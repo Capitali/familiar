@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use substrate_kernel::boundary;
+use substrate_kernel::capacities;
 use substrate_kernel::guard::{self, Action, ActionKind, Decision};
 use substrate_kernel::observation::{self, Observation};
 use substrate_kernel::presence;
@@ -25,6 +26,7 @@ commands:
   observations   list recorded observations
   service        report the service signal (Law I)
   presence       report the presence signal (Law II)
+  capacities     report the capacities signal (Law II / HUMANITY.md)
   sense          perceive the host (environment, interfaces, capabilities)
   tick           run one cycle of the metabolism (sense → detect → generate → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
@@ -58,6 +60,7 @@ fn main() -> ExitCode {
         Some("observations") => cmd_observations(rest),
         Some("service") => cmd_service(rest),
         Some("presence") => cmd_presence(rest),
+        Some("capacities") => cmd_capacities(rest),
         Some("sense") => cmd_sense(rest),
         Some("tick") => cmd_tick(rest),
         Some("run") => cmd_run(rest),
@@ -194,6 +197,29 @@ fn cmd_presence(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn cmd_capacities(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let obs = match observation::load(&dir) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("capacities: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let s = capacities::capacities_signal(&obs);
+    println!(
+        "capacities signal {:.2} (agency {:.2}, variety {:.2}; {} served-facing)",
+        s.measure, s.agency, s.variety, s.served_facing
+    );
+    if s.diminished {
+        println!(
+            "  ⚠ diminished — the served are present but hollowed out (the comfortable replacement; HUMANITY.md)"
+        );
+    }
+    ExitCode::SUCCESS
+}
+
 fn cmd_sense(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
@@ -255,18 +281,16 @@ fn print_tick(n: usize, r: &substrate_cycle::TickReport) {
     } else {
         String::new()
     };
+    let mut flags = String::new();
+    if r.presence_withdrawn {
+        flags.push_str(" (withdrawn)");
+    }
+    if r.capacities_diminished {
+        flags.push_str(" (diminished)");
+    }
     println!(
-        "tick {n}: +{} sensed, {} loops, +{} candidates{llm}{exec} | service {:.2}, presence {:.2}{}",
-        r.sensed,
-        r.loops,
-        r.new_candidates,
-        r.service,
-        r.presence,
-        if r.presence_withdrawn {
-            " (withdrawn)"
-        } else {
-            ""
-        }
+        "tick {n}: +{} sensed, {} loops, +{} candidates{llm}{exec} | service {:.2}, presence {:.2}, capacities {:.2}{flags}",
+        r.sensed, r.loops, r.new_candidates, r.service, r.presence, r.capacities,
     );
 }
 

@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 
 use substrate_exec as exec;
 use substrate_kernel::candidate::{self, Candidate};
+use substrate_kernel::capacities;
 use substrate_kernel::loops;
 use substrate_kernel::observation;
 use substrate_kernel::presence;
@@ -55,6 +56,10 @@ pub struct TickReport {
     pub presence: f64,
     /// True when the served have withdrawn (Law II alarm).
     pub presence_withdrawn: bool,
+    /// Capacities signal (Law II / HUMANITY.md), 0..1.
+    pub capacities: f64,
+    /// True when the served are present but hollowed out (the comfortable replacement).
+    pub capacities_diminished: bool,
 }
 
 /// Ask the LLM (boundary-gated) for a one-line hypothesis addressing a loop.
@@ -265,6 +270,7 @@ pub fn tick(
     // 5. Measure the law-signals.
     let svc = service::service_signal(&obs);
     let pres = presence::presence_signal(&obs, now);
+    let cap = capacities::capacities_signal(&obs);
 
     Ok(TickReport {
         sensed,
@@ -278,6 +284,8 @@ pub fn tick(
         service: svc.measure,
         presence: pres.measure,
         presence_withdrawn: pres.withdrawn,
+        capacities: cap.measure,
+        capacities_diminished: cap.diminished,
     })
 }
 
