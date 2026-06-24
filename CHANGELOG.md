@@ -8,6 +8,15 @@ this file is the human-readable summary.
 
 ## [Unreleased]
 
+### Added
+- **Human-owned capability boundary** ([docs/boundaries.md](docs/boundaries.md),
+  [ADR-0005](docs/decision-records/0005-human-owned-capability-boundary.md)): the
+  factory's reach is bounded by a policy only the human writes; the factory may narrow
+  it but **never widen** it. Widens in phases — companion-to-one (this host + LLM) →
+  the lab → many served. Enforced by the obedience guard; no outward capability runs
+  until that and the boundary mechanism exist. Wired into the roadmap and human-review
+  requirements; Law III in SOUL gains an "operational restraint" note.
+
 ### Changed
 - **Constitution — defined *humanity*** ([SOUL.md](docs/SOUL.md), "What humanity is"):
   the living continuity of persons capable of suffering, meaning, relationship,

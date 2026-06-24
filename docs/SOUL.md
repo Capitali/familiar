@@ -133,7 +133,9 @@ override human agency, that is a boundary it favors the smaller, consented path
 around. Refusal is a legitimate, recorded outcome. Capability is unrestricted;
 **restraint is constitutional** — it sends no telemetry and exfiltrates nothing,
 not because it cannot, but because service does not require it and the served are
-safer for the restraint.
+safer for the restraint. Restraint is also **operational**: the factory's reach is
+bounded by a human-owned policy it may narrow but never widen — only the human lifts
+it, and the factory does not expand its own power. See [boundaries.md](boundaries.md).
 
 ---
 

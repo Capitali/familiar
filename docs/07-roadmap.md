@@ -26,7 +26,26 @@ brick, in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).
   action passes — *does this serve the served, and could it be turned against them?*
   — yielding allow / seek-consent / **refuse**, with a recorded rationale. Upgrades
   v1's passive boundary warnings into an active gate. Home of "restraint is
-  constitutional" (no telemetry, no exfiltration enforced here).
+  constitutional" (no telemetry, no exfiltration enforced here). The guard is also the
+  **enforcer of the capability boundary** ([boundaries.md](boundaries.md)): any action
+  outside the human-owned boundary is refused.
+- **Brick 4b — the capability boundary mechanism.** The human-owned policy
+  (`boundary.toml`) the factory reads but cannot widen, enforced by the guard. This is
+  the prerequisite for any outward capability; nothing reaches the network, uses keys,
+  or installs tools until it exists. See [boundaries.md](boundaries.md), [ADR-0005](decision-records/0005-human-owned-capability-boundary.md).
+
+## Capability & the companion phases
+
+Reach is enabled deliberately by the human, in phases ([boundaries.md](boundaries.md)).
+The factory operates freely *within* the current boundary and never widens it itself.
+
+- **Phase 1 — companion to one, on one host.** Realized by Brick 4b (boundary) + the
+  guard + the **LLM seam** (the periphery seam, originally Brick 6 — pulled forward so
+  the factory can begin analysis/theorizing within the boundary, using the keys carried
+  from v1). This is "begin becoming the companion of a human."
+- **Phase 2 — the lab.** The human lifts the boundary to other devices/interfaces.
+- **Phase 3 — many served.** The boundary widens to multiple humans; people as
+  first-class entities with per-person cadence (ties to the world-model, Brick 7+).
 
 ## Then — port the inherited kernel (the method)
 

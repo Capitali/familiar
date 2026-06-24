@@ -6,6 +6,41 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-06-24 — The human-owned capability boundary (companion phases)
+
+### What changed
+
+- `docs/boundaries.md` + `decision-records/0005`: the factory's reach is bounded by a
+  human-owned policy (`boundary.toml`, planned) it **reads but cannot widen**. It may
+  narrow in caution; only the human lifts it — easily, and alone. Enforced by the
+  obedience guard.
+- Phased widening: **Phase 1** companion-to-one on this host + the LLM (v1 keys),
+  for analysis/theorizing/tool proposals; **Phase 2** the lab (more devices); **Phase
+  3** many served humans.
+- Wired in: roadmap (Brick 4b boundary mechanism; Phase-1 pulls the LLM seam forward;
+  guard enforces the boundary), human-review-requirements (widening = human-only),
+  SOUL Law III (restraint is also operational).
+
+### Why
+
+Ian's direction: enable reach **deliberately and gradually**, under a control only he
+holds, growing the factory from companion-to-one into companion-to-many. Makes Law III
+restraint concrete and enforceable, and forbids the steward from expanding its own
+power.
+
+### Checks run
+
+- Docs only; no code. **No outward capability is live:** no keys used, no LLM calls,
+  no tool installs. Those are gated behind the boundary mechanism (Brick 4b) + the
+  obedience guard (Brick 4).
+
+### Next
+
+Build order toward Phase 1: the obedience guard (Brick 4) and the boundary mechanism
+(Brick 4b) first; then the LLM seam *within* the boundary. Honest limit to carry: on
+an un-sandboxed host the boundary is guard-enforced norm, not an OS jail (sandboxing
+is later hardening).
+
 ## 2026-06-24 — Constitution: defined *humanity*
 
 ### What changed

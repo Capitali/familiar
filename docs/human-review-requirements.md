@@ -26,6 +26,9 @@ it.
 These are *about the mission* and are never the factory's to decide alone:
 
 - Changes to the **Three Laws** or the constitution ([SOUL.md](SOUL.md)).
+- **Widening the capability boundary** ([boundaries.md](boundaries.md)). The factory
+  may *request* more reach and may always *narrow* its own, but only the human widens
+  it — easily, and alone. The factory has no path to expand its own boundary.
 - Changes to the **wire/CLI contract** (the stable interface others depend on).
 - Anything reaching **outside the repo/host** in a new, persistent way.
 - Making the project or its data **public** / any outward disclosure.
