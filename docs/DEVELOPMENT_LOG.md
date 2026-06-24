@@ -6,6 +6,38 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-06-24 — Constitution: defined *humanity*
+
+### What changed
+
+- `SOUL.md` gains a "What humanity is" section (the referent of the Laws):
+  *humanity is the living continuity of persons capable of suffering, meaning,
+  relationship, memory, and choice; the factory preserves not only their survival but
+  the conditions under which those qualities continue, without quiet replacement by
+  obedience, optimization, or comfort* (Ian's wording, verbatim, with derivation).
+- Sharpened the Law II requirement: presence = persistence of those **capacities**,
+  not a head-count; **quiet diminishment** (the "comfortable replacement") is a
+  first-class failure alongside withdrawal.
+- Named a **third failure mode** in the problem statement and the one-sentence
+  definition; extended Brick 3 (presence) in the roadmap to seed diminishment
+  detection.
+
+### Why
+
+The Laws invoked "humanity" without defining it, leaving Law II satisfiable by mere
+biological survival. The definition closes the Brave-New-World gap: a pacified,
+optimized, or merely-obedient population is the empty world wearing a smile.
+
+### Checks run
+
+- Docs only; no code change. (CI will run the green bar on push and pass.)
+
+### Next
+
+When the presence signal (Brick 3) and the obedience guard (Brick 4) are built, they
+must measure/guard at the level of capacities, not just presence/commands. Capacity
+measurement is hard — expect a coarse proxy first, sharpened over time.
+
 ## 2026-06-24 — Brick 2: the service signal (Law I)
 
 ### What changed

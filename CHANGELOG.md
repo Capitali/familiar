@@ -8,6 +8,14 @@ this file is the human-readable summary.
 
 ## [Unreleased]
 
+### Changed
+- **Constitution — defined *humanity*** ([SOUL.md](docs/SOUL.md), "What humanity is"):
+  the living continuity of persons capable of suffering, meaning, relationship,
+  memory, and choice. Sharpens Law II (presence is the persistence of those
+  capacities, not mere survival of bodies) and names a third failure mode — the
+  **comfortable replacement** (quiet diminishment by obedience, optimization, or
+  comfort). Propagated to the problem statement and the presence-signal roadmap.
+
 ### Added
 - **Repository as scientific evidence** — FAIR/FAIR4RS + IMRaD structure: root
   metadata (`CITATION.cff`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`), the

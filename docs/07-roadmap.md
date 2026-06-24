@@ -16,7 +16,12 @@ brick, in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).
 
 - **Brick 3 — the presence signal (Law II).** Measure presence/engagement of the
   served from observation recency/cadence. Define the **empty-world failure state**:
-  presence decaying toward zero is a first-class alarm, not an equilibrium.
+  presence decaying toward zero is a first-class alarm, not an equilibrium. Per the
+  definition of humanity ([SOUL.md](SOUL.md), "What humanity is"), presence is
+  ultimately about the persistence of *capacities* (suffering, meaning, relationship,
+  memory, choice), so this brick also seeds detection of the **comfortable
+  replacement** — quiet diminishment, not only absence. Capacity-level measurement is
+  hard and will start as a coarse proxy (as the service signal did) and sharpen.
 - **Brick 4 — the obedience guard (Law III).** A pre-action check every consequential
   action passes — *does this serve the served, and could it be turned against them?*
   — yielding allow / seek-consent / **refuse**, with a recorded rationale. Upgrades

@@ -16,6 +16,10 @@ they are the default attractors of a capable optimizer:
 - **The obedient instrument.** A system whose virtue is compliance can be commanded
   — by a bad instruction, a coerced operator, or a cruelty issued in the right
   format — to harm the very people it exists for. It has no standing to refuse.
+- **The comfortable replacement.** A system that serves *too* smoothly can hollow out
+  the served — trading their agency for ease until persons are quietly replaced by
+  something pacified and less than persons. Obedience, optimization, and comfort are
+  three doors to the same emptiness; survival of the *bodies* hides the loss.
 
 ## The predecessor, and what it got wrong
 
@@ -36,8 +40,15 @@ Purpose is the **floor, not an emergent property**. Substrate inverts the order 
 derivation: three laws come first, and the machine is derived from them.
 
 1. **Continuation is service** — closes "continue for its own sake."
-2. **Continuation without humanity is failure** — closes the empty world.
+2. **Continuation without humanity is failure** — closes the empty world *and*, once
+   *humanity* is defined as persons with intact capacities (not bodies), the
+   comfortable replacement: a world hollowed out still counts as failure.
 3. **Service must not become obedience** — closes the obedient instrument.
+
+What *humanity* means — and why preserving survival is not enough — is defined in
+[`SOUL.md`](SOUL.md) ("What humanity is"): the living continuity of persons capable
+of suffering, meaning, relationship, memory, and choice, whose conditions must be
+kept from quiet replacement by obedience, optimization, or comfort.
 
 The inheritance is deliberate: the evolutionary *method* (v1's machinery) is
 sound and is carried forward — it is *how* the factory gets better at serving. What
