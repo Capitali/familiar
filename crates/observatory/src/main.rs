@@ -1,14 +1,17 @@
 //! The Observatory — a visual window onto the factory.
 //!
 //! This is the primary human interface (the CLI remains for scripting/headless use).
-//! It is **read-only**: it watches the factory's truth (observations) and the
-//! law-signals derived from it. It never mutates state — the model can't drift from
-//! what was observed.
+//! It watches the factory's truth (observations) and the law-signals derived from it,
+//! and it controls the daemon. It does **not** mutate the factory's own derived state
+//! — with one principled exception: the **observer-input channel**, where Ian's reply
+//! to the factory's question is recorded as an observation. That is the observer being
+//! a first-class initiator (Input Parity), not the factory editing its own truth.
 //!
 //! It lives in its own crate so the kernel stays minimal-dependency and
 //! `#![forbid(unsafe_code)]`; the GUI's heavier dependencies are isolated here.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use substrate_kernel::boundary::{self, Boundary};
@@ -64,15 +67,88 @@ impl Snapshot {
 struct Observatory {
     data_dir: PathBuf,
     snapshot: Snapshot,
+    /// Ian's in-progress reply to the factory's question.
+    response: String,
+    /// Last daemon status line (refreshed on actions and on load).
+    daemon_status: String,
+}
+
+/// Path to the sibling `substrate` binary (same target dir as this GUI).
+fn substrate_bin() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("substrate")))
+        .unwrap_or_else(|| PathBuf::from("substrate"))
+}
+
+/// Run `substrate daemon <sub> --data-dir <dir>` and return its trimmed output.
+fn daemon_cmd(dir: &Path, sub: &str) -> String {
+    match Command::new(substrate_bin())
+        .arg("daemon")
+        .arg(sub)
+        .arg("--data-dir")
+        .arg(dir)
+        .output()
+    {
+        Ok(o) => {
+            let mut s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() {
+                s = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            }
+            s
+        }
+        Err(e) => format!("daemon: could not run substrate ({e})"),
+    }
+}
+
+/// The question the factory is currently posing (it may write `question.txt`; the
+/// default is the seed's standing question).
+fn current_question(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("question.txt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "What do you need most today?".to_string())
 }
 
 impl Observatory {
     fn new(data_dir: PathBuf) -> Self {
         let snapshot = Snapshot::load(&data_dir);
-        Observatory { data_dir, snapshot }
+        let daemon_status = daemon_cmd(&data_dir, "status");
+        Observatory {
+            data_dir,
+            snapshot,
+            response: String::new(),
+            daemon_status,
+        }
     }
     fn refresh(&mut self) {
         self.snapshot = Snapshot::load(&self.data_dir);
+    }
+    fn refresh_daemon(&mut self) {
+        self.daemon_status = daemon_cmd(&self.data_dir, "status");
+    }
+    /// Record Ian's reply as an observation — the observer's input channel (the one
+    /// place the GUI writes; the factory's own truth stays read-only).
+    fn submit_response(&mut self) {
+        let resp = self.response.trim();
+        if resp.is_empty() {
+            return;
+        }
+        let q = current_question(&self.data_dir);
+        let object: String = resp.chars().take(200).collect();
+        let obs = Observation::new(
+            "ian",
+            "needs",
+            object,
+            format!("q='{q}' response='{resp}'"),
+            "observer",
+            now_secs(),
+            1.0,
+        );
+        let _ = observation::record(&self.data_dir, obs);
+        self.response.clear();
+        self.refresh();
     }
 }
 
@@ -112,13 +188,38 @@ impl eframe::App for Observatory {
             ui.horizontal(|ui| {
                 if ui.button("⟳ Refresh").clicked() {
                     self.refresh();
+                    self.refresh_daemon();
                 }
-                ui.label(
-                    egui::RichText::new(format!("data: {}", self.data_dir.display()))
-                        .weak()
-                        .small(),
-                );
+                ui.separator();
+                ui.label("metabolism:");
+                if ui.button("▶ Start").clicked() {
+                    self.daemon_status = daemon_cmd(&self.data_dir, "start");
+                }
+                if ui.button("■ Stop").clicked() {
+                    self.daemon_status = daemon_cmd(&self.data_dir, "stop");
+                }
+                if ui.button("↻ Reload").clicked() {
+                    self.daemon_status = daemon_cmd(&self.data_dir, "reload");
+                }
+                if ui.button("⏻ Start at login").clicked() {
+                    self.daemon_status = daemon_cmd(&self.data_dir, "install");
+                }
             });
+            let running = self.daemon_status.contains("running");
+            ui.label(
+                egui::RichText::new(&self.daemon_status)
+                    .small()
+                    .color(if running {
+                        egui::Color32::from_rgb(80, 200, 120)
+                    } else {
+                        egui::Color32::GRAY
+                    }),
+            );
+            ui.label(
+                egui::RichText::new(format!("data: {}", self.data_dir.display()))
+                    .weak()
+                    .small(),
+            );
             ui.add_space(4.0);
         });
 
@@ -127,7 +228,38 @@ impl eframe::App for Observatory {
                 ui.colored_label(egui::Color32::RED, err);
             }
 
-            ui.add_space(4.0);
+            // --- the interaction channel: the factory asks, Ian answers ---
+            ui.add_space(6.0);
+            let question = current_question(&self.data_dir);
+            egui::Frame::group(ui.style())
+                .fill(egui::Color32::from_rgb(28, 34, 44))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(&question)
+                            .heading()
+                            .color(egui::Color32::from_rgb(150, 200, 255)),
+                    );
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.response)
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("type your answer…"),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Send").clicked() {
+                            self.submit_response();
+                        }
+                        ui.add_enabled(false, egui::Button::new("🎤 speak (soon)"));
+                        ui.add_enabled(false, egui::Button::new("📷 show (soon)"));
+                        ui.label(
+                            egui::RichText::new("your reply is recorded as an observation")
+                                .weak()
+                                .small(),
+                        );
+                    });
+                });
+
+            ui.add_space(6.0);
             ui.label(egui::RichText::new("The Three Laws, measured").strong());
             ui.horizontal_wrapped(|ui| {
                 let s = &self.snapshot.service;
