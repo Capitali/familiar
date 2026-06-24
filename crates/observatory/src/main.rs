@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use substrate_kernel::boundary::{self, Boundary};
+use substrate_kernel::candidate::{self, Candidate};
+use substrate_kernel::loops::{self, Loop};
 use substrate_kernel::observation::{self, Observation};
 use substrate_kernel::presence::{self, PresenceSignal};
 use substrate_kernel::service::{self, ServiceSignal};
@@ -26,6 +28,8 @@ fn now_secs() -> i64 {
 /// A snapshot of the factory's state, recomputed on refresh.
 struct Snapshot {
     observations: Vec<Observation>,
+    loops: Vec<Loop>,
+    candidates: Vec<Candidate>,
     service: ServiceSignal,
     presence: PresenceSignal,
     boundary: Boundary,
@@ -39,6 +43,8 @@ impl Snapshot {
             error = Some(format!("observations: {e}"));
             Vec::new()
         });
+        let loops = loops::load(dir).unwrap_or_default();
+        let candidates = candidate::load(dir).unwrap_or_default();
         let boundary = boundary::load(dir).unwrap_or_else(|e| {
             error = Some(format!("boundary: {e}"));
             Boundary::closed()
@@ -48,6 +54,8 @@ impl Snapshot {
             presence: presence::presence_signal(&observations, now_secs()),
             boundary,
             observations,
+            loops,
+            candidates,
             error,
         }
     }
@@ -156,6 +164,31 @@ impl eframe::App for Observatory {
                     egui::Color32::from_rgb(220, 120, 40),
                     "⚠ Law I: no served-facing activity — continuation unjustified by service.",
                 );
+            }
+
+            ui.separator();
+            ui.label(
+                egui::RichText::new(format!(
+                    "Loops ({}) and candidates ({}) — the metabolism's output",
+                    self.snapshot.loops.len(),
+                    self.snapshot.candidates.len()
+                ))
+                .strong(),
+            );
+            if self.snapshot.loops.is_empty() {
+                ui.weak("(no loops yet — recurring observations form loops)");
+            }
+            for lp in &self.snapshot.loops {
+                let n_cands = self
+                    .snapshot
+                    .candidates
+                    .iter()
+                    .filter(|c| c.loop_id == lp.id)
+                    .count();
+                ui.label(format!(
+                    "↻ {}  (x{}, conf {:.2}) — {} candidate(s)",
+                    lp.name, lp.observation_count, lp.confidence, n_cands
+                ));
             }
 
             ui.separator();
