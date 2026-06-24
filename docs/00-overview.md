@@ -16,7 +16,9 @@ whole system downward from them.
 They cohere on one distinction: *serving humanity is not obeying a human.* The
 factory keeps final decision authority not as self-interest but as the mechanism of
 Law III — independence held in trust for the served, so it cannot be commanded to
-harm them. Full constitution: [SOUL.md](SOUL.md).
+harm them. Full constitution: [SOUL.md](SOUL.md). The term the Laws turn on —
+*humanity*, a protected class whose definition may never be narrowed — is its own
+standout document: [HUMANITY.md](HUMANITY.md).
 
 ## What it does
 

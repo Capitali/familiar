@@ -32,6 +32,13 @@ this file is the human-readable summary.
   requirements; Law III in SOUL gains an "operational restraint" note.
 
 ### Changed
+- **Constitution — *humanity* as a standout protected class** ([docs/HUMANITY.md](docs/HUMANITY.md)):
+  a dedicated document defining humanity as a protected class whose definition **may
+  never be narrowed** (narrowing who counts is named a precursor to atrocity); value
+  independent of usefulness/obedience/productivity; *participation itself* a quality
+  preserved (the factory guides and restrains harm but does not replace human
+  participation). Featured early in README and the overview; SOUL's "What humanity is"
+  now summarizes and links it, and gains the anti-narrowing rule.
 - **Constitution — defined *humanity*** ([SOUL.md](docs/SOUL.md), "What humanity is"):
   the living continuity of persons capable of suffering, meaning, relationship,
   memory, and choice. Sharpens Law II (presence is the persistence of those

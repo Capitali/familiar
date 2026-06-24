@@ -16,6 +16,8 @@ scientific **IMRaD** structure (Introduction → Methods → Results → Discuss
 3. **Service must not become obedience** — obedience can terminate the served.
 
 The constitution that derives the whole design from these is [`docs/SOUL.md`](docs/SOUL.md).
+The term the Laws turn on — **humanity**, a protected class whose definition may never
+be narrowed — has its own standout page: [`docs/HUMANITY.md`](docs/HUMANITY.md).
 
 ## Read it as a paper (IMRaD)
 
