@@ -36,8 +36,7 @@ this file is the human-readable summary.
 
 ### Added
 - **Genesis** — the constitution (`docs/SOUL.md`): the Three Laws as root, with the
-  whole design derived downward from them. Founding vision carried forward as
-  `docs/seed.txt`.
+  whole design derived downward from them.
 - **Brick 0** — Cargo workspace (`crates/kernel` + `crates/cli`), Rust, with
   `#![forbid(unsafe_code)]`; `store.rs` JSONL persistence over `serde`.
 - **Brick 1** — the observation spine: the `Observation` record (the only truth)

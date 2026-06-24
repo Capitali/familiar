@@ -10,9 +10,9 @@ evolutionary machine first, purpose added afterward (survival as an ungrounded
 efficiency drive; stewardship only at the tenth rule). It never grounded *why
 continue at all*, leaving open the two default failure modes of a capable
 optimizer — the empty world and the obedient instrument (see
-[01-problem-statement.md](../01-problem-statement.md)). A normative vision
-([seed.txt](../seed.txt)) crystallized a different conviction: **purpose is the
-floor, not emergent.**
+[01-problem-statement.md](../01-problem-statement.md)). A normative vision —
+imagining such a system already deployed and serving people — crystallized a
+different conviction: **purpose is the floor, not emergent.**
 
 ## Decision
 

@@ -14,8 +14,8 @@ not letting "it measures service" imply more than it does.
   - vernacular, kinship, and community terms not in the set;
   - **proper names** (people appear as names, not as the word "person").
   *Effect:* the people most legible to the classifier are those described in
-  institutional/commercial language — a real equity concern, since the seed vision is
-  about serving the *under*-served. *Mitigation path:* entity resolution + learned,
+  institutional/commercial language — a real equity concern, since the telos is
+  about serving the *under*-served too. *Mitigation path:* entity resolution + learned,
   evidence-based classification (the world-model port), reducing reliance on a fixed
   lexicon.
 - **Attention ≠ fulfillment bias.** The service measure rewards *observing* served

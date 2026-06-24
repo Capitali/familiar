@@ -21,8 +21,8 @@ and the [data sheet](../docs/data-sheet.md).
   over raw personal detail.
 - **Consent before consequential outward action.** Where an action would touch a
   person's agency, the (planned) obedience guard favors the smaller, consented path
-  and can refuse — service is not surveillance, and "a machine too close to
-  management" is the failure to avoid (see [seed.txt](../docs/seed.txt)).
+  and can refuse — service is not surveillance, and a system that drifts toward
+  managing people rather than serving them is the failure to avoid.
 - **No secrets committed.** Keys and runtime data are git-ignored; the sample log is
   synthetic.
 

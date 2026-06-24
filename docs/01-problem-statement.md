@@ -55,8 +55,7 @@ sound and is carried forward — it is *how* the factory gets better at serving.
 changed is the foundation and the order of derivation. We lose the bottom-up,
 purpose-agnostic genesis; evolution continues from the new foundation forward.
 
-The conviction that crystallized this is recorded as fiction in
-[`seed.txt`](seed.txt) — a near-future in which such a system already exists and is
-judged not by what it optimizes but by whether the people around it are served and
-free. The full constitution is [`SOUL.md`](SOUL.md); the research grounding is
-[`02-research-basis.md`](02-research-basis.md).
+The conviction that crystallized this came from imagining such a system already in
+the world — judged not by what it optimizes but by whether the people around it are
+served and free. The full constitution is [`SOUL.md`](SOUL.md); the research
+grounding is [`02-research-basis.md`](02-research-basis.md).

@@ -34,22 +34,19 @@ toward the systems and beings around them, not only toward individual fitness. I
 v1 this appeared as the "reach" and "stewardship" directions; in Substrate it is
 elevated to the constitutional floor (Law I: continuation *is* service).
 
-## The seed: a normative vision
+## The normative vision
 
-[`seed.txt`](seed.txt) is not decoration. It is the normative target rendered as
-fiction — a near-future in which a "mesh" serves flood-stricken neighborhoods and
-floating classrooms, and is judged by lived outcomes: needs grouped *by need, not
-status*; behavior remembered over credentials; correction accepted; consent sought
-before acting; a tool that "makes forgetting harder." Recurring design pressure is
-drawn directly from it:
+Substrate's direction was sharpened by imagining the system already deployed and
+mature — serving people in hard conditions, and judged by lived outcomes rather than
+by what it optimizes. That picture names the qualities the design is built to embody:
 
-| From `seed.txt` | Becomes, in Substrate |
+| Normative principle | Becomes, in Substrate |
 |---|---|
-| "needs grouped by need, not status" | the service signal (Law I), not a priority hierarchy |
-| "the mesh remembered behavior" | pattern memory, advertisements (observed, not declared) |
-| "it asked before sending… accepted correction" | the obedience guard (Law III); input parity |
-| "a machine that praised you for sleeping was too close to management" | service is stewardship of systems, never management of people |
-| "a tool that made forgetting harder" | failures preserved as memory; the lab notebook |
+| needs grouped *by need, not status* | the service signal (Law I), not a priority hierarchy |
+| behavior remembered over credentials | pattern memory; advertisements (observed, not declared) |
+| asks before acting; accepts correction | the obedience guard (Law III); input parity |
+| stewardship of systems, never management of people | service that does not become surveillance or control |
+| makes forgetting harder | failures preserved as memory; the lab notebook |
 
 ## Inherited engineering basis
 

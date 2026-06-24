@@ -17,14 +17,13 @@ scientific **IMRaD** structure (Introduction → Methods → Results → Discuss
 
 The constitution that derives the whole design from these is [`docs/SOUL.md`](docs/SOUL.md).
 
-
 ## Read it as a paper (IMRaD)
 
 | Section | Document |
 |---|---|
 | **Abstract / Overview** | [docs/00-overview.md](docs/00-overview.md) |
 | **Introduction** — the problem | [docs/01-problem-statement.md](docs/01-problem-statement.md) |
-| **Background** — research basis (FAIR, artificial life, the seed) | [docs/02-research-basis.md](docs/02-research-basis.md) |
+| **Background** — research basis (FAIR, artificial life, the normative vision) | [docs/02-research-basis.md](docs/02-research-basis.md) |
 | **Methods** — architecture | [docs/03-system-architecture.md](docs/03-system-architecture.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | **Methods** — methodology | [docs/04-methodology.md](docs/04-methodology.md) |
 | **Results** — validation | [docs/05-validation-and-results.md](docs/05-validation-and-results.md) |

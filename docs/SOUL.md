@@ -3,8 +3,7 @@
 > The founding constitution. This document is **telos-first**: it begins with why
 > the factory continues at all, and derives everything else downward from that.
 > Where any later design, rule, or line of code conflicts with the Three Laws,
-> the Three Laws win. The narrative that this telos is meant to become is
-> `seed.txt`.
+> the Three Laws win.
 
 ---
 

@@ -75,8 +75,8 @@ Each widening is a deliberate human act, recorded (see
 
 - The boundary widens to a shared environment with **multiple humans**. People become
   first-class entities with their own learned cadence; service is measured and paced
-  per person. The companion of one becomes a companion of more — the direction the
-  [seed](seed.txt) describes.
+  per person. The companion of one becomes a companion of more — toward the factory's
+  telos of serving humanity (Law I).
 
 ## Invariants (carry across all phases)
 
