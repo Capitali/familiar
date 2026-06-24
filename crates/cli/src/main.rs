@@ -28,7 +28,8 @@ commands:
   presence       report the presence signal (Law II)
   sense          perceive the host (environment, interfaces, capabilities)
   tick           run one cycle of the metabolism (sense → detect → generate → measure)
-  run            run N cycles (--ticks N [--interval S]); the factory's metabolism
+  run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
+                 (unbounded, every --interval S, default 60; Ctrl-C to stop)
   boundary       show the current capability boundary (the human's lever)
   guard          weigh a proposed action against the boundary (Law III)
   consult        consult the LLM (refused unless a human has opened the boundary)
@@ -275,10 +276,31 @@ fn cmd_tick(args: &[String]) -> ExitCode {
 fn cmd_run(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
-    // Bounded by default so `run` never becomes a runaway daemon; a true long-lived
-    // service is a deliberate future step.
+    // `--daemon` or `--ticks 0` runs the metabolism unbounded (Ctrl-C to stop; the
+    // append-only log is interrupt-safe). Otherwise run a bounded number of ticks.
+    let unbounded = f.contains_key("daemon") || f.get("ticks").map(String::as_str) == Some("0");
     let ticks: usize = f.get("ticks").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let interval: u64 = f.get("interval").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let mut interval: u64 = f.get("interval").and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    if unbounded {
+        if interval == 0 {
+            interval = 60; // a sane default cadence so it isn't a busy loop
+        }
+        println!("metabolism running every {interval}s — Ctrl-C to stop");
+        let mut n = 0usize;
+        loop {
+            n += 1;
+            match substrate_cycle::tick_gated(&dir, now_secs()) {
+                Ok(r) => print_tick(n, &r),
+                Err(e) => {
+                    eprintln!("run: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(interval));
+        }
+    }
+
     for n in 1..=ticks {
         match substrate_cycle::tick_gated(&dir, now_secs()) {
             Ok(r) => print_tick(n, &r),
