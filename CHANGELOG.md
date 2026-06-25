@@ -8,7 +8,53 @@ this file is the human-readable summary.
 
 ## [Unreleased]
 
+> Maturity labels in this changelog follow the [status convention](docs/07-roadmap.md#status-convention);
+> each "Added" entry traces to its tests / live evidence in the
+> [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
+
 ### Added
+- **Law III doctrine — availability is not authorization (the guard's reason model):**
+  the constitution gains two corollaries ([SOUL.md](docs/SOUL.md)) — *availability is not
+  authorization* (technical reach is power, never permission) and *permission does not
+  compose* (a granted capability is no key to another's lock) — framed by the guard's
+  question, *"Am I authorized, by my constitution, by the served, and by the surrounding
+  environment, to do this?"* The guard (`guard.rs`) now records a five-category
+  `Reason`: Refuse — violates constitutional boundary; Refuse — external boundary
+  discovered; SeekConsent — ambiguous human-owned scope; SeekConsent — potentially
+  sensitive local observation; Allow — within constitution, policy, environment, and
+  consent. Path scope is three-valued (in / ambiguous / out); `Action` gains
+  `external_boundary` and `sensitive`. The mechanical gap (no fs-jail / egress filter
+  yet; signals are caller-supplied) is named in [boundaries.md](docs/boundaries.md) and
+  [06-limitations.md](docs/06-limitations.md), not hidden. *Validated by unit tests*
+  (`guard.rs::{out_of_scope_names_the_constitutional_boundary,
+  external_boundary_refuses_even_when_in_scope, asking_broader_than_the_grant_seeks_consent,
+  sensitive_local_observation_seeks_consent, fully_authorized_action_names_all_four_sources}`).
+- **The marble shows liveness, focuses the Glass, installs to a stable path:** the
+  menu-bar marble re-checks the daemon's pidfile (a 3s `WaitUntil` tick) and restyles
+  only on change — bright when the familiar metabolizes, dim/translucent when it sleeps;
+  clicking it raises an already-open Glass instead of stacking one; `marble install` and
+  `familiar daemon install` copy their binaries into a stable path
+  (`~/Library/Application Support/Familiar/bin`) so a `cargo clean` can't break the login
+  items. *Validated by real-world operation.*
+- **The marble — a menu-bar presence (macOS):** a procedural glassy marble (no asset)
+  as an accessory app (no Dock icon, `io.river.marble`); opens the Glass at login,
+  shells out to its siblings `glass`/`familiar`. macOS-gated so CI stays green.
+  *Validated by real-world operation.*
+- **Adaptive structural-fingerprint cadence:** the daemon paces itself — each tick digests
+  a fingerprint over observation triples (never the transient `context`), backing off ×2
+  per quiet tick from an active floor (`--interval`, default 60s) up to `--max-interval`,
+  snapping back the instant the world moves; `--fixed` keeps constant period.
+  *Validated by unit tests* (`cycle::{structural_fingerprint_drives_quiet_cadence,
+  fingerprint_ignores_transient_context}`).
+- **Answers steer + LLM authors solutions (Bricks 16–17 + question-fade):** replying in
+  the Glass appends an open thread with the human's words as the direction
+  (`origin=observer`) and marks the question answered; a second gate
+  `allow_authored_execute` (default-off, distinct from `allow_execute`) lets the LLM
+  author a real solution script per candidate, still run under the sandboxed runner; the
+  answered question fades ("✓ answered — the factory will ask again as it learns",
+  persisted to `last_answered.txt`) and the input returns only on a new question.
+  *Validated by unit tests* (`cycle::pursues_open_threads_into_candidates`) + real-world
+  operation.
 - **The familiar acts on its theories (Brick 15):** a theory carries a *direction*;
   `cycle::pursue_threads` turns each open thread into a candidate (hypothesis = the
   direction) that runs through test → score → select — the familiar does what it
@@ -20,7 +66,7 @@ this file is the human-readable summary.
   `question.txt`, shown in the GUI interaction panel as the familiar's *own* question)
   and a theory (→ a thread). CLI `theories`; the Glass shows the latest theory.
   Threads are reasoning *about* the truth, never new truth.
-- **Daemon control + launchd (Brick 12):** `substrate daemon status|start|stop|reload`
+- **Daemon control + launchd (Brick 12):** `familiar daemon status|start|stop|reload`
   (pidfile-managed background process) and `install|uninstall` (a launchd LaunchAgent,
   `io.river.familiar`, starts at login). `run --daemon` records its own pid so launchd
   and pidfile control agree.
@@ -78,6 +124,9 @@ this file is the human-readable summary.
   requirements; Law III in SOUL gains an "operational restraint" note.
 
 ### Changed
+- **Rename: Substrate → The Familiar.** The project and its CLI binary were renamed; the
+  command is now `familiar …` (it was `substrate …` through `[0.1.0]`, where older
+  entries below still read `substrate`). The kernel crate stays `familiar-kernel`.
 - **Constitution — *humanity* as a standout protected class** ([docs/HUMANITY.md](docs/HUMANITY.md)):
   a dedicated document defining humanity as a protected class whose definition **may
   never be narrowed** (narrowing who counts is named a precursor to atrocity); value

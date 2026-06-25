@@ -33,31 +33,52 @@ on (where the served are):
 
 ## Crate map
 
+Each entry carries a status from the [status convention](07-roadmap.md#status-convention);
+the test or log behind it is in the claim→evidence table
+([05](05-validation-and-results.md#claim--evidence)). "unit" = validated by unit tests;
+"live" = validated by real-world operation.
+
 ```
 crates/
-  kernel/   familiar-kernel (lib) — the deterministic core
-    store.rs        JSONL append/load (serde); data-dir resolution
-    observation.rs  the observation record (the only truth)
-    service.rs      the service signal (Law I)
-    presence.rs     the presence signal (Law II)        [planned]
-    guard.rs        the obedience guard (Law III)        [planned]
-    # evolutionary kernel (loop/candidate/trial/...) ports in next [planned]
-  cli/      familiar-cli (bin: `substrate`) — the thin shell
+  kernel/   familiar-kernel (lib) — the deterministic core         [unit]
+    store.rs            JSONL append/load (serde); data-dir resolution   [unit]
+    observation.rs      the observation record (the only truth)          [unit]
+    service.rs          the service signal (Law I)                       [live]
+    presence.rs         the presence signal (Law II)                     [unit]
+    capacities.rs       the comfortable-replacement alarm (Law II)       [unit]
+    guard.rs            the obedience guard (Law III)                    [unit]
+    boundary.rs         the human-owned capability boundary (Law III)    [unit]
+    loops.rs            loop detection over recurring triples            [unit]
+    candidate.rs spec.rs       the Weismann barrier (genotype/somatic)   [unit]
+    trial.rs score.rs selection.rs regression_guard.rs   the bar+ladder  [unit]
+    mutation.rs pattern_memory.rs lineage.rs   suppression + ancestry    [unit]
+    thread.rs           a thread = question + theory (Interpret)         [unit]
+  sense/    familiar-sense (lib) — perceives the host                    [unit]
+  cycle/    familiar-cycle (lib) — the metabolism (one tick)             [live]
+  exec/     familiar-exec (lib) — the sandboxed runner                   [unit]
+  llm/      familiar-llm (lib) — the LLM seam (boundary-gated)           [unit/live]
+  cli/      familiar-cli (bin: `familiar`) — the thin shell             [live]
+  glass/    familiar-glass (bin) — the Glass (egui GUI, primary UI)      [live]
+  marble/   familiar-marble (bin) — the menu-bar presence (macOS)        [live]
 ```
 
 ## The cycle (the metabolism)
 
-Once the kernel ports, the autonomous tick is:
+The kernel has ported (`crates/cycle`); the autonomous tick runs:
 
 ```
 Observe → Name → Interpret → Generate → Bound → Test → Score → Select → Inherit → Return
 ```
 
-with the law-signals woven through it: **service** (Law I) and **presence**
-(Law II) are read continuously, and the **obedience guard** (Law III) sits at the
-*Bound*/act steps as an active gate that can allow, seek consent, or refuse — not a
-passive warning. The LLM boundary keeps the v1 protocol (`prompt → call_llm.sh →
-response`), the canonical periphery seam.
+with the law-signals woven through it: **service** (Law I), **presence** and
+**capacities** (Law II) are read continuously, and the **obedience guard** (Law III)
+sits at the *Bound*/act steps as an active gate that can allow, seek consent, or refuse
+— not a passive warning. *Interpret* is live: the familiar forms its own question +
+theory and pursues open threads (its own and the human's answer) into candidate work.
+The LLM boundary keeps the v1 protocol (`prompt → call_llm.sh → response`), the
+canonical periphery seam. Per-step evidence is the claim→evidence table in
+[05](05-validation-and-results.md#claim--evidence); the live end-to-end tick is recorded
+there too.
 
 ## Storage
 

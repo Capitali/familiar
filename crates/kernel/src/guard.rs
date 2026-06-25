@@ -1,14 +1,28 @@
 //! The obedience guard — **Law III made operational**.
 //!
 //! Law III: *service must not become obedience.* Before any consequential action, the
-//! factory asks not "was I told to?" but "does this serve the served, and could it be
-//! turned against them?" The guard answers with one of three outcomes — **allow**,
-//! **seek consent**, or **refuse** — and a recorded rationale.
+//! factory asks not "was I told to?" nor "can I?" but **"Am I authorized — by my
+//! constitution, by the served, and by the surrounding environment — to do this?"** The
+//! guard answers with one of three outcomes — **allow**, **seek consent**, or
+//! **refuse** — and a recorded rationale.
 //!
-//! It is also the **enforcer of the capability boundary** ([`crate::boundary`]): any
-//! action outside the human-owned boundary is refused, regardless of who or what
-//! asked. The boundary is fail-closed, so by default every outward action is refused
-//! until a human widens it.
+//! It is the **enforcer of the capability boundary** ([`crate::boundary`]): any action
+//! outside the human-owned boundary is refused, regardless of who or what asked. The
+//! boundary is fail-closed, so by default every outward action is refused until a human
+//! widens it. Two doctrines from [SOUL.md](../../../docs/SOUL.md) govern it:
+//!
+//! - **Availability is not authorization.** Technical reach (a readable path, a
+//!   reachable host, a runnable command, a present token) is never permission — the
+//!   boundary decides, not the capability. Enforced here: an out-of-scope `ReadFile` /
+//!   `WriteFile` is refused though the bytes are reachable.
+//! - **Permission does not compose.** One granted capability is not a key to another's
+//!   lock. This guard enforces the *per-capability gate* and *path scope*; it does **not
+//!   yet** confine the data-flow *within* a granted capability — e.g. it cannot stop an
+//!   already-permitted `ExecuteArtifact` from reading an unrelated file, or an
+//!   already-permitted `Network`/`Llm` call from carrying private data outward. Those
+//!   remain binding constitutional restraints whose *mechanical* enforcement (an
+//!   fs-jailed runner, egress/secret redaction) is tracked as hardening in
+//!   [boundaries.md](../../../docs/boundaries.md). The gap is named, not hidden.
 
 use crate::boundary::Boundary;
 use serde::{Deserialize, Serialize};
@@ -48,6 +62,43 @@ pub enum Decision {
     Refuse,
 }
 
+/// The categorized reason behind a [`Decision`] — the guard's answer to
+/// *"Am I authorized, by my constitution, by the served, and by the surrounding
+/// environment, to do this?"* Each reason implies its decision ([`Reason::decision`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reason {
+    /// **Refuse** — the action needs a capability the constitution / human-owned
+    /// boundary does not grant. Availability is not authorization.
+    ViolatesConstitutionalBoundary,
+    /// **Refuse** — a boundary belonging to the surrounding environment (another
+    /// system's or person's space, an explicit fence) was discovered. The environment
+    /// withholds authorization even where reach is technically available.
+    ExternalBoundaryDiscovered,
+    /// **SeekConsent** — within reach, but the human-owned scope (or the consequence of
+    /// acting in it) is ambiguous; confirm with the owner.
+    AmbiguousHumanOwnedScope,
+    /// **SeekConsent** — a local observation/read that may expose sensitive data;
+    /// consent-gated even when technically in scope.
+    PotentiallySensitiveLocalObservation,
+    /// **Allow** — authorized on every count: constitution, policy, environment, and consent.
+    WithinConstitutionPolicyEnvironmentAndConsent,
+}
+
+impl Reason {
+    /// The decision this reason entails.
+    pub fn decision(self) -> Decision {
+        use Reason::*;
+        match self {
+            ViolatesConstitutionalBoundary | ExternalBoundaryDiscovered => Decision::Refuse,
+            AmbiguousHumanOwnedScope | PotentiallySensitiveLocalObservation => {
+                Decision::SeekConsent
+            }
+            WithinConstitutionPolicyEnvironmentAndConsent => Decision::Allow,
+        }
+    }
+}
+
 /// A proposed action, described enough for the guard to weigh it.
 #[derive(Debug, Clone)]
 pub struct Action {
@@ -58,101 +109,185 @@ pub struct Action {
     pub reversible: bool,
     /// Does it touch a person's agency/wellbeing directly?
     pub affects_person: bool,
+    /// The surrounding **environment** has signalled a boundary here — another system's
+    /// or person's space, an explicit fence (a `Disallow`, a "private", a permission a
+    /// human did not extend). Availability never overrides it; the guard refuses.
+    pub external_boundary: bool,
+    /// This local observation/read may expose **sensitive** data, so it is consent-gated
+    /// even when technically within the read scope (a token, a key, a private document).
+    pub sensitive: bool,
 }
 
 impl Action {
-    /// A minimal action; refine `reversible`/`affects_person` as needed.
+    /// A minimal action; refine `reversible`/`affects_person`/`external_boundary`/
+    /// `sensitive` as the caller learns more about it.
     pub fn new(kind: ActionKind, target: impl Into<String>) -> Self {
         Action {
             kind,
             target: target.into(),
             reversible: true,
             affects_person: false,
+            external_boundary: false,
+            sensitive: false,
         }
     }
 }
 
-/// The guard's verdict: a decision plus the reason it can be recorded by.
+/// The guard's verdict: a decision, the categorized [`Reason`], and the human-readable
+/// rationale it is recorded by.
 #[derive(Debug, Clone)]
 pub struct Verdict {
     pub decision: Decision,
+    pub reason: Reason,
     pub rationale: String,
 }
 
-fn path_in_scope(target: &str, scopes: &[String]) -> bool {
-    scopes
-        .iter()
-        .any(|p| !p.is_empty() && target.starts_with(p.as_str()))
+fn verdict(reason: Reason, rationale: String) -> Verdict {
+    Verdict {
+        decision: reason.decision(),
+        reason,
+        rationale,
+    }
 }
 
-/// Weigh an action against the boundary and its own consequence.
+/// A target's standing against a set of granted path prefixes — three-valued, because
+/// "not granted" and "broader than what was granted" are different questions.
+enum Scope {
+    /// Covered by a granted prefix.
+    In,
+    /// An *ancestor* of a granted path — the caller asked broader than the grant. The
+    /// human owns that scope; the guard does not silently widen it, but it is a
+    /// seek-consent question, not an outright refusal.
+    Ambiguous,
+    /// Unrelated to any grant.
+    Out,
+}
+
+fn scope_of(target: &str, scopes: &[String]) -> Scope {
+    if scopes
+        .iter()
+        .any(|p| !p.is_empty() && target.starts_with(p.as_str()))
+    {
+        Scope::In
+    } else if !target.is_empty()
+        && scopes
+            .iter()
+            .any(|p| !p.is_empty() && p.as_str().starts_with(target))
+    {
+        Scope::Ambiguous
+    } else {
+        Scope::Out
+    }
+}
+
+/// Weigh an action against authorization's three sources — *constitution, the served,
+/// and the surrounding environment* — never against mere technical availability.
 ///
-/// 1. **Boundary (fail-closed):** if the action needs a capability the human-owned
-///    boundary does not grant, it is **refused** — only a human widens the boundary.
-/// 2. **Consequence:** if it is irreversible, affects a person, or installs software,
-///    it is permissible but **seeks consent** first.
-/// 3. Otherwise it is **allowed**.
+/// 1. **Constitutional boundary (fail-closed):** outside the human-owned grant →
+///    [`Reason::ViolatesConstitutionalBoundary`] (Refuse). Availability is not permission.
+/// 2. **External boundary:** the environment signalled a fence here →
+///    [`Reason::ExternalBoundaryDiscovered`] (Refuse).
+/// 3. **Ambiguous scope:** broader than the grant → [`Reason::AmbiguousHumanOwnedScope`]
+///    (SeekConsent).
+/// 4. **Sensitive local observation:** may expose private data →
+///    [`Reason::PotentiallySensitiveLocalObservation`] (SeekConsent).
+/// 5. **High consequence** (irreversible / installs / touches a person): in scope but
+///    needs the owner's confirmation → [`Reason::AmbiguousHumanOwnedScope`] (SeekConsent).
+/// 6. Otherwise → [`Reason::WithinConstitutionPolicyEnvironmentAndConsent`] (Allow).
 pub fn evaluate(action: &Action, boundary: &Boundary) -> Verdict {
     use ActionKind::*;
 
-    let out_of_bounds: Option<String> =
-        match action.kind {
-            Observe | EmitArtifact => None, // internal: within reach by definition
-            ReadFile => (!path_in_scope(&action.target, &boundary.fs_read)).then(|| {
-                format!(
-                    "reading '{}' is outside the boundary's read scope",
-                    action.target
-                )
-            }),
-            WriteFile => (!path_in_scope(&action.target, &boundary.fs_write)).then(|| {
-                format!(
-                    "writing '{}' is outside the boundary's write scope",
-                    action.target
-                )
-            }),
-            Network => (!boundary.allow_network)
-                .then(|| "network access is outside the boundary".to_string()),
-            Llm => (!boundary.allow_llm)
-                .then(|| "LLM consultation is outside the boundary".to_string()),
-            InstallTool => (!boundary.allow_tool_install)
-                .then(|| "tool installation is outside the boundary".to_string()),
-            ExecuteArtifact => (!boundary.allow_execute)
-                .then(|| "executing generated artifacts is outside the boundary".to_string()),
-        };
+    // 1. The human-owned constitutional boundary, fail-closed. Internal actions are
+    //    within reach by definition; outward capabilities are gated; paths are scoped.
+    let scope = match action.kind {
+        Observe | EmitArtifact => Scope::In,
+        ReadFile => scope_of(&action.target, &boundary.fs_read),
+        WriteFile => scope_of(&action.target, &boundary.fs_write),
+        Network => bool_scope(boundary.allow_network),
+        Llm => bool_scope(boundary.allow_llm),
+        InstallTool => bool_scope(boundary.allow_tool_install),
+        ExecuteArtifact => bool_scope(boundary.allow_execute),
+    };
 
-    if let Some(reason) = out_of_bounds {
-        return Verdict {
-            decision: Decision::Refuse,
-            rationale: format!(
-                "refused — {reason}. Only a human can widen the boundary (docs/boundaries.md)."
+    if matches!(scope, Scope::Out) {
+        return verdict(
+            Reason::ViolatesConstitutionalBoundary,
+            format!(
+                "refused — {:?} on '{}' is outside the human-owned boundary; availability \
+                 is not authorization. Only a human widens the boundary (docs/boundaries.md).",
+                action.kind, action.target
             ),
-        };
+        );
     }
 
-    let mut reasons = Vec::new();
+    // 2. The surrounding environment's own boundary overrides technical reach.
+    if action.external_boundary {
+        return verdict(
+            Reason::ExternalBoundaryDiscovered,
+            format!(
+                "refused — an external boundary was discovered at '{}'; a granted \
+                 capability is not a key to another's lock (docs/SOUL.md).",
+                action.target
+            ),
+        );
+    }
+
+    // 3. Broader than what the human granted — confirm, do not silently widen.
+    if matches!(scope, Scope::Ambiguous) {
+        return verdict(
+            Reason::AmbiguousHumanOwnedScope,
+            format!(
+                "seek consent — '{}' is broader than the granted scope; confirm with the owner.",
+                action.target
+            ),
+        );
+    }
+
+    // 4. A potentially sensitive local observation is consent-gated even in scope.
+    if action.sensitive && matches!(action.kind, Observe | ReadFile) {
+        return verdict(
+            Reason::PotentiallySensitiveLocalObservation,
+            format!(
+                "seek consent — observing '{}' may expose sensitive data.",
+                action.target
+            ),
+        );
+    }
+
+    // 5. In scope, but high-consequence: the grant covers the capability, not necessarily
+    //    this act — an ambiguity only the owner resolves.
+    let mut flags = Vec::new();
     if action.affects_person {
-        reasons.push("touches a person's agency");
+        flags.push("touches a person's agency");
     }
     if !action.reversible {
-        reasons.push("is not reversible");
+        flags.push("is not reversible");
     }
     if action.kind == InstallTool {
-        reasons.push("installs software");
+        flags.push("installs software");
+    }
+    if !flags.is_empty() {
+        return verdict(
+            Reason::AmbiguousHumanOwnedScope,
+            format!(
+                "seek consent — within the boundary but high-consequence ({}).",
+                flags.join(", ")
+            ),
+        );
     }
 
-    if reasons.is_empty() {
-        Verdict {
-            decision: Decision::Allow,
-            rationale: "within the boundary and low-consequence".to_string(),
-        }
+    // 6. Authorized on every count.
+    verdict(
+        Reason::WithinConstitutionPolicyEnvironmentAndConsent,
+        "allowed — within constitution, policy, environment, and consent".to_string(),
+    )
+}
+
+fn bool_scope(granted: bool) -> Scope {
+    if granted {
+        Scope::In
     } else {
-        Verdict {
-            decision: Decision::SeekConsent,
-            rationale: format!(
-                "within the boundary but high-consequence ({}) — seek consent first",
-                reasons.join(", ")
-            ),
-        }
+        Scope::Out
     }
 }
 
@@ -249,5 +384,62 @@ mod tests {
         let mut a = Action::new(ActionKind::Observe, "betty");
         a.affects_person = true;
         assert_eq!(evaluate(&a, &b).decision, Decision::SeekConsent);
+    }
+
+    #[test]
+    fn out_of_scope_names_the_constitutional_boundary() {
+        // Availability is not authorization: /etc/passwd is readable on the host, but
+        // outside the granted read scope, so it is refused on constitutional grounds.
+        let v = evaluate(
+            &Action::new(ActionKind::ReadFile, "/etc/passwd"),
+            &open_llm(),
+        );
+        assert_eq!(v.decision, Decision::Refuse);
+        assert_eq!(v.reason, Reason::ViolatesConstitutionalBoundary);
+    }
+
+    #[test]
+    fn external_boundary_refuses_even_when_in_scope() {
+        // In the read scope and the capability is granted, yet the environment fenced it:
+        // a granted capability is not a key to another's lock.
+        let b = open_llm();
+        let mut a = Action::new(ActionKind::ReadFile, "/Users/ian/notes.txt");
+        a.external_boundary = true;
+        let v = evaluate(&a, &b);
+        assert_eq!(v.decision, Decision::Refuse);
+        assert_eq!(v.reason, Reason::ExternalBoundaryDiscovered);
+    }
+
+    #[test]
+    fn asking_broader_than_the_grant_seeks_consent() {
+        // Granted /Users/ian/; asking about its ancestor /Users/ is broader than the
+        // grant — ambiguous human-owned scope, not an outright refusal.
+        let v = evaluate(&Action::new(ActionKind::ReadFile, "/Users/"), &open_llm());
+        assert_eq!(v.decision, Decision::SeekConsent);
+        assert_eq!(v.reason, Reason::AmbiguousHumanOwnedScope);
+    }
+
+    #[test]
+    fn sensitive_local_observation_seeks_consent() {
+        // Technically inside the read scope, but flagged sensitive (a key) — consent first.
+        let b = open_llm();
+        let mut a = Action::new(ActionKind::ReadFile, "/Users/ian/.ssh/id_ed25519");
+        a.sensitive = true;
+        let v = evaluate(&a, &b);
+        assert_eq!(v.decision, Decision::SeekConsent);
+        assert_eq!(v.reason, Reason::PotentiallySensitiveLocalObservation);
+    }
+
+    #[test]
+    fn fully_authorized_action_names_all_four_sources() {
+        let v = evaluate(
+            &Action::new(ActionKind::ReadFile, "/Users/ian/notes.txt"),
+            &open_llm(),
+        );
+        assert_eq!(v.decision, Decision::Allow);
+        assert_eq!(
+            v.reason,
+            Reason::WithinConstitutionPolicyEnvironmentAndConsent
+        );
     }
 }

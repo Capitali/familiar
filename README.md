@@ -80,6 +80,13 @@ the familiar asks ("What do you need most today?"), the human answers.
 Outward reach (network, LLM, executing generated code) is each a separate gate only a
 human opens. See [CHANGELOG.md](CHANGELOG.md) and [docs/07-roadmap.md](docs/07-roadmap.md).
 
+Every claim above is traceable. The maturity of each piece follows one
+[status convention](docs/07-roadmap.md#status-convention), and each component maps to its
+evidence — a test, the live experiment, or an explicit "not yet validated" marker — in
+the [claim→evidence table](docs/05-validation-and-results.md#claim--evidence). What is
+**not** yet validated (no scenario tests, no benchmarks, service-as-attention) is stated
+there and in [docs/06-limitations.md](docs/06-limitations.md), not glossed.
+
 ## Lineage
 
 The Familiar succeeds an archived bottom-up predecessor (`Capitali/factory`, tag

@@ -123,6 +123,11 @@ fn install_stable_binary() -> io::Result<PathBuf> {
 pub fn install(dir: &Path, interval: u64) -> io::Result<PathBuf> {
     let exe = install_stable_binary()?;
     let plist = launchd_plist_path()?;
+    // launchd runs with cwd `/`, so a relative data dir would make `--data-dir` and the
+    // log path resolve under `/` — the agent then fails to open its log and exits
+    // EX_CONFIG (78). Canonicalize to an absolute path so a relative arg can't break it.
+    let dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let dir = dir.as_path();
     let log = dir.join(LOGFILE);
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>

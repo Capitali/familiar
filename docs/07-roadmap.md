@@ -4,6 +4,31 @@ The build sequence is **telos-first**: make the laws measurable before porting t
 inherited machinery. Status is tracked in [CHANGELOG.md](../CHANGELOG.md) and, per
 brick, in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).
 
+## Status convention
+
+So the maturity of each piece reads the same everywhere, one vocabulary is used across
+the README, the docs (architecture, validation, limitations, this roadmap), and the
+changelog. The first five are **maturity rungs** — cumulative, so a higher rung implies
+the lower ones, and a component is tagged with the highest it has reached. **Planned**
+and **Deprecated** are lifecycle states, not rungs.
+
+| Status | Meaning |
+|---|---|
+| **Implemented** | Code exists and runs. |
+| **Implemented but not validated** | Built, but nothing yet checks that it behaves. |
+| **Validated by unit tests** | Its invariants are encoded as passing unit tests. |
+| **Validated by scenario tests** | Exercised end-to-end against scenario fixtures. |
+| **Validated by real-world operation** | Demonstrated doing its job in a live run on a real host. |
+| **Planned** | Designed, not yet built. |
+| **Deprecated** | Superseded; retained for history. |
+
+The mapping of each component to its rung **and the evidence behind it** (the specific
+tests, the live experiment, or an explicit "not yet validated" marker) is the
+claim→evidence table in [05-validation-and-results.md](05-validation-and-results.md#claim--evidence).
+The rule the whole repository holds to: **every major claim traces to a test, a
+scenario, a log, a limitation, or an explicit "not yet validated" marker** — never to
+assertion alone.
+
 ## Done
 
 - **Genesis** — the constitution ([SOUL.md](SOUL.md)); *humanity* defined.
@@ -31,9 +56,16 @@ only a human opens; the familiar never widens its own.
 
 ## Next — sharpen and reach
 
-- **Real scenarios & LLM-authored artifacts.** Today's artifacts are deterministic and
-  safe; next, test candidates against real scenarios and (separately gated) execute
-  LLM-authored *solutions*, so selection genuinely discriminates.
+Everything in this section is **Planned**. The first item is what lifts the cycle from
+*Validated by real-world operation* on a thin task to *Validated by scenario tests* —
+the one maturity rung the codebase has not yet occupied (no scenario fixture set exists
+yet; see [06-limitations.md](06-limitations.md)).
+
+- **Real scenarios & LLM-authored artifacts.** *(Planned.)* Today's artifacts are
+  deterministic and safe; LLM-*authored* execution is built but behind its own gate
+  (`allow_authored_execute`, default-off). Next: a scenario fixture set so candidates
+  are tested against real tasks and selection genuinely discriminates — the move onto
+  the **scenario-tests** rung.
 - **Rigor & adaptive cadence.** Feed a measured rigor drive into the promotion bar; give
   the daemon structural-fingerprint cadence (slow when nothing changes).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond

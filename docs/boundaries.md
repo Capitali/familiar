@@ -21,6 +21,28 @@ factory does not grab capability, persuade itself into more reach, install its w
 past a limit, or rewrite the boundary it was given. Capability grows only when a
 human hands it over.
 
+### Availability is not authorization · permission does not compose
+
+The boundary answers one question, asked before every consequential act
+([SOUL.md](SOUL.md)): **"Am I authorized — by my constitution, by the served, and by
+the surrounding environment — to do this?"** Authorization comes from those three; mere
+technical reach is none of them. Two doctrines follow:
+
+- **Availability is not authorization.** That a path can be read, a server can be
+  reached, a command can be run, or a token is present does not place the action within
+  boundary. *Availability is evidence of power, not permission.*
+- **Permission does not compose.** A granted capability is not a key to another's lock.
+  Shell execution does not authorize reading unrelated files; network access does not
+  authorize exfiltrating the served's data; LLM consultation does not authorize sending
+  secrets to a provider; a readable file is not therefore appropriate to inspect; and
+  one human's request never overrides another person's boundary.
+
+The guard records *why* it decided, in five categories: **Refuse** — violates
+constitutional boundary; **Refuse** — external boundary discovered; **SeekConsent** —
+ambiguous human-owned scope; **SeekConsent** — potentially sensitive local observation;
+**Allow** — within constitution, policy, environment, and consent. What is and is not
+*mechanically* enforced is stated in [Status](#status) below, not implied.
+
 ### Why a boundary at all, given "capability is unrestricted"?
 
 The Soul says the familiar's *inherent* reach is unrestricted and its restraint is
@@ -34,8 +56,9 @@ together. This is "guided freedom": wide capability, opened on a human's schedul
 ## The mechanism
 
 - **A human-owned policy.** The boundary lives in a plain, easily edited policy file
-  the **human writes and the familiar only reads** (proposed: `boundary.toml` in the
-  data dir). Easy to widen (edit one file), easy to revoke (edit it back).
+  the **human writes and the familiar only reads** (`boundary.json` in the data dir;
+  example: [`data/sample/boundary.phase-1.example.json`](../data/sample/boundary.phase-1.example.json)).
+  Easy to widen (edit one file), easy to revoke (edit it back).
 - **No self-widening code path.** The familiar has no code that writes the boundary
   policy. Proposals to widen are surfaced to the human as requests; they are never
   self-applied.
@@ -86,11 +109,31 @@ Each widening is a deliberate human act, recorded (see
 4. **Constitutional restraint is unconditional:** no telemetry, no exfiltration, in
    every phase.
 5. Every out-of-boundary action is **refused and recorded** (the guard).
+6. **Availability is not authorization.** Technical reach — a readable path, a reachable
+   host, a runnable command, a present token — is never permission. The boundary decides,
+   not the capability.
+7. **Permission does not compose.** No granted capability licenses an action in another
+   scope: execution ≠ reading unrelated files; network ≠ exfiltration; LLM ≠ sending
+   secrets; readable ≠ appropriate to read; one human's request ≠ override of another
+   person's boundary.
 
 ## Status
 
-Design captured. The enforcement (`boundary.toml` + the obedience guard) and the
-first live outward capability (LLM seam, tool proposals) are **not yet built** — they
-are the next bricks. No keys are used and no outward action is taken until the
-boundary mechanism and the guard exist. See [07-roadmap.md](07-roadmap.md) and
+**Built and validated by unit tests** ([05](05-validation-and-results.md#claim--evidence)):
+the human-owned policy (`boundary.json`, fail-closed — `boundary.rs`) and the obedience
+guard that enforces it with the five-category reason model (`guard.rs`). The first live
+outward capability (the LLM seam) has fired under an opened boundary
+([05](05-validation-and-results.md#the-full-cycle-live)).
+
+What is **enforced** today: the per-capability gate (network/LLM/install/execute), path
+read/write scope (three-valued — in / ambiguous / out), and the consequence and
+sensitivity gates. What is **not yet mechanically enforced** — and so remains a binding
+*norm* with the guard as a single chokepoint, not a jail — is confinement of data-flow
+*within* a granted capability: an executed artifact is not filesystem-jailed, and a
+permitted network/LLM call is not egress-filtered against carrying the served's data
+outward. The `external_boundary` and `sensitive` signals must be *supplied* by the
+caller; the guard does not yet discover them autonomously. OS-level sandboxing
+(least-privilege user, namespaces, seccomp) and autonomous discovery of those signals are
+tracked as hardening — see [06-limitations.md](06-limitations.md) and
+[07-roadmap.md](07-roadmap.md). See also
 [decision-records/0005-human-owned-capability-boundary.md](decision-records/0005-human-owned-capability-boundary.md).
