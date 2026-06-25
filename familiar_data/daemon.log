@@ -7,3 +7,20 @@ LLM response via gemini (694 bytes)
 tick 1: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75 (theorized) (pursued 1)
 tick 2: +0 sensed, 1 loops, +0 candidates, tested 1 (↑1 ⤳0 ✗0) | service 0.40, presence 0.91, capacities 0.75
 tick 3: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+metabolism running adaptively: 60s when active … up to 960s when quiet — Ctrl-C to stop
+tick 1: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+  cadence: active -> next tick in 60s
+tick 2: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+  cadence: quiet -> next tick in 120s
+tick 3: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+  cadence: quiet -> next tick in 240s
+tick 4: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+  cadence: quiet -> next tick in 480s
+tick 5: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75 (pursued 1)
+  cadence: active -> next tick in 60s
+tick 6: +0 sensed, 1 loops, +0 candidates, tested 1 (↑1 ⤳0 ✗0) | service 0.40, presence 0.91, capacities 0.75
+  cadence: active -> next tick in 60s
+tick 7: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+  cadence: quiet -> next tick in 120s
+tick 8: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75
+  cadence: quiet -> next tick in 240s

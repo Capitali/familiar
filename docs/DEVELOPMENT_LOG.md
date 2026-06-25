@@ -6,6 +6,45 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-06-24 — The marble: a menu-bar presence that opens the Glass
+
+The familiar now has a glassy blue marble in the macOS menu bar; click it to open the
+Glass. It comes up at login alongside the daemon and opens the Glass once on startup.
+
+### What changed
+
+- **New crate `crates/marble`** (binary `marble`), a macOS *accessory* app (no Dock
+  icon): a windowless `winit` loop + `tray-icon` NSStatusItem. Menu: Open the Glass /
+  Start the familiar / Stop the familiar / Quit. Left-click also opens the Glass.
+- **Login agent** `io.river.marble` (`marble install`, RunAtLoad) so it appears at
+  login; it spawns the Glass once on start (`--no-open` suppresses).
+- Kept **separate from the Glass** on purpose — the always-resident login item carries
+  no egui; it just shells to its siblings `glass` and `familiar` (resolved next to its
+  own exe) and passes `--data-dir` through so all three agree on which familiar.
+- The marble icon is **procedural RGBA** (radial blue gradient + specular highlight +
+  anti-aliased rim) — no asset file.
+
+### Why
+
+A standing, low-footprint entry point: the familiar is always one click away without a
+window cluttering the desktop, and "the Glass is up when the familiar launches" is met
+by the login agent. The accessory policy keeps it a menu-bar citizen, not a Dock app.
+
+### Checks run
+
+- Green: fmt, clippy --all-targets -D warnings, 72 tests. tray-icon/winit are
+  **macOS-gated**; the binary is a stub elsewhere, so ubuntu CI is unaffected. Verified
+  live: `marble install` loads `io.river.marble`, the process runs, and it opened the
+  Glass (pids confirmed).
+
+### Next / caveats
+
+- The login agent's plist points at `target/debug/marble`; `cargo clean` breaks it (same
+  caveat as the daemon) — install a release binary at a stable path for durable use.
+- The marble doesn't yet reflect daemon state in its icon/tooltip (e.g. dim when stopped)
+  or focus an already-open Glass window (it just avoids spawning a second). Both are easy
+  follow-ups. Quit only quits the marble; the familiar daemon keeps running.
+
 ## 2026-06-24 — Adaptive structural-fingerprint cadence
 
 The metabolism paces itself instead of ticking on a fixed period (the previous 300s
