@@ -6,6 +6,47 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-06-24 — Adaptive structural-fingerprint cadence
+
+The metabolism paces itself instead of ticking on a fixed period (the previous 300s
+was a placeholder; the design always called for a fingerprint-driven cadence).
+
+### What changed
+
+- **cycle:** each tick now takes a **structural fingerprint** (FNV-1a over the
+  perceived `actor|action|object` triples — *not* the transient `context` field, so
+  telemetry like paths/brands/latency don't trip it). Persisted to `structure.fp`.
+  `TickReport` gains `structural_changed` and a `quiet()` method (no structural change
+  *and* no work this tick: nothing sensed/generated/tested/promoted/mutated/pursued/
+  theorized). Because the fingerprint is over the *perceived* set (not the cumulative
+  log), it also falls when a fact *disappears* — which append-only dedup can't see.
+- **cli (`run` loop):** `--interval` is now the **active floor** (default 60s); on each
+  quiet tick the interval doubles up to `--max-interval` (default floor×16, cap 3600s),
+  snapping back to the floor the instant anything changes. `--fixed` keeps a constant
+  period. The daemon default floor moved 300→60. Each tick logs its chosen cadence.
+
+### Why
+
+"Fingerprint = structural change only" (Soul / the v1 scan-cadence idea): watch closely
+when the environment is moving, drowse when it isn't — real change, not noise, sets the
+pace. Side benefit: on a fully quiet host the interval settles near the hourly theorize
+cadence, so the familiar naturally wakes, muses, acts, then quiets again.
+
+### Checks run
+
+- 72 tests (fmt, clippy --all-targets -D warnings). New tests: fingerprint ignores
+  transient context but moves on a structural object change; `quiet()` true on a static
+  re-tick, false on the first/eventful tick. Demo (1s floor, 8s ceiling): 1→2→4→8s
+  back-off on a static host. **Verified live**: reinstalled launchd daemon (floor 60s,
+  ceiling 960s) — tick 1 active 60s (baseline), tick 2 quiet → 120s.
+
+### Next / caveats
+
+- `quiet()` treats the hourly theorize + its pursued thread as activity, so a quiet host
+  still gets a brief fast burst ~hourly, then re-quiets — intended. If you want presence/
+  capacities *alarms* to also force a fast cadence, fold them into `quiet()` (left out
+  for now: an alarm is a steady state, not a change, and shouldn't peg the floor forever).
+
 ## 2026-06-24 — Rename: Substrate → The Familiar
 
 The project is now **The Familiar** — a spirit companion that historically serves

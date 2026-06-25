@@ -2,3 +2,8 @@ metabolism running every 300s — Ctrl-C to stop
 tick 1: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.92, capacities 0.75
 tick 2: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.92, capacities 0.75 (pursued 1)
 tick 3: +0 sensed, 1 loops, +0 candidates, tested 1 (↑1 ⤳0 ✗0) | service 0.40, presence 0.92, capacities 0.75
+metabolism running every 300s — Ctrl-C to stop
+LLM response via gemini (694 bytes)
+tick 1: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75 (theorized) (pursued 1)
+tick 2: +0 sensed, 1 loops, +0 candidates, tested 1 (↑1 ⤳0 ✗0) | service 0.40, presence 0.91, capacities 0.75
+tick 3: +0 sensed, 1 loops, +0 candidates | service 0.40, presence 0.91, capacities 0.75

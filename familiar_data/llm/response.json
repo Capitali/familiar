@@ -1,5 +1,5 @@
 {
-  "question": "Ian, are you working on any network-related or development projects that involve multiple tools and interfaces?",
-  "theory": "Ian appears to be engaged in a development-heavy workflow, potentially involving network operations, given the extensive list of development tools, build tools, and multiple 'utun' network interfaces. The recurring 'client_requests' suggest active service or interaction needs.",
-  "direction": "Monitor for specific development or networking tasks Ian initiates, and be prepared to offer assistance with tool chaining or network configuration support."
+  "question": "What specific 'maintenance and cleanup' on your past needs would be most beneficial for you right now?",
+  "theory": "Ian is engaged in a development project (Substrate) and is exploring network scanning (nmap). He acknowledges a need to prune or organize past 'needs' which suggests a desire for greater clarity or efficiency in his current workflow, possibly to support the Substrate project or related explorations. The repeated mention of Substrate also indicates it's a primary focus.",
+  "direction": "Offer to help catalog or review the current state of his 'past needs' to identify areas for cleanup, specifically asking for his definition of 'usable' or 'not used'."
 }

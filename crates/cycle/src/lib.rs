@@ -4,7 +4,10 @@
 //!
 //! 1. **Sense** the host (perception; deduped by triple so static facts don't spam
 //!    the log — only genuinely new facts are recorded). Connectivity is the one
-//!    outward bit, gated by the caller.
+//!    outward bit, gated by the caller. A **structural fingerprint** of the perceived
+//!    triples is taken here; [`TickReport::quiet`] reports whether the world (and the
+//!    factory's own work) stood still, which the daemon uses to pace itself — fast when
+//!    the environment changes, drowsy when it doesn't (adaptive cadence).
 //! 2. **Detect** loops over all observations.
 //! 3. **Generate** a gen-0 candidate for any loop not yet covered.
 //! 4. **Measure** the law-signals (service, presence).
@@ -35,8 +38,44 @@ use familiar_sense as sense;
 const ARTIFACTS_DIR: &str = "artifacts";
 const QUESTION_FILE: &str = "question.txt";
 const LAST_THEORY_FILE: &str = "last_theory.txt";
+/// The structural fingerprint of the last tick's environment (a single u64).
+const STRUCTURE_FILE: &str = "structure.fp";
 /// How often the factory pauses to form a question + theory (seconds).
 const THEORIZE_EVERY_SECS: i64 = 3600;
+
+/// FNV-1a (64-bit) — the same family the kernel uses for loop ids. Deterministic,
+/// dependency-free; we only need a stable digest, not cryptographic strength.
+fn fnv1a(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// The **structural fingerprint** of what was perceived this tick: a digest over the
+/// *set of observation triples* (actor|action|object) only — never the `context`
+/// field, where transient telemetry (paths, brands, kernel build) lives. So the
+/// fingerprint moves when the environment's *structure* changes (an interface or tool
+/// appears/disappears, connectivity flips) and stays put under mere noise. This is the
+/// signal the metabolism's cadence rides (Soul: "fingerprint = structural change only").
+fn structural_fingerprint(perceived: &[observation::Observation]) -> u64 {
+    let mut keys: Vec<String> = perceived
+        .iter()
+        .map(|o| format!("{}\u{1f}{}\u{1f}{}", o.actor, o.action, o.object))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    fnv1a(&keys.join("\u{1e}"))
+}
+
+/// The fingerprint persisted from the previous tick, if any.
+fn last_fingerprint(dir: &Path) -> Option<u64> {
+    fs::read_to_string(dir.join(STRUCTURE_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
 
 /// What one tick changed.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +108,26 @@ pub struct TickReport {
     pub theorized: bool,
     /// Open threads turned into candidate work this tick.
     pub pursued: usize,
+    /// True when the environment's **structural fingerprint** changed since the last
+    /// tick (a structural fact appeared/disappeared, or connectivity flipped). The
+    /// metabolism's cadence rides this: a changing world is worth watching closely.
+    pub structural_changed: bool,
+}
+
+impl TickReport {
+    /// True when nothing of consequence happened this tick — neither the environment's
+    /// structure nor the factory's own work moved. The metabolism slows when ticks are
+    /// quiet and snaps back to its floor the moment one is not (adaptive cadence).
+    pub fn quiet(&self) -> bool {
+        !self.structural_changed
+            && self.sensed == 0
+            && self.new_candidates == 0
+            && self.tested == 0
+            && self.promoted == 0
+            && self.mutated == 0
+            && self.pursued == 0
+            && !self.theorized
+    }
 }
 
 /// Ask the LLM (boundary-gated) for a one-line hypothesis addressing a loop.
@@ -393,6 +452,12 @@ pub fn tick(
     if allow_connectivity {
         perceived.push(sense::connectivity(now));
     }
+    // Structural fingerprint of *this* perception vs. the last tick's. Computed over
+    // the perceived set (not the cumulative log), so it also falls when a fact
+    // *disappears* — something the append-only dedup below can never notice.
+    let fp = structural_fingerprint(&perceived);
+    let structural_changed = last_fingerprint(dir) != Some(fp);
+    fs::write(dir.join(STRUCTURE_FILE), fp.to_string())?;
     let mut sensed = 0;
     for o in perceived {
         if seen.insert(triple(&o)) {
@@ -464,6 +529,7 @@ pub fn tick(
         capacities_diminished: cap.diminished,
         theorized,
         pursued,
+        structural_changed,
     })
 }
 
@@ -607,6 +673,41 @@ mod tests {
         assert_eq!(thread::load(&t.0).unwrap()[0].status, "pursued");
         let r2 = tick(&t.0, 1_000_000, false, false, false, false).unwrap();
         assert_eq!(r2.pursued, 0);
+    }
+
+    #[test]
+    fn structural_fingerprint_drives_quiet_cadence() {
+        let t = Temp::new("cadence");
+        seed_recurring(&t.0);
+        // First tick: nothing was fingerprinted before -> structure "changed", not quiet.
+        let r1 = tick(&t.0, 1_000_000, false, false, false, false).unwrap();
+        assert!(
+            r1.structural_changed,
+            "first perception is a change from nothing"
+        );
+        assert!(!r1.quiet(), "a tick that sensed + generated is not quiet");
+        // Second tick on a static host: same triples perceived, no new work -> quiet.
+        let r2 = tick(&t.0, 1_000_000, false, false, false, false).unwrap();
+        assert!(
+            !r2.structural_changed,
+            "an unchanged environment yields the same fingerprint"
+        );
+        assert!(
+            r2.quiet(),
+            "static world + no new work -> the metabolism may slow"
+        );
+    }
+
+    #[test]
+    fn fingerprint_ignores_transient_context() {
+        // Same triple, different context (transient telemetry) -> identical fingerprint.
+        let a = observation::Observation::new("host", "has", "interface:en0", "ctx=1", "s", 1, 1.0);
+        let b = observation::Observation::new("host", "has", "interface:en0", "ctx=2", "s", 2, 1.0);
+        assert_eq!(structural_fingerprint(&[a]), structural_fingerprint(&[b]));
+        // A different object (a structural fact) -> different fingerprint.
+        let c = observation::Observation::new("host", "has", "interface:utun4", "", "s", 1, 1.0);
+        let d = observation::Observation::new("host", "has", "interface:en0", "", "s", 1, 1.0);
+        assert_ne!(structural_fingerprint(&[c]), structural_fingerprint(&[d]));
     }
 
     #[test]

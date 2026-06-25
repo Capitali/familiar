@@ -34,7 +34,10 @@ commands:
   sense          perceive the host (environment, interfaces, capabilities)
   tick           run one cycle of the metabolism (sense → detect → muse → act → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
-                 (unbounded, every --interval S, default 60; Ctrl-C to stop)
+                 (unbounded; Ctrl-C to stop). Adaptive cadence: --interval S is the
+                 active floor (default 60), backing off to --max-interval S when the
+                 environment is quiet (default floor x16, cap 3600); --fixed for a
+                 constant period.
   daemon         manage the background daemon:
                  status | start | stop | reload | install | uninstall
                  (start/stop = pidfile process; install = launchd at login)
@@ -307,10 +310,7 @@ fn cmd_daemon(args: &[String]) -> ExitCode {
     let sub = args.first().map(String::as_str).unwrap_or("status");
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
-    let interval: u64 = f
-        .get("interval")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(300);
+    let interval: u64 = f.get("interval").and_then(|s| s.parse().ok()).unwrap_or(60);
 
     let result: std::io::Result<()> = (|| {
         match sub {
@@ -433,21 +433,55 @@ fn cmd_run(args: &[String]) -> ExitCode {
 
     if unbounded {
         if interval == 0 {
-            interval = 60; // a sane default cadence so it isn't a busy loop
+            interval = 60; // a sane floor cadence so it isn't a busy loop
         }
+        // Adaptive structural-fingerprint cadence: `--interval` is the *floor* (the
+        // busy cadence), `--max-interval` the ceiling reached when the world goes
+        // quiet (default floor×16, capped at 1h). `--fixed` opts out for a constant
+        // period. The metabolism quickens when the environment or its own work moves
+        // and drowses when nothing changes (see `TickReport::quiet`).
+        let floor = interval;
+        let fixed = f.contains_key("fixed");
+        let ceil: u64 = f
+            .get("max-interval")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| floor.saturating_mul(16).min(3600))
+            .max(floor);
         // Make this process visible to `daemon status/start/stop` (incl. when launched
         // by launchd), so the two control paths agree and never double-spawn.
         daemon::record_self(&dir);
-        println!("metabolism running every {interval}s — Ctrl-C to stop");
+        if fixed {
+            println!("metabolism running every {floor}s (fixed) — Ctrl-C to stop");
+        } else {
+            println!(
+                "metabolism running adaptively: {floor}s when active … up to {ceil}s when quiet — Ctrl-C to stop"
+            );
+        }
         let mut n = 0usize;
         loop {
             n += 1;
-            match familiar_cycle::tick_gated(&dir, now_secs()) {
-                Ok(r) => print_tick(n, &r),
+            let quiet = match familiar_cycle::tick_gated(&dir, now_secs()) {
+                Ok(r) => {
+                    print_tick(n, &r);
+                    r.quiet()
+                }
                 Err(e) => {
                     eprintln!("run: {e}");
                     return ExitCode::FAILURE;
                 }
+            };
+            if !fixed {
+                // Multiplicative back-off while quiet; snap back to the floor on any
+                // change. The world moving (or our own work) buys closer attention.
+                interval = if quiet {
+                    interval.saturating_mul(2).min(ceil)
+                } else {
+                    floor
+                };
+                println!(
+                    "  cadence: {} -> next tick in {interval}s",
+                    if quiet { "quiet" } else { "active" }
+                );
             }
             std::thread::sleep(std::time::Duration::from_secs(interval));
         }
