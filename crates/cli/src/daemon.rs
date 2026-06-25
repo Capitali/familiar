@@ -10,6 +10,9 @@ use std::process::{Command, Stdio};
 const PIDFILE: &str = "daemon.pid";
 const LOGFILE: &str = "daemon.log";
 const LAUNCHD_LABEL: &str = "io.river.familiar";
+/// A durable home for the installed binary, outside the build tree (which `cargo clean`
+/// wipes). Kept in step with the marble's stable path so both login items agree.
+const STABLE_SUBDIR: &str = "Library/Application Support/Familiar/bin";
 
 fn pidfile(dir: &Path) -> PathBuf {
     dir.join(PIDFILE)
@@ -94,10 +97,31 @@ fn launchd_plist_path() -> io::Result<PathBuf> {
         .join(format!("{LAUNCHD_LABEL}.plist")))
 }
 
+/// The durable bin directory the login item points at, so a `cargo clean` can't break it.
+fn stable_bin_dir() -> io::Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "HOME not set"))?;
+    Ok(PathBuf::from(home).join(STABLE_SUBDIR))
+}
+
+/// Copy the running `familiar` binary into the stable bin directory and return that path,
+/// so launchd points at a copy outside `target/`. Skips the copy if already in place.
+/// `cargo build --release` then `target/release/familiar daemon install` installs release.
+fn install_stable_binary() -> io::Result<PathBuf> {
+    let src = std::env::current_exe()?;
+    let bin = stable_bin_dir()?;
+    fs::create_dir_all(&bin)?;
+    let dst = bin.join("familiar");
+    if fs::canonicalize(&src).ok() != fs::canonicalize(&dst).ok() {
+        fs::copy(&src, &dst)?;
+    }
+    Ok(dst)
+}
+
 /// Install a launchd LaunchAgent so the daemon starts at login (and is kept alive).
 /// Writes the plist and loads it. macOS only.
 pub fn install(dir: &Path, interval: u64) -> io::Result<PathBuf> {
-    let exe = std::env::current_exe()?;
+    let exe = install_stable_binary()?;
     let plist = launchd_plist_path()?;
     let log = dir.join(LOGFILE);
     let xml = format!(
@@ -131,7 +155,12 @@ pub fn install(dir: &Path, interval: u64) -> io::Result<PathBuf> {
         fs::create_dir_all(parent)?;
     }
     fs::write(&plist, xml)?;
-    // load it (older but functional API; -w persists the enabled state)
+    // Unload any prior copy so launchd picks up the (possibly new) stable path, then load.
+    // (Older but functional API; -w persists the enabled state.)
+    let _ = Command::new("launchctl")
+        .args(["unload", "-w"])
+        .arg(&plist)
+        .status();
     let _ = Command::new("launchctl")
         .args(["load", "-w"])
         .arg(&plist)
