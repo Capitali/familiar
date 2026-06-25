@@ -24,6 +24,7 @@ pub mod parameters;
 pub mod pattern_memory;
 pub mod presence;
 pub mod regression_guard;
+pub mod request;
 pub mod score;
 pub mod selection;
 pub mod service;

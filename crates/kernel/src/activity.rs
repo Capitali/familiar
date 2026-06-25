@@ -35,6 +35,12 @@ pub struct ActivityTick {
     /// flagged corruptor (Brick 20).
     #[serde(default)]
     pub marginalized: usize,
+    /// Human requests the familiar answered this tick (Brick 21).
+    #[serde(default)]
+    pub answered: usize,
+    /// Human requests the familiar refused as constitution-breaking this tick (Brick 21).
+    #[serde(default)]
+    pub refused: usize,
     pub service: f64,
     pub presence: f64,
     pub capacities: f64,
@@ -101,6 +107,8 @@ mod tests {
             pursued: 0,
             reverted: 0,
             marginalized: 0,
+            answered: 0,
+            refused: 0,
             service: 0.4,
             presence: 0.8,
             capacities: 0.75,

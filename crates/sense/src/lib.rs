@@ -147,6 +147,72 @@ pub fn connectivity(now: i64) -> Observation {
     )
 }
 
+/// A closer look at the host's network configuration — default gateway, DNS resolvers,
+/// and how many TCP ports are listening. Read-only and best-effort (records what it can
+/// perceive on this OS, skips the rest), so an analysis of "network config" can rest on
+/// verified facts rather than guesses. macOS (`route`) and Linux (`ip route`) variants.
+pub fn network_detail(now: i64) -> Vec<Observation> {
+    let mut out = Vec::new();
+
+    let gw = run("route", &["-n", "get", "default"]) // macOS
+        .and_then(|s| {
+            s.lines().find_map(|l| {
+                l.trim()
+                    .strip_prefix("gateway:")
+                    .map(|g| g.trim().to_string())
+            })
+        })
+        .or_else(|| {
+            run(
+                "sh",
+                &[
+                    "-c",
+                    "ip route show default 2>/dev/null | awk '{print $3; exit}'",
+                ],
+            )
+        })
+        .filter(|g| !g.is_empty());
+    if let Some(gw) = gw {
+        out.push(obs(
+            "network",
+            "reports",
+            format!("default_gateway:{gw}"),
+            String::new(),
+            now,
+        ));
+    }
+
+    if let Ok(resolv) = std::fs::read_to_string("/etc/resolv.conf") {
+        let servers: Vec<&str> = resolv
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("nameserver ").map(str::trim))
+            .collect();
+        if !servers.is_empty() {
+            out.push(obs(
+                "network",
+                "reports",
+                format!("dns_servers:{}", servers.join(",")),
+                String::new(),
+                now,
+            ));
+        }
+    }
+
+    if let Some(n) = run("sh", &["-c", "netstat -an 2>/dev/null | grep -c LISTEN"])
+        .and_then(|s| s.trim().parse::<u32>().ok())
+    {
+        out.push(obs(
+            "network",
+            "reports",
+            format!("listening_ports:{n}"),
+            String::new(),
+            now,
+        ));
+    }
+
+    out
+}
+
 // --- pure helpers (tested) ---
 
 /// Parse macOS `ifconfig -l` output (space-separated interface names).

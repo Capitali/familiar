@@ -23,6 +23,7 @@ use familiar_kernel::loops::{self, Loop};
 use familiar_kernel::observation::{self, Observation};
 use familiar_kernel::parameters::Parameters;
 use familiar_kernel::presence::{self, PresenceSignal};
+use familiar_kernel::request::{self, Answer, Confidence, Request};
 use familiar_kernel::service::{self, ServiceSignal};
 use familiar_kernel::thread::{self, Thread};
 
@@ -41,6 +42,8 @@ struct Snapshot {
     threads: Vec<Thread>,
     ticks: Vec<ActivityTick>,
     parameters: Parameters,
+    requests: Vec<Request>,
+    answers: Vec<Answer>,
     /// Actors flagged as corrupting (repeated constitution-breakers), with their score.
     flagged: Vec<(String, usize)>,
     service: ServiceSignal,
@@ -61,6 +64,8 @@ impl Snapshot {
         let threads = thread::load(dir).unwrap_or_default();
         let ticks = activity::load(dir).unwrap_or_default();
         let parameters = Parameters::load_or_default(dir);
+        let requests = request::load_requests(dir).unwrap_or_default();
+        let answers = request::load_answers(dir).unwrap_or_default();
         let flagged = corruption::flagged(&corruption::load(dir).unwrap_or_default(), now_secs());
         let boundary = boundary::load(dir).unwrap_or_else(|e| {
             error = Some(format!("boundary: {e}"));
@@ -76,6 +81,8 @@ impl Snapshot {
             threads,
             ticks,
             parameters,
+            requests,
+            answers,
             flagged,
             error,
         }
@@ -95,6 +102,8 @@ struct Glass {
     /// A working copy of the shared parameters the settings sliders edit; written to
     /// disk on Save. Not reset on the 2s refresh, so an in-progress edit isn't clobbered.
     params_edit: Parameters,
+    /// Ian's in-progress free-form request to the familiar ("ask the familiar").
+    ask: String,
 }
 
 fn read_answered(dir: &Path) -> Option<String> {
@@ -155,6 +164,7 @@ impl Glass {
             daemon_status,
             answered_question,
             params_edit,
+            ask: String::new(),
         }
     }
     fn refresh(&mut self) {
@@ -162,6 +172,36 @@ impl Glass {
     }
     fn refresh_daemon(&mut self) {
         self.daemon_status = daemon_cmd(&self.data_dir, "status");
+    }
+    /// Record Ian's free-form request; the cycle answers it on the next tick.
+    fn submit_request(&mut self) {
+        let text = self.ask.trim();
+        if text.is_empty() {
+            return;
+        }
+        let seq = self.snapshot.requests.len() + 1;
+        let _ = request::append_request(
+            &self.data_dir,
+            &Request {
+                id: format!("req-{seq:04}"),
+                actor: "ian".into(),
+                text: text.to_string(),
+                created_at: now_secs(),
+                status: "open".into(),
+            },
+        );
+        self.ask.clear();
+        self.refresh();
+    }
+    /// Record Ian's reaction to an answer. "refine" prefills the ask box with the original
+    /// request so he can sharpen it and ask again — the answer is refined toward what he
+    /// was truly after.
+    fn give_feedback(&mut self, answer_id: &str, kind: &str, prefill: Option<String>) {
+        let _ = request::set_feedback(&self.data_dir, answer_id, kind);
+        if let Some(text) = prefill {
+            self.ask = text;
+        }
+        self.refresh();
     }
     /// Record Ian's reply as an observation — the observer's input channel (the one
     /// place the GUI writes; the familiar's own truth stays read-only).
@@ -347,6 +387,76 @@ impl eframe::App for Glass {
                     );
                 }
             }
+
+            // --- ask the familiar: a free-form request, answered known-vs-probable ---
+            ui.add_space(6.0);
+            let latest_answer = self.snapshot.answers.last().cloned();
+            let pending_requests = self
+                .snapshot
+                .requests
+                .iter()
+                .filter(|r| r.status == "open")
+                .count();
+            let asked_text = latest_answer.as_ref().and_then(|a| {
+                self.snapshot
+                    .requests
+                    .iter()
+                    .find(|r| r.id == a.request_id)
+                    .map(|r| r.text.clone())
+            });
+            egui::Frame::group(ui.style())
+                .fill(egui::Color32::from_rgb(26, 30, 40))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("🔮 Ask the familiar")
+                            .strong()
+                            .color(egui::Color32::from_rgb(150, 200, 255)),
+                    );
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.ask)
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("e.g. do I have any network-configuration issues?"),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Ask").clicked() {
+                            self.submit_request();
+                        }
+                        ui.weak(
+                            "answered from what it can verify — labeled known or probable, never a guess",
+                        );
+                    });
+                    if pending_requests > 0 {
+                        ui.weak(format!(
+                            "⏳ {pending_requests} request(s) pending — answered on the next tick"
+                        ));
+                    }
+                    if let Some(a) = latest_answer {
+                        ui.separator();
+                        if let Some(q) = &asked_text {
+                            ui.weak(format!("you asked: {q}"));
+                        }
+                        ui.horizontal(|ui| {
+                            confidence_badge(ui, a.confidence);
+                            if !a.evidence.is_empty() {
+                                ui.weak(format!("· grounded in: {}", a.evidence));
+                            }
+                        });
+                        ui.label(&a.body);
+                        if a.feedback.is_empty() {
+                            ui.horizontal(|ui| {
+                                if ui.button("👍 helpful").clicked() {
+                                    self.give_feedback(&a.id, "helpful", None);
+                                }
+                                if ui.button("✍ refine").clicked() {
+                                    self.give_feedback(&a.id, "refine", asked_text.clone());
+                                }
+                            });
+                        } else {
+                            ui.weak(format!("✓ you marked this: {}", a.feedback));
+                        }
+                    }
+                });
 
             // --- the metabolism at work: a signals chart + a feed of recent actions ---
             ui.add_space(6.0);
@@ -565,6 +675,12 @@ fn activity_feed(ui: &mut egui::Ui, ticks: &[ActivityTick], now: i64) {
                 if t.marginalized > 0 {
                     parts.push(format!("⛔ marginalized {}", t.marginalized));
                 }
+                if t.answered > 0 {
+                    parts.push(format!("🔮 answered {}", t.answered));
+                }
+                if t.refused > 0 {
+                    parts.push(format!("⛔ refused {} request(s)", t.refused));
+                }
                 if t.structural_changed {
                     parts.push("⚙ world changed".into());
                 }
@@ -678,6 +794,17 @@ fn settings_panel(ui: &mut egui::Ui, params: &mut Parameters, dir: &Path) -> boo
         ui.weak("takes effect next tick (the familiar reviews it) / daemon reload");
     });
     saved
+}
+
+/// The confidence badge on an answer — the visible promise of no misinformation: a green
+/// "known", an amber "probable", or a grey "unknown" (it would rather say so than guess).
+fn confidence_badge(ui: &mut egui::Ui, c: Confidence) {
+    let (txt, col) = match c {
+        Confidence::Known => ("● known", egui::Color32::from_rgb(80, 200, 120)),
+        Confidence::Probable => ("◐ probable", egui::Color32::from_rgb(220, 180, 80)),
+        Confidence::Unknown => ("○ unknown", egui::Color32::GRAY),
+    };
+    ui.colored_label(col, egui::RichText::new(txt).strong());
 }
 
 fn boundary_card(ui: &mut egui::Ui, b: &Boundary) {
