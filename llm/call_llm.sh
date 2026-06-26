@@ -10,12 +10,14 @@
 # Reads:  $SCRIPT_DIR/prompt.txt
 # Writes: $SCRIPT_DIR/response.json
 #
-#   SUBSTRATE_LLM_PROVIDER   provider chain, comma-separated   (default: gemini,cerebras)
+#   SUBSTRATE_LLM_PROVIDER   provider chain, comma-separated   (default: openrouter,gemini,cerebras)
 #
 # Keys (per provider; each falls back to SUBSTRATE_LLM_API_KEY):
+#   OPENROUTER_API_KEY       https://openrouter.ai/keys  (OpenAI-compatible)
 #   GEMINI_API_KEY           https://aistudio.google.com/apikey
 #   CEREBRAS_API_KEY         https://cloud.cerebras.ai
-# Models (optional): GEMINI_MODEL (default gemini-2.5-flash), CEREBRAS_MODEL (default gpt-oss-120b)
+# Models (optional): OPENROUTER_MODEL (default openai/gpt-4o-mini),
+#                    GEMINI_MODEL (default gemini-2.5-flash), CEREBRAS_MODEL (default gpt-oss-120b)
 #
 # Secrets: if $SCRIPT_DIR/key.env exists it is sourced first (it matches *.env in
 # .gitignore, so a real key.env can never be committed).
@@ -37,10 +39,16 @@ if [ ! -f "$PROMPT_FILE" ]; then
     exit 1
 fi
 
-PROVIDERS="${SUBSTRATE_LLM_PROVIDER:-gemini,cerebras}"
+PROVIDERS="${SUBSTRATE_LLM_PROVIDER:-openrouter,gemini,cerebras}"
 
 python3 - "$SCRIPT_DIR" "$PROVIDERS" <<'PYEOF'
-import os, sys, json, re, urllib.request, urllib.error
+import os, sys, json, re, socket, urllib.request, urllib.error
+
+# Prefer IPv4: some networks advertise IPv6 that silently blackholes, and Python's urllib
+# has no Happy-Eyeballs fallback, so it would hang on the dead AAAA address (curl avoids
+# this). Order IPv4 addresses first so HTTPS connects immediately; IPv6 stays as a fallback.
+_gai = socket.getaddrinfo
+socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda ai: ai[0] != socket.AF_INET)
 
 script_dir, providers = sys.argv[1], sys.argv[2]
 prompt_path   = os.path.join(script_dir, "prompt.txt")
@@ -107,7 +115,27 @@ def call_cerebras():
     return body["choices"][0]["message"]["content"]
 
 
-PROVIDERS = {"gemini": call_gemini, "cerebras": call_cerebras}
+def call_openrouter():
+    key = os.environ.get("OPENROUTER_API_KEY") or shared_key
+    if not key:
+        raise RuntimeError("no OPENROUTER_API_KEY (or SUBSTRATE_LLM_API_KEY)")
+    model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    payload = {
+        "model": model,
+        "max_tokens": 2048,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": prompt_text}],
+    }
+    # OpenAI-compatible Chat Completions endpoint. The optional Referer/Title headers
+    # let OpenRouter attribute the call; they carry no secret.
+    body = post("https://openrouter.ai/api/v1/chat/completions", payload,
+                {"authorization": f"Bearer {key}",
+                 "http-referer": "https://github.com/Capitali/familiar",
+                 "x-title": "The Familiar"})
+    return body["choices"][0]["message"]["content"]
+
+
+PROVIDERS = {"openrouter": call_openrouter, "gemini": call_gemini, "cerebras": call_cerebras}
 
 
 def parse_retry(e):
