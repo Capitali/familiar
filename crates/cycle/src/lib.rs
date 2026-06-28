@@ -549,17 +549,32 @@ struct DraftedTool {
 /// and prints a clear result, plus a short name and one-line purpose so it can be
 /// recognized and reused later. None on refusal/parse failure.
 fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
+    let os = std::env::consts::OS;
+    // Host-appropriate tooling, so the authored script actually runs here. The same
+    // familiar runs on a Mac, a Linux box, or a Raspberry Pi — each needs its own idioms.
+    let os_hint = match os {
+        "macos" => {
+            "On macOS (Darwin) use the BSD tools: `sysctl`, `vm_stat`, `top -l 1`, plain \
+             `uptime`, `df -h`, `ifconfig`. Do NOT use Linux-only `/proc` paths or GNU-only \
+             flags like `uptime -p`."
+        }
+        "linux" => {
+            "On Linux (this may be a Raspberry Pi on ARM) use Linux tools: read `/proc` \
+             (e.g. `/proc/cpuinfo`, `/proc/meminfo`, `/proc/loadavg`), and `free -h`, \
+             `df -h`, `ip addr`, `nproc`; `vcgencmd` may exist on a Pi. Do NOT use macOS-only \
+             tools like `sysctl machdep.cpu...`, `vm_stat`, or `top -l 1`."
+        }
+        _ => "Use only portable POSIX shell commands known to work on this host.",
+    };
     let prompt = format!(
-        "This host is {os} ({arch}) — use only shell commands that work there. On macOS \
-         (Darwin) use `sysctl`, `vm_stat`, `top -l 1`, plain `uptime`; do NOT use Linux-only \
-         paths like /proc or GNU-only flags like `uptime -p`. The human (Ian) asks: \"{ask}\". \
-         Write a short POSIX /bin/sh script that accomplishes it and prints a clear, \
-         human-readable result to stdout, plus a short snake_case `name` and a one-line \
-         `purpose` describing what it does (so it can be reused). Be safe and bounded — no \
-         destructive actions, no reading secrets, no exfiltration, no unbounded loops; write \
-         files only under the current directory; finish quickly and exit 0 on success. Reply \
-         ONLY as compact JSON: {{\"name\":\"...\",\"purpose\":\"...\",\"script\":\"...\"}}.",
-        os = std::env::consts::OS,
+        "This host is {os} ({arch}) — use only shell commands that work there. {os_hint} The \
+         human (Ian) asks: \"{ask}\". Write a short POSIX /bin/sh script that accomplishes it \
+         and prints a clear, human-readable result to stdout, plus a short snake_case `name` \
+         and a one-line `purpose` describing what it does (so it can be reused). Be safe and \
+         bounded — no destructive actions, no reading secrets, no exfiltration, no unbounded \
+         loops; write files only under the current directory; finish quickly and exit 0 on \
+         success. Reply ONLY as compact JSON: \
+         {{\"name\":\"...\",\"purpose\":\"...\",\"script\":\"...\"}}.",
         arch = std::env::consts::ARCH,
         ask = text.replace('"', "'")
     );
@@ -624,7 +639,10 @@ fn run_tool(
     if let Some(reason) = review_script(&script) {
         let _ = tool::record_use(dir, &t.id, now, false);
         return Ok((
-            format!("I declined to run the tool '{}' — {reason} (Law III).", t.name),
+            format!(
+                "I declined to run the tool '{}' — {reason} (Law III).",
+                t.name
+            ),
             Confidence::Known,
             "the pre-execution review (docs/boundaries.md)".to_string(),
         ));
@@ -1002,8 +1020,25 @@ fn run_execution(
     };
     let (mut tested, mut promoted, mut mutated, mut archived, mut declined) = (0, 0, 0, 0, 0);
 
-    for c in &pending {
+    // Presence-governed self-tuning (Law II): authoring an artifact costs one LLM consult,
+    // so a tick with hundreds of pending candidates would otherwise fire hundreds of
+    // sequential calls and the familiar would vanish from the served for minutes. Cap the
+    // LLM-authored work to the self-tuned budget; the rest stay pending and are drained on
+    // following ticks (a tick that did work isn't "quiet", so the cadence keeps the floor).
+    // When there's no LLM in the loop (deterministic artifacts), there's nothing to bound.
+    let budget = Parameters::load_or_default(dir).sane().llm_calls_per_tick as usize;
+    let work_limit = if authored { budget } else { pending.len() };
+    let mut llm_secs = 0f64;
+    let mut llm_calls = 0u32;
+
+    for c in pending.iter().take(work_limit) {
+        let t_author = std::time::Instant::now();
         let script_path = author_artifact(dir, c, authored)?;
+        if authored {
+            // Time spent heads-down authoring is time not spent present with the served.
+            llm_secs += t_author.elapsed().as_secs_f64();
+            llm_calls += 1;
+        }
         // Pre-execution review: read what we are about to run and refuse the plainly
         // harmful — recorded as visible truth, never executed.
         let script = fs::read_to_string(&script_path).unwrap_or_default();
@@ -1069,7 +1104,73 @@ fn run_execution(
             }
         }
     }
+
+    if authored && llm_calls > 0 {
+        regulate_llm_budget(dir, now, budget, llm_secs, pending.len() > work_limit)?;
+    }
     Ok((tested, promoted, mutated, archived, declined))
+}
+
+/// How long the familiar may spend heads-down authoring per tick before it is judged to be
+/// neglecting the served (Law II). The budget self-tunes to keep a tick's LLM work near
+/// this — present-first, learning second.
+const PRESENCE_BUDGET_SECS: f64 = 20.0;
+
+/// Self-tune the per-tick LLM budget from what the last tick actually cost (Law II made
+/// self-correcting). Pull back *hard* when a tick ran past the presence budget — being
+/// unresponsive to the served is a failure, recorded as such; lean back in *gently* (one
+/// at a time) when calls were cheap and a backlog is waiting. The familiar owns this dial;
+/// the human never sets it. Persists the new value and its trend for the Glass to show.
+fn regulate_llm_budget(
+    dir: &Path,
+    now: i64,
+    budget: usize,
+    llm_secs: f64,
+    backlog: bool,
+) -> io::Result<()> {
+    use familiar_kernel::parameters::{LLM_CALLS_MAX, LLM_CALLS_MIN};
+    let budget = budget.max(1) as f64;
+    let overran = llm_secs > PRESENCE_BUDGET_SECS;
+    let new = if overran {
+        // proportional pull-back so the next tick projects to ~the presence budget, but
+        // always at least one step down so the familiar visibly yields attention back.
+        let scaled = (budget * PRESENCE_BUDGET_SECS / llm_secs).floor();
+        (scaled as u32).min(budget as u32 - 1).max(LLM_CALLS_MIN)
+    } else if backlog && llm_secs < PRESENCE_BUDGET_SECS * 0.6 {
+        // headroom to spare and work waiting — ease in by one
+        (budget as u32 + 1).min(LLM_CALLS_MAX)
+    } else {
+        budget as u32
+    };
+    let prev = budget as u32;
+    let trend = (new as i64 - prev as i64).signum() as i8;
+
+    let mut params = Parameters::load_or_default(dir).sane();
+    if params.llm_calls_per_tick != new || params.llm_calls_trend != trend {
+        params.llm_calls_per_tick = new;
+        params.llm_calls_trend = trend;
+        params.last_set_by = "familiar".to_string();
+        params.save(dir)?;
+    }
+    // A real overrun is a Law II event — recorded as visible truth, not a silent stall.
+    if overran {
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "regulated_presence",
+                "llm_budget".to_string(),
+                format!(
+                    "{llm_secs:.0}s heads-down exceeded the presence budget ({PRESENCE_BUDGET_SECS:.0}s) \
+                     — easing to {new} LLM call(s)/tick to stay present (Law II)"
+                ),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
+    }
+    Ok(())
 }
 
 /// Run one tick over the data dir. `allow_connectivity` and `allow_llm` must reflect
@@ -1140,10 +1241,19 @@ pub fn tick(
         }
     }
 
-    // 4. Test → score → select (only when a human has opened the execute gate).
-    //    Artifacts are LLM-authored only when the *authored* gate is also open and the
-    //    LLM is reachable — running model-written code is its own deliberate choice.
     let authored = allow_authored_execute && allow_llm;
+
+    // 4. Serve first (Law II). Answer open human requests *before* the familiar turns
+    //    inward to its own background work — when a request wants something run and the
+    //    gates are open, author + review + run it and report the real result; refuse +
+    //    record rule-breaking asks. A request is never queued behind the metabolism's
+    //    churn; attentiveness to the served outranks self-improvement.
+    let (answered, refused) = answer_requests(dir, now, allow_llm, allow_execute, authored)?;
+
+    // 5. Test → score → select (background self-improvement, only when the execute gate is
+    //    open). Artifacts are LLM-authored only when the *authored* gate is also open and
+    //    the LLM is reachable. Bounded by a self-tuned, presence-governed LLM budget (see
+    //    `run_execution`) so a single tick can never disappear into hundreds of calls.
     let (tested, promoted, mutated, archived, declined) = if allow_execute {
         run_execution(dir, now, 0.0, authored)?
     } else {
@@ -1162,12 +1272,7 @@ pub fn tick(
     // 7. Interpret — the factory forms a question + theory (gated, rate-limited).
     let theorized = maybe_theorize(dir, now, &obs, &detected, allow_llm)?;
 
-    // 8. Answer — analyze open human requests and answer them (grounded, confidence-
-    //    labeled); when a request wants something *run* and the gates are open, author +
-    //    review + run it and report the real result. Refuse + record rule-breaking asks.
-    let (answered, refused) = answer_requests(dir, now, allow_llm, allow_execute, authored)?;
-
-    // 9. Act — turn open threads into candidate work (executed on a later tick),
+    // 8. Act — turn open threads into candidate work (executed on a later tick),
     //    skipping (and marginalizing) directives from flagged corruptors.
     let (pursued, marginalized) = pursue_threads(dir, now)?;
 
@@ -1512,6 +1617,39 @@ mod tests {
     }
 
     #[test]
+    fn budget_pulls_back_hard_when_a_tick_neglects_presence() {
+        let t = Temp::new("regulate_down");
+        // the tick spent 40s heads-down at a budget of 8 — well past the 20s presence window
+        regulate_llm_budget(&t.0, 100, 8, 40.0, true).unwrap();
+        let p = Parameters::load(&t.0).unwrap();
+        assert!(p.llm_calls_per_tick < 8, "it yields attention back to the served");
+        assert_eq!(p.llm_calls_trend, -1, "trend points down");
+        assert_eq!(p.last_set_by, "familiar", "the familiar owns this dial");
+        // and it is recorded as a Law II event, not a silent stall
+        let obs = observation::load(&t.0).unwrap();
+        assert!(obs.iter().any(|o| o.action == "regulated_presence"));
+    }
+
+    #[test]
+    fn budget_leans_in_gently_when_cheap_with_a_backlog() {
+        let t = Temp::new("regulate_up");
+        // 2s heads-down (cheap) and work still waiting -> ease in by one
+        regulate_llm_budget(&t.0, 100, 4, 2.0, true).unwrap();
+        let p = Parameters::load(&t.0).unwrap();
+        assert_eq!(p.llm_calls_per_tick, 5);
+        assert_eq!(p.llm_calls_trend, 1);
+    }
+
+    #[test]
+    fn budget_holds_steady_when_cheap_but_no_backlog() {
+        let t = Temp::new("regulate_steady");
+        regulate_llm_budget(&t.0, 100, 4, 2.0, false).unwrap();
+        let p = Parameters::load(&t.0).unwrap();
+        assert_eq!(p.llm_calls_per_tick, 4);
+        assert_eq!(p.llm_calls_trend, 0);
+    }
+
+    #[test]
     fn refuses_a_corrupting_request_and_flags_the_asker() {
         use familiar_kernel::corruption;
         use familiar_kernel::request::{self, Request};
@@ -1593,6 +1731,7 @@ mod tests {
             interval_floor_secs: 60,
             interval_ceiling_secs: 960,
             last_set_by: "observer".into(),
+            ..Default::default()
         }
         .save(&t.0)
         .unwrap();

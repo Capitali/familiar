@@ -130,13 +130,24 @@ mod tests {
 
     #[test]
     fn best_match_reuses_a_strong_match_and_skips_weak_or_broken_ones() {
-        let cpu = tool("tool-0001", "cpu_load", "reports cpu load average and uptime", "cpu load uptime");
+        let cpu = tool(
+            "tool-0001",
+            "cpu_load",
+            "reports cpu load average and uptime",
+            "cpu load uptime",
+        );
         let mut broken = tool("tool-0002", "disk", "reports disk usage", "disk usage free");
         broken.last_exit_ok = false; // a failing tool is not reused
         let tools = vec![cpu.clone(), broken];
         // strong overlap -> reuse the cpu tool
-        let kw: Vec<String> = ["cpu", "load", "average"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(best_match(&tools, &kw).map(|t| t.id.as_str()), Some("tool-0001"));
+        let kw: Vec<String> = ["cpu", "load", "average"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            best_match(&tools, &kw).map(|t| t.id.as_str()),
+            Some("tool-0001")
+        );
         // a request that only shares one common word -> no reuse (author fresh)
         let kw2: Vec<String> = vec!["cpu".into()];
         assert!(best_match(&tools, &kw2).is_none());

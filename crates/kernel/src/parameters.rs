@@ -31,6 +31,12 @@ const FLOOR_MAX: u64 = 600;
 const CEIL_MIN: u64 = 60;
 const CEIL_MAX: u64 = 3_600; // a slower ceiling risks missing the served's withdrawal (Law II)
 
+/// Bounds for the **self-tuned** per-tick LLM budget (see `llm_calls_per_tick`). Public
+/// because the cycle's regulator clamps to them. Floor 1 so the familiar never stalls its
+/// own learning entirely; ceiling caps how far it may turn inward in one tick.
+pub const LLM_CALLS_MIN: u32 = 1;
+pub const LLM_CALLS_MAX: u32 = 64;
+
 /// One co-ownership correction the familiar made to a human-set parameter, with the Law
 /// it serves. Transient — the cycle turns each into a visible observation.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,8 +59,17 @@ pub struct Parameters {
     pub interval_floor_secs: u64,
     /// The cadence ceiling reached when the world goes quiet (seconds).
     pub interval_ceiling_secs: u64,
-    /// Provenance: who last set these — `"observer"` (Ian, via the Glass) or
-    /// `"familiar"` (a future self-adjustment/revert). Informational for now.
+    /// **Self-tuned by the familiar** (not a human dial): the most LLM consults it will
+    /// spend on background candidate work in a single tick. It eases this up when calls are
+    /// cheap and a backlog waits, and pulls it back hard when a tick spends too long
+    /// heads-down — because staying responsive to the served is Law II, and turning inward
+    /// at the cost of presence is the failure it regulates against.
+    pub llm_calls_per_tick: u32,
+    /// The last self-adjustment direction for `llm_calls_per_tick`: -1 down, 0 steady, +1
+    /// up. Surfaced in the Glass as a trend arrow so the regulation is legible.
+    pub llm_calls_trend: i8,
+    /// Provenance: who last set these — `"observer"` (the human, via the Glass) or
+    /// `"familiar"` (a self-adjustment/revert).
     pub last_set_by: String,
 }
 
@@ -64,6 +79,8 @@ impl Default for Parameters {
             theorize_every_secs: 3600,
             interval_floor_secs: 60,
             interval_ceiling_secs: 960,
+            llm_calls_per_tick: 4,
+            llm_calls_trend: 0,
             last_set_by: "default".to_string(),
         }
     }
@@ -100,6 +117,8 @@ impl Parameters {
         self.interval_ceiling_secs = self
             .interval_ceiling_secs
             .clamp(self.interval_floor_secs, 3_600);
+        self.llm_calls_per_tick = self.llm_calls_per_tick.clamp(LLM_CALLS_MIN, LLM_CALLS_MAX);
+        self.llm_calls_trend = self.llm_calls_trend.clamp(-1, 1);
         self
     }
 
@@ -212,6 +231,7 @@ mod tests {
             interval_floor_secs: 120,
             interval_ceiling_secs: 1200,
             last_set_by: "observer".into(),
+            ..Default::default()
         };
         let (corrected, reverts) = p.review();
         assert!(reverts.is_empty(), "in-envelope choices are Ian's to make");
@@ -225,6 +245,7 @@ mod tests {
             interval_floor_secs: 1,        // would busy-loop
             interval_ceiling_secs: 99_999, // would drowse forever
             last_set_by: "observer".into(),
+            ..Default::default()
         };
         let (corrected, reverts) = p.review();
         assert_eq!(reverts.len(), 3, "all three out-of-bounds get reverted");
@@ -244,6 +265,7 @@ mod tests {
             interval_floor_secs: 0,    // would busy-loop
             interval_ceiling_secs: 10, // below a sane floor
             last_set_by: "observer".into(),
+            ..Default::default()
         }
         .sane();
         assert!(p.theorize_every_secs >= 30);
