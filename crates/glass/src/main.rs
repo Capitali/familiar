@@ -133,7 +133,6 @@ struct Glass {
     ask: String,
     /// Keys typed into the Connect wizard — held only until Connect persists them to
     /// key.env, then cleared. Never stored in the snapshot; shown masked.
-    key_openrouter: String,
     key_gemini: String,
     key_cerebras: String,
     /// Which inner scroll region the human has clicked into. Only that region consumes
@@ -368,14 +367,19 @@ fn install_theme(ctx: &egui::Context) {
     v.widgets.active.fg_stroke.color = egui::Color32::WHITE;
     v.panel_fill = theme::CHASSIS_MID; // the beige chassis (rails)
     v.window_fill = theme::CHASSIS_DARK;
-    // Buttons read as blue chips with light text — legible on beige *and* on navy.
-    v.widgets.inactive.bg_fill = theme::BLUE_MID;
-    v.widgets.inactive.weak_bg_fill = theme::BLUE_MID;
-    v.widgets.hovered.bg_fill = theme::BLUE_LIGHT;
-    v.widgets.active.bg_fill = theme::BLUE_DARK;
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, theme::BLUE_BORDER);
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, theme::BLUE_BORDER);
-    for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active] {
+    // Buttons read as blue chips with white text in *every* state. egui fills a button
+    // with `weak_bg_fill`, so it must be set for inactive/hovered/active/open alike — set
+    // only inactive (as before) and hover falls back to a light default → white-on-white.
+    for (w, fill) in [
+        (&mut v.widgets.inactive, theme::BLUE_MID),
+        (&mut v.widgets.hovered, theme::BLUE_LIGHT),
+        (&mut v.widgets.active, theme::BLUE_DARK),
+        (&mut v.widgets.open, theme::BLUE_MID),
+    ] {
+        w.bg_fill = fill;
+        w.weak_bg_fill = fill;
+        w.bg_stroke = egui::Stroke::new(1.0, theme::BLUE_BORDER);
+        w.fg_stroke.color = egui::Color32::WHITE;
         w.corner_radius = egui::CornerRadius::same(8);
     }
     v.extreme_bg_color = theme::NAVY; // text-edit background (inputs live on navy screens)
@@ -427,7 +431,6 @@ impl Glass {
             name_entry: String::new(),
             pending_name: None,
             ask: String::new(),
-            key_openrouter: String::new(),
             key_gemini: String::new(),
             key_cerebras: String::new(),
             active_scroll: None,
@@ -557,13 +560,12 @@ impl Glass {
     /// in boundary.json. One key is enough; more just add failover. Then tests the link.
     fn connect_llm(&mut self) {
         let keys = [
-            ("OPENROUTER_API_KEY", sanitize_key(&self.key_openrouter)),
             ("GEMINI_API_KEY", sanitize_key(&self.key_gemini)),
             ("CEREBRAS_API_KEY", sanitize_key(&self.key_cerebras)),
         ];
         if keys.iter().all(|(_, v)| v.is_empty()) {
             self.write_connect_status(
-                "enter at least one key — OpenRouter is the simplest place to start",
+                "enter at least one key — Gemini's free tier is the simplest place to start",
             );
             return;
         }
@@ -609,7 +611,6 @@ impl Glass {
             }
         }
         // the keys are persisted now — drop them from memory
-        self.key_openrouter.clear();
         self.key_gemini.clear();
         self.key_cerebras.clear();
         self.write_connect_status("saved — testing the connection…");
@@ -756,21 +757,14 @@ impl Glass {
                     };
                 row(
                     ui,
-                    "OpenRouter (start here)",
-                    "paste your OpenRouter key",
-                    "https://openrouter.ai/keys",
-                    &mut self.key_openrouter,
-                );
-                row(
-                    ui,
-                    "Google Gemini (optional)",
+                    "Google Gemini (start here)",
                     "paste your Gemini key",
                     "https://aistudio.google.com/apikey",
                     &mut self.key_gemini,
                 );
                 row(
                     ui,
-                    "Cerebras (optional)",
+                    "Cerebras (failover)",
                     "paste your Cerebras key",
                     "https://cloud.cerebras.ai",
                     &mut self.key_cerebras,

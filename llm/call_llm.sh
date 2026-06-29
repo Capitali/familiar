@@ -14,14 +14,12 @@
 # Writes: $SCRIPT_DIR/response.json     (consult mode, on success)
 #         $SCRIPT_DIR/health.json       (always — per-provider status the system can surface)
 #
-#   SUBSTRATE_LLM_PROVIDER   provider chain, comma-separated   (default: openrouter,gemini,cerebras)
+#   SUBSTRATE_LLM_PROVIDER   provider chain, comma-separated   (default: gemini,cerebras)
 #
 # Keys (per provider; each falls back to SUBSTRATE_LLM_API_KEY):
-#   OPENROUTER_API_KEY       https://openrouter.ai/keys  (OpenAI-compatible)
 #   GEMINI_API_KEY           https://aistudio.google.com/apikey
 #   CEREBRAS_API_KEY         https://cloud.cerebras.ai
-# Models (optional): OPENROUTER_MODEL (default openai/gpt-4o-mini),
-#                    GEMINI_MODEL (default gemini-2.5-flash), CEREBRAS_MODEL (default gpt-oss-120b)
+# Models (optional): GEMINI_MODEL (default gemini-2.5-flash), CEREBRAS_MODEL (default gpt-oss-120b)
 #
 # Resilience: each provider is tried in turn; a failure is recorded in health.json with a
 # reason and a cooldown (`available_after`). Providers in cooldown are deprioritised, so the
@@ -45,7 +43,7 @@ if [ "$MODE" = "consult" ] && [ ! -f "$SCRIPT_DIR/prompt.txt" ]; then
     exit 1
 fi
 
-PROVIDERS="${SUBSTRATE_LLM_PROVIDER:-openrouter,gemini,cerebras}"
+PROVIDERS="${SUBSTRATE_LLM_PROVIDER:-gemini,cerebras}"
 
 python3 - "$SCRIPT_DIR" "$PROVIDERS" "$MODE" <<'PYEOF'
 import os, sys, json, re, time, socket, urllib.request, urllib.error
@@ -149,25 +147,7 @@ def call_cerebras(max_tokens):
     return body["choices"][0]["message"]["content"]
 
 
-def call_openrouter(max_tokens):
-    key = os.environ.get("OPENROUTER_API_KEY") or shared_key
-    if not key:
-        raise RuntimeError("no OPENROUTER_API_KEY (or SUBSTRATE_LLM_API_KEY)")
-    model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-    payload = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-        "messages": [{"role": "user", "content": prompt_text}],
-    }
-    body = post("https://openrouter.ai/api/v1/chat/completions", payload,
-                {"authorization": f"Bearer {key}",
-                 "http-referer": "https://github.com/Capitali/familiar",
-                 "x-title": "The Familiar"})
-    return body["choices"][0]["message"]["content"]
-
-
-PROVIDERS = {"openrouter": call_openrouter, "gemini": call_gemini, "cerebras": call_cerebras}
+PROVIDERS = {"gemini": call_gemini, "cerebras": call_cerebras}
 
 
 def http_detail(e):
