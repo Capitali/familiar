@@ -7,18 +7,21 @@
 # crucially, the macOS camera grant (TCC) attaches to *this bundle's* identity rather than to
 # whatever terminal launched a build.
 #
-# Signing: pass a Developer ID / Apple Development identity as $SIGN_IDENTITY for a stable,
-# distributable signature; otherwise it falls back to an ad-hoc signature ("-"), which is fine
+# Signing: pass a Developer ID Application identity as $APP_IDENTITY for a stable,
+# notarizable signature; otherwise it falls back to an ad-hoc signature ("-"), which is fine
 # for running locally but gives the bundle a new identity on each rebuild (so the camera grant
-# must be re-approved after a rebuild — see the installer notes).
+# must be re-approved after a rebuild — see packaging/README.md). Either way the bundle is
+# signed with the hardened runtime + camera entitlement, so the same artifact is what gets
+# notarized once a real identity is supplied.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 APP="$ROOT/dist/Familiar.app"
 MACOS="$APP/Contents/MacOS"
+ENTITLEMENTS="$ROOT/packaging/entitlements.plist"
 BINS=(marble glass familiar familiar-eye)
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"  # default: ad-hoc
+APP_IDENTITY="${APP_IDENTITY:-${SIGN_IDENTITY:--}}"  # default: ad-hoc ("-")
 
 echo "==> building release binaries"
 cargo build --release
@@ -41,14 +44,24 @@ for b in "${BINS[@]}"; do
   fi
 done
 
-echo "==> signing (identity: $SIGN_IDENTITY)"
-# --deep so the helper executables beside the main one in Contents/MacOS (glass, familiar,
-# familiar-eye) are each signed and sealed into the bundle. (--deep is fine for ad-hoc/local
-# signing; a notarized distribution build would sign each component explicitly instead.)
-codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
+# Strip extended attributes (quarantine, Finder info) so they don't become AppleDouble "._"
+# files in the pkg payload or trip up signing/notarization.
+xattr -cr "$APP"
+
+echo "==> signing (identity: $APP_IDENTITY)"
+# Hardened runtime + camera entitlement so the bundle is notarizable as-is. --deep seals the
+# helper executables beside the main one in Contents/MacOS (glass, familiar, familiar-eye).
+# A real identity gets a secure timestamp; ad-hoc ("-") cannot timestamp, so we skip it there.
+SIGN_ARGS=(--force --deep --options runtime --entitlements "$ENTITLEMENTS")
+if [[ "$APP_IDENTITY" != "-" ]]; then
+  SIGN_ARGS+=(--timestamp)
+fi
+codesign "${SIGN_ARGS[@]}" --sign "$APP_IDENTITY" "$APP"
 
 echo "==> verifying"
 codesign --verify --deep --strict --verbose=2 "$APP"
 echo
 echo "Built: $APP"
-echo "Run:   open '$APP'    (or: '$MACOS/marble' install  to set up the login item)"
+if [[ "$APP_IDENTITY" == "-" ]]; then
+  echo "Note:  ad-hoc signed — runs locally; set APP_IDENTITY='Developer ID Application: …' to notarize."
+fi

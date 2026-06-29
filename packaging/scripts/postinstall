@@ -1,0 +1,64 @@
+#!/bin/bash
+# postinstall — run by the installer (as root) after Familiar.app lands in /Applications.
+#
+# Sets the familiar up to live here: a per-user data dir, and two LaunchAgents in the
+# console user's ~/Library/LaunchAgents —
+#   io.river.familiar.daemon  (KeepAlive)  the always-on metabolism
+#   io.river.familiar.marble  (RunAtLoad)  the menu-bar presence / way into the Glass
+# Both point at the binaries inside the installed bundle, so the macOS camera grant attaches
+# to Familiar.app. Per-user agents load automatically at each login; we also bootstrap them
+# now so the marble appears without requiring a re-login.
+set -u
+
+APP="/Applications/Familiar.app"
+BIN="$APP/Contents/MacOS"
+
+# The logged-in GUI user (not root). If there's no console session, the agents we write will
+# load at that user's next login anyway.
+USER_NAME="$(stat -f%Su /dev/console 2>/dev/null || true)"
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = "root" ]; then
+  echo "postinstall: no console user; agents will load at next login"
+  exit 0
+fi
+USER_UID="$(id -u "$USER_NAME")"
+USER_HOME="$(eval echo "~$USER_NAME")"
+DATA="$USER_HOME/Library/Application Support/Familiar/data"
+AGENTS="$USER_HOME/Library/LaunchAgents"
+
+mkdir -p "$DATA" "$AGENTS"
+
+write_agent() {  # label  keepalive  arg...
+  local label="$1"; shift
+  local keepalive="$1"; shift
+  local plist="$AGENTS/$label.plist"
+  {
+    echo '<?xml version="1.0" encoding="UTF-8"?>'
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    echo '<plist version="1.0"><dict>'
+    echo "  <key>Label</key><string>$label</string>"
+    echo '  <key>ProgramArguments</key><array>'
+    for a in "$@"; do echo "    <string>$a</string>"; done
+    echo '  </array>'
+    echo '  <key>RunAtLoad</key><true/>'
+    echo "  <key>KeepAlive</key><$keepalive/>"
+    echo "  <key>StandardOutPath</key><string>$DATA/$label.log</string>"
+    echo "  <key>StandardErrorPath</key><string>$DATA/$label.log</string>"
+    echo '</dict></plist>'
+  } > "$plist"
+}
+
+write_agent io.river.familiar.daemon true  "$BIN/familiar" run --daemon --data-dir "$DATA"
+write_agent io.river.familiar.marble false "$BIN/marble" run --data-dir "$DATA"
+
+chown -R "$USER_NAME" "$USER_HOME/Library/Application Support/Familiar" "$AGENTS/io.river.familiar.daemon.plist" "$AGENTS/io.river.familiar.marble.plist"
+
+# (Re)load both into the user's GUI session, best-effort.
+for label in io.river.familiar.daemon io.river.familiar.marble; do
+  plist="$AGENTS/$label.plist"
+  sudo -u "$USER_NAME" launchctl bootout "gui/$USER_UID/$label" 2>/dev/null || true
+  sudo -u "$USER_NAME" launchctl bootstrap "gui/$USER_UID" "$plist" 2>/dev/null \
+    || sudo -u "$USER_NAME" launchctl load -w "$plist" 2>/dev/null || true
+done
+
+echo "postinstall: installed agents for $USER_NAME; data dir $DATA"
+exit 0
