@@ -831,22 +831,31 @@ impl Glass {
     /// stays responsive to you; ↑ green: leaning into a backlog while it has the headroom;
     /// → grey: steady. The familiar owns this dial; you never set it.
     fn budget_meter(&self, ui: &mut egui::Ui) {
+        // Explicit bright tokens — never rely on derived strong/weak colours here, so the
+        // text is always high-contrast on the navy self-pacing screen.
         let p = &self.snapshot.parameters;
         let (arrow, color) = match p.llm_calls_trend {
-            t if t > 0 => ("↑", egui::Color32::from_rgb(120, 190, 130)),
-            t if t < 0 => ("↓", egui::Color32::from_rgb(220, 160, 70)),
-            _ => ("→", egui::Color32::from_rgb(150, 160, 175)),
+            t if t > 0 => ("↑", theme::GREEN),
+            t if t < 0 => ("↓", theme::AMBER),
+            _ => ("→", theme::SCREEN_DIM),
         };
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("🫀 self-pacing — LLM calls/tick:").strong());
+            ui.label(
+                egui::RichText::new("LLM calls/tick:")
+                    .font(theme::mono(10.0))
+                    .color(theme::SCREEN_DIM),
+            );
             ui.label(
                 egui::RichText::new(format!("{} {arrow}", p.llm_calls_per_tick))
-                    .strong()
-                    .size(20.0)
+                    .font(theme::mono_semi(16.0))
                     .color(color),
             );
-            ui.weak("tuned by the familiar to stay present (Law II)");
         });
+        ui.label(
+            egui::RichText::new("tuned by the familiar to stay present (Law II)")
+                .font(theme::mono(9.0))
+                .color(theme::SCREEN_FAINT),
+        );
     }
     /// The "becoming familiar" exchange: the familiar asks the observer's name, reads it
     /// back to be sure it has it right, keeps it, and reassures that it won't forget. Shown
@@ -1676,6 +1685,7 @@ impl eframe::App for Glass {
             .show(ctx, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             theme::on_screen(ui); // the center is a dark screen — text is bright on it
+            ui.set_width(ui.available_width()); // fill the column; no left/right gap
             if let Some(err) = &self.snapshot.error {
                 ui.colored_label(theme::RED, err);
             }
