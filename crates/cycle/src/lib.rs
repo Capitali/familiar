@@ -55,6 +55,14 @@ const QUESTION_FILE: &str = "question.txt";
 const LAST_THEORY_FILE: &str = "last_theory.txt";
 /// The structural fingerprint of the last tick's environment (a single u64).
 const STRUCTURE_FILE: &str = "structure.fp";
+/// Where the eye's latest captured frame and its rate-limit stamp live, under the data dir.
+const EYE_DIR: &str = "eye";
+const EYE_FRAME: &str = "latest.jpg";
+const EYE_STAMP: &str = "last_capture.txt";
+/// Minimum gap between camera frames the always-on daemon grabs, so watching never holds the
+/// camera light on or fills the disk. The boundary's `allow_camera` is the real switch —
+/// close it and watching stops entirely; this only paces it while open.
+const CAPTURE_INTERVAL_SECS: i64 = 60;
 
 /// FNV-1a (64-bit) — the same family the kernel uses for loop ids. Deterministic,
 /// dependency-free; we only need a stable digest, not cryptographic strength.
@@ -456,6 +464,11 @@ fn grounding_facts(dir: &Path, text: &str, now: i64) -> Vec<String> {
     let mut facts: Vec<observation::Observation> = Vec::new();
     facts.extend(sense::census(now));
     facts.extend(sense::interfaces(now));
+    // The cameras present on this host — perception, always permitted. Included here so a
+    // question about the camera is grounded in what the familiar actually sees, not only in
+    // the network interfaces (which is why it once wrongly answered "no camera": the eye was
+    // perceived each tick but never reached the answer's fact set).
+    facts.extend(vision::discover(now));
     let t = text.to_lowercase();
     if [
         "network", "wifi", "dns", "gateway", "internet", "connect", "port",
@@ -1585,6 +1598,10 @@ pub fn authored_execute_allowed(dir: &Path) -> bool {
 /// boundary on disk. This is what the daemon runs — outward reach (and running
 /// generated code) only where a human opened that gate.
 pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
+    // Watching through the camera is the most invasive reach, so it is done only here — the
+    // gated driver — and only when the boundary's allow_camera is open. Best-effort: a
+    // capture failure never aborts the tick.
+    let _ = watch_camera(dir, now);
     tick(
         dir,
         now,
@@ -1593,6 +1610,56 @@ pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
         execute_allowed(dir),
         authored_execute_allowed(dir),
     )
+}
+
+/// Refresh the eye's latest frame at `<dir>/eye/latest.jpg` when the boundary permits it,
+/// rate-limited to one frame per [`CAPTURE_INTERVAL_SECS`]. The frame file is overwritten in
+/// place (the live view); the *observation* that the familiar has working sight is recorded
+/// only once (a constant triple), so an always-on daemon doesn't flood the log. Fail-closed:
+/// records nothing and returns `Ok(false)` when the gate is shut, the interval hasn't
+/// elapsed, or capture fails.
+fn watch_camera(dir: &Path, now: i64) -> io::Result<bool> {
+    if !camera_allowed(dir) {
+        return Ok(false);
+    }
+    let eye = dir.join(EYE_DIR);
+    let stamp = eye.join(EYE_STAMP);
+    let last = fs::read_to_string(&stamp)
+        .ok()
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .unwrap_or(0);
+    if last != 0 && now.saturating_sub(last) < CAPTURE_INTERVAL_SECS {
+        return Ok(false);
+    }
+
+    let frame = eye.join(EYE_FRAME);
+    if !vision::capture_frame(&frame, None) {
+        return Ok(false);
+    }
+    fs::create_dir_all(&eye)?;
+    fs::write(&stamp, now.to_string())?;
+
+    // Record the milestone once: the familiar now has working sight. The constant object means
+    // the structural dedup keeps it to a single fact; the frame file refreshes silently after.
+    let obj = format!("camera-frame:{EYE_DIR}/{EYE_FRAME}");
+    let already = observation::load(dir)?
+        .iter()
+        .any(|o| o.actor == "host" && o.action == "watched" && o.object == obj);
+    if !already {
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "host",
+                "watched",
+                obj,
+                "a still frame the familiar captured through its eye".to_string(),
+                "sensor",
+                now,
+                0.9,
+            ),
+        )?;
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -19,7 +19,9 @@ const PIDFILE: &str = "daemon.pid";
 /// How often the marble re-checks whether the familiar is alive, to keep its icon honest.
 const POLL: Duration = Duration::from_secs(3);
 /// Binaries the marble copies to the stable path so the login item survives `cargo clean`.
-const STABLE_BINS: [&str; 3] = ["marble", "glass", "familiar"];
+/// `familiar-eye` is the Swift camera helper (absent if the Swift toolchain wasn't present at
+/// build time); the copy loop skips any that don't exist, so that's harmless.
+const STABLE_BINS: [&str; 4] = ["marble", "glass", "familiar", "familiar-eye"];
 /// A durable home for the installed binaries, outside the build tree.
 const STABLE_SUBDIR: &str = "Library/Application Support/Familiar/bin";
 
@@ -89,7 +91,7 @@ fn resolve_bin(name: &str) -> PathBuf {
     let mut best: Option<(SystemTime, PathBuf)> = None;
     for path in candidates {
         if let Some(t) = mtime(&path) {
-            if best.as_ref().map_or(true, |(bt, _)| t > *bt) {
+            if best.as_ref().is_none_or(|(bt, _)| t > *bt) {
                 best = Some((t, path));
             }
         }
