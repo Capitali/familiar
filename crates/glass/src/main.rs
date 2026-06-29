@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use egui_plot::{Legend, Line, Plot, PlotPoints};
+use egui_plot::{Line, Plot, PlotPoints};
 use familiar_kernel::activity::{self, ActivityTick};
 use familiar_kernel::boundary::{self, Boundary};
 use familiar_kernel::candidate::{self, Candidate};
@@ -1417,22 +1417,24 @@ impl eframe::App for Glass {
 /// so small changes are legible without manual zoom.
 fn metabolism_box(ui: &mut egui::Ui, ticks: &[ActivityTick], now: i64) {
     const WINDOW_SECS: i64 = 600; // last 10 minutes
+    let c_service = egui::Color32::from_rgb(120, 210, 150);
+    let c_presence = egui::Color32::from_rgb(120, 175, 255);
+    let c_capacities = egui::Color32::from_rgb(230, 185, 100);
     egui::Frame::group(ui.style())
         .fill(egui::Color32::from_rgb(20, 24, 32))
         .show(ui, |ui| {
-            ui.set_width(280.0);
+            ui.set_width(288.0);
             ui.label(
                 egui::RichText::new("🫀 metabolism · last 10 min")
                     .small()
-                    .strong()
-                    .color(egui::Color32::from_rgb(150, 200, 255)),
+                    .color(egui::Color32::from_rgb(150, 165, 190)),
             );
             let recent: Vec<&ActivityTick> =
                 ticks.iter().filter(|t| now - t.ts <= WINDOW_SECS).collect();
             if recent.len() < 2 {
-                ui.add_space(8.0);
+                ui.add_space(10.0);
                 ui.weak("(warming up — the signals appear after a few ticks)");
-                ui.add_space(8.0);
+                ui.add_space(10.0);
                 return;
             }
             // x = minutes ago (negative), so the window reads -10 … 0
@@ -1442,22 +1444,47 @@ fn metabolism_box(ui: &mut egui::Ui, ticks: &[ActivityTick], now: i64) {
                     .map(|t| [(t.ts - now) as f64 / 60.0, sel(t)])
                     .collect()
             };
+            // Clean sparkline: no floating legend, no axis-number clutter — the graph is the
+            // graph. The key (with live values) sits below, outside the plotting space.
             Plot::new("metabolism")
-                .height(100.0)
-                .legend(Legend::default())
-                // fixed 10-minute window on x; y left to auto-fit the data's own min/max
+                .height(116.0)
+                .show_axes([false, false])
+                .show_grid([false, false])
+                .show_x(false)
+                .show_y(false)
                 .include_x(-10.0)
                 .include_x(0.0)
                 .allow_drag(false)
                 .allow_zoom(false)
                 .allow_scroll(false)
                 .allow_boxed_zoom(false)
-                .set_margin_fraction(egui::vec2(0.0, 0.1))
+                .set_margin_fraction(egui::vec2(0.01, 0.14))
                 .show(ui, |p| {
-                    p.line(Line::new(series(|t| t.service)).name("service"));
-                    p.line(Line::new(series(|t| t.presence)).name("presence"));
-                    p.line(Line::new(series(|t| t.capacities)).name("capacities"));
+                    p.line(Line::new(series(|t| t.service)).color(c_service).width(1.8));
+                    p.line(
+                        Line::new(series(|t| t.presence))
+                            .color(c_presence)
+                            .width(1.8),
+                    );
+                    p.line(
+                        Line::new(series(|t| t.capacities))
+                            .color(c_capacities)
+                            .width(1.8),
+                    );
                 });
+            // the key, outside the graph — a colour swatch and the current value
+            let last = recent[recent.len() - 1];
+            let key = |ui: &mut egui::Ui, color: egui::Color32, name: &str, v: f64| {
+                ui.colored_label(color, "▬");
+                ui.label(egui::RichText::new(format!("{name} {v:.2}")).small());
+                ui.add_space(6.0);
+            };
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 3.0;
+                key(ui, c_service, "service", last.service);
+                key(ui, c_presence, "presence", last.presence);
+                key(ui, c_capacities, "capacities", last.capacities);
+            });
         });
 }
 
