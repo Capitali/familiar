@@ -10,6 +10,8 @@
 //! It lives in its own crate so the kernel stays minimal-dependency and
 //! `#![forbid(unsafe_code)]`; the GUI's heavier dependencies are isolated here.
 
+mod theme;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -319,6 +321,10 @@ fn write_ui_scale(dir: &Path, scale: f32) {
 /// intact (no `override_text_color`); only the base and the dim "weak" greys are lifted.
 fn install_theme(ctx: &egui::Context) {
     use egui::{FontFamily, FontId, TextStyle};
+    // Phase 1 of the cockpit redesign: load Spectral (the serif voice) + IBM Plex Mono (the
+    // machinery, now the default face). The beige chassis palette and three-column layout
+    // arrive in phase 2; for now the dark high-contrast theme stays, but in the new fonts.
+    theme::install_fonts(ctx);
     let mut style = (*ctx.style()).clone();
     style.text_styles = [
         (
