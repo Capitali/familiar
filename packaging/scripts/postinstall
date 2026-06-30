@@ -27,6 +27,18 @@ AGENTS="$USER_HOME/Library/LaunchAgents"
 
 mkdir -p "$DATA" "$AGENTS"
 
+# Self-heal a machine upgrading from a dev-era install. Before packaging existed the daemon
+# ran under an older label from a hand-copied binary at …/Familiar/bin/familiar; those agents
+# were never named io.river.familiar.{daemon,marble}, so the lines below don't replace them and
+# they keep loading at every login — a second daemon racing this one on the same data dir.
+# Boot out and delete any such legacy agent (and the orphaned bin/) so only the packaged pair
+# remains. No-ops on a clean install.
+for legacy in io.river.familiar io.river.substrate; do
+  sudo -u "$USER_NAME" launchctl bootout "gui/$USER_UID/$legacy" 2>/dev/null || true
+  rm -f "$AGENTS/$legacy.plist"
+done
+rm -rf "$USER_HOME/Library/Application Support/Familiar/bin"
+
 write_agent() {  # label  keepalive  arg...
   local label="$1"; shift
   local keepalive="$1"; shift
