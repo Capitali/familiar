@@ -139,6 +139,12 @@ def call_cerebras(max_tokens):
     payload = {
         "model": model,
         "max_tokens": max_tokens,
+        # gpt-oss is a reasoning model: its reasoning tokens count against max_tokens.
+        # Left unbounded it spends the whole budget thinking and the JSON content is
+        # truncated mid-string ("Unterminated string ..." on json.loads). The factory
+        # only needs a concrete JSON answer, not deep reasoning, so cap the effort low —
+        # this drops reasoning from ~500 tokens to ~60 and leaves the budget for content.
+        "reasoning_effort": os.environ.get("CEREBRAS_REASONING_EFFORT", "low"),
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": prompt_text}],
     }
