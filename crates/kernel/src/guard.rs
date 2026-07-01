@@ -51,6 +51,11 @@ pub enum ActionKind {
     /// Watch through a camera (capture frames). The most invasive reach; discovering
     /// *which* cameras exist is perception and not weighed here — only *watching* is.
     Camera,
+    /// Federate with peer nodes over the mesh (announce presence, exchange briefs, pull
+    /// tools/patterns). Outward transmission at node scale; *discovering* that peers exist
+    /// on the tailnet is perception and not weighed here — only *exchanging* is. An
+    /// identity-bearing share carries `affects_person = true`, routing it through consent.
+    Mesh,
 }
 
 /// The guard's outcome.
@@ -211,6 +216,7 @@ pub fn evaluate(action: &Action, boundary: &Boundary) -> Verdict {
         InstallTool => bool_scope(boundary.allow_tool_install),
         ExecuteArtifact => bool_scope(boundary.allow_execute),
         Camera => bool_scope(boundary.allow_camera),
+        Mesh => bool_scope(boundary.allow_mesh),
     };
 
     if matches!(scope, Scope::Out) {
@@ -308,6 +314,7 @@ mod tests {
             allow_execute: false,
             allow_authored_execute: false,
             allow_camera: false,
+            allow_mesh: false,
             sandbox_execution: true,
             fs_read: vec!["/Users/ian/".into()],
             fs_write: vec!["/Users/ian/Development/familiar/familiar_data/".into()],
@@ -323,6 +330,7 @@ mod tests {
             ActionKind::InstallTool,
             ActionKind::ExecuteArtifact,
             ActionKind::Camera,
+            ActionKind::Mesh,
             ActionKind::ReadFile,
             ActionKind::WriteFile,
         ] {
@@ -409,6 +417,28 @@ mod tests {
             evaluate(&Action::new(ActionKind::Camera, "FaceTime HD Camera"), &b).decision,
             Decision::Allow
         );
+    }
+
+    #[test]
+    fn mesh_is_refused_until_opened_then_consent_gates_identity_shares() {
+        // A reachable tailnet is not permission to federate — fail-closed.
+        let v = evaluate(&Action::new(ActionKind::Mesh, "group:river"), &open_llm());
+        assert_eq!(v.decision, Decision::Refuse);
+        assert_eq!(v.reason, Reason::ViolatesConstitutionalBoundary);
+
+        // Human opens the group: a plain tool/pattern brief is allowed.
+        let mut b = open_llm();
+        b.allow_mesh = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::Mesh, "brief"), &b).decision,
+            Decision::Allow
+        );
+
+        // But an identity-bearing share (affects_person) still seeks consent, even with
+        // the mesh open — matching the per-human opt-in model.
+        let mut pii = Action::new(ActionKind::Mesh, "identity:betty");
+        pii.affects_person = true;
+        assert_eq!(evaluate(&pii, &b).decision, Decision::SeekConsent);
     }
 
     #[test]

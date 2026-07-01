@@ -42,6 +42,14 @@ pub struct Boundary {
     /// perception); *watching* is gated here, fail-closed, and is only ever opened by an
     /// explicit human grant. Availability is not authorization — made literal for the eye.
     pub allow_camera: bool,
+    /// May the familiar **federate with peer nodes over a mesh** (Tailscale)? Outward
+    /// transmission — the exfiltration surface Law III guards, at node-to-node scale.
+    /// *Discovering* that peers exist on the tailnet is perception; *exchanging briefs*
+    /// (tools, patterns, and — only when separately opted-in — human data) is gated here,
+    /// fail-closed, opened only by an explicit human grant. Enrolling a group credential
+    /// and opening this flag is the human authorizing the group; the familiar never
+    /// self-widens it. See `docs/mesh.md`.
+    pub allow_mesh: bool,
     /// Run executed artifacts under the resource sandbox (`ulimit`/wall-timeout)?
     /// Default **true** (safe). When the human sets it false, artifacts run without
     /// resource confinement — bound then by the constitution (the pre-execution review
@@ -76,6 +84,7 @@ impl Boundary {
             allow_execute: false,
             allow_authored_execute: false,
             allow_camera: false,
+            allow_mesh: false,
             sandbox_execution: true,
             fs_read: Vec::new(),
             fs_write: Vec::new(),
@@ -90,6 +99,7 @@ impl Boundary {
             && !self.allow_execute
             && !self.allow_authored_execute
             && !self.allow_camera
+            && !self.allow_mesh
             && self.fs_read.is_empty()
             && self.fs_write.is_empty()
     }
@@ -169,6 +179,23 @@ mod tests {
             b.sandbox_execution,
             "the safe default is sandboxed; turning it off must be an explicit human choice"
         );
+    }
+
+    #[test]
+    fn mesh_defaults_closed_and_counts_as_outward_capability() {
+        // Fail-closed by default, and old policy files that predate the flag stay closed.
+        assert!(!Boundary::closed().allow_mesh);
+        let t = Temp::new("mesh_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        assert!(!load(&t.0).unwrap().allow_mesh, "unspecified mesh stays off");
+        // Opening only the mesh flag is enough to make the boundary no longer closed.
+        let mut b = Boundary::closed();
+        b.allow_mesh = true;
+        assert!(!b.is_closed());
     }
 
     #[test]
