@@ -29,10 +29,19 @@
 #![forbid(unsafe_code)]
 
 pub mod brief;
+pub mod config;
 pub mod group;
 pub mod node;
+pub mod transport;
 
+use sha2::{Digest, Sha256};
 use std::fmt;
+
+/// Content address of a byte slice: lower-case hex SHA-256. The dedup + integrity key for
+/// shared tool bodies — a body is only installed if its hash matches the manifest's.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex_encode(&Sha256::digest(bytes))
+}
 
 /// The mesh error type. Kept deliberately coarse — callers log the rationale and record it
 /// as an observation; there is no fine-grained recovery beyond "reject this brief".

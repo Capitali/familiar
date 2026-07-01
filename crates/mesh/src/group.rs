@@ -321,7 +321,8 @@ mod tests {
         assert!(verify_membership(m, &gk, &cred.group_id, m.expiry, &[]).is_err());
         // Revoked.
         assert!(
-            verify_membership(m, &gk, &cred.group_id, NOW + 1, &[m.node_id.clone()]).is_err()
+            verify_membership(m, &gk, &cred.group_id, NOW + 1, std::slice::from_ref(&m.node_id))
+                .is_err()
         );
         // Wrong group id.
         assert!(verify_membership(m, &gk, "deadbeef", NOW + 1, &[]).is_err());

@@ -15,3 +15,9 @@ serde_json.workspace = true
 ed25519-dalek = "2"
 sha2 = "0.10"
 getrandom = "0.2"
+# Phase-3 transport: native async HTTP over the tailnet. Heavy, but isolated to this crate
+# and never inherited by kernel/cycle/cli (they call sync entry points only).
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util"] }
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
