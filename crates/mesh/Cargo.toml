@@ -1,0 +1,17 @@
+[package]
+name = "familiar-mesh"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Peer federation over the tailnet — cryptographically group-verified nodes exchange tools, patterns, and (opt-in) humans. The one place dependency-minimalism is relaxed (see lib.rs)."
+
+[dependencies]
+familiar-kernel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# The crypto floor: ed25519 node/group keys, SHA-256 fingerprints, OS randomness.
+# These — plus the Phase-3 transport deps — are the deliberate, documented concession
+# to the workspace's otherwise serde-only dependency discipline (see lib.rs doc-comment).
+ed25519-dalek = "2"
+sha2 = "0.10"
+getrandom = "0.2"

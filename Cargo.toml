@@ -5,7 +5,7 @@
 # artifacts / data / the LLM seam), so the compiled core changes rarely.
 [workspace]
 resolver = "2"
-members = ["crates/kernel", "crates/cli", "crates/glass", "crates/marble", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision"]
+members = ["crates/kernel", "crates/cli", "crates/glass", "crates/marble", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh"]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,3 +23,4 @@ familiar-vision = { path = "crates/vision" }
 familiar-cycle = { path = "crates/cycle" }
 familiar-llm = { path = "crates/llm" }
 familiar-exec = { path = "crates/exec" }
+familiar-mesh = { path = "crates/mesh" }
