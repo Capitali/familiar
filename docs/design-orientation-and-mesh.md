@@ -56,16 +56,26 @@ A first-run orientation pass that synthesizes the scan into a usage picture and 
 observers (e.g. from accounts, ownership, activity). Strictly within `fs_read`; sensitive
 sources stay off unless granted. Feeds richer first questions.
 
-### C — multi-nodal mesh (future, its own brick)
-- **Node identity**: each node has a stable id + presence record.
-- **Transport**: Tailscale tailnet (the river.io fabric already uses it).
-- **`allow_mesh` gate**: fail-closed; local-only until a human opens it; peers are explicitly
-  trusted, not discovered-and-trusted.
-- **Brief protocol**: on greet, exchange — presence, observers (scoped/consented),
-  serving queue + priority, and a manifest of shareable tools/assets. Tools are the safe
-  first thing to share (a node can offer a capability it authored to a peer that lacks it).
-- **Sharing policy**: tools shareable by default once `allow_mesh` is open; observer/personal
-  data shared only under explicit scoping — never a blanket gossip of who-knows-whom.
+### C — multi-nodal mesh (**implemented** — `crates/mesh`; full protocol in [mesh.md](mesh.md))
+Built as `familiar-mesh`. The trust model **evolved** from this stub's original
+"peers explicitly trusted, not discovered-and-trusted" to **gossip discovery + auto-merge of
+cryptographically group-verified peers** — the human authorizes the *group*, and within it any
+peer with a valid membership certificate is auto-trusted. The human still owns the gate; the
+familiar never self-widens.
+- **Node identity**: each node has a stable ed25519 keypair; `node_id` is a self-certifying
+  fingerprint of its pubkey.
+- **Group trust root**: a group ed25519 keypair. The join key *is* the group secret; holding it
+  is membership (the power to mint a membership certificate binding a node to the group).
+- **Transport**: native async HTTP over the Tailscale tailnet (the river.io fabric already uses
+  it); gossip discovery via `tailscale status --json`, no central server.
+- **`allow_mesh` gate**: fail-closed; local-only until a human opens it and enrolls a group.
+- **Brief protocol**: exchange presence (counts, never names), a shareable-tool manifest
+  (bodies fetched on demand), distilled patterns, and — only under per-human opt-in — scoped
+  identity. Tools are the safe first thing to share.
+- **Sharing policy**: tools + patterns shareable by default once `allow_mesh` is open and a
+  group is enrolled; personal/identity data only under explicit per-human, per-group opt-in —
+  never a blanket gossip of who-knows-whom. Peer tools still pass `review_script` + sandbox +
+  `allow_execute` on use; peer observations are tagged `source="mesh"`, never laundered.
 
 ## Identity linking across modalities (future)
 
