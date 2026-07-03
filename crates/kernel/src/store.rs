@@ -18,6 +18,21 @@ pub fn data_dir(override_dir: Option<&str>) -> PathBuf {
     PathBuf::from(override_dir.unwrap_or(DEFAULT_DATA_DIR))
 }
 
+/// The per-user data directory of the installed app:
+/// `~/Library/Application Support/Familiar/data`.
+///
+/// This is the fallback the **GUI apps** (the Glass, the marble) use when launched without
+/// an explicit `--data-dir`. Finder- and launchd-launched apps run with the working
+/// directory set to `/`, where the relative [`DEFAULT_DATA_DIR`] would resolve under the
+/// read-only system volume and every write would fail with `EROFS`. This absolute path is
+/// the same one the launchd agents pass explicitly, so all launch paths agree. Falls back to
+/// the relative default only if `HOME` is unset (never, for a real GUI session).
+pub fn user_data_dir() -> PathBuf {
+    std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join("Library/Application Support/Familiar/data"))
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_DATA_DIR))
+}
+
 /// Append one record as a single JSONL line to `<dir>/<file>`, creating the
 /// directory and file as needed.
 pub fn append<T: Serialize>(dir: &Path, file: &str, record: &T) -> io::Result<()> {

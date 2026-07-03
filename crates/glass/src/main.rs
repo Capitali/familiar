@@ -2531,7 +2531,10 @@ fn data_dir_from_args() -> PathBuf {
             return PathBuf::from(&w[1]);
         }
     }
-    PathBuf::from(familiar_kernel::store::DEFAULT_DATA_DIR)
+    // No explicit dir: fall back to the absolute per-user path, NOT the relative default.
+    // A Finder/launchd-launched Glass runs with cwd `/`, where a relative "familiar_data"
+    // resolves under the read-only system volume and every write fails with EROFS.
+    familiar_kernel::store::user_data_dir()
 }
 
 fn main() -> eframe::Result<()> {

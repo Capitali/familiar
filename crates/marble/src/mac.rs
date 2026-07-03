@@ -59,7 +59,15 @@ fn data_dir(args: &[String]) -> String {
     args.windows(2)
         .find(|w| w[0] == "--data-dir")
         .map(|w| w[1].clone())
-        .unwrap_or_else(|| DEFAULT_DATA_DIR.to_string())
+        // No explicit dir (e.g. the app double-clicked from Finder): use the absolute
+        // per-user path, not the relative default. A launchd/Finder-launched marble runs
+        // with cwd `/`, where "familiar_data" resolves under the read-only system volume —
+        // the Glass it opens would then fail every write with EROFS.
+        .unwrap_or_else(|| {
+            std::env::var("HOME")
+                .map(|h| format!("{h}/Library/Application Support/Familiar/data"))
+                .unwrap_or_else(|_| DEFAULT_DATA_DIR.to_string())
+        })
 }
 
 /// A binary that lives next to this one (the workspace builds `marble`, `glass`, and
