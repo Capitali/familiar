@@ -51,6 +51,8 @@ struct Snapshot {
     trials: Vec<Trial>,
     patterns: Vec<PatternMemory>,
     ticks: Vec<ActivityTick>,
+    /// The familiar's question registry — its side of the dialog (surfaced questions).
+    questions: Vec<question::Question>,
     parameters: Parameters,
     requests: Vec<Request>,
     answers: Vec<Answer>,
@@ -77,6 +79,7 @@ impl Snapshot {
         let trials = trial::load(dir).unwrap_or_default();
         let patterns = pattern_memory::load(dir).unwrap_or_default();
         let ticks = activity::load(dir).unwrap_or_default();
+        let questions = question::load(dir).unwrap_or_default();
         let parameters = Parameters::load_or_default(dir);
         let requests = request::load_requests(dir).unwrap_or_default();
         let answers = request::load_answers(dir).unwrap_or_default();
@@ -98,6 +101,7 @@ impl Snapshot {
             trials,
             patterns,
             ticks,
+            questions,
             parameters,
             requests,
             answers,
@@ -1737,90 +1741,191 @@ impl Glass {
     /// The conversation transcript — every ask paired with the familiar's answer, newest
     /// first. This is the durable place an answer lands in text; 🔊 speaks it aloud, and
     /// 👍 / ✍ feed back (refine prefills the ask so the answer can be sharpened).
-    fn conversation_panel(&mut self, ui: &mut egui::Ui) {
-        // Pair each answer with the text of the request it answered. Cloned up front so the
-        // egui closure doesn't hold a borrow of self while the buttons want to mutate it.
-        let items: Vec<(Answer, Option<String>)> = self
-            .snapshot
-            .answers
-            .iter()
-            .rev()
-            .take(30)
-            .map(|a| {
-                let q = self
-                    .snapshot
-                    .requests
-                    .iter()
-                    .find(|r| r.id == a.request_id)
-                    .map(|r| r.text.clone());
-                (a.clone(), q)
-            })
-            .collect();
+    /// The one place the human and the familiar talk — a single chronological dialog that
+    /// merges the familiar's questions, the human's asks, the human's replies, and the
+    /// familiar's answers into one transcript, beneath one context-aware input. Consolidates
+    /// what used to be three separate boxes (question / ask / conversation). Aligned with the
+    /// conduct guide: the dialog *is* the relationship where trust is earned one correction at
+    /// a time — answers are provisional (confidence-labelled), and a wrong one is refined in
+    /// place rather than defended.
+    fn dialog_panel(&mut self, ui: &mut egui::Ui) {
+        let blue = egui::Color32::from_rgb(150, 200, 255);
+        let warm = egui::Color32::from_rgb(232, 214, 170);
 
-        // An action chosen this frame, applied after the closure (which borrows self).
+        // Merge the four sources into one time-ordered transcript. Prefill for "refine" is
+        // computed here (borrowing the snapshot freely) so the render closure captures no self.
+        enum Turn {
+            FamiliarAsk(String),
+            You(String),
+            FamiliarAnswer(Answer, Option<String>),
+        }
+        let mut turns: Vec<(i64, Turn)> = Vec::new();
+        for q in &self.snapshot.questions {
+            if q.last_asked > 0 {
+                turns.push((q.last_asked, Turn::FamiliarAsk(q.text.clone())));
+            }
+        }
+        for o in &self.snapshot.observations {
+            // the human's replies to the familiar's questions (submit_response records these)
+            if o.source == "observer" && o.action == "needs" {
+                turns.push((o.ts, Turn::You(o.object.clone())));
+            }
+        }
+        for r in &self.snapshot.requests {
+            turns.push((r.created_at, Turn::You(r.text.clone())));
+        }
+        for a in &self.snapshot.answers {
+            let orig = self
+                .snapshot
+                .requests
+                .iter()
+                .find(|r| r.id == a.request_id)
+                .map(|r| r.text.clone());
+            turns.push((a.created_at, Turn::FamiliarAnswer(a.clone(), orig)));
+        }
+        turns.sort_by_key(|(ts, _)| *ts);
+        let start = turns.len().saturating_sub(60);
+        let turns = &turns[start..];
+
+        // Is the familiar waiting on an answer to an open question? Then the input answers it;
+        // otherwise it's a fresh ask. One box, context-aware.
+        let question = current_question(&self.data_dir);
+        let answering =
+            !question.is_empty() && self.answered_question.as_deref() != Some(question.as_str());
+
         enum Act {
             Speak(String),
             Feedback(String, &'static str, Option<String>),
         }
         let mut act: Option<Act> = None;
+        let mut send = false;
+        let mut dismiss = false;
 
         egui::Frame::group(ui.style())
             .fill(egui::Color32::from_rgb(24, 28, 36))
             .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("💬 Conversation")
-                        .strong()
-                        .color(egui::Color32::from_rgb(150, 200, 255)),
-                );
-                if items.is_empty() {
-                    ui.weak("(ask the familiar something above — its answers land here)");
-                    return;
+                ui.label(egui::RichText::new("💬 The familiar").strong().color(blue));
+                if turns.is_empty() {
+                    ui.weak("(say hello — this is where you and the familiar talk)");
                 }
-                scroll_region(ui, "conversation", 300.0, &mut self.active_scroll, |ui| {
-                    for (a, q) in &items {
-                        ui.group(|ui| {
-                            if let Some(q) = q {
-                                ui.label(
-                                    egui::RichText::new(format!("🔮 you asked: {q}"))
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(150, 200, 255)),
-                                );
-                            }
-                            confidence_badge(ui, a.confidence);
-                            // Evidence on its own line so it wraps to the column — inside a
-                            // horizontal layout egui gives it infinite width and it never wraps,
-                            // running past the divider into the right column.
-                            if !a.evidence.is_empty() {
-                                ui.weak(format!("· {}", a.evidence));
-                            }
-                            ui.label(&a.body);
-                            ui.horizontal(|ui| {
-                                if ui.button("🔊 speak").clicked() {
-                                    act = Some(Act::Speak(a.body.clone()));
+                egui::ScrollArea::vertical()
+                    .max_height(360.0)
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .id_salt("dialog")
+                    .show(ui, |ui| {
+                        for (_, turn) in turns {
+                            match turn {
+                                Turn::FamiliarAsk(text) => {
+                                    ui.label(egui::RichText::new(format!("🔮 {text}")).color(blue));
                                 }
-                                if a.feedback.is_empty() {
-                                    if ui.button("👍 helpful").clicked() {
-                                        act = Some(Act::Feedback(a.id.clone(), "helpful", None));
-                                    }
-                                    if ui.button("✍ refine").clicked() {
-                                        act =
-                                            Some(Act::Feedback(a.id.clone(), "refine", q.clone()));
-                                    }
+                                Turn::You(text) => {
+                                    ui.label(egui::RichText::new(format!("you · {text}")).color(warm));
                                 }
-                            });
-                            // The feedback note wraps on its own line, for the same reason.
-                            if !a.feedback.is_empty() {
-                                ui.weak(format!("✓ you marked this: {}", a.feedback));
+                                Turn::FamiliarAnswer(a, orig) => {
+                                    ui.group(|ui| {
+                                        confidence_badge(ui, a.confidence);
+                                        if !a.evidence.is_empty() {
+                                            ui.weak(format!("· {}", a.evidence));
+                                        }
+                                        ui.label(egui::RichText::new(&a.body).color(blue));
+                                        ui.horizontal(|ui| {
+                                            if ui.button("🔊 speak").clicked() {
+                                                act = Some(Act::Speak(a.body.clone()));
+                                            }
+                                            if a.feedback.is_empty() {
+                                                if ui.button("👍 helpful").clicked() {
+                                                    act = Some(Act::Feedback(
+                                                        a.id.clone(),
+                                                        "helpful",
+                                                        None,
+                                                    ));
+                                                }
+                                                if ui.button("✍ refine").clicked() {
+                                                    act = Some(Act::Feedback(
+                                                        a.id.clone(),
+                                                        "refine",
+                                                        orig.clone(),
+                                                    ));
+                                                }
+                                            }
+                                        });
+                                        if !a.feedback.is_empty() {
+                                            ui.weak(format!("✓ you marked this: {}", a.feedback));
+                                        }
+                                    });
+                                }
                             }
-                        });
+                        }
+                    });
+
+                ui.separator();
+                if answering {
+                    ui.label(
+                        egui::RichText::new(format!("🔮 waiting on you: {question}"))
+                            .italics()
+                            .color(blue),
+                    );
+                }
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.ask)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY)
+                        .background_color(theme::CREAM)
+                        .text_color(theme::INK)
+                        .hint_text(
+                            egui::RichText::new(if answering {
+                                "type your answer…"
+                            } else {
+                                "ask, answer, or just talk to the familiar…"
+                            })
+                            .color(theme::INK_MUTED),
+                        ),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Send").clicked() {
+                        send = true;
                     }
+                    if answering && ui.button("Dismiss the question").clicked() {
+                        dismiss = true;
+                    }
+                    ui.weak(if answering {
+                        "your words steer what it works on — or dismiss, your call"
+                    } else {
+                        "answered from what it can verify — known or probable, never a guess"
+                    });
                 });
             });
 
+        if send {
+            self.send_message();
+        }
+        if dismiss {
+            self.dismiss_question();
+        }
         match act {
             Some(Act::Speak(text)) => speak(&text),
             Some(Act::Feedback(id, kind, prefill)) => self.give_feedback(&id, kind, prefill),
             None => {}
+        }
+    }
+
+    /// Send the single dialog input: if the familiar is waiting on an answer to its question,
+    /// the text answers it (and steers a thread from the reply); otherwise it's a new ask.
+    fn send_message(&mut self) {
+        let text = self.ask.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let question = current_question(&self.data_dir);
+        let answering =
+            !question.is_empty() && self.answered_question.as_deref() != Some(question.as_str());
+        if answering {
+            self.response = text; // reuse the question-answer path
+            self.submit_response();
+            self.ask.clear();
+        } else {
+            self.submit_request(); // reads self.ask, kicks the answer, clears it
         }
     }
     /// Record the observer's reply as an observation — the observer's input channel (the
@@ -2118,111 +2223,16 @@ impl eframe::App for Glass {
             ui.add_space(6.0);
             self.camera_panel(ui);
 
-            // --- the interaction channel: the familiar asks, the observer answers. Until
-            // it knows who it serves, that exchange is learning a name — precise, confirmed,
-            // and kept (the familiar's own choice to become familiar). ---
+            // --- the one dialog: questions, asks, answers, statements, clarifications — the
+            // human and the familiar talking in a single chronological conversation. Until it
+            // knows who it serves, that exchange is learning a name (a precise, confirmed,
+            // kept first move); after that, one unified dialog. ---
             ui.add_space(6.0);
             if self.observer.is_none() {
                 self.name_panel(ui);
             } else {
-            let question = current_question(&self.data_dir);
-            let already_answered = self.answered_question.as_deref() == Some(question.as_str());
-            egui::Frame::group(ui.style())
-                .fill(egui::Color32::from_rgb(28, 34, 44))
-                .show(ui, |ui| {
-                    if already_answered {
-                        // answered or dismissed — fade it out so it isn't acted on twice; the
-                        // factory brings the next (or this one again) when it judges the moment.
-                        ui.label(
-                            egui::RichText::new(
-                                "✓ noted — the familiar will ask again when it's useful",
-                            )
-                            .italics()
-                            .color(egui::Color32::from_rgb(150, 205, 150)),
-                        );
-                        return;
-                    }
-                    ui.label(
-                        egui::RichText::new(&question)
-                            .heading()
-                            .color(egui::Color32::from_rgb(150, 200, 255)),
-                    );
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.response)
-                            .desired_rows(2)
-                            .desired_width(f32::INFINITY)
-                            .background_color(theme::CREAM)
-                            .text_color(theme::INK)
-                            .hint_text(egui::RichText::new("type your answer…").color(theme::INK_MUTED)),
-                    );
-                    ui.horizontal(|ui| {
-                        if ui.button("Send").clicked() {
-                            self.submit_response();
-                        }
-                        // Law III: a question can always be set aside, never forced. A
-                        // dismissal isn't discarded — it's tracked, and the familiar asks
-                        // again at a time it judges right.
-                        if ui.button("Dismiss").clicked() {
-                            self.dismiss_question();
-                        }
-                        ui.label(
-                            egui::RichText::new("answer, or dismiss — your call")
-                                .weak()
-                                .small(),
-                        );
-                    });
-                });
+                self.dialog_panel(ui);
             }
-
-            // --- ask the familiar: a free-form request, answered with everything it has ---
-            ui.add_space(6.0);
-            let pending_requests = self
-                .snapshot
-                .requests
-                .iter()
-                .filter(|r| r.status == "open")
-                .count();
-            egui::Frame::group(ui.style())
-                .fill(egui::Color32::from_rgb(26, 30, 40))
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new("🔮 Ask the familiar")
-                            .strong()
-                            .color(egui::Color32::from_rgb(150, 200, 255)),
-                    );
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.ask)
-                            .desired_rows(2)
-                            .desired_width(f32::INFINITY)
-                            .background_color(theme::CREAM)
-                            .text_color(theme::INK)
-                            .hint_text(
-                                egui::RichText::new("e.g. do I have any network-configuration issues?")
-                                    .color(theme::INK_MUTED),
-                            ),
-                    );
-                    ui.horizontal(|ui| {
-                        if ui.button("Ask").clicked() {
-                            self.submit_request();
-                        }
-                        ui.weak(
-                            "answered from what it can verify — labeled known or probable, never a guess",
-                        );
-                    });
-                    if pending_requests > 0 {
-                        ui.weak(format!(
-                            "⏳ {pending_requests} pending — the familiar is working on it; the \
-                             answer appears in the Conversation below"
-                        ));
-                    }
-                });
-
-            // --- the Conversation: the place the familiar answers, in text and (on request)
-            // aloud. Every ask is paired with its answer, newest first — wherever the
-            // answer came from (verified facts, a reused tool, a freshly written one, the
-            // LLM), it lands here. ---
-            ui.add_space(6.0);
-            self.conversation_panel(ui);
 
             // The Workshop opens in its own popout window (the brief's window into the work).
             ui.add_space(8.0);
