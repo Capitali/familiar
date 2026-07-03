@@ -45,6 +45,18 @@ pub struct ActivityTick {
     /// them plainly harmful (Brick 22).
     #[serde(default)]
     pub declined: usize,
+    /// Distinct mesh peers whose verified briefs were merged this tick (federation).
+    #[serde(default)]
+    pub mesh_peers: usize,
+    /// Tools auto-merged from peers into the library this tick (still gated on *use*).
+    #[serde(default)]
+    pub mesh_tools_merged: usize,
+    /// Patterns merged from peers this tick.
+    #[serde(default)]
+    pub mesh_patterns_merged: usize,
+    /// Inbound briefs rejected this tick (failed cert/signature re-verification).
+    #[serde(default)]
+    pub mesh_rejected: usize,
     pub service: f64,
     pub presence: f64,
     pub capacities: f64,
@@ -114,6 +126,10 @@ mod tests {
             answered: 0,
             refused: 0,
             declined: 0,
+            mesh_peers: 0,
+            mesh_tools_merged: 0,
+            mesh_patterns_merged: 0,
+            mesh_rejected: 0,
             service: 0.4,
             presence: 0.8,
             capacities: 0.75,

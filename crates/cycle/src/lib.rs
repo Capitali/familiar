@@ -146,6 +146,14 @@ pub struct TickReport {
     /// tick (a structural fact appeared/disappeared, or connectivity flipped). The
     /// metabolism's cadence rides this: a changing world is worth watching closely.
     pub structural_changed: bool,
+    /// Distinct mesh peers whose verified briefs were merged this tick (federation).
+    pub mesh_peers: usize,
+    /// Tools auto-merged from peers into the library this tick.
+    pub mesh_tools_merged: usize,
+    /// Patterns merged from peers this tick.
+    pub mesh_patterns_merged: usize,
+    /// Inbound briefs rejected this tick (failed cert/signature re-verification).
+    pub mesh_rejected: usize,
 }
 
 impl TickReport {
@@ -165,6 +173,9 @@ impl TickReport {
             && self.answered == 0
             && self.refused == 0
             && self.declined == 0
+            && self.mesh_tools_merged == 0
+            && self.mesh_patterns_merged == 0
+            && self.mesh_rejected == 0
             && !self.theorized
     }
 }
@@ -727,6 +738,8 @@ fn persist_tool(dir: &Path, d: &DraftedTool, keywords: &[String], now: i64) -> i
         uses: 0,
         last_used: 0,
         last_exit_ok: true,
+        origin: String::new(),
+        origin_verified_at: 0,
     };
     tool::append(dir, &t)?;
     Ok(t)
@@ -1500,6 +1513,14 @@ pub fn tick(
     //    skipping (and marginalizing) directives from flagged corruptors.
     let (pursued, marginalized) = pursue_threads(dir, now)?;
 
+    // 8b. Federate — the constitutional half of the mesh. Gated by allow_mesh (fail-closed,
+    //     a no-op when the human hasn't opened it). Publishes our brief and merges verified
+    //     peer briefs the async transport left in mesh/inbox: tools (auto-merged into the
+    //     library, still gated on *use*), patterns, and tagged peer observations — never
+    //     laundered into local sensing. Best-effort, like watch_camera: internal errors fold
+    //     into the report, they never abort the tick.
+    let mesh = familiar_mesh::federate(dir, now);
+
     let report = TickReport {
         sensed,
         loops: detected.len(),
@@ -1522,6 +1543,10 @@ pub fn tick(
         refused,
         declined,
         structural_changed,
+        mesh_peers: mesh.peers,
+        mesh_tools_merged: mesh.tools_merged,
+        mesh_patterns_merged: mesh.patterns_merged,
+        mesh_rejected: mesh.rejected,
     };
 
     // 9. Record the tick as activity so the human can *see* the metabolism work — the
@@ -1544,6 +1569,10 @@ pub fn tick(
             answered: report.answered,
             refused: report.refused,
             declined: report.declined,
+            mesh_peers: report.mesh_peers,
+            mesh_tools_merged: report.mesh_tools_merged,
+            mesh_patterns_merged: report.mesh_patterns_merged,
+            mesh_rejected: report.mesh_rejected,
             service: report.service,
             presence: report.presence,
             capacities: report.capacities,
@@ -1887,6 +1916,8 @@ mod tests {
             uses: 0,
             last_used: 0,
             last_exit_ok: true,
+            origin: String::new(),
+            origin_verified_at: 0,
         };
         tool::append(&t.0, &tl).unwrap();
         let (body, conf, _) = run_tool(&t.0, &tl, 100, false).unwrap();

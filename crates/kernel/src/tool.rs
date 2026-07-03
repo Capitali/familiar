@@ -35,6 +35,14 @@ pub struct Tool {
     pub last_used: i64,
     /// Did its most recent run exit cleanly? A tool that keeps failing should not be reused.
     pub last_exit_ok: bool,
+    /// Provenance. Empty when this node authored the tool itself; otherwise the `node_id` of
+    /// the mesh peer it was federated from. A federated tool is trusted into the *library*
+    /// but — like any tool — still passes `review_script` + the sandbox on every run.
+    #[serde(default)]
+    pub origin: String,
+    /// When a federated tool's body was verified (sha-matched) on merge; 0 for local tools.
+    #[serde(default)]
+    pub origin_verified_at: i64,
 }
 
 impl Tool {
@@ -125,6 +133,8 @@ mod tests {
             uses: 0,
             last_used: 0,
             last_exit_ok: true,
+            origin: String::new(),
+            origin_verified_at: 0,
         }
     }
 
