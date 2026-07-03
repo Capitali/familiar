@@ -96,6 +96,17 @@ pub fn record_use(dir: &Path, id: &str, now: i64, exit_ok: bool) -> io::Result<O
     Ok(Some(uses))
 }
 
+/// Retire a tool by marking it unhealthy, so [`best_match`] skips it and the familiar
+/// re-authors a fresh one instead of reusing it. Used when the human's feedback says an
+/// answer a tool produced was wrong. Returns true if the id was found.
+pub fn mark_unhealthy(dir: &Path, id: &str) -> io::Result<bool> {
+    let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
+        return Ok(false);
+    };
+    t.last_exit_ok = false;
+    store::update_by_id(dir, TOOLS_FILE, id, &t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +182,18 @@ mod tests {
         assert_eq!(reloaded.uses, 2);
         assert_eq!(reloaded.last_used, 200);
         assert_eq!(record_use(&t.0, "nope", 1, true).unwrap(), None);
+    }
+
+    #[test]
+    fn mark_unhealthy_retires_a_tool_from_reuse() {
+        let t = Temp::new("retire");
+        append(&t.0, &tool("tool-0001", "scan", "p", "network scan run results")).unwrap();
+        let kw = vec!["network".to_string(), "scan".to_string()];
+        // healthy → best_match will reuse it
+        assert!(best_match(&load(&t.0).unwrap(), &kw).is_some());
+        // the human's "refine" retires it → no longer a reuse candidate
+        assert!(mark_unhealthy(&t.0, "tool-0001").unwrap());
+        assert!(best_match(&load(&t.0).unwrap(), &kw).is_none());
+        assert!(!mark_unhealthy(&t.0, "nope").unwrap());
     }
 }

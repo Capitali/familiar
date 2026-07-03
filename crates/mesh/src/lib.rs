@@ -39,16 +39,14 @@ pub use merge::{federate, MergeReport};
 
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Where federated tool scripts are written — the same workspace the cycle runs tools from,
-/// outside the repo (`~/Library/Application Support/Familiar/workspace`). Mesh can't depend
-/// on cycle (cycle depends on mesh), so this mirrors `familiar_cycle::familiar_workspace`:
-/// both derive the path from `$HOME` the same way, and must agree.
-pub(crate) fn merge_workspace() -> PathBuf {
-    std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join("Library/Application Support/Familiar/workspace"))
-        .unwrap_or_else(|_| PathBuf::from("familiar_workspace"))
+/// Where federated tool scripts are written: a `workspace/` under the **data dir** (so a
+/// federated tool's script travels with the data it belongs to, and so tests writing to a
+/// temp data dir never touch the real `~/Library/.../Familiar/workspace`). The tool record
+/// stores the resulting absolute `script_path`, which the cycle's runner reads directly.
+pub(crate) fn merge_workspace(dir: &Path) -> PathBuf {
+    dir.join("workspace")
 }
 
 /// Content address of a byte slice: lower-case hex SHA-256. The dedup + integrity key for

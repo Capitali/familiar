@@ -64,6 +64,10 @@ pub struct Answer {
     /// "" | helpful | refine — the human's reaction, which steers refinement.
     #[serde(default)]
     pub feedback: String,
+    /// The id of the tool that produced this answer, if one ran (empty otherwise). Lets a
+    /// "refine" reaction retire the responsible tool so it is re-authored, not reused.
+    #[serde(default)]
+    pub tool_id: String,
 }
 
 pub fn append_request(dir: &Path, r: &Request) -> io::Result<()> {
@@ -145,6 +149,7 @@ mod tests {
                 evidence: "host has interface:en0; connectivity:online".into(),
                 created_at: 101,
                 feedback: String::new(),
+                tool_id: String::new(),
             },
         )
         .unwrap();

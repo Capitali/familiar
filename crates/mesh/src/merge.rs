@@ -195,7 +195,7 @@ fn merge_one(
             continue; // integrity mismatch — never install
         }
         // Persist the body into the workspace and index it with provenance.
-        let ws = crate::merge_workspace();
+        let ws = crate::merge_workspace(dir);
         if std::fs::create_dir_all(&ws).is_err() {
             continue;
         }

@@ -783,17 +783,24 @@ fn run_tool(
         exec::Limits::unsandboxed()
     };
     let run = exec::run_script(std::path::Path::new(&t.script_path), &limits, &ws)?;
-    let uses = tool::record_use(dir, &t.id, now, run.exit_ok)?.unwrap_or(t.uses + 1);
     let out = run.output.trim();
-    let body = if out.is_empty() {
-        "I ran it; it produced no output.".to_string()
-    } else {
-        format!("I ran it. Here is the result:\n\n{out}")
-    };
+    // A tool can `exit 0` and still be broken — printing "does not exist", a usage line, or
+    // nothing useful. Exit code alone can't tell that apart, so a healthy tool gets reused
+    // forever while emitting garbage (the "ask" dead-end). Inspect the output too: a failure
+    // signature (or a timeout / nonzero exit) marks the tool unhealthy, so `best_match` skips
+    // it and the familiar re-authors a fresh one next time instead of repeating bad output.
+    let broken = output_looks_broken(out);
+    let healthy = run.exit_ok && !run.timed_out && broken.is_none();
+    let uses = tool::record_use(dir, &t.id, now, healthy)?.unwrap_or(t.uses + 1);
     let (confidence, status) = if run.timed_out {
         (
             Confidence::Probable,
             format!("timed out after {}ms", run.wall_ms),
+        )
+    } else if let Some(sig) = broken {
+        (
+            Confidence::Probable,
+            format!("output looked wrong ({sig}) — retiring this tool so it's re-authored"),
         )
     } else if run.exit_ok {
         (Confidence::Known, format!("exit 0 in {}ms", run.wall_ms))
@@ -802,6 +809,17 @@ fn run_tool(
             Confidence::Probable,
             format!("nonzero exit in {}ms", run.wall_ms),
         )
+    };
+    let body = if let Some(sig) = broken {
+        format!(
+            "I ran the tool '{}', but its output looks wrong ({sig}) — I've retired it and \
+             will write a fresh one next time you ask.\n\n{out}",
+            t.name
+        )
+    } else if out.is_empty() {
+        "I ran it; it produced no output.".to_string()
+    } else {
+        format!("I ran it. Here is the result:\n\n{out}")
     };
     let evidence = if reused {
         format!(
@@ -812,6 +830,35 @@ fn run_tool(
         format!("authored and saved a new tool '{}'; {status}", t.name)
     };
     Ok((body, confidence, evidence))
+}
+
+/// Does a tool's stdout look like a failure even though it exited cleanly? Returns the
+/// signature that flagged it, or `None` if the output looks like a genuine result. Empty
+/// output counts (a "run and tell me" tool that prints nothing did not do its job); so do
+/// common shell error markers. Deliberately conservative — it only flags clear breakage, so a
+/// real result is never mistaken for one.
+fn output_looks_broken(out: &str) -> Option<&'static str> {
+    let o = out.trim();
+    if o.is_empty() {
+        return Some("no output");
+    }
+    let l = o.to_lowercase();
+    [
+        "does not exist",
+        "command not found",
+        "no such file",
+        "not found",
+        "usage:",
+        "error:",
+        "permission denied",
+        "cannot open",
+        "cannot access",
+        "invalid option",
+        "unrecognized option",
+        "illegal option",
+    ]
+    .into_iter()
+    .find(|m| l.contains(m))
 }
 
 /// The first http(s) URL in a request (trailing punctuation trimmed), if any.
@@ -928,6 +975,7 @@ fn answer_requests(
                     evidence: "the Three Laws (docs/SOUL.md)".into(),
                     created_at: now,
                     feedback: String::new(),
+                    tool_id: String::new(),
                 },
             )?;
             refused += 1;
@@ -941,25 +989,35 @@ fn answer_requests(
         // it for next time, and runs it.
         if wants_execution(&r.text) && allow_execute && allow_authored && allow_llm {
             let kw = content_words(&r.text);
-            let outcome = match tool::best_match(&tool::load(dir)?, &kw).cloned() {
-                Some(known) => Some(run_tool(dir, &known, now, true)?),
-                None => match author_tool(dir, &r.text) {
-                    Some(drafted) if review_script(&drafted.script).is_some() => Some((
-                        format!(
-                            "I drafted a tool for that but declined to run it — {} (Law III).",
-                            review_script(&drafted.script).unwrap_or("unsafe")
-                        ),
-                        Confidence::Known,
-                        "the pre-execution review (docs/boundaries.md)".to_string(),
-                    )),
-                    Some(drafted) => {
-                        let saved = persist_tool(dir, &drafted, &kw, now)?;
-                        Some(run_tool(dir, &saved, now, false)?)
+            // The 4th element is the id of the tool that produced the answer (empty when none
+            // ran), so a later "refine" reaction can retire exactly that tool.
+            let outcome: Option<(String, Confidence, String, String)> =
+                match tool::best_match(&tool::load(dir)?, &kw).cloned() {
+                    Some(known) => {
+                        let id = known.id.clone();
+                        let (b, c, e) = run_tool(dir, &known, now, true)?;
+                        Some((b, c, e, id))
                     }
-                    None => None, // authoring failed — fall through to read-only analysis
-                },
-            };
-            if let Some((body, confidence, evidence)) = outcome {
+                    None => match author_tool(dir, &r.text) {
+                        Some(drafted) if review_script(&drafted.script).is_some() => Some((
+                            format!(
+                                "I drafted a tool for that but declined to run it — {} (Law III).",
+                                review_script(&drafted.script).unwrap_or("unsafe")
+                            ),
+                            Confidence::Known,
+                            "the pre-execution review (docs/boundaries.md)".to_string(),
+                            String::new(),
+                        )),
+                        Some(drafted) => {
+                            let saved = persist_tool(dir, &drafted, &kw, now)?;
+                            let id = saved.id.clone();
+                            let (b, c, e) = run_tool(dir, &saved, now, false)?;
+                            Some((b, c, e, id))
+                        }
+                        None => None, // authoring failed — fall through to read-only analysis
+                    },
+                };
+            if let Some((body, confidence, evidence, tool_id)) = outcome {
                 request::update_status(dir, &r.id, "answered")?;
                 let aseq = next_ans(dir)?;
                 request::append_answer(
@@ -972,6 +1030,7 @@ fn answer_requests(
                         evidence,
                         created_at: now,
                         feedback: String::new(),
+                        tool_id,
                     },
                 )?;
                 answered += 1;
@@ -997,6 +1056,7 @@ fn answer_requests(
                             evidence,
                             created_at: now,
                             feedback: String::new(),
+                            tool_id: String::new(),
                         },
                     )?;
                     answered += 1;
@@ -1023,6 +1083,7 @@ fn answer_requests(
                 evidence,
                 created_at: now,
                 feedback: String::new(),
+                tool_id: String::new(),
             },
         )?;
         answered += 1;
@@ -1716,6 +1777,18 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn broken_output_is_detected_even_on_clean_exit() {
+        // the exact failure the reused local_network_scan produced on macOS
+        assert!(output_looks_broken("ifconfig: interface inet does not exist").is_some());
+        assert!(output_looks_broken("").is_some()); // no output = did nothing
+        assert!(output_looks_broken("Usage: nmap [options] target").is_some());
+        assert!(output_looks_broken("bash: nmap: command not found").is_some());
+        // a genuine result is not flagged
+        assert!(output_looks_broken("Host up: 192.168.108.42\nHost up: 192.168.108.41").is_none());
+        assert!(output_looks_broken("CPU load: 1.24").is_none());
+    }
 
     struct Temp(PathBuf);
     impl Temp {

@@ -574,6 +574,21 @@ impl Glass {
     /// was truly after.
     fn give_feedback(&mut self, answer_id: &str, kind: &str, prefill: Option<String>) {
         let _ = request::set_feedback(&self.data_dir, answer_id, kind);
+        // "refine" means the answer was off. If a tool produced it, retire that tool so the
+        // familiar re-authors a fresh one instead of reusing it — a direct steering lever
+        // over the tool library (Law I: the human shapes what "cheaper next time" means).
+        if kind == "refine" {
+            if let Some(tool_id) = self
+                .snapshot
+                .answers
+                .iter()
+                .find(|a| a.id == answer_id)
+                .map(|a| a.tool_id.clone())
+                .filter(|id| !id.is_empty())
+            {
+                let _ = familiar_kernel::tool::mark_unhealthy(&self.data_dir, &tool_id);
+            }
+        }
         if let Some(text) = prefill {
             self.ask = text;
         }
