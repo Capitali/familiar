@@ -135,6 +135,11 @@ struct Glass {
     /// key.env, then cleared. Never stored in the snapshot; shown masked.
     key_gemini: String,
     key_cerebras: String,
+    /// A join key pasted into the mesh wizard to join an existing group. Held only until
+    /// Join enrolls it; then cleared.
+    mesh_join_key: String,
+    /// A label typed for a group being created/joined (cosmetic).
+    mesh_group_label: String,
     /// Which inner scroll region the human has clicked into. Only that region consumes
     /// wheel/drag scroll; the rest let it fall through to the page — so hovering a panel
     /// while scrolling no longer hijacks the gesture (the trackpad pain). `None` = none
@@ -189,6 +194,17 @@ fn open_url(url: &str) {
             return;
         }
     }
+}
+
+/// A cosmetic label for this node in the mesh — the machine's hostname, best-effort.
+fn machine_label() -> String {
+    Command::new("hostname")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "familiar".to_string())
 }
 
 /// One-line, length-capped form of a string for brief narration (newlines flattened).
@@ -441,6 +457,8 @@ impl Glass {
             ask: String::new(),
             key_gemini: String::new(),
             key_cerebras: String::new(),
+            mesh_join_key: String::new(),
+            mesh_group_label: String::new(),
             active_scroll: None,
             ui_scale,
             last_probe: std::time::Instant::now(),
@@ -830,6 +848,305 @@ impl Glass {
                 }
             });
     }
+    // ---- Mesh: peer federation (mirrors the Connect wizard) ----------------------------
+
+    fn write_mesh_status(&self, s: &str) {
+        let mesh = self.data_dir.join("mesh");
+        let _ = std::fs::create_dir_all(&mesh);
+        let _ = std::fs::write(mesh.join("status.txt"), s);
+    }
+    fn read_mesh_status(&self) -> Option<String> {
+        std::fs::read_to_string(self.data_dir.join("mesh").join("status.txt"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+    fn mesh_group(&self) -> Option<familiar_mesh::group::GroupCredential> {
+        familiar_mesh::group::load(&self.data_dir).ok().flatten()
+    }
+    fn mesh_peers(&self) -> Vec<familiar_mesh::transport::PeerRecord> {
+        std::fs::read_to_string(self.data_dir.join("mesh").join("peers.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+    fn mesh_config(&self) -> familiar_mesh::config::MeshConfig {
+        familiar_mesh::config::load(&self.data_dir).unwrap_or_default()
+    }
+    fn write_mesh_config(&self, cfg: &familiar_mesh::config::MeshConfig) {
+        let mesh = self.data_dir.join("mesh");
+        let _ = std::fs::create_dir_all(&mesh);
+        if let Ok(json) = serde_json::to_string_pretty(cfg) {
+            let _ = std::fs::write(mesh.join("config.json"), json);
+        }
+    }
+    /// Open the `allow_mesh` gate — a human act, through the human's instrument (the kernel
+    /// has no boundary-write path). Preserves every other grant; never silently widens.
+    fn open_mesh_gate(&self) {
+        let mut b = boundary::load(&self.data_dir).unwrap_or_else(|_| Boundary::closed());
+        b.allow_mesh = true;
+        if b.phase == "closed" {
+            b.phase = "phase-1".to_string();
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&b) {
+            let _ = std::fs::write(self.data_dir.join("boundary.json"), json);
+        }
+    }
+    /// Create a new mesh group: mint the group trust root + this node's membership, open the
+    /// mesh gate, and surface the join key to copy to peers. The daemon's transport picks it
+    /// up on its next cycle.
+    fn create_group(&mut self) {
+        let label = if self.mesh_group_label.trim().is_empty() {
+            "familiar-group".to_string()
+        } else {
+            self.mesh_group_label.trim().to_string()
+        };
+        let node = match familiar_mesh::node::NodeKey::load_or_mint(&self.data_dir, &machine_label())
+        {
+            Ok(n) => n,
+            Err(e) => {
+                self.write_mesh_status(&format!("✗ could not mint a node key — {e}"));
+                return;
+            }
+        };
+        match familiar_mesh::group::create_group(
+            &self.data_dir,
+            &node,
+            &label,
+            now_secs(),
+            familiar_mesh::group::DEFAULT_CERT_TTL_SECS,
+        ) {
+            Ok(_) => {
+                self.open_mesh_gate();
+                self.write_mesh_status("✓ group created — share the join key below to invite peers");
+                self.refresh();
+            }
+            Err(e) => self.write_mesh_status(&format!("✗ could not create the group — {e}")),
+        }
+    }
+    /// Join an existing group from a pasted join key: mint this node's membership against the
+    /// group key, open the mesh gate. The transport then discovers peers and exchanges briefs.
+    fn join_group_from_key(&mut self) {
+        let key = self.mesh_join_key.trim().to_string();
+        if key.is_empty() {
+            self.write_mesh_status("paste the join key the group's creator gave you");
+            return;
+        }
+        let label = if self.mesh_group_label.trim().is_empty() {
+            "familiar-group".to_string()
+        } else {
+            self.mesh_group_label.trim().to_string()
+        };
+        let node = match familiar_mesh::node::NodeKey::load_or_mint(&self.data_dir, &machine_label())
+        {
+            Ok(n) => n,
+            Err(e) => {
+                self.write_mesh_status(&format!("✗ could not mint a node key — {e}"));
+                return;
+            }
+        };
+        match familiar_mesh::group::join_group(
+            &self.data_dir,
+            &node,
+            &key,
+            &label,
+            now_secs(),
+            familiar_mesh::group::DEFAULT_CERT_TTL_SECS,
+        ) {
+            Ok(_) => {
+                self.mesh_join_key.clear();
+                self.open_mesh_gate();
+                self.write_mesh_status("✓ joined the group — connecting to peers…");
+                self.refresh();
+            }
+            Err(e) => self.write_mesh_status(&format!("✗ could not join — check the key ({e})")),
+        }
+    }
+    /// The Mesh wizard: create or join a group of peer familiars, see who's connected, and
+    /// govern what crosses. Mirrors the Connect wizard. Federation itself only runs while the
+    /// `allow_mesh` gate (in the boundary panel) is open — the human owns that switch.
+    fn mesh_panel(&mut self, ui: &mut egui::Ui) {
+        let group = self.mesh_group();
+        let open = self.snapshot.boundary.allow_mesh;
+        let connected = open && group.is_some();
+        let title = if connected {
+            "🕸 Mesh — federate with peer familiars  ·  ✓ in a group"
+        } else {
+            "🕸 Mesh — share tools & knowledge with peer familiars"
+        };
+        egui::CollapsingHeader::new(egui::RichText::new(title).strong())
+            .default_open(group.is_none())
+            .show(ui, |ui| {
+                ui.label(
+                    "Familiars on the same tailnet can form a group and share what they \
+                     learn — tools they've authored, distilled patterns, and (only if you \
+                     opt a person in) knowledge of the humans they serve. Trust is \
+                     cryptographic: only nodes holding the group's join key are believed. \
+                     Nothing crosses until you open the Mesh gate in Capability.",
+                );
+                ui.add_space(4.0);
+                match &group {
+                    None => {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Group name").strong());
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.mesh_group_label)
+                                    .hint_text("e.g. river")
+                                    .desired_width(160.0),
+                            );
+                            if ui.button("Create a new group").clicked() {
+                                self.create_group();
+                            }
+                        });
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new("…or join one you were invited to:").weak());
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.mesh_join_key)
+                                    .password(true)
+                                    .hint_text("paste the join key")
+                                    .desired_width(260.0),
+                            );
+                            if ui.button("Join").clicked() {
+                                self.join_group_from_key();
+                            }
+                        });
+                    }
+                    Some(cred) => {
+                        let gid: String = cred.group_id.chars().take(8).collect();
+                        ui.label(format!("In group “{}” · id {}", cred.label, gid));
+                        if !open {
+                            ui.colored_label(
+                                theme::AMBER,
+                                "Mesh gate is closed — open it in Capability to actually connect.",
+                            );
+                        }
+                        // The join key to invite other machines. It IS the group secret, so
+                        // shown here for you to copy on a trusted screen; select and ⌘C it.
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new("Join key (share to invite a peer):").weak().small());
+                        let mut jk = cred.join_key();
+                        ui.add(
+                            egui::TextEdit::singleline(&mut jk)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(320.0),
+                        );
+
+                        // Peers currently connected.
+                        ui.add_space(6.0);
+                        let peers = self.mesh_peers();
+                        ui.label(
+                            egui::RichText::new(format!("{} peer(s)", peers.len())).strong(),
+                        );
+                        let now = now_secs();
+                        for p in &peers {
+                            let ago = now.saturating_sub(p.last_seen);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.colored_label(theme::GREEN, "●");
+                                ui.label(egui::RichText::new(&p.label).small());
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} tool(s), {} pattern(s) · seen {}s ago",
+                                        p.tools_offered, p.patterns_offered, ago
+                                    ))
+                                    .weak()
+                                    .small(),
+                                );
+                            });
+                        }
+                        if peers.is_empty() {
+                            ui.label(
+                                egui::RichText::new("(no peers yet — invite one with the join key)")
+                                    .weak()
+                                    .small(),
+                            );
+                        }
+
+                        // What has crossed: federated tools + tagged peer observations.
+                        let fed: Vec<&Tool> = self
+                            .snapshot
+                            .tools
+                            .iter()
+                            .filter(|t| !t.origin.is_empty())
+                            .collect();
+                        if !fed.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(egui::RichText::new("merged from peers").weak().small());
+                            for t in fed.iter().take(6) {
+                                let src: String = t.origin.chars().take(8).collect();
+                                ui.label(
+                                    egui::RichText::new(format!("↳ tool “{}” ← {}", t.name, src))
+                                        .small(),
+                                );
+                            }
+                        }
+
+                        // Sharing governance (config, not authorization — the gate is separate).
+                        ui.add_space(6.0);
+                        ui.separator();
+                        let mut cfg = self.mesh_config();
+                        let mut changed = false;
+                        changed |= ui
+                            .checkbox(&mut cfg.share_tools, "Share my authored tools")
+                            .changed();
+                        changed |= ui
+                            .checkbox(&mut cfg.share_knowledge, "Share distilled patterns")
+                            .changed();
+                        changed |= ui
+                            .checkbox(
+                                &mut cfg.share_identities,
+                                "Share humans I've opted in (below) — off by default",
+                            )
+                            .changed();
+                        // Per-human opt-in, scoped to this group.
+                        for person in familiar_kernel::identity::load(&self.data_dir)
+                            .unwrap_or_default()
+                        {
+                            let mut opted = cfg
+                                .identity_optin
+                                .iter()
+                                .any(|o| o.handle == person.handle && o.group == cred.group_id);
+                            if ui
+                                .checkbox(
+                                    &mut opted,
+                                    format!("   ↳ share “{}” with this group", person.name),
+                                )
+                                .changed()
+                            {
+                                if opted {
+                                    cfg.identity_optin.push(
+                                        familiar_mesh::config::IdentityOptin {
+                                            handle: person.handle.clone(),
+                                            group: cred.group_id.clone(),
+                                        },
+                                    );
+                                } else {
+                                    cfg.identity_optin.retain(|o| {
+                                        !(o.handle == person.handle && o.group == cred.group_id)
+                                    });
+                                }
+                                changed = true;
+                            }
+                        }
+                        if changed {
+                            self.write_mesh_config(&cfg);
+                        }
+                    }
+                }
+                if let Some(s) = self.read_mesh_status() {
+                    let color = if s.starts_with('✓') {
+                        theme::GREEN
+                    } else if s.starts_with('✗') {
+                        theme::AMBER
+                    } else {
+                        theme::SCREEN_DIM
+                    };
+                    ui.add_space(4.0);
+                    ui.colored_label(color, s);
+                }
+            });
+    }
     /// The self-tuned per-tick LLM budget, shown as a number with a trend arrow — the
     /// familiar's presence regulation (Law II) made legible. ↓ amber: pulling back so it
     /// stays responsive to you; ↑ green: leaning into a backlog while it has the headroom;
@@ -952,6 +1269,12 @@ impl Glass {
             .checkbox(
                 &mut b.allow_camera,
                 "Camera — watch through a camera (sharpest reach — Law III)",
+            )
+            .changed();
+        changed |= ui
+            .checkbox(
+                &mut b.allow_mesh,
+                "Mesh — federate with peer familiars (share tools/knowledge over the tailnet)",
             )
             .changed();
         ui.separator();
@@ -1711,6 +2034,11 @@ impl eframe::App for Glass {
             // --- first run: connect the familiar to a mind (collapses once connected) ---
             ui.add_space(6.0);
             self.connect_panel(ui);
+
+            // --- optional: federate with peer familiars over the tailnet (collapsed once
+            // in a group). Sharing only runs while the Mesh gate is open in Capability. ---
+            ui.add_space(6.0);
+            self.mesh_panel(ui);
 
             // --- the interaction channel: the familiar asks, the observer answers. Until
             // it knows who it serves, that exchange is learning a name — precise, confirmed,

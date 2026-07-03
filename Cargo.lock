@@ -1245,6 +1245,7 @@ dependencies = [
  "egui",
  "egui_plot",
  "familiar-kernel",
+ "familiar-mesh",
  "serde_json",
 ]
 
