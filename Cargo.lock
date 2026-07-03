@@ -1293,6 +1293,8 @@ name = "familiar-sense"
 version = "0.1.0"
 dependencies = [
  "familiar-kernel",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

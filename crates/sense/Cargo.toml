@@ -7,3 +7,5 @@ description = "Perception of the host — environment, interfaces, capabilities 
 
 [dependencies]
 familiar-kernel.workspace = true
+serde.workspace = true
+serde_json.workspace = true

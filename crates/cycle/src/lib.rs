@@ -1424,6 +1424,11 @@ pub fn tick(
     // governs reach, not perception). *Watching* one is gated (camera_allowed) and not
     // done here; the familiar only learns that an eye is available, never opens it itself.
     perceived.extend(vision::discover(now));
+    // Discover the devices sharing this network — perception, like discovering a camera
+    // (knowing a phone/watch is present is not reaching into it). The local ARP read is
+    // always permitted; enriching from the router's DHCP lease table is outward reach, so it
+    // only happens when connectivity is allowed and the human has pointed devices.json at it.
+    perceived.extend(sense::devices(dir, now, allow_connectivity));
     if allow_connectivity {
         perceived.push(sense::connectivity(now));
     }
