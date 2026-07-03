@@ -8,3 +8,7 @@ description = "The deterministic core of the Substrate factory: records, persist
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# The one place the otherwise serde-only kernel takes on a C-backed dependency: the embedded
+# store (see store.rs). `bundled` compiles SQLite in — no system library — and the kernel's own
+# `#![forbid(unsafe_code)]` still holds (it governs kernel code, not dependencies).
+rusqlite = { version = "0.32", features = ["bundled"] }
