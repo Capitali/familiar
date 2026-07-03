@@ -82,36 +82,22 @@ pub fn load_answers(dir: &Path) -> io::Result<Vec<Answer>> {
     store::load(dir, ANSWERS_FILE)
 }
 
-/// Set a request's status, rewriting the file. Returns true if found.
+/// Set a request's status — a single indexed update. Returns true if the id was found.
 pub fn update_status(dir: &Path, id: &str, status: &str) -> io::Result<bool> {
-    let mut rs = load_requests(dir)?;
-    let mut found = false;
-    for r in &mut rs {
-        if r.id == id {
-            r.status = status.to_string();
-            found = true;
-        }
-    }
-    if found {
-        store::rewrite(dir, REQUESTS_FILE, &rs)?;
-    }
-    Ok(found)
+    let Some(mut r) = store::load_by_id::<Request>(dir, REQUESTS_FILE, id)? else {
+        return Ok(false);
+    };
+    r.status = status.to_string();
+    store::update_by_id(dir, REQUESTS_FILE, id, &r)
 }
 
-/// Record the human's reaction to an answer (helpful / refine), rewriting the file.
+/// Record the human's reaction to an answer (helpful / refine) — a single indexed update.
 pub fn set_feedback(dir: &Path, answer_id: &str, feedback: &str) -> io::Result<bool> {
-    let mut answers = load_answers(dir)?;
-    let mut found = false;
-    for a in &mut answers {
-        if a.id == answer_id {
-            a.feedback = feedback.to_string();
-            found = true;
-        }
-    }
-    if found {
-        store::rewrite(dir, ANSWERS_FILE, &answers)?;
-    }
-    Ok(found)
+    let Some(mut a) = store::load_by_id::<Answer>(dir, ANSWERS_FILE, answer_id)? else {
+        return Ok(false);
+    };
+    a.feedback = feedback.to_string();
+    store::update_by_id(dir, ANSWERS_FILE, answer_id, &a)
 }
 
 #[cfg(test)]

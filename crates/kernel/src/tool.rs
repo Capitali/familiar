@@ -85,20 +85,15 @@ pub fn best_match<'a>(tools: &'a [Tool], request_keywords: &[String]) -> Option<
 /// Record a run of a tool: bump `uses`, stamp `last_used`, note whether it exited cleanly.
 /// Returns the tool's new use count (or None if the id was not found).
 pub fn record_use(dir: &Path, id: &str, now: i64, exit_ok: bool) -> io::Result<Option<u32>> {
-    let mut tools = load(dir)?;
-    let mut uses = None;
-    for t in &mut tools {
-        if t.id == id {
-            t.uses += 1;
-            t.last_used = now;
-            t.last_exit_ok = exit_ok;
-            uses = Some(t.uses);
-        }
-    }
-    if uses.is_some() {
-        store::rewrite(dir, TOOLS_FILE, &tools)?;
-    }
-    Ok(uses)
+    let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
+        return Ok(None);
+    };
+    t.uses += 1;
+    t.last_used = now;
+    t.last_exit_ok = exit_ok;
+    let uses = t.uses;
+    store::update_by_id(dir, TOOLS_FILE, id, &t)?;
+    Ok(Some(uses))
 }
 
 #[cfg(test)]

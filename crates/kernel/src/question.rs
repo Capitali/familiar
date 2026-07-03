@@ -128,18 +128,11 @@ pub fn add(dir: &Path, text: &str, origin: &str, now: i64) -> io::Result<String>
 }
 
 fn update<F: FnMut(&mut Question)>(dir: &Path, id: &str, mut f: F) -> io::Result<bool> {
-    let mut qs = load(dir)?;
-    let mut hit = false;
-    for q in &mut qs {
-        if q.id == id {
-            f(q);
-            hit = true;
-        }
-    }
-    if hit {
-        store::rewrite(dir, QUESTIONS_FILE, &qs)?;
-    }
-    Ok(hit)
+    let Some(mut q) = store::load_by_id::<Question>(dir, QUESTIONS_FILE, id)? else {
+        return Ok(false);
+    };
+    f(&mut q);
+    store::update_by_id(dir, QUESTIONS_FILE, id, &q)
 }
 
 pub fn record_asked(dir: &Path, id: &str, now: i64) -> io::Result<bool> {
