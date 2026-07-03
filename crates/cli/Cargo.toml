@@ -14,3 +14,4 @@ familiar-kernel.workspace = true
 familiar-sense.workspace = true
 familiar-cycle.workspace = true
 familiar-llm.workspace = true
+familiar-mesh.workspace = true

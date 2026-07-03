@@ -1216,6 +1216,7 @@ dependencies = [
  "familiar-cycle",
  "familiar-kernel",
  "familiar-llm",
+ "familiar-mesh",
  "familiar-sense",
 ]
 

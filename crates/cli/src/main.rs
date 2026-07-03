@@ -401,6 +401,15 @@ fn print_tick(n: usize, r: &familiar_cycle::TickReport) {
     if r.pursued > 0 {
         flags.push_str(&format!(" (pursued {})", r.pursued));
     }
+    if r.mesh_peers > 0 || r.mesh_tools_merged > 0 || r.mesh_patterns_merged > 0 {
+        flags.push_str(&format!(
+            " (mesh: {} peer(s), +{} tool(s), +{} pattern(s))",
+            r.mesh_peers, r.mesh_tools_merged, r.mesh_patterns_merged
+        ));
+    }
+    if r.mesh_rejected > 0 {
+        flags.push_str(&format!(" (mesh ✗{} rejected)", r.mesh_rejected));
+    }
     println!(
         "tick {n}: +{} sensed, {} loops, +{} candidates{llm}{exec} | service {:.2}, presence {:.2}, capacities {:.2}{flags}",
         r.sensed, r.loops, r.new_candidates, r.service, r.presence, r.capacities,
@@ -454,6 +463,12 @@ fn cmd_run(args: &[String]) -> ExitCode {
         // Make this process visible to `daemon status/start/stop` (incl. when launched
         // by launchd), so the two control paths agree and never double-spawn.
         daemon::record_self(&dir);
+        // Start the mesh transport on its own background thread. It self-gates on
+        // allow_mesh each cycle (idle until a human opens the boundary and enrolls a
+        // group), so this is safe to spawn unconditionally; opening the gate later via the
+        // Glass is picked up without a daemon restart. The handle lives for the process
+        // lifetime (this loop never returns); on exit the OS reclaims the thread.
+        let _mesh = familiar_mesh::transport::spawn(dir.clone());
         if fixed {
             println!("metabolism running every {floor}s (fixed) — Ctrl-C to stop");
         } else {
