@@ -63,6 +63,12 @@ const EYE_STAMP: &str = "last_capture.txt";
 /// camera light on or fills the disk. The boundary's `allow_camera` is the real switch —
 /// close it and watching stops entirely; this only paces it while open.
 const CAPTURE_INTERVAL_SECS: i64 = 60;
+/// The most times a single candidate lineage may mutate before it is retired (archived)
+/// rather than mutated again. Bounds the self-improvement search so a non-converging line
+/// can't spawn an unbounded chain of ever-deeper children (which once filled the store to
+/// generation 320). With gen-0 candidates created only for uncovered loops, this caps the
+/// total candidate population to roughly `loops × MAX_MUTATION_GENERATION`.
+const MAX_MUTATION_GENERATION: i32 = 6;
 
 /// FNV-1a (64-bit) — the same family the kernel uses for loop ids. Deterministic,
 /// dependency-free; we only need a stable digest, not cryptographic strength.
@@ -1304,6 +1310,15 @@ fn run_execution(
                 promoted += 1;
             }
             selection::Decision::Archive | selection::Decision::Reject => {
+                candidate::update_status(dir, &c.id, "archived")?;
+                archived += 1;
+            }
+            // A lineage that hasn't converged after MAX_MUTATION_GENERATION rounds is
+            // *retired*, not mutated again. Without this cap a candidate that keeps scoring
+            // in the mutate band spawns a child every tick, forever — the unbounded chain
+            // that once buried the store under thousands of ever-deeper generations (seen at
+            // depth 320). Law I: motion must make the future cheaper, not churn in place.
+            selection::Decision::Mutate if c.generation >= MAX_MUTATION_GENERATION => {
                 candidate::update_status(dir, &c.id, "archived")?;
                 archived += 1;
             }

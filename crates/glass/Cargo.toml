@@ -12,6 +12,9 @@ path = "src/main.rs"
 [dependencies]
 familiar-kernel.workspace = true
 familiar-mesh.workspace = true
+# JPEG decode for the camera live-view (eye/latest.jpg → an egui texture). Only the jpeg
+# codec is pulled in — no other formats — to keep this GUI-only dependency small.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 serde_json.workspace = true
 eframe = "0.31"
 egui = "0.31"

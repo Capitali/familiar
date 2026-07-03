@@ -1246,6 +1246,7 @@ dependencies = [
  "egui_plot",
  "familiar-kernel",
  "familiar-mesh",
+ "image",
  "serde_json",
 ]
 
@@ -2116,6 +2117,8 @@ dependencies = [
  "num-traits",
  "png 0.18.1",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

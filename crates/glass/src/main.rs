@@ -161,6 +161,10 @@ struct Glass {
     /// When the snapshot was last reloaded — so the Glass tracks the daemon live (it
     /// auto-refreshes on a throttle, not only when Ian clicks something).
     last_refresh: std::time::Instant,
+    /// The eye's latest frame as a GPU texture, and the file mtime it was decoded from —
+    /// so the camera view only re-decodes `eye/latest.jpg` when the daemon captures a new one.
+    camera_tex: Option<egui::TextureHandle>,
+    camera_mtime: i64,
 }
 
 fn read_answered(dir: &Path) -> Option<String> {
@@ -467,6 +471,8 @@ impl Glass {
             show_substrate: false,
             show_settings: false,
             last_refresh: std::time::Instant::now(),
+            camera_tex: None,
+            camera_mtime: 0,
         }
     }
     fn refresh(&mut self) {
@@ -1146,6 +1152,59 @@ impl Glass {
                     ui.colored_label(color, s);
                 }
             });
+    }
+    /// The eye's live view — the latest frame the daemon captured through the camera. Shown
+    /// only while `allow_camera` is open and a frame exists. The daemon writes
+    /// `eye/latest.jpg` each tick (rate-limited); this re-decodes it into a texture only when
+    /// the file changes, so it's cheap. This is the "I finally see what it sees" surface.
+    fn camera_panel(&mut self, ui: &mut egui::Ui) {
+        if !self.snapshot.boundary.allow_camera {
+            return;
+        }
+        let frame = self.data_dir.join("eye").join("latest.jpg");
+        let mtime = std::fs::metadata(&frame)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        if mtime == 0 {
+            return; // no frame captured yet
+        }
+        // Re-decode only when the daemon has written a newer frame.
+        if mtime != self.camera_mtime || self.camera_tex.is_none() {
+            if let Ok(bytes) = std::fs::read(&frame) {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let color = egui::ColorImage::from_rgba_unmultiplied(
+                        [w as usize, h as usize],
+                        rgba.as_raw(),
+                    );
+                    self.camera_tex = Some(ui.ctx().load_texture(
+                        "eye-frame",
+                        color,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                    self.camera_mtime = mtime;
+                }
+            }
+        }
+        if let Some(tex) = &self.camera_tex {
+            Self::rail_label(ui, "THE EYE · WHAT IT SEES");
+            let size = tex.size_vec2();
+            let scale = (ui.available_width().min(480.0) / size.x).min(1.0);
+            ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                tex.id(),
+                size * scale,
+            )));
+            let age = now_secs() - self.camera_mtime;
+            ui.label(
+                egui::RichText::new(format!("captured {age}s ago · refreshes as it watches"))
+                    .weak()
+                    .small(),
+            );
+        }
     }
     /// The self-tuned per-tick LLM budget, shown as a number with a trend arrow — the
     /// familiar's presence regulation (Law II) made legible. ↓ amber: pulling back so it
@@ -2039,6 +2098,10 @@ impl eframe::App for Glass {
             // in a group). Sharing only runs while the Mesh gate is open in Capability. ---
             ui.add_space(6.0);
             self.mesh_panel(ui);
+
+            // --- the eye's live view: what the familiar currently sees, when watching ---
+            ui.add_space(6.0);
+            self.camera_panel(ui);
 
             // --- the interaction channel: the familiar asks, the observer answers. Until
             // it knows who it serves, that exchange is learning a name — precise, confirmed,
