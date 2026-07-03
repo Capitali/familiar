@@ -44,6 +44,8 @@ commands:
   boundary       show the Pact — the capability boundary (the human's lever, Law III)
   guard          weigh a proposed action against the Pact (Law III)
   consult        consult the LLM (refused unless a human has opened the Pact)
+  db             storage: `db export [--out DIR]` dumps every table to JSONL
+                 (auditability); `db import` folds any legacy .jsonl into the DB
 
 options:
   --data-dir <dir>   data directory (default: familiar_data)
@@ -79,8 +81,84 @@ fn main() -> ExitCode {
         Some("boundary") => cmd_boundary(rest),
         Some("guard") => cmd_guard(rest),
         Some("consult") => cmd_consult(rest),
+        Some("db") => cmd_db(rest),
         Some(cmd) => {
             eprintln!("familiar: unknown command '{cmd}'\n\n{USAGE}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The record tables held in the database (the JSONL "files" that map to tables).
+const DB_TABLES: &[&str] = &[
+    "observations.jsonl",
+    "candidates.jsonl",
+    "trials.jsonl",
+    "patterns.jsonl",
+    "threads.jsonl",
+    "questions.jsonl",
+    "requests.jsonl",
+    "answers.jsonl",
+    "tools.jsonl",
+    "identities.jsonl",
+    "ticks.jsonl",
+    "loops.jsonl",
+    "refusals.jsonl",
+];
+
+/// `db export` / `db import` — the auditability seam over the SQLite store. `export` dumps
+/// every table to readable JSONL (the "cat-able truth" preserved); `import` folds any legacy
+/// `<file>.jsonl` still present into its table (the store does this once automatically, this
+/// just triggers it without starting the daemon).
+fn cmd_db(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        Some("export") => {
+            let out = f
+                .get("out")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| dir.join("export"));
+            if let Err(e) = std::fs::create_dir_all(&out) {
+                eprintln!("db: could not create {}: {e}", out.display());
+                return ExitCode::FAILURE;
+            }
+            let mut total = 0usize;
+            for t in DB_TABLES {
+                match store::export_jsonl(&dir, t) {
+                    Ok(s) => {
+                        let rows = s.lines().count();
+                        if let Err(e) = std::fs::write(out.join(t), &s) {
+                            eprintln!("db: {t}: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                        if rows > 0 {
+                            println!("  {t}: {rows} rows");
+                        }
+                        total += rows;
+                    }
+                    Err(e) => eprintln!("db: {t}: {e}"),
+                }
+            }
+            println!("exported {total} rows → {}", out.display());
+            ExitCode::SUCCESS
+        }
+        Some("import") => {
+            let mut n = 0usize;
+            for t in DB_TABLES {
+                if dir.join(t).exists() {
+                    let _ = store::import_legacy(&dir, t);
+                    n += 1;
+                }
+            }
+            println!(
+                "import: folded {n} legacy file(s) into {}",
+                dir.join(store::DB_FILE).display()
+            );
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("db: usage: familiar db export [--out DIR] | familiar db import");
             ExitCode::FAILURE
         }
     }

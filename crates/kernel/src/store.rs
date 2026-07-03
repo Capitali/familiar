@@ -244,6 +244,16 @@ pub fn update_by_id<T: Serialize>(
     Ok(n > 0)
 }
 
+/// Fold a legacy `<dir>/<file>` JSONL log into its table if it hasn't been already (the same
+/// one-time import the store does on first touch) — the seam behind `familiar db import`, so
+/// it can be triggered without deserializing or starting the daemon.
+pub fn import_legacy(dir: &Path, file: &str) -> io::Result<()> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)
+}
+
 /// Export a table back to JSONL text (oldest first) — the auditability seam behind
 /// `familiar db export`. A missing/empty table yields an empty string.
 pub fn export_jsonl(dir: &Path, file: &str) -> io::Result<String> {

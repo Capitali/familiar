@@ -1,7 +1,9 @@
 # Data Model
 
-The conceptual model of what The Familiar stores and how the records relate. The
-operational format and schema are in [`../data/`](../data/); this is the *meaning*.
+The conceptual model of what The Familiar stores and how the records relate. This is the
+*meaning*; the operational format is an embedded SQLite database (one table per record type) —
+see [storage.md](storage.md). JSONL is now the import/export format (`familiar db export`),
+not the on-disk store. Human-owned config (`boundary.json`, `parameters.json`) stays plain text.
 
 ## The one truth: observations
 
