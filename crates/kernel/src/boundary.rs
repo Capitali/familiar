@@ -50,6 +50,13 @@ pub struct Boundary {
     /// and opening this flag is the human authorizing the group; the familiar never
     /// self-widens it. See `docs/mesh.md`.
     pub allow_mesh: bool,
+    /// May the familiar **delegate a task to a multi-step agent** (the agentic seam)? A
+    /// sharper reach than `allow_llm`: a one-shot consult returns text the core then weighs,
+    /// whereas an agent runs a *loop* that proposes actions. Fail-closed, human-opened. Every
+    /// action the agent proposes is still separately gated (and scoped to the agent's own
+    /// capability profile), so opening this never widens what an agent may actually *do* — it
+    /// only permits the delegated reasoning loop to run. See `docs/agents.md`.
+    pub allow_agent: bool,
     /// Run executed artifacts under the resource sandbox (`ulimit`/wall-timeout)?
     /// Default **true** (safe). When the human sets it false, artifacts run without
     /// resource confinement — bound then by the constitution (the pre-execution review
@@ -85,6 +92,7 @@ impl Boundary {
             allow_authored_execute: false,
             allow_camera: false,
             allow_mesh: false,
+            allow_agent: false,
             sandbox_execution: true,
             fs_read: Vec::new(),
             fs_write: Vec::new(),
@@ -100,9 +108,89 @@ impl Boundary {
             && !self.allow_authored_execute
             && !self.allow_camera
             && !self.allow_mesh
+            && !self.allow_agent
             && self.fs_read.is_empty()
             && self.fs_write.is_empty()
     }
+}
+
+/// A **capability scope** — the subset of reach a single agent specialist is trusted with.
+/// It is a *request*, never a grant: the effective boundary an agent acts under is the
+/// **intersection** of this scope with the human-owned boundary ([`scoped_boundary`]), so an
+/// agent can never exceed either. A network specialist gets `{network, execute}`; a
+/// control-systems specialist gets its own reach and cannot scan even under an open
+/// `allow_network`. Fail-closed: [`CapabilityScope::none`] is all-off.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CapabilityScope {
+    pub network: bool,
+    pub execute: bool,
+    pub authored_execute: bool,
+    pub tool_install: bool,
+    pub camera: bool,
+    pub mesh: bool,
+    pub fs_read: Vec<String>,
+    pub fs_write: Vec<String>,
+}
+
+impl Default for CapabilityScope {
+    fn default() -> Self {
+        CapabilityScope::none()
+    }
+}
+
+impl CapabilityScope {
+    /// The fail-closed scope: no reach at all.
+    pub fn none() -> Self {
+        CapabilityScope {
+            network: false,
+            execute: false,
+            authored_execute: false,
+            tool_install: false,
+            camera: false,
+            mesh: false,
+            fs_read: Vec::new(),
+            fs_write: Vec::new(),
+        }
+    }
+}
+
+/// The effective boundary an agent runs under: the **intersection** of the human-owned
+/// boundary and the agent's own [`CapabilityScope`] — least privilege. Each gate is granted
+/// only if *both* allow it; each path is kept only if the agent requested it *and* the
+/// boundary already covers it. `allow_llm` is preserved (an agent must be able to reason) and
+/// `allow_agent` is dropped (an agent does not spawn sub-agents in this scope), so delegating
+/// can never widen reach beyond what the human already opened.
+pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
+    Boundary {
+        phase: format!("{}·scoped", b.phase),
+        allow_network: b.allow_network && s.network,
+        allow_llm: b.allow_llm,
+        allow_tool_install: b.allow_tool_install && s.tool_install,
+        allow_execute: b.allow_execute && s.execute,
+        allow_authored_execute: b.allow_authored_execute && s.authored_execute,
+        allow_camera: b.allow_camera && s.camera,
+        allow_mesh: b.allow_mesh && s.mesh,
+        allow_agent: false,
+        sandbox_execution: b.sandbox_execution,
+        fs_read: intersect_paths(&b.fs_read, &s.fs_read),
+        fs_write: intersect_paths(&b.fs_write, &s.fs_write),
+    }
+}
+
+/// Keep each *requested* path only when the *granted* set already covers it (a granted
+/// prefix is an ancestor of it) — so a scope can narrow the boundary's paths but never add one.
+fn intersect_paths(granted: &[String], requested: &[String]) -> Vec<String> {
+    requested
+        .iter()
+        .filter(|r| {
+            !r.is_empty()
+                && granted
+                    .iter()
+                    .any(|g| !g.is_empty() && r.starts_with(g.as_str()))
+        })
+        .cloned()
+        .collect()
 }
 
 /// Load the human-owned boundary policy. A missing file is **fully closed**
@@ -196,6 +284,41 @@ mod tests {
         let mut b = Boundary::closed();
         b.allow_mesh = true;
         assert!(!b.is_closed());
+    }
+
+    #[test]
+    fn agent_gate_defaults_closed() {
+        assert!(!Boundary::closed().allow_agent);
+        let mut b = Boundary::closed();
+        b.allow_agent = true;
+        assert!(!b.is_closed());
+    }
+
+    #[test]
+    fn scoped_boundary_is_a_true_intersection() {
+        // A generously-open boundary.
+        let mut b = Boundary::closed();
+        b.allow_network = true;
+        b.allow_execute = true;
+        b.allow_camera = true;
+        b.fs_read = vec!["/Users/ian/".into()];
+        // A network specialist's scope: network + execute, one narrower read path. No camera.
+        let mut scope = CapabilityScope::none();
+        scope.network = true;
+        scope.execute = true;
+        scope.fs_read = vec!["/Users/ian/Development/".into()]; // within the grant
+        scope.fs_write = vec!["/etc/".into()]; // NOT granted → dropped
+
+        let eff = scoped_boundary(&b, &scope);
+        assert!(eff.allow_network && eff.allow_execute);
+        assert!(!eff.allow_camera, "scope withholds camera even though boundary allows it");
+        assert!(!eff.allow_agent, "a scoped agent cannot itself spawn agents");
+        assert_eq!(eff.fs_read, vec!["/Users/ian/Development/".to_string()]);
+        assert!(eff.fs_write.is_empty(), "a path the boundary never granted is not added");
+
+        // And a scope can't exceed a closed boundary: everything off in → everything off out.
+        let eff2 = scoped_boundary(&Boundary::closed(), &scope);
+        assert!(eff2.is_closed());
     }
 
     #[test]

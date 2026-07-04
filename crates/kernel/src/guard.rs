@@ -56,6 +56,10 @@ pub enum ActionKind {
     /// on the tailnet is perception and not weighed here — only *exchanging* is. An
     /// identity-bearing share carries `affects_person = true`, routing it through consent.
     Mesh,
+    /// Delegate a task to a multi-step agent (the agentic seam). Gated by `allow_agent`; a
+    /// sharper reach than a one-shot `Llm` consult because the agent runs a loop. Every action
+    /// the agent then proposes is itself weighed here against the agent's *scoped* boundary.
+    Agent,
 }
 
 /// The guard's outcome.
@@ -217,6 +221,7 @@ pub fn evaluate(action: &Action, boundary: &Boundary) -> Verdict {
         ExecuteArtifact => bool_scope(boundary.allow_execute),
         Camera => bool_scope(boundary.allow_camera),
         Mesh => bool_scope(boundary.allow_mesh),
+        Agent => bool_scope(boundary.allow_agent),
     };
 
     if matches!(scope, Scope::Out) {
@@ -315,6 +320,7 @@ mod tests {
             allow_authored_execute: false,
             allow_camera: false,
             allow_mesh: false,
+            allow_agent: false,
             sandbox_execution: true,
             fs_read: vec!["/Users/ian/".into()],
             fs_write: vec!["/Users/ian/Development/familiar/familiar_data/".into()],
@@ -331,6 +337,7 @@ mod tests {
             ActionKind::ExecuteArtifact,
             ActionKind::Camera,
             ActionKind::Mesh,
+            ActionKind::Agent,
             ActionKind::ReadFile,
             ActionKind::WriteFile,
         ] {
@@ -439,6 +446,20 @@ mod tests {
         let mut pii = Action::new(ActionKind::Mesh, "identity:betty");
         pii.affects_person = true;
         assert_eq!(evaluate(&pii, &b).decision, Decision::SeekConsent);
+    }
+
+    #[test]
+    fn delegating_to_an_agent_is_refused_until_opened() {
+        // An agent is reach the human must open — closed by default even with the LLM open.
+        let v = evaluate(&Action::new(ActionKind::Agent, "network-scan"), &open_llm());
+        assert_eq!(v.decision, Decision::Refuse);
+        assert_eq!(v.reason, Reason::ViolatesConstitutionalBoundary);
+        let mut b = open_llm();
+        b.allow_agent = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::Agent, "network-scan"), &b).decision,
+            Decision::Allow
+        );
     }
 
     #[test]

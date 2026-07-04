@@ -27,6 +27,7 @@ pub mod presence;
 pub mod question;
 pub mod regression_guard;
 pub mod request;
+pub mod review;
 pub mod score;
 pub mod selection;
 pub mod service;

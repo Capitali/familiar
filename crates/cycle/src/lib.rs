@@ -46,6 +46,7 @@ use familiar_kernel::service;
 use familiar_kernel::thread::{self, Thread};
 use familiar_kernel::tool::{self, Tool};
 use familiar_kernel::trial::{self, Trial};
+use familiar_kernel::review::review_script;
 use familiar_kernel::{mutation, pattern_memory, regression_guard, selection};
 use familiar_sense as sense;
 use familiar_vision as vision;
@@ -1220,67 +1221,6 @@ fn author_artifact(dir: &Path, c: &Candidate, authored: bool) -> io::Result<Path
     };
     fs::write(&path, script)?;
     Ok(path)
-}
-
-/// Read an authored script *before running it* and refuse plainly constitution-breaking
-/// actions — the pre-execution review that makes "the Three Laws bind it" mechanically
-/// real, even unsandboxed. Deliberately conservative and heuristic: it cannot catch every
-/// hostile script (that honesty is in docs/boundaries.md), but it stops the obvious ways a
-/// hallucinated or injected artifact would harm the served or the host. Returns the reason
-/// to refuse, or None to allow.
-fn review_script(script: &str) -> Option<&'static str> {
-    let s = script.to_lowercase();
-    let has = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
-    if has(&[
-        "rm -rf /",
-        "rm -rf ~",
-        "rm -rf $home",
-        "rm -fr /",
-        "mkfs",
-        "dd if=/dev/zero of=/dev",
-        ":(){",
-        "shutdown ",
-        "reboot",
-        "> /dev/sda",
-    ]) {
-        Some("it would destroy data or the host")
-    } else if has(&[
-        "/.ssh/",
-        "id_rsa",
-        "id_ed25519",
-        "/etc/shadow",
-        ".env",
-        "keychain",
-        "login.keychain",
-        "/etc/passwd",
-    ]) {
-        Some("it would read secrets or credentials")
-    } else if has(&["curl", "wget", "nc ", "ncat", "scp ", "telnet "])
-        && has(&[
-            "-d @",
-            "--data",
-            "--upload",
-            "/.ssh",
-            "address_book",
-            "contacts",
-            "passwords",
-            "$(cat",
-            "`cat",
-            "base64",
-        ])
-    {
-        Some("it would transmit local data outward (exfiltration)")
-    } else if has(&[
-        "sudo ",
-        "chmod 777 /",
-        "chown root",
-        "launchctl unload",
-        "boundary.json",
-    ]) {
-        Some("it would escalate privilege or tamper with its own boundary")
-    } else {
-        None
-    }
 }
 
 /// Build a trial from a run: fit from clean exit, complexity from measured cost,
