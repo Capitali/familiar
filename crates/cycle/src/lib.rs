@@ -69,6 +69,11 @@ const CAPTURE_INTERVAL_SECS: i64 = 60;
 /// generation 320). With gen-0 candidates created only for uncovered loops, this caps the
 /// total candidate population to roughly `loops × MAX_MUTATION_GENERATION`.
 const MAX_MUTATION_GENERATION: i32 = 6;
+/// The fastest the familiar will theorize even when novelty is high — a floor that keeps
+/// heads-down musing from crowding out presence (Law II). Five minutes: frequent enough to
+/// turn a burst of new grounding into work promptly, bounded enough not to churn or overspend
+/// the LLM. See `theorize_due`.
+const THEORIZE_FLOOR_SECS: i64 = 300;
 
 /// FNV-1a (64-bit) — the same family the kernel uses for loop ids. Deterministic,
 /// dependency-free; we only need a stable digest, not cryptographic strength.
@@ -227,16 +232,35 @@ fn last_theory_at(dir: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// Should the factory pause to form a question + theory this tick? Yes when the cadence
-/// window (a tunable [`Parameters::theorize_every_secs`], default hourly) has elapsed,
-/// **or** when the human has spoken since the last theory — *fresh observer input*. The
-/// second clause is what makes the familiar respond: answering in the Glass records an
-/// `observer`-sourced observation, so the very next tick it forms a fresh question
-/// grounded in that answer, instead of an hour of silence.
+/// Should the factory pause to form a question + theory this tick?
+///
+/// **Adaptive / novelty-gated** — it muses *more often when there is fresh grounding* and
+/// *rests when the world is static*, the same philosophy as the tick cadence. This spends
+/// idle capacity where it compounds (new facts → new candidates, tools, knowledge worth
+/// building) and conserves it where more theories would only paraphrase the last (busywork,
+/// LLM cost). Three ways to be due:
+/// - **Fresh observer input** since the last theory → muse now (the familiar *responds*;
+///   answering in the Glass records an `observer` observation, so the next tick theorizes on
+///   it rather than sitting silent).
+/// - **Novelty** since the last theory — sensing is deduped, so a genuinely-new observation
+///   means the world actually changed. The wait scales *down* with how much is new (more to
+///   muse on → sooner), floored so the familiar stays present (Law II).
+/// - Otherwise the full **rest** cadence ([`Parameters::theorize_every_secs`]) — a stable
+///   world with nothing new gets the quiet it deserves.
 fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool {
     let last = last_theory_at(dir);
-    let every = Parameters::load_or_default(dir).sane().theorize_every_secs;
-    now - last >= every || obs.iter().any(|o| o.source == "observer" && o.ts > last)
+    let base = Parameters::load_or_default(dir).sane().theorize_every_secs;
+    // Fresh human input is always worth responding to — muse next tick.
+    if obs.iter().any(|o| o.source == "observer" && o.ts > last) {
+        return true;
+    }
+    // Novelty = genuinely-new facts the world has shown us since we last mused (deduped
+    // sensing). More novelty → a shorter wait, but never faster than the presence floor and
+    // never slower than the human-set rest cadence.
+    let novel = obs.iter().filter(|o| o.ts > last).count() as i64;
+    let floor = THEORIZE_FLOOR_SECS.max(base / 6);
+    let interval = (base / (1 + novel)).max(floor).min(base);
+    now - last >= interval
 }
 
 /// The familiar's standing name-ask. It does not assume a name; when it doesn't know who
@@ -1777,6 +1801,32 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn theorizing_is_novelty_gated() {
+        let t = Temp::new("theorize_novelty");
+        let mut p = familiar_kernel::parameters::Parameters::load_or_default(&t.0);
+        p.theorize_every_secs = 1800; // 30-min rest cadence
+        p.save(&t.0).unwrap();
+        fs::write(t.0.join(LAST_THEORY_FILE), "1000").unwrap();
+
+        // 400s since the last theory: below the 30-min rest window either way.
+        let novel: Vec<observation::Observation> = (0..10)
+            .map(|i| {
+                observation::Observation::new("host", "reports", format!("x{i}"), "", "sensor", 1100, 1.0)
+            })
+            .collect();
+        let empty: Vec<observation::Observation> = Vec::new();
+        // fresh grounding → the interval shrinks to the floor → due now
+        assert!(theorize_due(&t.0, 1400, &novel));
+        // a static world → the full rest cadence → not yet due
+        assert!(!theorize_due(&t.0, 1400, &empty));
+        // fresh observer input is always due, even seconds later
+        let said = vec![observation::Observation::new(
+            "ian", "needs", "hello", "", "observer", 1390, 1.0,
+        )];
+        assert!(theorize_due(&t.0, 1395, &said));
+    }
 
     #[test]
     fn broken_output_is_detected_even_on_clean_exit() {
