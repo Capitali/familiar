@@ -863,11 +863,16 @@ fn cmd_run(args: &[String]) -> ExitCode {
         }
     }
 
+    // A bounded run federates too — same self-gating transport as the daemon (idle unless
+    // the human opened allow_mesh and enrolled a group), wound down cleanly at the end.
+    // Without this, a headless `run --ticks N` silently skipped the mesh.
+    let mesh = familiar_mesh::transport::spawn(dir.clone());
     for n in 1..=ticks {
         match familiar_cycle::tick_gated(&dir, now_secs()) {
             Ok(r) => print_tick(n, &r),
             Err(e) => {
                 eprintln!("run: {e}");
+                mesh.shutdown();
                 return ExitCode::FAILURE;
             }
         }
@@ -875,6 +880,7 @@ fn cmd_run(args: &[String]) -> ExitCode {
             std::thread::sleep(std::time::Duration::from_secs(interval));
         }
     }
+    mesh.shutdown();
     ExitCode::SUCCESS
 }
 
