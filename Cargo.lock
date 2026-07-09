@@ -1242,6 +1242,7 @@ dependencies = [
  "familiar-llm",
  "familiar-mesh",
  "familiar-sense",
+ "serde_json",
 ]
 
 [[package]]

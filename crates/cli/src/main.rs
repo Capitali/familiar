@@ -48,6 +48,10 @@ commands:
                  (auditability); `db import` folds any legacy .jsonl into the DB
   agent          delegate a task to the boundary-mediated agentic loop:
                  `agent run <task…> [--steps N]` (refused unless the Pact opens it)
+  mesh           federate with peer familiars (headless mirror of the Glass wizard):
+                 `mesh create-group [--label L]` | `mesh join --key K [--label L]`
+                 | `mesh key` (print the join key — it IS the group secret)
+                 | `mesh peer <ip[:port]>` (add a static peer) | `mesh status`
 
 options:
   --data-dir <dir>   data directory (default: familiar_data)
@@ -85,6 +89,7 @@ fn main() -> ExitCode {
         Some("consult") => cmd_consult(rest),
         Some("db") => cmd_db(rest),
         Some("agent") => cmd_agent(rest),
+        Some("mesh") => cmd_mesh(rest),
         Some(cmd) => {
             eprintln!("familiar: unknown command '{cmd}'\n\n{USAGE}");
             ExitCode::FAILURE
@@ -218,6 +223,224 @@ fn cmd_agent(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `mesh …` — headless enrollment + inspection, mirroring the Glass Mesh wizard
+/// (docs/TODO-linux.md: a headless node has no GUI, so the CLI is the human's instrument
+/// there). Enrolling opens the `allow_mesh` gate — a human act, performed here by the human
+/// invoking the command; the kernel still has no boundary-write path.
+fn cmd_mesh(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        Some("create-group") => {
+            let label = f.get("label").cloned().unwrap_or_else(|| "familiar-group".to_string());
+            let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &machine_label()) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("mesh: could not mint a node key — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match familiar_mesh::group::create_group(
+                &dir,
+                &node,
+                &label,
+                now_secs(),
+                familiar_mesh::group::DEFAULT_CERT_TTL_SECS,
+            ) {
+                Ok(cred) => {
+                    open_mesh_gate(&dir);
+                    println!("✓ group “{label}” created · id {}", short_id(&cred.group_id));
+                    println!("join key (the group secret — share only on a trusted channel):");
+                    println!("{}", cred.join_key());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not create the group — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("join") => {
+            let Some(key) = f.get("key") else {
+                eprintln!("mesh: usage: familiar mesh join --key <join-key> [--label L]");
+                return ExitCode::FAILURE;
+            };
+            let label = f.get("label").cloned().unwrap_or_else(|| "familiar-group".to_string());
+            let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &machine_label()) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("mesh: could not mint a node key — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match familiar_mesh::group::join_group(
+                &dir,
+                &node,
+                key.trim(),
+                &label,
+                now_secs(),
+                familiar_mesh::group::DEFAULT_CERT_TTL_SECS,
+            ) {
+                Ok(cred) => {
+                    open_mesh_gate(&dir);
+                    println!(
+                        "✓ joined “{}” · id {} — the transport will connect on its next cycle",
+                        cred.label,
+                        short_id(&cred.group_id)
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not join — check the key ({e})");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("key") => match familiar_mesh::group::load(&dir) {
+            Ok(Some(cred)) => {
+                println!("{}", cred.join_key());
+                ExitCode::SUCCESS
+            }
+            Ok(None) => {
+                eprintln!("mesh: not in a group — `mesh create-group` or `mesh join` first");
+                ExitCode::FAILURE
+            }
+            Err(e) => {
+                eprintln!("mesh: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("peer") => {
+            // everything after "peer" that isn't a --flag is the address
+            let Some(addr) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh peer <ip[:port]>");
+                return ExitCode::FAILURE;
+            };
+            let mut cfg = match familiar_mesh::config::load(&dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("mesh: bad mesh/config.json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if cfg.static_peers.iter().any(|p| p == addr) {
+                println!("already a static peer: {addr}");
+                return ExitCode::SUCCESS;
+            }
+            cfg.static_peers.push(addr.clone());
+            match write_mesh_config(&dir, &cfg) {
+                Ok(()) => {
+                    println!("✓ static peer added: {addr} (gossip port {})", cfg.gossip_port);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not write mesh/config.json — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("status") => {
+            let b = boundary::load(&dir).unwrap_or_else(|_| boundary::Boundary::closed());
+            match familiar_mesh::group::load(&dir) {
+                Ok(Some(cred)) => println!(
+                    "group   “{}” · id {} · node {}",
+                    cred.label,
+                    short_id(&cred.group_id),
+                    short_id(&cred.membership.node_id)
+                ),
+                Ok(None) => println!("group   (none — `mesh create-group` or `mesh join`)"),
+                Err(e) => println!("group   (unreadable: {e})"),
+            }
+            println!("gate    allow_mesh = {}", b.allow_mesh);
+            if let Ok(cfg) = familiar_mesh::config::load(&dir) {
+                println!(
+                    "config  port {} · every {}s · tools {} · knowledge {} · identities {}",
+                    cfg.gossip_port,
+                    cfg.gossip_interval_secs,
+                    cfg.share_tools,
+                    cfg.share_knowledge,
+                    cfg.share_identities
+                );
+                if !cfg.static_peers.is_empty() {
+                    println!("static  {}", cfg.static_peers.join(", "));
+                }
+            }
+            if let Ok(s) = std::fs::read_to_string(dir.join(familiar_mesh::transport::STATUS_FILE)) {
+                println!("last    {}", s.trim());
+            }
+            match std::fs::read_to_string(dir.join(familiar_mesh::transport::PEERS_FILE))
+                .ok()
+                .and_then(|s| {
+                    serde_json::from_str::<Vec<familiar_mesh::transport::PeerRecord>>(&s).ok()
+                }) {
+                Some(peers) if !peers.is_empty() => {
+                    let now = now_secs();
+                    for p in peers {
+                        println!(
+                            "peer    “{}” {} @ {} · seen {}s ago · offers {} tool(s), {} pattern(s)",
+                            p.label,
+                            short_id(&p.node_id),
+                            p.addr,
+                            (now - p.last_seen).max(0),
+                            p.tools_offered,
+                            p.patterns_offered
+                        );
+                    }
+                }
+                _ => println!("peers   (none seen yet)"),
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!(
+                "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
+                 | key | peer <ip[:port]> | status>"
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Open the `allow_mesh` gate — a human act, through the human's instrument (this CLI,
+/// invoked by the human). Preserves every other grant; never silently widens. Mirrors
+/// Glass's `open_mesh_gate`.
+fn open_mesh_gate(dir: &std::path::Path) {
+    let mut b = boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed());
+    b.allow_mesh = true;
+    if b.phase == "closed" {
+        b.phase = "phase-1".to_string();
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&b) {
+        let _ = std::fs::write(dir.join("boundary.json"), json);
+    }
+}
+
+fn write_mesh_config(
+    dir: &std::path::Path,
+    cfg: &familiar_mesh::config::MeshConfig,
+) -> std::io::Result<()> {
+    let mesh = dir.join("mesh");
+    std::fs::create_dir_all(&mesh)?;
+    let json = serde_json::to_string_pretty(cfg)?;
+    std::fs::write(mesh.join("config.json"), json)
+}
+
+/// This machine's human-recognizable name (what peers see in `mesh status`).
+fn machine_label() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "familiar".to_string())
+}
+
+/// First 8 chars of an id — enough to recognize, short enough to read.
+fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 fn cmd_observe(args: &[String]) -> ExitCode {
