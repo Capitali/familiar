@@ -51,7 +51,9 @@ commands:
   mesh           federate with peer familiars (headless mirror of the Glass wizard):
                  `mesh create-group [--label L]` | `mesh join --key K [--label L]`
                  | `mesh key` (print the join key — it IS the group secret)
-                 | `mesh peer <ip[:port]>` (add a static peer) | `mesh status`
+                 | `mesh peer <ip[:port]>` (add a static peer)
+                 | `mesh share <tools|knowledge|identities> <on|off>`
+                 | `mesh optin <handle>` (per-human, per-group consent) | `mesh status`
 
 options:
   --data-dir <dir>   data directory (default: familiar_data)
@@ -341,6 +343,104 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("share") => {
+            // `mesh share <tools|knowledge|identities> <on|off>` — the sharing switches,
+            // headless. `identities` is the master switch; nothing about a human crosses
+            // until a handle is also opted in (`mesh optin`).
+            let (Some(what), Some(setting)) = (args.get(1), args.get(2)) else {
+                eprintln!("mesh: usage: familiar mesh share <tools|knowledge|identities> <on|off>");
+                return ExitCode::FAILURE;
+            };
+            let on = match setting.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => {
+                    eprintln!("mesh: setting must be `on` or `off`");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut cfg = match familiar_mesh::config::load(&dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("mesh: bad mesh/config.json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match what.as_str() {
+                "tools" => cfg.share_tools = on,
+                "knowledge" => cfg.share_knowledge = on,
+                "identities" => cfg.share_identities = on,
+                _ => {
+                    eprintln!("mesh: unknown switch '{what}' — tools|knowledge|identities");
+                    return ExitCode::FAILURE;
+                }
+            }
+            match write_mesh_config(&dir, &cfg) {
+                Ok(()) => {
+                    println!("✓ share {what} = {setting}");
+                    if what == "identities" && on && cfg.identity_optin.is_empty() {
+                        println!("  (master switch only — no handle is opted in yet; `mesh optin <handle>`)");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not write mesh/config.json — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("optin") => {
+            // `mesh optin <handle>` — opt one human into sharing with the *current* group.
+            // Explicit per-human, per-group consent; requires enrollment first so the scope
+            // of what's being consented to is concrete.
+            let Some(handle) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh optin <handle>");
+                return ExitCode::FAILURE;
+            };
+            let cred = match familiar_mesh::group::load(&dir) {
+                Ok(Some(c)) => c,
+                Ok(None) => {
+                    eprintln!("mesh: not in a group — join one first so the opt-in has a scope");
+                    return ExitCode::FAILURE;
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut cfg = match familiar_mesh::config::load(&dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("mesh: bad mesh/config.json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if cfg
+                .identity_optin
+                .iter()
+                .any(|o| o.handle == *handle && o.group == cred.group_id)
+            {
+                println!("already opted in: {handle} → group {}", short_id(&cred.group_id));
+                return ExitCode::SUCCESS;
+            }
+            cfg.identity_optin.push(familiar_mesh::config::IdentityOptin {
+                handle: handle.clone(),
+                group: cred.group_id.clone(),
+            });
+            match write_mesh_config(&dir, &cfg) {
+                Ok(()) => {
+                    println!("✓ opted in: {handle} → group {}", short_id(&cred.group_id));
+                    if !cfg.share_identities {
+                        println!("  (identities master switch is off — `mesh share identities on` to activate)");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not write mesh/config.json — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("status") => {
             let b = boundary::load(&dir).unwrap_or_else(|_| boundary::Boundary::closed());
             match familiar_mesh::group::load(&dir) {
@@ -365,6 +465,9 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 );
                 if !cfg.static_peers.is_empty() {
                     println!("static  {}", cfg.static_peers.join(", "));
+                }
+                for o in &cfg.identity_optin {
+                    println!("optin   {} → group {}", o.handle, short_id(&o.group));
                 }
             }
             if let Ok(s) = std::fs::read_to_string(dir.join(familiar_mesh::transport::STATUS_FILE)) {
@@ -396,7 +499,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
         _ => {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
-                 | key | peer <ip[:port]> | status>"
+                 | key | peer <ip[:port]> | share <tools|knowledge|identities> <on|off> \
+                 | optin <handle> | status>"
             );
             ExitCode::FAILURE
         }
