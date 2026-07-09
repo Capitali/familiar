@@ -140,6 +140,23 @@ impl Default for CapabilityScope {
 }
 
 impl CapabilityScope {
+    /// A scope mirroring a boundary — an ad-hoc agent trusted with the *full* current
+    /// boundary (no extra narrowing). `scoped_boundary(b, from_boundary(b))` ≈ `b` (minus
+    /// `allow_agent`, which a scoped agent never gets). Used by the ad-hoc `agent run`; named
+    /// specialists carry their own narrower scopes.
+    pub fn from_boundary(b: &Boundary) -> Self {
+        CapabilityScope {
+            network: b.allow_network,
+            execute: b.allow_execute,
+            authored_execute: b.allow_authored_execute,
+            tool_install: b.allow_tool_install,
+            camera: b.allow_camera,
+            mesh: b.allow_mesh,
+            fs_read: b.fs_read.clone(),
+            fs_write: b.fs_write.clone(),
+        }
+    }
+
     /// The fail-closed scope: no reach at all.
     pub fn none() -> Self {
         CapabilityScope {

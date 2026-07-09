@@ -44,6 +44,17 @@ impl Limits {
             output_cap: 65_536,
         }
     }
+
+    /// Limits for a **delegated agent step** — still sandboxed, but generous enough for a real
+    /// task to finish (a network scan, a build probe) where the tick's tight candidate-scoring
+    /// budget (5s/10s) would only ever time out. Bounded so a step still can't run away.
+    pub fn agent_task() -> Self {
+        Limits {
+            cpu_secs: 45,
+            wall_secs: 90,
+            output_cap: 32_768,
+        }
+    }
 }
 
 /// The measured outcome of a run.

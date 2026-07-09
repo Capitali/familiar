@@ -46,6 +46,8 @@ commands:
   consult        consult the LLM (refused unless a human has opened the Pact)
   db             storage: `db export [--out DIR]` dumps every table to JSONL
                  (auditability); `db import` folds any legacy .jsonl into the DB
+  agent          delegate a task to the boundary-mediated agentic loop:
+                 `agent run <task…> [--steps N]` (refused unless the Pact opens it)
 
 options:
   --data-dir <dir>   data directory (default: familiar_data)
@@ -82,6 +84,7 @@ fn main() -> ExitCode {
         Some("guard") => cmd_guard(rest),
         Some("consult") => cmd_consult(rest),
         Some("db") => cmd_db(rest),
+        Some("agent") => cmd_agent(rest),
         Some(cmd) => {
             eprintln!("familiar: unknown command '{cmd}'\n\n{USAGE}");
             ExitCode::FAILURE
@@ -159,6 +162,59 @@ fn cmd_db(args: &[String]) -> ExitCode {
         }
         _ => {
             eprintln!("db: usage: familiar db export [--out DIR] | familiar db import");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `agent run <task…>` — delegate a task to the native agentic loop, scoped to the full
+/// current boundary. Prints the agent's answer. (Named specialists + selection come later; this
+/// is the ad-hoc entry, and the way to see the multi-step loop work.)
+fn cmd_agent(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        Some("run") => {
+            // everything after "run" that isn't a --flag is the task text
+            let task: String = args[1..]
+                .iter()
+                .take_while(|a| !a.starts_with("--"))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
+            if task.trim().is_empty() {
+                eprintln!("agent: usage: familiar agent run <task…>");
+                return ExitCode::FAILURE;
+            }
+            let budget: u32 = f.get("steps").and_then(|s| s.parse().ok()).unwrap_or(8);
+            let scope = match boundary::load(&dir) {
+                Ok(b) => familiar_kernel::boundary::CapabilityScope::from_boundary(&b),
+                Err(_) => familiar_kernel::boundary::CapabilityScope::none(),
+            };
+            match familiar_agent::run_agent(&dir, &scope, &task, budget, now_secs()) {
+                Ok(Some(r)) => {
+                    println!("[{} step(s)] {:?}", r.steps, r.confidence);
+                    if !r.evidence.is_empty() {
+                        println!("· {}", r.evidence);
+                    }
+                    println!("{}", r.body);
+                    ExitCode::SUCCESS
+                }
+                Ok(None) => {
+                    eprintln!(
+                        "agent: delegation not available — open `allow_agent` in the boundary \
+                         and connect an LLM (the loop fell back)."
+                    );
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("agent: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            eprintln!("agent: usage: familiar agent run <task…> [--steps N]");
             ExitCode::FAILURE
         }
     }

@@ -15,3 +15,4 @@ familiar-sense.workspace = true
 familiar-cycle.workspace = true
 familiar-llm.workspace = true
 familiar-mesh.workspace = true
+familiar-agent.workspace = true
