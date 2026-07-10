@@ -178,7 +178,10 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
             match TcpListener::bind(("0.0.0.0", cfg.gossip_port)).await {
                 Ok(listener) => {
                     bound_port = cfg.gossip_port;
-                    let ctx = Arc::new(ServerCtx { dir: dir.clone() });
+                    let ctx = Arc::new(ServerCtx {
+                        dir: dir.clone(),
+                        seen: std::sync::Mutex::new(crate::observe::NonceRing::default()),
+                    });
                     server = Some(tokio::spawn(serve(listener, ctx)));
                 }
                 Err(e) => {
@@ -221,6 +224,9 @@ async fn sleep_or_stop(stop: &Arc<AtomicBool>, dur: Duration) {
 
 struct ServerCtx {
     dir: PathBuf,
+    /// Anti-replay memory for `/mesh/observe`, shared across connections. In-process only —
+    /// a restart forgets, but the `ts` window bounds a replay to the same short window anyway.
+    seen: std::sync::Mutex<crate::observe::NonceRing>,
 }
 
 async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>) {
@@ -263,6 +269,20 @@ async fn handle(
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
             recv_brief(&dir, &bytes)
+        }
+        (Method::POST, "/mesh/observe") => {
+            // The signature covers the raw body, so grab the header before the body is consumed.
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_observe(&dir, &bytes, &sig, &ctx.seen)
         }
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
@@ -330,6 +350,23 @@ pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8]) -> Result<()> {
     )?;
     upsert_peer(dir, &brief, "")?;
     Ok(())
+}
+
+/// `POST /mesh/observe` → verify a device's signed observation batch and, if trusted + fresh,
+/// append it to the store. `sig` is the `X-Familiar-Sig` header (ed25519 over the raw body).
+/// 200 + count on success; 409 on a replayed nonce; 403 if untrusted; 400 if malformed.
+fn recv_observe(
+    dir: &Path,
+    bytes: &[u8],
+    sig: &str,
+    ring: &std::sync::Mutex<crate::observe::NonceRing>,
+) -> Response<Full<Bytes>> {
+    match crate::observe::ingest_observations(dir, bytes, sig, now_secs(), ring) {
+        Ok(n) => text(StatusCode::OK, format!("recorded {n}")),
+        Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "bad batch"),
+    }
 }
 
 /// `GET /mesh/tool/{id}` → the raw script body, if we have that tool and sharing is on.

@@ -33,9 +33,11 @@ pub mod config;
 pub mod group;
 pub mod merge;
 pub mod node;
+pub mod observe;
 pub mod transport;
 
 pub use merge::{federate, MergeReport};
+pub use observe::{ObsRecord, ObserveEnvelope};
 
 use sha2::{Digest, Sha256};
 use std::fmt;

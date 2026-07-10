@@ -53,6 +53,7 @@ commands:
                  | `mesh key` (print the join key — it IS the group secret)
                  | `mesh peer <ip[:port]>` (add a static peer)
                  | `mesh share <tools|knowledge|identities> <on|off>`
+                 | `mesh accept-observations <on|off>` (device agents) | `mesh qr` (enroll a device)
                  | `mesh optin <handle>` (per-human, per-group consent) | `mesh status`
 
 options:
@@ -314,6 +315,53 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("qr") => {
+            // `mesh qr [--host H] [--port P]` — the device-enrollment payload: the group secret
+            // (which IS membership — show only on a trusted screen), plus where to reach this
+            // familiar. Rendered as a scannable terminal QR if `qrencode` is installed (a common
+            // CLI), else printed for manual entry. The payload doubles as paste-in JSON.
+            let cred = match familiar_mesh::group::load(&dir) {
+                Ok(Some(c)) => c,
+                Ok(None) => {
+                    eprintln!("mesh: not in a group — `mesh create-group` or `mesh join` first");
+                    return ExitCode::FAILURE;
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let port = f
+                .get("port")
+                .and_then(|p| p.parse::<u16>().ok())
+                .unwrap_or_else(|| familiar_mesh::config::load(&dir).map(|c| c.gossip_port).unwrap_or(47_100));
+            let host = f.get("host").cloned().unwrap_or_else(tailnet_ip_or_hint);
+            // Compact JSON — the phone parses this after scanning or pasting.
+            let payload = serde_json::json!({
+                "v": 1,
+                "secret": cred.join_key(),
+                "group": cred.group_id,
+                "label": cred.label,
+                "host": host,
+                "port": port,
+            })
+            .to_string();
+            println!("enrollment payload (contains the group secret — trusted screen only):");
+            println!("{payload}");
+            if !render_qr(&payload) {
+                println!(
+                    "\n(install `qrencode` to show a scannable QR — `brew install qrencode`; \
+                     until then paste the payload into the device app)"
+                );
+            }
+            if host_is_placeholder(&host) {
+                println!(
+                    "note: could not detect a reachable address — pass `--host <tailscale-or-lan-ip>` \
+                     so the device knows where to reach this familiar."
+                );
+            }
+            ExitCode::SUCCESS
+        }
         Some("peer") => {
             // everything after "peer" that isn't a --flag is the address
             let Some(addr) = args.get(1).filter(|a| !a.starts_with("--")) else {
@@ -389,6 +437,40 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("accept-observations") => {
+            // `mesh accept-observations <on|off>` — the device-ingestion switch. Separate from
+            // `allow_mesh`: federation can be on while device agents (iPhone/Watch) are refused.
+            let Some(setting) = args.get(1) else {
+                eprintln!("mesh: usage: familiar mesh accept-observations <on|off>");
+                return ExitCode::FAILURE;
+            };
+            let on = match setting.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => {
+                    eprintln!("mesh: setting must be `on` or `off`");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut cfg = match familiar_mesh::config::load(&dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("mesh: bad mesh/config.json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            cfg.accept_observations = on;
+            match write_mesh_config(&dir, &cfg) {
+                Ok(()) => {
+                    println!("✓ accept-observations = {setting}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not write mesh/config.json — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("optin") => {
             // `mesh optin <handle>` — opt one human into sharing with the *current* group.
             // Explicit per-human, per-group consent; requires enrollment first so the scope
@@ -456,12 +538,13 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             println!("gate    allow_mesh = {}", b.allow_mesh);
             if let Ok(cfg) = familiar_mesh::config::load(&dir) {
                 println!(
-                    "config  port {} · every {}s · tools {} · knowledge {} · identities {}",
+                    "config  port {} · every {}s · tools {} · knowledge {} · identities {} · accept-obs {}",
                     cfg.gossip_port,
                     cfg.gossip_interval_secs,
                     cfg.share_tools,
                     cfg.share_knowledge,
-                    cfg.share_identities
+                    cfg.share_identities,
+                    cfg.accept_observations
                 );
                 if !cfg.static_peers.is_empty() {
                     println!("static  {}", cfg.static_peers.join(", "));
@@ -499,8 +582,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
         _ => {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
-                 | key | peer <ip[:port]> | share <tools|knowledge|identities> <on|off> \
-                 | optin <handle> | status>"
+                 | key | qr | peer <ip[:port]> | share <tools|knowledge|identities> <on|off> \
+                 | accept-observations <on|off> | optin <handle> | status>"
             );
             ExitCode::FAILURE
         }
@@ -545,6 +628,52 @@ fn machine_label() -> String {
 /// First 8 chars of an id — enough to recognize, short enough to read.
 fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
+}
+
+/// The placeholder used when no reachable address can be detected — a signal (not a real host)
+/// so the caller can nudge the human to pass `--host`.
+const HOST_PLACEHOLDER: &str = "<this-familiar>";
+
+fn host_is_placeholder(host: &str) -> bool {
+    host == HOST_PLACEHOLDER
+}
+
+/// This familiar's tailnet IPv4 (via `tailscale ip -4`), so a device can reach it off-LAN. Falls
+/// back to a placeholder the caller flags — the mesh already shells out to tailscale for peers.
+fn tailnet_ip_or_hint() -> String {
+    std::process::Command::new("tailscale")
+        .args(["ip", "-4"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| HOST_PLACEHOLDER.to_string())
+}
+
+/// Render `payload` as a scannable terminal QR via `qrencode` if it's installed. Returns whether
+/// a QR was drawn — dependency-free (optional external tool), matching how the mesh shells out to
+/// `tailscale` rather than pulling in a crate.
+fn render_qr(payload: &str) -> bool {
+    use std::io::Write;
+    let Ok(mut child) = std::process::Command::new("qrencode")
+        .args(["-t", "ANSIUTF8", "-m", "1"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::inherit())
+        .spawn()
+    else {
+        return false;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(payload.as_bytes());
+    }
+    child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
 fn cmd_observe(args: &[String]) -> ExitCode {

@@ -41,6 +41,10 @@ pub struct MeshConfig {
     /// Useful for a two-instance test on one host, or explicit peering off-tailnet. Still
     /// fully signature/group-gated — a static peer earns no trust it can't prove.
     pub static_peers: Vec<String>,
+    /// Accept signed observation batches from device agents (iPhone/Watch) at `/mesh/observe`.
+    /// A separate human switch from `allow_mesh`: mesh federation can be on while device
+    /// ingestion is off. Every batch is still cert-verified and signature-checked regardless.
+    pub accept_observations: bool,
 }
 
 impl Default for MeshConfig {
@@ -53,6 +57,7 @@ impl Default for MeshConfig {
             share_identities: false,
             identity_optin: Vec::new(),
             static_peers: Vec::new(),
+            accept_observations: true,
         }
     }
 }
