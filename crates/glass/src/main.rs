@@ -1751,6 +1751,7 @@ impl Glass {
     fn dialog_panel(&mut self, ui: &mut egui::Ui) {
         let blue = egui::Color32::from_rgb(150, 200, 255);
         let warm = egui::Color32::from_rgb(232, 214, 170);
+        let now = now_secs();
 
         // Merge the four sources into one time-ordered transcript. Prefill for "refine" is
         // computed here (borrowing the snapshot freely) so the render closure captures no self.
@@ -1814,17 +1815,23 @@ impl Glass {
                     .auto_shrink([false, false])
                     .id_salt("dialog")
                     .show(ui, |ui| {
-                        for (_, turn) in turns {
+                        for (ts, turn) in turns {
+                            let ts = *ts;
                             match turn {
                                 Turn::FamiliarAsk(text) => {
+                                    timestamp_label(ui, now, ts);
                                     ui.label(egui::RichText::new(format!("🔮 {text}")).color(blue));
                                 }
                                 Turn::You(text) => {
+                                    timestamp_label(ui, now, ts);
                                     ui.label(egui::RichText::new(format!("you · {text}")).color(warm));
                                 }
                                 Turn::FamiliarAnswer(a, orig) => {
                                     ui.group(|ui| {
-                                        confidence_badge(ui, a.confidence);
+                                        ui.horizontal(|ui| {
+                                            confidence_badge(ui, a.confidence);
+                                            timestamp_label(ui, now, ts);
+                                        });
                                         if !a.evidence.is_empty() {
                                             ui.weak(format!("· {}", a.evidence));
                                         }
@@ -2464,16 +2471,100 @@ fn activity_feed(ui: &mut egui::Ui, ticks: &[ActivityTick], now: i64, active: &m
     });
 }
 
-/// A compact relative timestamp like `12s`, `5m`, `2h`.
+/// A compact relative timestamp like `12s`, `5m`, `2h`, `3d`.
 fn ago(now: i64, then: i64) -> String {
     let d = (now - then).max(0);
     if d < 90 {
         format!("{d}s")
     } else if d < 5400 {
         format!("{}m", d / 60)
-    } else {
+    } else if d < 86_400 {
         format!("{}h", d / 3600)
+    } else {
+        format!("{}d", d / 86_400)
     }
+}
+
+/// The local timezone offset from UTC in seconds, resolved once via `date +%z`. A mid-session
+/// DST change isn't tracked — fine for a wall-clock label, and dependency-free (no time crate).
+fn tz_offset_secs() -> i64 {
+    static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        std::process::Command::new("date")
+            .arg("+%z")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                let s = s.trim(); // "-0500" / "+0930"
+                if s.len() < 5 {
+                    return None;
+                }
+                let sign = if s.starts_with('-') { -1 } else { 1 };
+                let h: i64 = s.get(1..3)?.parse().ok()?;
+                let m: i64 = s.get(3..5)?.parse().ok()?;
+                Some(sign * (h * 3600 + m * 60))
+            })
+            .unwrap_or(0)
+    })
+}
+
+/// Civil date `(year, month 1-12, day 1-31)` from days since the Unix epoch. Howard Hinnant's
+/// `civil_from_days` — exact integer math, no calendar library.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (y + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// A local wall-clock label for `ts`: `2:34 PM`; `Jul 8, 2:34 PM` when it's not `now`'s day;
+/// `Jul 8 2025, 2:34 PM` when it's a different year. Local time resolved via `date +%z`.
+fn clock(now: i64, ts: i64) -> String {
+    clock_at(now, ts, tz_offset_secs())
+}
+
+/// The offset-parameterized core of [`clock`], so the calendar/format logic is testable
+/// without depending on the host timezone.
+fn clock_at(now: i64, ts: i64, off: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let local = ts + off;
+    let (day, sod) = (local.div_euclid(86_400), local.rem_euclid(86_400));
+    let (h24, min) = (sod / 3600, (sod % 3600) / 60);
+    let period = if h24 < 12 { "AM" } else { "PM" };
+    let h12 = match h24 % 12 {
+        0 => 12,
+        h => h,
+    };
+    let (ty, tm, td) = civil_from_days(day);
+    let (ny, _, _) = civil_from_days((now + off).div_euclid(86_400));
+    let hm = format!("{h12}:{min:02} {period}");
+    if day == (now + off).div_euclid(86_400) {
+        hm
+    } else if ty == ny {
+        format!("{} {}, {hm}", MONTHS[(tm - 1) as usize], td)
+    } else {
+        format!("{} {} {ty}, {hm}", MONTHS[(tm - 1) as usize], td)
+    }
+}
+
+/// The paired stamp shown on each message: absolute clock time plus a muted relative age,
+/// e.g. `2:34 PM · 3h`. Rendered small and weak so it frames a message without competing.
+fn timestamp_label(ui: &mut egui::Ui, now: i64, ts: i64) {
+    ui.label(
+        egui::RichText::new(format!("{} · {}", clock(now, ts), ago(now, ts)))
+            .small()
+            .weak(),
+    );
 }
 
 /// The familiar's theories and threads — its questions, interpretations, and the
@@ -2483,6 +2574,7 @@ fn threads_panel(ui: &mut egui::Ui, threads: &[Thread], active: &mut Option<Stri
         ui.weak("(no theories yet — they form as the familiar interprets what it observes)");
         return;
     }
+    let now = now_secs();
     scroll_region(ui, "threads", 220.0, active, |ui| {
         for t in threads.iter().rev().take(20) {
             let color = match t.status.as_str() {
@@ -2494,7 +2586,7 @@ fn threads_panel(ui: &mut egui::Ui, threads: &[Thread], active: &mut Option<Stri
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.colored_label(color, format!("[{}]", t.status));
-                    ui.weak(format!("{} · {}", t.id, t.origin));
+                    ui.weak(format!("{} · {} · {}", t.id, t.origin, clock(now, t.created_at)));
                 });
                 if !t.theory.is_empty() {
                     ui.label(format!("💭 {}", t.theory));
@@ -2519,6 +2611,7 @@ fn tools_panel(ui: &mut egui::Ui, tools: &[Tool], active: &mut Option<String>) {
         ui.weak("(no tools yet — the familiar saves a tool the first time it writes one to run something)");
         return;
     }
+    let now = now_secs();
     scroll_region(ui, "tools", 220.0, active, |ui| {
         for t in tools.iter().rev() {
             ui.group(|ui| {
@@ -2548,6 +2641,13 @@ fn tools_panel(ui: &mut egui::Ui, tools: &[Tool], active: &mut Option<String>) {
                 if !t.purpose.is_empty() {
                     ui.label(&t.purpose);
                 }
+                // When it was authored, and when it last ran — the efficiency dividend, dated.
+                let when = if t.last_used > 0 {
+                    format!("authored {} · last run {}", clock(now, t.created_at), clock(now, t.last_used))
+                } else {
+                    format!("authored {}", clock(now, t.created_at))
+                };
+                ui.label(egui::RichText::new(when).small().weak());
             });
         }
     });
@@ -2643,4 +2743,50 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(Glass::new(data_dir)))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn civil_from_days_matches_known_dates() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1)); // the epoch
+        assert_eq!(civil_from_days(10_957), (2000, 1, 1));
+        assert_eq!(civil_from_days(18_321), (2020, 2, 29)); // a leap day
+        assert_eq!(civil_from_days(19_546), (2023, 7, 8));
+    }
+
+    #[test]
+    fn clock_formats_time_and_dates_relative_to_now() {
+        // 2023-07-08 19:34:00 UTC. At offset 0, same-day vs `now` → time only, 12-hour.
+        let ts = 1_688_844_840;
+        let same_day_now = ts + 1_000; // still 2023-07-08
+        assert_eq!(clock_at(same_day_now, ts, 0), "7:34 PM");
+        // A `now` later the same year → month + day, no year.
+        let later_year = ts + 5 * 86_400; // 2023-07-13
+        assert_eq!(clock_at(later_year, ts, 0), "Jul 8, 7:34 PM");
+        // A `now` in a later year → include the year.
+        let next_year = ts + 400 * 86_400;
+        assert_eq!(clock_at(next_year, ts, 0), "Jul 8 2023, 7:34 PM");
+        // Offset shifts the wall clock (and can cross midnight): +5h30m → past midnight → Jul 9.
+        assert_eq!(clock_at(later_year, ts, 5 * 3600 + 1800), "Jul 9, 1:04 AM");
+    }
+
+    #[test]
+    fn clock_handles_midnight_and_noon_boundaries() {
+        // 2023-07-08 00:00:00 UTC → 12:00 AM; 12:00:00 UTC → 12:00 PM.
+        let midnight = 1_688_774_400;
+        assert_eq!(clock_at(midnight + 10, midnight, 0), "12:00 AM");
+        assert_eq!(clock_at(midnight + 10, midnight + 12 * 3600, 0), "12:00 PM");
+    }
+
+    #[test]
+    fn ago_scales_through_days() {
+        assert_eq!(ago(100, 100), "0s");
+        assert_eq!(ago(100 + 45, 100), "45s");
+        assert_eq!(ago(100 + 600, 100), "10m");
+        assert_eq!(ago(100 + 7200, 100), "2h");
+        assert_eq!(ago(100 + 3 * 86_400, 100), "3d");
+    }
 }
