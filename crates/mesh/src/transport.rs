@@ -180,7 +180,7 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                     bound_port = cfg.gossip_port;
                     let ctx = Arc::new(ServerCtx {
                         dir: dir.clone(),
-                        seen: std::sync::Mutex::new(crate::observe::NonceRing::default()),
+                        seen: std::sync::Mutex::new(crate::observe::IngestGuard::default()),
                     });
                     server = Some(tokio::spawn(serve(listener, ctx)));
                 }
@@ -226,7 +226,7 @@ struct ServerCtx {
     dir: PathBuf,
     /// Anti-replay memory for `/mesh/observe`, shared across connections. In-process only —
     /// a restart forgets, but the `ts` window bounds a replay to the same short window anyway.
-    seen: std::sync::Mutex<crate::observe::NonceRing>,
+    seen: std::sync::Mutex<crate::observe::IngestGuard>,
 }
 
 async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>) {
@@ -359,7 +359,7 @@ fn recv_observe(
     dir: &Path,
     bytes: &[u8],
     sig: &str,
-    ring: &std::sync::Mutex<crate::observe::NonceRing>,
+    ring: &std::sync::Mutex<crate::observe::IngestGuard>,
 ) -> Response<Full<Bytes>> {
     match crate::observe::ingest_observations(dir, bytes, sig, now_secs(), ring) {
         Ok(n) => text(StatusCode::OK, format!("recorded {n}")),

@@ -64,33 +64,52 @@ pub struct ObserveEnvelope {
     pub observations: Vec<ObsRecord>,
 }
 
-/// A bounded remember-set of recently-seen `(node_id, nonce)` pairs for anti-replay. Entries
-/// older than [`REPLAY_WINDOW_SECS`] are pruned on each check; within the window a repeat is
-/// rejected. Small and self-trimming — a device sends on change, not in a tight loop.
+/// A same-`(actor,action,object)` triple more often than this is dropped as noise. Derived
+/// observations are state-changes ("still" → "walking"); re-affirming an unchanged state every
+/// second carries no information and only floods the store. Transitions differ in `object`, so
+/// they always pass — only *identical* triples inside this window are suppressed.
+pub const DEBOUNCE_SECS: i64 = 60;
+
+/// The transport-held ingest state: anti-replay for `(node_id, nonce)` pairs, and a same-triple
+/// debounce so a chatty or buggy in-group device can't flood the observation store. Both are
+/// in-memory (reset on restart) and self-trimming — the `ts` window bounds their size.
 #[derive(Default)]
-pub struct NonceRing {
-    seen: VecDeque<(String, String, i64)>, // (node_id, nonce, stamped_at)
+pub struct IngestGuard {
+    nonces: VecDeque<(String, String, i64)>, // (node_id, nonce, stamped_at)
+    recent: std::collections::HashMap<String, i64>, // "actor\u{1}action\u{1}object" -> last ts
 }
 
-impl NonceRing {
-    /// Remember `(node_id, nonce)` at `now`. Returns `true` if it was fresh (and is now
-    /// remembered), `false` if this pair was already seen inside the window.
-    fn remember(&mut self, node_id: &str, nonce: &str, now: i64) -> bool {
-        while let Some((_, _, t)) = self.seen.front() {
+impl IngestGuard {
+    /// Remember `(node_id, nonce)` at `now`. Returns `true` if fresh, `false` if already seen
+    /// inside the replay window.
+    fn remember_nonce(&mut self, node_id: &str, nonce: &str, now: i64) -> bool {
+        while let Some((_, _, t)) = self.nonces.front() {
             if now - *t > REPLAY_WINDOW_SECS {
-                self.seen.pop_front();
+                self.nonces.pop_front();
             } else {
                 break;
             }
         }
-        if self
-            .seen
-            .iter()
-            .any(|(n, x, _)| n == node_id && x == nonce)
-        {
+        if self.nonces.iter().any(|(n, x, _)| n == node_id && x == nonce) {
             return false;
         }
-        self.seen.push_back((node_id.to_string(), nonce.to_string(), now));
+        self.nonces.push_back((node_id.to_string(), nonce.to_string(), now));
+        true
+    }
+
+    /// Should this triple be recorded now? `false` if the identical triple was recorded within
+    /// [`DEBOUNCE_SECS`]. Updates the last-seen stamp when it allows the triple.
+    fn allow_triple(&mut self, actor: &str, action: &str, object: &str, now: i64) -> bool {
+        let key = format!("{actor}\u{1}{action}\u{1}{object}");
+        if let Some(&t) = self.recent.get(&key) {
+            if now - t < DEBOUNCE_SECS {
+                return false;
+            }
+        }
+        self.recent.insert(key, now);
+        if self.recent.len() > 4096 {
+            self.recent.retain(|_, t| now - *t < DEBOUNCE_SECS);
+        }
         true
     }
 }
@@ -106,7 +125,7 @@ pub(crate) fn ingest_observations(
     raw: &[u8],
     sig_hex: &str,
     now: i64,
-    ring: &Mutex<NonceRing>,
+    guard: &Mutex<IngestGuard>,
 ) -> Result<usize> {
     // Gate: the human must have opened the mesh and not disabled device ingestion.
     if !familiar_kernel::boundary::load(dir).map_err(Error::Io)?.allow_mesh {
@@ -138,25 +157,34 @@ pub(crate) fn ingest_observations(
     // 3. The node signed these exact bytes.
     env.node.verify(raw, sig_hex)?;
 
-    // 4. Freshness: within the replay window, and this nonce not seen before.
+    // 4. Freshness: within the replay window.
     if (now - env.ts).abs() > REPLAY_WINDOW_SECS {
         return Err(Error::Untrusted("stale or future timestamp".into()));
     }
-    if !ring
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remember(&env.node.node_id, &env.nonce, now)
-    {
-        return Err(Error::Untrusted("replayed nonce".into()));
-    }
 
-    // Trusted + fresh: append each observation, tagged so it stays quarantined from local sensing.
-    let source = format!("mesh:{}", env.node.node_id);
-    let mut recorded = 0usize;
-    for o in &env.observations {
-        if o.actor.trim().is_empty() || o.action.trim().is_empty() || o.object.trim().is_empty() {
-            continue; // skip incomplete triples rather than poisoning the store
+    // Under one short lock (no IO held): reject a replayed nonce, then pick the observations to
+    // keep — complete triples that aren't an unchanged repeat within the debounce window. The
+    // debounce protects the store from a chatty/buggy in-group device flooding it.
+    let keep: Vec<usize> = {
+        let mut g = guard.lock().unwrap_or_else(|p| p.into_inner());
+        if !g.remember_nonce(&env.node.node_id, &env.nonce, now) {
+            return Err(Error::Untrusted("replayed nonce".into()));
         }
+        env.observations
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| {
+                !o.actor.trim().is_empty() && !o.action.trim().is_empty() && !o.object.trim().is_empty()
+            })
+            .filter(|(_, o)| g.allow_triple(&o.actor, &o.action, &o.object, now))
+            .map(|(i, _)| i)
+            .collect()
+    };
+
+    // Trusted + fresh: append the survivors, tagged so they stay quarantined from local sensing.
+    let source = format!("mesh:{}", env.node.node_id);
+    for &i in &keep {
+        let o = &env.observations[i];
         let obs = Observation::new(
             o.actor.clone(),
             o.action.clone(),
@@ -167,9 +195,8 @@ pub(crate) fn ingest_observations(
             o.confidence.clamp(0.0, 1.0),
         );
         observation::record(dir, obs).map_err(Error::Io)?;
-        recorded += 1;
     }
-    Ok(recorded)
+    Ok(keep.len())
 }
 
 #[cfg(test)]
@@ -239,19 +266,43 @@ mod tests {
         (raw, sig)
     }
 
-    fn ring() -> Mutex<NonceRing> {
-        Mutex::new(NonceRing::default())
+    fn ring() -> Mutex<IngestGuard> {
+        Mutex::new(IngestGuard::default())
     }
 
     #[test]
-    fn nonce_ring_rejects_repeats_and_prunes_old() {
-        let mut r = NonceRing::default();
-        assert!(r.remember("nodeA", "n1", 1000));
-        assert!(!r.remember("nodeA", "n1", 1000)); // exact repeat rejected
-        assert!(r.remember("nodeA", "n2", 1000)); // different nonce ok
-        assert!(r.remember("nodeB", "n1", 1000)); // different node, same nonce ok
-                                                  // after the window the old entry is pruned, so the nonce is accepted again
-        assert!(r.remember("nodeA", "n1", 1000 + REPLAY_WINDOW_SECS + 1));
+    fn nonce_guard_rejects_repeats_and_prunes_old() {
+        let mut r = IngestGuard::default();
+        assert!(r.remember_nonce("nodeA", "n1", 1000));
+        assert!(!r.remember_nonce("nodeA", "n1", 1000)); // exact repeat rejected
+        assert!(r.remember_nonce("nodeA", "n2", 1000)); // different nonce ok
+        assert!(r.remember_nonce("nodeB", "n1", 1000)); // different node, same nonce ok
+                                                        // after the window the old entry is pruned, so the nonce is accepted again
+        assert!(r.remember_nonce("nodeA", "n1", 1000 + REPLAY_WINDOW_SECS + 1));
+    }
+
+    #[test]
+    fn triple_debounce_suppresses_unchanged_repeats_but_lets_changes_through() {
+        let mut g = IngestGuard::default();
+        assert!(g.allow_triple("phone:ian", "reports", "motion:still", 1000));
+        assert!(!g.allow_triple("phone:ian", "reports", "motion:still", 1010)); // repeat within window
+        assert!(g.allow_triple("phone:ian", "reports", "motion:walking", 1010)); // a change passes
+        // once the debounce window elapses, the same state may be re-affirmed
+        assert!(g.allow_triple("phone:ian", "reports", "motion:still", 1000 + DEBOUNCE_SECS + 1));
+    }
+
+    #[test]
+    fn a_chatty_device_is_debounced_across_batches() {
+        let (host, cred, device) = setup("debounce");
+        let g = ring();
+        // Same triple in three quick batches (distinct nonces): only the first records.
+        for (i, nonce) in ["a", "b", "c"].iter().enumerate() {
+            let ts = NOW + i as i64; // all within the debounce window
+            let (raw, sig) = signed(&cred, &device, ts, nonce, NOW, DEFAULT_CERT_TTL_SECS, vec![obs("motion:still")]);
+            let n = ingest_observations(&host, &raw, &sig, ts, &g).unwrap();
+            assert_eq!(n, if i == 0 { 1 } else { 0 }, "only the first unchanged repeat records");
+        }
+        assert_eq!(observation::load(&host).unwrap().len(), 1);
     }
 
     #[test]
