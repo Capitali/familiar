@@ -8,9 +8,15 @@ import PackageDescription
 let package = Package(
     name: "FamiliarMesh",
     platforms: [.macOS(.v13), .iOS(.v16), .watchOS(.v9)],
-    products: [.library(name: "FamiliarMesh", targets: ["FamiliarMesh"])],
+    products: [
+        .library(name: "FamiliarMesh", targets: ["FamiliarMesh"]),
+        .executable(name: "familiar-observe", targets: ["familiar-observe"]),
+    ],
     targets: [
         .target(name: "FamiliarMesh"),
+        // A macOS stand-in for the phone: enroll from a payload and POST one signed observation —
+        // used to prove the Swift client interoperates with the live Rust /mesh/observe endpoint.
+        .executableTarget(name: "familiar-observe", dependencies: ["FamiliarMesh"]),
         .testTarget(name: "FamiliarMeshTests", dependencies: ["FamiliarMesh"]),
     ]
 )
