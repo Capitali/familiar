@@ -35,11 +35,15 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
             motion.startActivityUpdates(to: .main) { [weak self] activity in
                 guard let self, let a = activity else { return }
                 let label = Self.activityLabel(a)
+                // Ignore "unknown" (the classifier's "don't know") and low-confidence flaps —
+                // otherwise a stationary phone oscillates still↔unknown and floods the familiar.
+                // Only a *changed*, confident activity is worth an observation.
+                guard label != "unknown", a.confidence != .low else { return }
                 guard label != self.lastActivity else { return }
                 self.lastActivity = label
                 let obs = ObsRecord(actor: "phone:ian", action: "reports",
                                     object: "motion:\(label)", context: "confidence=\(a.confidence.rawValue)",
-                                    confidence: 0.85)
+                                    confidence: a.confidence == .high ? 0.9 : 0.7)
                 Task { await self.deliver([obs]) }
             }
         }
