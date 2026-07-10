@@ -1,0 +1,33 @@
+# XcodeGen spec — regenerate the project with `xcodegen` (declarative, so the .xcodeproj need not
+# be hand-maintained). Team 8GHXL328AR, bundle io.river.familiar.ios.
+name: FamiliarAgent
+options:
+  bundleIdPrefix: io.river.familiar
+  deploymentTarget:
+    iOS: "16.0"
+    watchOS: "9.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: 8GHXL328AR
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  FamiliarMesh:
+    path: FamiliarMesh
+targets:
+  FamiliarAgent:
+    type: application
+    platform: iOS
+    sources:
+      - App/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ios
+        INFOPLIST_FILE: App/Support/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: FamiliarMesh
+        product: FamiliarMesh
