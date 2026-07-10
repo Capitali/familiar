@@ -704,7 +704,8 @@ fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
         "macos" => {
             "On macOS (Darwin) use the BSD tools: `sysctl`, `vm_stat`, `top -l 1`, plain \
              `uptime`, `df -h`, `ifconfig`. Do NOT use Linux-only `/proc` paths or GNU-only \
-             flags like `uptime -p`."
+             flags like `uptime -p`. Note `top -l 1` samples for ~1-2s per call, so call it at \
+             most once — do not loop it."
         }
         "linux" => {
             "On Linux (this may be a Raspberry Pi on ARM) use Linux tools: read `/proc` \
@@ -719,10 +720,16 @@ fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
         "This host is {os} ({arch}) — use only shell commands that work there. {os_hint} \
          {who} asks: \"{ask}\". Write a short POSIX /bin/sh script that accomplishes it \
          and prints a clear, human-readable result to stdout, plus a short snake_case `name` \
-         and a one-line `purpose` describing what it does (so it can be reused). Be safe and \
-         bounded — no destructive actions, no reading secrets, no exfiltration, no unbounded \
-         loops; write files only under the current directory; finish quickly and exit 0 on \
-         success. Reply ONLY as compact JSON: \
+         and a one-line `purpose` describing what it does (so it can be reused). \
+         The script MUST be valid, self-contained POSIX sh: begin it with `#!/bin/sh`, balance \
+         every quote and brace (no stray `}}`), no bashisms, and use `printf` — never `echo -e` \
+         or an `echo` with a literal `\\n` — for formatted output. Be safe and bounded — no \
+         destructive actions, no reading secrets, no exfiltration, no unbounded loops; write \
+         files only under the current directory. It runs in a sandbox with a hard ~60s \
+         wall-clock and ~30s CPU limit, so it MUST finish well within that: keep any sampling \
+         to a few seconds total, and bound expensive work — e.g. cap host discovery with a \
+         per-host timeout over a small range instead of slowly sweeping a whole subnet. Finish \
+         quickly and exit 0 on success. Reply ONLY as compact JSON: \
          {{\"name\":\"...\",\"purpose\":\"...\",\"script\":\"...\"}}.",
         arch = std::env::consts::ARCH,
         ask = text.replace('"', "'")
@@ -769,6 +776,7 @@ fn persist_tool(dir: &Path, d: &DraftedTool, keywords: &[String], now: i64) -> i
         uses: 0,
         last_used: 0,
         last_exit_ok: true,
+        last_status: String::new(),
         origin: String::new(),
         origin_verified_at: 0,
     };
@@ -788,7 +796,7 @@ fn run_tool(
 ) -> io::Result<(String, Confidence, String)> {
     let script = fs::read_to_string(&t.script_path).unwrap_or_default();
     if let Some(reason) = review_script(&script) {
-        let _ = tool::record_use(dir, &t.id, now, false);
+        let _ = tool::record_use(dir, &t.id, now, false, "declined by pre-execution review");
         return Ok((
             format!(
                 "I declined to run the tool '{}' — {reason} (Law III).",
@@ -803,7 +811,10 @@ fn run_tool(
         .map(|b| b.sandbox_execution)
         .unwrap_or(true);
     let limits = if sandbox {
-        exec::Limits::default()
+        // A real tool does real work — sampling CPU over a few seconds, an nmap sweep — which
+        // the tick's tight candidate budget (5s/10s) could only ever time out. `tool_run` is
+        // the generous-but-bounded budget so a legitimate tool actually finishes.
+        exec::Limits::tool_run()
     } else {
         exec::Limits::unsandboxed()
     };
@@ -816,7 +827,8 @@ fn run_tool(
     // it and the familiar re-authors a fresh one next time instead of repeating bad output.
     let broken = output_looks_broken(out);
     let healthy = run.exit_ok && !run.timed_out && broken.is_none();
-    let uses = tool::record_use(dir, &t.id, now, healthy)?.unwrap_or(t.uses + 1);
+    // A concise verdict on this run — persisted on the tool (shown in the Glass so a failure is
+    // diagnosable, not just an orange badge) and carried in the answer's evidence line.
     let (confidence, status) = if run.timed_out {
         (
             Confidence::Probable,
@@ -825,7 +837,7 @@ fn run_tool(
     } else if let Some(sig) = broken {
         (
             Confidence::Probable,
-            format!("output looked wrong ({sig}) — retiring this tool so it's re-authored"),
+            format!("output looked wrong ({sig})"),
         )
     } else if run.exit_ok {
         (Confidence::Known, format!("exit 0 in {}ms", run.wall_ms))
@@ -835,6 +847,7 @@ fn run_tool(
             format!("nonzero exit in {}ms", run.wall_ms),
         )
     };
+    let uses = tool::record_use(dir, &t.id, now, healthy, &status)?.unwrap_or(t.uses + 1);
     let body = if let Some(sig) = broken {
         format!(
             "I ran the tool '{}', but its output looks wrong ({sig}) — I've retired it and \
@@ -1999,6 +2012,7 @@ mod tests {
             uses: 0,
             last_used: 0,
             last_exit_ok: true,
+            last_status: String::new(),
             origin: String::new(),
             origin_verified_at: 0,
         };

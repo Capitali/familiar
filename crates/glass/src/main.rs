@@ -2535,10 +2535,14 @@ fn tools_panel(ui: &mut egui::Ui, tools: &[Tool], active: &mut Option<String>) {
                         format!("· {} uses", t.uses)
                     });
                     if !t.last_exit_ok {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(200, 120, 80),
-                            "· last run failed",
-                        );
+                        // Show *why* it failed, not just that it did — the stored verdict
+                        // (e.g. "timed out after 61000ms") makes the orange badge diagnosable.
+                        let reason = if t.last_status.is_empty() {
+                            "· last run failed".to_string()
+                        } else {
+                            format!("· last run failed — {}", t.last_status)
+                        };
+                        ui.colored_label(egui::Color32::from_rgb(200, 120, 80), reason);
                     }
                 });
                 if !t.purpose.is_empty() {

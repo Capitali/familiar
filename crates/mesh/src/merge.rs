@@ -215,6 +215,7 @@ fn merge_one(
             uses: 0,
             last_used: 0,
             last_exit_ok: m.last_exit_ok,
+            last_status: String::new(),
             origin: node_id.clone(),
             origin_verified_at: now,
         };

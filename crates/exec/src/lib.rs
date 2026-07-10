@@ -45,6 +45,18 @@ impl Limits {
         }
     }
 
+    /// Limits for running an **authored tool** to answer a request. Wider than the tick's
+    /// candidate-scoring `default()` (5s/10s) because a real tool does real work — sampling CPU
+    /// over a few seconds, an nmap ping sweep — that the tight budget could only ever time out
+    /// (which retired the whole authored library). Still firmly bounded so a tool can't run away.
+    pub fn tool_run() -> Self {
+        Limits {
+            cpu_secs: 30,
+            wall_secs: 60,
+            output_cap: 16_384,
+        }
+    }
+
     /// Limits for a **delegated agent step** — still sandboxed, but generous enough for a real
     /// task to finish (a network scan, a build probe) where the tick's tight candidate-scoring
     /// budget (5s/10s) would only ever time out. Bounded so a step still can't run away.
@@ -190,6 +202,23 @@ mod tests {
         let r = run_script(&s, &Limits::unsandboxed(), &d).unwrap();
         assert!(r.exit_ok && !r.timed_out);
         assert!(r.output.contains("ran unsandboxed"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn tool_run_budget_lets_a_multi_second_tool_finish() {
+        // A real authored tool (CPU sampling, a bounded scan) runs for several seconds — the
+        // tick's default() 5s-CPU/10s-wall budget could only ever time it out (which retired
+        // the whole authored library). tool_run() is wide enough that such work completes.
+        let d = tmp("toolrun");
+        let s = d.join("t.sh");
+        fs::write(&s, "sleep 2; echo sampled\n").unwrap();
+        let r = run_script(&s, &Limits::tool_run(), &d).unwrap();
+        assert!(r.exit_ok && !r.timed_out, "a 2s tool must finish under tool_run");
+        assert!(r.output.contains("sampled"));
+        // …and the budget is genuinely wider than the tick's candidate-scoring default.
+        assert!(Limits::tool_run().wall_secs > Limits::default().wall_secs);
+        assert!(Limits::tool_run().cpu_secs > Limits::default().cpu_secs);
         let _ = fs::remove_dir_all(&d);
     }
 

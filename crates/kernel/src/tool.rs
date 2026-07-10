@@ -35,6 +35,11 @@ pub struct Tool {
     pub last_used: i64,
     /// Did its most recent run exit cleanly? A tool that keeps failing should not be reused.
     pub last_exit_ok: bool,
+    /// A short, human-readable verdict on the most recent run — e.g. "timed out after 10120ms",
+    /// "output looked wrong (permission denied)", "exit 0 in 180ms". Shown in the Glass so a
+    /// failure is diagnosable, not just an orange badge. Empty until the tool has run.
+    #[serde(default)]
+    pub last_status: String,
     /// Provenance. Empty when this node authored the tool itself; otherwise the `node_id` of
     /// the mesh peer it was federated from. A federated tool is trusted into the *library*
     /// but — like any tool — still passes `review_script` + the sandbox on every run.
@@ -82,15 +87,23 @@ pub fn best_match<'a>(tools: &'a [Tool], request_keywords: &[String]) -> Option<
         .map(|(t, _)| t)
 }
 
-/// Record a run of a tool: bump `uses`, stamp `last_used`, note whether it exited cleanly.
-/// Returns the tool's new use count (or None if the id was not found).
-pub fn record_use(dir: &Path, id: &str, now: i64, exit_ok: bool) -> io::Result<Option<u32>> {
+/// Record a run of a tool: bump `uses`, stamp `last_used`, note whether it exited cleanly and
+/// a short human-readable `status` (the verdict shown in the Glass). Returns the tool's new use
+/// count (or None if the id was not found).
+pub fn record_use(
+    dir: &Path,
+    id: &str,
+    now: i64,
+    exit_ok: bool,
+    status: &str,
+) -> io::Result<Option<u32>> {
     let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
         return Ok(None);
     };
     t.uses += 1;
     t.last_used = now;
     t.last_exit_ok = exit_ok;
+    t.last_status = status.to_string();
     let uses = t.uses;
     store::update_by_id(dir, TOOLS_FILE, id, &t)?;
     Ok(Some(uses))
@@ -104,6 +117,7 @@ pub fn mark_unhealthy(dir: &Path, id: &str) -> io::Result<bool> {
         return Ok(false);
     };
     t.last_exit_ok = false;
+    t.last_status = "retired by your feedback".to_string();
     store::update_by_id(dir, TOOLS_FILE, id, &t)
 }
 
@@ -139,6 +153,7 @@ mod tests {
             uses: 0,
             last_used: 0,
             last_exit_ok: true,
+            last_status: String::new(),
             origin: String::new(),
             origin_verified_at: 0,
         }
@@ -176,12 +191,19 @@ mod tests {
     fn record_use_increments_and_persists() {
         let t = Temp::new("use");
         append(&t.0, &tool("tool-0001", "cpu_load", "p", "cpu load")).unwrap();
-        assert_eq!(record_use(&t.0, "tool-0001", 100, true).unwrap(), Some(1));
-        assert_eq!(record_use(&t.0, "tool-0001", 200, true).unwrap(), Some(2));
+        assert_eq!(
+            record_use(&t.0, "tool-0001", 100, true, "exit 0 in 12ms").unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            record_use(&t.0, "tool-0001", 200, true, "exit 0 in 9ms").unwrap(),
+            Some(2)
+        );
         let reloaded = &load(&t.0).unwrap()[0];
         assert_eq!(reloaded.uses, 2);
         assert_eq!(reloaded.last_used, 200);
-        assert_eq!(record_use(&t.0, "nope", 1, true).unwrap(), None);
+        assert_eq!(reloaded.last_status, "exit 0 in 9ms");
+        assert_eq!(record_use(&t.0, "nope", 1, true, "").unwrap(), None);
     }
 
     #[test]
@@ -194,6 +216,7 @@ mod tests {
         // the human's "refine" retires it → no longer a reuse candidate
         assert!(mark_unhealthy(&t.0, "tool-0001").unwrap());
         assert!(best_match(&load(&t.0).unwrap(), &kw).is_none());
+        assert_eq!(load(&t.0).unwrap()[0].last_status, "retired by your feedback");
         assert!(!mark_unhealthy(&t.0, "nope").unwrap());
     }
 }
