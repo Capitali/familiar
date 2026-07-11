@@ -284,6 +284,23 @@ async fn handle(
             };
             recv_observe(&dir, &bytes, &sig, &ctx.seen)
         }
+        (Method::POST, "/mesh/enroll-request") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_enroll_request(&dir, &bytes, &sig)
+        }
+        (Method::GET, p) if p.starts_with("/mesh/enroll-status/") => {
+            let node_id = p.trim_start_matches("/mesh/enroll-status/");
+            enroll_status(&dir, node_id)
+        }
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
             serve_tool(&dir, id)
@@ -366,6 +383,39 @@ fn recv_observe(
         Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad batch"),
+    }
+}
+
+/// `POST /mesh/enroll-request` → a node attests to the Laws and asks to join. `sig` is the
+/// `X-Familiar-Sig` header (ed25519 over the raw body). 200 + the minted Grant if an invite
+/// window auto-approved it; 202 + the pending record otherwise; 403 untrusted; 400 malformed.
+fn recv_enroll_request(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    match crate::enroll::submit_request(dir, bytes, sig, now_secs()) {
+        Ok(crate::enroll::Submitted::Granted(g)) => match serde_json::to_vec(&*g) {
+            Ok(b) => text(StatusCode::OK, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "grant encode"),
+        },
+        Ok(crate::enroll::Submitted::Pending(p)) => match serde_json::to_vec(&p) {
+            Ok(b) => text(StatusCode::ACCEPTED, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "pending encode"),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "bad enroll request"),
+    }
+}
+
+/// `GET /mesh/enroll-status/{node_id}` → a node polls for the human's decision. 200 + Grant once
+/// approved (the cert is useless without the node's private key, so it is safe to serve openly);
+/// 202 while pending; 404 if unknown.
+fn enroll_status(dir: &Path, node_id: &str) -> Response<Full<Bytes>> {
+    match crate::enroll::enroll_status(dir, node_id) {
+        Ok(crate::enroll::StatusOutcome::Granted(g)) => match serde_json::to_vec(&*g) {
+            Ok(b) => text(StatusCode::OK, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "grant encode"),
+        },
+        Ok(crate::enroll::StatusOutcome::Pending) => text(StatusCode::ACCEPTED, "pending approval"),
+        Ok(crate::enroll::StatusOutcome::Unknown) => text(StatusCode::NOT_FOUND, "no such request"),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "status error"),
     }
 }
 

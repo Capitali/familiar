@@ -54,6 +54,7 @@ commands:
                  | `mesh peer <ip[:port]>` (add a static peer)
                  | `mesh share <tools|knowledge|identities> <on|off>`
                  | `mesh accept-observations <on|off>` (device agents) | `mesh qr` (enroll a device)
+                 | `mesh pending`/`approve <id>`/`deny <id>` (covenant handshake) | `mesh invite`
                  | `mesh optin <handle>` (per-human, per-group consent) | `mesh status`
 
 options:
@@ -471,6 +472,97 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("pending") => {
+            // `mesh pending` — the covenant handshake's inbox: nodes that attested the Laws and
+            // are waiting for you to extend the covenant. Approve/deny by their code or node id.
+            match familiar_mesh::enroll::list_pending(&dir) {
+                Ok(ps) if ps.is_empty() => {
+                    println!("(no pending join requests)");
+                    ExitCode::SUCCESS
+                }
+                Ok(ps) => {
+                    let now = now_secs();
+                    for p in ps {
+                        println!(
+                            "· {}  “{}”  node {}  · {}s ago",
+                            p.code,
+                            p.node.label,
+                            short_id(&p.node.node_id),
+                            (now - p.received_at).max(0)
+                        );
+                        println!("    attests (v{}): {}", p.attestation.laws_version, p.attestation.statement);
+                        println!("    approve: familiar mesh approve {}", p.node.node_id);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("approve") => {
+            // `mesh approve <node_id>` — extend the covenant: mint this node's membership cert.
+            // The join key never leaves this familiar; the node gets only a cert bound to its key.
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh approve <node_id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::enroll::approve(&dir, node_id, now_secs()) {
+                Ok(g) => {
+                    println!(
+                        "✓ admitted {} to group “{}” — its agent can now enroll and serve (revoke by \
+                         node id in mesh/revoked.json)",
+                        short_id(&g.membership.node_id),
+                        g.group_label
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not approve — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("deny") => {
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh deny <node_id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::enroll::deny(&dir, node_id) {
+                Ok(true) => {
+                    println!("✓ denied {}", short_id(node_id));
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("mesh: no pending request for {node_id}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("invite") => {
+            // `mesh invite [--minutes N]` — pairing mode: authorize an expansion once so devices
+            // you bring in during the window enroll without a tap each (default 10 min).
+            let minutes: i64 = f.get("minutes").and_then(|m| m.parse().ok()).unwrap_or(10);
+            let until = now_secs() + minutes.max(1) * 60;
+            match familiar_mesh::enroll::open_invite(&dir, until) {
+                Ok(()) => {
+                    println!(
+                        "✓ inviting for {minutes} min — join requests that arrive now are auto-admitted \
+                         to the covenant. Unsolicited joiners after that wait for `mesh approve`."
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("optin") => {
             // `mesh optin <handle>` — opt one human into sharing with the *current* group.
             // Explicit per-human, per-group consent; requires enrollment first so the scope
@@ -553,6 +645,19 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     println!("optin   {} → group {}", o.handle, short_id(&o.group));
                 }
             }
+            // Covenant handshake: any nodes waiting to be admitted, and the invite window.
+            if let Ok(ps) = familiar_mesh::enroll::list_pending(&dir) {
+                if !ps.is_empty() {
+                    println!(
+                        "pending {} join request(s) — `mesh pending` to review",
+                        ps.len()
+                    );
+                }
+            }
+            let invite_left = familiar_mesh::enroll::invite_until(&dir) - now_secs();
+            if invite_left > 0 {
+                println!("invite  open — auto-admitting for {}s", invite_left);
+            }
             if let Ok(s) = std::fs::read_to_string(dir.join(familiar_mesh::transport::STATUS_FILE)) {
                 println!("last    {}", s.trim());
             }
@@ -583,7 +688,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
                  | key | qr | peer <ip[:port]> | share <tools|knowledge|identities> <on|off> \
-                 | accept-observations <on|off> | optin <handle> | status>"
+                 | accept-observations <on|off> | pending | approve <node_id> | deny <node_id> \
+                 | invite [--minutes N] | optin <handle> | status>"
             );
             ExitCode::FAILURE
         }

@@ -30,12 +30,14 @@
 
 pub mod brief;
 pub mod config;
+pub mod enroll;
 pub mod group;
 pub mod merge;
 pub mod node;
 pub mod observe;
 pub mod transport;
 
+pub use enroll::{Attestation, EnrollRequest, Grant, Pending};
 pub use merge::{federate, MergeReport};
 pub use observe::{ObsRecord, ObserveEnvelope};
 
