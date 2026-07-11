@@ -41,10 +41,13 @@ pub struct PresenceSignal {
 /// function of its inputs. Withdrawal (`withdrawn == true`) is a first-class failure
 /// signal — the empty world the factory must never accept as success.
 pub fn presence_signal(obs: &[Observation], now: i64) -> PresenceSignal {
+    // Presence evidence = the familiar's own served-facing activity OR a personal device (a
+    // phone/watch agent) reporting on the person who carries it. The latter connects the device
+    // seam to Law II: if the served's watch just saw their heart beat, the world is not empty.
     let mut served_facing = 0usize;
     let mut last_ts: Option<i64> = None;
     for o in obs {
-        if service::is_served_facing(o) {
+        if service::is_served_facing(o) || service::is_personal_device_report(o) {
             served_facing += 1;
             last_ts = Some(last_ts.map_or(o.ts, |t| t.max(o.ts)));
         }
@@ -96,6 +99,18 @@ mod tests {
         let s = presence_signal(&[host_at(999_999), host_at(1_000_000)], 1_000_000);
         assert!(s.withdrawn);
         assert_eq!(s.served_facing, 0);
+    }
+
+    #[test]
+    fn a_personal_device_report_is_presence() {
+        // The served's phone/watch reporting on them is evidence they are present, even with no
+        // direct engagement — the device seam feeding Law II.
+        let now = 1_000_000;
+        let phone = Observation::new("phone:ian", "reports", "location:home", "", "mesh:abc", now, 0.9);
+        let s = presence_signal(&[phone], now);
+        assert_eq!(s.measure, 1.0);
+        assert!(!s.withdrawn);
+        assert_eq!(s.served_facing, 1);
     }
 
     #[test]

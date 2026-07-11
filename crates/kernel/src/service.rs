@@ -53,6 +53,18 @@ pub fn is_served_facing(obs: &Observation) -> bool {
     served_term(obs).is_some()
 }
 
+/// Actor namespaces of a **personal device** — a phone/watch/iPad an agent runs on, reporting on
+/// the person who carries it. An observation from one of these is direct evidence that person is
+/// *present* (the device saw them), which the presence signal counts even though it is not the
+/// familiar's own served-facing activity (so it does not inflate the service signal).
+const PERSONAL_DEVICE_PREFIXES: &[&str] = &["phone:", "watch:", "ipad:", "iphone:"];
+
+/// Is this a personal-device report about its owner (e.g. `phone:ian`, `watch:ian`)?
+pub fn is_personal_device_report(obs: &Observation) -> bool {
+    let actor = obs.actor.to_ascii_lowercase();
+    PERSONAL_DEVICE_PREFIXES.iter().any(|p| actor.starts_with(p))
+}
+
 /// The service signal (Law I): to what degree is the factory's attention on the
 /// humans it exists to serve?
 #[derive(Debug, Clone, PartialEq)]
