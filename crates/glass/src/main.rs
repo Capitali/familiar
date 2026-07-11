@@ -895,6 +895,24 @@ impl Glass {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     }
+    fn mesh_pending(&self) -> Vec<familiar_mesh::enroll::Pending> {
+        familiar_mesh::enroll::list_pending(&self.data_dir).unwrap_or_default()
+    }
+    /// Accept a device into the covenant: mint its membership cert (the group secret never leaves
+    /// here). The human's "accept enrollment" act, through their own instrument.
+    fn approve_pending(&mut self, node_id: &str) {
+        let short: String = node_id.chars().take(8).collect();
+        match familiar_mesh::enroll::approve(&self.data_dir, node_id, now_secs()) {
+            Ok(g) => self.write_mesh_status(&format!("✓ admitted {short} to “{}”", g.group_label)),
+            Err(e) => self.write_mesh_status(&format!("✗ could not admit {short} — {e}")),
+        }
+        self.refresh();
+    }
+    fn deny_pending(&mut self, node_id: &str) {
+        let _ = familiar_mesh::enroll::deny(&self.data_dir, node_id);
+        self.write_mesh_status("✗ declined a join request");
+        self.refresh();
+    }
     fn mesh_config(&self) -> familiar_mesh::config::MeshConfig {
         familiar_mesh::config::load(&self.data_dir).unwrap_or_default()
     }
@@ -1056,6 +1074,50 @@ impl Glass {
                                 .font(egui::TextStyle::Monospace)
                                 .desired_width(320.0),
                         );
+
+                        // The "accept enrollment" moment: devices that attested the Three Laws and
+                        // are asking to join. Accepting mints their cert; the secret never leaves.
+                        let pending = self.mesh_pending();
+                        if !pending.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} device(s) asking to join",
+                                    pending.len()
+                                ))
+                                .strong()
+                                .color(theme::AMBER),
+                            );
+                            let mut approve: Option<String> = None;
+                            let mut deny: Option<String> = None;
+                            for p in &pending {
+                                ui.group(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!("🤝 {} · {}", p.node.label, p.code))
+                                            .strong(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(format!("attests: {}", p.attestation.statement))
+                                            .weak()
+                                            .small(),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Accept").clicked() {
+                                            approve = Some(p.node.node_id.clone());
+                                        }
+                                        if ui.button("Decline").clicked() {
+                                            deny = Some(p.node.node_id.clone());
+                                        }
+                                    });
+                                });
+                            }
+                            if let Some(id) = approve {
+                                self.approve_pending(&id);
+                            }
+                            if let Some(id) = deny {
+                                self.deny_pending(&id);
+                            }
+                        }
 
                         // Peers currently connected.
                         ui.add_space(6.0);
