@@ -32,6 +32,8 @@ commands:
   capacities     report the capacities signal (Law II / HUMANITY.md)
   theories       list the familiar's questions + theories (threads)
   sense          perceive the host (environment, interfaces, capabilities)
+  reach          assess what the familiar could extend into — discover devices and
+                 classify each (agent-capable / protocol-controllable / observable)
   tick           run one cycle of the metabolism (sense → detect → muse → act → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
                  (unbounded; Ctrl-C to stop). Adaptive cadence: --interval S is the
@@ -85,6 +87,7 @@ fn main() -> ExitCode {
         Some("capacities") => cmd_capacities(rest),
         Some("theories") => cmd_theories(rest),
         Some("sense") => cmd_sense(rest),
+        Some("reach") => cmd_reach(rest),
         Some("tick") => cmd_tick(rest),
         Some("run") => cmd_run(rest),
         Some("daemon") => cmd_daemon(rest),
@@ -999,6 +1002,72 @@ fn cmd_sense(args: &[String]) -> ExitCode {
     println!("sensed the host: recorded {recorded} observations");
     println!("  connectivity: {connectivity_note}");
     println!("  (open the Glass to see the environment the familiar discovered)");
+    ExitCode::SUCCESS
+}
+
+/// `reach` — assess what the familiar could extend into: discover devices, probe what each speaks,
+/// and classify its reach (agent-capable / protocol-controllable / observable). Outward reach, so
+/// it is boundary-gated exactly like the connectivity probe.
+fn cmd_reach(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let now = now_secs();
+    let timeout: u64 = f.get("timeout-ms").and_then(|s| s.parse().ok()).unwrap_or(300);
+
+    let b = match boundary::load(&dir) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("reach: boundary policy error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let verdict = guard::evaluate(&Action::new(ActionKind::Network, "reach-scan"), &b);
+    if verdict.decision != Decision::Allow {
+        eprintln!(
+            "reach: the network is outside the boundary — open `allow_network` to let the familiar \
+             assess what it could extend into.\n  {}",
+            verdict.rationale
+        );
+        return ExitCode::FAILURE;
+    }
+
+    println!("assessing reach (probing discovered devices)…");
+    let (reaches, observations) = familiar_reach::scan(&dir, now, b.allow_network, timeout);
+    if reaches.is_empty() {
+        println!(
+            "reach: no devices discovered — are you on the LAN? (A `devices.json` pointed at your \
+             router names more of them.)"
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    use familiar_reach::ReachClass;
+    for class in [
+        ReachClass::AgentCapable,
+        ReachClass::ProtocolControllable,
+        ReachClass::ObservableOnly,
+    ] {
+        let group: Vec<_> = reaches.iter().filter(|r| r.class == class).collect();
+        if group.is_empty() {
+            continue;
+        }
+        println!("\n{} ({}):", class.label(), group.len());
+        for r in group {
+            let svc = if r.open.is_empty() { "—".to_string() } else { r.open.join(", ") };
+            println!("  · {:<22} {:<15} {}", r.label, r.ip, svc);
+        }
+    }
+
+    let mut recorded = 0;
+    for o in observations {
+        if observation::record(&dir, o).is_ok() {
+            recorded += 1;
+        }
+    }
+    println!(
+        "\nrecorded {recorded} reach observation(s). Agent-capable devices are the candidates for \
+         a consent-gated agent install (Brick 3)."
+    );
     ExitCode::SUCCESS
 }
 

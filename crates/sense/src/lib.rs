@@ -243,6 +243,34 @@ pub struct Lease {
 ///   at their router. The DHCP hostname (e.g. "iPhone") is preferred over ARP's reverse-DNS
 ///   FQDN ("iphone.river.io"). Modern phones/watches randomise their MAC, noted as a hint.
 pub fn devices(dir: &Path, now: i64, allow_network: bool) -> Vec<Observation> {
+    device_list(dir, allow_network)
+        .into_iter()
+        .map(|d| {
+            let mut ctx = format!("ip={} mac={} via={}", d.ip, d.mac, d.via.join("+"));
+            if d.randomized {
+                ctx.push_str(" randomized=true");
+            }
+            obs("host", "sees", format!("device:{}", d.label), ctx, now)
+        })
+        .collect()
+}
+
+/// One device on the network, merged across sources. The structured form behind [`devices`], so
+/// reach-assessment can probe real IPs without re-parsing ARP/DHCP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Device {
+    /// Best human name (DHCP hostname > reverse-DNS > the IP).
+    pub label: String,
+    pub ip: String,
+    pub mac: String,
+    pub via: Vec<String>,
+    /// The MAC looks locally-administered (a privacy-randomised phone/watch).
+    pub randomized: bool,
+}
+
+/// The devices sharing this network, merged by MAC. See [`devices`] for the perception rationale;
+/// this is the same discovery returning structured records instead of observations.
+pub fn device_list(dir: &Path, allow_network: bool) -> Vec<Device> {
     use std::collections::BTreeMap;
     /// A device merged across sources, keyed by MAC.
     struct Rec {
@@ -292,11 +320,13 @@ pub fn devices(dir: &Path, now: i64, allow_network: bool) -> Vec<Observation> {
     map.into_iter()
         .map(|(mac, r)| {
             let label = r.name.clone().unwrap_or_else(|| r.ip.clone());
-            let mut ctx = format!("ip={} mac={} via={}", r.ip, mac, r.via.join("+"));
-            if r.randomized {
-                ctx.push_str(" randomized=true");
+            Device {
+                label,
+                ip: r.ip,
+                mac,
+                via: r.via.iter().map(|s| s.to_string()).collect(),
+                randomized: r.randomized,
             }
-            obs("host", "sees", format!("device:{label}"), ctx, now)
         })
         .collect()
 }

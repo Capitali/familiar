@@ -1241,6 +1241,7 @@ dependencies = [
  "familiar-kernel",
  "familiar-llm",
  "familiar-mesh",
+ "familiar-reach",
  "familiar-sense",
  "serde_json",
 ]
@@ -1313,6 +1314,14 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+]
+
+[[package]]
+name = "familiar-reach"
+version = "0.1.0"
+dependencies = [
+ "familiar-kernel",
+ "familiar-sense",
 ]
 
 [[package]]
