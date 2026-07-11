@@ -2,12 +2,14 @@ import Foundation
 import SwiftUI
 import FamiliarMesh
 
-/// The agent's whole state: enrollment, the signing session, consent, and a small activity log.
-/// Deliberately thin — the crypto/wire logic lives in the FamiliarMesh package; sensing lives in
-/// SensingCoordinator. This just holds it together for the UI.
+/// The agent's whole state: enrollment (via the covenant handshake), the signing session, consent,
+/// and a small activity log. Thin — the crypto/wire logic lives in FamiliarMesh; sensing lives in
+/// SensingCoordinator. The device holds its own key + a *granted* membership cert; it never holds
+/// the group secret.
 @MainActor
 final class AppModel: ObservableObject {
     @Published var enrolled = false
+    @Published var enrolling = false          // a handshake is in flight (waiting for approval)
     @Published var groupLabel = ""
     @Published var host = ""
     @Published var log: [String] = []
@@ -17,8 +19,7 @@ final class AppModel: ObservableObject {
     @AppStorage("consent.location") var locationEnabled = false
     @AppStorage("consent.motion") var motionEnabled = false
 
-    private let seedAccount = "node.seed"
-    private let secretAccount = "group.secret"
+    private let grantAccount = "grant.json"
     private let defaults = UserDefaults.standard
 
     private(set) var node: NodeKey
@@ -36,34 +37,55 @@ final class AppModel: ObservableObject {
         }
         host = defaults.string(forKey: "enroll.host") ?? ""
         groupLabel = defaults.string(forKey: "enroll.label") ?? ""
-        enrolled = KeychainStore.load(account: secretAccount) != nil && !host.isEmpty
+        enrolled = storedGrant() != nil && !host.isEmpty
     }
 
-    /// Enroll from a scanned QR / pasted payload: verify the group secret, persist it, and arm.
-    func enroll(from json: String) {
-        guard let p = EnrollmentPayload.parse(json), let secret = p.secretData else {
-            note("✗ could not read that enrollment code")
+    /// Request to join from a scanned QR / pasted address payload: attest the Three Laws, ask the
+    /// familiar, and wait for its human to approve. The group secret never touches this device.
+    func requestJoin(from json: String) {
+        guard let p = EnrollmentPayload.parse(json) else {
+            note("✗ could not read that address")
             return
         }
-        // Sanity: the secret must derive the group id it claims.
-        guard (try? Cert.groupId(fromSecret: secret)) == p.group else {
-            note("✗ enrollment code failed its integrity check")
-            return
-        }
-        KeychainStore.save(secret, account: secretAccount)
+        host = p.host
+        groupLabel = p.label
         defaults.set(p.host, forKey: "enroll.host")
         defaults.set(String(p.port), forKey: "enroll.port")
         defaults.set(p.label, forKey: "enroll.label")
-        defaults.set(p.group, forKey: "enroll.group")
-        host = p.host
-        groupLabel = p.label
-        enrolled = true
-        note("✓ enrolled in “\(p.label)” — reaching \(p.host):\(p.port)")
-        startSensingIfConsented()
+        enrolling = true
+        note("requesting to join “\(p.label)” — accepting the Three Laws…")
+        let node = self.node
+        Task { await self.runHandshake(host: p.host, port: p.port, node: node) }
+    }
+
+    private func runHandshake(host: String, port: Int, node: NodeKey) async {
+        let enroller = EnrollmentClient(host: host, port: port)
+        do {
+            var grant = try await enroller.requestJoin(node: node)     // non-nil if auto-approved
+            if grant == nil { note("waiting for the familiar to approve this device…") }
+            var tries = 0
+            while grant == nil, tries < 150 {                          // ~5 min of polling
+                try await Task.sleep(nanoseconds: 2_000_000_000)
+                grant = try await enroller.pollGrant(nodeId: node.nodeId)
+                tries += 1
+            }
+            guard let g = grant else { enrolling = false; note("… no approval yet — tap to retry"); return }
+            saveGrant(g)
+            enrolling = false
+            enrolled = true
+            note("✓ admitted to “\(g.group_label)” — the covenant is in force")
+            startSensingIfConsented()
+        } catch EnrollmentClient.EnrollError.denied {
+            enrolling = false
+            note("✗ the familiar declined this device")
+        } catch {
+            enrolling = false
+            note("… couldn't reach the familiar: \(error)")
+        }
     }
 
     func unenroll() {
-        KeychainStore.delete(account: secretAccount)
+        KeychainStore.delete(account: grantAccount)
         defaults.removeObject(forKey: "enroll.host")
         coordinator?.stop()
         coordinator = nil
@@ -71,16 +93,14 @@ final class AppModel: ObservableObject {
         note("unenrolled — nothing is sent")
     }
 
-    /// Build the client session (node + freshly-minted cert + endpoint URL), or nil if not ready.
+    /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
     func makeSession() -> ObservationClient.Session? {
-        guard let secret = KeychainStore.load(account: secretAccount),
+        guard let g = storedGrant(),
               let host = defaults.string(forKey: "enroll.host"),
               let port = Int(defaults.string(forKey: "enroll.port") ?? ""),
-              let url = URL(string: "http://\(host):\(port)/mesh/observe"),
-              let m = try? Cert.mint(groupSecret: secret, node: node.identity,
-                                     issued: Int64(Date().timeIntervalSince1970), ttlSecs: defaultCertTTLSecs)
+              let url = URL(string: "http://\(host):\(port)/mesh/observe")
         else { return nil }
-        return ObservationClient.Session(node: node, membership: m, url: url)
+        return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
     func startSensingIfConsented() {
@@ -96,6 +116,17 @@ final class AppModel: ObservableObject {
     func setHomeToCurrentLocation() {
         coordinator?.markHomeAtCurrent()
         note("home region set to current location")
+    }
+
+    // MARK: grant persistence (the cert is public — Keychain just keeps it tidy with the key)
+
+    private func saveGrant(_ g: Grant) {
+        if let data = try? JSONEncoder().encode(g) { KeychainStore.save(data, account: grantAccount) }
+    }
+
+    private func storedGrant() -> Grant? {
+        guard let data = KeychainStore.load(account: grantAccount) else { return nil }
+        return try? JSONDecoder().decode(Grant.self, from: data)
     }
 
     private func deliver(_ batch: [ObsRecord]) async {

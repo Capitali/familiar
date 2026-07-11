@@ -19,19 +19,19 @@ final class EnvelopeTests: XCTestCase {
         XCTAssertTrue(node.signing.publicKey.isValidSignature(Hex.decode(sig)!, for: body))
     }
 
-    func testEnrollmentPayloadParsesAndRejectsJunk() {
-        let good = """
-        {"v":1,"secret":"1111111111111111111111111111111111111111111111111111111111111111",\
-        "group":"10ba682c8ad13513","label":"river","host":"100.64.0.5","port":47100}
-        """
+    func testEnrollmentPayloadParsesAddressOnly() {
+        // Covenant payload: only the address matters; a secret, if present, is ignored.
+        let good = #"{"v":1,"label":"river","host":"100.64.0.5","port":47100}"#
         let p = EnrollmentPayload.parse(good)
         XCTAssertEqual(p?.port, 47100)
-        XCTAssertEqual(p?.observeURL?.absoluteString, "http://100.64.0.5:47100/mesh/observe")
-        XCTAssertEqual(p?.secretData?.count, 32)
+        XCTAssertEqual(p?.host, "100.64.0.5")
+        XCTAssertEqual(p?.label, "river")
+        XCTAssertNil(p?.secret)
 
+        // An older secret-bearing payload still parses (the secret is simply ignored).
+        XCTAssertNotNil(EnrollmentPayload.parse(#"{"v":1,"secret":"beef","group":"x","label":"y","host":"h","port":1}"#))
         XCTAssertNil(EnrollmentPayload.parse("not json"))
-        XCTAssertNil(EnrollmentPayload.parse(#"{"v":1,"secret":"beef","group":"x","label":"y","host":"h","port":1}"#),
-                     "a short secret is rejected")
+        XCTAssertNil(EnrollmentPayload.parse(#"{"v":1,"label":"y","host":"","port":0}"#), "no address")
     }
 
     func testHexRoundTrips() {

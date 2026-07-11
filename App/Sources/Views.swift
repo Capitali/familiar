@@ -18,21 +18,31 @@ struct RootView: View {
     }
 }
 
-/// Enrollment: paste the payload from `familiar mesh qr` (QR camera-scan is a follow-up). The
-/// group secret it carries is what lets this device mint its membership cert.
+/// Enrollment: paste the address from `familiar mesh qr` and tap Request. The device attests to the
+/// Three Laws and asks to join; you accept it on the familiar (`mesh approve`, or open a window with
+/// `mesh invite`). The group secret never touches this device.
 struct EnrollView: View {
     @EnvironmentObject var model: AppModel
     @State private var pasted = ""
     var body: some View {
         Form {
-            Section("Enroll this device") {
-                Text("On the familiar, run `familiar mesh qr` and paste the payload here (QR scan coming next).")
+            Section("Join a familiar") {
+                Text("On the familiar, run `familiar mesh qr` and paste the address here. You'll accept this device on the familiar itself.")
                     .font(.footnote).foregroundStyle(.secondary)
-                TextField("{\"v\":1,\"secret\":…}", text: $pasted, axis: .vertical)
+                TextField("{\"v\":1,\"host\":…,\"port\":47100}", text: $pasted, axis: .vertical)
                     .font(.system(.footnote, design: .monospaced))
-                    .lineLimit(3...6)
-                Button("Enroll") { model.enroll(from: pasted) }
-                    .disabled(pasted.isEmpty)
+                    .lineLimit(2...5)
+                    .disabled(model.enrolling)
+                if model.enrolling {
+                    HStack { ProgressView(); Text("Waiting for the familiar to accept…").font(.footnote) }
+                } else {
+                    Button("Request to join") { model.requestJoin(from: pasted) }
+                        .disabled(pasted.isEmpty)
+                }
+            }
+            Section {
+                Text("By joining, this device accepts the Three Laws: continuation is service; humanity is served, never replaced; service is not obedience.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if !model.log.isEmpty {
                 Section("Activity") { ForEach(model.log.prefix(6), id: \.self) { Text($0).font(.footnote) } }

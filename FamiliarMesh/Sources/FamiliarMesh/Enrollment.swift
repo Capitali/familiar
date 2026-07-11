@@ -1,37 +1,32 @@
 import Foundation
 
-/// The enrollment payload a device scans (QR) or pastes — produced by `familiar mesh qr`. Carries
-/// the group secret (which *is* membership — trusted-screen only), the group id/label for a sanity
-/// check, and where to reach this familiar.
+/// Where to reach a familiar, for the covenant handshake — produced by `familiar mesh qr` (or, later,
+/// Bonjour discovery). It carries only the **address** and a cosmetic label; the group secret never
+/// leaves the familiar. (`secret`/`group` are accepted but ignored — kept optional so an older
+/// secret-bearing payload still parses, and so the field can be dropped entirely.)
 public struct EnrollmentPayload: Codable, Equatable {
     public var v: Int
-    public var secret: String  // group secret, hex — the join key
-    public var group: String   // group_id, for cross-check
     public var label: String
     public var host: String
     public var port: Int
+    public var group: String?
+    public var secret: String?
 
-    public init(v: Int = 1, secret: String, group: String, label: String, host: String, port: Int) {
+    public init(v: Int = 1, label: String, host: String, port: Int, group: String? = nil, secret: String? = nil) {
         self.v = v
-        self.secret = secret
-        self.group = group
         self.label = label
         self.host = host
         self.port = port
+        self.group = group
+        self.secret = secret
     }
 
-    /// Parse the JSON string carried by the QR/paste. Returns nil if malformed or the secret is
-    /// not a 32-byte hex value.
+    /// Parse the JSON string carried by the QR/paste. Requires only a reachable `host`/`port`.
     public static func parse(_ json: String) -> EnrollmentPayload? {
         guard let data = json.data(using: .utf8),
               let p = try? JSONDecoder().decode(EnrollmentPayload.self, from: data),
-              let secret = Hex.decode(p.secret), secret.count == 32
+              !p.host.isEmpty, p.port > 0
         else { return nil }
         return p
     }
-
-    public var secretData: Data? { Hex.decode(secret) }
-
-    /// The base URL for the observation endpoint.
-    public var observeURL: URL? { URL(string: "http://\(host):\(port)/mesh/observe") }
 }
