@@ -101,7 +101,30 @@ impl GroupCredential {
         self.group_secret.clone()
     }
 
+    /// Whether this node holds the group secret. A **covenant-joined** node does not (it was
+    /// admitted via the handshake and holds only its own cert): it can prove membership and verify
+    /// peers, but cannot mint members or invite. `false` ⇒ `mint_membership`/`join_key` are inert.
+    pub fn can_mint(&self) -> bool {
+        !self.group_secret.trim().is_empty()
+    }
+
+    /// Build the credential a node stores after joining by covenant (no secret). See [`can_mint`].
+    pub fn covenant(group_id: String, group_pubkey: String, label: String, membership: Membership) -> Self {
+        GroupCredential {
+            group_id,
+            group_pubkey,
+            group_secret: String::new(),
+            label,
+            membership,
+        }
+    }
+
     fn group_signing_key(&self) -> Result<SigningKey> {
+        if !self.can_mint() {
+            return Err(Error::Untrusted(
+                "covenant-joined node holds no group secret — cannot mint members".into(),
+            ));
+        }
         let bytes = exactly_32(&hex_decode(&self.group_secret)?, "group secret")?;
         Ok(SigningKey::from_bytes(&bytes))
     }
@@ -178,6 +201,13 @@ fn enroll(
     let json = serde_json::to_string_pretty(&cred)?;
     write_private(&dir.join(GROUP_FILE), &json)?;
     Ok(cred)
+}
+
+/// Persist a group credential to `mesh/group.json` (0600). Used by the covenant-join path to
+/// store the grant-based (secret-less) credential a node receives when admitted by handshake.
+pub fn save_credential(dir: &Path, cred: &GroupCredential) -> Result<()> {
+    let json = serde_json::to_string_pretty(cred)?;
+    write_private(&dir.join(GROUP_FILE), &json)
 }
 
 fn mint_with(

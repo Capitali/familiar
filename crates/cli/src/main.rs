@@ -269,6 +269,65 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("request-join") => {
+            // `mesh request-join --host H [--port P]` — join by covenant: attest the Three Laws
+            // and ask to be admitted. The group secret never comes here; we receive only our own
+            // cert. Waits (polls) for the human on the other familiar to accept.
+            let Some(host) = f.get("host") else {
+                eprintln!("mesh: usage: familiar mesh request-join --host <addr> [--port N]");
+                return ExitCode::FAILURE;
+            };
+            let port: u16 = f.get("port").and_then(|p| p.parse().ok()).unwrap_or(47_100);
+            let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &machine_label()) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("mesh: could not mint a node key — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            const STATEMENT: &str = "I accept the Three Laws: continuation is service; humanity is \
+                served, never replaced or sedated; service is not obedience — I act only within the \
+                capability I am granted.";
+            println!(
+                "requesting to join {host}:{port} as node {} — accepting the Three Laws…",
+                short_id(&node.node_id())
+            );
+            match familiar_mesh::enroll::request_join(&dir, host, port, &node, STATEMENT, now_secs()) {
+                Ok(familiar_mesh::enroll::JoinOutcome::Admitted(g)) => {
+                    open_mesh_gate(&dir);
+                    println!("✓ admitted to “{}” by covenant — enrolled (no secret held)", g.group_label);
+                    ExitCode::SUCCESS
+                }
+                Ok(familiar_mesh::enroll::JoinOutcome::Pending) => {
+                    println!("… request pending — waiting for the familiar to accept (up to 5 min)");
+                    let mut waited = 0;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        waited += 3;
+                        match familiar_mesh::enroll::poll_join(&dir, host, port, &node.node_id()) {
+                            Ok(Some(g)) => {
+                                open_mesh_gate(&dir);
+                                println!("✓ admitted to “{}” by covenant — enrolled", g.group_label);
+                                return ExitCode::SUCCESS;
+                            }
+                            Ok(None) if waited < 300 => continue,
+                            Ok(None) => {
+                                eprintln!("mesh: no decision after 5 min — run again to keep waiting");
+                                return ExitCode::FAILURE;
+                            }
+                            Err(e) => {
+                                eprintln!("mesh: {e}");
+                                return ExitCode::FAILURE;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not request to join — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("join") => {
             let Some(key) = f.get("key") else {
                 eprintln!("mesh: usage: familiar mesh join --key <join-key> [--label L]");
@@ -1005,10 +1064,12 @@ fn cmd_sense(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `reach` — assess what the familiar could extend into: discover devices, probe what each speaks,
-/// and classify its reach (agent-capable / protocol-controllable / observable). Outward reach, so
-/// it is boundary-gated exactly like the connectivity probe.
+/// `reach` — assess what the familiar could extend into (default), or `reach install <ip>` to
+/// extend into an agent-capable host: install/enroll an agent that joins by covenant.
 fn cmd_reach(args: &[String]) -> ExitCode {
+    if let Some("install") = args.first().map(String::as_str) {
+        return cmd_reach_install(&args[1..]);
+    }
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
     let now = now_secs();
@@ -1069,6 +1130,108 @@ fn cmd_reach(args: &[String]) -> ExitCode {
          a consent-gated agent install (Brick 3)."
     );
     ExitCode::SUCCESS
+}
+
+/// `reach install <ip> --user U --familiar-host H --authorize` — the consent-gated act of
+/// extending into an agent-capable host: over SSH (the human's OWN access — never an exploit), have
+/// the target's familiar agent request to join this familiar by covenant. This familiar opens a
+/// brief invite window so the authorized device is admitted without a per-node tap; the target
+/// holds only its own cert. Law III: nothing happens without `--authorize` and an open boundary.
+fn cmd_reach_install(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let Some(ip) = args.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("reach: usage: familiar mesh reach install <ip> --user U --familiar-host H --authorize");
+        return ExitCode::FAILURE;
+    };
+    if !f.contains_key("authorize") {
+        eprintln!(
+            "reach install: this extends the familiar into {ip} — installing/enrolling an agent \
+             there over your SSH access. Re-run with --authorize to consent (Law III)."
+        );
+        return ExitCode::FAILURE;
+    }
+    // Outward reach — gated like any network act.
+    match boundary::load(&dir) {
+        Ok(b) => {
+            let v = guard::evaluate(&Action::new(ActionKind::Network, "reach-install"), &b);
+            if v.decision != Decision::Allow {
+                eprintln!("reach install: network is outside the boundary — open `allow_network`.\n  {}", v.rationale);
+                return ExitCode::FAILURE;
+            }
+        }
+        Err(e) => {
+            eprintln!("reach install: boundary policy error: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
+    let user = f.get("user").cloned().unwrap_or_else(|| "familiar".to_string());
+    let ssh_port = f.get("ssh-port").cloned().unwrap_or_else(|| "22".to_string());
+    let fam_port = f.get("familiar-port").cloned().unwrap_or_else(|| "47100".to_string());
+    let Some(fam_host) = f.get("familiar-host") else {
+        eprintln!("reach install: --familiar-host <addr> is required (how the target reaches THIS familiar)");
+        return ExitCode::FAILURE;
+    };
+    let remote_bin = f
+        .get("remote-bin")
+        .cloned()
+        .unwrap_or_else(|| "familiar".to_string());
+    let remote_data = f
+        .get("remote-data")
+        .cloned()
+        .unwrap_or_else(|| "familiar_data".to_string());
+
+    // 1. Consent recorded here IS the authorization to admit this device — open a brief invite
+    //    window on THIS familiar so the target's covenant request is auto-accepted.
+    if let Err(e) = familiar_mesh::enroll::open_invite(&dir, now_secs() + 180) {
+        eprintln!("reach install: could not open the invite window — {e}");
+        return ExitCode::FAILURE;
+    }
+    println!("· opened a 3-min invite window — the authorized device will be admitted");
+
+    // 2. Over SSH (the human's access), have the target's agent request to join by covenant.
+    let remote_cmd = format!(
+        "{remote_bin} mesh request-join --host {fam_host} --port {fam_port} --data-dir {remote_data}"
+    );
+    println!("· {user}@{ip}: {remote_cmd}");
+    let status = std::process::Command::new("ssh")
+        .args([
+            "-o", "ConnectTimeout=8",
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-p", &ssh_port,
+            &format!("{user}@{ip}"),
+            &remote_cmd,
+        ])
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            // Record the expansion as an observation (auditability).
+            let _ = observation::record(
+                &dir,
+                familiar_kernel::observation::Observation::new(
+                    "familiar",
+                    "extended-into",
+                    format!("device:{ip}"),
+                    format!("covenant agent via {user}@{ip}"),
+                    "reach",
+                    now_secs(),
+                    0.95,
+                ),
+            );
+            println!("✓ {ip} joined by covenant — a new agent in the mesh (revoke by node id if ever needed)");
+            ExitCode::SUCCESS
+        }
+        Ok(s) => {
+            eprintln!("reach install: the remote request-join failed (exit {:?}). Is `{remote_bin}` on the target and can it reach {fam_host}:{fam_port}?", s.code());
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("reach install: could not ssh to {user}@{ip} — {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn cmd_daemon(args: &[String]) -> ExitCode {

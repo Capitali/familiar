@@ -20,10 +20,13 @@
 //! wait for explicit approval. Every grant is revocable by `node_id` (`mesh/revoked.json`).
 
 use crate::group::{self, Membership};
-use crate::node::{fingerprint, NodeIdentity};
+use crate::node::{fingerprint, NodeIdentity, NodeKey};
 use crate::{exactly_32, hex_decode, Error, Result};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
+use std::time::Duration;
 
 /// The version of the Laws covenant a node attests to. Bumped if the covenant's terms change.
 pub const LAWS_VERSION: u32 = 1;
@@ -196,6 +199,135 @@ pub fn invite_until(dir: &Path) -> i64 {
 
 fn invite_open(dir: &Path, now: i64) -> bool {
     now < invite_until(dir)
+}
+
+// ---- the JOIN side: a node requesting to join another familiar by covenant ----------
+
+/// The outcome of asking to join: admitted now (auto-approved), or pending the human's approval.
+pub enum JoinOutcome {
+    Admitted(Box<Grant>),
+    Pending,
+}
+
+/// Ask a familiar at `host:port` to admit this node by covenant: attest the Three Laws, submit the
+/// request (signing the raw body), and — if admitted immediately (an invite window) — persist the
+/// grant-based (secret-less) credential. Otherwise returns `Pending`; poll with [`poll_join`]. The
+/// node never receives the group secret; it can prove membership and verify peers, but not mint.
+pub fn request_join(
+    dir: &Path,
+    host: &str,
+    port: u16,
+    node: &NodeKey,
+    statement: &str,
+    now: i64,
+) -> Result<JoinOutcome> {
+    let req = EnrollRequest {
+        node: node.identity(),
+        attestation: Attestation {
+            laws_version: LAWS_VERSION,
+            statement: statement.to_string(),
+            ts: now,
+        },
+        nonce: format!("{now:x}{}", node.node_id()),
+        ts: now,
+    };
+    let raw = serde_json::to_vec(&req)?;
+    let sig = node.sign(&raw);
+    let (status, body) = http(
+        host,
+        port,
+        "POST",
+        "/mesh/enroll-request",
+        &[("X-Familiar-Sig", &sig), ("Content-Type", "application/json")],
+        &raw,
+    )?;
+    match status {
+        200 => {
+            let grant: Grant = serde_json::from_slice(&body)?;
+            persist_covenant(dir, &grant)?;
+            Ok(JoinOutcome::Admitted(Box::new(grant)))
+        }
+        202 => Ok(JoinOutcome::Pending),
+        403 => Err(Error::Untrusted(String::from_utf8_lossy(&body).into_owned())),
+        _ => Err(Error::Malformed(format!("enroll-request: HTTP {status}"))),
+    }
+}
+
+/// Poll a familiar for the decision on our request. Returns the grant (persisted) once approved,
+/// `None` while still pending; `Untrusted` if the request was declined/removed.
+pub fn poll_join(dir: &Path, host: &str, port: u16, node_id: &str) -> Result<Option<Grant>> {
+    let (status, body) = http(host, port, "GET", &format!("/mesh/enroll-status/{node_id}"), &[], &[])?;
+    match status {
+        200 => {
+            let grant: Grant = serde_json::from_slice(&body)?;
+            persist_covenant(dir, &grant)?;
+            Ok(Some(grant))
+        }
+        202 => Ok(None),
+        404 => Err(Error::Untrusted("request was declined".into())),
+        _ => Err(Error::Malformed(format!("enroll-status: HTTP {status}"))),
+    }
+}
+
+/// Store the grant as this node's (secret-less) group credential, so the transport treats it as an
+/// enrolled member.
+fn persist_covenant(dir: &Path, grant: &Grant) -> Result<()> {
+    let cred = group::GroupCredential::covenant(
+        grant.group_id.clone(),
+        grant.group_pubkey.clone(),
+        grant.group_label.clone(),
+        grant.membership.clone(),
+    );
+    group::save_credential(dir, &cred)
+}
+
+/// A minimal blocking HTTP/1.1 client — dependency-free (std `TcpStream`), matching the crate's
+/// no-crates ethos. Sends `Connection: close` and reads the response to EOF, then splits head/body.
+/// Sufficient for the small JSON bodies the enroll endpoints return on a LAN/tailnet.
+fn http(
+    host: &str,
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Result<(u16, Vec<u8>)> {
+    let addr = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| Error::Malformed(format!("resolve {host}:{port}: {e}")))?
+        .next()
+        .ok_or_else(|| Error::Malformed(format!("no address for {host}:{port}")))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(Error::Io)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
+
+    let mut req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    req.push_str("\r\n");
+    stream.write_all(req.as_bytes())?;
+    stream.write_all(body)?;
+
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf)?;
+    let sep = buf
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or_else(|| Error::Malformed("no HTTP header terminator".into()))?;
+    let head = &buf[..sep];
+    let resp_body = buf[sep + 4..].to_vec();
+    // Status line: "HTTP/1.1 <code> <reason>".
+    let status = std::str::from_utf8(head)
+        .ok()
+        .and_then(|s| s.lines().next())
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| Error::Malformed("bad HTTP status line".into()))?;
+    Ok((status, resp_body))
 }
 
 // ---- internals ----------------------------------------------------------------------
