@@ -192,14 +192,15 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
             }
         }
 
-        // One gossip round.
-        let peers = gossip_round(&dir, &cfg, &cred).await;
+        // One gossip round, then report the count of peers we're actually federating with —
+        // fresh entries in peers.json in EITHER direction, not just this round's outbound reach.
+        let _ = gossip_round(&dir, &cfg, &cred).await;
         let _ = write_status(
             &dir,
             &format!(
                 "✓ mesh open (group {}) — {} peer(s) connected",
                 short(&cred.group_id),
-                peers
+                count_connected(&dir, cfg.gossip_interval_secs)
             ),
         );
 
@@ -670,6 +671,20 @@ fn live_peer_count(dir: &Path) -> usize {
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<PeerRecord>>(&s).ok())
         .map(|p| p.len())
+        .unwrap_or(0)
+}
+
+/// How many peers we're actually federating with: entries in `peers.json` seen within a few gossip
+/// intervals, in *either* direction. The gossip round's own return counts only this cycle's
+/// OUTBOUND reach, which undercounts a peer that reaches us but that we didn't reach this round —
+/// the cause of a confusing "0 peer(s) connected" while the tick reports 1.
+fn count_connected(dir: &Path, interval_secs: u64) -> usize {
+    let window = interval_secs.saturating_mul(3).max(90) as i64;
+    let now = now_secs();
+    std::fs::read_to_string(dir.join(PEERS_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<PeerRecord>>(&s).ok())
+        .map(|ps| ps.iter().filter(|p| now - p.last_seen <= window).count())
         .unwrap_or(0)
 }
 
