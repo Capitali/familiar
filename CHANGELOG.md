@@ -13,6 +13,29 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The mesh became a covenant (`crates/mesh`).** Beyond peer federation, three seams: a
+  **device seam** (`POST /mesh/observe`) where a phone/watch that can't gossip pushes a *signed
+  batch of derived observations* (signature over the raw body, anti-replay + triple debounce,
+  tagged `mesh:<node>`); the **covenant handshake** — a node joins by *attesting the Three Laws*
+  and being accepted, the group secret never leaving the familiar, which mints the joiner's
+  (secret-less) cert (Glass 🤝 accept card; `mesh request-join`/`pending`/`approve`/`invite`); and
+  headless CLI verbs mirroring the Glass wizard. *Validated by real-world operation* (a two-node
+  Mac↔VM federation; a VM admitted as a covenant agent). See [`docs/mesh.md`](docs/mesh.md).
+- **Reach (`crates/reach`).** Assess what the familiar could extend into — probe discovered
+  devices and classify each *agent-capable / protocol-controllable / observable*; `familiar reach`
+  prints the map, and `reach install <ip> --authorize` extends into an agent-capable host over the
+  human's own SSH access → covenant enrolment. *Validated by real-world operation.*
+- **iOS device agent (`~/Development/familiar-ios`).** A lightweight Swift/SwiftUI mesh agent —
+  CryptoKit ed25519 byte-matched to the Rust cert canonicalization, the covenant client, and
+  CoreLocation/CoreMotion → derived observations. Enrols by covenant; holds only its granted cert.
+  *Validated by real-world operation* (a real iPhone's observations reached the familiar).
+- **The agentic seam (`crates/agent`).** A boundary-mediated, multi-step loop: the agent proposes
+  one action at a time; the core executes each through the obedience guard (scoped boundary) +
+  `review_script` + the sandbox — nothing the familiar itself couldn't do. `familiar agent run`.
+  *Validated by unit tests.*
+- **SQLite store.** The append/load/update API now runs on embedded SQLite (`rusqlite`,
+  `bundled`); `familiar db export`/`import` for auditability + legacy migration.
+  *Validated by unit tests.* See [`docs/storage.md`](docs/storage.md).
 - **The eye — gated camera capture (`crates/vision`):** discovery (which cameras exist) was
   always permitted; now *watching* exists too. `capture_frame` grabs a still through the
   bundled `familiar-eye` Swift/AVFoundation helper, and the daemon's gated tick refreshes

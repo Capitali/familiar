@@ -51,17 +51,31 @@ crates/
     trial.rs · score.rs · selection.rs · regression_guard.rs   testing & selection
     mutation.rs · pattern_memory.rs · lineage.rs   variation, memory, ancestry
     thread.rs       the familiar's questions + theories (the Interpret step)
-  sense/    familiar-sense (lib) — perception of the host -> observations (periphery)
+  sense/    familiar-sense (lib) — perception of the host + LAN device discovery -> observations
+  reach/    familiar-reach (lib) — reach assessment: probe discovered devices, classify how the
+                                    familiar could extend into each (agent-capable / protocol-
+                                    controllable / observable). The input to consent-gated expansion.
+  vision/   familiar-vision (lib) — the eye: camera discovery + gated still capture (familiar-eye)
   llm/      familiar-llm (lib)   — the LLM seam: boundary-gated consult (periphery)
   exec/     familiar-exec (lib)  — sandboxed script runner (resource limits + cost)
+  agent/    familiar-agent (lib) — the agentic seam: a boundary-mediated, multi-step loop (the
+                                    agent proposes one action at a time; the core decides + gates)
+  mesh/     familiar-mesh (lib)  — peer federation over the tailnet/LAN: ed25519 group trust, the
+                                    covenant handshake, device observation ingestion, tool/pattern
+                                    merge. Carries the crypto + async-HTTP floor (see mesh.md).
   cycle/    familiar-cycle (lib) — the metabolism: one full tick (sense → detect →
                                     interpret → generate → test → score → select → measure)
-  cli/      familiar-cli (bin: `substrate`) — the shell + daemon control (start/stop/
+  cli/      familiar-cli (bin: `familiar`) — the shell + daemon control (start/stop/
                                     reload/install via pidfile + launchd: src/daemon.rs)
-  observatory/  familiar-glass (bin: `observatory`) — the GUI (primary human
-                interface; egui/eframe; daemon control bar + the interaction channel;
+  glass/    familiar-glass (bin: `glass`) — the GUI (primary human interface; egui/eframe;
+                daemon control bar + the interaction channel + the mesh wizard/accept card;
                 writes only the observer's input; GUI deps isolated). See ADR-0006.
+  marble/   marble (bin: `marble`) — the macOS menu-bar accessory that opens the Glass.
 ```
+
+A separate iOS/watchOS project (`~/Development/familiar-ios`, Swift/SwiftUI) provides lightweight
+**device agents** — they enrol by the covenant handshake and push derived observations to a
+familiar's `/mesh/observe`. See [mesh.md](mesh.md).
 
 ## Interfaces
 
@@ -73,11 +87,12 @@ kernel.
 
 ## Storage
 
-JSONL-in / JSONL-out via `serde`, append-only, one file per record type under a
-data directory (`familiar_data/` by default, `--data-dir` to override).
-Local-first and auditable; the familiar sends no telemetry and exfiltrates nothing
-(restraint is constitutional). SQLite remains a deferred option once the file
-model is proven.
+An **embedded SQLite** store (`crates/kernel/src/store.rs`, `rusqlite` with the `bundled`
+feature — no system library) behind the original append/load/update API; `familiar db export`
+dumps every table to JSONL for auditability and `db import` folds legacy `.jsonl` in. One logical
+table per record type under a data directory (`familiar_data/` by default, `--data-dir` to
+override). Local-first and auditable; the familiar sends no telemetry and exfiltrates nothing
+(restraint is constitutional). See [storage.md](storage.md).
 
 ## Discipline (the green bar)
 

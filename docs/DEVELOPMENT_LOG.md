@@ -6,6 +6,72 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-07-11 — Storage, the agentic seam, the mesh, and reach
+
+A large arc: the store moved to SQLite, the familiar gained a multi-step agentic seam, the mesh
+grew from peer federation into a **covenant** with a device seam and reach. Grouped by theme; the
+per-change detail is in the git history (commits `78136a2`…`f3ae14f`).
+
+### What changed
+
+- **Storage → SQLite** (`crates/kernel/src/store.rs`). The append/load/update API now runs on
+  embedded SQLite (`rusqlite`, `bundled` — no system lib), one table per record type; indexed
+  updates replaced whole-file rewrites. `familiar db export` dumps every table to JSONL
+  (auditability) and `db import` folds legacy `.jsonl` in. See [storage.md](storage.md).
+- **The agentic seam** (`crates/agent`). A boundary-mediated, multi-step loop: the agent proposes
+  ONE action at a time (run this script / here is the answer), the core executes it through the
+  *same* gauntlet the familiar's own actions pass (obedience guard against a scoped boundary →
+  constitutional `review_script` → resource sandbox). `familiar agent run <task>`. Phase 1 added
+  the kernel floor (`ActionKind::Agent`, `scoped_boundary`); Phase 2 the loop.
+- **Tools, judged by output.** A tool that `exit 0`s but prints garbage is retired; the run budget
+  was right-sized (`exec::Limits::tool_run`, 30s/60s) so real sampling/scan tools finish instead
+  of timing out; the Glass shows *why* a run failed (`last_status`), and authoring guidance
+  tightened (valid POSIX, budget-aware).
+- **The mesh grew three seams** (`crates/mesh`, see [mesh.md](mesh.md)). (a) Headless **CLI
+  verbs** mirroring the Glass wizard (`create-group/join/key/qr/peer/share/optin/status`). (b) A
+  **device seam** `/mesh/observe`: a phone/watch that can't gossip pushes a *signed batch of
+  derived observations* (signature over the raw body → no canonicalization; anti-replay + triple
+  debounce; tagged `mesh:<node>`, never laundered). (c) The **covenant handshake**: a node joins
+  by *attesting the Three Laws* and being accepted — the group secret never leaves the familiar,
+  which mints the joiner's cert; a covenant credential is **secret-less** (`can_mint()==false`).
+  Glass gained an 🤝 accept card; `mesh pending/approve/deny/invite`.
+- **Reach** (`crates/reach`). Discovery says what's present; reach probes each device and
+  classifies how the familiar could extend into it (agent-capable / protocol-controllable /
+  observable). `familiar reach` prints the map; `reach install <ip> --authorize` is the
+  consent-gated act — over the human's OWN SSH access (never an exploit) it opens an invite window
+  and has the target's agent request-join by covenant.
+- **The iOS device agent** (`~/Development/familiar-ios`, a separate Swift/SwiftUI project;
+  `FamiliarMesh` package + XcodeGen). CryptoKit ed25519 byte-matched to the Rust `CertBody`; the
+  covenant client (`request-join`/poll); CoreLocation (home/away) + CoreMotion (activity) → derived
+  observations. Enrols by covenant; holds only its granted cert.
+- **Glass** — every message now carries a timestamp (absolute clock + relative age,
+  dependency-free); the unified dialog consolidated question/ask/conversation.
+
+### Why
+
+The owner's arc: give the familiar a real agentic loop, then grow its **reach** across an
+environment — bringing devices under the Three Laws by *consent and demonstrated advantage, never
+coercion* (a covenant, not a conquest). The covenant handshake, the device seam, and reach are the
+built primitives of that telos; the bright-line invariant is that the familiar extends only through
+access the human legitimately holds.
+
+### Checks run
+
+- `cargo test --workspace` green (kernel/cycle/mesh/reach/exec/… + the new suites); `cargo clippy`
+  clean; the Swift `FamiliarMesh` package `swift test` green + a simulator build.
+- Live: a two-node Mac↔VM mesh federated (tools/patterns crossed); a **real iPhone** enrolled and
+  its location/motion observations reached the familiar; a **VM was admitted as a covenant agent**
+  via `reach install` (secret-less credential, audit observation recorded); a LAN `reach` scan
+  produced a real map (Macs/VMs agent-capable, iPhones protocol-controllable).
+
+### Next
+
+- **Reach 2.2** — mDNS/BLE discovery; protocol adapters (AirPlay/Roku/MQTT); wire reach into the
+  tick. **Device agents** — iPadOS + watchOS, then on-device **speech recognition**, then
+  **facial recognition/analysis on iPadOS** (all derived-only, consent-gated). **HealthKit** on
+  the phone. Fix the misleading transport "0 peer(s) connected" status count (it undercounts —
+  reports only the outbound gossip reach, not the inbound federation).
+
 ## 2026-06-29 — The eye, the installer, and a breathing marble
 
 The familiar gained sight, a way to ship, and a little life in the menu bar.

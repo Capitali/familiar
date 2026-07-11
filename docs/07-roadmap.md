@@ -56,6 +56,25 @@ assertion alone.
   app and the launchd agents (daemon KeepAlive + the breathing menu-bar marble at login).
   *Validated by real-world operation* (notarized, stapled, `spctl`-accepted). See
   [`../packaging/README.md`](../packaging/README.md).
+- **SQLite store** — the append/load/update API now runs on embedded SQLite (`rusqlite`,
+  `bundled`); `db export`/`import` for auditability + legacy migration. *Validated by unit tests.*
+- **The agentic seam (`crates/agent`)** — a boundary-mediated, multi-step loop: the agent proposes
+  one action at a time, the core decides and gates each through the obedience guard + review +
+  sandbox. *Validated by unit tests.*
+- **Mesh federation (`crates/mesh`)** — ed25519 group trust, signed briefs over the tailnet/LAN,
+  in-tick merge of tools/patterns (+ opt-in identities). *Validated by real-world operation* (a
+  live two-node Mac↔VM federation). See [mesh.md](mesh.md).
+- **The covenant handshake** — join by *accepting the Three Laws*; the group secret never leaves
+  the familiar, which mints the joiner's cert (Glass accept card + `mesh approve`/`invite`).
+  *Validated by real-world operation.*
+- **The device seam (`/mesh/observe`)** + the **iOS device agent** (`~/Development/familiar-ios`,
+  Swift/SwiftUI + CryptoKit) — a phone enrols by covenant and pushes derived observations
+  (location/motion; health next). *Validated by real-world operation* (a real iPhone's
+  observations reached the familiar). See [mesh.md](mesh.md).
+- **Reach (Bricks 2.1 / 3)** — `familiar-reach` assesses what the familiar could extend into
+  (agent-capable / protocol-controllable / observable) and, with consent (`reach install
+  --authorize`), extends into an agent-capable host via SSH → covenant enrolment. *Validated by
+  real-world operation* (a LAN reach map; a VM admitted as a covenant agent).
 
 The full cycle now runs — observe → detect → generate (LLM-drafted) → test → score →
 select → inherit — under the law-signals (service, presence, capacities) and the
@@ -78,8 +97,21 @@ yet; see [06-limitations.md](06-limitations.md)).
   the daemon structural-fingerprint cadence (slow when nothing changes).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond
   the verb-lexicon proxy; presence per-person.
-- **Reach (Phase 2+).** LAN sensing, the world-model + entity tagging (so proper names
-  resolve as served), people as first-class entities with human-paced cadence.
+- **Reach, continued.** Brick 2.2: richer discovery (mDNS/Bonjour for HomeKit/AirPlay-2 on
+  random ports, BLE), and wire `reach` into the tick so the map stays fresh. Protocol adapters
+  (AirPlay/Roku/MQTT) so protocol-controllable devices become *commandable*, not just seen.
+- **Device agents (the reach frontier).** *(Planned, ordered.)*
+  1. **iPadOS + watchOS agents** — the iOS agent extended to the iPad and an on-wrist watchOS
+     companion (heart rate/motion relayed via WatchConnectivity). HealthKit on iPhone/iPad.
+  2. **Speech recognition** — on-device `SFSpeechRecognizer` + `AVAudioEngine` → derived
+     observations (spoken intent / ambient speech), consent-gated mic, never raw audio by default.
+  3. **Facial recognition + analysis (iPadOS)** — Vision-framework face detection/analysis →
+     derived observations of who is present / attention / expression, tagged and consent-gated;
+     feeds people as first-class entities. Derived-only; raw frames stay on device.
+- **The covenant horizon.** The far telos: familiars (and, eventually, other AIs) accept the
+  Three Laws and join the mesh by consent and demonstrated advantage — never coercion (see
+  [design-orientation-and-mesh.md](design-orientation-and-mesh.md)). The covenant handshake is
+  its built primitive.
 
 ## Capability & the companion phases
 

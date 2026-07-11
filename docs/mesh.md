@@ -8,6 +8,16 @@ Three Laws: a wider, corroborated picture of who is served and how (Laws I/II), 
 spread so the future is cheaper (Law I), and a node never turned against people by a bad peer
 (Law III — the human owns the gate; trust is cryptographic, not ambient).
 
+Beyond peer-to-peer federation it now carries three further seams, documented below: a
+**covenant handshake** (join by accepting the Laws — the secret never leaves the familiar), a
+**device seam** (`/mesh/observe` — phones/watches push signed derived observations), and
+**reach** (`familiar-reach` — assess and, with consent, extend into agent-capable hosts).
+
+**CLI:** `familiar mesh <create-group | join --key | request-join --host | key | qr | peer |
+share | accept-observations | pending | approve | deny | invite | optin | status>`, and
+`familiar reach [install <ip> --authorize]`. The Glass "Mesh" panel mirrors these (create/join
+wizard, the 🤝 accept card, sharing switches).
+
 This document is the protocol + threat model. The narrative arc lives in
 [design-orientation-and-mesh.md](design-orientation-and-mesh.md) §C; the capability gate lives
 in [boundaries.md](boundaries.md).
@@ -54,6 +64,42 @@ The human authorizes the *group* (enrolls the credential + opens `allow_mesh`); 
 group, any peer presenting a valid cert is auto-trusted and auto-merged. The familiar never
 self-widens — it can only mint a cert for a group whose secret a human already handed it.
 
+## Joining by covenant (the preferred enrolment)
+
+Copying the group secret to every node (`mesh join --key`) works but has two costs: a lost node
+leaks the whole group, and "join" is a directed chore. The **covenant handshake** is the shape
+the familiar's reach is built on — a node joins by *accepting the Three Laws*, and the group
+secret never leaves the familiar:
+
+1. The joining node generates its keypair and **attests** — signs a short statement that it will
+   operate under the Three Laws — then `POST`s that to `/mesh/enroll-request`.
+2. The familiar records it as **pending** and surfaces it to the human ("Kali-Jeff wants to join
+   — accept?") in the Glass (an 🤝 accept card) or via `familiar mesh pending`/`approve`.
+   Accepting is an act of *extending the covenant*: the familiar **mints** a membership cert for
+   the node's public key and retains the attestation, so the node can later be held to what it
+   accepted.
+3. The node polls `/mesh/enroll-status/{id}`, receives its cert + the group's public identity (a
+   `Grant`), and is enrolled. It stores a **covenant credential** — its own cert and the group
+   *public* key, but **no group secret** (`can_mint() == false`): it can prove membership and
+   verify peers, but can never mint another member or invite. Revoke by `node_id`.
+
+An **invite window** (`mesh invite`, pairing mode) auto-admits during a bounded window, so a
+human authorizing an *expansion* once does not tap per device; unsolicited joiners always wait
+for explicit approval. This is the primitive the far-horizon telos rests on: an agent presents
+itself, attests to the Laws, and is admitted by an act that can later hold it accountable — the
+same motion whether the joiner is a phone, a Linux host, or (someday) another AI
+(see [design-orientation-and-mesh.md](design-orientation-and-mesh.md)).
+
+## Reach — extending into agent-capable hosts
+
+`familiar-reach` turns discovery into a **reach map**: it probes each device `sense` discovered
+and classifies how the familiar could extend into it — **agent-capable** (SSH: could install a
+native agent, given the human's access), **protocol-controllable** (AirPlay/Roku/MQTT/RTSP/…:
+could command it without installing), or **observable-only**. `familiar reach install <ip>
+--authorize` is the consent-gated act: over the human's **own** SSH access (never an exploit —
+the bright line), it opens a brief invite window here and has the target's agent request to join
+by covenant. Every expansion is recorded (`familiar extended-into device:<ip>`) and revocable.
+
 ## Discovery + wire protocol
 
 Discovery is **gossip, no central server.** Tailscale is L3 (WireGuard) with no multicast, so
@@ -66,11 +112,21 @@ IPs. Endpoints (bound on `gossip_port`, default 47100):
   `mesh/inbox/<node_id>.json`; answer with our own brief (one round exchanges both ways).
 - `GET  /mesh/tool/{id}` → the raw tool script body (only if `share_tools`); the requester
   re-hashes it against the manifest's `script_sha256` before trusting it.
+- `POST /mesh/enroll-request` → a node **asks to join by covenant** (see below): the signed
+  `EnrollRequest` (attestation + node identity). 202 pending / 200 + a `Grant` if an invite
+  window auto-admits / 403 untrusted.
+- `GET  /mesh/enroll-status/{node_id}` → a joiner polls for the human's decision; 200 + `Grant`
+  once approved (the cert is useless without the node's private key, so it is safe to serve).
+- `POST /mesh/observe` → a **device agent** that cannot gossip (an iPhone/Watch) pushes a signed
+  batch of derived observations. The signature covers the raw body (in `X-Familiar-Sig`), so
+  there is no canonicalization to match. See *The device seam* below.
 
 A **brief** carries: node identity + membership cert; a presence summary (counts, never names);
 a capability manifest (host facts + `ToolManifest`s — bodies fetched on demand, not inlined);
 offered patterns + a non-identifying observation summary; and, only when opted in, a scoped
-identity payload. The whole body is signed by the node key; `ts` + `nonce` guard replay.
+identity payload. The whole body is signed by the node key. It carries `ts` + `nonce` for
+freshness; on the brief path these are not yet enforced (the tunnel encrypts and the inbox is
+latest-wins per node), but the device seam (`/mesh/observe`) **does** enforce them.
 
 ## Merge policy (in-tick, `merge.rs`)
 
@@ -91,6 +147,27 @@ identity payload. The whole body is signed by the node key; `ts` + `nonce` guard
 
 Every merge is deduped, so re-draining the same brief each tick is idempotent.
 
+## The device seam (`/mesh/observe`)
+
+A phone or watch cannot be a full gossip peer — iOS can't run a background TCP server to answer
+`POST /mesh/brief`. So a device is a **pure client**: it reuses the mesh trust primitives (an
+ed25519 node key, a covenant-minted membership cert) and `POST`s a **signed batch of derived
+observations** to `/mesh/observe`. Two choices keep it safe and simple:
+
+- **The signature covers the raw request body** (in the `X-Familiar-Sig` header), so a Swift
+  signer signs the literal bytes it sends — zero cross-language JSON canonicalization. The only
+  thing it must byte-reproduce is the membership `CertBody` (integers/strings only).
+- Every recorded observation is tagged `source = "mesh:<node_id>"`, actor `phone:*`/`watch:*` —
+  **never laundered** into local sensing or the structural fingerprint.
+
+The familiar verifies the membership cert (the same trust the brief path uses) + the node
+signature over the raw body, **enforces anti-replay** (a ±5-min `ts` window + a nonce ring — the
+freshness the brief path declares but does not yet enforce), and **debounces** identical
+`(actor,action,object)` triples so a chatty device can't flood the store. `accept_observations`
+in `mesh/config.json` is a separate human switch from `allow_mesh`. Derived-only by design: no
+raw audio/imagery/health samples cross — the phone ships triples like `phone at location:home`.
+The iOS/watchOS agents live in `~/Development/familiar-ios` (Swift/SwiftUI + CryptoKit).
+
 ## The capability gate
 
 `allow_mesh` in `boundary.json` is the fail-closed switch (see [boundaries.md](boundaries.md)).
@@ -108,8 +185,10 @@ holds only **tunables** (interval, port, share toggles, opt-ins) — never autho
   they carry provenance and a node can be quarantined by `node_id`.
 - **PII leak** → default no identity sharing; opt-in per-human/per-group; the guard treats an
   identity-bearing share as `affects_person` → consent; outbound redaction happens in `merge.rs`.
-- **Replay / MITM** → Tailscale already encrypts (WireGuard); plus each brief carries `ts` +
-  `nonce` and a signature; the merge re-verifies before applying.
+- **Replay / MITM** → Tailscale already encrypts (WireGuard); every message is signed and the
+  merge re-verifies before applying. On the brief path the inbox is latest-wins per node (a
+  replay of a *newer* brief only overwrites); the device seam (`/mesh/observe`) additionally
+  enforces a `ts` window + a nonce ring, since it is defined fresh and may run off-tailnet.
 - **Observation laundering** → peer observations are tagged `source="mesh"`, actor-namespaced,
   and never feed local sensing or the structural fingerprint.
 - **Sybil / discovery spoofing** → trust is membership-cert based, not IP/discovery based; a
