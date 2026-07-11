@@ -16,6 +16,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>WKApplication</key>
 	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>io.river.familiar.ios</string>
+	<key>WKRunsIndependentlyOfCompanionApp</key>
+	<true/>
 	<key>NSHealthShareUsageDescription</key>
 	<string>The familiar notes your heart-rate trend (elevated / normal) — never raw readings.</string>
 	<key>NSMotionUsageDescription</key>
