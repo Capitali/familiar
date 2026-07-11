@@ -74,6 +74,9 @@ final class AppModel: ObservableObject {
             enrolling = false
             enrolled = true
             note("✓ admitted to “\(g.group_label)” — the covenant is in force")
+            // Hand the paired Apple Watch this familiar's address so it can enrol itself by
+            // covenant (address only — the watch mints its own key + gets its own grant).
+            PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label)
             startSensingIfConsented()
         } catch EnrollmentClient.EnrollError.denied {
             enrolling = false

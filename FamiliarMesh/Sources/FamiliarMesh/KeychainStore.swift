@@ -1,14 +1,14 @@
 import Foundation
 import Security
 
-/// Minimal Keychain wrapper for the two secrets the agent must persist: the device node seed
-/// (its ed25519 private key) and the group secret (the join key it enrolled with). Both are
-/// 32 raw bytes. Everything else (host/port/group id, consent flags) is non-secret and lives in
-/// UserDefaults.
-enum KeychainStore {
-    private static let service = "io.river.familiar.ios"
+/// Minimal Keychain wrapper for the secrets an agent must persist — the device node seed (its
+/// ed25519 private key) and its granted membership cert. Shared by the iOS/iPad app and the
+/// watchOS companion (each keeps its own key + cert). Everything non-secret (host/port/consent)
+/// lives in UserDefaults.
+public enum KeychainStore {
+    private static let service = "io.river.familiar"
 
-    static func save(_ data: Data, account: String) {
+    public static func save(_ data: Data, account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -21,7 +21,7 @@ enum KeychainStore {
         SecItemAdd(add as CFDictionary, nil)
     }
 
-    static func load(account: String) -> Data? {
+    public static func load(account: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -34,7 +34,7 @@ enum KeychainStore {
         return out as? Data
     }
 
-    static func delete(account: String) {
+    public static func delete(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
