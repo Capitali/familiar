@@ -16,6 +16,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>WKApplication</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>io.river.familiar.ios</string>
 	<key>WKRunsIndependentlyOfCompanionApp</key>
