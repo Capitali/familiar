@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
 	<string>The familiar notes your heart-rate trend (elevated / normal) — never raw readings.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>The familiar only reads your heart-rate trend; it never writes to Health.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>The familiar notes coarse activity (walking, still) — never raw motion data.</string>
 </dict>
