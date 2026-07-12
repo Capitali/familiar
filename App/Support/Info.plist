@@ -30,6 +30,8 @@
 	<string>The familiar notes home/away in the background so it can serve you without the app open. Only "home" or "away" is ever sent — never your coordinates.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>The familiar notes coarse activity (walking, driving, still) — never raw motion data.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan a familiar's join QR code to enrol this device. The camera is used only for that scan.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

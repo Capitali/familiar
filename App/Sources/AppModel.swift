@@ -87,6 +87,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// The address payload this device enrolled with — an *address*, not a secret. An enrolled
+    /// member shows this as a QR so a new device can scan it and join the same familiar.
+    var addressPayload: String? {
+        guard let host = defaults.string(forKey: "enroll.host"),
+              let port = defaults.string(forKey: "enroll.port"), !host.isEmpty
+        else { return nil }
+        return "{\"v\":1,\"host\":\"\(host)\",\"port\":\(port),\"label\":\"\(groupLabel)\"}"
+    }
+
     func unenroll() {
         KeychainStore.delete(account: grantAccount)
         defaults.removeObject(forKey: "enroll.host")
