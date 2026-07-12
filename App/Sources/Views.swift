@@ -15,6 +15,7 @@ struct RootView: View {
         NavigationStack {
             if model.enrolled { StatusView() } else { EnrollView() }
         }
+        .onAppear { model.syncWatch() }
     }
 }
 
@@ -70,6 +71,7 @@ struct EnrollView: View {
 /// so this member becomes a scan-to-join point for the next device.
 struct StatusView: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var watch = PhoneWatchLink.shared
     @State private var showJoinQR = false
     var body: some View {
         Form {
@@ -77,6 +79,19 @@ struct StatusView: View {
                 LabeledContent("Group", value: model.groupLabel)
                 LabeledContent("Familiar", value: model.host)
                 LabeledContent("Sent", value: "\(model.sentCount)")
+            }
+            Section("Apple Watch") {
+                if !watch.paired {
+                    Text("No paired watch detected.").foregroundStyle(.secondary).font(.footnote)
+                } else if !watch.appInstalled {
+                    Text("Watch paired — install the Familiar watch app to link it.")
+                        .foregroundStyle(.secondary).font(.footnote)
+                } else {
+                    LabeledContent("Watch app", value: watch.lastSent != nil ? "linked" : "linking…")
+                    Text("The watch enrols itself by covenant and sends heart-rate + motion.")
+                        .foregroundStyle(.secondary).font(.footnote)
+                }
+                Button("Re-link watch") { model.syncWatch() }
             }
             Section("Invite another device") {
                 Text("Show this QR for a new device to scan — it joins this familiar directly (you accept it on the familiar). It carries only the address, no secret.")

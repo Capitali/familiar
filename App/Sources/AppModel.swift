@@ -87,6 +87,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Activate the watch link and, if we're enrolled, (re)hand the watch our address — so a watch
+    /// that connects *after* the phone enrolled still gets linked. Safe to call every launch.
+    func syncWatch() {
+        let link = PhoneWatchLink.shared // touch = activate the WCSession
+        if enrolled,
+           let host = defaults.string(forKey: "enroll.host"),
+           let port = Int(defaults.string(forKey: "enroll.port") ?? "") {
+            link.sendAddress(host: host, port: port, label: groupLabel)
+        }
+    }
+
     /// The address payload this device enrolled with — an *address*, not a secret. An enrolled
     /// member shows this as a QR so a new device can scan it and join the same familiar.
     var addressPayload: String? {
