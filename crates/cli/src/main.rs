@@ -534,6 +534,43 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("auto-accept") => {
+            // `mesh auto-accept <on|off>` — a standing invite: auto-admit any node that attests the
+            // Laws and asks, without a per-device tap. Convenient on a trusted network.
+            let Some(setting) = args.get(1) else {
+                eprintln!("mesh: usage: familiar mesh auto-accept <on|off>");
+                return ExitCode::FAILURE;
+            };
+            let on = match setting.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => {
+                    eprintln!("mesh: setting must be `on` or `off`");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut cfg = match familiar_mesh::config::load(&dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("mesh: bad mesh/config.json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            cfg.auto_accept_enrollments = on;
+            match write_mesh_config(&dir, &cfg) {
+                Ok(()) => {
+                    println!("✓ auto-accept = {setting}");
+                    if on {
+                        println!("  (any device that attests the Laws and reaches this familiar is now admitted automatically)");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not write mesh/config.json — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("pending") => {
             // `mesh pending` — the covenant handshake's inbox: nodes that attested the Laws and
             // are waiting for you to extend the covenant. Approve/deny by their code or node id.
@@ -692,13 +729,14 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             println!("gate    allow_mesh = {}", b.allow_mesh);
             if let Ok(cfg) = familiar_mesh::config::load(&dir) {
                 println!(
-                    "config  port {} · every {}s · tools {} · knowledge {} · identities {} · accept-obs {}",
+                    "config  port {} · every {}s · tools {} · knowledge {} · identities {} · accept-obs {} · auto-accept {}",
                     cfg.gossip_port,
                     cfg.gossip_interval_secs,
                     cfg.share_tools,
                     cfg.share_knowledge,
                     cfg.share_identities,
-                    cfg.accept_observations
+                    cfg.accept_observations,
+                    cfg.auto_accept_enrollments
                 );
                 if !cfg.static_peers.is_empty() {
                     println!("static  {}", cfg.static_peers.join(", "));
@@ -749,8 +787,9 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
         _ => {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
-                 | key | qr | peer <ip[:port]> | share <tools|knowledge|identities> <on|off> \
-                 | accept-observations <on|off> | pending | approve <node_id> | deny <node_id> \
+                 | request-join --host H | key | qr | peer <ip[:port]> \
+                 | share <tools|knowledge|identities> <on|off> | accept-observations <on|off> \
+                 | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
                  | invite [--minutes N] | optin <handle> | status>"
             );
             ExitCode::FAILURE

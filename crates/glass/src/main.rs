@@ -919,7 +919,13 @@ impl Glass {
     /// actor like `phone:ian`): one row per device node, newest first, as `(actor, node, object, ts)`.
     fn mesh_device_agents(&self) -> Vec<(String, String, String, i64)> {
         use std::collections::HashMap;
-        let mut latest: HashMap<String, (String, String, i64)> = HashMap::new();
+        // How recently a device must have reported to count as a connected agent. A device that
+        // re-enrolled gets a NEW node key (new node id) but keeps its actor (e.g. `phone:ian`), so
+        // key by ACTOR — the newest report wins — collapsing a re-enrolled device to one row, and
+        // drop any actor whose latest report is older than the window (a departed agent).
+        const FRESH_SECS: i64 = 6 * 3600;
+        let now = now_secs();
+        let mut latest: HashMap<String, (String, String, i64)> = HashMap::new(); // actor -> (node, object, ts)
         for o in &self.snapshot.observations {
             let Some(node) = o.source.strip_prefix("mesh:") else {
                 continue;
@@ -927,14 +933,15 @@ impl Glass {
             if o.actor.starts_with("mesh:") {
                 continue; // gossip-peer presence, not a device agent
             }
-            let e = latest.entry(node.to_string()).or_insert(("".into(), "".into(), 0));
+            let e = latest.entry(o.actor.clone()).or_insert(("".into(), "".into(), 0));
             if o.ts >= e.2 {
-                *e = (o.actor.clone(), o.object.clone(), o.ts);
+                *e = (node.to_string(), o.object.clone(), o.ts);
             }
         }
         let mut v: Vec<(String, String, String, i64)> = latest
             .into_iter()
-            .map(|(node, (actor, object, ts))| (actor, node, object, ts))
+            .filter(|(_, (_, _, ts))| now - *ts <= FRESH_SECS)
+            .map(|(actor, (node, object, ts))| (actor, node, object, ts))
             .collect();
         v.sort_by_key(|(_, _, _, ts)| std::cmp::Reverse(*ts));
         v
@@ -1241,6 +1248,12 @@ impl Glass {
                                 "Share humans I've opted in (below) — off by default",
                             )
                             .changed();
+                        changed |= ui
+                            .checkbox(
+                                &mut cfg.auto_accept_enrollments,
+                                "Auto-accept join requests (admit any device that attests the Laws)",
+                            )
+                            .changed();
                         // Per-human opt-in, scoped to this group.
                         for person in familiar_kernel::identity::load(&self.data_dir)
                             .unwrap_or_default()
@@ -1327,19 +1340,25 @@ impl Glass {
             }
         }
         if let Some(tex) = &self.camera_tex {
-            Self::rail_label(ui, "THE EYE · WHAT IT SEES");
-            let size = tex.size_vec2();
-            let scale = (ui.available_width().min(480.0) / size.x).min(1.0);
-            ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                tex.id(),
-                size * scale,
-            )));
-            let age = now_secs() - self.camera_mtime;
-            ui.label(
-                egui::RichText::new(format!("captured {age}s ago · refreshes as it watches"))
-                    .weak()
-                    .small(),
-            );
+            let mtime = self.camera_mtime;
+            egui::CollapsingHeader::new(
+                egui::RichText::new("📷 THE EYE · WHAT IT SEES").strong(),
+            )
+            .default_open(true)
+            .show(ui, |ui| {
+                let size = tex.size_vec2();
+                let scale = (ui.available_width().min(480.0) / size.x).min(1.0);
+                ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                    tex.id(),
+                    size * scale,
+                )));
+                let age = now_secs() - mtime;
+                ui.label(
+                    egui::RichText::new(format!("captured {age}s ago · refreshes as it watches"))
+                        .weak()
+                        .small(),
+                );
+            });
         }
     }
     /// The self-tuned per-tick LLM budget, shown as a number with a trend arrow — the
@@ -1922,7 +1941,11 @@ impl Glass {
         egui::Frame::group(ui.style())
             .fill(egui::Color32::from_rgb(24, 28, 36))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("💬 The familiar").strong().color(blue));
+                egui::CollapsingHeader::new(
+                    egui::RichText::new("💬 The familiar").strong().color(blue),
+                )
+                .default_open(true)
+                .show(ui, |ui| {
                 if turns.is_empty() {
                     ui.weak("(say hello — this is where you and the familiar talk)");
                 }
@@ -2019,6 +2042,7 @@ impl Glass {
                         "answered from what it can verify — known or probable, never a guess"
                     });
                 });
+                }); // close the collapsible "💬 The familiar" body
             });
 
         if send {

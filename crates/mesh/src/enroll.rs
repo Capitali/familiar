@@ -123,8 +123,11 @@ pub(crate) fn submit_request(dir: &Path, raw: &[u8], sig_hex: &str, now: i64) ->
         code: short_code(&req.node.node_id),
     };
 
-    // Pairing mode: if the human opened an invite window, admit the node now.
-    if invite_open(dir, now) {
+    // Auto-admit if the human has set a standing auto-accept, or opened a timed invite window.
+    let auto = crate::config::load(dir)
+        .map(|c| c.auto_accept_enrollments)
+        .unwrap_or(false);
+    if auto || invite_open(dir, now) {
         let grant = mint_grant(dir, &cred, &req.node, now)?;
         remove_pending(dir, &req.node.node_id)?;
         return Ok(Submitted::Granted(Box::new(grant)));

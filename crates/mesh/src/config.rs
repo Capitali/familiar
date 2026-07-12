@@ -45,6 +45,11 @@ pub struct MeshConfig {
     /// A separate human switch from `allow_mesh`: mesh federation can be on while device
     /// ingestion is off. Every batch is still cert-verified and signature-checked regardless.
     pub accept_observations: bool,
+    /// **Auto-admit any well-formed covenant request** — a standing invite. When true, a node that
+    /// attests the Laws and reaches `/mesh/enroll-request` is admitted immediately, without a
+    /// per-device tap. Convenient on a trusted network; leave off to review each joiner (`mesh
+    /// pending`/`approve`). Off by default — admitting a member is a human act.
+    pub auto_accept_enrollments: bool,
 }
 
 impl Default for MeshConfig {
@@ -58,6 +63,7 @@ impl Default for MeshConfig {
             identity_optin: Vec::new(),
             static_peers: Vec::new(),
             accept_observations: true,
+            auto_accept_enrollments: false,
         }
     }
 }
