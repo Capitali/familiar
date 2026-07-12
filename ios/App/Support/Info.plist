@@ -31,7 +31,11 @@
 	<key>NSMotionUsageDescription</key>
 	<string>The familiar notes coarse activity (walking, driving, still) — never raw motion data.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan a familiar's join QR code to enrol this device. The camera is used only for that scan.</string>
+	<string>Used to scan a familiar's join QR code, and (if you enable it) on-device facial presence analysis — never a stored image.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Push-to-talk: your spoken note is transcribed on-device and sent to the familiar. No audio leaves the device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribes your push-to-talk speech on-device so the familiar can act on it.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

@@ -67,6 +67,42 @@ struct EnrollView: View {
     }
 }
 
+/// Push-to-talk voice: tap to speak, tap to send. On-device transcription; the utterance becomes
+/// an observation. Requests speech + mic permission on first use.
+struct VoiceControl: View {
+    @ObservedObject var voice: VoiceSensing
+    var body: some View {
+        Button {
+            if voice.listening {
+                voice.stop()
+            } else {
+                voice.requestAccess { ok in if ok { voice.start() } }
+            }
+        } label: {
+            Label(voice.listening ? "Listening — tap to send" : "Push to talk",
+                  systemImage: voice.listening ? "mic.fill" : "mic")
+                .foregroundStyle(voice.listening ? .red : .primary)
+        }
+        if !voice.partial.isEmpty {
+            Text("“\(voice.partial)”").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A toggle for on-device facial *presence* analysis (front camera): derived presence/attention,
+/// never a frame or an identity.
+struct FaceControl: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var face: FaceSensing
+    var body: some View {
+        Toggle("Presence — faces at the iPad (front camera)", isOn: $model.faceEnabled)
+            .onChange(of: model.faceEnabled) { _ in model.startFaceIfConsented() }
+        if face.running {
+            Text("watching · \(face.lastCount) face(s)").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// Post-enrollment: consent switches, a home anchor, live counts, the activity log, and a join QR
 /// so this member becomes a scan-to-join point for the next device.
 struct StatusView: View {
@@ -109,6 +145,10 @@ struct StatusView: View {
                     .onChange(of: model.motionEnabled) { _ in model.startSensingIfConsented() }
                 Button("Set “home” to my current location") { model.setHomeToCurrentLocation() }
             }
+            Section("Voice & presence") {
+                VoiceControl(voice: model.voice)
+                FaceControl(model: model, face: model.face)
+            }
             Section("Activity") {
                 ForEach(model.log.prefix(20), id: \.self) { Text($0).font(.footnote) }
             }
@@ -117,7 +157,7 @@ struct StatusView: View {
             }
         }
         .navigationTitle("Familiar Agent")
-        .onAppear { model.startSensingIfConsented() }
+        .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented() }
         .sheet(isPresented: $showJoinQR) {
             VStack(spacing: 16) {
                 Text("Join \(model.groupLabel)").font(.headline)

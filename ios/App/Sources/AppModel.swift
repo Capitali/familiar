@@ -18,12 +18,18 @@ final class AppModel: ObservableObject {
     // Consent — nothing is gathered until the human turns it on. Persisted.
     @AppStorage("consent.location") var locationEnabled = false
     @AppStorage("consent.motion") var motionEnabled = false
+    @AppStorage("consent.face") var faceEnabled = false
 
     private let grantAccount = "grant.json"
     private let defaults = UserDefaults.standard
 
     private(set) var node: NodeKey
     private var coordinator: SensingCoordinator?
+
+    // Richer iPad sensors (voice is push-to-talk; face is a toggle). Created after node so their
+    // closures can capture a fully-initialised self.
+    private(set) var voice: VoiceSensing!
+    private(set) var face: FaceSensing!
 
     init() {
         // Restore (or mint) the device node key. The label is what the familiar sees as the peer.
@@ -38,6 +44,19 @@ final class AppModel: ObservableObject {
         host = defaults.string(forKey: "enroll.host") ?? ""
         groupLabel = defaults.string(forKey: "enroll.label") ?? ""
         enrolled = storedGrant() != nil && !host.isEmpty
+        voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
+        face = FaceSensing { [weak self] obs in self?.emit(obs) }
+    }
+
+    /// A single derived observation from any sensor → the /mesh/observe pipe.
+    func emit(_ obs: ObsRecord) {
+        Task { await deliver([obs]) }
+    }
+
+    /// Start/stop on-device facial analysis per consent (heavier than location/motion, so its own
+    /// toggle). Only while enrolled.
+    func startFaceIfConsented() {
+        if enrolled, faceEnabled { face.start() } else { face.stop() }
     }
 
     /// Request to join from a scanned QR / pasted address payload: attest the Three Laws, ask the
