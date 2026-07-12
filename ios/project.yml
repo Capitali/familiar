@@ -11,7 +11,7 @@ settings:
     DEVELOPMENT_TEAM: 8GHXL328AR
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "4"
 packages:
   FamiliarMesh:
     path: FamiliarMesh
@@ -32,6 +32,11 @@ targets:
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh
+      # Embed the watch app inside the iPhone app so iOS registers it as the companion:
+      # WCSession.isWatchAppInstalled turns true, the address hand-off flows, and the watch
+      # rides along through TestFlight. (Standalone-installed watch apps never link.)
+      - target: FamiliarWatch
+        embed: true
   # A watchOS companion — its own covenant node (heart rate + motion → derived observations).
   # Receives the familiar's address from the paired iPhone via WatchConnectivity, but runs
   # independently. Bundle id MUST be prefixed by the companion's (io.river.familiar.ios.*).

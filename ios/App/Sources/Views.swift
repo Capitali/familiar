@@ -1,5 +1,6 @@
 import SwiftUI
 import FamiliarMesh
+import WatchConnectivity
 
 @main
 struct FamiliarAgentApp: App {
@@ -116,18 +117,22 @@ struct StatusView: View {
                 LabeledContent("Familiar", value: model.host)
                 LabeledContent("Sent", value: "\(model.sentCount)")
             }
-            Section("Apple Watch") {
-                if !watch.paired {
-                    Text("No paired watch detected.").foregroundStyle(.secondary).font(.footnote)
-                } else if !watch.appInstalled {
-                    Text("Watch paired — install the Familiar watch app to link it.")
-                        .foregroundStyle(.secondary).font(.footnote)
-                } else {
-                    LabeledContent("Watch app", value: watch.lastSent != nil ? "linked" : "linking…")
-                    Text("The watch enrols itself by covenant and sends heart-rate + motion.")
-                        .foregroundStyle(.secondary).font(.footnote)
+            // Only iPhones pair with an Apple Watch — WCSession.isSupported() is false on iPad,
+            // so the whole section stays off there.
+            if WCSession.isSupported() {
+                Section("Apple Watch") {
+                    if !watch.paired {
+                        Text("No paired watch detected.").foregroundStyle(.secondary).font(.footnote)
+                    } else if !watch.appInstalled {
+                        Text("Watch paired — install the Familiar watch app to link it.")
+                            .foregroundStyle(.secondary).font(.footnote)
+                    } else {
+                        LabeledContent("Watch app", value: watch.lastSent != nil ? "linked" : "linking…")
+                        Text("The watch enrols itself by covenant and sends heart-rate + motion.")
+                            .foregroundStyle(.secondary).font(.footnote)
+                    }
+                    Button("Re-link watch") { model.syncWatch() }
                 }
-                Button("Re-link watch") { model.syncWatch() }
             }
             Section("Invite another device") {
                 Text("Show this QR for a new device to scan — it joins this familiar directly (you accept it on the familiar). It carries only the address, no secret.")
