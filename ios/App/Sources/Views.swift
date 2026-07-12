@@ -148,6 +148,8 @@ struct StatusView: View {
                     .onChange(of: model.locationEnabled) { _ in model.startSensingIfConsented() }
                 Toggle("Motion — walking / driving / still", isOn: $model.motionEnabled)
                     .onChange(of: model.motionEnabled) { _ in model.startSensingIfConsented() }
+                Toggle("Network — devices & services nearby", isOn: $model.discoveryEnabled)
+                    .onChange(of: model.discoveryEnabled) { _ in model.startDiscoveryIfConsented() }
                 Button("Set “home” to my current location") { model.setHomeToCurrentLocation() }
             }
             Section("Voice & presence") {
@@ -162,7 +164,7 @@ struct StatusView: View {
             }
         }
         .navigationTitle("Familiar Agent")
-        .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented() }
+        .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented(); model.startDiscoveryIfConsented() }
         .sheet(isPresented: $showJoinQR) {
             VStack(spacing: 16) {
                 Text("Join \(model.groupLabel)").font(.headline)

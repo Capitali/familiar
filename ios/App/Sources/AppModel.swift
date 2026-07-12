@@ -19,12 +19,14 @@ final class AppModel: ObservableObject {
     @AppStorage("consent.location") var locationEnabled = false
     @AppStorage("consent.motion") var motionEnabled = false
     @AppStorage("consent.face") var faceEnabled = false
+    @AppStorage("consent.discovery") var discoveryEnabled = false
 
     private let grantAccount = "grant.json"
     private let defaults = UserDefaults.standard
 
     private(set) var node: NodeKey
     private var coordinator: SensingCoordinator?
+    private var discovery: NetworkDiscovery?
 
     // Richer iPad sensors (voice is push-to-talk; face is a toggle). Created after node so their
     // closures can capture a fully-initialised self.
@@ -97,6 +99,7 @@ final class AppModel: ObservableObject {
             // covenant (address only — the watch mints its own key + gets its own grant).
             PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label)
             startSensingIfConsented()
+            startDiscoveryIfConsented()
         } catch EnrollmentClient.EnrollError.denied {
             enrolling = false
             note("✗ the familiar declined this device")
@@ -131,6 +134,8 @@ final class AppModel: ObservableObject {
         defaults.removeObject(forKey: "enroll.host")
         coordinator?.stop()
         coordinator = nil
+        discovery?.stop()
+        discovery = nil
         enrolled = false
         note("unenrolled — nothing is sent")
     }
@@ -158,6 +163,16 @@ final class AppModel: ObservableObject {
     func setHomeToCurrentLocation() {
         coordinator?.markHomeAtCurrent()
         note("home region set to current location")
+    }
+
+    /// Survey the local network by Bonjour and report what's out there — the device's view of the
+    /// mesh's surroundings becomes the familiar's (and its peers'). Consent-gated; only while enrolled.
+    func startDiscoveryIfConsented() {
+        guard enrolled, discoveryEnabled else { discovery?.stop(); return }
+        let d = discovery ?? NetworkDiscovery { [weak self] batch in await self?.deliver(batch) }
+        discovery = d
+        d.start()
+        note("network discovery armed — surveying \(NetworkDiscovery.serviceTypes.count) service kinds")
     }
 
     // MARK: grant persistence (the cert is public — Keychain just keeps it tidy with the key)
