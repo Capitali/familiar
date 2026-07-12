@@ -21,6 +21,7 @@ targets:
     platform: iOS
     sources:
       - App/Sources
+      - App/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ios
@@ -31,17 +32,19 @@ targets:
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh
-  # A standalone watchOS companion — its own covenant node (heart rate + motion → derived
-  # observations). Receives the familiar's address from the paired iPhone via WatchConnectivity.
+  # A watchOS companion — its own covenant node (heart rate + motion → derived observations).
+  # Receives the familiar's address from the paired iPhone via WatchConnectivity, but runs
+  # independently. Bundle id MUST be prefixed by the companion's (io.river.familiar.ios.*).
   FamiliarWatch:
     type: application
     platform: watchOS
     deploymentTarget: "9.0"
     sources:
       - Watch/Sources
+      - Watch/Assets.xcassets
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.watch
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ios.watch
         INFOPLIST_FILE: Watch/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: Watch/Support/Familiar.entitlements
