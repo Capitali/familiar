@@ -26,8 +26,11 @@ echo "== regenerate project =="
 xcodegen >/dev/null
 
 echo "== archive =="
+# No -sdk iphoneos: that flag forces EVERY target (including the embedded watchOS app) onto the
+# iOS SDK, so the watch fails to build. The generic iOS destination lets each target use its own
+# SDK — the app builds for iphoneos, the embedded watch for watchos.
 xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent \
-  -sdk iphoneos -destination 'generic/platform=iOS' \
+  -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE" archive -allowProvisioningUpdates
 
 echo "== export (App Store) =="
