@@ -20,7 +20,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 /// Wire/brief format version — bump on incompatible changes to the signed body.
-pub const BRIEF_VERSION: u32 = 1;
+pub const BRIEF_VERSION: u32 = 2;
 
 /// Presence: how busy this node is and when it last served — **counts, never names**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -61,11 +61,33 @@ pub struct PatternOffer {
     pub support: u32,
 }
 
-/// Knowledge offered: distilled patterns + a non-identifying observation summary.
+/// One observation shared for replication. Carries its **origin node** so peers dedup globally and
+/// preserve provenance — observation ids are node-local (`obs-NNNN`), so an id alone can't dedup
+/// across nodes; the receiver keys on a content hash of (origin, actor, action, object, ts).
+/// Derived data only, same discipline as everything that crosses the mesh. `confidence_pct` is an
+/// integer so the brief body stays `Eq`/byte-deterministic for signing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObsShare {
+    pub origin: String,
+    pub actor: String,
+    pub action: String,
+    pub object: String,
+    pub context: String,
+    pub ts: i64,
+    pub confidence_pct: u8,
+}
+
+/// Knowledge offered: distilled patterns, a non-identifying observation summary, and — when
+/// `share_observations` is on — the recent observation records themselves, so every peer holds the
+/// shared record and can back up and speak for a peer that goes away.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Knowledge {
     pub patterns: Vec<PatternOffer>,
     pub obs_summary: String,
+    /// Recent observations for replication. `#[serde(default)]` so a brief from a node that predates
+    /// this field still deserializes (as none).
+    #[serde(default)]
+    pub observations: Vec<ObsShare>,
 }
 
 /// A single opted-in human, shared only under explicit per-handle/per-group consent.
@@ -195,6 +217,7 @@ mod tests {
                     support: 7,
                 }],
                 obs_summary: "42 observations".into(),
+                observations: Vec::new(),
             },
             identities: None,
         }

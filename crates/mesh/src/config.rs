@@ -31,6 +31,10 @@ pub struct MeshConfig {
     pub share_tools: bool,
     /// Offer distilled patterns/knowledge to peers.
     pub share_knowledge: bool,
+    /// Replicate observations to peers so every node holds the shared record — a true mesh where
+    /// any peer can vanish and the rest still know what it knew. Derived data only, mesh-tagged and
+    /// deduped by origin; a separate switch from `share_knowledge` since it moves more data.
+    pub share_observations: bool,
     /// Master switch for identity sharing. Even when true, only handles listed in
     /// `identity_optin` for the relevant group are shared — this just gates the whole path.
     pub share_identities: bool,
@@ -59,6 +63,7 @@ impl Default for MeshConfig {
             gossip_port: 47_100,
             share_tools: true,
             share_knowledge: true,
+            share_observations: true,
             share_identities: false,
             identity_optin: Vec::new(),
             static_peers: Vec::new(),

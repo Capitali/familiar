@@ -19,7 +19,7 @@
 //! Every merge is deduped so re-draining the same brief each tick is idempotent.
 
 use crate::brief::{sign_brief, BriefBody, Capability, ConsentedIdentityPayload, IdentityShare,
-    Knowledge, MeshBrief, PatternOffer, Presence, ToolManifest, BRIEF_VERSION};
+    Knowledge, MeshBrief, ObsShare, PatternOffer, Presence, ToolManifest, BRIEF_VERSION};
 use crate::config::{self, MeshConfig};
 use crate::group::{self, GroupCredential};
 use crate::node::NodeKey;
@@ -83,9 +83,33 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
         Vec::new()
     };
     let knowledge = if cfg.share_knowledge {
+        // Replicate the recent record so peers converge on a shared memory. Bounded per brief; over
+        // repeated rounds recent history propagates across the whole mesh (older history backfills
+        // as long as it stays within the window of some peer — full anti-entropy is a follow-up).
+        let observations = if cfg.share_observations {
+            let self_node = &id.node_id;
+            obs.iter()
+                .rev()
+                .take(OBS_SHARE_CAP)
+                .filter_map(|o| {
+                    obs_origin(&o.source, self_node).map(|origin| ObsShare {
+                        origin,
+                        actor: o.actor.clone(),
+                        action: o.action.clone(),
+                        object: o.object.clone(),
+                        context: o.context.clone(),
+                        ts: o.ts,
+                        confidence_pct: (o.confidence * 100.0).round().clamp(0.0, 100.0) as u8,
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         Knowledge {
             patterns: pattern_offers(dir),
             obs_summary: format!("{} observations", obs.len()),
+            observations,
         }
     } else {
         Knowledge::default()
@@ -260,6 +284,43 @@ fn merge_one(
         report.observations_ingested += 1;
     }
 
+    // --- Observations: replicate the shared record so this node backs up what the peer knows.
+    // Deduped by a content hash of (origin, actor, action, object, ts) — ids are node-local, so we
+    // can't key on them — and tagged `mesh:<origin>` so replicated data stays quarantined from
+    // local sensing/fingerprint (same discipline as presence). We never re-ingest our own. ---
+    if cfg.share_observations && !brief.body.knowledge.observations.is_empty() {
+        let self_node = &cred.membership.node_id;
+        let mut seen: std::collections::HashSet<String> = observation::load(dir)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|o| {
+                obs_origin(&o.source, self_node)
+                    .map(|origin| obs_key(&origin, &o.actor, &o.action, &o.object, o.ts))
+            })
+            .collect();
+        for s in &brief.body.knowledge.observations {
+            if &s.origin == self_node {
+                continue; // our own observation echoed back — never re-ingest
+            }
+            let key = obs_key(&s.origin, &s.actor, &s.action, &s.object, s.ts);
+            if !seen.insert(key) {
+                continue; // already have it (deduped across peers and rounds)
+            }
+            let o = observation::Observation::new(
+                s.actor.clone(),
+                s.action.clone(),
+                s.object.clone(),
+                s.context.clone(),
+                format!("mesh:{}", s.origin),
+                s.ts,
+                (s.confidence_pct as f64 / 100.0).clamp(0.0, 1.0),
+            );
+            if observation::record(dir, o).is_ok() {
+                report.observations_ingested += 1;
+            }
+        }
+    }
+
     // --- Identities: opt-in only, per handle + group. ---
     if let Some(payload) = &brief.body.identities {
         for share in &payload.entries {
@@ -366,6 +427,31 @@ fn merge_identity(dir: &Path, share: &IdentityShare, node_id: &str, now: i64) ->
     familiar_kernel::store::append(dir, identity::IDENTITY_FILE, &rec).is_ok()
 }
 
+/// How many recent observations a single brief carries. Bounds brief size; recent history still
+/// converges across the mesh over repeated rounds.
+const OBS_SHARE_CAP: usize = 200;
+
+/// The origin node of an observation, for replication dedup + provenance. A `mesh:<node>...`
+/// source names the node it came from; bare `mesh` (peer presence) has no shareable origin; anything
+/// else was born on this node, so its origin is us. Returns `None` for records not worth replicating.
+fn obs_origin(source: &str, self_node: &str) -> Option<String> {
+    if source == "mesh" {
+        return None; // peer-presence marker, not a shareable observation
+    }
+    if let Some(rest) = source.strip_prefix("mesh:") {
+        let node = rest.split(['#', ':']).next().unwrap_or("");
+        return if node.is_empty() { None } else { Some(node.to_string()) };
+    }
+    Some(self_node.to_string())
+}
+
+/// A stable, cross-node dedup key for an observation: a content hash of its origin + triple + time.
+/// Ids are node-local, so two nodes that hold the same observation agree only on these fields.
+fn obs_key(origin: &str, actor: &str, action: &str, object: &str, ts: i64) -> String {
+    let material = format!("{origin}\u{1}{actor}\u{1}{action}\u{1}{object}\u{1}{ts}");
+    sha256_hex(material.as_bytes())[..16].to_string()
+}
+
 fn record_obs(dir: &Path, actor: &str, action: &str, object: &str, ctx: &str, now: i64) {
     let _ = observation::record(
         dir,
@@ -458,6 +544,7 @@ mod tests {
                     support: 6,
                 }],
                 obs_summary: "88 observations".into(),
+                observations: Vec::new(),
             },
             identities: None,
         };
@@ -510,6 +597,63 @@ mod tests {
         let r2 = federate(&dir_b, NOW + 2);
         assert_eq!(r2.tools_merged, 0);
         assert_eq!(r2.patterns_merged, 0);
+
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_a);
+    }
+
+    #[test]
+    fn replicates_peer_observations_deduped_and_quarantined() {
+        // B enrolls; A (same group) shares an observation it originated.
+        let dir_b = tmp("obs_recv");
+        let b_node = NodeKey::load_or_mint(&dir_b, "beta").unwrap();
+        let cred = group::create_group(&dir_b, &b_node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir_b);
+        let dir_a = tmp("obs_peer");
+        let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
+        let cred_a =
+            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        let mut body = peer_brief_with_tool(&a_node, &cred_a, b"#!/bin/sh\n").body;
+        body.knowledge.observations = vec![ObsShare {
+            origin: a_node.node_id(),
+            actor: "phone:ian".into(),
+            action: "reports".into(),
+            object: "location:home".into(),
+            context: "acc=12m".into(),
+            ts: NOW,
+            confidence_pct: 90,
+        }];
+        let brief = sign_brief(body, &a_node).unwrap();
+
+        fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+
+        let r = federate(&dir_b, NOW + 1);
+        assert!(r.observations_ingested >= 1);
+        // B now holds A's observation — tagged mesh:<A>, quarantined, provenance preserved.
+        let obs = observation::load(&dir_b).unwrap();
+        let rep = obs
+            .iter()
+            .find(|o| o.object == "location:home")
+            .expect("replicated observation landed");
+        assert_eq!(rep.source, format!("mesh:{}", a_node.node_id()));
+        assert_eq!(rep.actor, "phone:ian");
+
+        // Idempotent: the same observation arriving again is deduped by content hash.
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+        let before = observation::load(&dir_b).unwrap().len();
+        let _ = federate(&dir_b, NOW + 2);
+        let after = observation::load(&dir_b).unwrap().len();
+        assert_eq!(before, after, "a re-shared observation is not duplicated");
 
         let _ = fs::remove_dir_all(&dir_b);
         let _ = fs::remove_dir_all(&dir_a);

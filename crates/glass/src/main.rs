@@ -1193,6 +1193,27 @@ impl Glass {
                         // lifts it from agent to peer. `peers.json` holds both gossip and device
                         // peers, so we split it by whether the node is a sensing device.
                         ui.add_space(6.0);
+                        // This familiar is a node in the mesh too — the anchor you're looking
+                        // *through*. It isn't its own peer, but showing it as "self" completes the
+                        // topology (every node visible, none privileged): a true mesh of equals
+                        // where any one can vanish and the rest carry on.
+                        if let Some(cred) = self.mesh_group() {
+                            let sn: String = cred.membership.node_id.chars().take(8).collect();
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label("🏠");
+                                ui.label(egui::RichText::new("this familiar").small().strong());
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{sn} · {} tool(s), {} pattern(s) · self",
+                                        self.snapshot.tools.len(),
+                                        self.snapshot.patterns.len()
+                                    ))
+                                    .weak()
+                                    .small(),
+                                );
+                            });
+                        }
                         let peers = self.mesh_peers();
                         let devices = self.device_actor_by_node();
                         let (device_peers, gossip_peers): (Vec<_>, Vec<_>) =
