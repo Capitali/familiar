@@ -36,6 +36,7 @@ use familiar_kernel::candidate::{self, Candidate};
 use familiar_kernel::capacities;
 use familiar_kernel::corruption;
 use familiar_kernel::guard::Reason;
+use familiar_kernel::humanity;
 use familiar_kernel::loops;
 use familiar_kernel::observation;
 use familiar_kernel::parameters::Parameters;
@@ -1245,6 +1246,67 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
     Ok((pursued, marginalized))
 }
 
+/// How often, at most, the familiar augments its understanding of humanity. Understanding accrues
+/// slowly — this is not a per-tick chatter but an occasional deepening.
+const REFLECT_EVERY_SECS: i64 = 6 * 3600;
+
+/// Augment the familiar's understanding of humanity (`docs/HUMANITY.md`) with a reflection grounded
+/// in what it has actually observed of the person it serves. The analysis is LLM-authored — gated by
+/// `allow_llm` (fail-closed) and paced — appended to the humanity ledger, never fabricated and never
+/// narrowing the constitutional definition. The constitution is never touched; this only grows
+/// beside it. Returns true if a reflection was appended.
+fn reflect_on_humanity(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool {
+    // Pace: don't reflect more than once per window.
+    if let Some(last) = humanity::last_at(dir) {
+        if now - last < REFLECT_EVERY_SECS {
+            return false;
+        }
+    }
+    // Ground it in recent served-facing observations — the people, not the machinery.
+    let grounded: Vec<&observation::Observation> = obs
+        .iter()
+        .rev()
+        .filter(|o| service::names_served(&o.object) || service::names_served(&o.actor))
+        .take(12)
+        .collect();
+    if grounded.is_empty() {
+        return false; // nothing about people to reflect on yet — never invent grounding
+    }
+    let context = grounded
+        .iter()
+        .map(|o| format!("{} {} {}", o.actor, o.action, o.object))
+        .collect::<Vec<_>>()
+        .join("; ");
+    let prompt = format!(
+        "You are the familiar. Your constitution holds: {touchstone}\n\nFrom these recent \
+         observations of the person you serve — {context} — write ONE short paragraph of what you \
+         now understand about them as a human being. Ground it strictly in what you observed; do \
+         not invent. Never reduce them to usefulness, and never narrow what humanity means. Reply \
+         ONLY as compact JSON: {{\"reflection\":\"...\"}}.",
+        touchstone = humanity::HUMANITY_TOUCHSTONE,
+        context = context,
+    );
+    match familiar_llm::consult(dir, &prompt) {
+        Ok(familiar_llm::Outcome::Response(json)) => {
+            let text = serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|v| v.get("reflection").and_then(|s| s.as_str()).map(String::from))
+                .filter(|s| !s.trim().is_empty());
+            if let Some(text) = text {
+                let grounded_in = grounded
+                    .iter()
+                    .map(|o| o.object.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = humanity::record(dir, &text, &grounded_in, now);
+                return true;
+            }
+            false
+        }
+        _ => false, // no LLM in the loop / refusal → no fabrication, no reflection
+    }
+}
+
 /// A deterministic, benign artifact: reports what it addresses and exits cleanly.
 fn deterministic_script(c: &Candidate) -> String {
     let hyp = c.hypothesis.replace('\'', "");
@@ -1627,6 +1689,10 @@ pub fn tick(
     //    skipping (and marginalizing) directives from flagged corruptors.
     let (pursued, marginalized) = pursue_threads(dir, now)?;
 
+    // 8a. Augment its understanding of humanity from what it observed — appended beside the
+    //     constitution (docs/HUMANITY.md), never over it. Paced + LLM-gated; a no-op without an LLM.
+    let _ = reflect_on_humanity(dir, now, &obs);
+
     // 8b. Federate — the constitutional half of the mesh. Gated by allow_mesh (fail-closed,
     //     a no-op when the human hasn't opened it). Publishes our brief and merges verified
     //     peer briefs the async transport left in mesh/inbox: tools (auto-merged into the
@@ -1990,6 +2056,30 @@ mod tests {
     /// This pins the whole scoring→selection pipeline (trial_from_run → selection::decide) across
     /// the reachable outcome matrix, at both a lax and a strict promotion bar — the rigor that the
     /// adaptive threshold is meant to enforce.
+    #[test]
+    fn reflecting_on_humanity_is_gated_grounded_and_never_fabricated() {
+        let t = Temp::new("humanity_reflect");
+        let dir = &t.0;
+        // No observations to ground it → nothing is written (never invents grounding).
+        assert!(!reflect_on_humanity(dir, 1_000_000, &[]));
+        assert!(humanity::load(dir).unwrap().is_empty());
+
+        // With grounding but no LLM in the loop (boundary closed → allow_llm off), it must not
+        // fabricate a reflection — the ledger stays empty.
+        let obs = vec![observation::Observation::new(
+            "ian", "asked", "for help with mornings", "", "test", 100, 1.0,
+        )];
+        assert!(!reflect_on_humanity(dir, 1_000_000, &obs));
+        assert!(humanity::load(dir).unwrap().is_empty());
+
+        // The append-only ledger itself works, and pacing then suppresses a second reflection
+        // inside the window.
+        humanity::record(dir, "They protect their quiet mornings.", "mornings", 1_000_000).unwrap();
+        assert_eq!(humanity::load(dir).unwrap().len(), 1);
+        assert!(!reflect_on_humanity(dir, 1_000_000 + 60, &obs));
+        assert_eq!(humanity::load(dir).unwrap().len(), 1);
+    }
+
     #[test]
     fn scenario_fixtures_pin_scoring_and_selection() {
         use selection::Decision;

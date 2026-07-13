@@ -52,6 +52,16 @@ pub struct TheoryView {
     pub status: String,
 }
 
+/// One of the familiar's reflections on humanity — its lived understanding, appended beside (never
+/// over) the constitutional HUMANITY.md. Mirrors `familiar_kernel::humanity::Reflection`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionView {
+    pub id: String,
+    pub reflection: String,
+    pub grounded_in: String,
+    pub created_at: i64,
+}
+
 /// The boundary gates — Law III, human-owned. What outward reach the human has opened. Read-only
 /// over the mesh: a peer sees the gate states but a device can't widen them (that stays a local,
 /// human act at the familiar itself).
@@ -101,12 +111,16 @@ pub struct Worldview {
     pub tick: u64,
     /// Seconds since the familiar's earliest observation — a coarse uptime.
     pub uptime_secs: i64,
+    /// The familiar's reflections on humanity, newest first, capped at [`HUMANITY_CAP`].
+    pub humanity: Vec<ReflectionView>,
 }
 
 /// How many recent observations the snapshot carries. A console shows a live tail, not the archive.
 const RECENT_CAP: usize = 60;
 /// How many theories the snapshot carries.
 const THEORY_CAP: usize = 24;
+/// How many humanity reflections the snapshot carries.
+const HUMANITY_CAP: usize = 24;
 
 /// Verify a signed read request and, if trusted, assemble the familiar's worldview snapshot.
 /// Fail-closed: an `Untrusted` error means the caller answers 403 (or 409 for a replay).
@@ -221,6 +235,19 @@ pub(crate) fn read_worldview(
     let tick = familiar_kernel::activity::load(dir).map(|a| a.len() as u64).unwrap_or(0);
     let uptime_secs = obs.iter().map(|o| o.ts).min().map(|t0| (now - t0).max(0)).unwrap_or(0);
 
+    let humanity: Vec<ReflectionView> = familiar_kernel::humanity::load(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .take(HUMANITY_CAP)
+        .map(|r| ReflectionView {
+            id: r.id,
+            reflection: r.reflection,
+            grounded_in: r.grounded_in,
+            created_at: r.created_at,
+        })
+        .collect();
+
     Ok(Worldview {
         group_label: cred.label,
         node_id: cred.membership.node_id,
@@ -236,6 +263,7 @@ pub(crate) fn read_worldview(
         gates,
         tick,
         uptime_secs,
+        humanity,
     })
 }
 
