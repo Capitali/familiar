@@ -23,8 +23,30 @@ public struct PeerView: Codable, Equatable, Identifiable {
     public var id: String { node_id }
 }
 
+/// One of the familiar's theories — mirrors the Rust `worldview::TheoryView`.
+public struct TheoryView: Codable, Equatable, Identifiable {
+    public var id: String
+    public var question: String
+    public var theory: String
+    public var direction: String
+    public var status: String
+}
+
+/// The boundary gates (Law III) — mirrors the Rust `worldview::GateStates`.
+public struct GateStates: Codable, Equatable {
+    public var llm: Bool
+    public var camera: Bool
+    public var network: Bool
+    public var mesh: Bool
+    public var execute: Bool
+    public var agent: Bool
+    public var tool_install: Bool
+}
+
 /// A snapshot of what the familiar knows — mirrors the Rust `worldview::Worldview`. Enough to render
-/// a Glass-like console: the three constitutional meters, the peer roster, and the recent feed.
+/// a Glass-like console: the three constitutional meters, the peer roster, the recent feed, the
+/// familiar's own theories, the boundary gates, and a coarse tick/uptime. The later fields are
+/// optional so an older familiar that predates them still decodes.
 public struct Worldview: Codable, Equatable {
     public var group_label: String
     public var node_id: String
@@ -35,6 +57,11 @@ public struct Worldview: Codable, Equatable {
     public var observation_count: Int
     public var peers: [PeerView]
     public var recent: [ObsView]
+    public var theories: [TheoryView]?
+    public var theory_quality: Double?
+    public var gates: GateStates?
+    public var tick: Int?
+    public var uptime_secs: Int64?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus

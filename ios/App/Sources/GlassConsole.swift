@@ -440,6 +440,13 @@ private struct LedgerCard: View {
 private struct PresenceCard: View {
     @EnvironmentObject var model: AppModel
     var present: Bool { !(model.worldview?.withdrawn ?? true) }
+    private var uptime: String {
+        let s = model.worldview?.uptime_secs ?? 0
+        if s >= 86400 { return "\(s / 86400)d" }
+        if s >= 3600 { return "\(s / 3600)h" }
+        if s >= 60 { return "\(s / 60)m" }
+        return "\(s)s"
+    }
     var body: some View {
         Panel(fill: 0.04) {
             VStack(spacing: 0) {
@@ -450,11 +457,11 @@ private struct PresenceCard: View {
                     .font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.top, 4)
                 Divider().overlay(Fam.hairline(0.08)).padding(.top, 22).padding(.bottom, 20)
                 HStack(spacing: 0) {
+                    stat(uptime, "UPTIME")
+                    Divider().overlay(Fam.hairline(0.08)).frame(height: 34)
+                    stat("\(model.worldview?.tick ?? 0)", "TICKS")
+                    Divider().overlay(Fam.hairline(0.08)).frame(height: 34)
                     stat("\(model.worldview?.observation_count ?? 0)", "OBSERVED")
-                    Divider().overlay(Fam.hairline(0.08)).frame(height: 34)
-                    stat("\(model.worldview?.peers.count ?? 0)", "PEERS")
-                    Divider().overlay(Fam.hairline(0.08)).frame(height: 34)
-                    stat(String(format: "%.2f", model.worldview?.presence ?? 0), "PRESENCE")
                 }
             }
             .frame(maxWidth: .infinity)
@@ -575,15 +582,62 @@ private struct MetabolismScreen: View {
 
 private struct TheoriesScreen: View {
     @EnvironmentObject var model: AppModel
+    private func tint(_ status: String) -> Color {
+        switch status {
+        case "pursued": return Fam.blueSoft
+        case "answered": return Fam.green
+        case "abandoned", "marginalized": return Fam.ink.opacity(0.45)
+        default: return Fam.amber   // open
+        }
+    }
     var body: some View {
+        let theories = model.worldview?.theories ?? []
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "03 · THEORIES", title: "Its own questions",
-                         subtitle: "The familiar forms these itself — no one asked it to. Each is tested, scored, and kept or discarded.")
-            Panel(fill: 0.03) {
-                VStack(alignment: .leading, spacing: 8) {
-                    MonoLabel(text: "COMING FROM THE FAMILIAR")
-                    Text("Theory records aren't in the worldview snapshot yet — the next step wires the familiar's live theories (from the cycle) into this screen. For now the console shows the constitutional signals that its theories are scored against.")
-                        .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top) {
+                ScreenHeader(number: "03 · THEORIES", title: "Its own questions",
+                             subtitle: "The familiar forms these itself — no one asked it to. Each is tested, scored, and kept or discarded.")
+                Spacer()
+                if let q = model.worldview?.theory_quality {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(String(format: "%.2f", q)).font(.system(size: 20, weight: .semibold)).foregroundStyle(Fam.blueSoft)
+                        Text("THEORY QUALITY").font(Fam.mono(9.5)).tracking(1).foregroundStyle(Fam.monoDim.opacity(0.55))
+                    }
+                }
+            }
+            if theories.isEmpty {
+                Panel(fill: 0.03) {
+                    Text("No theories yet — the familiar forms them as it senses recurring patterns.")
+                        .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
+                }
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], spacing: 18) {
+                    ForEach(theories) { th in
+                        Panel(radius: 22, fill: 0.035) {
+                            VStack(alignment: .leading, spacing: 11) {
+                                HStack {
+                                    Text(th.id).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6))
+                                    Spacer()
+                                    Text(th.status.uppercased()).font(Fam.mono(9.5)).tracking(1)
+                                        .foregroundStyle(tint(th.status))
+                                        .padding(.horizontal, 11).padding(.vertical, 5)
+                                        .background(Capsule().fill(tint(th.status).opacity(0.12)))
+                                }
+                                if !th.question.isEmpty {
+                                    Text(th.question).font(.system(size: 17, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                                }
+                                if !th.theory.isEmpty {
+                                    Text(th.theory).font(.system(size: 13.5)).foregroundStyle(Fam.ink.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
+                                }
+                                if !th.direction.isEmpty {
+                                    Divider().overlay(Fam.hairline(0.06)).padding(.vertical, 2)
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.turn.down.right").font(.system(size: 10)).foregroundStyle(Fam.blueSoft)
+                                        Text(th.direction).font(.system(size: 12.5)).foregroundStyle(Fam.blueSoft)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -611,6 +665,15 @@ private struct GatesScreen: View {
                                     .overlay(Capsule().stroke(Fam.blueBright.opacity(0.3), lineWidth: 1)))
                         }
                     }
+                    if let g = model.worldview?.gates {
+                        Divider().overlay(Fam.hairline(0.07)).padding(.vertical, 4)
+                        MonoLabel(text: "THE FAMILIAR'S OUTWARD REACH · GATED")
+                        let items: [(String, Bool)] = [("llm", g.llm), ("camera", g.camera), ("network", g.network),
+                                                       ("mesh", g.mesh), ("execute", g.execute), ("agent", g.agent), ("tools", g.tool_install)]
+                        FlowGates(items: items)
+                        Text("Read-only here — a gate on the familiar is opened at the familiar itself, never widened from a peer.")
+                            .font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.5))
+                    }
                 }
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], spacing: 18) {
@@ -618,6 +681,26 @@ private struct GatesScreen: View {
                 GateCard(title: "Motion", desc: "Coarse activity — walking, driving, still.", isOn: $model.motionEnabled) { model.startSensingIfConsented() }
                 GateCard(title: "Network", desc: "Surveys nearby devices & services by Bonjour.", isOn: $model.discoveryEnabled) { model.startDiscoveryIfConsented() }
                 GateCard(title: "Face", desc: "On-device presence only — never a stored image.", isOn: $model.faceEnabled) { model.startFaceIfConsented() }
+            }
+        }
+    }
+}
+
+private struct FlowGates: View {
+    let items: [(String, Bool)]
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.0) { name, on in
+                HStack(spacing: 6) {
+                    Circle().fill(on ? Fam.green : Color.white.opacity(0.2)).frame(width: 7, height: 7)
+                        .shadow(color: on ? Fam.green : .clear, radius: 4)
+                    Text(name).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.75))
+                    Spacer(minLength: 0)
+                    Text(on ? "open" : "closed").font(Fam.mono(9)).foregroundStyle(on ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
+                }
+                .padding(.horizontal, 11).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.2))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Fam.hairline(0.06), lineWidth: 1)))
             }
         }
     }

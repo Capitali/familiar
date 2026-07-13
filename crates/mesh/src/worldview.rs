@@ -41,6 +41,31 @@ pub struct ObsView {
     pub confidence: f64,
 }
 
+/// One of the familiar's theories (a thread) — its own question + interpretation, and where that
+/// stands (open / pursued / abandoned / answered). The iPad "Theories" screen renders these.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoryView {
+    pub id: String,
+    pub question: String,
+    pub theory: String,
+    pub direction: String,
+    pub status: String,
+}
+
+/// The boundary gates — Law III, human-owned. What outward reach the human has opened. Read-only
+/// over the mesh: a peer sees the gate states but a device can't widen them (that stays a local,
+/// human act at the familiar itself).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GateStates {
+    pub llm: bool,
+    pub camera: bool,
+    pub network: bool,
+    pub mesh: bool,
+    pub execute: bool,
+    pub agent: bool,
+    pub tool_install: bool,
+}
+
 /// A federated peer as last seen.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerView {
@@ -66,10 +91,22 @@ pub struct Worldview {
     pub peers: Vec<PeerView>,
     /// Newest first, capped at [`RECENT_CAP`].
     pub recent: Vec<ObsView>,
+    /// The familiar's own theories, newest first, capped at [`THEORY_CAP`].
+    pub theories: Vec<TheoryView>,
+    /// How well the factory's theories have paid off so far (smoothed [0,1]); see `score::theory_record`.
+    pub theory_quality: f64,
+    /// The boundary gates (Law III) as the human has set them.
+    pub gates: GateStates,
+    /// Metabolic ticks recorded (a rough age/health of the cycle).
+    pub tick: u64,
+    /// Seconds since the familiar's earliest observation — a coarse uptime.
+    pub uptime_secs: i64,
 }
 
 /// How many recent observations the snapshot carries. A console shows a live tail, not the archive.
 const RECENT_CAP: usize = 60;
+/// How many theories the snapshot carries.
+const THEORY_CAP: usize = 24;
 
 /// Verify a signed read request and, if trusted, assemble the familiar's worldview snapshot.
 /// Fail-closed: an `Untrusted` error means the caller answers 403 (or 409 for a replay).
@@ -151,6 +188,39 @@ pub(crate) fn read_worldview(
         })
         .collect();
 
+    // The familiar's theories + how well its theorizing has paid off (so the iPad can show its own
+    // questions and their track record), and the human-owned boundary gates (read-only over mesh).
+    let threads = familiar_kernel::thread::load(dir).unwrap_or_default();
+    let candidates = familiar_kernel::candidate::load(dir).unwrap_or_default();
+    let trials = familiar_kernel::trial::load(dir).unwrap_or_default();
+    let theory_quality =
+        familiar_kernel::score::theory_record(&threads, &candidates, &trials, 0.0).quality;
+    let theories: Vec<TheoryView> = threads
+        .iter()
+        .rev()
+        .take(THEORY_CAP)
+        .map(|t| TheoryView {
+            id: t.id.clone(),
+            question: t.question.clone(),
+            theory: t.theory.clone(),
+            direction: t.direction.clone(),
+            status: t.status.clone(),
+        })
+        .collect();
+
+    let b = familiar_kernel::boundary::load(dir).unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
+    let gates = GateStates {
+        llm: b.allow_llm,
+        camera: b.allow_camera,
+        network: b.allow_network,
+        mesh: b.allow_mesh,
+        execute: b.allow_execute,
+        agent: b.allow_agent,
+        tool_install: b.allow_tool_install,
+    };
+    let tick = familiar_kernel::activity::load(dir).map(|a| a.len() as u64).unwrap_or(0);
+    let uptime_secs = obs.iter().map(|o| o.ts).min().map(|t0| (now - t0).max(0)).unwrap_or(0);
+
     Ok(Worldview {
         group_label: cred.label,
         node_id: cred.membership.node_id,
@@ -161,6 +231,11 @@ pub(crate) fn read_worldview(
         observation_count: obs.len(),
         peers,
         recent,
+        theories,
+        theory_quality,
+        gates,
+        tick,
+        uptime_secs,
     })
 }
 
