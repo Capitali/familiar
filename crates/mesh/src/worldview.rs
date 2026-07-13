@@ -79,6 +79,7 @@ pub(crate) fn read_worldview(
     sig_hex: &str,
     now: i64,
     guard: &Mutex<IngestGuard>,
+    peer_ip: &str,
 ) -> Result<Worldview> {
     if !familiar_kernel::boundary::load(dir).map_err(Error::Io)?.allow_mesh {
         return Err(Error::Untrusted("mesh gate closed".into()));
@@ -111,6 +112,12 @@ pub(crate) fn read_worldview(
             return Err(Error::Untrusted("replayed nonce".into()));
         }
     }
+
+    // A member that reads the worldview participates as a full peer (a console), not a write-only
+    // sensor — so record it in the peer roster (by its own node id, from where it connected). This
+    // is what promotes an iPad from "device agent" to "peer" in the familiar's own Glass. Failing to
+    // record is non-fatal: the read still succeeds.
+    let _ = crate::transport::register_device_peer(dir, &req.node.node_id, &req.node.label, peer_ip);
 
     // Trusted member — assemble the snapshot from the canonical store + the three signals + peers.
     let obs = familiar_kernel::observation::load(dir).map_err(Error::Io)?;
@@ -214,7 +221,7 @@ mod tests {
         .unwrap();
 
         let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
-        let view = read_worldview(&host, &raw, &sig, NOW, &ring()).unwrap();
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
         assert_eq!(view.group_label, "river");
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
@@ -226,9 +233,24 @@ mod tests {
         let (host, cred, device) = setup("replay");
         let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
         let r = ring();
-        assert!(read_worldview(&host, &raw, &sig, NOW, &r).is_ok());
-        let err = read_worldview(&host, &raw, &sig, NOW, &r).unwrap_err();
+        assert!(read_worldview(&host, &raw, &sig, NOW, &r, "10.0.0.5").is_ok());
+        let err = read_worldview(&host, &raw, &sig, NOW, &r, "10.0.0.5").unwrap_err();
         assert!(matches!(err, Error::Untrusted(m) if m.contains("replay")));
+    }
+
+    #[test]
+    fn reading_the_worldview_promotes_the_reader_to_a_peer() {
+        let (host, cred, device) = setup("promote");
+        // Before: not in the peer roster (a fresh member that has only ever read).
+        assert!(crate::transport::load_peers(&host).is_empty());
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.42").unwrap();
+        // After: it appears as a peer, at the address it connected from — no longer a mere agent.
+        let peers = crate::transport::load_peers(&host);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].node_id, device.node_id());
+        assert_eq!(peers[0].addr, "192.168.1.42");
+        assert_eq!(peers[0].label, "iPad");
     }
 
     #[test]
@@ -242,7 +264,7 @@ mod tests {
         )
         .unwrap();
         let (raw, sig) = signed_request(&other, &device, NOW, "v1");
-        let err = read_worldview(&host, &raw, &sig, NOW, &ring()).unwrap_err();
+        let err = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap_err();
         assert!(matches!(err, Error::Untrusted(_)));
     }
 
@@ -251,7 +273,7 @@ mod tests {
         let (host, cred, device) = setup("gate");
         open_gate(&host, false);
         let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
-        let err = read_worldview(&host, &raw, &sig, NOW, &ring()).unwrap_err();
+        let err = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap_err();
         assert!(matches!(err, Error::Untrusted(m) if m.contains("gate closed")));
     }
 }

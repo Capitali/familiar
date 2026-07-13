@@ -76,7 +76,7 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
         DispatchQueue.main.async { self.lastCount = count }
         guard state != lastState else { return }
         lastState = state
-        deliver(ObsRecord(actor: "ipad:ian", action: "reports", object: state,
+        deliver(ObsRecord(actor: DeviceActor.current, action: "reports", object: state,
                           context: "faces=\(count)", confidence: 0.85))
     }
 }

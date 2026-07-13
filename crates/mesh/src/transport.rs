@@ -232,14 +232,15 @@ struct ServerCtx {
 
 async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>) {
     loop {
-        let (stream, _) = match listener.accept().await {
+        let (stream, remote) = match listener.accept().await {
             Ok(pair) => pair,
             Err(_) => continue,
         };
+        let peer_ip = remote.ip().to_string();
         let io = TokioIo::new(stream);
         let ctx = ctx.clone();
         tokio::spawn(async move {
-            let svc = service_fn(move |req| handle(req, ctx.clone()));
+            let svc = service_fn(move |req| handle(req, ctx.clone(), peer_ip.clone()));
             let _ = hyper::server::conn::http1::Builder::new()
                 .serve_connection(io, svc)
                 .await;
@@ -257,6 +258,7 @@ fn text(status: StatusCode, body: impl Into<Bytes>) -> Response<Full<Bytes>> {
 async fn handle(
     req: Request<hyper::body::Incoming>,
     ctx: Arc<ServerCtx>,
+    peer_ip: String,
 ) -> std::result::Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
@@ -296,7 +298,7 @@ async fn handle(
                 Ok(b) => b,
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
-            recv_worldview(&dir, &bytes, &sig, &ctx.seen)
+            recv_worldview(&dir, &bytes, &sig, &ctx.seen, &peer_ip)
         }
         (Method::POST, "/mesh/enroll-request") => {
             let sig = req
@@ -408,8 +410,9 @@ fn recv_worldview(
     bytes: &[u8],
     sig: &str,
     ring: &std::sync::Mutex<crate::observe::IngestGuard>,
+    peer_ip: &str,
 ) -> Response<Full<Bytes>> {
-    match crate::worldview::read_worldview(dir, bytes, sig, now_secs(), ring) {
+    match crate::worldview::read_worldview(dir, bytes, sig, now_secs(), ring, peer_ip) {
         Ok(view) => match serde_json::to_vec(&view) {
             Ok(body) => text(StatusCode::OK, body),
             Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
@@ -691,6 +694,49 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
             };
         }
         None => peers.push(rec),
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    Ok(())
+}
+
+/// Register a **device peer** — a member that reads the worldview (`/mesh/worldview`) rather than
+/// only pushing observations. It participates as a full peer (an iPad console), so it belongs in the
+/// peer roster, not the device-agent list. It can't serve gossip, so `tools/patterns` are 0 and the
+/// gossip loop never dials it (that loop reaches Tailscale-discovered addrs, not `peers.json`);
+/// `addr` is the observed source IP, for display only. Upserts by node_id like [`upsert_peer`].
+pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr: &str) -> Result<()> {
+    let path = dir.join(PEERS_FILE);
+    let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let group_id = group::load(dir)
+        .ok()
+        .flatten()
+        .map(|c| c.group_id)
+        .unwrap_or_default();
+    match peers.iter_mut().find(|p| p.node_id == node_id) {
+        Some(existing) => {
+            existing.last_seen = now_secs();
+            if !label.is_empty() {
+                existing.label = label.to_string();
+            }
+            if !addr.is_empty() {
+                existing.addr = addr.to_string();
+            }
+        }
+        None => peers.push(PeerRecord {
+            node_id: node_id.to_string(),
+            label: label.to_string(),
+            addr: addr.to_string(),
+            group_id,
+            last_seen: now_secs(),
+            tools_offered: 0,
+            patterns_offered: 0,
+        }),
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

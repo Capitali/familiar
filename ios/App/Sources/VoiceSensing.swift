@@ -79,7 +79,7 @@ final class VoiceSensing: NSObject, ObservableObject {
 
     private func finish(_ text: String) {
         let trimmed = String(text.prefix(200))
-        deliver(ObsRecord(actor: "ipad:ian", action: "said",
+        deliver(ObsRecord(actor: DeviceActor.current, action: "said",
                           object: "voice:\(trimmed)", context: "on-device speech", confidence: 0.9))
         partial = ""
     }

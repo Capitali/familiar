@@ -41,7 +41,7 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
                 guard label != "unknown", a.confidence != .low else { return }
                 guard label != self.lastActivity else { return }
                 self.lastActivity = label
-                let obs = ObsRecord(actor: "phone:ian", action: "reports",
+                let obs = ObsRecord(actor: DeviceActor.current, action: "reports",
                                     object: "motion:\(label)", context: "confidence=\(a.confidence.rawValue)",
                                     confidence: a.confidence == .high ? 0.9 : 0.7)
                 Task { await self.deliver([obs]) }
@@ -68,7 +68,7 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
         let place = placeLabel(for: loc)
         guard place != lastPlace else { return }
         lastPlace = place
-        let obs = ObsRecord(actor: "phone:ian", action: "reports",
+        let obs = ObsRecord(actor: DeviceActor.current, action: "reports",
                             object: "location:\(place)", context: "acc=\(Int(loc.horizontalAccuracy))m",
                             confidence: 0.9)
         Task { await deliver([obs]) }
