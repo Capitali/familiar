@@ -104,4 +104,31 @@ mod tests {
             Decision::Archive
         );
     }
+
+    #[test]
+    fn a_clean_pass_below_the_strict_bar_is_archived_not_promoted() {
+        // A pass isn't automatically promoted: below the rigor-adaptive bar it's neither a mutate
+        // (that's for partial/failed) nor a promote, so it archives. This is the pressure that a
+        // high rigor exerts — mediocre successes don't get inherited.
+        let t = trial("pass", 0.80, "");
+        assert_eq!(decide(&t, 0.0), Decision::Promote); // bar 0.70
+        assert_eq!(decide(&t, 1.0), Decision::Archive); // bar 0.95
+    }
+
+    #[test]
+    fn decision_boundaries_are_inclusive_at_the_thresholds() {
+        // Exactly at the promotion bar (0.70 at rigor 0) → promote (>= is inclusive).
+        assert_eq!(decide(&trial("pass", 0.70, ""), 0.0), Decision::Promote);
+        assert_eq!(decide(&trial("pass", 0.699, ""), 0.0), Decision::Archive);
+        // Exactly at the mutation floor for a classified failure → mutate.
+        assert_eq!(decide(&trial("fail", 0.35, "low_fit"), 0.0), Decision::Mutate);
+        assert_eq!(decide(&trial("fail", 0.349, "low_fit"), 0.0), Decision::Archive);
+    }
+
+    #[test]
+    fn an_unclassified_failure_seeks_evidence_before_judging() {
+        // No failure_class → observe more (gather evidence) regardless of a low overall.
+        assert_eq!(decide(&trial("fail", 0.0, ""), 0.0), Decision::ObserveMore);
+        assert_eq!(decide(&trial("fail", 0.9, ""), 0.0), Decision::ObserveMore);
+    }
 }

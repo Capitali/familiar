@@ -1986,6 +1986,57 @@ mod tests {
         assert!(observation::load(dir).unwrap().iter().any(|o| o.object.starts_with("theory_quality:")));
     }
 
+    /// A scenario fixture: a run outcome + rigor, and the trial classification + fate it must earn.
+    /// This pins the whole scoring→selection pipeline (trial_from_run → selection::decide) across
+    /// the reachable outcome matrix, at both a lax and a strict promotion bar — the rigor that the
+    /// adaptive threshold is meant to enforce.
+    #[test]
+    fn scenario_fixtures_pin_scoring_and_selection() {
+        use selection::Decision;
+        let limits = exec::Limits::default();
+        let full_wall = (limits.wall_secs.max(1) as u128) * 1000; // drives complexity to 0.5
+
+        struct Scenario {
+            name: &'static str,
+            run: exec::RunResult,
+            rigor: f64,
+            want_result: &'static str,
+            want_class: &'static str,
+            want_decision: Decision,
+        }
+        fn run(exit_ok: bool, timed_out: bool, wall_ms: u128, out: usize) -> exec::RunResult {
+            exec::RunResult { exit_ok, timed_out, wall_ms, output_bytes: out, output: String::new() }
+        }
+
+        let cases = [
+            // Clean, cheap run → near-perfect overall → passes, promotes at any bar.
+            Scenario { name: "clean-cheap @lax", run: run(true, false, 5, 0), rigor: 0.0,
+                       want_result: "pass", want_class: "", want_decision: Decision::Promote },
+            Scenario { name: "clean-cheap @strict", run: run(true, false, 5, 0), rigor: 1.0,
+                       want_result: "pass", want_class: "", want_decision: Decision::Promote },
+            // Clean but slow (complexity 0.5 → overall 0.75): promotes under a lax bar, but the
+            // strict 0.95 bar archives it — the self-regulating rigor doing its job.
+            Scenario { name: "clean-slow @lax", run: run(true, false, full_wall, 0), rigor: 0.0,
+                       want_result: "pass", want_class: "", want_decision: Decision::Promote },
+            Scenario { name: "clean-slow @strict", run: run(true, false, full_wall, 0), rigor: 1.0,
+                       want_result: "pass", want_class: "", want_decision: Decision::Archive },
+            // Timed out → failed/costly, zero overall → archived (kept as negative evidence).
+            Scenario { name: "timeout", run: run(false, true, full_wall, 0), rigor: 0.0,
+                       want_result: "fail", want_class: "costly", want_decision: Decision::Archive },
+            // Non-zero exit, cheap → failed/low_fit, overall ~0.5 → mutate (a classified failure
+            // above the mutation floor is worth another generation).
+            Scenario { name: "crash-cheap", run: run(false, false, 5, 0), rigor: 0.0,
+                       want_result: "fail", want_class: "low_fit", want_decision: Decision::Mutate },
+        ];
+
+        for s in &cases {
+            let tr = trial_from_run("trial-x".into(), "cand-x", &s.run, &limits);
+            assert_eq!(tr.result, s.want_result, "{}: result", s.name);
+            assert_eq!(tr.failure_class, s.want_class, "{}: failure_class", s.name);
+            assert_eq!(selection::decide(&tr, s.rigor), s.want_decision, "{}: decision", s.name);
+        }
+    }
+
     #[test]
     fn structural_fingerprint_drives_quiet_cadence() {
         let t = Temp::new("cadence");
