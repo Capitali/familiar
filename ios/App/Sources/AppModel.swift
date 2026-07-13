@@ -28,6 +28,9 @@ final class AppModel: ObservableObject {
     private var coordinator: SensingCoordinator?
     private var discovery: NetworkDiscovery?
 
+    // The console's answer field (The Glass home screen). The human speaking to the familiar.
+    @Published var consoleAnswer = ""
+
     // The familiar's worldview, as this peer reads it (the iPad Glass console). Polled while shown.
     @Published var worldview: Worldview?
     @Published var worldviewError: String?
@@ -58,6 +61,16 @@ final class AppModel: ObservableObject {
     /// A single derived observation from any sensor → the /mesh/observe pipe.
     func emit(_ obs: ObsRecord) {
         Task { await deliver([obs]) }
+    }
+
+    /// The human answered the familiar's question in the console — a served-facing observation, so
+    /// presence and service register that a person is here and spoke.
+    func submitConsoleAnswer() {
+        let t = consoleAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        emit(ObsRecord(actor: "ian", action: "told the familiar", object: t, context: "console", confidence: 1.0))
+        note("answered: \(t)")
+        consoleAnswer = ""
     }
 
     /// Start/stop on-device facial analysis per consent (heavier than location/motion, so its own
