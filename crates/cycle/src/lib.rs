@@ -47,7 +47,7 @@ use familiar_kernel::thread::{self, Thread};
 use familiar_kernel::tool::{self, Tool};
 use familiar_kernel::trial::{self, Trial};
 use familiar_kernel::review::review_script;
-use familiar_kernel::{mutation, pattern_memory, regression_guard, selection};
+use familiar_kernel::{mutation, pattern_memory, regression_guard, score, selection};
 use familiar_sense as sense;
 use familiar_vision as vision;
 
@@ -1136,7 +1136,18 @@ fn answer_requests(
 fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
     let threads = thread::load(dir)?;
     let refusals = corruption::load(dir).unwrap_or_default();
+    // Read the factory's prior work once so it can score a new theory against how the ones before it
+    // turned out. run_execution decides candidates at the baseline rigor (0.0); resolve theory
+    // outcomes at the same bar so the self-assessment matches how the work is actually judged.
+    let candidates = candidate::load(dir)?;
+    let trials = trial::load(dir).unwrap_or_default();
+    const RIGOR: f64 = 0.0;
+    /// Below this theory-quality score a direction isn't worth spending selection pressure on — it
+    /// merely repeats one the factory's own trials already discarded.
+    const PURSUE_FLOOR: f64 = 0.30;
+    let mut seq = candidates.len();
     let mut pursued = 0;
+    let mut abandoned = 0;
     let mut marginalized = 0;
     for t in &threads {
         if t.status != "open" || t.direction.trim().is_empty() {
@@ -1163,7 +1174,31 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
             marginalized += 1;
             continue;
         }
-        let seq = candidate::load(dir)?.len() + 1;
+        // Theory-quality feedback (learning from its own past): a direction that merely repeats one
+        // the factory's trials already discarded isn't worth re-testing. Score the theory against
+        // the outcomes of the ones before it; below the floor, abandon it as negative evidence
+        // rather than spending a candidate on a known dead end.
+        let quality = score::score_theory(&t.direction, &threads, &candidates, &trials, RIGOR);
+        if quality < PURSUE_FLOOR {
+            thread::update_status(dir, &t.id, "abandoned")?;
+            observation::record(
+                dir,
+                observation::Observation::new(
+                    "familiar",
+                    "abandoned",
+                    format!("theory {}", t.id),
+                    format!(
+                        "direction repeats one already discarded — theory-quality {quality:.2} below the pursue floor"
+                    ),
+                    "familiar",
+                    now,
+                    1.0,
+                ),
+            )?;
+            abandoned += 1;
+            continue;
+        }
+        seq += 1;
         let mut c = Candidate::from_loop(
             &loops::Loop {
                 id: t.id.clone(),
@@ -1185,6 +1220,27 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         candidate::append(dir, &c)?;
         thread::update_status(dir, &t.id, "pursued")?;
         pursued += 1;
+    }
+    // Theory-quality feedback: when there was theory activity this tick, record the factory's
+    // standing track record as a theorist so it's visible in the Glass and available to future
+    // gating. Gated on activity so it doesn't flood the store with an unchanged signal.
+    if pursued + abandoned > 0 {
+        let rec = score::theory_record(&threads, &candidates, &trials, RIGOR);
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "reports",
+                format!("theory_quality:{:.2}", rec.quality),
+                format!(
+                    "{} theories acted on — {} promoted, {} refined, {} discarded",
+                    rec.acted_on, rec.promoted, rec.refined, rec.discarded
+                ),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
     }
     Ok((pursued, marginalized))
 }
@@ -1881,6 +1937,53 @@ mod tests {
         assert_eq!(thread::load(&t.0).unwrap()[0].status, "pursued");
         let r2 = tick(&t.0, 1_000_000, false, false, false, false).unwrap();
         assert_eq!(r2.pursued, 0);
+    }
+
+    #[test]
+    fn abandons_a_theory_that_repeats_a_discarded_direction() {
+        let t = Temp::new("theory_quality");
+        let dir = &t.0;
+        let dead = "poll the battery every single second";
+
+        // A PAST theory with this direction was pursued, tested, and discarded (failed hard).
+        thread::append(dir, &Thread {
+            id: "thread-past".into(), question: "q".into(), theory: "th".into(),
+            direction: dead.into(), created_at: 100, status: "pursued".into(),
+            origin: "llm".into(), actor: "familiar".into(),
+        }).unwrap();
+        let mut c = Candidate::from_loop(
+            &loops::Loop {
+                id: "thread-past".into(), name: "thread:thread-past".into(), description: String::new(),
+                loop_type: "thread".into(), observation_ids: String::new(), observation_count: 0,
+                first_seen: 100, last_seen: 100, recurrence_score: 0.0, friction_score: 0.5,
+                opportunity_score: 0.5, confidence: 0.5,
+            },
+            "candidate-0001",
+        );
+        c.status = "archived".into();
+        candidate::append(dir, &c).unwrap();
+        let mut tr = Trial::new("trial-0001", "candidate-0001");
+        tr.result = "fail".into(); tr.overall = 0.10; tr.failure_class = "too_complex".into();
+        trial::append(dir, &tr).unwrap();
+
+        // A NEW open theory repeats the discarded direction verbatim.
+        thread::append(dir, &Thread {
+            id: "thread-new".into(), question: "q".into(), theory: "th".into(),
+            direction: dead.into(), created_at: 200, status: "open".into(),
+            origin: "llm".into(), actor: "familiar".into(),
+        }).unwrap();
+
+        let (pursued, _marginalized) = pursue_threads(dir, 1_000_000).unwrap();
+        assert_eq!(pursued, 0, "a direction its trials already discarded is not re-pursued");
+
+        // The new theory is abandoned as negative evidence, and it spawned no candidate.
+        let threads = thread::load(dir).unwrap();
+        let new = threads.iter().find(|t| t.id == "thread-new").unwrap();
+        assert_eq!(new.status, "abandoned");
+        assert!(!candidate::load(dir).unwrap().iter().any(|c| c.loop_id == "thread-new"));
+
+        // And it recorded theory-quality feedback for the human to see.
+        assert!(observation::load(dir).unwrap().iter().any(|o| o.object.starts_with("theory_quality:")));
     }
 
     #[test]
