@@ -36,6 +36,7 @@ pub mod merge;
 pub mod node;
 pub mod observe;
 pub mod transport;
+pub mod worldview;
 
 pub use enroll::{Attestation, EnrollRequest, Grant, Pending};
 pub use merge::{federate, MergeReport};

@@ -285,6 +285,19 @@ async fn handle(
             };
             recv_observe(&dir, &bytes, &sig, &ctx.seen)
         }
+        (Method::POST, "/mesh/worldview") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_worldview(&dir, &bytes, &sig, &ctx.seen)
+        }
         (Method::POST, "/mesh/enroll-request") => {
             let sig = req
                 .headers()
@@ -384,6 +397,26 @@ fn recv_observe(
         Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad batch"),
+    }
+}
+
+/// `POST /mesh/worldview` → a member device asks for a snapshot of what the familiar knows. Signed
+/// + membership-bearing (verified like an observe batch); 200 + JSON worldview, 409 replay, 403
+/// untrusted, 400 malformed. The read seam that lets an iPad be a peer console, not just a sensor.
+fn recv_worldview(
+    dir: &Path,
+    bytes: &[u8],
+    sig: &str,
+    ring: &std::sync::Mutex<crate::observe::IngestGuard>,
+) -> Response<Full<Bytes>> {
+    match crate::worldview::read_worldview(dir, bytes, sig, now_secs(), ring) {
+        Ok(view) => match serde_json::to_vec(&view) {
+            Ok(body) => text(StatusCode::OK, body),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        },
+        Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "bad request"),
     }
 }
 
@@ -664,6 +697,14 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
     }
     std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
     Ok(())
+}
+
+/// Load the peer records as last seen — for the worldview read seam (an iPad console shows them).
+pub(crate) fn load_peers(dir: &Path) -> Vec<PeerRecord> {
+    std::fs::read_to_string(dir.join(PEERS_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<PeerRecord>>(&s).ok())
+        .unwrap_or_default()
 }
 
 fn live_peer_count(dir: &Path) -> usize {

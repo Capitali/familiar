@@ -81,8 +81,9 @@ pub struct IngestGuard {
 
 impl IngestGuard {
     /// Remember `(node_id, nonce)` at `now`. Returns `true` if fresh, `false` if already seen
-    /// inside the replay window.
-    fn remember_nonce(&mut self, node_id: &str, nonce: &str, now: i64) -> bool {
+    /// inside the replay window. Shared with the worldview read seam so both writes and reads are
+    /// replay-bounded by the same ring.
+    pub(crate) fn remember_nonce(&mut self, node_id: &str, nonce: &str, now: i64) -> bool {
         while let Some((_, _, t)) = self.nonces.front() {
             if now - *t > REPLAY_WINDOW_SECS {
                 self.nonces.pop_front();
