@@ -28,6 +28,11 @@ final class AppModel: ObservableObject {
     private var coordinator: SensingCoordinator?
     private var discovery: NetworkDiscovery?
 
+    // The familiar's worldview, as this peer reads it (the iPad Glass console). Polled while shown.
+    @Published var worldview: Worldview?
+    @Published var worldviewError: String?
+    private var worldviewTask: Task<Void, Never>?
+
     // Richer iPad sensors (voice is push-to-talk; face is a toggle). Created after node so their
     // closures can capture a fully-initialised self.
     private(set) var voice: VoiceSensing!
@@ -148,6 +153,44 @@ final class AppModel: ObservableObject {
               let url = URL(string: "http://\(host):\(port)/mesh/observe")
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
+    }
+
+    /// A signing session pointed at the familiar's `/mesh/worldview` (the read seam).
+    func worldviewSession() -> ObservationClient.Session? {
+        guard let g = storedGrant(),
+              let host = defaults.string(forKey: "enroll.host"),
+              let port = Int(defaults.string(forKey: "enroll.port") ?? ""),
+              let url = WorldviewClient.worldviewURL(host: host, port: port)
+        else { return nil }
+        return ObservationClient.Session(node: node, membership: g.membership, url: url)
+    }
+
+    /// Poll the familiar's worldview so the iPad Glass shows a live console. Idempotent; cancelled by
+    /// `stopWorldviewPolling`. A peer *reads* the familiar's snapshot — it never sees the data dir.
+    func startWorldviewPolling() {
+        guard enrolled, worldviewTask == nil else { return }
+        worldviewTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshWorldview()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
+    }
+
+    func stopWorldviewPolling() {
+        worldviewTask?.cancel()
+        worldviewTask = nil
+    }
+
+    func refreshWorldview() async {
+        guard let session = worldviewSession() else { return }
+        do {
+            let view = try await WorldviewClient(session: session).fetch()
+            worldview = view
+            worldviewError = nil
+        } catch {
+            worldviewError = "\(error)"
+        }
     }
 
     func startSensingIfConsented() {
