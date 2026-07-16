@@ -63,6 +63,29 @@ final class MacModel: ObservableObject {
             self.error = "no local node on :47100 — start the familiar daemon"
         }
     }
+
+    /// The human at this machine speaks to the familiar (POST /local/answer).
+    func answer(_ text: String) async {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        await post("/local/answer", ["text": t])
+        await refresh()
+    }
+
+    /// Open or close one of the familiar's boundary gates from the console (POST /local/gate) — the
+    /// human's own act at the node, the same the Glass performs.
+    func setGate(_ gate: String, _ open: Bool) async {
+        await post("/local/gate", ["gate": gate, "open": open])
+        await refresh()
+    }
+
+    private func post(_ path: String, _ body: [String: Any]) async {
+        guard let u = URL(string: "http://127.0.0.1:47100" + path),
+              let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        var req = URLRequest(url: u); req.httpMethod = "POST"; req.httpBody = data
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        _ = try? await URLSession.shared.data(for: req)
+    }
 }
 
 // MARK: - App
@@ -197,7 +220,9 @@ private struct ScreenHeader: View {
 
 private struct GlassScreen: View {
     @EnvironmentObject var model: MacModel
+    @State private var reply = ""
     var v: Worldview? { model.worldview }
+    private func send() { let t = reply; reply = ""; Task { await model.answer(t) } }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             ScreenHeader(number: "01 · THE GLASS", title: "Home", subtitle: nil)
@@ -209,6 +234,23 @@ private struct GlassScreen: View {
                             Text("Good \(dayPart()).").font(.system(size: 34, weight: .semibold))
                             Text("This Mac is a peer in the mesh — it reads the node running here and shows the shared world.")
                                 .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.55))
+                            Divider().overlay(Fam.hairline(0.08)).padding(.vertical, 8)
+                            MonoLabel("THE FAMILIAR ASKS")
+                            let q = v?.question ?? ""
+                            Text(q.isEmpty ? "What do you need most today?" : q)
+                                .font(.system(size: 20, weight: .medium)).padding(.top, 4)
+                            HStack(spacing: 12) {
+                                TextField("Answer, or leave it — silence is an answer too", text: $reply)
+                                    .textFieldStyle(.plain).padding(.horizontal, 16).padding(.vertical, 12)
+                                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.25))
+                                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1)))
+                                    .onSubmit { send() }
+                                Button(action: send) {
+                                    Text("Answer").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: 0x0a1330))
+                                        .padding(.horizontal, 22).padding(.vertical, 12)
+                                        .background(RoundedRectangle(cornerRadius: 12).fill(LinearGradient(colors: [Color(hex: 0x8fb4ff), Color(hex: 0x3f7bff)], startPoint: .top, endPoint: .bottom)))
+                                }.buttonStyle(.plain)
+                            }.padding(.top, 4)
                         }
                     }
                     Panel {
@@ -383,16 +425,26 @@ private struct GatesScreen: View {
             if let g = model.worldview?.gates {
                 Panel {
                     VStack(alignment: .leading, spacing: 14) {
-                        MonoLabel("THE OUTWARD REACH · GATED")
-                        let items: [(String, Bool)] = [("llm", g.llm), ("camera", g.camera), ("network", g.network), ("mesh", g.mesh), ("execute", g.execute), ("agent", g.agent), ("tools", g.tool_install)]
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], alignment: .leading, spacing: 10) {
-                            ForEach(items, id: \.0) { name, on in
-                                HStack(spacing: 8) {
-                                    Circle().fill(on ? Fam.green : Color.white.opacity(0.2)).frame(width: 8, height: 8).shadow(color: on ? Fam.green : .clear, radius: 4)
-                                    Text(name).font(Fam.mono(12)).foregroundStyle(Fam.ink.opacity(0.8)); Spacer(minLength: 0)
-                                    Text(on ? "open" : "closed").font(Fam.mono(9.5)).foregroundStyle(on ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
-                                }.padding(.horizontal, 13).padding(.vertical, 10)
-                                .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.2)).overlay(RoundedRectangle(cornerRadius: 12).stroke(Fam.hairline(0.06), lineWidth: 1)))
+                        MonoLabel("THE OUTWARD REACH · YOU OPEN EACH GATE")
+                        Text("Click a gate to open or close it. This is your own act at this node.")
+                            .font(.system(size: 12)).foregroundStyle(Fam.ink.opacity(0.5))
+                        let items: [(String, String, Bool)] = [
+                            ("llm", "allow_llm", g.llm), ("camera", "allow_camera", g.camera),
+                            ("network", "allow_network", g.network), ("mesh", "allow_mesh", g.mesh),
+                            ("execute", "allow_execute", g.execute), ("agent", "allow_agent", g.agent),
+                            ("tools", "allow_tool_install", g.tool_install)]
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {
+                            ForEach(items, id: \.0) { name, key, on in
+                                Button { Task { await model.setGate(key, !on) } } label: {
+                                    HStack(spacing: 8) {
+                                        Circle().fill(on ? Fam.green : Color.white.opacity(0.2)).frame(width: 8, height: 8).shadow(color: on ? Fam.green : .clear, radius: 4)
+                                        Text(name).font(Fam.mono(12)).foregroundStyle(Fam.ink.opacity(0.85)); Spacer(minLength: 0)
+                                        Text(on ? "open" : "closed").font(Fam.mono(9.5)).foregroundStyle(on ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
+                                    }.padding(.horizontal, 13).padding(.vertical, 11)
+                                    .background(RoundedRectangle(cornerRadius: 12).fill(on ? Fam.green.opacity(0.08) : Color.black.opacity(0.2))
+                                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Fam.green.opacity(0.3) : Fam.hairline(0.06), lineWidth: 1)))
+                                    .contentShape(Rectangle())
+                                }.buttonStyle(.plain)
                             }
                         }
                     }

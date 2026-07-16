@@ -75,6 +75,7 @@ public struct GateStates: Codable, Equatable {
 public struct Worldview: Codable, Equatable {
     public var group_label: String
     public var node_id: String
+    public var question: String?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

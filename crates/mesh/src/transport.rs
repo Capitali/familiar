@@ -312,12 +312,33 @@ async fn handle(
             recv_worldview(&dir, &bytes, &sig, &ctx.seen, &peer_ip)
         }
         (Method::GET, "/local/worldview") => {
-            // The host's OWN console (the macOS SwiftUI app) reads the worldview without a mesh
-            // signature — it IS this node. Strictly loopback-only: nothing leaves the machine.
+            // A peer's own console (e.g. the macOS SwiftUI app) reads the worldview of the node
+            // running on the same machine, without a mesh signature — it's reading itself, not a
+            // remote peer. Strictly loopback-only: nothing leaves the machine.
             if peer_ip != "127.0.0.1" && peer_ip != "::1" {
                 text(StatusCode::FORBIDDEN, "local only")
             } else {
                 local_worldview(&dir)
+            }
+        }
+        (Method::POST, "/local/answer") => {
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                match collect(req).await {
+                    Ok(b) => local_answer(&dir, &b),
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                }
+            }
+        }
+        (Method::POST, "/local/gate") => {
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                match collect(req).await {
+                    Ok(b) => local_gate(&dir, &b),
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                }
             }
         }
         (Method::POST, "/mesh/enroll-request") => {
@@ -434,6 +455,61 @@ fn local_worldview(dir: &Path) -> Response<Full<Bytes>> {
             Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
         },
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "assemble"),
+    }
+}
+
+/// `POST /local/answer {"text": "..."}` → the human at this machine speaks to the familiar. Records
+/// a served-facing observation and retires the current question. Loopback-gated by the caller.
+fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
+    let text_val = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v.get("text").and_then(|s| s.as_str()).map(String::from))
+        .unwrap_or_default();
+    let t = text_val.trim();
+    if t.is_empty() {
+        return text(StatusCode::BAD_REQUEST, "empty");
+    }
+    let obs = familiar_kernel::observation::Observation::new(
+        "ian", "told the familiar", t, "console", "local", now_secs(), 1.0,
+    );
+    let _ = familiar_kernel::observation::record(dir, obs);
+    // Retire the open question so the cycle re-coordinates.
+    let _ = std::fs::write(dir.join("question.txt"), "");
+    let _ = std::fs::write(dir.join("active_question.txt"), "");
+    text(StatusCode::OK, "ok")
+}
+
+/// `POST /local/gate {"gate":"allow_execute","open":true}` → the human at this machine opens or
+/// closes a boundary gate through their own instrument (the same act the Glass performs). This is a
+/// local human boundary-write, not the autonomous cycle. Loopback-gated by the caller.
+fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
+    let v = match serde_json::from_slice::<serde_json::Value>(body) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad json"),
+    };
+    let gate = v.get("gate").and_then(|s| s.as_str()).unwrap_or("");
+    let open = v.get("open").and_then(|b| b.as_bool()).unwrap_or(false);
+    let mut b = familiar_kernel::boundary::load(dir).unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
+    match gate {
+        "allow_llm" => b.allow_llm = open,
+        "allow_camera" => b.allow_camera = open,
+        "allow_network" => b.allow_network = open,
+        "allow_mesh" => b.allow_mesh = open,
+        "allow_execute" => b.allow_execute = open,
+        "allow_authored_execute" => b.allow_authored_execute = open,
+        "allow_agent" => b.allow_agent = open,
+        "allow_tool_install" => b.allow_tool_install = open,
+        _ => return text(StatusCode::BAD_REQUEST, "unknown gate"),
+    }
+    if b.phase == "closed" && open {
+        b.phase = "phase-1".to_string();
+    }
+    match serde_json::to_string_pretty(&b) {
+        Ok(json) => {
+            let _ = std::fs::write(dir.join(familiar_kernel::boundary::BOUNDARY_FILE), json);
+            text(StatusCode::OK, "ok")
+        }
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
     }
 }
 
