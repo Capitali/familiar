@@ -6,6 +6,7 @@ options:
   deploymentTarget:
     iOS: "17.0"
     watchOS: "10.0"
+    macOS: "14.0"
 settings:
   base:
     DEVELOPMENT_TEAM: 8GHXL328AR
@@ -37,6 +38,23 @@ targets:
       # rides along through TestFlight. (Standalone-installed watch apps never link.)
       - target: FamiliarWatch
         embed: true
+  # The macOS peer's console — a SwiftUI app (the standard dark design) that reads the node running
+  # on the same machine over the loopback-only GET /local/worldview. A peer among equals, no "host".
+  FamiliarMac:
+    type: application
+    platform: macOS
+    sources:
+      - MacApp/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.mac
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "0.1.0"
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+    dependencies:
+      - package: FamiliarMesh
+        product: FamiliarMesh
   # A watchOS companion — its own covenant node (heart rate + motion → derived observations).
   # Receives the familiar's address from the paired iPhone via WatchConnectivity, but runs
   # independently. Bundle id MUST be prefixed by the companion's (io.river.familiar.ios.*).
