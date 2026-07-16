@@ -86,7 +86,7 @@ struct GlassConsole: View {
         }
         .foregroundStyle(Fam.ink)
         .preferredColorScheme(.dark)
-        .onAppear { model.startWorldviewPolling(); model.startDiscoveryIfConsented() }
+        .onAppear { model.startWorldviewPolling(); model.startDiscoveryIfConsented(); model.startReasoningIfConsented() }
         .onDisappear { model.stopWorldviewPolling() }
     }
 }
@@ -868,6 +868,9 @@ private struct GatesScreen: View {
                 GateCard(title: "Motion", desc: "Coarse activity — walking, driving, still.", isOn: $model.motionEnabled) { model.startSensingIfConsented() }
                 GateCard(title: "Network", desc: "Surveys nearby devices & services by Bonjour.", isOn: $model.discoveryEnabled) { model.startDiscoveryIfConsented() }
                 GateCard(title: "Face", desc: "On-device presence only — never a stored image.", isOn: $model.faceEnabled) { model.startFaceIfConsented() }
+                GateCard(title: "Reasoning",
+                         desc: "This iPad reasons over what's observed with on-device Apple Intelligence (under the Three Laws) and proposes theories for the mesh to test. Private — nothing leaves the device. \(model.reasoner.status).",
+                         isOn: $model.reasoningEnabled) { model.reasoner.refreshAvailability(); model.startReasoningIfConsented() }
             }
         }
     }

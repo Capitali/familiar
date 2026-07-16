@@ -1130,6 +1130,49 @@ fn answer_requests(
     Ok((answered, refused))
 }
 
+/// Adopt theories a **device peer reasoned out** and submitted over the mesh. A powerful device
+/// (an iPad running on-device Apple Intelligence, framed by the Three Laws) analyzes what it observes
+/// and proposes new ways to serve, posting each as an observation `action:"theorizes"` (object =
+/// what to try, context = the question). Here those become open threads, so the same pursue/test/
+/// delegate machinery that handles the familiar's own theories tests them too. Deduped by direction.
+/// Returns how many were adopted.
+fn adopt_device_theories(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Result<usize> {
+    let existing = thread::load(dir)?;
+    let held: std::collections::HashSet<String> = existing
+        .iter()
+        .map(|t| t.direction.trim().to_lowercase())
+        .collect();
+    let mut seq = existing.len();
+    let mut adopted = 0;
+    let mut fresh: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for o in obs {
+        // Only device/peer-submitted theories (tagged mesh:*), with a real direction.
+        if o.action != "theorizes" || !o.source.starts_with("mesh:") || o.object.trim().is_empty() {
+            continue;
+        }
+        let key = o.object.trim().to_lowercase();
+        if held.contains(&key) || !fresh.insert(key) {
+            continue;
+        }
+        seq += 1;
+        let t = thread::Thread {
+            id: format!("thread-{seq:04}"),
+            question: o.context.clone(),
+            theory: format!("reasoned by {}", o.actor),
+            direction: o.object.clone(),
+            created_at: now,
+            status: "open".into(),
+            origin: "device".into(),
+            // Attribute to the reasoning device so corruption-awareness governs it.
+            actor: o.actor.clone(),
+        };
+        if thread::append(dir, &t).is_ok() {
+            adopted += 1;
+        }
+    }
+    Ok(adopted)
+}
+
 /// Act on theories: for each `open` thread that carries a direction, create a
 /// candidate to pursue it (status `generated`, so it flows through test → score →
 /// select like any other), and mark the thread `pursued`. Returns how many were
@@ -1687,6 +1730,9 @@ pub fn tick(
 
     // 8. Act — turn open threads into candidate work (executed on a later tick),
     //    skipping (and marginalizing) directives from flagged corruptors.
+    // 8·0 Adopt theories a device peer reasoned out (e.g. the iPad's on-device Apple Intelligence)
+    //      and submitted over the mesh, so they flow into the same test/delegate machinery.
+    let _ = adopt_device_theories(dir, now, &obs);
     let (pursued, marginalized) = pursue_threads(dir, now)?;
 
     // 8a. Augment its understanding of humanity from what it observed — appended beside the
@@ -2003,6 +2049,33 @@ mod tests {
         assert_eq!(thread::load(&t.0).unwrap()[0].status, "pursued");
         let r2 = tick(&t.0, 1_000_000, false, false, false, false).unwrap();
         assert_eq!(r2.pursued, 0);
+    }
+
+    #[test]
+    fn adopts_a_theory_a_device_reasoned_and_submitted() {
+        let t = Temp::new("device_theory");
+        let dir = &t.0;
+        // A device (iPad) reasoned a theory and posted it as a mesh observation.
+        observation::record(dir, observation::Observation::new(
+            "ipad:ian", "theorizes", "offer a quiet-hours summary at dusk",
+            "what would ease the evenings?", "mesh:ipadnode1", 100, 0.9,
+        )).unwrap();
+        // A non-device 'theorizes' (local) is ignored — only peer-submitted theories are adopted.
+        observation::record(dir, observation::Observation::new(
+            "familiar", "theorizes", "local idea", "", "familiar", 100, 0.9,
+        )).unwrap();
+
+        let n = adopt_device_theories(dir, 1_000_000, &observation::load(dir).unwrap()).unwrap();
+        assert_eq!(n, 1, "only the device-submitted theory is adopted");
+        let threads = thread::load(dir).unwrap();
+        let th = threads.iter().find(|x| x.direction == "offer a quiet-hours summary at dusk").unwrap();
+        assert_eq!(th.status, "open");
+        assert_eq!(th.actor, "ipad:ian");
+        assert_eq!(th.origin, "device");
+
+        // Idempotent: adopting again creates no duplicate.
+        let n2 = adopt_device_theories(dir, 1_000_001, &observation::load(dir).unwrap()).unwrap();
+        assert_eq!(n2, 0);
     }
 
     #[test]

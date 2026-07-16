@@ -36,6 +36,12 @@ final class AppModel: ObservableObject {
     @Published var worldviewError: String?
     private var worldviewTask: Task<Void, Never>?
 
+    // The iPad as a thinking-peer: on-device Apple Intelligence reasoning under the Three Laws.
+    let reasoner = LocalReasoner()
+    @AppStorage("consent.reasoning") var reasoningEnabled = false
+    private var reasoningTask: Task<Void, Never>?
+    private var lastReasonedAt: Date?
+
     // Richer iPad sensors (voice is push-to-talk; face is a toggle). Created after node so their
     // closures can capture a fully-initialised self.
     private(set) var voice: VoiceSensing!
@@ -204,6 +210,34 @@ final class AppModel: ObservableObject {
         } catch {
             worldviewError = "\(error)"
         }
+    }
+
+    /// The iPad reasons over the familiar's recent observations with on-device Apple Intelligence
+    /// (under the Three Laws) and submits a proposed theory to the mesh as a `theorizes` observation,
+    /// where the familiar adopts it and an executor peer tests it. Consent-gated, paced (≤ every
+    /// ~20 min), only while enrolled and only where the model is available.
+    func startReasoningIfConsented() {
+        guard enrolled, reasoningEnabled, reasoner.available, reasoningTask == nil else {
+            if !reasoningEnabled { reasoningTask?.cancel(); reasoningTask = nil }
+            return
+        }
+        reasoningTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.reasonOnce()
+                try? await Task.sleep(nanoseconds: 20 * 60 * 1_000_000_000)
+            }
+        }
+    }
+
+    func stopReasoning() { reasoningTask?.cancel(); reasoningTask = nil }
+
+    func reasonOnce() async {
+        guard reasoningEnabled, let recent = worldview?.recent, !recent.isEmpty else { return }
+        guard let proposal = await reasoner.reason(over: recent) else { return }
+        // Submit the theory as a derived observation; the familiar turns it into a testable thread.
+        emit(ObsRecord(actor: DeviceActor.current, action: "theorizes",
+                       object: proposal.direction, context: proposal.question, confidence: 0.8))
+        note("reasoned a theory: \(proposal.direction)")
     }
 
     func startSensingIfConsented() {
