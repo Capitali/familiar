@@ -27,7 +27,7 @@ use crate::transport::{INBOX_DIR, INBOX_TOOLS_DIR, OUTBOX_FILE};
 use crate::{hex_encode, os_random, sha256_hex};
 use familiar_kernel::boundary;
 use familiar_kernel::guard::{self, Action, ActionKind, Decision};
-use familiar_kernel::{identity, observation, pattern_memory, tool};
+use familiar_kernel::{identity, observation, pattern_memory, thread, tool};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -106,10 +106,32 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
         } else {
             Vec::new()
         };
+        // Theories this node can't test locally, offered for a peer to test. Only when THIS node
+        // cannot execute (allow_execute off) — an executor keeps its own theories and tests them.
+        // A device peer / a headless node with execution gated becomes a theorist that delegates.
+        let can_execute = boundary::load(dir).map(|b| b.allow_execute).unwrap_or(false);
+        let theory_requests = if can_execute {
+            Vec::new()
+        } else {
+            let self_node = &id.node_id;
+            thread::load(dir)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|t| t.status == "open" && !t.direction.trim().is_empty())
+                .take(THEORY_SHARE_CAP)
+                .map(|t| crate::brief::TheoryRequest {
+                    origin: self_node.clone(),
+                    thread_id: t.id,
+                    question: t.question,
+                    direction: t.direction,
+                })
+                .collect()
+        };
         Knowledge {
             patterns: pattern_offers(dir),
             obs_summary: format!("{} observations", obs.len()),
             observations,
+            theory_requests,
         }
     } else {
         Knowledge::default()
@@ -321,6 +343,57 @@ fn merge_one(
         }
     }
 
+    // --- Theory delegation: a peer that can't test its own theories asks us to. If WE can execute,
+    // adopt each federated theory as a local thread so pursue_threads tests it (candidate → test →
+    // select), and the outcome replicates home via the shared observation record. Deduped by
+    // (origin, direction) against threads we already hold. We lend our execution to a peer's ideas. ---
+    if !brief.body.knowledge.theory_requests.is_empty()
+        && boundary::load(dir).map(|b| b.allow_execute).unwrap_or(false)
+    {
+        let existing = thread::load(dir).unwrap_or_default();
+        let held: std::collections::HashSet<String> = existing
+            .iter()
+            .map(|t| format!("{}\u{1}{}", t.actor, t.direction.trim().to_lowercase()))
+            .collect();
+        let mut tseq = existing.len();
+        for req in &brief.body.knowledge.theory_requests {
+            if req.origin == cred.membership.node_id || req.direction.trim().is_empty() {
+                continue; // our own, echoed back
+            }
+            let origin_actor = format!("mesh:{}", req.origin);
+            let key = format!("{}\u{1}{}", origin_actor, req.direction.trim().to_lowercase());
+            if held.contains(&key) {
+                continue; // already adopted this peer's theory
+            }
+            tseq += 1;
+            let t = thread::Thread {
+                id: format!("thread-{tseq:04}"),
+                question: req.question.clone(),
+                theory: format!("delegated by {}", short(&req.origin)),
+                direction: req.direction.clone(),
+                created_at: now,
+                status: "open".into(),
+                origin: "mesh".into(),
+                // Attribute to the originating node so corruption-awareness still governs it and its
+                // outcome can be traced home. A peer's theory, tested on our execution.
+                actor: origin_actor.clone(),
+            };
+            if thread::append(dir, &t).is_ok() {
+                // A visible, replicating record that we picked up a peer's theory to test — source
+                // "familiar" so it originates here and flows back to the peer via observation sharing.
+                record_obs(
+                    dir,
+                    "familiar",
+                    "adopted-theory",
+                    &format!("theory:{}", req.thread_id),
+                    &format!("testing a theory delegated by {} — '{}'", short(&req.origin), req.direction),
+                    now,
+                );
+                report.observations_ingested += 1;
+            }
+        }
+    }
+
     // --- Identities: opt-in only, per handle + group. ---
     if let Some(payload) = &brief.body.identities {
         for share in &payload.entries {
@@ -430,6 +503,15 @@ fn merge_identity(dir: &Path, share: &IdentityShare, node_id: &str, now: i64) ->
 /// How many recent observations a single brief carries. Bounds brief size; recent history still
 /// converges across the mesh over repeated rounds.
 const OBS_SHARE_CAP: usize = 200;
+
+/// How many un-testable theories a node offers per brief. Bounded so a theorist can't flood an
+/// executor; the rest ride on later rounds.
+const THEORY_SHARE_CAP: usize = 20;
+
+/// First 8 chars of a node id, for human-facing lines.
+fn short(node_id: &str) -> String {
+    node_id.chars().take(8).collect()
+}
 
 /// The origin node of an observation, for replication dedup + provenance. A `mesh:<node>...`
 /// source names the node it came from; bare `mesh` (peer presence) has no shareable origin; anything
@@ -545,10 +627,108 @@ mod tests {
                 }],
                 obs_summary: "88 observations".into(),
                 observations: Vec::new(),
+                theory_requests: Vec::new(),
             },
             identities: None,
         };
         sign_brief(body, author).unwrap()
+    }
+
+    #[test]
+    fn an_executor_adopts_a_peers_untestable_theory_and_tests_it() {
+        // B can execute (allow_execute on); peer A (a theorist that can't) delegates a theory.
+        let dir_b = tmp("delegate_recv");
+        let b_node = NodeKey::load_or_mint(&dir_b, "beta").unwrap();
+        let cred = group::create_group(&dir_b, &b_node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let mut bnd = boundary::Boundary::closed();
+        bnd.allow_mesh = true;
+        bnd.allow_execute = true; // B is an executor
+        fs::write(dir_b.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
+
+        let dir_a = tmp("delegate_peer");
+        let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
+        let cred_a =
+            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        let mut body = peer_brief_with_tool(&a_node, &cred_a, b"#!/bin/sh\n").body;
+        body.knowledge.theory_requests = vec![crate::brief::TheoryRequest {
+            origin: a_node.node_id(),
+            thread_id: "thread-0007".into(),
+            question: "What eases mornings?".into(),
+            direction: "offer a standing morning digest".into(),
+        }];
+        let brief = sign_brief(body, &a_node).unwrap();
+
+        fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+
+        federate(&dir_b, NOW + 1);
+
+        // B adopted A's theory as a local open thread it will pursue (attributed to A's node).
+        let threads = familiar_kernel::thread::load(&dir_b).unwrap();
+        let adopted = threads
+            .iter()
+            .find(|t| t.direction == "offer a standing morning digest")
+            .expect("executor adopted the delegated theory");
+        assert_eq!(adopted.status, "open");
+        assert_eq!(adopted.actor, format!("mesh:{}", a_node.node_id()));
+        // And it recorded a replicating note that it's testing the peer's theory.
+        let obs = observation::load(&dir_b).unwrap();
+        assert!(obs.iter().any(|o| o.action == "adopted-theory"));
+
+        // Idempotent: a second round doesn't re-adopt the same theory.
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+        federate(&dir_b, NOW + 2);
+        let n = familiar_kernel::thread::load(&dir_b)
+            .unwrap()
+            .iter()
+            .filter(|t| t.direction == "offer a standing morning digest")
+            .count();
+        assert_eq!(n, 1, "the delegated theory is adopted once, not every round");
+
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_a);
+    }
+
+    #[test]
+    fn a_non_executor_offers_its_open_theories_but_an_executor_does_not() {
+        // A theorist (allow_execute off) shares its open directional theories in its brief.
+        let dir = tmp("delegate_share");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let mut bnd = boundary::Boundary::closed();
+        bnd.allow_mesh = true;
+        bnd.allow_execute = false; // a theorist, not an executor
+        fs::write(dir.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
+        familiar_kernel::thread::append(&dir, &familiar_kernel::thread::Thread {
+            id: "thread-0001".into(), question: "q".into(), theory: "th".into(),
+            direction: "try a gentle nudge".into(), created_at: NOW, status: "open".into(),
+            origin: "llm".into(), actor: "familiar".into(),
+        }).unwrap();
+
+        let cfg = MeshConfig::default();
+        build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
+        let brief: MeshBrief =
+            serde_json::from_str(&fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap()).unwrap();
+        assert_eq!(brief.body.knowledge.theory_requests.len(), 1, "a theorist offers its theory");
+        assert_eq!(brief.body.knowledge.theory_requests[0].direction, "try a gentle nudge");
+
+        // Flip to executor: it keeps its theories to itself (tests them locally instead).
+        bnd.allow_execute = true;
+        fs::write(dir.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
+        build_outbox(&dir, &cred, &cfg, NOW + 2).unwrap();
+        let brief2: MeshBrief =
+            serde_json::from_str(&fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap()).unwrap();
+        assert!(brief2.body.knowledge.theory_requests.is_empty(), "an executor delegates nothing");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -20,7 +20,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 /// Wire/brief format version — bump on incompatible changes to the signed body.
-pub const BRIEF_VERSION: u32 = 2;
+pub const BRIEF_VERSION: u32 = 3;
 
 /// Presence: how busy this node is and when it last served — **counts, never names**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -77,9 +77,22 @@ pub struct ObsShare {
     pub confidence_pct: u8,
 }
 
-/// Knowledge offered: distilled patterns, a non-identifying observation summary, and — when
-/// `share_observations` is on — the recent observation records themselves, so every peer holds the
-/// shared record and can back up and speak for a peer that goes away.
+/// A theory a node formed but **cannot test locally** (it can't write/execute code — `allow_execute`
+/// off), offered to the mesh so a peer that CAN test it will. Distributed cognition: theorists
+/// delegate testing to executors. Carries its origin so the outcome can find its way home.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TheoryRequest {
+    pub origin: String,
+    pub thread_id: String,
+    pub question: String,
+    /// What to *do* to test the theory — becomes a candidate's hypothesis on the executor.
+    pub direction: String,
+}
+
+/// Knowledge offered: distilled patterns, a non-identifying observation summary, the recent
+/// observation records themselves (when `share_observations` is on), and theories this node couldn't
+/// test locally — so every peer holds the shared record, backs up a peer that goes away, and lends
+/// its execution to a peer that has ideas but no way to try them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Knowledge {
     pub patterns: Vec<PatternOffer>,
@@ -88,6 +101,10 @@ pub struct Knowledge {
     /// this field still deserializes (as none).
     #[serde(default)]
     pub observations: Vec<ObsShare>,
+    /// Theories this node can't test locally, seeking a peer that can. `#[serde(default)]` for
+    /// back-compat with briefs that predate the field.
+    #[serde(default)]
+    pub theory_requests: Vec<TheoryRequest>,
 }
 
 /// A single opted-in human, shared only under explicit per-handle/per-group consent.
@@ -218,6 +235,7 @@ mod tests {
                 }],
                 obs_summary: "42 observations".into(),
                 observations: Vec::new(),
+                theory_requests: Vec::new(),
             },
             identities: None,
         }
