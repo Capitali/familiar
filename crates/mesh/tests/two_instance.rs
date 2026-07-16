@@ -67,6 +67,7 @@ fn write_outbox(dir: &Path, node: &NodeKey, membership: familiar_mesh::group::Me
         },
         knowledge: Knowledge::default(),
         identities: None,
+        authority_requests: Vec::new(),
     };
     let brief = sign_brief(body, node).unwrap();
     fs::write(

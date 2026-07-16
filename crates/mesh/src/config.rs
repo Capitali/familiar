@@ -49,6 +49,12 @@ pub struct MeshConfig {
     /// A separate human switch from `allow_mesh`: mesh federation can be on while device
     /// ingestion is off. Every batch is still cert-verified and signature-checked regardless.
     pub accept_observations: bool,
+    /// This node has **no local human** to perform the human-gated acts (approve enrollments,
+    /// answer questions, open gates). When true it routes those authority needs to human-facing
+    /// peers instead of waiting on a human who will never arrive. A full peer otherwise — it still
+    /// theorizes and (gates permitting) builds + tests code. Off by default (most nodes have a human).
+    #[serde(default)]
+    pub headless: bool,
     /// **Auto-admit any well-formed covenant request** — a standing invite. When true, a node that
     /// attests the Laws and reaches `/mesh/enroll-request` is admitted immediately, without a
     /// per-device tap. Convenient on a trusted network; leave off to review each joiner (`mesh
@@ -68,6 +74,7 @@ impl Default for MeshConfig {
             identity_optin: Vec::new(),
             static_peers: Vec::new(),
             accept_observations: true,
+            headless: false,
             auto_accept_enrollments: false,
         }
     }

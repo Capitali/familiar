@@ -153,6 +153,36 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
         Some(ConsentedIdentityPayload { entries: shared })
     };
 
+    // A headless node (no local human) routes its human-gated needs to human-facing peers: the
+    // enrollments awaiting approval and its current open question. It never proxies gate-opening —
+    // that would breach the "kernel has no boundary-write path" invariant. Authority still comes
+    // from a genuine human, just one at another peer.
+    let authority_requests = if cfg.headless {
+        let mut reqs = Vec::new();
+        for p in crate::enroll::list_pending(dir).unwrap_or_default() {
+            reqs.push(crate::brief::AuthorityRequest {
+                origin: id.node_id.clone(),
+                kind: "enrollment".into(),
+                ref_id: p.node.node_id.clone(),
+                summary: format!("admit node {} ({}) to the group?", p.code, p.node.label),
+            });
+        }
+        if let Ok(q) = std::fs::read_to_string(dir.join("question.txt")) {
+            let q = q.trim();
+            if !q.is_empty() {
+                reqs.push(crate::brief::AuthorityRequest {
+                    origin: id.node_id.clone(),
+                    kind: "question".into(),
+                    ref_id: "active".into(),
+                    summary: q.to_string(),
+                });
+            }
+        }
+        reqs
+    } else {
+        Vec::new()
+    };
+
     let body = BriefBody {
         version: BRIEF_VERSION,
         node: id,
@@ -171,6 +201,7 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
         },
         knowledge,
         identities,
+        authority_requests,
     };
     let brief = sign_brief(body, &node)?;
     if let Some(parent) = dir.join(OUTBOX_FILE).parent() {
@@ -391,6 +422,37 @@ fn merge_one(
                 );
                 report.observations_ingested += 1;
             }
+        }
+    }
+
+    // --- Authority proxy: a headless peer has no local human, so it routes its human-gated needs
+    // (a pending enrollment, an open question) to us. If WE have a local human (not headless), make
+    // them visible so the human can act. Increment 1 surfaces them as observations; the grant-return
+    // loop (remote approve → the peer applies it) is the next step. Deduped by (origin,kind,ref).
+    // We never proxy gate-opening — a boundary is opened only by a human at the node it governs. ---
+    if !brief.body.authority_requests.is_empty()
+        && !config::load(dir).map(|c| c.headless).unwrap_or(false)
+    {
+        let seen: std::collections::HashSet<String> = observation::load(dir)
+            .unwrap_or_default()
+            .iter()
+            .filter(|o| o.action == "asked-to-decide")
+            .map(|o| o.object.clone())
+            .collect();
+        for req in &brief.body.authority_requests {
+            let obj = format!("{}:{}:{}", req.kind, node_id, req.ref_id);
+            if seen.contains(&obj) {
+                continue;
+            }
+            record_obs(
+                dir,
+                &format!("mesh:{node_id}"),
+                "asked-to-decide",
+                &obj,
+                &format!("peer {} needs a human: {}", short(node_id), req.summary),
+                now,
+            );
+            report.observations_ingested += 1;
         }
     }
 
@@ -630,8 +692,60 @@ mod tests {
                 theory_requests: Vec::new(),
             },
             identities: None,
+            authority_requests: Vec::new(),
         };
         sign_brief(body, author).unwrap()
+    }
+
+    #[test]
+    fn a_headless_peers_authority_needs_surface_at_a_human_facing_peer() {
+        // Human-facing receiver B (not headless); headless peer A routes an enrollment approval.
+        let dir_b = tmp("auth_recv");
+        let b_node = NodeKey::load_or_mint(&dir_b, "beta").unwrap();
+        let cred = group::create_group(&dir_b, &b_node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir_b); // B has a human (headless defaults false)
+
+        let dir_a = tmp("auth_peer");
+        let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
+        let cred_a =
+            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        let mut body = peer_brief_with_tool(&a_node, &cred_a, b"#!/bin/sh\n").body;
+        body.authority_requests = vec![crate::brief::AuthorityRequest {
+            origin: a_node.node_id(),
+            kind: "enrollment".into(),
+            ref_id: "newnode123".into(),
+            summary: "admit node abc123 (kali-jeff) to the group?".into(),
+        }];
+        let brief = sign_brief(body, &a_node).unwrap();
+
+        fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+
+        federate(&dir_b, NOW + 1);
+
+        // B's human can now see that peer A needs a decision.
+        let obs = observation::load(&dir_b).unwrap();
+        let ask = obs.iter().find(|o| o.action == "asked-to-decide").expect("surfaced for the human");
+        assert!(ask.object.starts_with("enrollment:"));
+        assert!(ask.context.contains("kali-jeff"));
+
+        // Idempotent: re-draining doesn't surface it twice.
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+        federate(&dir_b, NOW + 2);
+        let n = observation::load(&dir_b).unwrap().iter().filter(|o| o.action == "asked-to-decide").count();
+        assert_eq!(n, 1, "an authority request surfaces once, not every round");
+
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_a);
     }
 
     #[test]

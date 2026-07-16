@@ -20,7 +20,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 /// Wire/brief format version — bump on incompatible changes to the signed body.
-pub const BRIEF_VERSION: u32 = 3;
+pub const BRIEF_VERSION: u32 = 4;
 
 /// Presence: how busy this node is and when it last served — **counts, never names**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -116,6 +116,20 @@ pub struct IdentityShare {
     pub group: String,
 }
 
+/// A human-gated act a **headless** node can't perform alone (it has no local human), routed to
+/// human-facing peers so a human there can act. Authority always originates from a human — this only
+/// moves *where* that human sits, never removes them. `kind` is "enrollment" | "question" (gate-open
+/// is deliberately NOT proxied yet — that would change the boundary safety invariant).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityRequest {
+    pub origin: String,
+    pub kind: String,
+    /// What the decision is about — a node id (enrollment) or a question id.
+    pub ref_id: String,
+    /// Human-legible summary to surface at the deciding peer.
+    pub summary: String,
+}
+
 /// The scoped identity payload — present on a brief **only** when opt-in applies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ConsentedIdentityPayload {
@@ -140,6 +154,10 @@ pub struct BriefBody {
     /// Present only when a human opted a handle into this group's sharing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identities: Option<ConsentedIdentityPayload>,
+    /// Human-authority needs a headless node routes to human-facing peers. `#[serde(default)]` for
+    /// back-compat; empty on nodes that have their own human.
+    #[serde(default)]
+    pub authority_requests: Vec<AuthorityRequest>,
 }
 
 impl BriefBody {
@@ -238,6 +256,7 @@ mod tests {
                 theory_requests: Vec::new(),
             },
             identities: None,
+            authority_requests: Vec::new(),
         }
     }
 
