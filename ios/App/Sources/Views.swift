@@ -12,15 +12,14 @@ struct FamiliarAgentApp: App {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
-    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
     var body: some View {
         Group {
             if model.enrolled {
-                // The iPad is a full peer: the Glass-like console (its own split-view layout).
-                // The iPhone stays a compact pocket agent.
-                if isPad { GlassConsole() } else { NavigationStack { StatusView() } }
+                // The dark futuristic console is the standard UI for every peer with a screen —
+                // iPhone and iPad both. It adapts its own layout to the width (rail vs compact bar).
+                GlassConsole()
             } else {
-                NavigationStack { EnrollView() }
+                EnrollView().background(Fam.bg.ignoresSafeArea()).preferredColorScheme(.dark)
             }
         }
         .onAppear { model.syncWatch() }

@@ -1,5 +1,6 @@
 import SwiftUI
 import FamiliarMesh
+import WatchConnectivity
 
 // The iPad "Familiar" console — a faithful build of the futuristic design (Familiar for iPad.dc.html):
 // a deep-navy instrument with a breathing marble, a left rail, and four screens (The Glass,
@@ -48,9 +49,13 @@ extension Color {
 
 // MARK: - The console shell
 
+/// The dark futuristic console — the standard UI for **every** peer with a screen (iPhone, iPad, and
+/// the macOS SwiftUI shell). Adaptive: a left rail on a wide screen (iPad/Mac), a compact top bar with
+/// a pill selector on a narrow one (iPhone). Same design language everywhere.
 struct GlassConsole: View {
     @EnvironmentObject var model: AppModel
     @State private var screen: Screen = .glass
+    @Environment(\.horizontalSizeClass) private var hClass
 
     enum Screen: String, CaseIterable, Identifiable {
         case glass = "The Glass"
@@ -59,6 +64,15 @@ struct GlassConsole: View {
         case mesh = "The Mesh"
         case gates = "Gates & Boundary"
         var id: String { rawValue }
+        var short: String {
+            switch self {
+            case .glass: return "Glass"
+            case .metabolism: return "Metabolism"
+            case .theories: return "Theories"
+            case .mesh: return "Mesh"
+            case .gates: return "Gates"
+            }
+        }
         var number: String {
             switch self {
             case .glass: return "01"
@@ -70,17 +84,27 @@ struct GlassConsole: View {
         }
     }
 
+    private var isCompact: Bool { hClass == .compact }
+
     var body: some View {
         ZStack {
             Fam.bg.ignoresSafeArea()
             AuroraBackground()
-            HStack(spacing: 0) {
-                LeftRail(screen: $screen)
-                    .frame(width: 250)
+            if isCompact {
                 VStack(spacing: 0) {
-                    TopBar()
+                    CompactBar(screen: $screen)
                     Divider().overlay(Fam.hairline(0.055))
                     ScreenArea(screen: screen)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    LeftRail(screen: $screen)
+                        .frame(width: 250)
+                    VStack(spacing: 0) {
+                        TopBar()
+                        Divider().overlay(Fam.hairline(0.055))
+                        ScreenArea(screen: screen)
+                    }
                 }
             }
         }
@@ -88,6 +112,62 @@ struct GlassConsole: View {
         .preferredColorScheme(.dark)
         .onAppear { model.startWorldviewPolling(); model.startDiscoveryIfConsented(); model.startReasoningIfConsented() }
         .onDisappear { model.stopWorldviewPolling() }
+    }
+}
+
+/// The compact (iPhone) navigation chrome: the marble + presence line, then a horizontal pill
+/// selector for the screens — the same dark language as the iPad rail, sized for a narrow screen.
+private struct CompactBar: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var screen: GlassConsole.Screen
+    var present: Bool { !(model.worldview?.withdrawn ?? true) }
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 11) {
+                Marble(size: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("FAMILIAR").font(.system(size: 14, weight: .semibold)).tracking(2)
+                    Text(model.worldview?.group_label ?? model.groupLabel)
+                        .font(Fam.mono(9.5)).foregroundStyle(Fam.monoDim.opacity(0.6))
+                }
+                Spacer()
+                Circle().fill(present ? Fam.green : Fam.amber).frame(width: 8, height: 8)
+                    .shadow(color: present ? Fam.green : Fam.amber, radius: 4)
+            }
+            .padding(.horizontal, 18)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(GlassConsole.Screen.allCases) { s in
+                        let on = screen == s
+                        Button { screen = s } label: {
+                            Text(s.short).font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(on ? Color(hex: 0xeaf1ff) : Fam.ink.opacity(0.55))
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .background(Capsule().fill(on ? Fam.blue.opacity(0.16) : Color.white.opacity(0.04))
+                                    .overlay(Capsule().stroke(on ? Fam.blueBright.opacity(0.32) : Color.white.opacity(0.06), lineWidth: 1)))
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 18)
+            }
+        }
+        .padding(.top, 10).padding(.bottom, 12)
+    }
+}
+
+/// Two panels side-by-side on a wide screen, stacked on a narrow one — keeps the console's
+/// multi-column screens usable on an iPhone without a separate layout.
+struct AdaptiveColumns<Main: View, Side: View>: View {
+    @Environment(\.horizontalSizeClass) private var hClass
+    var sideWidth: CGFloat = 352
+    @ViewBuilder var main: () -> Main
+    @ViewBuilder var side: () -> Side
+    var body: some View {
+        if hClass == .compact {
+            VStack(spacing: 22) { main(); side() }
+        } else {
+            HStack(alignment: .top, spacing: 22) { main(); side().frame(width: sideWidth) }
+        }
     }
 }
 
@@ -357,17 +437,17 @@ private struct GlassHomeScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             ScreenHeader(number: "01 · THE GLASS", title: "Home", subtitle: nil)
-            HStack(alignment: .top, spacing: 22) {
+            AdaptiveColumns {
                 VStack(spacing: 22) {
                     GreetingCard()
                     LedgerCard()
                     HumanityCard()
                 }
+            } side: {
                 VStack(spacing: 22) {
                     PresenceCard()
                     LawSignalsCard()
                 }
-                .frame(width: 352)
             }
         }
     }
@@ -561,7 +641,7 @@ private struct MetabolismScreen: View {
         VStack(alignment: .leading, spacing: 22) {
             ScreenHeader(number: "02 · METABOLISM", title: "The cycle, breathing",
                          subtitle: "sense → detect → interpret → generate → test → score → select → inherit")
-            HStack(alignment: .top, spacing: 24) {
+            AdaptiveColumns(sideWidth: 392) {
                 Panel(fill: 0.03) {
                     VStack(spacing: 18) {
                         Marble(size: 112)
@@ -584,6 +664,7 @@ private struct MetabolismScreen: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
+            } side: {
                 VStack(spacing: 22) {
                     Panel(fill: 0.03) {
                         VStack(alignment: .leading, spacing: 16) {
@@ -608,7 +689,6 @@ private struct MetabolismScreen: View {
                         }
                     }
                 }
-                .frame(width: 392)
             }
         }
         .onReceive(timer) { _ in withAnimation(.easeInOut(duration: 0.55)) { active = (active + 1) % Self.stages.count } }
@@ -647,7 +727,7 @@ private struct TheoriesScreen: View {
                         .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                 }
             } else {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], spacing: 18) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 18)], spacing: 18) {
                     ForEach(theories) { th in
                         Panel(radius: 22, fill: 0.035) {
                             VStack(alignment: .leading, spacing: 11) {
@@ -863,15 +943,69 @@ private struct GatesScreen: View {
                     }
                 }
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], spacing: 18) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 18)], spacing: 18) {
                 GateCard(title: "Location", desc: "Notes home / away — never coordinates.", isOn: $model.locationEnabled) { model.startSensingIfConsented() }
                 GateCard(title: "Motion", desc: "Coarse activity — walking, driving, still.", isOn: $model.motionEnabled) { model.startSensingIfConsented() }
                 GateCard(title: "Network", desc: "Surveys nearby devices & services by Bonjour.", isOn: $model.discoveryEnabled) { model.startDiscoveryIfConsented() }
                 GateCard(title: "Face", desc: "On-device presence only — never a stored image.", isOn: $model.faceEnabled) { model.startFaceIfConsented() }
                 GateCard(title: "Reasoning",
-                         desc: "This iPad reasons over what's observed with on-device Apple Intelligence (under the Three Laws) and proposes theories for the mesh to test. Private — nothing leaves the device. \(model.reasoner.status).",
+                         desc: "This peer reasons over what's observed with on-device Apple Intelligence (under the Three Laws) and proposes theories for the mesh to test. Private — nothing leaves the device. \(model.reasoner.status).",
                          isOn: $model.reasoningEnabled) { model.reasoner.refreshAvailability(); model.startReasoningIfConsented() }
             }
+            DeviceActionsPanel()
+        }
+    }
+}
+
+/// This device's own controls — the watch link (iPhone), a join QR for a new device, the GitHub
+/// link, and unenroll. These lived in the old iPhone form; the console is the standard UI now, so
+/// they live here.
+private struct DeviceActionsPanel: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject private var watch = PhoneWatchLink.shared
+    @State private var showJoinQR = false
+    var body: some View {
+        Panel(fill: 0.03) {
+            VStack(alignment: .leading, spacing: 16) {
+                MonoLabel(text: "THIS DEVICE")
+                if WCSession.isSupported() {
+                    HStack(spacing: 10) {
+                        Image(systemName: "applewatch").foregroundStyle(Fam.blueSoft)
+                        if !watch.paired {
+                            Text("No paired watch.").font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.55))
+                        } else if !watch.appInstalled {
+                            Text("Install the Familiar watch app to link it.").font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.55))
+                        } else {
+                            Text(watch.lastSent != nil ? "Apple Watch linked" : "linking watch…").font(.system(size: 13)).foregroundStyle(Fam.greenSoft)
+                        }
+                        Spacer()
+                        Button("Re-link") { model.syncWatch() }.font(.system(size: 12)).foregroundStyle(Fam.blueLink)
+                    }
+                    Divider().overlay(Fam.hairline(0.06))
+                }
+                Button { showJoinQR = true } label: {
+                    Label("Show join QR for a new device", systemImage: "qrcode").font(.system(size: 14)).foregroundStyle(Fam.blueLink)
+                }
+                Link(destination: URL(string: "https://github.com/Capitali/familiar")!) {
+                    Label("The familiar on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .font(.system(size: 14)).foregroundStyle(Fam.blueLink)
+                }
+                Divider().overlay(Fam.hairline(0.06))
+                Button(role: .destructive) { model.unenroll() } label: {
+                    Label("Unenroll this device", systemImage: "minus.circle").font(.system(size: 14))
+                }
+            }
+        }
+        .sheet(isPresented: $showJoinQR) {
+            VStack(spacing: 16) {
+                Text("Join \(model.groupLabel)").font(.headline)
+                if let payload = model.addressPayload, let img = QRKit.image(from: payload) {
+                    Image(uiImage: img).interpolation(.none).resizable().scaledToFit().frame(maxWidth: 300)
+                    Text("Scan on a new device to join this familiar. Carries only the address — no secret.")
+                        .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
+                }
+                Button("Done") { showJoinQR = false }.padding(.top, 8)
+            }.padding(28).presentationDetents([.medium])
         }
     }
 }
