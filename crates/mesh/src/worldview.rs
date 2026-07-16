@@ -113,6 +113,9 @@ pub struct Worldview {
     pub uptime_secs: i64,
     /// The familiar's reflections on humanity, newest first, capped at [`HUMANITY_CAP`].
     pub humanity: Vec<ReflectionView>,
+    /// Every mesh participant classified into one layer (self / gossip peer / device peer / device
+    /// agent), with os + join date — the roster the iPad renders as a table and a graph.
+    pub members: Vec<crate::members::Member>,
 }
 
 /// How many recent observations the snapshot carries. A console shows a live tail, not the archive.
@@ -264,6 +267,7 @@ pub(crate) fn read_worldview(
         tick,
         uptime_secs,
         humanity,
+        members: crate::members::classify(dir, now),
     })
 }
 

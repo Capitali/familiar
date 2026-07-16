@@ -32,6 +32,7 @@ pub mod brief;
 pub mod config;
 pub mod enroll;
 pub mod group;
+pub mod members;
 pub mod merge;
 pub mod node;
 pub mod observe;

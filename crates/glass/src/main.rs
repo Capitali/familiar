@@ -889,12 +889,6 @@ impl Glass {
     fn mesh_group(&self) -> Option<familiar_mesh::group::GroupCredential> {
         familiar_mesh::group::load(&self.data_dir).ok().flatten()
     }
-    fn mesh_peers(&self) -> Vec<familiar_mesh::transport::PeerRecord> {
-        std::fs::read_to_string(self.data_dir.join("mesh").join("peers.json"))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
-    }
     fn mesh_pending(&self) -> Vec<familiar_mesh::enroll::Pending> {
         familiar_mesh::enroll::list_pending(&self.data_dir).unwrap_or_default()
     }
@@ -913,68 +907,8 @@ impl Glass {
         self.write_mesh_status("✗ declined a join request");
         self.refresh();
     }
-    /// Covenant-enrolled **device agents** (phones/watches) — distinct from gossip peers: they
-    /// push observations to `/mesh/observe` rather than exchanging briefs, so they never appear in
-    /// `peers.json`. Surfaced from their own recent observations (source `mesh:<node>`, a device
-    /// actor like `phone:ian`): one row per device node, newest first, as `(actor, node, object, ts)`.
-    fn mesh_device_agents(&self) -> Vec<(String, String, String, i64)> {
-        use std::collections::HashMap;
-        // How recently a device must have reported to count as a connected agent. A device that
-        // re-enrolled gets a NEW node key (new node id) but keeps its actor (e.g. `phone:ian`), so
-        // key by ACTOR — the newest report wins — collapsing a re-enrolled device to one row, and
-        // drop any actor whose latest report is older than the window (a departed agent).
-        const FRESH_SECS: i64 = 6 * 3600;
-        let now = now_secs();
-        let mut latest: HashMap<String, (String, String, i64)> = HashMap::new(); // actor -> (node, object, ts)
-        for o in &self.snapshot.observations {
-            let Some(node) = o.source.strip_prefix("mesh:") else {
-                continue;
-            };
-            if o.actor.starts_with("mesh:") {
-                continue; // gossip-peer presence, not a device agent
-            }
-            let e = latest.entry(o.actor.clone()).or_insert(("".into(), "".into(), 0));
-            if o.ts >= e.2 {
-                *e = (node.to_string(), o.object.clone(), o.ts);
-            }
-        }
-        let mut v: Vec<(String, String, String, i64)> = latest
-            .into_iter()
-            .filter(|(_, (_, _, ts))| now - *ts <= FRESH_SECS)
-            .map(|(actor, (node, object, ts))| (actor, node, object, ts))
-            .collect();
-        v.sort_by_key(|(_, _, _, ts)| std::cmp::Reverse(*ts));
-        v
-    }
-    /// Which member **devices** are sensing, keyed by their node id: `node → (actor, object, ts)`,
-    /// newest report per node, within the freshness window. A device is anything reporting under a
-    /// non-`mesh:` actor (`phone:ian`, `watch:ian`, `ipad:ian`) — the layer *above* the network, in
-    /// OSI terms. This is the ground truth for telling a member device apart from a gossip node:
-    /// a node that appears here is a device; the same node id appearing in `peers.json` means that
-    /// device also reads the worldview (a *device peer*), while one that doesn't is a *device agent*.
-    /// Keeps peer/agent counts accurate and non-overlapping regardless of how a device reports
-    /// (e.g. a watchOS node that reached us over its paired iPhone's network still carries its own
-    /// `watch:` actor + node id, so it's counted once, as itself).
-    fn device_actor_by_node(&self) -> std::collections::HashMap<String, (String, String, i64)> {
-        use std::collections::HashMap;
-        const FRESH_SECS: i64 = 6 * 3600;
-        let now = now_secs();
-        let mut latest: HashMap<String, (String, String, i64)> = HashMap::new();
-        for o in &self.snapshot.observations {
-            let Some(node) = o.source.strip_prefix("mesh:") else {
-                continue;
-            };
-            if o.actor.starts_with("mesh:") {
-                continue; // gossip-peer presence, not a device
-            }
-            let e = latest.entry(node.to_string()).or_insert(("".into(), "".into(), 0));
-            if o.ts >= e.2 {
-                *e = (o.actor.clone(), o.object.clone(), o.ts);
-            }
-        }
-        latest.retain(|_, (_, _, ts)| now - *ts <= FRESH_SECS);
-        latest
-    }
+    // Mesh participant classification now lives in the shared `familiar_mesh::members` module, so
+    // the Glass and the iPad render the same roster (see the mesh panel).
 
     fn mesh_config(&self) -> familiar_mesh::config::MeshConfig {
         familiar_mesh::config::load(&self.data_dir).unwrap_or_default()
@@ -1184,131 +1118,74 @@ impl Glass {
 
                         let now = now_secs();
 
-                        // Classify every mesh participant into one accurate, non-overlapping layer
-                        // (the OSI-style hierarchy the peer/agent counts must respect):
-                        //   • gossip peer  — a full node that exchanges briefs both ways
-                        //   • device peer  — a member device that also READS the worldview (a console)
-                        //   • device agent — a member device that only PUSHES observations (a sensor)
-                        // A device is a device wherever it appears; reading the worldview is what
-                        // lifts it from agent to peer. `peers.json` holds both gossip and device
-                        // peers, so we split it by whether the node is a sensing device.
-                        ui.add_space(6.0);
-                        // This familiar is a node in the mesh too — the anchor you're looking
-                        // *through*. It isn't its own peer, but showing it as "self" completes the
-                        // topology (every node visible, none privileged): a true mesh of equals
-                        // where any one can vanish and the rest carry on.
-                        if let Some(cred) = self.mesh_group() {
-                            let sn: String = cred.membership.node_id.chars().take(8).collect();
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label("🏠");
-                                ui.label(egui::RichText::new("this familiar").small().strong());
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{sn} · {} tool(s), {} pattern(s) · self",
-                                        self.snapshot.tools.len(),
-                                        self.snapshot.patterns.len()
-                                    ))
-                                    .weak()
-                                    .small(),
-                                );
-                            });
-                        }
-                        let peers = self.mesh_peers();
-                        let devices = self.device_actor_by_node();
-                        let (device_peers, gossip_peers): (Vec<_>, Vec<_>) =
-                            peers.iter().partition(|p| devices.contains_key(&p.node_id));
+                        // The mesh roster, classified once by the shared `members` module so the Glass
+                        // and the iPad agree exactly. Every participant sits at one layer — self /
+                        // gossip peer / device peer / device agent — none privileged (peers are
+                        // equals; "The Familiar" is the whole collective, not any one node). Each row
+                        // shows OS and how long ago the node joined.
+                        use familiar_mesh::members::MemberKind;
+                        let members = familiar_mesh::members::classify(&self.data_dir, now);
+                        let count = |k: MemberKind| members.iter().filter(|m| m.kind == k).count();
 
-                        ui.label(
-                            egui::RichText::new(format!("🖥 {} mesh peer(s)", gossip_peers.len()))
-                                .strong(),
-                        );
-                        for p in &gossip_peers {
-                            let ago = now.saturating_sub(p.last_seen);
-                            let node: String = p.node_id.chars().take(8).collect();
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.colored_label(theme::GREEN, "●");
-                                ui.label(egui::RichText::new(&p.label).small());
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{node} @ {} · {} tool(s), {} pattern(s) · seen {}s ago",
-                                        p.addr, p.tools_offered, p.patterns_offered, ago
-                                    ))
-                                    .weak()
-                                    .small(),
-                                );
-                            });
-                        }
-                        if gossip_peers.is_empty() {
+                        let section = |ui: &mut egui::Ui,
+                                       members: &[familiar_mesh::members::Member],
+                                       kind: MemberKind,
+                                       header: &str| {
+                            let rows: Vec<_> = members.iter().filter(|m| m.kind == kind).collect();
+                            if rows.is_empty() {
+                                return;
+                            }
+                            ui.add_space(6.0);
+                            ui.label(egui::RichText::new(header).strong());
+                            for m in rows {
+                                let icon = match m.kind {
+                                    MemberKind::SelfNode => "🏠",
+                                    MemberKind::GossipPeer => "🖥",
+                                    MemberKind::DevicePeer if m.actor.starts_with("watch") => "⌚",
+                                    MemberKind::DevicePeer if m.actor.starts_with("ipad") => "▦",
+                                    MemberKind::DevicePeer => "📲",
+                                    MemberKind::DeviceAgent if m.actor.starts_with("watch") => "⌚",
+                                    MemberKind::DeviceAgent => "📱",
+                                };
+                                let dot = if m.online { theme::GREEN } else { theme::INK_MUTED };
+                                let os = if m.os.is_empty() { String::new() } else { format!("{} · ", m.os) };
+                                let joined = if m.first_seen > 0 {
+                                    format!(" · joined {}", ago(now, m.first_seen))
+                                } else {
+                                    String::new()
+                                };
+                                let node8: String = m.node_id.chars().take(8).collect();
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    ui.colored_label(dot, icon);
+                                    ui.label(egui::RichText::new(&m.label).small());
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{node8} · {os}{}{joined} · seen {} ago",
+                                            m.detail,
+                                            ago(now, m.last_seen),
+                                        ))
+                                        .weak()
+                                        .small(),
+                                    );
+                                });
+                            }
+                        };
+
+                        section(ui, &members, MemberKind::SelfNode, "🏠 this node");
+                        section(ui, &members, MemberKind::GossipPeer,
+                                &format!("🖥 {} mesh peer(s)", count(MemberKind::GossipPeer)));
+                        if count(MemberKind::GossipPeer) == 0 {
                             ui.label(
                                 egui::RichText::new("(no mesh peers yet — invite one with the join key)")
                                     .weak()
                                     .small(),
                             );
                         }
-
-                        // Device peers — member devices that read the worldview (e.g. an iPad Glass).
-                        if !device_peers.is_empty() {
-                            ui.add_space(6.0);
-                            ui.label(
-                                egui::RichText::new(format!("📲 {} device peer(s)", device_peers.len()))
-                                    .strong(),
-                            );
-                            for p in &device_peers {
-                                let (actor, _, ts) = &devices[&p.node_id];
-                                let ago = now.saturating_sub(*ts);
-                                let icon = if actor.starts_with("watch") { "⌚" } else if actor.starts_with("ipad") { "▦" } else { "📲" };
-                                let node8: String = p.node_id.chars().take(8).collect();
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.colored_label(theme::GREEN, icon);
-                                    ui.label(egui::RichText::new(actor.as_str()).small());
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{node8} @ {} · reads the worldview · seen {ago}s ago",
-                                            p.addr
-                                        ))
-                                        .weak()
-                                        .small(),
-                                    );
-                                });
-                            }
-                        }
-
-                        // Device agents — member devices that only push observations (not peers). One
-                        // row per device node; a node already listed as a peer is not repeated here.
-                        let peer_ids: std::collections::HashSet<&str> =
-                            peers.iter().map(|p| p.node_id.as_str()).collect();
-                        let agents: Vec<_> = self
-                            .mesh_device_agents()
-                            .into_iter()
-                            .filter(|(_, node, _, _)| !peer_ids.contains(node.as_str()))
-                            .collect();
-                        if !agents.is_empty() {
-                            ui.add_space(6.0);
-                            ui.label(
-                                egui::RichText::new(format!("📱 {} device agent(s)", agents.len()))
-                                    .strong(),
-                            );
-                            for (actor, node, object, ts) in &agents {
-                                let ago = now.saturating_sub(*ts);
-                                let icon = if actor.starts_with("watch") { "⌚" } else { "📱" };
-                                let node8: String = node.chars().take(8).collect();
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.colored_label(theme::GREEN, icon);
-                                    ui.label(egui::RichText::new(actor.as_str()).small());
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{node8} · {object} · seen {ago}s ago"
-                                        ))
-                                        .weak()
-                                        .small(),
-                                    );
-                                });
-                            }
-                        }
+                        section(ui, &members, MemberKind::DevicePeer,
+                                &format!("📲 {} device peer(s)", count(MemberKind::DevicePeer)));
+                        section(ui, &members, MemberKind::DeviceAgent,
+                                &format!("📱 {} device agent(s)", count(MemberKind::DeviceAgent)));
 
                         // What has crossed: federated tools + tagged peer observations.
                         let fed: Vec<&Tool> = self

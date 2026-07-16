@@ -62,6 +62,17 @@ pub struct PeerRecord {
     pub last_seen: i64,
     pub tools_offered: usize,
     pub patterns_offered: usize,
+    /// OS the peer reported in its brief (gossip peers). Empty for device peers, whose family is
+    /// derived from their actor namespace instead. `#[serde(default)]` so older rosters still load.
+    #[serde(default)]
+    pub os: String,
+    /// CPU arch the peer reported. Empty for device peers.
+    #[serde(default)]
+    pub arch: String,
+    /// When this node first joined the roster (unix secs) — the "date joined". 0 for pre-existing
+    /// rows written before this field; backfilled to `last_seen` on the next sighting.
+    #[serde(default)]
+    pub first_seen: i64,
 }
 
 /// A running mesh transport. Dropping or calling [`MeshHandle::shutdown`] stops it.
@@ -672,14 +683,18 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    let now = now_secs();
     let rec = PeerRecord {
         node_id: brief.body.node.node_id.clone(),
         label: brief.body.node.label.clone(),
         addr: addr.to_string(),
         group_id: brief.body.membership.group_id.clone(),
-        last_seen: now_secs(),
+        last_seen: now,
         tools_offered: brief.body.capability.tools.len(),
         patterns_offered: brief.body.knowledge.patterns.len(),
+        os: brief.body.capability.os.clone(),
+        arch: brief.body.capability.arch.clone(),
+        first_seen: now,
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -688,8 +703,11 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
             } else {
                 rec.addr.clone()
             };
+            // Preserve the original join date (backfill 0 from a pre-field row to now).
+            let first_seen = if existing.first_seen > 0 { existing.first_seen } else { now };
             *existing = PeerRecord {
                 addr: addr_keep,
+                first_seen,
                 ..rec
             };
         }
@@ -718,9 +736,13 @@ pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr:
         .flatten()
         .map(|c| c.group_id)
         .unwrap_or_default();
+    let now = now_secs();
     match peers.iter_mut().find(|p| p.node_id == node_id) {
         Some(existing) => {
-            existing.last_seen = now_secs();
+            existing.last_seen = now;
+            if existing.first_seen == 0 {
+                existing.first_seen = now;
+            }
             if !label.is_empty() {
                 existing.label = label.to_string();
             }
@@ -733,9 +755,12 @@ pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr:
             label: label.to_string(),
             addr: addr.to_string(),
             group_id,
-            last_seen: now_secs(),
+            last_seen: now,
             tools_offered: 0,
             patterns_offered: 0,
+            os: String::new(),
+            arch: String::new(),
+            first_seen: now,
         }),
     }
     if let Some(parent) = path.parent() {
