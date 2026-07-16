@@ -56,6 +56,7 @@ struct GlassConsole: View {
         case glass = "The Glass"
         case metabolism = "Metabolism"
         case theories = "Theories"
+        case mesh = "The Mesh"
         case gates = "Gates & Boundary"
         var id: String { rawValue }
         var number: String {
@@ -63,7 +64,8 @@ struct GlassConsole: View {
             case .glass: return "01"
             case .metabolism: return "02"
             case .theories: return "03"
-            case .gates: return "04"
+            case .mesh: return "04"
+            case .gates: return "05"
             }
         }
     }
@@ -306,6 +308,7 @@ private struct ScreenArea: View {
                 case .glass: GlassHomeScreen()
                 case .metabolism: MetabolismScreen()
                 case .theories: TheoriesScreen()
+                case .mesh: MeshScreen()
                 case .gates: GatesScreen()
                 }
             }
@@ -358,6 +361,7 @@ private struct GlassHomeScreen: View {
                 VStack(spacing: 22) {
                     GreetingCard()
                     LedgerCard()
+                    HumanityCard()
                 }
                 VStack(spacing: 22) {
                     PresenceCard()
@@ -429,6 +433,39 @@ private struct LedgerCard: View {
                             }
                             .padding(.vertical, 11)
                             Divider().overlay(Fam.hairline(0.045))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The familiar's growing, observation-grounded understanding of the person — appended beside the
+/// constitutional HUMANITY.md, never over it.
+private struct HumanityCard: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        Panel(fill: 0.03) {
+            VStack(alignment: .leading, spacing: 14) {
+                MonoLabel(text: "UNDERSTANDING · WHAT IT'S LEARNED OF YOU")
+                let refs = model.worldview?.humanity ?? []
+                if refs.isEmpty {
+                    Text("The familiar grows this from what it observes — appended beside its constitution (HUMANITY.md), never narrowing it. Nothing yet.")
+                        .font(.system(size: 13.5)).foregroundStyle(Fam.ink.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(refs.prefix(4)) { r in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(r.reflection).font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.85))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                HStack(spacing: 6) {
+                                    Text(GlassTime.clock(r.created_at)).font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.5))
+                                    if !r.grounded_in.isEmpty {
+                                        Text("· grounded in \(r.grounded_in)").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.45))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -644,13 +681,163 @@ private struct TheoriesScreen: View {
     }
 }
 
-// MARK: - 04 · Gates & Boundary (this device's own consent surface)
+// MARK: - 04 · The Mesh (all peers + agents: graphic + table)
+
+private struct MeshScreen: View {
+    @EnvironmentObject var model: AppModel
+    private var members: [Member] { model.worldview?.members ?? [] }
+
+    private func kindColor(_ k: Member.Kind) -> Color {
+        switch k {
+        case .self_node: return Fam.iceStat
+        case .gossip_peer: return Fam.blueBright
+        case .device_peer: return Fam.green
+        case .device_agent: return Fam.amber
+        }
+    }
+    private func kindLabel(_ k: Member.Kind) -> String {
+        switch k {
+        case .self_node: return "this node"
+        case .gossip_peer: return "mesh peer"
+        case .device_peer: return "device peer"
+        case .device_agent: return "device agent"
+        }
+    }
+    private func icon(_ m: Member) -> String {
+        switch m.kind {
+        case .self_node: return "house.fill"
+        case .gossip_peer: return "cpu"
+        case .device_peer where m.actor.hasPrefix("ipad"): return "ipad"
+        case .device_peer where m.actor.hasPrefix("watch"): return "applewatch"
+        case .device_peer: return "iphone"
+        case .device_agent where m.actor.hasPrefix("watch"): return "applewatch"
+        case .device_agent: return "iphone"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .top) {
+                ScreenHeader(number: "04 · THE MESH", title: "Peers & agents",
+                             subtitle: "Everything under the Three Laws — one collective, equals. Each node is counted once, at its layer.")
+                Spacer()
+                HStack(spacing: 18) {
+                    tally("peers", members.filter { $0.kind == .gossip_peer || $0.kind == .device_peer }.count, Fam.blueBright)
+                    tally("agents", members.filter { $0.kind == .device_agent }.count, Fam.amber)
+                    tally("online", members.filter { $0.online }.count, Fam.green)
+                }
+            }
+            // The constellation — the collective as a graph, this node at the center.
+            Panel(fill: 0.03) {
+                MeshConstellation(members: members, color: kindColor, icon: icon)
+                    .frame(height: 360).frame(maxWidth: .infinity)
+            }
+            // The table — every member with kind, OS, status, joined.
+            Panel(fill: 0.03) {
+                VStack(alignment: .leading, spacing: 0) {
+                    MonoLabel(text: "ROSTER")
+                    HStack(spacing: 0) {
+                        col("MEMBER", 200); col("LAYER", 110); col("OS", 90); col("STATUS", 90); col("JOINED", 80); col("SEEN", 70)
+                    }.padding(.top, 12).padding(.bottom, 6)
+                    Divider().overlay(Fam.hairline(0.08))
+                    if members.isEmpty {
+                        Text("No members yet.").font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 12)
+                    }
+                    ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
+                        HStack(spacing: 0) {
+                            HStack(spacing: 8) {
+                                Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
+                                Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            }.frame(width: 200, alignment: .leading)
+                            Text(kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 110, alignment: .leading)
+                            Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 90, alignment: .leading)
+                            HStack(spacing: 5) {
+                                Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
+                                Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
+                            }.frame(width: 90, alignment: .leading)
+                            Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 80, alignment: .leading)
+                            Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 70, alignment: .leading)
+                        }
+                        .padding(.vertical, 10)
+                        Divider().overlay(Fam.hairline(0.045))
+                    }
+                }
+            }
+        }
+    }
+    private func rank(_ k: Member.Kind) -> Int {
+        switch k { case .self_node: return 0; case .gossip_peer: return 1; case .device_peer: return 2; case .device_agent: return 3 }
+    }
+    private func tally(_ label: String, _ n: Int, _ c: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text("\(n)").font(.system(size: 20, weight: .semibold)).foregroundStyle(c)
+            Text(label.uppercased()).font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.monoDim.opacity(0.55))
+        }
+    }
+    private func col(_ t: String, _ w: CGFloat) -> some View {
+        Text(t).font(Fam.mono(9.5)).tracking(1).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: w, alignment: .leading)
+    }
+}
+
+/// The mesh as a constellation: the local node at center, every other member on a ring, a line to
+/// each. A live picture of the collective — who is here, at what layer, online or away.
+private struct MeshConstellation: View {
+    let members: [Member]
+    let color: (Member.Kind) -> Color
+    let icon: (Member) -> String
+
+    var body: some View {
+        GeometryReader { geo in
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            let radius = min(geo.size.width, geo.size.height) / 2 - 54
+            let selfNode = members.first { $0.kind == .self_node }
+            let others = members.filter { $0.kind != .self_node }
+            ZStack {
+                // links
+                ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
+                    let p = point(center: center, radius: radius, i: i, n: others.count)
+                    Path { path in path.move(to: center); path.addLine(to: p) }
+                        .stroke(color(m.kind).opacity(m.online ? 0.35 : 0.12), lineWidth: 1)
+                }
+                // center (self)
+                node(selfNode ?? members.first, at: center, big: true)
+                // ring nodes
+                ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
+                    node(m, at: point(center: center, radius: radius, i: i, n: others.count), big: false)
+                }
+            }
+        }
+    }
+    private func point(center: CGPoint, radius: CGFloat, i: Int, n: Int) -> CGPoint {
+        guard n > 0 else { return center }
+        let a = (Double(i) / Double(n)) * 2 * .pi - .pi / 2
+        return CGPoint(x: center.x + radius * CGFloat(cos(a)), y: center.y + radius * CGFloat(sin(a)))
+    }
+    @ViewBuilder private func node(_ m: Member?, at p: CGPoint, big: Bool) -> some View {
+        if let m = m {
+            let c = color(m.kind)
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle().fill(c.opacity(m.online ? 0.22 : 0.08)).frame(width: big ? 58 : 42, height: big ? 58 : 42)
+                    Circle().stroke(c.opacity(m.online ? 0.9 : 0.4), lineWidth: 1.5).frame(width: big ? 58 : 42, height: big ? 58 : 42)
+                    Image(systemName: icon(m)).font(.system(size: big ? 20 : 15)).foregroundStyle(c)
+                }
+                .shadow(color: m.online ? c.opacity(0.5) : .clear, radius: 8)
+                Text(m.label.isEmpty ? String(m.node_id.prefix(6)) : m.label)
+                    .font(Fam.mono(9.5)).foregroundStyle(Fam.ink.opacity(0.8)).lineLimit(1).frame(maxWidth: 90)
+            }
+            .position(x: p.x, y: p.y)
+        }
+    }
+}
+
+// MARK: - 05 · Gates & Boundary (this device's own consent surface)
 
 private struct GatesScreen: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "04 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
+            ScreenHeader(number: "05 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
                          subtitle: "Law III — service must not become obedience. This iPad senses only through gates you open; it never widens them itself.")
             Panel(fill: 0.03) {
                 VStack(alignment: .leading, spacing: 16) {

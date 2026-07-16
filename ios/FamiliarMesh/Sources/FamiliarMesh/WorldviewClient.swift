@@ -13,6 +13,23 @@ public struct ObsView: Codable, Equatable, Identifiable {
     public var id: String { "\(ts)|\(source)|\(actor)|\(object)" }
 }
 
+/// A classified mesh participant — mirrors the Rust `members::Member`. Every participant sits at one
+/// layer: self / gossip peer / device peer / device agent. `The Familiar` is the whole collective,
+/// not any one node — none is privileged.
+public struct Member: Codable, Equatable, Identifiable {
+    public enum Kind: String, Codable { case self_node = "self_node", gossip_peer, device_peer, device_agent }
+    public var node_id: String
+    public var label: String
+    public var kind: Kind
+    public var os: String
+    public var actor: String
+    public var detail: String
+    public var first_seen: Int64
+    public var last_seen: Int64
+    public var online: Bool
+    public var id: String { node_id }
+}
+
 /// A federated peer as last seen — mirrors the Rust `worldview::PeerView`.
 public struct PeerView: Codable, Equatable, Identifiable {
     public var node_id: String
@@ -30,6 +47,14 @@ public struct TheoryView: Codable, Equatable, Identifiable {
     public var theory: String
     public var direction: String
     public var status: String
+}
+
+/// One reflection on humanity — mirrors the Rust `worldview::ReflectionView`.
+public struct ReflectionView: Codable, Equatable, Identifiable {
+    public var id: String
+    public var reflection: String
+    public var grounded_in: String
+    public var created_at: Int64
 }
 
 /// The boundary gates (Law III) — mirrors the Rust `worldview::GateStates`.
@@ -62,6 +87,8 @@ public struct Worldview: Codable, Equatable {
     public var gates: GateStates?
     public var tick: Int?
     public var uptime_secs: Int64?
+    public var humanity: [ReflectionView]?
+    public var members: [Member]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus
