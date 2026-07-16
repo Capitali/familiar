@@ -69,14 +69,32 @@ pub const ONLINE_WINDOW_SECS: i64 = 600;
 /// A device agent older than this has departed — dropped from the roster.
 const AGENT_FRESH_SECS: i64 = 6 * 3600;
 
-/// The latest device report per node id: `node -> (actor, object, ts)`, over non-`mesh:` actors
-/// (a device is anything reporting under `phone:`/`ipad:`/`watch:`… — the layer above the network).
+/// Known device actor namespaces — the prefix before the ':' in a device's actor (`ipad:ian`).
+/// Only observations under one of these count as *device* reports; a peer's own cycle actors
+/// (`familiar`), human actors (`ian`), or gossip presence (`mesh:…`) do NOT make a node a device.
+/// This is what keeps a headless gossip peer (whose replicated `familiar` observations arrive tagged
+/// `mesh:<node>`) from being misread as a device peer.
+const DEVICE_NAMESPACES: &[&str] = &[
+    "phone", "iphone", "ipad", "watch", "mac", "tv", "appletv", "roku", "android",
+    "tablet", "tizen", "wearable", "windows", "linux",
+];
+
+fn is_device_actor(actor: &str) -> bool {
+    match actor.split_once(':') {
+        Some((ns, _)) => DEVICE_NAMESPACES.contains(&ns),
+        None => false,
+    }
+}
+
+/// The latest device report per node id: `node -> (actor, object, ts)`, over **device-namespace**
+/// actors only (`phone:`/`ipad:`/`watch:`/`tv:`…). Non-device actors (a peer's `familiar` cycle,
+/// human `ian`, gossip `mesh:*`) are ignored so a gossip peer isn't misclassified as a device.
 fn device_reports(obs: &[familiar_kernel::observation::Observation]) -> HashMap<String, (String, String, i64)> {
     let mut latest: HashMap<String, (String, String, i64)> = HashMap::new();
     for o in obs {
         let Some(node) = o.source.strip_prefix("mesh:") else { continue };
-        if o.actor.starts_with("mesh:") {
-            continue; // gossip-peer presence, not a device
+        if !is_device_actor(&o.actor) {
+            continue; // not a device-sensor report (peer cycle / human / gossip presence)
         }
         let e = latest.entry(node.to_string()).or_insert((String::new(), String::new(), 0));
         if o.ts >= e.2 {

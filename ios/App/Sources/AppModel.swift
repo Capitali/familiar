@@ -22,7 +22,30 @@ final class AppModel: ObservableObject {
     @AppStorage("consent.discovery") var discoveryEnabled = false
 
     private let grantAccount = "grant.json"
+    private let enrollAccount = "enroll.info"   // {host,port,label} in the Keychain — survives reinstall
     private let defaults = UserDefaults.standard
+
+    // The enrollment address, held in the model and persisted in the KEYCHAIN (not UserDefaults, which
+    // is wiped on reinstall — the cause of the app dropping back to the join screen after a TestFlight
+    // update). Loaded on init, saved on join, cleared on unenroll.
+    var enrollPort: Int = 47100
+
+    private func saveEnrollment() {
+        let d: [String: Any] = ["host": host, "port": enrollPort, "label": groupLabel]
+        if let data = try? JSONSerialization.data(withJSONObject: d) { KeychainStore.save(data, account: enrollAccount) }
+    }
+    private func loadEnrollment() -> (host: String, port: Int, label: String)? {
+        // Keychain first (durable); fall back to the old UserDefaults keys once, to migrate.
+        if let data = KeychainStore.load(account: enrollAccount),
+           let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let h = d["host"] as? String, !h.isEmpty {
+            return (h, (d["port"] as? Int) ?? 47100, (d["label"] as? String) ?? "")
+        }
+        if let h = defaults.string(forKey: "enroll.host"), !h.isEmpty {
+            return (h, Int(defaults.string(forKey: "enroll.port") ?? "") ?? 47100, defaults.string(forKey: "enroll.label") ?? "")
+        }
+        return nil
+    }
 
     private(set) var node: NodeKey
     private var coordinator: SensingCoordinator?
@@ -57,11 +80,14 @@ final class AppModel: ObservableObject {
             KeychainStore.save(n.seed, account: "node.seed")
             node = n
         }
-        host = defaults.string(forKey: "enroll.host") ?? ""
-        groupLabel = defaults.string(forKey: "enroll.label") ?? ""
+        if let e = loadEnrollment() {
+            host = e.host; enrollPort = e.port; groupLabel = e.label
+        }
         enrolled = storedGrant() != nil && !host.isEmpty
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
+        // Migrate an existing UserDefaults-only enrollment into the Keychain so it stops evaporating.
+        if enrolled { saveEnrollment() }
     }
 
     /// A single derived observation from any sensor → the /mesh/observe pipe.
@@ -93,10 +119,9 @@ final class AppModel: ObservableObject {
             return
         }
         host = p.host
+        enrollPort = p.port
         groupLabel = p.label
-        defaults.set(p.host, forKey: "enroll.host")
-        defaults.set(String(p.port), forKey: "enroll.port")
-        defaults.set(p.label, forKey: "enroll.label")
+        saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
         note("requesting to join “\(p.label)” — accepting the Three Laws…")
         let node = self.node
@@ -137,25 +162,22 @@ final class AppModel: ObservableObject {
     /// that connects *after* the phone enrolled still gets linked. Safe to call every launch.
     func syncWatch() {
         let link = PhoneWatchLink.shared // touch = activate the WCSession
-        if enrolled,
-           let host = defaults.string(forKey: "enroll.host"),
-           let port = Int(defaults.string(forKey: "enroll.port") ?? "") {
-            link.sendAddress(host: host, port: port, label: groupLabel)
+        if enrolled, !host.isEmpty {
+            link.sendAddress(host: host, port: enrollPort, label: groupLabel)
         }
     }
 
     /// The address payload this device enrolled with — an *address*, not a secret. An enrolled
     /// member shows this as a QR so a new device can scan it and join the same familiar.
     var addressPayload: String? {
-        guard let host = defaults.string(forKey: "enroll.host"),
-              let port = defaults.string(forKey: "enroll.port"), !host.isEmpty
-        else { return nil }
-        return "{\"v\":1,\"host\":\"\(host)\",\"port\":\(port),\"label\":\"\(groupLabel)\"}"
+        guard !host.isEmpty else { return nil }
+        return "{\"v\":1,\"host\":\"\(host)\",\"port\":\(enrollPort),\"label\":\"\(groupLabel)\"}"
     }
 
     func unenroll() {
         KeychainStore.delete(account: grantAccount)
-        defaults.removeObject(forKey: "enroll.host")
+        KeychainStore.delete(account: enrollAccount)
+        host = ""
         coordinator?.stop()
         coordinator = nil
         discovery?.stop()
@@ -166,20 +188,16 @@ final class AppModel: ObservableObject {
 
     /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
     func makeSession() -> ObservationClient.Session? {
-        guard let g = storedGrant(),
-              let host = defaults.string(forKey: "enroll.host"),
-              let port = Int(defaults.string(forKey: "enroll.port") ?? ""),
-              let url = URL(string: "http://\(host):\(port)/mesh/observe")
+        guard let g = storedGrant(), !host.isEmpty,
+              let url = URL(string: "http://\(host):\(enrollPort)/mesh/observe")
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
     /// A signing session pointed at the familiar's `/mesh/worldview` (the read seam).
     func worldviewSession() -> ObservationClient.Session? {
-        guard let g = storedGrant(),
-              let host = defaults.string(forKey: "enroll.host"),
-              let port = Int(defaults.string(forKey: "enroll.port") ?? ""),
-              let url = WorldviewClient.worldviewURL(host: host, port: port)
+        guard let g = storedGrant(), !host.isEmpty,
+              let url = WorldviewClient.worldviewURL(host: host, port: enrollPort)
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
