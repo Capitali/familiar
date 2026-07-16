@@ -27,6 +27,11 @@ public struct Member: Codable, Equatable, Identifiable {
     public var first_seen: Int64
     public var last_seen: Int64
     public var online: Bool
+    public var familiar_version: String?
+    public var tools: Int?
+    public var patterns: Int?
+    public var addr: String?
+    public var relationship: String?
     public var id: String { node_id }
 }
 

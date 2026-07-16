@@ -393,16 +393,21 @@ private struct MeshScreen: View {
             Panel {
                 VStack(alignment: .leading, spacing: 8) {
                     MonoLabel("ROSTER")
+                    HStack(spacing: 0) {
+                        rcol("MEMBER", 210); rcol("RELATIONSHIP", 130); rcol("OS", 84); rcol("VERSION", 74); rcol("STATUS", 72); rcol("JOINED", 90)
+                    }
+                    Divider().overlay(Fam.hairline(0.08))
                     ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
                         HStack(spacing: 0) {
                             HStack(spacing: 8) {
                                 Circle().fill(color(m.kind)).frame(width: 7, height: 7)
-                                Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium))
-                            }.frame(width: 220, alignment: .leading)
-                            Text(kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(color(m.kind)).frame(width: 120, alignment: .leading)
-                            Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 90, alignment: .leading)
-                            Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6)).frame(width: 80, alignment: .leading)
-                            Text(m.first_seen > 0 ? "joined \(GlassTime.ago(m.first_seen))" : "").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55))
+                                Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            }.frame(width: 210, alignment: .leading)
+                            Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(color(m.kind)).frame(width: 130, alignment: .leading)
+                            Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
+                            Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 74, alignment: .leading)
+                            Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6)).frame(width: 72, alignment: .leading)
+                            Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 90, alignment: .leading)
                             Spacer(minLength: 0)
                         }.padding(.vertical, 9)
                         Divider().overlay(Fam.hairline(0.045))
@@ -410,6 +415,9 @@ private struct MeshScreen: View {
                 }
             }
         }
+    }
+    private func rcol(_ t: String, _ w: CGFloat) -> some View {
+        Text(t).font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: w, alignment: .leading)
     }
     private func rank(_ k: Member.Kind) -> Int { switch k { case .self_node: return 0; case .gossip_peer: return 1; case .device_peer: return 2; case .device_agent: return 3 } }
     private func kindLabel(_ k: Member.Kind) -> String { switch k { case .self_node: return "this node"; case .gossip_peer: return "mesh peer"; case .device_peer: return "device peer"; case .device_agent: return "device agent" } }

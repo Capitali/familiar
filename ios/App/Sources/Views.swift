@@ -33,43 +33,71 @@ struct EnrollView: View {
     @EnvironmentObject var model: AppModel
     @State private var pasted = ""
     @State private var scanning = false
+    @State private var showPaste = false
     var body: some View {
-        Form {
-            Section("Join a familiar") {
-                Text("Scan the familiar's QR (from the Glass or another member's device), or paste its address. You'll accept this device on the familiar itself.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                if model.enrolling {
-                    HStack { ProgressView(); Text("Waiting for the familiar to accept…").font(.footnote) }
-                } else {
-                    Button {
-                        scanning = true
-                    } label: {
-                        Label("Scan QR to join", systemImage: "qrcode.viewfinder")
+        ZStack {
+            Fam.bg.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 22) {
+                    Marble(size: 96).padding(.top, 40)
+                    Text("FAMILIAR").font(.system(size: 17, weight: .semibold)).tracking(3)
+                    Text("Join a familiar")
+                        .font(.system(size: 26, weight: .semibold)).foregroundStyle(Fam.ink)
+                    Text("Scan the familiar's QR (from a Mac/iPad console or another member), or paste its address. You'll accept this device on the familiar itself.")
+                        .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.55))
+                        .multilineTextAlignment(.center).padding(.horizontal, 28)
+
+                    if model.enrolling {
+                        Panel {
+                            HStack(spacing: 10) { ProgressView().tint(Fam.blueSoft)
+                                Text("Waiting for the familiar to accept…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
+                        }.padding(.horizontal, 22)
+                    } else {
+                        Button { scanning = true } label: {
+                            Label("Scan QR to join", systemImage: "qrcode.viewfinder")
+                                .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0x0a1330))
+                                .frame(maxWidth: .infinity).padding(.vertical, 15)
+                                .background(RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [Color(hex: 0x8fb4ff), Color(hex: 0x3f7bff)], startPoint: .top, endPoint: .bottom)))
+                        }.buttonStyle(.plain).padding(.horizontal, 22)
+
+                        Button { withAnimation { showPaste.toggle() } } label: {
+                            Text(showPaste ? "hide paste" : "…or paste the address").font(.system(size: 13)).foregroundStyle(Fam.blueLink)
+                        }.buttonStyle(.plain)
+                        if showPaste {
+                            Panel {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    TextField("{\"v\":1,\"host\":…,\"port\":47100}", text: $pasted, axis: .vertical)
+                                        .textFieldStyle(.plain).font(Fam.mono(12)).lineLimit(2...5)
+                                        .padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25))
+                                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.1), lineWidth: 1)))
+                                    Button("Request to join") { model.requestJoin(from: pasted) }
+                                        .disabled(pasted.isEmpty).foregroundStyle(pasted.isEmpty ? Fam.ink.opacity(0.3) : Fam.blueLink)
+                                }
+                            }.padding(.horizontal, 22)
+                        }
                     }
-                    DisclosureGroup("…or paste the address") {
-                        TextField("{\"v\":1,\"host\":…,\"port\":47100}", text: $pasted, axis: .vertical)
-                            .font(.system(.footnote, design: .monospaced))
-                            .lineLimit(2...5)
-                        Button("Request to join") { model.requestJoin(from: pasted) }
-                            .disabled(pasted.isEmpty)
+
+                    Text("By joining, this device accepts the Three Laws: continuation is service; humanity is served, never replaced; service is not obedience.")
+                        .font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55))
+                        .multilineTextAlignment(.center).padding(.horizontal, 30).padding(.top, 8)
+
+                    if !model.log.isEmpty {
+                        Panel {
+                            VStack(alignment: .leading, spacing: 4) {
+                                MonoLabel(text: "ACTIVITY")
+                                ForEach(model.log.prefix(6), id: \.self) { Text($0).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)) }
+                            }
+                        }.padding(.horizontal, 22)
                     }
+                    Spacer(minLength: 20)
                 }
-            }
-            Section {
-                Text("By joining, this device accepts the Three Laws: continuation is service; humanity is served, never replaced; service is not obedience.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if !model.log.isEmpty {
-                Section("Activity") { ForEach(model.log.prefix(6), id: \.self) { Text($0).font(.footnote) } }
+                .frame(maxWidth: .infinity)
             }
         }
-        .navigationTitle("Familiar Agent")
+        .foregroundStyle(Fam.ink)
+        .preferredColorScheme(.dark)
         .sheet(isPresented: $scanning) {
-            QRScannerView { code in
-                scanning = false
-                model.requestJoin(from: code)
-            }
-            .ignoresSafeArea()
+            QRScannerView { code in scanning = false; model.requestJoin(from: code) }.ignoresSafeArea()
         }
     }
 }

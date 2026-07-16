@@ -462,7 +462,7 @@ private struct ScreenHeader: View {
     }
 }
 
-private struct Panel<Content: View>: View {
+struct Panel<Content: View>: View {
     var radius: CGFloat = 24
     var fill: Double = 0.03
     @ViewBuilder var content: () -> Content
@@ -475,7 +475,7 @@ private struct Panel<Content: View>: View {
     }
 }
 
-private struct MonoLabel: View {
+struct MonoLabel: View {
     let text: String
     var body: some View {
         Text(text).font(Fam.mono(10.5)).tracking(1.9).foregroundStyle(Fam.labelBlue.opacity(0.6))
@@ -863,26 +863,27 @@ private struct MeshScreen: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 0) {
                                 HStack(spacing: 0) {
-                                    col("MEMBER", 200); col("LAYER", 110); col("OS", 90); col("STATUS", 90); col("JOINED", 80); col("SEEN", 70)
+                                    col("MEMBER", 180); col("RELATIONSHIP", 130); col("OS", 84); col("VERSION", 70); col("STATUS", 80); col("JOINED", 74); col("SEEN", 60)
                                 }.padding(.bottom, 6)
-                                Divider().overlay(Fam.hairline(0.08)).frame(width: 640)
+                                Divider().overlay(Fam.hairline(0.08)).frame(width: 678)
                                 ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
                                     HStack(spacing: 0) {
                                         HStack(spacing: 8) {
                                             Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
                                             Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                        }.frame(width: 200, alignment: .leading)
-                                        Text(kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 110, alignment: .leading)
-                                        Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 90, alignment: .leading)
+                                        }.frame(width: 180, alignment: .leading)
+                                        Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
+                                        Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
+                                        Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 70, alignment: .leading)
                                         HStack(spacing: 5) {
                                             Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
                                             Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
-                                        }.frame(width: 90, alignment: .leading)
-                                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 80, alignment: .leading)
-                                        Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 70, alignment: .leading)
+                                        }.frame(width: 80, alignment: .leading)
+                                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 74, alignment: .leading)
+                                        Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 60, alignment: .leading)
                                     }
                                     .padding(.vertical, 10)
-                                    Divider().overlay(Fam.hairline(0.045)).frame(width: 640)
+                                    Divider().overlay(Fam.hairline(0.045)).frame(width: 678)
                                 }
                             }
                         }

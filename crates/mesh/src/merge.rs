@@ -218,6 +218,7 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
             env_summary: node.identity().label,
+            familiar_version: env!("CARGO_PKG_VERSION").to_string(),
             tools,
         },
         knowledge,
@@ -818,6 +819,7 @@ mod tests {
                 os: "linux".into(),
                 arch: "arm".into(),
                 env_summary: "cpn".into(),
+                familiar_version: "0.1.0".into(),
                 tools: vec![ToolManifest {
                     tool_id: "tool-0007".into(),
                     name: "battery".into(),

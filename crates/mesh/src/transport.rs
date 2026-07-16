@@ -73,6 +73,9 @@ pub struct PeerRecord {
     /// rows written before this field; backfilled to `last_seen` on the next sighting.
     #[serde(default)]
     pub first_seen: i64,
+    /// The familiar build the peer runs (from its brief). Empty for device peers / older rows.
+    #[serde(default)]
+    pub familiar_version: String,
 }
 
 /// A running mesh transport. Dropping or calling [`MeshHandle::shutdown`] stops it.
@@ -795,6 +798,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         os: brief.body.capability.os.clone(),
         arch: brief.body.capability.arch.clone(),
         first_seen: now,
+        familiar_version: brief.body.capability.familiar_version.clone(),
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -861,6 +865,7 @@ pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr:
             os: String::new(),
             arch: String::new(),
             first_seen: now,
+            familiar_version: String::new(),
         }),
     }
     if let Some(parent) = path.parent() {

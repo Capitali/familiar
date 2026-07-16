@@ -50,6 +50,10 @@ pub struct Capability {
     pub os: String,
     pub arch: String,
     pub env_summary: String,
+    /// The familiar build this peer runs (crate version) — for the roster. `#[serde(default)]` for
+    /// briefs that predate it.
+    #[serde(default)]
+    pub familiar_version: String,
     pub tools: Vec<ToolManifest>,
 }
 
@@ -262,6 +266,7 @@ mod tests {
                 os: "macos".into(),
                 arch: "aarch64".into(),
                 env_summary: "wildhorse".into(),
+                familiar_version: "0.1.0".into(),
                 tools: vec![ToolManifest {
                     tool_id: "t1".into(),
                     name: "ping".into(),

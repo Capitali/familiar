@@ -45,6 +45,22 @@ pub struct Member {
     pub last_seen: i64,
     /// Present if seen within the freshness window.
     pub online: bool,
+    /// The familiar build the node runs (gossip peers). Empty for devices.
+    #[serde(default)]
+    pub familiar_version: String,
+    /// Tools this peer offers to the mesh.
+    #[serde(default)]
+    pub tools: usize,
+    /// Distilled patterns this peer offers.
+    #[serde(default)]
+    pub patterns: usize,
+    /// Where it connected from / its address (display only).
+    #[serde(default)]
+    pub addr: String,
+    /// The relationship — how this node participates: "self", "gossip", "reads worldview",
+    /// "sensor (direct)", "sensor (via phone)". Human-readable for the roster.
+    #[serde(default)]
+    pub relationship: String,
 }
 
 /// A device counts as present if it was seen within this window. Generous, because device agents
@@ -100,18 +116,23 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
         let first = obs.iter().map(|o| o.ts).min().unwrap_or(now);
         let last = obs.iter().map(|o| o.ts).max().unwrap_or(now);
+        let tools = familiar_kernel::tool::load(dir).map(|t| t.len()).unwrap_or(0);
+        let patterns = familiar_kernel::pattern_memory::load(dir).map(|p| p.len()).unwrap_or(0);
         out.push(Member {
             node_id: cred.membership.node_id.clone(),
             label,
             kind: MemberKind::SelfNode,
-            os: std::env::consts::OS.to_string(),
+            os: os_pretty(std::env::consts::OS),
             actor: String::new(),
-            detail: format!("{} · {} tool(s), {} pattern(s)", std::env::consts::OS,
-                            familiar_kernel::tool::load(dir).map(|t| t.len()).unwrap_or(0),
-                            familiar_kernel::pattern_memory::load(dir).map(|p| p.len()).unwrap_or(0)),
+            detail: format!("this node · v{}", env!("CARGO_PKG_VERSION")),
             first_seen: first,
             last_seen: last,
             online: true,
+            familiar_version: env!("CARGO_PKG_VERSION").to_string(),
+            tools,
+            patterns,
+            addr: "localhost".into(),
+            relationship: "self".into(),
         });
     }
 
@@ -119,27 +140,35 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
     let reports = device_reports(&obs);
     let peers: Vec<PeerRecord> = transport::load_peers(dir);
     let peer_ids: std::collections::HashSet<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
+    // Best-probable names for peers on the tailnet: their Tailscale hostname, keyed by IP.
+    let tailnet: std::collections::HashMap<String, String> = transport::enumerate_peers()
+        .into_iter()
+        .map(|t| (t.ip, t.host))
+        .collect();
 
-    // Peers from the roster, split by whether the node also sources device observations: a node that
-    // reports as a device *and* reads the worldview is a device peer; otherwise a gossip peer.
     for p in &peers {
-        let (kind, os, actor, detail) = match reports.get(&p.node_id) {
-            Some((actor, object, _)) => (
-                MemberKind::DevicePeer,
-                os_from_actor(actor),
-                actor.clone(),
-                object.clone(),
-            ),
-            None => (
-                MemberKind::GossipPeer,
-                p.os.clone(),
-                String::new(),
-                format!("{} tool(s), {} pattern(s)", p.tools_offered, p.patterns_offered),
-            ),
+        let ip = p.addr.split(':').next().unwrap_or("").to_string();
+        let is_device = reports.contains_key(&p.node_id);
+        let (kind, os, actor, relationship) = if let Some((actor, _, _)) = reports.get(&p.node_id) {
+            (MemberKind::DevicePeer, os_from_actor(actor), actor.clone(), "reads worldview".to_string())
+        } else {
+            (MemberKind::GossipPeer, os_pretty(&p.os), String::new(), "gossip peer".to_string())
+        };
+        // Prefer a resolved tailnet hostname for gossip peers; keep the device's own label otherwise.
+        let label = if !is_device {
+            tailnet.get(&ip).cloned().filter(|h| !h.is_empty()).unwrap_or_else(|| p.label.clone())
+        } else {
+            p.label.clone()
+        };
+        let detail = if is_device {
+            reports.get(&p.node_id).map(|(_, o, _)| o.clone()).unwrap_or_default()
+        } else {
+            let v = if p.familiar_version.is_empty() { String::new() } else { format!("v{} · ", p.familiar_version) };
+            format!("{v}{} tool(s), {} pattern(s)", p.tools_offered, p.patterns_offered)
         };
         out.push(Member {
             node_id: p.node_id.clone(),
-            label: p.label.clone(),
+            label,
             kind,
             os,
             actor,
@@ -147,11 +176,16 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             first_seen: p.first_seen,
             last_seen: p.last_seen,
             online: now - p.last_seen <= ONLINE_WINDOW_SECS,
+            familiar_version: p.familiar_version.clone(),
+            tools: p.tools_offered,
+            patterns: p.patterns_offered,
+            addr: ip,
+            relationship,
         });
     }
 
     // Device agents — devices that push observations but aren't in the peer roster (never read the
-    // worldview). One row per node, dropped once stale.
+    // worldview). One row per node, dropped once stale. A watch is called out with its relationship.
     for (node, (actor, object, ts)) in &reports {
         if peer_ids.contains(node.as_str()) {
             continue; // already listed as a (device) peer
@@ -159,6 +193,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         if now - *ts > AGENT_FRESH_SECS {
             continue; // departed
         }
+        let ns = actor.split(':').next().unwrap_or("");
+        let relationship = match ns {
+            "watch" => "watch · sensor",
+            "ipad" | "phone" | "iphone" => "sensor",
+            _ => "observed device",
+        }
+        .to_string();
         out.push(Member {
             node_id: node.clone(),
             label: actor.clone(),
@@ -169,10 +210,26 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             first_seen: *ts,
             last_seen: *ts,
             online: now - *ts <= ONLINE_WINDOW_SECS,
+            familiar_version: String::new(),
+            tools: 0,
+            patterns: 0,
+            addr: String::new(),
+            relationship,
         });
     }
 
     out
+}
+
+/// A friendlier OS name for the roster ("linux" → "Linux", "macos" → "macOS").
+fn os_pretty(os: &str) -> String {
+    match os {
+        "linux" => "Linux".into(),
+        "macos" => "macOS".into(),
+        "windows" => "Windows".into(),
+        other if !other.is_empty() => other.into(),
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]
