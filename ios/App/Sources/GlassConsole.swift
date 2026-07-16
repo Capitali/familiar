@@ -812,34 +812,40 @@ private struct MeshScreen: View {
                 MeshConstellation(members: members, color: kindColor, icon: icon)
                     .frame(height: 360).frame(maxWidth: .infinity)
             }
-            // The table — every member with kind, OS, status, joined.
+            // The table — every member with kind, OS, status, joined. Scrolls horizontally on a
+            // narrow screen (iPhone) so the fixed columns stay readable.
             Panel(fill: 0.03) {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
                     MonoLabel(text: "ROSTER")
-                    HStack(spacing: 0) {
-                        col("MEMBER", 200); col("LAYER", 110); col("OS", 90); col("STATUS", 90); col("JOINED", 80); col("SEEN", 70)
-                    }.padding(.top, 12).padding(.bottom, 6)
-                    Divider().overlay(Fam.hairline(0.08))
                     if members.isEmpty {
                         Text("No members yet.").font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 12)
-                    }
-                    ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
-                        HStack(spacing: 0) {
-                            HStack(spacing: 8) {
-                                Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
-                                Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                            }.frame(width: 200, alignment: .leading)
-                            Text(kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 110, alignment: .leading)
-                            Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 90, alignment: .leading)
-                            HStack(spacing: 5) {
-                                Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
-                                Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
-                            }.frame(width: 90, alignment: .leading)
-                            Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 80, alignment: .leading)
-                            Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 70, alignment: .leading)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack(spacing: 0) {
+                                    col("MEMBER", 200); col("LAYER", 110); col("OS", 90); col("STATUS", 90); col("JOINED", 80); col("SEEN", 70)
+                                }.padding(.bottom, 6)
+                                Divider().overlay(Fam.hairline(0.08)).frame(width: 640)
+                                ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
+                                    HStack(spacing: 0) {
+                                        HStack(spacing: 8) {
+                                            Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
+                                            Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                        }.frame(width: 200, alignment: .leading)
+                                        Text(kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 110, alignment: .leading)
+                                        Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 90, alignment: .leading)
+                                        HStack(spacing: 5) {
+                                            Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
+                                            Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
+                                        }.frame(width: 90, alignment: .leading)
+                                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 80, alignment: .leading)
+                                        Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 70, alignment: .leading)
+                                    }
+                                    .padding(.vertical, 10)
+                                    Divider().overlay(Fam.hairline(0.045)).frame(width: 640)
+                                }
+                            }
                         }
-                        .padding(.vertical, 10)
-                        Divider().overlay(Fam.hairline(0.045))
                     }
                 }
             }
