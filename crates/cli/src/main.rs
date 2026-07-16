@@ -643,6 +643,56 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("grant") => {
+            // `mesh grant <target_node> <enrollment|question|gate> <ref> <approve|deny> [note...]`
+            // A human's decision on a peer's authority request, relayed back for that peer to apply.
+            // This is a human act — only run it when you've actually decided. For a headless peer that
+            // asked to open its execute gate, `mesh grant <node> gate allow_execute approve`.
+            let (Some(target), Some(kind), Some(ref_id), Some(dec)) =
+                (args.get(1), args.get(2), args.get(3), args.get(4))
+            else {
+                eprintln!("mesh: usage: familiar mesh grant <target_node> <enrollment|question|gate> <ref_id> <approve|deny> [note]");
+                return ExitCode::FAILURE;
+            };
+            let approved = match dec.as_str() {
+                "approve" | "yes" | "y" => true,
+                "deny" | "no" | "n" => false,
+                _ => {
+                    eprintln!("mesh: decision must be approve or deny");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let note = args.get(5..).map(|s| s.join(" ")).unwrap_or_default();
+            let by = familiar_mesh::group::load(&dir)
+                .ok()
+                .flatten()
+                .map(|c| c.membership.node_id)
+                .unwrap_or_default();
+            let grant = familiar_mesh::brief::AuthorityGrant {
+                by,
+                target: target.to_string(),
+                kind: kind.to_string(),
+                ref_id: ref_id.to_string(),
+                approved,
+                note,
+                ts: now_secs(),
+            };
+            match familiar_mesh::grants::record(&dir, grant) {
+                Ok(()) => {
+                    println!(
+                        "✓ recorded your decision ({}) on {}'s {} — it rides the next briefs to that peer",
+                        if approved { "approve" } else { "deny" },
+                        short_id(target),
+                        kind
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not record grant — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("invite") => {
             // `mesh invite [--minutes N]` — pairing mode: authorize an expansion once so devices
             // you bring in during the window enroll without a tap each (default 10 min).

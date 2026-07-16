@@ -20,7 +20,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 /// Wire/brief format version — bump on incompatible changes to the signed body.
-pub const BRIEF_VERSION: u32 = 4;
+pub const BRIEF_VERSION: u32 = 5;
 
 /// Presence: how busy this node is and when it last served — **counts, never names**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -130,6 +130,30 @@ pub struct AuthorityRequest {
     pub summary: String,
 }
 
+/// A human's decision on an [`AuthorityRequest`], relayed back to the node that asked. Carried in the
+/// **granting node's signed brief**, so it is authenticated as "this member asserts a human here
+/// decided X" — the covenant trust that a member only emits a grant when its human actually acted.
+/// The target applies it: mint/deny an enrollment, record a question's answer, or — the one path that
+/// writes the boundary — open a gate the target requested. That boundary write happens ONLY here, on
+/// an authenticated human grant; the autonomous cycle still has no boundary-write path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityGrant {
+    /// The node whose human made the decision.
+    pub by: String,
+    /// The node the decision is for (applies it).
+    pub target: String,
+    /// "enrollment" | "question" | "gate".
+    pub kind: String,
+    /// The subject: a node id (enrollment), a question id, or a gate name (`allow_execute`, …).
+    pub ref_id: String,
+    pub approved: bool,
+    /// Optional human note (e.g. the answer to a question).
+    #[serde(default)]
+    pub note: String,
+    /// When the human decided — for pruning old grants.
+    pub ts: i64,
+}
+
 /// The scoped identity payload — present on a brief **only** when opt-in applies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ConsentedIdentityPayload {
@@ -158,6 +182,9 @@ pub struct BriefBody {
     /// back-compat; empty on nodes that have their own human.
     #[serde(default)]
     pub authority_requests: Vec<AuthorityRequest>,
+    /// Decisions a human here made on peers' authority requests, relayed back for them to apply.
+    #[serde(default)]
+    pub authority_grants: Vec<AuthorityGrant>,
 }
 
 impl BriefBody {
@@ -257,6 +284,7 @@ mod tests {
             },
             identities: None,
             authority_requests: Vec::new(),
+            authority_grants: Vec::new(),
         }
     }
 
