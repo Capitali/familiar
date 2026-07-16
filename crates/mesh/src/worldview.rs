@@ -173,7 +173,14 @@ pub(crate) fn read_worldview(
     // record is non-fatal: the read still succeeds.
     let _ = crate::transport::register_device_peer(dir, &req.node.node_id, &req.node.label, peer_ip);
 
-    // Trusted member — assemble the snapshot from the canonical store + the three signals + peers.
+    assemble_worldview(dir, &cred, now)
+}
+
+/// Assemble the worldview snapshot from the canonical store + signals + peers + theories + gates +
+/// humanity + members. The auth-free core of a read — used by the verified mesh path (after it
+/// checks membership) and by the **localhost-only** `GET /local/worldview` the host's own SwiftUI
+/// console reads (the Mac IS the node; no mesh signature needed for its own screen).
+pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now: i64) -> Result<Worldview> {
     let obs = familiar_kernel::observation::load(dir).map_err(Error::Io)?;
     let presence = familiar_kernel::presence::presence_signal(&obs, now);
     let service = familiar_kernel::service::service_signal(&obs);
@@ -252,8 +259,8 @@ pub(crate) fn read_worldview(
         .collect();
 
     Ok(Worldview {
-        group_label: cred.label,
-        node_id: cred.membership.node_id,
+        group_label: cred.label.clone(),
+        node_id: cred.membership.node_id.clone(),
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,

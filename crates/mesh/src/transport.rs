@@ -311,6 +311,15 @@ async fn handle(
             };
             recv_worldview(&dir, &bytes, &sig, &ctx.seen, &peer_ip)
         }
+        (Method::GET, "/local/worldview") => {
+            // The host's OWN console (the macOS SwiftUI app) reads the worldview without a mesh
+            // signature — it IS this node. Strictly loopback-only: nothing leaves the machine.
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                local_worldview(&dir)
+            }
+        }
         (Method::POST, "/mesh/enroll-request") => {
             let sig = req
                 .headers()
@@ -410,6 +419,21 @@ fn recv_observe(
         Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad batch"),
+    }
+}
+
+/// `GET /local/worldview` → the host's own console reads the worldview, no mesh signature (loopback
+/// gated by the caller). 200 + JSON, 503 if no group yet.
+fn local_worldview(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    match crate::worldview::assemble_worldview(dir, &cred, now_secs()) {
+        Ok(view) => match serde_json::to_vec(&view) {
+            Ok(body) => text(StatusCode::OK, body),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        },
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "assemble"),
     }
 }
 
