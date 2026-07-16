@@ -273,20 +273,7 @@ private struct MetabolismScreen: View {
                          subtitle: "sense → detect → interpret → generate → test → score → select → inherit")
             HStack(alignment: .top, spacing: 22) {
                 Panel {
-                    VStack(spacing: 16) {
-                        Marble(size: 108)
-                        Text(Self.stages[active].uppercased()).font(Fam.mono(12)).tracking(1.6).foregroundStyle(Fam.blueSoft)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                            ForEach(Array(Self.stages.enumerated()), id: \.offset) { i, s in
-                                VStack(spacing: 4) {
-                                    Text(String(format: "%02d", i + 1)).font(Fam.mono(10)).foregroundStyle(i == active ? Fam.blueSoft : Fam.monoDim.opacity(0.5))
-                                    Text(s).font(.system(size: 13, weight: .semibold)).foregroundStyle(i == active ? Fam.ink : Fam.ink.opacity(0.5))
-                                }.frame(maxWidth: .infinity).padding(.vertical, 14)
-                                .background(RoundedRectangle(cornerRadius: 16).fill(i == active ? Fam.blue.opacity(0.16) : Color.white.opacity(0.03))
-                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(i == active ? Fam.blueBright.opacity(0.4) : Fam.hairline(0.06), lineWidth: 1)))
-                            }
-                        }
-                    }.frame(maxWidth: .infinity)
+                    CycleRing(stages: Self.stages, active: active).frame(height: 440).frame(maxWidth: .infinity)
                 }
                 Panel {
                     VStack(alignment: .leading, spacing: 12) {
@@ -325,7 +312,7 @@ private struct TheoriesScreen: View {
             if theories.isEmpty {
                 Panel { Text("No theories yet.").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6)) }
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 18)], spacing: 18) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)], spacing: 18) {
                     ForEach(theories) { th in
                         Panel {
                             VStack(alignment: .leading, spacing: 10) {
@@ -416,6 +403,39 @@ private struct GatesScreen: View {
 }
 
 // MARK: - Shared visual components
+
+/// The cycle as the design intends it — the 8 phases in a ring around the breathing marble.
+struct CycleRing: View {
+    let stages: [String]
+    let active: Int
+    var body: some View {
+        GeometryReader { geo in
+            let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            let r = min(geo.size.width, geo.size.height) / 2 - 46
+            ZStack {
+                Circle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
+                    .foregroundStyle(Fam.blueBright.opacity(0.18)).frame(width: r * 2, height: r * 2).position(c)
+                VStack(spacing: 8) {
+                    Marble(size: 104)
+                    Text(stages[active].uppercased()).font(Fam.mono(11)).tracking(1.4).foregroundStyle(Fam.blueSoft)
+                }.position(c)
+                ForEach(Array(stages.enumerated()), id: \.offset) { i, s in
+                    let a = (Double(i) / Double(stages.count)) * 2 * .pi - .pi / 2
+                    let p = CGPoint(x: c.x + r * CGFloat(cos(a)), y: c.y + r * CGFloat(sin(a)))
+                    let on = i == active
+                    VStack(spacing: 2) {
+                        Text(String(format: "%02d", i + 1)).font(Fam.mono(9)).foregroundStyle(on ? Fam.blueSoft : Fam.monoDim.opacity(0.5))
+                        Text(s).font(.system(size: 12, weight: .semibold)).foregroundStyle(on ? Fam.ink : Fam.ink.opacity(0.55))
+                    }
+                    .frame(width: 84, height: 54)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(on ? Fam.blue.opacity(0.18) : Color.white.opacity(0.03))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(on ? Fam.blueBright.opacity(0.5) : Fam.hairline(0.07), lineWidth: 1)))
+                    .shadow(color: on ? Fam.blue.opacity(0.4) : .clear, radius: 8).position(p)
+                }
+            }
+        }
+    }
+}
 
 struct Marble: View {
     var size: CGFloat

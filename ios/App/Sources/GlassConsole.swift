@@ -47,6 +47,18 @@ extension Color {
     }
 }
 
+// Layout is driven by the *measured* width, not horizontalSizeClass — a Pro Max reports `.regular`
+// in landscape (and betas can misreport), which would wrongly pick the wide rail layout and overflow
+// the phone. Below this width we use the compact (single-column) layout.
+private struct CompactLayoutKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var isCompactLayout: Bool {
+        get { self[CompactLayoutKey.self] }
+        set { self[CompactLayoutKey.self] = newValue }
+    }
+}
+let kCompactWidth: CGFloat = 740
+
 // MARK: - The console shell
 
 /// The dark futuristic console — the standard UI for **every** peer with a screen (iPhone, iPad, and
@@ -55,7 +67,6 @@ extension Color {
 struct GlassConsole: View {
     @EnvironmentObject var model: AppModel
     @State private var screen: Screen = .glass
-    @Environment(\.horizontalSizeClass) private var hClass
 
     enum Screen: String, CaseIterable, Identifiable {
         case glass = "The Glass"
@@ -84,30 +95,34 @@ struct GlassConsole: View {
         }
     }
 
-    private var isCompact: Bool { hClass == .compact }
-
     var body: some View {
-        ZStack {
-            Fam.bg.ignoresSafeArea()
-            AuroraBackground()
-            if isCompact {
-                VStack(spacing: 0) {
-                    CompactBar(screen: $screen)
-                    Divider().overlay(Fam.hairline(0.055))
-                    ScreenArea(screen: screen)
-                }
-            } else {
-                HStack(spacing: 0) {
-                    LeftRail(screen: $screen)
-                        .frame(width: 250)
+        GeometryReader { geo in
+            let compact = geo.size.width < kCompactWidth
+            ZStack {
+                Fam.bg.ignoresSafeArea()
+                AuroraBackground()
+                if compact {
                     VStack(spacing: 0) {
-                        TopBar()
+                        CompactBar(screen: $screen)
                         Divider().overlay(Fam.hairline(0.055))
                         ScreenArea(screen: screen)
                     }
+                } else {
+                    HStack(spacing: 0) {
+                        LeftRail(screen: $screen)
+                            .frame(width: 250)
+                        VStack(spacing: 0) {
+                            TopBar()
+                            Divider().overlay(Fam.hairline(0.055))
+                            ScreenArea(screen: screen)
+                        }
+                    }
                 }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .environment(\.isCompactLayout, compact)
         }
+        .ignoresSafeArea(.keyboard)
         .foregroundStyle(Fam.ink)
         .preferredColorScheme(.dark)
         .onAppear { model.startWorldviewPolling(); model.startDiscoveryIfConsented(); model.startReasoningIfConsented() }
@@ -158,12 +173,12 @@ private struct CompactBar: View {
 /// Two panels side-by-side on a wide screen, stacked on a narrow one — keeps the console's
 /// multi-column screens usable on an iPhone without a separate layout.
 struct AdaptiveColumns<Main: View, Side: View>: View {
-    @Environment(\.horizontalSizeClass) private var hClass
+    @Environment(\.isCompactLayout) private var compact
     var sideWidth: CGFloat = 352
     @ViewBuilder var main: () -> Main
     @ViewBuilder var side: () -> Side
     var body: some View {
-        if hClass == .compact {
+        if compact {
             VStack(spacing: 22) { main(); side() }
         } else {
             HStack(alignment: .top, spacing: 22) { main(); side().frame(width: sideWidth) }
@@ -232,6 +247,43 @@ struct Marble: View {
         .scaleEffect(breathe ? 1.045 : 1.0)
         .onAppear {
             withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) { breathe = true }
+        }
+    }
+}
+
+/// The cycle as the design intends it — the 8 phases arranged in a ring around the breathing marble,
+/// the active phase lit, a dashed orbit behind them.
+struct CycleRing: View {
+    let stages: [String]
+    let active: Int
+    var body: some View {
+        GeometryReader { geo in
+            let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            let r = min(geo.size.width, geo.size.height) / 2 - 46
+            ZStack {
+                Circle()
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
+                    .foregroundStyle(Fam.blueBright.opacity(0.18))
+                    .frame(width: r * 2, height: r * 2).position(c)
+                VStack(spacing: 8) {
+                    Marble(size: 104)
+                    Text(stages[active].uppercased()).font(Fam.mono(11)).tracking(1.4).foregroundStyle(Fam.blueSoft)
+                }.position(c)
+                ForEach(Array(stages.enumerated()), id: \.offset) { i, s in
+                    let a = (Double(i) / Double(stages.count)) * 2 * .pi - .pi / 2
+                    let p = CGPoint(x: c.x + r * CGFloat(cos(a)), y: c.y + r * CGFloat(sin(a)))
+                    let on = i == active
+                    VStack(spacing: 2) {
+                        Text(String(format: "%02d", i + 1)).font(Fam.mono(9)).foregroundStyle(on ? Fam.blueSoft : Fam.monoDim.opacity(0.5))
+                        Text(s).font(.system(size: 12, weight: .semibold)).foregroundStyle(on ? Fam.ink : Fam.ink.opacity(0.55))
+                    }
+                    .frame(width: 84, height: 54)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(on ? Fam.blue.opacity(0.18) : Color.white.opacity(0.03))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(on ? Fam.blueBright.opacity(0.5) : Fam.hairline(0.07), lineWidth: 1)))
+                    .shadow(color: on ? Fam.blue.opacity(0.4) : .clear, radius: 8)
+                    .position(p)
+                }
+            }
         }
     }
 }
@@ -643,26 +695,8 @@ private struct MetabolismScreen: View {
                          subtitle: "sense → detect → interpret → generate → test → score → select → inherit")
             AdaptiveColumns(sideWidth: 392) {
                 Panel(fill: 0.03) {
-                    VStack(spacing: 18) {
-                        Marble(size: 112)
-                        Text(Self.stages[active].uppercased()).font(Fam.mono(12)).tracking(1.6).foregroundStyle(Fam.blueSoft)
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                            ForEach(Array(Self.stages.enumerated()), id: \.offset) { i, s in
-                                VStack(spacing: 4) {
-                                    Text(String(format: "%02d", i + 1)).font(Fam.mono(10))
-                                        .foregroundStyle(i == active ? Fam.blueSoft : Fam.monoDim.opacity(0.5))
-                                    Text(s).font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(i == active ? Fam.ink : Fam.ink.opacity(0.5))
-                                }
-                                .frame(maxWidth: .infinity).padding(.vertical, 14)
-                                .background(RoundedRectangle(cornerRadius: 16)
-                                    .fill(i == active ? Fam.blue.opacity(0.16) : Color.white.opacity(0.03))
-                                    .overlay(RoundedRectangle(cornerRadius: 16)
-                                        .stroke(i == active ? Fam.blueBright.opacity(0.4) : Fam.hairline(0.06), lineWidth: 1)))
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
+                    CycleRing(stages: Self.stages, active: active)
+                        .frame(height: 440).frame(maxWidth: .infinity)
                 }
             } side: {
                 VStack(spacing: 22) {
@@ -699,6 +733,12 @@ private struct MetabolismScreen: View {
 
 private struct TheoriesScreen: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.isCompactLayout) private var compact
+    // Two side-by-side columns on a wide screen (iPad/Mac), one on a phone.
+    private var columns: [GridItem] {
+        compact ? [GridItem(.flexible())]
+            : [GridItem(.flexible(), spacing: 18), GridItem(.flexible(), spacing: 18)]
+    }
     private func tint(_ status: String) -> Color {
         switch status {
         case "pursued": return Fam.blueSoft
@@ -727,7 +767,7 @@ private struct TheoriesScreen: View {
                         .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                 }
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 18)], spacing: 18) {
+                LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(theories) { th in
                         Panel(radius: 22, fill: 0.035) {
                             VStack(alignment: .leading, spacing: 11) {
