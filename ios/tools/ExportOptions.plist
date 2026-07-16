@@ -6,8 +6,20 @@
 	<string>app-store</string>
 	<key>teamID</key>
 	<string>8GHXL328AR</string>
+	<!-- Manual signing: automatic/cloud signing produced a store profile that didn't include the
+	     Apple Distribution cert we created via the ASC API (and hit a cloud-signing permission
+	     error). We pin the cert + the App Store profiles we created for it instead. -->
 	<key>signingStyle</key>
-	<string>automatic</string>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>io.river.familiar.ios</key>
+		<string>Familiar AppStore io.river.familiar.ios</string>
+		<key>io.river.familiar.ios.watch</key>
+		<string>Familiar AppStore io.river.familiar.ios.watch</string>
+	</dict>
 	<key>uploadSymbols</key>
 	<true/>
 	<key>destination</key>

@@ -18,6 +18,18 @@ cd "$(dirname "$0")/.."
 : "${ASC_KEY_ID:?set ASC_KEY_ID (App Store Connect API key id)}"
 : "${ASC_ISSUER_ID:?set ASC_ISSUER_ID (App Store Connect issuer id)}"
 
+# Authenticate signing to the App Store Connect portal with the API key, NOT a GUI-signed-in Xcode
+# account: the command-line xcodebuild doesn't see accounts signed in through Xcode's UI ("No
+# Accounts"), so we hand it the .p8 directly. This lets -allowProvisioningUpdates mint the Apple
+# Distribution certificate + app-store profile headlessly. The key file lives on this Mac only.
+ASC_KEY_PATH="${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
+: "${ASC_KEY_PATH:?}"
+[ -f "$ASC_KEY_PATH" ] || { echo "ASC key not found at $ASC_KEY_PATH"; exit 1; }
+AUTH=(-allowProvisioningUpdates \
+  -authenticationKeyPath "$ASC_KEY_PATH" \
+  -authenticationKeyID "$ASC_KEY_ID" \
+  -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+
 ARCHIVE=/tmp/FamiliarAgent.xcarchive
 EXPORT=/tmp/FamiliarAgent-export
 rm -rf "$ARCHIVE" "$EXPORT"
@@ -31,11 +43,14 @@ echo "== archive =="
 # SDK — the app builds for iphoneos, the embedded watch for watchos.
 xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent \
   -destination 'generic/platform=iOS' \
-  -archivePath "$ARCHIVE" archive -allowProvisioningUpdates
+  -archivePath "$ARCHIVE" archive "${AUTH[@]}"
 
 echo "== export (App Store) =="
+# Manual signing (ExportOptions pins the Apple Distribution cert + our App Store profiles). Do NOT
+# pass -allowProvisioningUpdates here — that re-triggers cloud signing, which produced a profile
+# without our cert. Export reads the locally-installed profiles instead.
 xcodebuild -exportArchive -archivePath "$ARCHIVE" \
-  -exportOptionsPlist tools/ExportOptions.plist -exportPath "$EXPORT" -allowProvisioningUpdates
+  -exportOptionsPlist tools/ExportOptions.plist -exportPath "$EXPORT"
 
 IPA=$(ls "$EXPORT"/*.ipa | head -1)
 echo "== upload $IPA =="
