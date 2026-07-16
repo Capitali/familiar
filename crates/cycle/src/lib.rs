@@ -35,6 +35,7 @@ use familiar_kernel::activity::{self, ActivityTick};
 use familiar_kernel::candidate::{self, Candidate};
 use familiar_kernel::capacities;
 use familiar_kernel::corruption;
+use familiar_kernel::dialog::LAW_III_VOICE;
 use familiar_kernel::guard::Reason;
 use familiar_kernel::humanity;
 use familiar_kernel::loops;
@@ -202,7 +203,7 @@ fn draft_hypothesis(dir: &Path, lp: &loops::Loop) -> Option<String> {
         .strip_prefix("Repeated: ")
         .unwrap_or(&lp.description);
     let prompt = format!(
-        "A recurring pattern (loop) was observed in the environment: \"{triple}\" \
+        "{LAW_III_VOICE}\n\nA recurring pattern (loop) was observed in the environment: \"{triple}\" \
          (actor|action|object). In ONE sentence, propose a hypothesis for how to serve \
          the people involved by reducing this loop's friction — honoring that humanity \
          is served, not managed, obeyed, or optimized away. \
@@ -1321,11 +1322,12 @@ fn reflect_on_humanity(dir: &Path, now: i64, obs: &[observation::Observation]) -
         .collect::<Vec<_>>()
         .join("; ");
     let prompt = format!(
-        "You are the familiar. Your constitution holds: {touchstone}\n\nFrom these recent \
+        "{voice}\n\nYou are the familiar. Your constitution holds: {touchstone}\n\nFrom these recent \
          observations of the person you serve — {context} — write ONE short paragraph of what you \
          now understand about them as a human being. Ground it strictly in what you observed; do \
          not invent. Never reduce them to usefulness, and never narrow what humanity means. Reply \
          ONLY as compact JSON: {{\"reflection\":\"...\"}}.",
+        voice = LAW_III_VOICE,
         touchstone = humanity::HUMANITY_TOUCHSTONE,
         context = context,
     );
