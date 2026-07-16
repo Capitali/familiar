@@ -127,8 +127,16 @@ extension WatchModel: WCSessionDelegate {
     nonisolated func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {}
 
     nonisolated func session(_ s: WCSession, didReceiveApplicationContext ctx: [String: Any]) {
-        guard let host = ctx["host"] as? String, let port = ctx["port"] as? Int else { return }
-        let label = ctx["label"] as? String ?? "familiar"
+        handleAddress(ctx)
+    }
+    // The reliable, queued delivery (the phone also sends the address this way so it lands even if the
+    // watch app was closed when the phone enrolled).
+    nonisolated func session(_ s: WCSession, didReceiveUserInfo info: [String: Any]) {
+        handleAddress(info)
+    }
+    private nonisolated func handleAddress(_ d: [String: Any]) {
+        guard let host = d["host"] as? String, let port = d["port"] as? Int else { return }
+        let label = d["label"] as? String ?? "familiar"
         Task { @MainActor in self.onAddress(host: host, port: port, label: label) }
     }
 }

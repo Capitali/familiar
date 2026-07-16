@@ -40,12 +40,21 @@ final class PhoneWatchLink: NSObject, WCSessionDelegate, ObservableObject {
             self.appInstalled = s.isWatchAppInstalled
         }
         guard s.activationState == .activated, let ctx = latest else { return }
+        // updateApplicationContext only delivers the LATEST state and is dropped if unchanged — so we
+        // also send via transferUserInfo, which queues and is delivered reliably even if the watch app
+        // is backgrounded or launches later. Between the two, the address handoff (and thus the watch's
+        // covenant enrollment) is robust. A fresh nonce keeps each context "changed" so it isn't coalesced.
+        var payload = ctx
+        payload["_n"] = UUID().uuidString
         do {
-            try s.updateApplicationContext(ctx)
-            DispatchQueue.main.async { self.lastSent = ctx["host"] as? String }
+            try s.updateApplicationContext(payload)
         } catch {
-            // benign: no watch paired yet, or context unchanged — retried on the next state change
+            // benign: context unchanged / no watch — transferUserInfo below still delivers.
         }
+        if s.isWatchAppInstalled {
+            s.transferUserInfo(ctx)
+        }
+        DispatchQueue.main.async { self.lastSent = ctx["host"] as? String }
     }
 
     func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) { flush() }
