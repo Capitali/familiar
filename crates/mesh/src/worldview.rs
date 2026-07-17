@@ -123,6 +123,23 @@ pub struct Worldview {
     /// Networks, services, and data streams the mesh has discovered (Bonjour/reach) — the second
     /// roster tab. Aggregated from `discovered service:*` observations already crossing the mesh.
     pub services: Vec<ServiceView>,
+    /// The frontier: reachable devices that aren't enrolled members yet — faded branches on the map.
+    /// Aggregated from `can-reach device:*` observations (the daemon's paced reach sweep).
+    pub frontier: Vec<FrontierView>,
+}
+
+/// A device on the frontier — reachable but not (yet) an enrolled mesh member. Drawn as a faded
+/// branch on the mesh map, dimmed by how far the familiar could extend to it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontierView {
+    pub label: String,
+    pub ip: String,
+    /// Reach class: "agent-capable" (could run a familiar agent), "protocol-controllable" (could
+    /// command it), or "observable-only" (only visible). Governs the branch's opacity.
+    pub reach: String,
+    /// Open services discovered (ssh, airplay, mqtt, …) — the interfaces the frontier exposes.
+    pub open: Vec<String>,
+    pub last_seen: i64,
 }
 
 /// A discovered network service / data stream — from a peer's Bonjour survey, shared over the mesh.
@@ -278,6 +295,8 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         .collect();
 
     let question = std::fs::read_to_string(dir.join("question.txt")).unwrap_or_default().trim().to_string();
+    let members = crate::members::classify(dir, now);
+    let frontier = frontier_devices(&obs, &members);
 
     Ok(Worldview {
         group_label: cred.label.clone(),
@@ -296,9 +315,69 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         tick,
         uptime_secs,
         humanity,
-        members: crate::members::classify(dir, now),
+        members,
         services: discovered_services(&obs),
+        frontier,
     })
+}
+
+/// The frontier: devices the familiar can *reach* but hasn't enrolled. Aggregated from `can-reach
+/// device:<label>` observations (context `class=… open=… ip=…`), deduped by label (newest wins),
+/// and with any device that already matches an enrolled member (by label or IP) removed — a member
+/// isn't a frontier. Sorted strongest-reach first.
+fn frontier_devices(
+    obs: &[familiar_kernel::observation::Observation],
+    members: &[crate::members::Member],
+) -> Vec<FrontierView> {
+    use std::collections::HashMap;
+    let member_labels: std::collections::HashSet<String> =
+        members.iter().map(|m| m.label.to_lowercase()).collect();
+    let member_addrs: std::collections::HashSet<String> =
+        members.iter().map(|m| m.addr.clone()).filter(|a| !a.is_empty()).collect();
+    let mut latest: HashMap<String, FrontierView> = HashMap::new();
+    for o in obs {
+        if o.action != "can-reach" {
+            continue;
+        }
+        let Some(label) = o.object.strip_prefix("device:") else { continue };
+        // Parse "class=<c> open=<a,b> ip=<x>" from the context.
+        let mut reach = "observable-only".to_string();
+        let mut open: Vec<String> = Vec::new();
+        let mut ip = String::new();
+        for field in o.context.split_whitespace() {
+            if let Some(c) = field.strip_prefix("class=") {
+                reach = c.to_string();
+            } else if let Some(list) = field.strip_prefix("open=") {
+                if list != "-" {
+                    open = list.split(',').map(|s| s.to_string()).collect();
+                }
+            } else if let Some(i) = field.strip_prefix("ip=") {
+                ip = i.to_string();
+            }
+        }
+        let e = latest.entry(label.to_string()).or_insert(FrontierView {
+            label: label.to_string(),
+            ip: ip.clone(),
+            reach: reach.clone(),
+            open: open.clone(),
+            last_seen: 0,
+        });
+        if o.ts >= e.last_seen {
+            *e = FrontierView { label: label.to_string(), ip, reach, open, last_seen: o.ts };
+        }
+    }
+    let rank = |r: &str| match r {
+        "agent-capable" => 2,
+        "protocol-controllable" => 1,
+        _ => 0,
+    };
+    let mut v: Vec<FrontierView> = latest
+        .into_values()
+        .filter(|f| !member_labels.contains(&f.label.to_lowercase()) && !member_addrs.contains(&f.ip))
+        .collect();
+    v.sort_by(|a, b| rank(&b.reach).cmp(&rank(&a.reach)).then(b.last_seen.cmp(&a.last_seen)));
+    v.truncate(60);
+    v
 }
 
 /// Aggregate discovered network services from the observation log (a peer's Bonjour survey posts

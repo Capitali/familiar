@@ -388,6 +388,7 @@ private struct MeshScreen: View {
     private enum MeshTab: String, CaseIterable { case members = "PEERS · AGENTS · DEVICES"; case services = "NETWORKS · SERVICES · STREAMS" }
     var members: [Member] { model.worldview?.members ?? [] }
     var services: [ServiceView] { model.worldview?.services ?? [] }
+    var frontier: [FrontierView] { model.worldview?.frontier ?? [] }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             ScreenHeader(number: "04 · THE MESH", title: "Peers & agents",
@@ -407,7 +408,15 @@ private struct MeshScreen: View {
         }
     }
     @ViewBuilder private var membersTab: some View {
-        Panel { MeshConstellation(members: members).frame(height: 340).frame(maxWidth: .infinity) }
+        Panel {
+            VStack(spacing: 6) {
+                MeshConstellation(members: members, frontier: frontier).frame(height: 340).frame(maxWidth: .infinity)
+                if !frontier.isEmpty {
+                    Text("Dashed = the frontier: \(frontier.count) device(s) the mesh can reach but hasn't enrolled. Brightness shows reach — agent-capable, controllable, or only observable.")
+                        .font(Fam.mono(9.5)).foregroundStyle(Fam.monoDim.opacity(0.5)).multilineTextAlignment(.center)
+                }
+            }
+        }
         Panel {
             VStack(alignment: .leading, spacing: 8) {
                 MonoLabel("ROSTER")
@@ -618,27 +627,47 @@ struct SignalBar: View {
 
 struct MeshConstellation: View {
     let members: [Member]
+    var frontier: [FrontierView] = []
     private func color(_ k: Member.Kind) -> Color { switch k { case .self_node: return Fam.iceStat; case .gossip_peer: return Fam.blueBright; case .device_peer: return Fam.green; case .device_agent: return Fam.amber } }
     private func icon(_ m: Member) -> String {
         switch m.kind { case .self_node: return "house.fill"; case .gossip_peer: return "cpu"
         case .device_peer where m.actor.hasPrefix("ipad"): return "ipad"; case .device_peer where m.actor.hasPrefix("watch"): return "applewatch"; case .device_peer: return "iphone"
         case .device_agent where m.actor.hasPrefix("watch"): return "applewatch"; case .device_agent: return "iphone" }
     }
+    private func frontierOpacity(_ reach: String) -> Double { switch reach { case "agent-capable": return 0.9; case "protocol-controllable": return 0.6; default: return 0.38 } }
+    private func frontierIcon(_ reach: String) -> String { switch reach { case "agent-capable": return "shippingbox"; case "protocol-controllable": return "slider.horizontal.3"; default: return "dot.radiowaves.right" } }
     var body: some View {
         GeometryReader { geo in
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let radius = min(geo.size.width, geo.size.height) / 2 - 50
+            let radius = min(geo.size.width, geo.size.height) / 2 - (frontier.isEmpty ? 50 : 64)
+            let fRadius = min(geo.size.width, geo.size.height) / 2 - 24
             let selfNode = members.first { $0.kind == .self_node }
             let others = members.filter { $0.kind != .self_node }
             ZStack {
+                ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in
+                    let p = point(center, fRadius, i, frontier.count)
+                    Path { pt in pt.move(to: center); pt.addLine(to: p) }.stroke(Fam.ink.opacity(frontierOpacity(f.reach) * 0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                }
                 ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
                     let p = point(center, radius, i, others.count)
                     Path { pt in pt.move(to: center); pt.addLine(to: p) }.stroke(color(m.kind).opacity(m.online ? 0.35 : 0.12), lineWidth: 1)
                 }
                 node(selfNode ?? members.first, center, true)
                 ForEach(Array(others.enumerated()), id: \.element.id) { i, m in node(m, point(center, radius, i, others.count), false) }
+                ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in frontierNode(f, point(center, fRadius, i, frontier.count)) }
             }
         }
+    }
+    @ViewBuilder private func frontierNode(_ f: FrontierView, _ p: CGPoint) -> some View {
+        let o = frontierOpacity(f.reach)
+        VStack(spacing: 3) {
+            ZStack {
+                Circle().fill(Fam.ink.opacity(0.04)).frame(width: 30, height: 30)
+                Circle().stroke(Fam.ink.opacity(o * 0.5), style: StrokeStyle(lineWidth: 1, dash: [2, 2])).frame(width: 30, height: 30)
+                Image(systemName: frontierIcon(f.reach)).font(.system(size: 11)).foregroundStyle(Fam.ink.opacity(o * 0.7))
+            }
+            Text(f.label).font(Fam.mono(8.5)).foregroundStyle(Fam.ink.opacity(o * 0.55)).lineLimit(1).frame(maxWidth: 74)
+        }.position(x: p.x, y: p.y)
     }
     private func point(_ c: CGPoint, _ r: CGFloat, _ i: Int, _ n: Int) -> CGPoint {
         guard n > 0 else { return c }

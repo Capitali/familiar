@@ -1448,6 +1448,25 @@ fn cmd_tick(args: &[String]) -> ExitCode {
     }
 }
 
+/// How often (in ticks) the daemon sweeps the LAN for reachable devices — the frontier the mesh map
+/// draws as faded branches. Network probing is heavier than a tick, so it runs sparsely.
+const REACH_EVERY: usize = 15;
+
+/// Sweep the LAN for reachable devices and record the `can-reach` frontier observations, but only if
+/// the network gate is open. Returns how many devices were assessed (0 if the gate is shut or nothing
+/// answered). Short per-port timeout so it doesn't stall the tick loop.
+fn reach_sweep(dir: &std::path::Path) -> usize {
+    let Ok(b) = boundary::load(dir) else { return 0 };
+    if !b.allow_network {
+        return 0;
+    }
+    let (reaches, obs) = familiar_reach::scan(dir, now_secs(), true, 250);
+    for o in obs {
+        let _ = observation::record(dir, o);
+    }
+    reaches.len()
+}
+
 fn cmd_run(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
@@ -1506,6 +1525,15 @@ fn cmd_run(args: &[String]) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            // Every REACH_EVERY ticks (and on the first), if the network gate is open, sweep the
+            // LAN for reachable devices. These `can-reach` observations are the mesh's *frontier* —
+            // interfaces the familiar can see but hasn't enrolled — drawn as faded branches on the map.
+            if n == 1 || n % REACH_EVERY == 0 {
+                let seeded = reach_sweep(&dir);
+                if seeded > 0 {
+                    println!("  reach: swept the frontier, {seeded} device(s) assessed");
+                }
+            }
             if !fixed {
                 // Multiplicative back-off while quiet; snap back to the floor on any
                 // change. The world moving (or our own work) buys closer attention.

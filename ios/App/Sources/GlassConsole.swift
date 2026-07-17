@@ -809,6 +809,7 @@ private struct MeshScreen: View {
     private enum MeshTab: String, CaseIterable { case members = "PEERS · AGENTS · DEVICES"; case services = "NETWORKS · SERVICES · STREAMS" }
     private var members: [Member] { model.worldview?.members ?? [] }
     private var services: [ServiceView] { model.worldview?.services ?? [] }
+    private var frontier: [FrontierView] { model.worldview?.frontier ?? [] }
 
     private func kindColor(_ k: Member.Kind) -> Color {
         switch k {
@@ -878,8 +879,15 @@ private struct MeshScreen: View {
     @ViewBuilder private var membersTab: some View {
         // The constellation — the collective as a graph, this node at the center.
         Panel(fill: 0.03) {
-            MeshConstellation(members: members, color: kindColor, icon: icon)
-                .frame(height: 360).frame(maxWidth: .infinity)
+            VStack(spacing: 6) {
+                MeshConstellation(members: members, color: kindColor, icon: icon, frontier: frontier)
+                    .frame(height: 360).frame(maxWidth: .infinity)
+                if !frontier.isEmpty {
+                    Text("Dashed = the frontier: \(frontier.count) device(s) the mesh can reach but hasn't enrolled. Brightness shows how far it could extend — agent-capable, controllable, or only observable.")
+                        .font(Fam.mono(9.5)).foregroundStyle(Fam.monoDim.opacity(0.5))
+                        .multilineTextAlignment(.center).padding(.horizontal, 8)
+                }
+            }
         }
         // The table — every member with kind, OS, status, joined. Scrolls horizontally on a
         // narrow screen (iPhone) so the fixed columns stay readable.
@@ -995,14 +1003,22 @@ private struct MeshConstellation: View {
     let members: [Member]
     let color: (Member.Kind) -> Color
     let icon: (Member) -> String
+    var frontier: [FrontierView] = []
 
     var body: some View {
         GeometryReader { geo in
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let radius = min(geo.size.width, geo.size.height) / 2 - 54
+            let radius = min(geo.size.width, geo.size.height) / 2 - (frontier.isEmpty ? 54 : 68)
+            let frontierRadius = min(geo.size.width, geo.size.height) / 2 - 26
             let selfNode = members.first { $0.kind == .self_node }
             let others = members.filter { $0.kind != .self_node }
             ZStack {
+                // frontier — faded, dashed branches to what the mesh can see but hasn't enrolled.
+                ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in
+                    let p = point(center: center, radius: frontierRadius, i: i, n: frontier.count)
+                    Path { path in path.move(to: center); path.addLine(to: p) }
+                        .stroke(Fam.ink.opacity(frontierOpacity(f.reach) * 0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                }
                 // links
                 ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
                     let p = point(center: center, radius: radius, i: i, n: others.count)
@@ -1015,8 +1031,38 @@ private struct MeshConstellation: View {
                 ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
                     node(m, at: point(center: center, radius: radius, i: i, n: others.count), big: false)
                 }
+                // frontier nodes — dim hollow markers on the outer ring.
+                ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in
+                    frontierNode(f, at: point(center: center, radius: frontierRadius, i: i, n: frontier.count))
+                }
             }
         }
+    }
+    private func frontierOpacity(_ reach: String) -> Double {
+        switch reach {
+        case "agent-capable": return 0.9
+        case "protocol-controllable": return 0.6
+        default: return 0.38
+        }
+    }
+    private func frontierIcon(_ reach: String) -> String {
+        switch reach {
+        case "agent-capable": return "shippingbox"          // could run a familiar agent here
+        case "protocol-controllable": return "slider.horizontal.3" // could command it
+        default: return "dot.radiowaves.right"              // only visible
+        }
+    }
+    @ViewBuilder private func frontierNode(_ f: FrontierView, at p: CGPoint) -> some View {
+        let o = frontierOpacity(f.reach)
+        VStack(spacing: 3) {
+            ZStack {
+                Circle().fill(Fam.ink.opacity(0.04)).frame(width: 30, height: 30)
+                Circle().stroke(Fam.ink.opacity(o * 0.5), style: StrokeStyle(lineWidth: 1, dash: [2, 2])).frame(width: 30, height: 30)
+                Image(systemName: frontierIcon(f.reach)).font(.system(size: 11)).foregroundStyle(Fam.ink.opacity(o * 0.7))
+            }
+            Text(f.label).font(Fam.mono(8.5)).foregroundStyle(Fam.ink.opacity(o * 0.55)).lineLimit(1).frame(maxWidth: 74)
+        }
+        .position(x: p.x, y: p.y)
     }
     private func point(center: CGPoint, radius: CGFloat, i: Int, n: Int) -> CGPoint {
         guard n > 0 else { return center }

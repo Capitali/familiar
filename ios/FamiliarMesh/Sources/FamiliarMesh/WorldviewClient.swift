@@ -37,6 +37,18 @@ public struct Member: Codable, Equatable, Identifiable {
     public var id: String { node_id }
 }
 
+/// A reachable-but-unenrolled device — mirrors the Rust `worldview::FrontierView`. Drawn as a faded
+/// branch on the mesh map, dimmed by reach class.
+public struct FrontierView: Codable, Equatable, Identifiable {
+    public var label: String
+    public var ip: String
+    /// "agent-capable", "protocol-controllable", or "observable-only".
+    public var reach: String
+    public var open: [String]
+    public var last_seen: Int64
+    public var id: String { label + "/" + ip }
+}
+
 /// A discovered network service / data stream — mirrors the Rust `worldview::ServiceView`. The second
 /// roster tab (networks / services / data-streams), aggregated from Bonjour surveys shared over the mesh.
 public struct ServiceView: Codable, Equatable, Identifiable {
@@ -108,6 +120,7 @@ public struct Worldview: Codable, Equatable {
     public var humanity: [ReflectionView]?
     public var members: [Member]?
     public var services: [ServiceView]?
+    public var frontier: [FrontierView]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus
