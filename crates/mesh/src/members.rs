@@ -35,6 +35,9 @@ pub struct Member {
     /// OS family — from the peer's brief ("linux"/"macos") or derived from a device's actor
     /// namespace ("iOS"/"iPadOS"/"watchOS"). Empty when unknown.
     pub os: String,
+    /// OS release detail ("iPadOS 26.1", "Ubuntu 24.04") when the node reports it. Empty otherwise.
+    #[serde(default)]
+    pub os_version: String,
     /// The device's actor namespace where applicable (`phone:ian`, `ipad:ian`, `watch:ian`).
     pub actor: String,
     /// Latest thing this member did/reported — a one-line status.
@@ -147,6 +150,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             label,
             kind: MemberKind::SelfNode,
             os: os_pretty(std::env::consts::OS),
+            os_version: crate::merge::os_release(),
             actor: String::new(),
             detail: format!("this node · v{}", env!("CARGO_PKG_VERSION")),
             first_seen: first,
@@ -205,6 +209,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             label,
             kind,
             os,
+            os_version: p.os_version.clone(),
             actor,
             detail,
             first_seen: p.first_seen,
@@ -240,6 +245,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             label: actor.clone(),
             kind: MemberKind::DeviceAgent,
             os: os_from_actor(actor),
+            os_version: String::new(),
             actor: actor.clone(),
             detail: object.clone(),
             first_seen: *ts,

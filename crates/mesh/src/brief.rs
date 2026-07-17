@@ -54,6 +54,10 @@ pub struct Capability {
     /// briefs that predate it.
     #[serde(default)]
     pub familiar_version: String,
+    /// The OS release ("Ubuntu 24.04", "macOS 15.5") — the roster's OS-version detail. Empty on
+    /// briefs that predate it.
+    #[serde(default)]
+    pub os_version: String,
     pub tools: Vec<ToolManifest>,
 }
 
@@ -267,6 +271,7 @@ mod tests {
                 arch: "aarch64".into(),
                 env_summary: "wildhorse".into(),
                 familiar_version: "0.1.0".into(),
+                os_version: String::new(),
                 tools: vec![ToolManifest {
                     tool_id: "t1".into(),
                     name: "ping".into(),

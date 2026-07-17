@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import FamiliarMesh
 
 /// The agent's whole state: enrollment (via the covenant handshake), the signing session, consent,
@@ -222,13 +223,22 @@ final class AppModel: ObservableObject {
     func refreshWorldview() async {
         guard let session = worldviewSession() else { return }
         do {
-            let view = try await WorldviewClient(session: session).fetch()
+            let view = try await WorldviewClient(session: session)
+                .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease)
             worldview = view
             worldviewError = nil
         } catch {
             worldviewError = "\(error)"
         }
     }
+
+    /// This app's build number ("16") — reported to the familiar so it shows in the roster.
+    static let appBuild: String = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
+    /// This device's OS release ("iPadOS 26.1") — reported to the familiar for the roster.
+    static let osRelease: String = {
+        let d = UIDevice.current
+        return "\(d.systemName) \(d.systemVersion)"
+    }()
 
     /// The iPad reasons over the familiar's recent observations with on-device Apple Intelligence
     /// (under the Three Laws) and submits a proposed theory to the mesh as a `theorizes` observation,

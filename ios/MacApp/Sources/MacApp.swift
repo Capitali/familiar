@@ -428,7 +428,7 @@ private struct MeshScreen: View {
             VStack(alignment: .leading, spacing: 8) {
                 MonoLabel("ROSTER")
                 HStack(spacing: 0) {
-                    rcol("MEMBER", 200); rcol("RELATIONSHIP", 128); rcol("AI", 44); rcol("OS", 84); rcol("VERSION", 74); rcol("STATUS", 72); rcol("JOINED", 90)
+                    rcol("MEMBER", 200); rcol("RELATIONSHIP", 128); rcol("AI", 44); rcol("OS", 140); rcol("VERSION", 74); rcol("STATUS", 72); rcol("JOINED", 84); rcol("ACTIVE", 74)
                 }
                 Divider().overlay(Fam.hairline(0.08))
                 ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
@@ -445,10 +445,11 @@ private struct MeshScreen: View {
                                     .background(Capsule().fill(Fam.iceStat.opacity(0.15)).overlay(Capsule().stroke(Fam.iceStat.opacity(0.5), lineWidth: 1)))
                             } else { Text("—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.4)) }
                         }.frame(width: 44, alignment: .leading)
-                        Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
+                        Text({ if let v = m.os_version, !v.isEmpty { return v }; return m.os.isEmpty ? "—" : m.os }()).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 140, alignment: .leading).lineLimit(1)
                         Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 74, alignment: .leading)
                         Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6)).frame(width: 72, alignment: .leading)
-                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 90, alignment: .leading)
+                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 84, alignment: .leading)
+                        Text(GlassTime.span(m.first_seen)).font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 74, alignment: .leading)
                         Spacer(minLength: 0)
                     }.padding(.vertical, 9)
                     Divider().overlay(Fam.hairline(0.045))
@@ -636,9 +637,9 @@ struct MeshConstellation: View {
     let members: [Member]
     var frontier: [FrontierView] = []
     var edges: [EdgeView] = []
-    private func color(_ k: Member.Kind) -> Color { switch k { case .self_node: return Fam.iceStat; case .gossip_peer: return Fam.blueBright; case .device_peer: return Fam.green; case .device_agent: return Fam.amber } }
+    private func color(_ k: Member.Kind) -> Color { switch k { case .self_node: return Fam.blueBright; case .gossip_peer: return Fam.blueBright; case .device_peer: return Fam.green; case .device_agent: return Fam.amber } }
     private func icon(_ m: Member) -> String {
-        switch m.kind { case .self_node: return "house.fill"; case .gossip_peer: return "cpu"
+        switch m.kind { case .self_node: return "cpu"; case .gossip_peer: return "cpu"
         case .device_peer where m.actor.hasPrefix("ipad"): return "ipad"; case .device_peer where m.actor.hasPrefix("watch"): return "applewatch"; case .device_peer: return "iphone"
         case .device_agent where m.actor.hasPrefix("watch"): return "applewatch"; case .device_agent: return "iphone" }
     }
@@ -664,7 +665,7 @@ struct MeshConstellation: View {
                         Path { p in p.move(to: a); p.addLine(to: b) }.stroke(c.opacity(o), lineWidth: e.kind == "gossip" ? 1 : 1.5)
                     }
                 }
-                ForEach(Array(ring.enumerated()), id: \.element.id) { _, m in node(m, pos[m.node_id] ?? center, m.kind == .self_node) }
+                ForEach(Array(ring.enumerated()), id: \.element.id) { _, m in node(m, pos[m.node_id] ?? center, vantage: m.kind == .self_node) }
                 ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in frontierNode(f, point(center, fRadius, i, frontier.count)) }
             }
         }
@@ -685,14 +686,15 @@ struct MeshConstellation: View {
         let a = (Double(i) / Double(n)) * 2 * .pi - .pi / 2
         return CGPoint(x: c.x + r * CGFloat(cos(a)), y: c.y + r * CGFloat(sin(a)))
     }
-    @ViewBuilder private func node(_ m: Member?, _ p: CGPoint, _ big: Bool) -> some View {
+    @ViewBuilder private func node(_ m: Member?, _ p: CGPoint, vantage: Bool) -> some View {
         if let m = m {
             let c = color(m.kind)
             VStack(spacing: 4) {
                 ZStack {
-                    Circle().fill(c.opacity(m.online ? 0.22 : 0.08)).frame(width: big ? 56 : 40, height: big ? 56 : 40)
-                    Circle().stroke(c.opacity(m.online ? 0.9 : 0.4), lineWidth: 1.5).frame(width: big ? 56 : 40, height: big ? 56 : 40)
-                    Image(systemName: icon(m)).font(.system(size: big ? 19 : 14)).foregroundStyle(c)
+                    Circle().fill(c.opacity(m.online ? 0.22 : 0.08)).frame(width: 42, height: 42)
+                    Circle().stroke(c.opacity(m.online ? 0.9 : 0.4), lineWidth: 1.5).frame(width: 42, height: 42)
+                    if vantage { Circle().stroke(c.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [2, 3])).frame(width: 52, height: 52) }
+                    Image(systemName: icon(m)).font(.system(size: 14)).foregroundStyle(c)
                 }.shadow(color: m.online ? c.opacity(0.5) : .clear, radius: 8)
                 Text(m.label.isEmpty ? String(m.node_id.prefix(6)) : m.label).font(Fam.mono(9)).foregroundStyle(Fam.ink.opacity(0.8)).lineLimit(1).frame(maxWidth: 90)
             }.position(x: p.x, y: p.y)
@@ -706,6 +708,11 @@ enum GlassTime {
     }
     static func ago(_ ts: Int64) -> String {
         let s = Int64(Date().timeIntervalSince1970) - ts
+        if s < 60 { return "\(s)s" }; if s < 3600 { return "\(s / 60)m" }; if s < 86400 { return "\(s / 3600)h" }; return "\(s / 86400)d"
+    }
+    static func span(_ from: Int64) -> String {
+        guard from > 0 else { return "—" }
+        let s = max(0, Int64(Date().timeIntervalSince1970) - from)
         if s < 60 { return "\(s)s" }; if s < 3600 { return "\(s / 60)m" }; if s < 86400 { return "\(s / 3600)h" }; return "\(s / 86400)d"
     }
 }

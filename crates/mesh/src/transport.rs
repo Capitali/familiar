@@ -73,9 +73,14 @@ pub struct PeerRecord {
     /// rows written before this field; backfilled to `last_seen` on the next sighting.
     #[serde(default)]
     pub first_seen: i64,
-    /// The familiar build the peer runs (from its brief). Empty for device peers / older rows.
+    /// The familiar build the peer runs (from its brief), or a device's app build (reported on its
+    /// worldview read). Empty for older rows.
     #[serde(default)]
     pub familiar_version: String,
+    /// The OS release the node reported ("iPadOS 26.1", "18.5"). Empty for older rows / nodes that
+    /// don't report it. The OS *family* is still derived from the actor; this is the version detail.
+    #[serde(default)]
+    pub os_version: String,
 }
 
 /// A running mesh transport. Dropping or calling [`MeshHandle::shutdown`] stops it.
@@ -799,6 +804,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         arch: brief.body.capability.arch.clone(),
         first_seen: now,
         familiar_version: brief.body.capability.familiar_version.clone(),
+        os_version: brief.body.capability.os_version.clone(),
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -829,7 +835,14 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
 /// peer roster, not the device-agent list. It can't serve gossip, so `tools/patterns` are 0 and the
 /// gossip loop never dials it (that loop reaches Tailscale-discovered addrs, not `peers.json`);
 /// `addr` is the observed source IP, for display only. Upserts by node_id like [`upsert_peer`].
-pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr: &str) -> Result<()> {
+pub(crate) fn register_device_peer(
+    dir: &Path,
+    node_id: &str,
+    label: &str,
+    addr: &str,
+    client_version: &str,
+    os_version: &str,
+) -> Result<()> {
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
         .ok()
@@ -853,6 +866,12 @@ pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr:
             if !addr.is_empty() {
                 existing.addr = addr.to_string();
             }
+            if !client_version.is_empty() {
+                existing.familiar_version = client_version.to_string();
+            }
+            if !os_version.is_empty() {
+                existing.os_version = os_version.to_string();
+            }
         }
         None => peers.push(PeerRecord {
             node_id: node_id.to_string(),
@@ -865,7 +884,8 @@ pub(crate) fn register_device_peer(dir: &Path, node_id: &str, label: &str, addr:
             os: String::new(),
             arch: String::new(),
             first_seen: now,
-            familiar_version: String::new(),
+            familiar_version: client_version.to_string(),
+            os_version: os_version.to_string(),
         }),
     }
     if let Some(parent) = path.parent() {

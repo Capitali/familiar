@@ -814,7 +814,9 @@ private struct MeshScreen: View {
 
     private func kindColor(_ k: Member.Kind) -> Color {
         switch k {
-        case .self_node: return Fam.iceStat
+        // A self-node here is the familiar this device reads from — a full peer, no different in
+        // standing from any other. Colour it like a gossip peer; there is no host.
+        case .self_node: return Fam.blueBright
         case .gossip_peer: return Fam.blueBright
         case .device_peer: return Fam.green
         case .device_agent: return Fam.amber
@@ -822,9 +824,9 @@ private struct MeshScreen: View {
     }
     private func kindLabel(_ k: Member.Kind) -> String {
         switch k {
-        // This console reads a *remote* familiar's world, so its self-node is the familiar this
-        // device is connected to — not "this device". Say so plainly.
-        case .self_node: return "the familiar"
+        // This console reads a *remote* familiar's world; its self-node is just another peer in the
+        // mesh from here — not a host, not "the familiar".
+        case .self_node: return "peer"
         case .gossip_peer: return "mesh peer"
         case .device_peer: return "device peer"
         case .device_agent: return "device agent"
@@ -832,7 +834,7 @@ private struct MeshScreen: View {
     }
     private func icon(_ m: Member) -> String {
         switch m.kind {
-        case .self_node: return "house.fill"
+        case .self_node: return "cpu"
         case .gossip_peer: return "cpu"
         case .device_peer where m.actor.hasPrefix("ipad"): return "ipad"
         case .device_peer where m.actor.hasPrefix("watch"): return "applewatch"
@@ -906,30 +908,31 @@ private struct MeshScreen: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 0) {
                             HStack(spacing: 0) {
-                                col("MEMBER", 180); col("RELATIONSHIP", 130); col("AI", 44); col("OS", 84); col("VERSION", 70); col("STATUS", 80); col("JOINED", 74); col("SEEN", 60)
+                                col("MEMBER", 180); col("RELATIONSHIP", 130); col("AI", 44); col("OS", 132); col("VERSION", 70); col("STATUS", 80); col("JOINED", 74); col("ACTIVE", 66); col("SEEN", 60)
                             }.padding(.bottom, 6)
-                            Divider().overlay(Fam.hairline(0.08)).frame(width: 722)
+                            Divider().overlay(Fam.hairline(0.08)).frame(width: 836)
                             ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
                                 HStack(spacing: 0) {
                                     HStack(spacing: 8) {
                                         Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
                                         Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
                                     }.frame(width: 180, alignment: .leading)
-                                    Text(m.kind == .self_node ? "the familiar" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
+                                    Text(m.kind == .self_node ? "peer" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
                                     Group {
                                         if m.ai == true { aiBadge } else { Text("—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.4)) }
                                     }.frame(width: 44, alignment: .leading)
-                                    Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
+                                    Text(osText(m)).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 132, alignment: .leading).lineLimit(1)
                                     Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 70, alignment: .leading)
                                     HStack(spacing: 5) {
                                         Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
                                         Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
                                     }.frame(width: 80, alignment: .leading)
                                     Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 74, alignment: .leading)
+                                    Text(GlassTime.span(m.first_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 66, alignment: .leading)
                                     Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 60, alignment: .leading)
                                 }
                                 .padding(.vertical, 10)
-                                Divider().overlay(Fam.hairline(0.045)).frame(width: 722)
+                                Divider().overlay(Fam.hairline(0.045)).frame(width: 836)
                             }
                         }
                     }
@@ -992,6 +995,11 @@ private struct MeshScreen: View {
     private func rank(_ k: Member.Kind) -> Int {
         switch k { case .self_node: return 0; case .gossip_peer: return 1; case .device_peer: return 2; case .device_agent: return 3 }
     }
+    // OS cell: prefer the reported release ("iPadOS 26.1", "Ubuntu 24.04"); fall back to the family.
+    private func osText(_ m: Member) -> String {
+        if let v = m.os_version, !v.isEmpty { return v }
+        return m.os.isEmpty ? "—" : m.os
+    }
     private func edgeKey(_ c: Color, _ label: String) -> some View {
         HStack(spacing: 5) {
             Rectangle().fill(c).frame(width: 14, height: 2)
@@ -1053,9 +1061,10 @@ private struct MeshConstellation: View {
                             .stroke(c.opacity(o), style: StrokeStyle(lineWidth: e.kind == "gossip" ? 1 : 1.5, dash: dash))
                     }
                 }
-                // member nodes — all on the ring, equals; self only gets a brighter halo.
+                // member nodes — all on the ring, same size, equals. Self gets only a faint "you are
+                // here" ring (it's the node you're reading through), never a bigger seat.
                 ForEach(Array(ring.enumerated()), id: \.element.id) { _, m in
-                    node(m, at: pos[m.node_id] ?? center, big: m.kind == .self_node)
+                    node(m, at: pos[m.node_id] ?? center, vantage: m.kind == .self_node)
                 }
                 // frontier nodes — dim hollow markers outside the ring.
                 ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in
@@ -1095,14 +1104,18 @@ private struct MeshConstellation: View {
         let a = (Double(i) / Double(n)) * 2 * .pi - .pi / 2
         return CGPoint(x: center.x + radius * CGFloat(cos(a)), y: center.y + radius * CGFloat(sin(a)))
     }
-    @ViewBuilder private func node(_ m: Member?, at p: CGPoint, big: Bool) -> some View {
+    @ViewBuilder private func node(_ m: Member?, at p: CGPoint, vantage: Bool) -> some View {
         if let m = m {
             let c = color(m.kind)
             VStack(spacing: 4) {
                 ZStack {
-                    Circle().fill(c.opacity(m.online ? 0.22 : 0.08)).frame(width: big ? 58 : 42, height: big ? 58 : 42)
-                    Circle().stroke(c.opacity(m.online ? 0.9 : 0.4), lineWidth: 1.5).frame(width: big ? 58 : 42, height: big ? 58 : 42)
-                    Image(systemName: icon(m)).font(.system(size: big ? 20 : 15)).foregroundStyle(c)
+                    Circle().fill(c.opacity(m.online ? 0.22 : 0.08)).frame(width: 44, height: 44)
+                    Circle().stroke(c.opacity(m.online ? 0.9 : 0.4), lineWidth: 1.5).frame(width: 44, height: 44)
+                    // "You are here": a faint dashed ring on the node this console reads through.
+                    if vantage {
+                        Circle().stroke(c.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [2, 3])).frame(width: 54, height: 54)
+                    }
+                    Image(systemName: icon(m)).font(.system(size: 15)).foregroundStyle(c)
                 }
                 .shadow(color: m.online ? c.opacity(0.5) : .clear, radius: 8)
                 Text(m.label.isEmpty ? String(m.node_id.prefix(6)) : m.label)
@@ -1271,6 +1284,15 @@ enum GlassTime {
     static func ago(_ ts: Int64) -> String {
         let secs = Int64(Date().timeIntervalSince1970) - ts
         if secs < 5 { return "just now" }
+        if secs < 60 { return "\(secs)s" }
+        if secs < 3600 { return "\(secs / 60)m" }
+        if secs < 86400 { return "\(secs / 3600)h" }
+        return "\(secs / 86400)d"
+    }
+    /// A compact span ("3d", "5h", "12m") — for "active for" tenure since a member first joined.
+    static func span(_ from: Int64) -> String {
+        guard from > 0 else { return "—" }
+        let secs = max(0, Int64(Date().timeIntervalSince1970) - from)
         if secs < 60 { return "\(secs)s" }
         if secs < 3600 { return "\(secs / 60)m" }
         if secs < 86400 { return "\(secs / 3600)h" }

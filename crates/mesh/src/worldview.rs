@@ -27,6 +27,13 @@ pub struct ViewRequest {
     pub membership: Membership,
     pub ts: i64,
     pub nonce: String,
+    /// The reading device's own app build (e.g. "16") — surfaced as its roster version. Optional so
+    /// older clients (and the signer's byte layout) stay compatible.
+    #[serde(default)]
+    pub client_version: String,
+    /// The reading device's OS release (e.g. "iPadOS 26.1"). Optional for the same reason.
+    #[serde(default)]
+    pub os_version: String,
 }
 
 /// One observation as the console shows it — a flat view of the kernel's `Observation`.
@@ -224,7 +231,14 @@ pub(crate) fn read_worldview(
     // sensor — so record it in the peer roster (by its own node id, from where it connected). This
     // is what promotes an iPad from "device agent" to "peer" in the familiar's own Glass. Failing to
     // record is non-fatal: the read still succeeds.
-    let _ = crate::transport::register_device_peer(dir, &req.node.node_id, &req.node.label, peer_ip);
+    let _ = crate::transport::register_device_peer(
+        dir,
+        &req.node.node_id,
+        &req.node.label,
+        peer_ip,
+        &req.client_version,
+        &req.os_version,
+    );
 
     assemble_worldview(dir, &cred, now)
 }
@@ -438,8 +452,16 @@ fn mesh_edges(
         if is_full || attributed.contains(&m.node_id) {
             continue; // full peers meshed above; sub-devices attributed to a parent
         }
-        // Device peers / agents attach to the familiar they reach through (self, from this vantage).
-        push(&m.node_id, self_id, "gossip", &mut edges);
+        // A device peer is enrolled in the group and can read *any* familiar's worldview — so it
+        // links to every full peer, not just the one it happens to be reading now. That's why the
+        // iPad shows meshed to both the Mac and the Linux VM, not hung off a single node.
+        if full.is_empty() {
+            push(&m.node_id, self_id, "gossip", &mut edges);
+        } else {
+            for f in &full {
+                push(&m.node_id, f, "gossip", &mut edges);
+            }
+        }
     }
 
     edges
@@ -550,6 +572,7 @@ mod tests {
             label: node_id.into(),
             kind,
             os: String::new(),
+            os_version: String::new(),
             actor: actor.into(),
             detail: String::new(),
             first_seen: 0,
@@ -622,7 +645,7 @@ mod tests {
     fn signed_request(cred: &GroupCredential, device: &NodeKey, ts: i64, nonce: &str) -> (Vec<u8>, String) {
         let id = device.identity();
         let membership = cred.mint_membership(&id.node_id, &id.pubkey, NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        let req = ViewRequest { node: id, membership, ts, nonce: nonce.into() };
+        let req = ViewRequest { node: id, membership, ts, nonce: nonce.into(), client_version: String::new(), os_version: String::new() };
         let raw = serde_json::to_vec(&req).unwrap();
         let sig = device.sign(&raw);
         (raw, sig)

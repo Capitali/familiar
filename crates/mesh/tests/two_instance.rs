@@ -64,6 +64,7 @@ fn write_outbox(dir: &Path, node: &NodeKey, membership: familiar_mesh::group::Me
             arch: "test".into(),
             env_summary: node.identity().label,
             familiar_version: "0.1.0".into(),
+            os_version: String::new(),
             tools: vec![],
         },
         knowledge: Knowledge::default(),

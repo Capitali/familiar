@@ -22,6 +22,7 @@ public struct Member: Codable, Equatable, Identifiable {
     public var label: String
     public var kind: Kind
     public var os: String
+    public var os_version: String?
     public var actor: String
     public var detail: String
     public var first_seen: Int64
@@ -141,6 +142,10 @@ struct ViewRequest: Codable {
     var membership: Membership
     var ts: Int64
     var nonce: String
+    /// This device's app build + OS release, so the familiar it reads can show them in the roster.
+    /// Optional — omitted when empty so the signed bytes stay minimal and older familiars ignore them.
+    var client_version: String?
+    var os_version: String?
 }
 
 /// Reads a familiar's worldview over `POST /mesh/worldview`. The device is a member peer: it signs
@@ -166,13 +171,17 @@ public struct WorldviewClient {
     /// Sign and POST a read request; decode the returned snapshot.
     public func fetch(
         now: Int64 = Int64(Date().timeIntervalSince1970),
-        nonce: String = ObservationClient.freshNonce()
+        nonce: String = ObservationClient.freshNonce(),
+        clientVersion: String = "",
+        osVersion: String = ""
     ) async throws -> Worldview {
         let request = ViewRequest(
             node: session.node.identity,
             membership: session.membership,
             ts: now,
-            nonce: nonce
+            nonce: nonce,
+            client_version: clientVersion.isEmpty ? nil : clientVersion,
+            os_version: osVersion.isEmpty ? nil : osVersion
         )
         guard let body = try? JSONEncoder().encode(request) else { throw ReadError.encoding }
         let sig = try session.node.sign(body)

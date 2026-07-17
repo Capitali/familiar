@@ -32,6 +32,37 @@ use familiar_kernel::{identity, observation, pattern_memory, thread, tool};
 use std::collections::HashSet;
 use std::path::Path;
 
+/// The OS release for the roster ("macOS 15.5", "Ubuntu 24.04"). Best-effort and computed once —
+/// std has no OS-version API, so we read the platform's own source (sw_vers / /etc/os-release).
+/// Empty if it can't be determined; the roster then just shows the OS family.
+pub(crate) fn os_release() -> String {
+    use std::sync::OnceLock;
+    static V: OnceLock<String> = OnceLock::new();
+    V.get_or_init(|| {
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(out) = std::process::Command::new("sw_vers").arg("-productVersion").output() {
+                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !v.is_empty() {
+                    return format!("macOS {v}");
+                }
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(s) = std::fs::read_to_string("/etc/os-release") {
+                for line in s.lines() {
+                    if let Some(rest) = line.strip_prefix("PRETTY_NAME=") {
+                        return rest.trim().trim_matches('"').to_string();
+                    }
+                }
+            }
+        }
+        String::new()
+    })
+    .clone()
+}
+
 /// What a federation pass changed — folded into `ActivityTick` so the metabolism shows it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MergeReport {
@@ -219,6 +250,7 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
             arch: std::env::consts::ARCH.to_string(),
             env_summary: node.identity().label,
             familiar_version: env!("CARGO_PKG_VERSION").to_string(),
+            os_version: os_release(),
             tools,
         },
         knowledge,
@@ -820,6 +852,7 @@ mod tests {
                 arch: "arm".into(),
                 env_summary: "cpn".into(),
                 familiar_version: "0.1.0".into(),
+                os_version: String::new(),
                 tools: vec![ToolManifest {
                     tool_id: "tool-0007".into(),
                     name: "battery".into(),
