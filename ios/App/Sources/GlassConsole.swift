@@ -817,7 +817,9 @@ private struct MeshScreen: View {
     }
     private func kindLabel(_ k: Member.Kind) -> String {
         switch k {
-        case .self_node: return "this node"
+        // This console reads a *remote* familiar's world, so its self-node is the familiar this
+        // device is connected to — not "this device". Say so plainly.
+        case .self_node: return "the familiar"
         case .gossip_peer: return "mesh peer"
         case .device_peer: return "device peer"
         case .device_agent: return "device agent"
@@ -872,7 +874,7 @@ private struct MeshScreen: View {
                                             Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
                                             Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
                                         }.frame(width: 180, alignment: .leading)
-                                        Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
+                                        Text(m.kind == .self_node ? "the familiar" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
                                         Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
                                         Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 70, alignment: .leading)
                                         HStack(spacing: 5) {

@@ -5,7 +5,10 @@
 # artifacts / data / the LLM seam), so the compiled core changes rarely.
 [workspace]
 resolver = "2"
-members = ["crates/kernel", "crates/cli", "crates/glass", "crates/marble", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach"]
+# The egui Glass (crates/glass) and the menu-bar Marble (crates/marble) were superseded by the SwiftUI
+# consoles (FamiliarMac + the iOS/iPad app) and archived under `archive/` — nothing depends on them.
+# The daemon (crates/cli → `familiar`) + the SwiftUI apps are the path forward.
+members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach"]
 
 [workspace.package]
 version = "0.1.0"
