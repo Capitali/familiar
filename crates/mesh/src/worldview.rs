@@ -126,6 +126,23 @@ pub struct Worldview {
     /// The frontier: reachable devices that aren't enrolled members yet — faded branches on the map.
     /// Aggregated from `can-reach device:*` observations (the daemon's paced reach sweep).
     pub frontier: Vec<FrontierView>,
+    /// Real relationships between members — the edges of the mesh graph (gossip / delegation /
+    /// attribution). The map lays members out as equals and draws these, so it reads as a mesh.
+    pub edges: Vec<EdgeView>,
+}
+
+/// A real relationship between two mesh members — an edge in the graph the map draws. The mesh is
+/// peer-to-peer, not hub-and-spoke: these edges let the map show peers linked to peers (a watch to
+/// its phone, a thinking peer handing a theory to an executor) rather than everything through "self".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgeView {
+    /// Source member node_id.
+    pub from: String,
+    /// Destination member node_id.
+    pub to: String,
+    /// "gossip" (briefs exchanged / worldview read), "delegation" (a theory handed to an executor),
+    /// or "attribution" (a sub-device reaches the mesh through a parent device).
+    pub kind: String,
 }
 
 /// A device on the frontier — reachable but not (yet) an enrolled mesh member. Drawn as a faded
@@ -297,6 +314,7 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
     let question = std::fs::read_to_string(dir.join("question.txt")).unwrap_or_default().trim().to_string();
     let members = crate::members::classify(dir, now);
     let frontier = frontier_devices(&obs, &members);
+    let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
 
     Ok(Worldview {
         group_label: cred.label.clone(),
@@ -318,7 +336,113 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         members,
         services: discovered_services(&obs),
         frontier,
+        edges,
     })
+}
+
+/// Derive the real relationships between members — the mesh graph's edges. Three honest kinds, only
+/// where the data actually supports them (no invented links):
+///
+/// - **attribution**: a sub-device reaches the mesh through a parent (a `watch:ian` through
+///   `phone:ian` / `ipad:ian` — same human suffix). The watch→phone edge is real and doesn't pass
+///   through self.
+/// - **delegation**: a thinking peer handed a theory to an executor — read from
+///   `testing a theory delegated by <origin>` observations. origin→executor, a genuine peer↔peer
+///   workload edge.
+/// - **gossip**: briefs exchanged / worldview read. Any member with no attribution parent links to
+///   self (the vantage point). This is the one kind that is inherently self-centered — full
+///   peer↔peer gossip adjacency needs each peer to publish its own neighbors (a later step).
+fn mesh_edges(
+    members: &[crate::members::Member],
+    obs: &[familiar_kernel::observation::Observation],
+    self_id: &str,
+) -> Vec<EdgeView> {
+    use std::collections::HashSet;
+    let mut edges = Vec::new();
+    let mut seen: HashSet<(String, String, &str)> = HashSet::new();
+    let mut push = |from: &str, to: &str, kind: &'static str, edges: &mut Vec<EdgeView>| {
+        if from == to || from.is_empty() || to.is_empty() {
+            return;
+        }
+        // Undirected dedup for gossip/attribution; keep delegation directed.
+        let key = if kind == "delegation" {
+            (from.to_string(), to.to_string(), kind)
+        } else {
+            let (a, b) = if from < to { (from, to) } else { (to, from) };
+            (a.to_string(), b.to_string(), kind)
+        };
+        if seen.insert(key) {
+            edges.push(EdgeView { from: from.to_string(), to: to.to_string(), kind: kind.to_string() });
+        }
+    };
+
+    // Index members by node_id and by the human suffix of their actor ("phone:ian" → "ian").
+    let human_of = |actor: &str| actor.split(':').nth(1).unwrap_or("").to_string();
+    let is_parent_ns = |actor: &str| {
+        let ns = actor.split(':').next().unwrap_or("");
+        matches!(ns, "phone" | "iphone" | "ipad" | "mac")
+    };
+
+    // Attribution: a sub-device (watch) → a parent device of the same human.
+    let mut attributed: HashSet<String> = HashSet::new();
+    for m in members {
+        let ns = m.actor.split(':').next().unwrap_or("");
+        if ns == "watch" {
+            let human = human_of(&m.actor);
+            if let Some(parent) = members.iter().find(|p| is_parent_ns(&p.actor) && human_of(&p.actor) == human && !human.is_empty()) {
+                push(&m.node_id, &parent.node_id, "attribution", &mut edges);
+                attributed.insert(m.node_id.clone());
+            }
+        }
+    }
+
+    // Delegation: origin (short id) → executor (the observation's node). The origin is written as the
+    // first 8 hex of the delegating node; match it against a member by node_id prefix.
+    for o in obs {
+        // The executor records "testing a theory delegated by <short> — '…'" as its cycle theory.
+        let marker = "delegated by ";
+        let hay = format!("{} {}", o.action, o.context);
+        if let Some(pos) = hay.find(marker) {
+            let after = &hay[pos + marker.len()..];
+            let short: String = after.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+            if short.len() >= 4 {
+                if let Some(origin) = members.iter().find(|m| m.node_id.starts_with(&short)) {
+                    // Executor is the member whose actor matches the observation actor, else self.
+                    let executor = members
+                        .iter()
+                        .find(|m| !m.actor.is_empty() && m.actor == o.actor)
+                        .map(|m| m.node_id.clone())
+                        .unwrap_or_else(|| self_id.to_string());
+                    push(&origin.node_id, &executor, "delegation", &mut edges);
+                }
+            }
+        }
+    }
+
+    // Gossip. The full peers (self + gossip peers) exchange briefs with *each other* — they form a
+    // complete graph, the genuinely meshed layer (no hub). Device peers read a familiar's worldview,
+    // so they link to self (the vantage point). Sub-devices already have an attribution parent.
+    use crate::members::MemberKind;
+    let full: Vec<&str> = members
+        .iter()
+        .filter(|m| matches!(m.kind, MemberKind::SelfNode | MemberKind::GossipPeer))
+        .map(|m| m.node_id.as_str())
+        .collect();
+    for i in 0..full.len() {
+        for j in (i + 1)..full.len() {
+            push(full[i], full[j], "gossip", &mut edges);
+        }
+    }
+    for m in members {
+        let is_full = matches!(m.kind, MemberKind::SelfNode | MemberKind::GossipPeer);
+        if is_full || attributed.contains(&m.node_id) {
+            continue; // full peers meshed above; sub-devices attributed to a parent
+        }
+        // Device peers / agents attach to the familiar they reach through (self, from this vantage).
+        push(&m.node_id, self_id, "gossip", &mut edges);
+    }
+
+    edges
 }
 
 /// The frontier: devices the familiar can *reach* but hasn't enrolled. Aggregated from `can-reach
@@ -419,6 +543,59 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     const NOW: i64 = 1_000_000;
+
+    fn member(node_id: &str, actor: &str, kind: crate::members::MemberKind) -> crate::members::Member {
+        crate::members::Member {
+            node_id: node_id.into(),
+            label: node_id.into(),
+            kind,
+            os: String::new(),
+            actor: actor.into(),
+            detail: String::new(),
+            first_seen: 0,
+            last_seen: NOW,
+            online: true,
+            familiar_version: String::new(),
+            tools: 0,
+            patterns: 0,
+            addr: String::new(),
+            relationship: String::new(),
+            ai: false,
+        }
+    }
+
+    #[test]
+    fn edges_mesh_full_peers_attribute_devices_and_read_delegation() {
+        use crate::members::MemberKind::*;
+        let members = vec![
+            member("aaaa1111", "", SelfNode),
+            member("bbbb2222", "", GossipPeer),  // another full peer
+            member("cccc3333", "ipad:ian", DevicePeer),
+            member("dddd4444", "watch:ian", DeviceAgent),
+        ];
+        // The iPad delegated a theory that self's executor tested (origin = iPad's node prefix).
+        let obs = vec![Observation::new(
+            "familiar",
+            "reasons",
+            "theory",
+            "testing a theory delegated by cccc3333 — 'gc pauses'",
+            "cycle",
+            NOW,
+            0.8,
+        )];
+        let edges = mesh_edges(&members, &obs, "aaaa1111");
+        let has = |from: &str, to: &str, kind: &str| {
+            edges.iter().any(|e| e.from == from && e.to == to && e.kind == kind)
+        };
+        // Full peers (self + gossip) mesh with each other — not through a hub.
+        assert!(has("aaaa1111", "bbbb2222", "gossip"), "full peers form the gossip mesh");
+        // The watch reaches the mesh through its phone/iPad, not self.
+        assert!(has("dddd4444", "cccc3333", "attribution"), "watch attributed to the iPad");
+        // The device peer with a parent is NOT also linked to self.
+        assert!(!has("dddd4444", "aaaa1111", "gossip"), "attributed sub-device skips the self link");
+        // The delegation edge runs iPad -> executor (self), a real workload handoff.
+        assert!(has("cccc3333", "aaaa1111", "delegation"), "delegation origin -> executor");
+    }
 
     fn fresh(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("familiar_worldview_{}_{tag}", std::process::id()));

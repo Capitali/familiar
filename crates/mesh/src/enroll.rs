@@ -123,7 +123,11 @@ pub(crate) fn submit_request(dir: &Path, raw: &[u8], sig_hex: &str, now: i64) ->
         code: short_code(&req.node.node_id),
     };
 
-    // Auto-admit if the human has set a standing auto-accept, or opened a timed invite window.
+    // Auto-admit if the human has set a standing auto-accept, or opened a timed invite window. A node
+    // that attests the Laws (verified above: it signed a non-empty covenant statement with the key
+    // its id fingerprints) is admitted without a second approval. This stays a *deliberate* switch,
+    // not implied by `allow_mesh` — a headless node may serve the mesh yet route each enrollment to a
+    // human for approval (the authority proxy). Opening auto-peering is its own human decision.
     let auto = crate::config::load(dir)
         .map(|c| c.auto_accept_enrollments)
         .unwrap_or(false);

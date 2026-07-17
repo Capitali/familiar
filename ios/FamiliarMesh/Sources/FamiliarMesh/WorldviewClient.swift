@@ -37,6 +37,16 @@ public struct Member: Codable, Equatable, Identifiable {
     public var id: String { node_id }
 }
 
+/// A real relationship between two members — mirrors the Rust `worldview::EdgeView`. Lets the map
+/// draw a mesh (peers linked to peers) instead of a star centered on self.
+public struct EdgeView: Codable, Equatable, Identifiable {
+    public var from: String
+    public var to: String
+    /// "gossip", "delegation", or "attribution".
+    public var kind: String
+    public var id: String { from + ">" + to + ":" + kind }
+}
+
 /// A reachable-but-unenrolled device — mirrors the Rust `worldview::FrontierView`. Drawn as a faded
 /// branch on the mesh map, dimmed by reach class.
 public struct FrontierView: Codable, Equatable, Identifiable {
@@ -121,6 +131,7 @@ public struct Worldview: Codable, Equatable {
     public var members: [Member]?
     public var services: [ServiceView]?
     public var frontier: [FrontierView]?
+    public var edges: [EdgeView]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus

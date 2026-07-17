@@ -810,6 +810,7 @@ private struct MeshScreen: View {
     private var members: [Member] { model.worldview?.members ?? [] }
     private var services: [ServiceView] { model.worldview?.services ?? [] }
     private var frontier: [FrontierView] { model.worldview?.frontier ?? [] }
+    private var edges: [EdgeView] { model.worldview?.edges ?? [] }
 
     private func kindColor(_ k: Member.Kind) -> Color {
         switch k {
@@ -880,8 +881,13 @@ private struct MeshScreen: View {
         // The constellation — the collective as a graph, this node at the center.
         Panel(fill: 0.03) {
             VStack(spacing: 6) {
-                MeshConstellation(members: members, color: kindColor, icon: icon, frontier: frontier)
+                MeshConstellation(members: members, color: kindColor, icon: icon, frontier: frontier, edges: edges)
                     .frame(height: 360).frame(maxWidth: .infinity)
+                HStack(spacing: 14) {
+                    edgeKey(Fam.blueBright.opacity(0.7), "gossip")
+                    edgeKey(Fam.amber, "delegation")
+                    edgeKey(Fam.green, "attribution")
+                }.font(Fam.mono(9))
                 if !frontier.isEmpty {
                     Text("Dashed = the frontier: \(frontier.count) device(s) the mesh can reach but hasn't enrolled. Brightness shows how far it could extend — agent-capable, controllable, or only observable.")
                         .font(Fam.mono(9.5)).foregroundStyle(Fam.monoDim.opacity(0.5))
@@ -986,6 +992,12 @@ private struct MeshScreen: View {
     private func rank(_ k: Member.Kind) -> Int {
         switch k { case .self_node: return 0; case .gossip_peer: return 1; case .device_peer: return 2; case .device_agent: return 3 }
     }
+    private func edgeKey(_ c: Color, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Rectangle().fill(c).frame(width: 14, height: 2)
+            Text(label).foregroundStyle(Fam.monoDim.opacity(0.7))
+        }
+    }
     private func tally(_ label: String, _ n: Int, _ c: Color) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
             Text("\(n)").font(.system(size: 20, weight: .semibold)).foregroundStyle(c)
@@ -997,43 +1009,57 @@ private struct MeshScreen: View {
     }
 }
 
-/// The mesh as a constellation: the local node at center, every other member on a ring, a line to
-/// each. A live picture of the collective — who is here, at what layer, online or away.
+/// The mesh as a graph of equals: every member sits on the ring — no node is the hub, because there
+/// is no host. Real edges (gossip / delegation / attribution) link peers to peers; a thinking peer's
+/// handoff to an executor, a watch's link to its phone, are drawn as their own strands, not routed
+/// through "self". Self is only marked (a brighter ring), never centered. Frontier devices float
+/// faded outside the ring.
 private struct MeshConstellation: View {
     let members: [Member]
     let color: (Member.Kind) -> Color
     let icon: (Member) -> String
     var frontier: [FrontierView] = []
+    var edges: [EdgeView] = []
+
+    private func edgeStyle(_ kind: String) -> (Color, Double, [CGFloat]) {
+        switch kind {
+        case "delegation": return (Fam.amber, 0.55, [])          // workload handed to an executor
+        case "attribution": return (Fam.green, 0.5, [])          // sub-device via its parent
+        default: return (Fam.blueBright, 0.28, [])               // gossip
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            let radius = min(geo.size.width, geo.size.height) / 2 - (frontier.isEmpty ? 54 : 68)
-            let frontierRadius = min(geo.size.width, geo.size.height) / 2 - 26
-            let selfNode = members.first { $0.kind == .self_node }
-            let others = members.filter { $0.kind != .self_node }
-            ZStack {
-                // frontier — faded, dashed branches to what the mesh can see but hasn't enrolled.
+            let ringR = min(geo.size.width, geo.size.height) / 2 - (frontier.isEmpty ? 46 : 62)
+            let frontierR = min(geo.size.width, geo.size.height) / 2 - 22
+            // Stable positions keyed by node_id so edges can find their endpoints.
+            let ring = members
+            var pos: [String: CGPoint] = [:]
+            for (i, m) in ring.enumerated() { pos[m.node_id] = point(center: center, radius: ring.count == 1 ? 0 : ringR, i: i, n: ring.count) }
+            return ZStack {
+                // frontier — faded dashed strands out to the unexplored edge (attached to the centroid).
                 ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in
-                    let p = point(center: center, radius: frontierRadius, i: i, n: frontier.count)
+                    let p = point(center: center, radius: frontierR, i: i, n: frontier.count)
                     Path { path in path.move(to: center); path.addLine(to: p) }
                         .stroke(Fam.ink.opacity(frontierOpacity(f.reach) * 0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
                 }
-                // links
-                ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
-                    let p = point(center: center, radius: radius, i: i, n: others.count)
-                    Path { path in path.move(to: center); path.addLine(to: p) }
-                        .stroke(color(m.kind).opacity(m.online ? 0.35 : 0.12), lineWidth: 1)
+                // real edges between members — the mesh's actual relationships.
+                ForEach(edges) { e in
+                    if let a = pos[e.from], let b = pos[e.to] {
+                        let (c, o, dash) = edgeStyle(e.kind)
+                        Path { p in p.move(to: a); p.addLine(to: b) }
+                            .stroke(c.opacity(o), style: StrokeStyle(lineWidth: e.kind == "gossip" ? 1 : 1.5, dash: dash))
+                    }
                 }
-                // center (self)
-                node(selfNode ?? members.first, at: center, big: true)
-                // ring nodes
-                ForEach(Array(others.enumerated()), id: \.element.id) { i, m in
-                    node(m, at: point(center: center, radius: radius, i: i, n: others.count), big: false)
+                // member nodes — all on the ring, equals; self only gets a brighter halo.
+                ForEach(Array(ring.enumerated()), id: \.element.id) { _, m in
+                    node(m, at: pos[m.node_id] ?? center, big: m.kind == .self_node)
                 }
-                // frontier nodes — dim hollow markers on the outer ring.
+                // frontier nodes — dim hollow markers outside the ring.
                 ForEach(Array(frontier.enumerated()), id: \.element.id) { i, f in
-                    frontierNode(f, at: point(center: center, radius: frontierRadius, i: i, n: frontier.count))
+                    frontierNode(f, at: point(center: center, radius: frontierR, i: i, n: frontier.count))
                 }
             }
         }
