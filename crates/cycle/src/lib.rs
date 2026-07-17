@@ -740,7 +740,10 @@ fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
          and a one-line `purpose` describing what it does (so it can be reused). \
          The script MUST be valid, self-contained POSIX sh: begin it with `#!/bin/sh`, balance \
          every quote and brace (no stray `}}`), no bashisms, and use `printf` — never `echo -e` \
-         or an `echo` with a literal `\\n` — for formatted output. Be safe and bounded — no \
+         or an `echo` with a literal `\\n` — for formatted output. It takes NO command-line \
+         arguments and prompts for NO input — it runs unattended, so embed any needed values \
+         (hosts, IPs, subnets, thresholds) directly with sensible defaults; if the task mentions \
+         a specific host or range, hard-code it. Be safe and bounded — no \
          destructive actions, no reading secrets, no exfiltration, no unbounded loops; write \
          files only under the current directory. It runs in a sandbox with a hard ~60s \
          wall-clock and ~30s CPU limit, so it MUST finish well within that: keep any sampling \
