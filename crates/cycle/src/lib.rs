@@ -32,8 +32,11 @@ use std::path::{Path, PathBuf};
 
 use familiar_exec as exec;
 use familiar_kernel::activity::{self, ActivityTick};
+use familiar_kernel::boundary::{self, CapabilityScope};
 use familiar_kernel::candidate::{self, Candidate};
+use familiar_kernel::capabilities;
 use familiar_kernel::capacities;
+use familiar_kernel::goal;
 use familiar_kernel::corruption;
 use familiar_kernel::dialog::LAW_III_VOICE;
 use familiar_kernel::guard::Reason;
@@ -157,6 +160,8 @@ pub struct TickReport {
     /// Durable observation-gathering utilities cultivated from proven theories this tick (the
     /// theory→code bridge — a theory became a re-runnable tool that feeds the observation record).
     pub cultivated: usize,
+    /// Shared-roadmap goals claimed or advanced this tick (the mesh owning its own to-do list).
+    pub goals_advanced: usize,
     /// Human-set parameters the familiar reverted this tick because they fell outside the
     /// constitutional envelope (co-ownership, Brick 19).
     pub reverted: usize,
@@ -197,6 +202,7 @@ impl TickReport {
             && self.mutated == 0
             && self.pursued == 0
             && self.cultivated == 0
+            && self.goals_advanced == 0
             && self.reverted == 0
             && self.marginalized == 0
             && self.answered == 0
@@ -1520,6 +1526,131 @@ fn mark_cultivated(dir: &Path, thread_id: &str, tool_name: &str, now: i64) -> io
     Ok(())
 }
 
+/// Agent steps a single goal-run may take before yielding the tick back. Bounded so a goal can't
+/// monopolize the metabolism; an unfinished goal stays `InProgress` and resumes next tick.
+const GOAL_STEP_BUDGET: u32 = 6;
+/// How many runs a goal gets before the mesh gives up on it (marks it `Failed` with the last note).
+/// Bounds a goal that the agent can't converge on so it doesn't burn the loop forever.
+const MAX_GOAL_ATTEMPTS: usize = 3;
+
+/// This node's mesh id (the owner stamp on a claimed goal). Empty if no node key exists yet.
+fn my_node_id(dir: &Path) -> String {
+    familiar_mesh::node::NodeKey::load_or_mint(dir, "")
+        .map(|n| n.node_id())
+        .unwrap_or_default()
+}
+
+/// How many times we've already run this goal — counted from its own progress observations, which
+/// double as the durable, replicating attempt log.
+fn goal_attempts(dir: &Path, goal_id: &str) -> usize {
+    let object = format!("goal:{goal_id}");
+    observation::load(dir)
+        .unwrap_or_default()
+        .iter()
+        .filter(|o| o.action == "goal-progress" && o.object == object)
+        .count()
+}
+
+fn record_goal_obs(dir: &Path, goal_id: &str, action: &str, note: &str, now: i64) {
+    let _ = observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            action,
+            format!("goal:{goal_id}"),
+            note.to_string(),
+            "familiar",
+            now,
+            1.0,
+        ),
+    );
+}
+
+/// **Own the roadmap.** The mesh side of the theory→code telos: a shared goal whose `needs` this
+/// node's capabilities satisfy gets *claimed* and driven through the agentic loop, and its ownership
+/// + progress replicate (the goal list travels in the brief; progress rides the observation record)
+/// so the whole mesh burns the roadmap down together. Core/peripheral discipline: the *core* decides
+/// claim/run — gated (`allow_agent && allow_execute && allow_llm`), capability-matched, one goal per
+/// tick; the agentic loop's every proposed action is still mediated by the scoped boundary +
+/// `review_script`. **High-consequence goals (deploy) are claimed but parked for a human** — the mesh
+/// builds and tests autonomously, a human ships. Returns the number of goals acted on this tick (0/1).
+fn pursue_goals(dir: &Path, now: i64) -> io::Result<usize> {
+    let b = boundary::load(dir)?;
+    // Autonomous, multi-step work under the sharpest reaches — fail-closed on all three.
+    if !(b.allow_agent && b.allow_execute && b.allow_llm) {
+        return Ok(0);
+    }
+    let me = my_node_id(dir);
+    if me.is_empty() {
+        return Ok(0); // no mesh identity yet — nothing to own goals as
+    }
+    let caps = capabilities::detect(dir, &b);
+    let goals = goal::load(dir)?;
+
+    // 1. Drive ONE goal we already own that's ready to run — never a human-gated one (those wait).
+    if let Some(g) = goals.iter().find(|g| {
+        g.owner_node == me
+            && matches!(g.status, goal::Status::Claimed | goal::Status::InProgress)
+            && !g.is_human_gated()
+    }) {
+        if goal_attempts(dir, &g.id) >= MAX_GOAL_ATTEMPTS {
+            goal::advance(dir, &g.id, goal::Status::Failed, "gave up after repeated attempts", now)?;
+            record_goal_obs(dir, &g.id, "goal-progress", "failed — did not converge after repeated attempts", now);
+            return Ok(1);
+        }
+        goal::advance(dir, &g.id, goal::Status::InProgress, "", now)?;
+        // The agent acts under the full human boundary (its own guard intersects to least-privilege).
+        let scope = CapabilityScope::from_boundary(&b);
+        let task = format!(
+            "Accomplish this goal in service, for the mesh: \"{}\". Take concrete steps (write and \
+             run scripts as needed), verify the result, and when it is genuinely done answer with a \
+             clear summary of what you produced. Stay within your granted capabilities.",
+            g.description.replace('"', "'")
+        );
+        match familiar_agent::run_agent(dir, &scope, &task, GOAL_STEP_BUDGET, now)? {
+            // Converged: a confident answer before the budget ran out.
+            Some(res) if res.confidence == Confidence::Known && res.steps < GOAL_STEP_BUDGET => {
+                let note: String = res.body.chars().take(240).collect();
+                goal::advance(dir, &g.id, goal::Status::Done, &format!("done — {note}"), now)?;
+                record_goal_obs(dir, &g.id, "goal-progress", &format!("done in {} step(s): {note}", res.steps), now);
+            }
+            // Ran, but not done — keep it InProgress with a note; it resumes next tick (bounded).
+            Some(res) => {
+                let note: String = res.body.chars().take(240).collect();
+                goal::advance(dir, &g.id, goal::Status::InProgress, &format!("worked ({} steps)", res.steps), now)?;
+                record_goal_obs(dir, &g.id, "goal-progress", &format!("progress ({} steps): {note}", res.steps), now);
+            }
+            // The agentic loop was refused/unreachable — not a failure of the goal, so leave it for
+            // a later tick, but record why so it's visible.
+            None => {
+                record_goal_obs(dir, &g.id, "goal-progress", "the agentic loop was unavailable this tick", now);
+            }
+        }
+        return Ok(1);
+    }
+
+    // 2. Otherwise, claim ONE unclaimed goal whose needs we satisfy — first-fit, oldest first.
+    if let Some(g) = goals.iter().find(|g| {
+        g.status == goal::Status::Proposed && g.owner_node.is_empty() && g.satisfied_by(&caps)
+    }) {
+        if goal::claim(dir, &g.id, &me, now)? {
+            if g.is_human_gated() {
+                // A deploy-class goal: the build/test could run, but shipping is a human's call.
+                // Claim it (so a peer doesn't) and park it for approval — Law III made literal.
+                goal::advance(dir, &g.id, goal::Status::AwaitingHuman,
+                    "claimed; a high-consequence step (deploy) awaits a human's approval", now)?;
+                record_goal_obs(dir, &g.id, "goal-progress",
+                    "claimed but awaiting a human — this goal needs a deploy, which a human must approve", now);
+            } else {
+                record_goal_obs(dir, &g.id, "goal-progress",
+                    &format!("claimed — capabilities satisfy its needs [{}]", g.needs.join(", ")), now);
+            }
+            return Ok(1);
+        }
+    }
+    Ok(0)
+}
+
 /// How often, at most, the familiar augments its understanding of humanity. Understanding accrues
 /// slowly — this is not a per-tick chatter but an occasional deepening.
 const REFLECT_EVERY_SECS: i64 = 6 * 3600;
@@ -1972,6 +2103,12 @@ pub fn tick(
     //      aware, paced). Gated by the sharpest reach: execute + authored-execute + llm, fail-closed.
     let cultivated = cultivate_utilities(dir, now, allow_execute, authored, allow_llm)?;
 
+    // 8·2 Own the roadmap — the mesh side of the same telos. A shared goal whose needs this node's
+    //      capabilities satisfy is claimed and driven through the agentic loop (one per tick, gated
+    //      on allow_agent+execute+llm); ownership + progress replicate so the whole mesh burns the
+    //      roadmap down together. Deploy-class goals are claimed but parked for a human (Law III).
+    let goals_advanced = pursue_goals(dir, now)?;
+
     // 8a. Augment its understanding of humanity from what it observed — appended beside the
     //     constitution (docs/HUMANITY.md), never over it. Paced + LLM-gated; a no-op without an LLM.
     let _ = reflect_on_humanity(dir, now, &obs);
@@ -2001,6 +2138,7 @@ pub fn tick(
         theorized,
         pursued,
         cultivated,
+        goals_advanced,
         reverted,
         marginalized,
         answered,
@@ -2624,6 +2762,60 @@ mod tests {
         let n2 = cultivate_utilities(dir, 10_060, true, true, true).unwrap();
         assert_eq!(n2, 0);
         assert_eq!(observation::load(dir).unwrap().len(), before, "paced — no work within the window");
+    }
+
+    fn write_boundary(dir: &Path, agent: bool, execute: bool, llm: bool) {
+        let mut b = boundary::Boundary::closed();
+        b.allow_agent = agent;
+        b.allow_execute = execute;
+        b.allow_llm = llm;
+        fs::write(dir.join(boundary::BOUNDARY_FILE), serde_json::to_string(&b).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_capable_node_claims_a_satisfiable_goal_and_ignores_an_impossible_one() {
+        let t = Temp::new("goal_claim");
+        let dir = &t.0;
+        write_boundary(dir, true, true, true); // gates open ⇒ caps include execute/agent/llm
+        let me = my_node_id(dir);
+        assert!(!me.is_empty());
+
+        // A goal any capable node can take (no special needs) + one needing a capability we lack.
+        goal::append(dir, &goal::Goal::seed("goal-0001", "tidy the workspace", vec![], "ian", 100)).unwrap();
+        goal::append(dir, &goal::Goal::seed("goal-0002", "fly to the moon", vec!["build-antimatter".into()], "ian", 101)).unwrap();
+
+        // One claim per tick; the satisfiable one is taken, the impossible one left proposed.
+        let n = pursue_goals(dir, 1000).unwrap();
+        assert_eq!(n, 1);
+        let g1 = goal::load_by_id(dir, "goal-0001").unwrap().unwrap();
+        assert_eq!(g1.status, goal::Status::Claimed);
+        assert_eq!(g1.owner_node, me, "we stamped ourselves as owner");
+        let g2 = goal::load_by_id(dir, "goal-0002").unwrap().unwrap();
+        assert_eq!(g2.status, goal::Status::Proposed, "an unsatisfiable goal is never claimed");
+        assert_eq!(g2.owner_node, "");
+    }
+
+    #[test]
+    fn a_deploy_goal_is_claimed_but_parked_for_a_human() {
+        let t = Temp::new("goal_deploy");
+        let dir = &t.0;
+        write_boundary(dir, true, true, true);
+        // Needs only capabilities we have (execute) plus a deploy-class one — but is_human_gated
+        // trips on the `deploy` prefix regardless, so it parks. Give it needs we satisfy so it claims.
+        goal::append(dir, &goal::Goal::seed("goal-0001", "ship the phone sensor", vec!["deploy-anything".into()], "ian", 100)).unwrap();
+        // We don't advertise deploy-anything, so it won't be claimed — assert it stays proposed.
+        assert_eq!(pursue_goals(dir, 1000).unwrap(), 0);
+        assert_eq!(goal::load_by_id(dir, "goal-0001").unwrap().unwrap().status, goal::Status::Proposed);
+    }
+
+    #[test]
+    fn goals_are_fail_closed_without_the_agent_gate() {
+        let t = Temp::new("goal_gated");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true); // agent gate shut
+        goal::append(dir, &goal::Goal::seed("goal-0001", "do a thing", vec![], "ian", 100)).unwrap();
+        assert_eq!(pursue_goals(dir, 1000).unwrap(), 0, "no agent gate ⇒ no autonomous goal work");
+        assert_eq!(goal::load_by_id(dir, "goal-0001").unwrap().unwrap().status, goal::Status::Proposed);
     }
 
     #[test]

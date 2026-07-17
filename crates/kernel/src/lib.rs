@@ -13,9 +13,11 @@
 pub mod activity;
 pub mod boundary;
 pub mod candidate;
+pub mod capabilities;
 pub mod capacities;
 pub mod corruption;
 pub mod dialog;
+pub mod goal;
 pub mod guard;
 pub mod humanity;
 pub mod identity;

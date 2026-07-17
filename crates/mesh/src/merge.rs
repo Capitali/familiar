@@ -28,7 +28,7 @@ use crate::{hex_encode, os_random, sha256_hex};
 use familiar_kernel::boundary;
 use familiar_kernel::corruption;
 use familiar_kernel::guard::{self, Action, ActionKind, Decision};
-use familiar_kernel::{identity, observation, pattern_memory, thread, tool};
+use familiar_kernel::{goal, identity, observation, pattern_memory, thread, tool};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -159,11 +159,34 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
                 })
                 .collect()
         };
+        // The shared roadmap: every node carries the same goal list + live status so the mesh burns
+        // it down together. Shared whether or not this node can execute — a theorist still needs to
+        // see (and seed) goals; an executor claims them. Bounded per brief; ids are global so dedup
+        // is exact on the receiver.
+        let goals = goal::load(dir)
+            .unwrap_or_default()
+            .into_iter()
+            .rev()
+            .take(GOAL_SHARE_CAP)
+            .map(|g| crate::brief::GoalShare {
+                id: g.id,
+                description: g.description,
+                needs: g.needs,
+                status: g.status.as_str().to_string(),
+                owner_node: g.owner_node,
+                origin: g.origin,
+                produced: g.produced,
+                notes: g.notes,
+                created_at: g.created_at,
+                updated_at: g.updated_at,
+            })
+            .collect();
         Knowledge {
             patterns: pattern_offers(dir),
             obs_summary: format!("{} observations", obs.len()),
             observations,
             theory_requests,
+            goals,
         }
     } else {
         Knowledge::default()
@@ -252,6 +275,10 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
             familiar_version: env!("CARGO_PKG_VERSION").to_string(),
             os_version: os_release(),
             tools,
+            capabilities: familiar_kernel::capabilities::detect(
+                dir,
+                &boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed()),
+            ),
         },
         knowledge,
         identities,
@@ -451,6 +478,61 @@ fn merge_one(
             );
             if observation::record(dir, o).is_ok() {
                 report.observations_ingested += 1;
+            }
+        }
+    }
+
+    // --- Goals: the shared roadmap. Adopt goals we don't have; for ones we do, take the peer's
+    // version if it is strictly NEWER (last-writer-wins by updated_at) so a claim, a progress note,
+    // or a completion propagates to every node. We never regress our own newer state, and we never
+    // let a peer un-settle a goal we've moved past. Reached only by trusted/throttled peers (a
+    // marginalized peer returned early above), so a slipped peer can't rewrite the roadmap. ---
+    for gs in &brief.body.knowledge.goals {
+        let incoming_status = match gs.status.as_str() {
+            "proposed" => goal::Status::Proposed,
+            "claimed" => goal::Status::Claimed,
+            "in_progress" => goal::Status::InProgress,
+            "awaiting_human" => goal::Status::AwaitingHuman,
+            "done" => goal::Status::Done,
+            "failed" => goal::Status::Failed,
+            "blocked" => goal::Status::Blocked,
+            _ => continue, // an unknown status from a newer peer — leave it be
+        };
+        match goal::load_by_id(dir, &gs.id).ok().flatten() {
+            Some(local) if local.updated_at >= gs.updated_at => {} // ours is as-new or newer — keep it
+            Some(_) => {
+                let merged = goal::Goal {
+                    id: gs.id.clone(),
+                    description: gs.description.clone(),
+                    needs: gs.needs.clone(),
+                    status: incoming_status,
+                    owner_node: gs.owner_node.clone(),
+                    origin: gs.origin.clone(),
+                    produced: gs.produced.clone(),
+                    notes: gs.notes.clone(),
+                    created_at: gs.created_at,
+                    updated_at: gs.updated_at,
+                };
+                if goal::update(dir, &merged).is_ok() {
+                    report.observations_ingested += 1;
+                }
+            }
+            None => {
+                let adopted = goal::Goal {
+                    id: gs.id.clone(),
+                    description: gs.description.clone(),
+                    needs: gs.needs.clone(),
+                    status: incoming_status,
+                    owner_node: gs.owner_node.clone(),
+                    origin: gs.origin.clone(),
+                    produced: gs.produced.clone(),
+                    notes: gs.notes.clone(),
+                    created_at: gs.created_at,
+                    updated_at: gs.updated_at,
+                };
+                if goal::append(dir, &adopted).is_ok() {
+                    report.observations_ingested += 1;
+                }
             }
         }
     }
@@ -720,6 +802,10 @@ const OBS_SHARE_CAP: usize = 200;
 /// executor; the rest ride on later rounds.
 const THEORY_SHARE_CAP: usize = 20;
 
+/// How many goals a brief carries — the whole shared roadmap is small, but bound it so a runaway
+/// seeder can't bloat the brief. Newest first; the rest converge over later rounds.
+const GOAL_SHARE_CAP: usize = 60;
+
 /// First 8 chars of a node id, for human-facing lines.
 fn short(node_id: &str) -> String {
     node_id.chars().take(8).collect()
@@ -922,6 +1008,7 @@ mod tests {
                     uses: 5,
                     last_exit_ok: true,
                 }],
+                capabilities: Vec::new(),
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {
@@ -932,6 +1019,7 @@ mod tests {
                 obs_summary: "88 observations".into(),
                 observations: Vec::new(),
                 theory_requests: Vec::new(),
+                goals: Vec::new(),
             },
             identities: None,
             authority_requests: Vec::new(),

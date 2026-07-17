@@ -59,6 +59,12 @@ pub struct Capability {
     #[serde(default)]
     pub os_version: String,
     pub tools: Vec<ToolManifest>,
+    /// What this node can actually *do* — `build-rust`, `build-apple`, `deploy-apple`, `execute`,
+    /// `agent`, `llm`, … (discovered toolchain ∩ open gates; see `familiar_kernel::capabilities`).
+    /// The mesh routes a goal to a node whose capabilities satisfy its `needs`. Empty on briefs that
+    /// predate the field.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 /// An abstract pattern offered for merge — never raw private data, a distilled regularity.
@@ -113,6 +119,29 @@ pub struct Knowledge {
     /// back-compat with briefs that predate the field.
     #[serde(default)]
     pub theory_requests: Vec<TheoryRequest>,
+    /// The shared roadmap — goals every node holds and burns down together. `#[serde(default)]` for
+    /// back-compat with briefs that predate the field.
+    #[serde(default)]
+    pub goals: Vec<GoalShare>,
+}
+
+/// A goal shared for replication — the roadmap made mesh-native. Every node holds the same goal
+/// list and its live status, so the mesh burns the roadmap down together: whoever's capabilities fit
+/// claims it, and progress/ownership travels back to all. Deduped by `id` (goal ids are minted by the
+/// seeding node and carried verbatim, unlike node-local observation ids). Mirrors `goal::Goal`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalShare {
+    pub id: String,
+    pub description: String,
+    pub needs: Vec<String>,
+    /// The goal's status as a slug ("proposed"/"claimed"/"in_progress"/"awaiting_human"/"done"/…).
+    pub status: String,
+    pub owner_node: String,
+    pub origin: String,
+    pub produced: String,
+    pub notes: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 /// A single opted-in human, shared only under explicit per-handle/per-group consent.
@@ -281,6 +310,7 @@ mod tests {
                     uses: 3,
                     last_exit_ok: true,
                 }],
+                capabilities: Vec::new(),
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {
@@ -291,6 +321,7 @@ mod tests {
                 obs_summary: "42 observations".into(),
                 observations: Vec::new(),
                 theory_requests: Vec::new(),
+                goals: Vec::new(),
             },
             identities: None,
             authority_requests: Vec::new(),

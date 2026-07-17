@@ -12,4 +12,5 @@ familiar-vision.workspace = true
 familiar-llm.workspace = true
 familiar-exec.workspace = true
 familiar-mesh.workspace = true
+familiar-agent.workspace = true
 serde_json.workspace = true

@@ -97,6 +97,7 @@ fn main() -> ExitCode {
         Some("db") => cmd_db(rest),
         Some("agent") => cmd_agent(rest),
         Some("mesh") => cmd_mesh(rest),
+        Some("goal") => cmd_goal(rest),
         Some(cmd) => {
             eprintln!("familiar: unknown command '{cmd}'\n\n{USAGE}");
             ExitCode::FAILURE
@@ -111,6 +112,7 @@ const DB_TABLES: &[&str] = &[
     "trials.jsonl",
     "patterns.jsonl",
     "threads.jsonl",
+    "goals.jsonl",
     "questions.jsonl",
     "requests.jsonl",
     "answers.jsonl",
@@ -227,6 +229,87 @@ fn cmd_agent(args: &[String]) -> ExitCode {
         }
         _ => {
             eprintln!("agent: usage: familiar agent run <task…> [--steps N]");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `goal …` — seed and inspect the **shared roadmap**. A goal seeded here replicates across the
+/// mesh; the node whose capabilities satisfy its `needs` claims it and drives it through the agentic
+/// loop, and progress/ownership travel back to every node. High-consequence goals (deploy) are
+/// claimed but parked for a human. This is the human's instrument for pointing the mesh at work.
+fn cmd_goal(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        Some("add") => {
+            let Some(desc) = args.get(1).filter(|s| !s.starts_with("--")) else {
+                eprintln!("goal: usage: familiar goal add \"<description>\" [--needs cap1,cap2]");
+                return ExitCode::FAILURE;
+            };
+            let needs: Vec<String> = f
+                .get("needs")
+                .map(|s| {
+                    s.split(',')
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            let seq = familiar_kernel::goal::load(&dir).map(|g| g.len()).unwrap_or(0) + 1;
+            let id = format!("goal-{seq:04}");
+            let g = familiar_kernel::goal::Goal::seed(&id, desc, needs, "ian", now_secs());
+            match familiar_kernel::goal::append(&dir, &g) {
+                Ok(()) => {
+                    println!("✓ seeded {id} — “{}”", g.description);
+                    if !g.needs.is_empty() {
+                        println!("  needs: {}", g.needs.join(", "));
+                    }
+                    if g.is_human_gated() {
+                        println!("  (high-consequence: a node will build + test it, but a human approves the deploy)");
+                    }
+                    println!("  it replicates to the mesh; a capable node will claim it.");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("goal: could not write — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("list") | None => match familiar_kernel::goal::load(&dir) {
+            Ok(gs) if gs.is_empty() => {
+                println!("(no goals yet — seed one with `familiar goal add \"…\"`)");
+                ExitCode::SUCCESS
+            }
+            Ok(gs) => {
+                for g in gs {
+                    let owner = if g.owner_node.is_empty() {
+                        "—".to_string()
+                    } else {
+                        short_id(&g.owner_node)
+                    };
+                    println!(
+                        "· {}  [{}]  owner {}  needs [{}]",
+                        g.id,
+                        g.status.as_str(),
+                        owner,
+                        g.needs.join(",")
+                    );
+                    println!("    {}", g.description);
+                    if !g.notes.is_empty() {
+                        println!("    ↳ {}", g.notes);
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("goal: could not read — {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some(other) => {
+            eprintln!("goal: unknown subcommand '{other}' — try `add` or `list`");
             ExitCode::FAILURE
         }
     }

@@ -136,6 +136,29 @@ pub struct Worldview {
     /// Real relationships between members — the edges of the mesh graph (gossip / delegation /
     /// attribution). The map lays members out as equals and draws these, so it reads as a mesh.
     pub edges: Vec<EdgeView>,
+    /// The shared roadmap — goals the mesh owns and burns down together, with live status and which
+    /// node claimed each. Every node holds the same list; the console renders it as the to-do board.
+    #[serde(default)]
+    pub goals: Vec<GoalView>,
+}
+
+/// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
+/// the UI doesn't need. `owner` is the claiming node's short id (empty while unclaimed).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalView {
+    pub id: String,
+    pub description: String,
+    pub needs: Vec<String>,
+    /// "proposed" | "claimed" | "in_progress" | "awaiting_human" | "done" | "failed" | "blocked".
+    pub status: String,
+    /// Short node id of the owner (empty while unclaimed).
+    pub owner: String,
+    pub origin: String,
+    /// Tools/artifacts it produced, for the audit trail.
+    pub produced: String,
+    /// Progress + learnings that travelled with the goal.
+    pub notes: String,
+    pub updated_at: i64,
 }
 
 /// A real relationship between two mesh members — an edge in the graph the map draws. The mesh is
@@ -329,6 +352,7 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
     let members = crate::members::classify(dir, now);
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
+    let goals = goal_views(dir);
 
     Ok(Worldview {
         group_label: cred.label.clone(),
@@ -351,7 +375,34 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         services: discovered_services(&obs),
         frontier,
         edges,
+        goals,
     })
+}
+
+/// The shared roadmap for the console — every goal, newest activity first, its owner shown as a short
+/// node id. Settled goals sort after active ones so the board reads "what's in flight" at a glance.
+fn goal_views(dir: &Path) -> Vec<GoalView> {
+    let mut goals = familiar_kernel::goal::load(dir).unwrap_or_default();
+    goals.sort_by(|a, b| {
+        let rank = |s: familiar_kernel::goal::Status| if s.settled() { 1 } else { 0 };
+        rank(a.status)
+            .cmp(&rank(b.status))
+            .then(b.updated_at.cmp(&a.updated_at))
+    });
+    goals
+        .into_iter()
+        .map(|g| GoalView {
+            id: g.id,
+            description: g.description,
+            needs: g.needs,
+            status: g.status.as_str().to_string(),
+            owner: g.owner_node.chars().take(8).collect(),
+            origin: g.origin,
+            produced: g.produced,
+            notes: g.notes,
+            updated_at: g.updated_at,
+        })
+        .collect()
 }
 
 /// Derive the real relationships between members — the mesh graph's edges. Three honest kinds, only
