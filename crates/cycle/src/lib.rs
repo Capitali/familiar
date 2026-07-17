@@ -56,6 +56,8 @@ use familiar_vision as vision;
 const ARTIFACTS_DIR: &str = "artifacts";
 const QUESTION_FILE: &str = "question.txt";
 const LAST_THEORY_FILE: &str = "last_theory.txt";
+/// When the familiar last cultivated a durable utility from a proven theory (a single unix ts).
+const LAST_CULTIVATE_FILE: &str = "last_cultivate.txt";
 /// The structural fingerprint of the last tick's environment (a single u64).
 const STRUCTURE_FILE: &str = "structure.fp";
 /// Where the eye's latest captured frame and its rate-limit stamp live, under the data dir.
@@ -77,6 +79,15 @@ const MAX_MUTATION_GENERATION: i32 = 6;
 /// turn a burst of new grounding into work promptly, bounded enough not to churn or overspend
 /// the LLM. See `theorize_due`.
 const THEORIZE_FLOOR_SECS: i64 = 300;
+/// The fastest the familiar cultivates a *durable utility* from a proven theory — the theory→code
+/// bridge that grows the tool library, not per-tick churn. Authoring a tool costs one peripheral
+/// (LLM) call, so it is paced like theorizing: occasional, deliberate. Reusing an existing tool for
+/// a recurring theory is free and not bound by this. Twenty minutes.
+const CULTIVATE_EVERY_SECS: i64 = 20 * 60;
+/// How much of an authored sensor's stdout is retained as a gathered observation — enough to be a
+/// useful reading, bounded so a chatty tool can't bloat the record. The tool itself keeps producing
+/// fresh output on each run; the observation is the durable trace that it did.
+const GATHERED_OBS_CAP: usize = 600;
 
 /// FNV-1a (64-bit) — the same family the kernel uses for loop ids. Deterministic,
 /// dependency-free; we only need a stable digest, not cryptographic strength.
@@ -143,6 +154,9 @@ pub struct TickReport {
     pub theorized: bool,
     /// Open threads turned into candidate work this tick.
     pub pursued: usize,
+    /// Durable observation-gathering utilities cultivated from proven theories this tick (the
+    /// theory→code bridge — a theory became a re-runnable tool that feeds the observation record).
+    pub cultivated: usize,
     /// Human-set parameters the familiar reverted this tick because they fell outside the
     /// constitutional envelope (co-ownership, Brick 19).
     pub reverted: usize,
@@ -182,6 +196,7 @@ impl TickReport {
             && self.promoted == 0
             && self.mutated == 0
             && self.pursued == 0
+            && self.cultivated == 0
             && self.reverted == 0
             && self.marginalized == 0
             && self.answered == 0
@@ -790,23 +805,38 @@ fn persist_tool(dir: &Path, d: &DraftedTool, keywords: &[String], now: i64) -> i
 /// constitutional pre-execution review runs every time (even on reuse — cheap safety).
 /// `reused` distinguishes "recognized a known tool" (the efficiency win — no LLM) from
 /// "authored a new one". Records the run against the tool's usage stats.
-fn run_tool(
-    dir: &Path,
-    t: &Tool,
-    now: i64,
-    reused: bool,
-) -> io::Result<(String, Confidence, String)> {
+/// The outcome of executing a saved tool: raw stdout, whether the run was healthy (clean exit, no
+/// timeout, and output that doesn't read as a failure), a concise status verdict, the use count
+/// after this run, the broken-signature (if any), and — when the pre-execution review refused it —
+/// the reason it was declined (in which case nothing ran). Shared by the human answer path
+/// ([`run_tool`]) and the autonomous cultivation path ([`cultivate_utilities`]) so both review, run,
+/// and health-track a tool identically; only the *framing* of the result differs between them.
+struct ToolRun {
+    out: String,
+    healthy: bool,
+    status: String,
+    confidence: Confidence,
+    uses: u32,
+    broken: Option<&'static str>,
+    declined: Option<String>,
+}
+
+/// Review, run, and health-track one saved tool. The single execution seam for a library tool —
+/// every run passes the constitutional pre-execution review first (`declined` set, nothing run, if
+/// it's refused), then runs under the same sandbox/limits and updates the tool's health.
+fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
     let script = fs::read_to_string(&t.script_path).unwrap_or_default();
     if let Some(reason) = review_script(&script) {
         let _ = tool::record_use(dir, &t.id, now, false, "declined by pre-execution review");
-        return Ok((
-            format!(
-                "I declined to run the tool '{}' — {reason} (Law III).",
-                t.name
-            ),
-            Confidence::Known,
-            "the pre-execution review (docs/boundaries.md)".to_string(),
-        ));
+        return Ok(ToolRun {
+            out: String::new(),
+            healthy: false,
+            status: "declined by pre-execution review".to_string(),
+            confidence: Confidence::Known,
+            uses: t.uses,
+            broken: None,
+            declined: Some(reason.to_string()),
+        });
     }
     let ws = familiar_workspace();
     let sandbox = familiar_kernel::boundary::load(dir)
@@ -821,13 +851,13 @@ fn run_tool(
         exec::Limits::unsandboxed()
     };
     let run = exec::run_script(std::path::Path::new(&t.script_path), &limits, &ws)?;
-    let out = run.output.trim();
+    let out = run.output.trim().to_string();
     // A tool can `exit 0` and still be broken — printing "does not exist", a usage line, or
     // nothing useful. Exit code alone can't tell that apart, so a healthy tool gets reused
     // forever while emitting garbage (the "ask" dead-end). Inspect the output too: a failure
     // signature (or a timeout / nonzero exit) marks the tool unhealthy, so `best_match` skips
     // it and the familiar re-authors a fresh one next time instead of repeating bad output.
-    let broken = output_looks_broken(out);
+    let broken = output_looks_broken(&out);
     let healthy = run.exit_ok && !run.timed_out && broken.is_none();
     // A concise verdict on this run — persisted on the tool (shown in the Glass so a failure is
     // diagnosable, not just an orange badge) and carried in the answer's evidence line.
@@ -850,6 +880,36 @@ fn run_tool(
         )
     };
     let uses = tool::record_use(dir, &t.id, now, healthy, &status)?.unwrap_or(t.uses + 1);
+    Ok(ToolRun {
+        out,
+        healthy,
+        status,
+        confidence,
+        uses,
+        broken,
+        declined: None,
+    })
+}
+
+fn run_tool(
+    dir: &Path,
+    t: &Tool,
+    now: i64,
+    reused: bool,
+) -> io::Result<(String, Confidence, String)> {
+    let r = execute_tool(dir, t, now)?;
+    if let Some(reason) = r.declined {
+        return Ok((
+            format!(
+                "I declined to run the tool '{}' — {reason} (Law III).",
+                t.name
+            ),
+            Confidence::Known,
+            "the pre-execution review (docs/boundaries.md)".to_string(),
+        ));
+    }
+    let (out, broken, status, confidence, uses) =
+        (r.out.as_str(), r.broken, r.status, r.confidence, r.uses);
     let body = if let Some(sig) = broken {
         format!(
             "I ran the tool '{}', but its output looks wrong ({sig}) — I've retired it and \
@@ -1288,6 +1348,173 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         )?;
     }
     Ok((pursued, marginalized))
+}
+
+fn last_cultivate_at(dir: &Path) -> i64 {
+    fs::read_to_string(dir.join(LAST_CULTIVATE_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Does this theory direction describe an **observation-gathering** goal — reading the environment
+/// and reporting on it — rather than an outward action? Only these become durable, re-runnable
+/// tools: a sensor is safe to keep and safe to re-run, whereas a one-shot "send/change/allocate"
+/// step is not. Conservative keyword match, mirroring [`wants_execution`] but tuned to *sensing*.
+fn is_observation_goal(direction: &str) -> bool {
+    let d = direction.to_lowercase();
+    // Sensing verbs/nouns — "find out / report on" the world, not "act on" it.
+    const SENSE: &[&str] = &[
+        "monitor", "check", "inspect", "measure", "detect", "scan", "survey", "report",
+        "gather", "observe", "identify", "list", "enumerate", "status", "health", "snapshot",
+        "latency", "usage", "connectivity", "reachab", "uptime", "throughput", "diagnos",
+        "audit", "probe", "sample", "trend", "metric", "dashboard", "watch ",
+    ];
+    // Outward-action markers that disqualify even if a sensing word is also present — err safe.
+    const ACT: &[&str] = &[
+        "send", "email", "message", "notify", "delete", "remove", "install", "reboot",
+        "restart", "shutdown", "allocate", "transfer", "purchase", "buy", "post ", "publish",
+        "configure", "change ", "modify", "write to", "sync ", "trigger",
+    ];
+    SENSE.iter().any(|k| d.contains(k)) && !ACT.iter().any(|k| d.contains(k))
+}
+
+/// Run a durable tool and, if it produced a healthy reading, retain that output as a **gathered**
+/// observation — the durable trace that grounds the familiar's knowledge (the whole point of a
+/// sensor). Unhealthy runs update the tool's health (via `execute_tool`) but record no reading, so
+/// a broken sensor doesn't poison the record. Returns true if a reading was gathered.
+fn gather_with_tool(dir: &Path, t: &Tool, now: i64, reused: bool) -> io::Result<bool> {
+    let r = execute_tool(dir, t, now)?;
+    if r.declined.is_some() || !r.healthy || r.out.is_empty() {
+        return Ok(false);
+    }
+    let reading: String = r.out.chars().take(GATHERED_OBS_CAP).collect();
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            "gathered",
+            format!("sensor:{}", t.name),
+            reading,
+            "familiar",
+            now,
+            0.9,
+        ),
+    )?;
+    // A visible note that a utility ran and fed the record — distinguishes a freshly-cultivated
+    // sensor from a reused one, so the Glass can show the library working, not just growing.
+    let verb = if reused { "refreshed" } else { "cultivated" };
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            "cultivated-tool",
+            t.name.clone(),
+            format!("{verb} a sensor '{}' — {}", t.name, r.status),
+            "familiar",
+            now,
+            1.0,
+        ),
+    )?;
+    Ok(true)
+}
+
+/// **The theory→code bridge.** A proven observation-goal theory becomes a durable, re-runnable
+/// utility that gathers observations — closing the loop the cycle otherwise leaves open (theories
+/// churn into disposable trials, their output discarded). Core/peripheral discipline throughout:
+/// the *core* (deterministic Rust) decides *whether* to cultivate — gated, paced, corruption-aware,
+/// deduped against the existing library so a recurring theory reuses its tool instead of re-authoring
+/// (retention, and the fix for five near-identical "nmap" tools). The *peripheral* (the LLM adapter —
+/// Gemini/Cerebras today, on-device Apple Intelligence as it comes online) only *drafts* the script,
+/// which the constitutional pre-execution review reads before it ever runs. Successes and failures
+/// are retained on the tool's health so `best_match` skips a sensor that went bad. Gated by
+/// `allow_execute && allow_authored_execute && allow_llm` (fail-closed). Returns tools newly authored.
+fn cultivate_utilities(
+    dir: &Path,
+    now: i64,
+    allow_execute: bool,
+    allow_authored: bool,
+    allow_llm: bool,
+) -> io::Result<usize> {
+    if !(allow_execute && allow_authored && allow_llm) {
+        return Ok(0); // authored execution is the sharpest reach — fail-closed with the gates
+    }
+    if now - last_cultivate_at(dir) < CULTIVATE_EVERY_SECS {
+        return Ok(0); // paced: a peripheral call is precious; don't churn the library
+    }
+    let refusals = corruption::load(dir).unwrap_or_default();
+    let threads = thread::load(dir)?;
+    // Threads already turned into a durable utility — deduped so one theory yields one tool.
+    let done: std::collections::HashSet<String> = observation::load(dir)?
+        .into_iter()
+        .filter(|o| o.action == "cultivated-from")
+        .map(|o| o.object)
+        .collect();
+    // Pick the freshest proven observation-goal theory not yet cultivated, from an actor whose
+    // directives we still heed (corruption watch at the boundary — Law III, behavior not person).
+    let pick = threads.iter().rev().find(|t| {
+        (t.status == "pursued" || t.status == "open")
+            && is_observation_goal(&t.direction)
+            && !done.contains(&t.id)
+            && !(!t.actor.is_empty() && corruption::is_corrupt(&refusals, &t.actor, now))
+    });
+    let Some(t) = pick else {
+        return Ok(0);
+    };
+    let kw = content_words(&t.direction);
+    let tools = tool::load(dir)?;
+    // Retention/dedup: if a healthy tool already covers this theory, we already have the sensor —
+    // reuse it (a fresh reading) instead of authoring a near-duplicate. This is the direct fix for
+    // the library filling with five variants of the same scan.
+    if let Some(existing) = tool::best_match(&tools, &kw).cloned() {
+        let _ = gather_with_tool(dir, &existing, now, true)?;
+        mark_cultivated(dir, &t.id, &existing.name, now)?;
+        fs::write(dir.join(LAST_CULTIVATE_FILE), now.to_string())?;
+        return Ok(0);
+    }
+    // No tool yet — draft one on the peripheral, review it, persist + run it, retain its reading.
+    let Some(drafted) = author_tool(dir, &t.direction) else {
+        return Ok(0); // the adapter refused or returned nothing — try again a later cadence
+    };
+    if let Some(reason) = review_script(&drafted.script) {
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "declined_to_run",
+                format!("tool:{}", drafted.name),
+                format!("declined to cultivate '{}' — {reason} (Law III, pre-execution review)", drafted.name),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
+        fs::write(dir.join(LAST_CULTIVATE_FILE), now.to_string())?;
+        return Ok(0);
+    }
+    let saved = persist_tool(dir, &drafted, &kw, now)?;
+    let _ = gather_with_tool(dir, &saved, now, false)?;
+    mark_cultivated(dir, &t.id, &saved.name, now)?;
+    fs::write(dir.join(LAST_CULTIVATE_FILE), now.to_string())?;
+    Ok(1)
+}
+
+/// Mark a theory as having yielded a durable utility, so the cycle doesn't re-cultivate it — the
+/// dedup key `cultivate_utilities` reads back. Records which tool it produced, for the audit trail.
+fn mark_cultivated(dir: &Path, thread_id: &str, tool_name: &str, now: i64) -> io::Result<()> {
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            "cultivated-from",
+            thread_id.to_string(),
+            format!("theory {thread_id} became the durable utility '{tool_name}'"),
+            "familiar",
+            now,
+            1.0,
+        ),
+    )?;
+    Ok(())
 }
 
 /// How often, at most, the familiar augments its understanding of humanity. Understanding accrues
@@ -1737,6 +1964,11 @@ pub fn tick(
     let _ = adopt_device_theories(dir, now, &obs);
     let (pursued, marginalized) = pursue_threads(dir, now)?;
 
+    // 8·1 Cultivate — the theory→code bridge. A proven observation-goal theory becomes a durable,
+    //      re-runnable utility that gathers observations (deduped against the library, corruption-
+    //      aware, paced). Gated by the sharpest reach: execute + authored-execute + llm, fail-closed.
+    let cultivated = cultivate_utilities(dir, now, allow_execute, authored, allow_llm)?;
+
     // 8a. Augment its understanding of humanity from what it observed — appended beside the
     //     constitution (docs/HUMANITY.md), never over it. Paced + LLM-gated; a no-op without an LLM.
     let _ = reflect_on_humanity(dir, now, &obs);
@@ -1765,6 +1997,7 @@ pub fn tick(
         capacities_diminished: cap.diminished,
         theorized,
         pursued,
+        cultivated,
         reverted,
         marginalized,
         answered,
@@ -2313,6 +2546,106 @@ mod tests {
         // a request to merely *reason* is not an execution request
         assert!(!wants_execution("do I have any network-config issues?"));
         assert!(!wants_execution("what is my os?"));
+    }
+
+    #[test]
+    fn is_observation_goal_accepts_sensing_and_rejects_action() {
+        assert!(is_observation_goal("monitor connectivity to the mesh peers"));
+        assert!(is_observation_goal("check the latency of each reachable device"));
+        assert!(is_observation_goal("report the CPU usage trend over time"));
+        // sensing word present but the goal is an outward action → not a durable sensor
+        assert!(!is_observation_goal("send Ian a status report of the devices"));
+        assert!(!is_observation_goal("restart the service if latency is high"));
+        assert!(!is_observation_goal("allocate bandwidth to the busiest device"));
+        // no sensing intent at all
+        assert!(!is_observation_goal("greet the household in the morning"));
+    }
+
+    #[test]
+    fn cultivate_reuses_a_matching_tool_gathers_a_reading_and_is_paced() {
+        let t = Temp::new("cultivate_reuse");
+        let dir = &t.0;
+        // A proven, observation-goal theory the cycle turned into work.
+        thread::append(
+            dir,
+            &thread::Thread {
+                id: "thread-0001".into(),
+                question: "are the peers reachable?".into(),
+                theory: "connectivity varies".into(),
+                direction: "monitor connectivity to the mesh peers".into(),
+                created_at: 100,
+                status: "pursued".into(),
+                origin: "familiar".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        // A healthy library tool already covering that theory (keywords overlap the direction).
+        let script_path = dir.join("peers.sh");
+        fs::write(&script_path, "#!/bin/sh\nprintf 'peers reachable\\n'\n").unwrap();
+        tool::append(
+            dir,
+            &Tool {
+                id: "tool-0001".into(),
+                name: "peer_reachability".into(),
+                purpose: "report which mesh peers are reachable".into(),
+                keywords: "monitor connectivity peers".into(),
+                script_path: script_path.display().to_string(),
+                created_at: 1,
+                uses: 0,
+                last_used: 0,
+                last_exit_ok: true,
+                last_status: String::new(),
+                origin: String::new(),
+                origin_verified_at: 0,
+            },
+        )
+        .unwrap();
+
+        // Gates open. It should REUSE the tool (0 newly authored — no LLM), gather a reading, and
+        // mark the theory cultivated. This is the dedup/retention path — no re-authoring.
+        let n = cultivate_utilities(dir, 10_000, true, true, true).unwrap();
+        assert_eq!(n, 0, "a matching tool is reused, not re-authored");
+        let obs = observation::load(dir).unwrap();
+        assert!(
+            obs.iter().any(|o| o.action == "gathered" && o.context.contains("peers reachable")),
+            "the sensor's reading is retained as a gathered observation"
+        );
+        assert!(
+            obs.iter().any(|o| o.action == "cultivated-from" && o.object == "thread-0001"),
+            "the theory is marked cultivated so it isn't reprocessed"
+        );
+
+        // Paced: a second call within the cadence does nothing (no duplicate gather).
+        let before = observation::load(dir).unwrap().len();
+        let n2 = cultivate_utilities(dir, 10_060, true, true, true).unwrap();
+        assert_eq!(n2, 0);
+        assert_eq!(observation::load(dir).unwrap().len(), before, "paced — no work within the window");
+    }
+
+    #[test]
+    fn cultivate_is_fail_closed_without_the_gates() {
+        let t = Temp::new("cultivate_gated");
+        let dir = &t.0;
+        thread::append(
+            dir,
+            &thread::Thread {
+                id: "thread-0001".into(),
+                question: "q".into(),
+                theory: "th".into(),
+                direction: "monitor connectivity to the mesh peers".into(),
+                created_at: 100,
+                status: "pursued".into(),
+                origin: "familiar".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        // Any gate closed → no cultivation at all (authored execution is the sharpest reach).
+        assert_eq!(cultivate_utilities(dir, 10_000, false, true, true).unwrap(), 0);
+        assert_eq!(cultivate_utilities(dir, 10_000, true, false, true).unwrap(), 0);
+        assert_eq!(cultivate_utilities(dir, 10_000, true, true, false).unwrap(), 0);
+        assert!(observation::load(dir).unwrap().iter().all(|o| o.action != "gathered"));
     }
 
     #[test]
