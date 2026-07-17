@@ -22,6 +22,7 @@ enum Fam {
     static let green = Color(hex: 0x3ddc97)
     static let greenSoft = Color(hex: 0x7ce0b4)
     static let amber = Color(hex: 0xffb15a)
+    static let red = Color(hex: 0xff6b6b)
     static let monoDim = Color(hex: 0x8ca5dc)        // rgba(140,165,220,*)
     static let labelBlue = Color(hex: 0x96b4ff)      // rgba(150,180,255,*)
 
@@ -917,7 +918,10 @@ private struct MeshScreen: View {
                                         Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
                                         Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
                                     }.frame(width: 180, alignment: .leading)
-                                    Text(m.kind == .self_node ? "peer" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
+                                    HStack(spacing: 5) {
+                                        Text(m.kind == .self_node ? "peer" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).lineLimit(1)
+                                        if let t = m.trust, t != "trusted", !t.isEmpty { trustTag(t) }
+                                    }.frame(width: 130, alignment: .leading)
                                     Group {
                                         if m.ai == true { aiBadge } else { Text("—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.4)) }
                                     }.frame(width: 44, alignment: .leading)
@@ -979,6 +983,14 @@ private struct MeshScreen: View {
         Text("AI").font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.iceStat)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Capsule().fill(Fam.iceStat.opacity(0.15)).overlay(Capsule().stroke(Fam.iceStat.opacity(0.5), lineWidth: 1)))
+    }
+    // A slipped-trust tier badge (throttled/marginalized/severed) — the monitor→throttle→sever ladder
+    // made visible. Amber for the reversible tiers, red for a severed peer awaiting a revoke decision.
+    private func trustTag(_ t: String) -> some View {
+        let c = t == "severed" ? Fam.red : Fam.amber
+        return Text(t.uppercased()).font(Fam.mono(8)).tracking(0.5).foregroundStyle(c)
+            .padding(.horizontal, 3).padding(.vertical, 1)
+            .overlay(RoundedRectangle(cornerRadius: 2).stroke(c.opacity(0.5), lineWidth: 0.5))
     }
     private func serviceIcon(_ kind: String) -> String {
         let k = kind.lowercased()

@@ -69,6 +69,11 @@ pub struct Member {
     /// iPad's on-device Apple Intelligence). Badged in the roster + mesh map.
     #[serde(default)]
     pub ai: bool,
+    /// The graduated trust the familiar holds this member at — "trusted" (normal), "throttled"
+    /// (directives paused), "marginalized" (content ignored), or "severed" (briefs dropped, revoke
+    /// recommended). Reversible; derived from the corruption-awareness score. See `corruption::Trust`.
+    #[serde(default)]
+    pub trust: String,
 }
 
 /// A device counts as present if it was seen within this window. Generous, because device agents
@@ -162,11 +167,15 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             addr: "localhost".into(),
             relationship: "self".into(),
             ai: self_ai,
+            trust: "trusted".into(),
         });
     }
 
     let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
     let reports = device_reports(&obs);
+    // The graduated trust tier per actor (monitor → throttle → marginalize → sever), from the shared
+    // refusal log. Surfaced so the roster/map can badge a peer whose standing has slipped.
+    let refusals = familiar_kernel::corruption::load(dir).unwrap_or_default();
     // Nodes with direct local / context AI: anyone who has posted a `theorizes` observation reasoned
     // locally (the iPad's on-device Apple Intelligence, a headless peer with an LLM adapter, …).
     let ai_nodes: std::collections::HashSet<String> = obs
@@ -204,6 +213,9 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             format!("{v}{} tool(s), {} pattern(s)", p.tools_offered, p.patterns_offered)
         };
         let has_ai = ai_node(&p.node_id, &actor);
+        let trust = familiar_kernel::corruption::trust(&refusals, &format!("mesh:{}", p.node_id), now)
+            .label()
+            .to_string();
         out.push(Member {
             node_id: p.node_id.clone(),
             label,
@@ -221,6 +233,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             addr: ip,
             relationship,
             ai: has_ai,
+            trust,
         });
     }
 
@@ -257,6 +270,9 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             addr: String::new(),
             relationship,
             ai: ai_node(node, actor),
+            trust: familiar_kernel::corruption::trust(&refusals, actor, now)
+                .label()
+                .to_string(),
         });
     }
 

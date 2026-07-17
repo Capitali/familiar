@@ -584,6 +584,7 @@ mod tests {
             addr: String::new(),
             relationship: String::new(),
             ai: false,
+            trust: "trusted".into(),
         }
     }
 

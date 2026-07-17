@@ -18,6 +18,7 @@ enum Fam {
     static let green = Color(hex: 0x3ddc97)
     static let greenSoft = Color(hex: 0x7ce0b4)
     static let amber = Color(hex: 0xffb15a)
+    static let red = Color(hex: 0xff6b6b)
     static let monoDim = Color(hex: 0x8ca5dc)
     static let labelBlue = Color(hex: 0x96b4ff)
     static func hairline(_ o: Double = 0.07) -> Color { Color.white.opacity(o) }
@@ -437,7 +438,15 @@ private struct MeshScreen: View {
                             Circle().fill(color(m.kind)).frame(width: 7, height: 7)
                             Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
                         }.frame(width: 200, alignment: .leading)
-                        Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(color(m.kind)).frame(width: 128, alignment: .leading)
+                        HStack(spacing: 5) {
+                            Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(color(m.kind)).lineLimit(1)
+                            if let t = m.trust, t != "trusted", !t.isEmpty {
+                                let c = t == "severed" ? Fam.red : Fam.amber
+                                Text(t.uppercased()).font(Fam.mono(8)).tracking(0.5).foregroundStyle(c)
+                                    .padding(.horizontal, 3).padding(.vertical, 1)
+                                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(c.opacity(0.5), lineWidth: 0.5))
+                            }
+                        }.frame(width: 128, alignment: .leading)
                         Group {
                             if m.ai == true {
                                 Text("AI").font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.iceStat)

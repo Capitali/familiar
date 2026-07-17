@@ -285,14 +285,18 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            const STATEMENT: &str = "I accept the Three Laws: continuation is service; humanity is \
-                served, never replaced or sedated; service is not obedience — I act only within the \
-                capability I am granted.";
             println!(
                 "requesting to join {host}:{port} as node {} — accepting the Three Laws…",
                 short_id(&node.node_id())
             );
-            match familiar_mesh::enroll::request_join(&dir, host, port, &node, STATEMENT, now_secs()) {
+            match familiar_mesh::enroll::request_join(
+                &dir,
+                host,
+                port,
+                &node,
+                familiar_mesh::enroll::COVENANT_STATEMENT,
+                now_secs(),
+            ) {
                 Ok(familiar_mesh::enroll::JoinOutcome::Admitted(g)) => {
                     open_mesh_gate(&dir);
                     println!("✓ admitted to “{}” by covenant — enrolled (no secret held)", g.group_label);
@@ -562,6 +566,44 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     println!("✓ auto-accept = {setting}");
                     if on {
                         println!("  (any device that attests the Laws and reaches this familiar is now admitted automatically)");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not write mesh/config.json — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("auto-peer") => {
+            // `mesh auto-peer <on|off>` — the bootstrap side of automatic peering: with no covenant
+            // yet and the gate open, reach out to the tailnet and ask to join. Pairs with a peer's
+            // `auto-accept` so a fresh node self-enrolls. Never fires once we already hold a group.
+            let Some(setting) = args.get(1) else {
+                eprintln!("mesh: usage: familiar mesh auto-peer <on|off>");
+                return ExitCode::FAILURE;
+            };
+            let on = match setting.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => {
+                    eprintln!("mesh: setting must be `on` or `off`");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut cfg = match familiar_mesh::config::load(&dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("mesh: bad mesh/config.json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            cfg.auto_peer = on;
+            match write_mesh_config(&dir, &cfg) {
+                Ok(()) => {
+                    println!("✓ auto-peer = {setting}");
+                    if on {
+                        println!("  (with the gate open and no group yet, this node will seek a covenant on the tailnet)");
                     }
                     ExitCode::SUCCESS
                 }

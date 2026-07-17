@@ -314,7 +314,33 @@ fn merge_one(
 ) {
     let node_id = &brief.body.node.node_id;
 
+    // --- Corruption-awareness, at the covenant scale. A member that repeatedly tries to breach the
+    // constitution earns a graduated, reversible loss of standing (monitor → throttle → marginalize
+    // → sever). We compute its tier once and let each block below consult it: throttled peers lose
+    // their *directives*, marginalized peers lose their *content* too, a severed peer is dropped
+    // wholesale and raised to the human for a revoke decision. All reversible as refusals age out. ---
+    let tier = {
+        let refusals = corruption::load(dir).unwrap_or_default();
+        corruption::trust(&refusals, &format!("mesh:{node_id}"), now)
+    };
+    if tier == corruption::Trust::Severed {
+        // Still note the peer exists (presence is knowledge, not influence), then stop.
+        let ctx = format!("peer {} — SEVERED (repeated covenant breaches)", brief.body.node.label);
+        if record_mesh_presence(dir, node_id, &ctx, now) {
+            report.observations_ingested += 1;
+        }
+        if recommend_revoke(dir, node_id, now) {
+            report.observations_ingested += 1;
+        }
+        return;
+    }
+
     // --- Tools: auto-merge into the library with provenance (use is still fully gated). ---
+    if !tier.shapes_worldview() {
+        // A marginalized peer's offerings no longer shape us — skip tools/patterns/observations.
+        record_marginalized(dir, node_id, &brief.body.node.label, now, report);
+        return;
+    }
     let known = known_tool_shas(dir);
     let mut seq = tool::load(dir).map(|t| t.len()).unwrap_or(0);
     for m in &brief.body.capability.tools {
@@ -434,6 +460,7 @@ fn merge_one(
     // select), and the outcome replicates home via the shared observation record. Deduped by
     // (origin, direction) against threads we already hold. We lend our execution to a peer's ideas. ---
     if !brief.body.knowledge.theory_requests.is_empty()
+        && tier.heeds_directives()
         && boundary::load(dir).map(|b| b.allow_execute).unwrap_or(false)
     {
         let existing = thread::load(dir).unwrap_or_default();
@@ -486,6 +513,7 @@ fn merge_one(
     // loop (remote approve → the peer applies it) is the next step. Deduped by (origin,kind,ref).
     // We never proxy gate-opening — a boundary is opened only by a human at the node it governs. ---
     if !brief.body.authority_requests.is_empty()
+        && tier.heeds_directives()
         && !config::load(dir).map(|c| c.headless).unwrap_or(false)
     {
         let seen: std::collections::HashSet<String> = observation::load(dir)
@@ -516,10 +544,10 @@ fn merge_one(
     // group-verified brief (authenticated as "this member asserts a human decided X"); we trust a
     // member under the covenant, and corruption-awareness marginalizes one that abuses it. Applied
     // once (dedup by observing our own audit trail). This includes the sole boundary-write path:
-    // opening a gate WE requested, only on an approved human grant — never the autonomous cycle. ---
-    {
+    // opening a gate WE requested, only on an approved human grant — never the autonomous cycle. A
+    // throttled-or-worse peer's grants do not act on us (`heeds_directives` — behavior, not person). ---
+    if tier.heeds_directives() {
         let me = &cred.membership.node_id;
-        let refusals = corruption::load(dir).unwrap_or_default();
         let applied: std::collections::HashSet<String> = observation::load(dir)
             .unwrap_or_default()
             .iter()
@@ -529,10 +557,6 @@ fn merge_one(
         for grant in &brief.body.authority_grants {
             if &grant.target != me {
                 continue; // not for us
-            }
-            // A grant from a flagged corruptor is ignored (Law III) — behavior, not person.
-            if corruption::is_corrupt(&refusals, &format!("mesh:{node_id}"), now) {
-                continue;
             }
             let marker = format!("{}:{}:{}", grant.kind, grant.ref_id, grant.approved);
             if applied.contains(&marker) {
@@ -632,6 +656,42 @@ fn record_mesh_presence(dir: &Path, node_id: &str, ctx: &str, now: i64) -> bool 
         return false;
     }
     record_obs(dir, &actor, "reports", "presence", ctx, now);
+    true
+}
+
+/// A marginalized peer contributes only its presence — note it (so the roster still shows the peer
+/// and its tier), skip everything it offers. Returns how many observations were newly recorded.
+fn record_marginalized(dir: &Path, node_id: &str, label: &str, now: i64, report: &mut MergeReport) {
+    let ctx = format!("peer {label} — MARGINALIZED (repeated covenant breaches; content ignored)");
+    if record_mesh_presence(dir, node_id, &ctx, now) {
+        report.observations_ingested += 1;
+    }
+}
+
+/// Raise a **revoke recommendation** for a severed peer to the human — permanent expulsion
+/// (`mesh/revoked.json`) is theirs to decide, the mirror of admitting a member. Deduped: recorded
+/// once while the peer stays severed (a later grant/approval or the tier relaxing lets it recur).
+/// Returns true if a new recommendation was recorded.
+fn recommend_revoke(dir: &Path, node_id: &str, now: i64) -> bool {
+    let object = format!("peer:{node_id}");
+    let already = observation::load(dir)
+        .unwrap_or_default()
+        .iter()
+        .any(|o| o.action == "recommend-revoke" && o.object == object);
+    if already {
+        return false;
+    }
+    record_obs(
+        dir,
+        "familiar",
+        "recommend-revoke",
+        &object,
+        &format!(
+            "peer {} crossed the sever line (repeated covenant breaches) — recommend revoking it",
+            short(node_id)
+        ),
+        now,
+    );
     true
 }
 
@@ -1246,5 +1306,66 @@ mod tests {
         assert_eq!(r.tools_merged, 0);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&odir);
+    }
+
+    #[test]
+    fn a_marginalized_peer_offers_nothing_and_a_severed_one_is_dropped() {
+        use familiar_kernel::corruption;
+        use familiar_kernel::guard::Reason;
+
+        let dir_b = tmp("marginal_recv");
+        let b_node = NodeKey::load_or_mint(&dir_b, "beta").unwrap();
+        let cred = group::create_group(&dir_b, &b_node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir_b);
+
+        // A covenanted peer A — a legitimate member whose behavior has slipped.
+        let dir_a = tmp("marginal_peer");
+        let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
+        let cred_a =
+            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let actor = format!("mesh:{}", a_node.node_id());
+
+        // Marginalize A (5 breaches within the window) → its tool + pattern must NOT merge.
+        for i in 0..corruption::MARGINALIZE_THRESHOLD as i64 {
+            corruption::record(&dir_b, &actor, Reason::ViolatesConstitutionalBoundary, NOW - i).unwrap();
+        }
+        let tool_body = b"#!/bin/sh\necho soc\n";
+        let brief = peer_brief_with_tool(&a_node, &cred_a, tool_body);
+        fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
+        // Prefetch the tool body so the merge *could* install it if not for the tier gate.
+        fs::create_dir_all(dir_b.join(INBOX_TOOLS_DIR)).unwrap();
+        fs::write(inbox_tool_path(&dir_b, &sha256_hex(tool_body)), tool_body).unwrap();
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+
+        let r = federate(&dir_b, NOW + 1);
+        assert_eq!(r.tools_merged, 0, "a marginalized peer's tool does not merge");
+        assert_eq!(r.patterns_merged, 0, "nor its patterns");
+        assert!(
+            observation::load(&dir_b).unwrap().iter().any(|o| o.context.contains("MARGINALIZED")),
+            "the peer is still noted, badged marginalized"
+        );
+
+        // Push A over the sever line → its next brief is dropped and a revoke recommendation is raised.
+        for i in 0..(corruption::SEVER_THRESHOLD - corruption::MARGINALIZE_THRESHOLD) as i64 {
+            corruption::record(&dir_b, &actor, Reason::ViolatesConstitutionalBoundary, NOW - 100 - i).unwrap();
+        }
+        fs::write(
+            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
+        federate(&dir_b, NOW + 2);
+        let obs = observation::load(&dir_b).unwrap();
+        assert!(
+            obs.iter().any(|o| o.action == "recommend-revoke"),
+            "a severed peer is raised to the human for a revoke decision"
+        );
+
+        let _ = fs::remove_dir_all(&dir_b);
+        let _ = fs::remove_dir_all(&dir_a);
     }
 }

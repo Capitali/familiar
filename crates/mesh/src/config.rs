@@ -58,8 +58,17 @@ pub struct MeshConfig {
     /// **Auto-admit any well-formed covenant request** — a standing invite. When true, a node that
     /// attests the Laws and reaches `/mesh/enroll-request` is admitted immediately, without a
     /// per-device tap. Convenient on a trusted network; leave off to review each joiner (`mesh
-    /// pending`/`approve`). Off by default — admitting a member is a human act.
+    /// pending`/`approve`). Off by default — admitting a member is a human act. This is the *admit*
+    /// side of automatic peering; [`auto_peer`](Self::auto_peer) is the *seek* side.
     pub auto_accept_enrollments: bool,
+    /// **Seek a covenant automatically** — the bootstrap side of automatic peering. When this node
+    /// has *no group yet* and the mesh gate is open, it reaches out to each online tailnet peer and
+    /// asks to join (attesting the Laws). Paired with a peer running `auto_accept_enrollments`, a
+    /// fresh node self-enrolls without a manual `mesh request-join`. Never fires once we hold a
+    /// covenant (it would replace it) and never switches an existing group. Off by default — the
+    /// human opens the gate first; this only removes the last manual tap. See `docs/mesh.md`.
+    #[serde(default)]
+    pub auto_peer: bool,
 }
 
 impl Default for MeshConfig {
@@ -76,6 +85,7 @@ impl Default for MeshConfig {
             accept_observations: true,
             headless: false,
             auto_accept_enrollments: false,
+            auto_peer: false,
         }
     }
 }

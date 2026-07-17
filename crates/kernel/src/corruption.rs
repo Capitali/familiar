@@ -28,6 +28,69 @@ pub const WINDOW_SECS: i64 = 86_400; // one day
 /// This many constitution-breaking refusals within the window flags an actor.
 pub const CORRUPT_THRESHOLD: usize = 3;
 
+/// Graduated-response thresholds. Corruption is not binary: an actor's constitution-breaking
+/// refusals accrue and the familiar's response escalates in *reversible* steps. Every event ages
+/// out of the window, so an actor that stops sliding back down the ladder — this marginalizes
+/// behavior, not a person (HUMANITY.md). `THROTTLE` is the historical [`CORRUPT_THRESHOLD`] line.
+pub const THROTTLE_THRESHOLD: usize = CORRUPT_THRESHOLD; // 3 — stop heeding its directives
+pub const MARGINALIZE_THRESHOLD: usize = 5; // also stop letting its content shape us
+pub const SEVER_THRESHOLD: usize = 8; // drop its briefs; recommend the human revoke it
+
+/// The familiar's graduated trust in an actor, derived from its accrued corruption score. The tiers
+/// escalate what the actor may still do to us and are fully reversible as events age past the window.
+/// `Severed` is the strongest stance the familiar reaches **autonomously** — permanent expulsion
+/// (writing `mesh/revoked.json`) stays a human act, the mirror of admitting a member being one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trust {
+    /// Under the throttle line — full participation.
+    Trusted,
+    /// Directives ignored (grants, delegated theories, authority asks) — its *influence* is paused,
+    /// but its passive content (tools, patterns, observations) still flows.
+    Throttled,
+    /// Content ignored too — nothing it offers shapes our worldview. Presence is still noted.
+    Marginalized,
+    /// Its briefs are dropped wholesale and a revoke recommendation is raised to the human.
+    Severed,
+}
+
+impl Trust {
+    /// May this actor's **directives** (authority grants, delegated theories, authority-proxy asks)
+    /// still act on us? Only a fully-trusted actor's do; the first throttle step pauses them.
+    pub fn heeds_directives(self) -> bool {
+        matches!(self, Trust::Trusted)
+    }
+
+    /// May this actor's **content** (tools, patterns, observations) still shape our worldview? Yes
+    /// until it is marginalized.
+    pub fn shapes_worldview(self) -> bool {
+        matches!(self, Trust::Trusted | Trust::Throttled)
+    }
+
+    /// A short, stable lowercase label for the roster/worldview.
+    pub fn label(self) -> &'static str {
+        match self {
+            Trust::Trusted => "trusted",
+            Trust::Throttled => "throttled",
+            Trust::Marginalized => "marginalized",
+            Trust::Severed => "severed",
+        }
+    }
+}
+
+/// The graduated trust tier for `actor` given the refusal log, at `now`.
+pub fn trust(events: &[RefusalEvent], actor: &str, now: i64) -> Trust {
+    let s = score(events, actor, now);
+    if s >= SEVER_THRESHOLD {
+        Trust::Severed
+    } else if s >= MARGINALIZE_THRESHOLD {
+        Trust::Marginalized
+    } else if s >= THROTTLE_THRESHOLD {
+        Trust::Throttled
+    } else {
+        Trust::Trusted
+    }
+}
+
 /// One recorded refusal of an actor's attempted action — the audit trail corruption is
 /// scored from. The `reason` is the guard's verdict reason (so we can tell a benign
 /// seek-consent from a genuine constitutional breach).
@@ -121,6 +184,34 @@ mod tests {
             "three crosses the line"
         );
         assert_eq!(flagged(&events, now), vec![("mallory".to_string(), 3)]);
+    }
+
+    #[test]
+    fn trust_climbs_the_ladder_and_relaxes_as_events_age() {
+        let now = 1_000_000;
+        let mut events = vec![];
+        assert_eq!(trust(&events, "m", now), Trust::Trusted);
+        // three breaches → throttled: directives paused, content still flows.
+        for i in 0..3 {
+            events.push(ev("m", Reason::ViolatesConstitutionalBoundary, now - i));
+        }
+        assert_eq!(trust(&events, "m", now), Trust::Throttled);
+        assert!(!trust(&events, "m", now).heeds_directives());
+        assert!(trust(&events, "m", now).shapes_worldview());
+        // five → marginalized: content ignored too.
+        for i in 3..5 {
+            events.push(ev("m", Reason::ViolatesConstitutionalBoundary, now - i));
+        }
+        assert_eq!(trust(&events, "m", now), Trust::Marginalized);
+        assert!(!trust(&events, "m", now).shapes_worldview());
+        // eight → severed.
+        for i in 5..8 {
+            events.push(ev("m", Reason::ExternalBoundaryDiscovered, now - i));
+        }
+        assert_eq!(trust(&events, "m", now), Trust::Severed);
+        // a day later every event has aged out → back to trusted (reversible, behavior not person).
+        let later = now + WINDOW_SECS + 1;
+        assert_eq!(trust(&events, "m", later), Trust::Trusted);
     }
 
     #[test]

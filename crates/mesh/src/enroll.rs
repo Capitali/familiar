@@ -31,6 +31,12 @@ use std::time::Duration;
 /// The version of the Laws covenant a node attests to. Bumped if the covenant's terms change.
 pub const LAWS_VERSION: u32 = 1;
 
+/// The attestation a node makes when it asks to join a covenant — the Three Laws, in the node's own
+/// voice. Shared so the CLI `request-join` and the daemon's automatic peering attest identically.
+pub const COVENANT_STATEMENT: &str = "I accept the Three Laws: continuation is service; humanity is \
+    served, never replaced or sedated; service is not obedience — I act only within the capability I \
+    am granted.";
+
 const PENDING_DIR: &str = "mesh/pending";
 const GRANTED_DIR: &str = "mesh/granted";
 const INVITE_FILE: &str = "mesh/invite_until";

@@ -183,7 +183,19 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                     s.abort();
                 }
                 bound_port = 0;
-                let _ = write_status(&dir, "mesh waiting — no group enrolled yet");
+                // Automatic peering (bootstrap): the gate is open but we hold no covenant. If the
+                // human turned on auto_peer, reach out to the tailnet and ask to be admitted; the
+                // next loop iteration then finds a group and gossips. Otherwise idle for the human.
+                if cfg.auto_peer && auto_join_round(&dir, &cfg).await > 0 {
+                    let _ = write_status(&dir, "✓ auto-peer — admitted by covenant, joining the mesh");
+                    continue; // skip the sleep so we start serving/gossiping immediately
+                }
+                let msg = if cfg.auto_peer {
+                    "mesh auto-peer — seeking a covenant on the tailnet…"
+                } else {
+                    "mesh waiting — no group enrolled yet"
+                };
+                let _ = write_status(&dir, msg);
                 sleep_or_stop(&stop, interval).await;
                 continue;
             }
@@ -497,6 +509,24 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     };
     let gate = v.get("gate").and_then(|s| s.as_str()).unwrap_or("");
     let open = v.get("open").and_then(|b| b.as_bool()).unwrap_or(false);
+    // Automatic-peering switches live in mesh/config.json, not the boundary — but the console reaches
+    // them through the same gate control. Intercept them here (a local human write, like the gates).
+    if gate == "auto_peer" || gate == "auto_accept" {
+        let mut cfg = config::load(dir).unwrap_or_default();
+        match gate {
+            "auto_peer" => cfg.auto_peer = open,
+            "auto_accept" => cfg.auto_accept_enrollments = open,
+            _ => unreachable!(),
+        }
+        return match serde_json::to_vec_pretty(&cfg) {
+            Ok(json) => {
+                let _ = std::fs::create_dir_all(dir.join("mesh"));
+                let _ = std::fs::write(dir.join(config::CONFIG_FILE), json);
+                text(StatusCode::OK, "ok")
+            }
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        };
+    }
     let mut b = familiar_kernel::boundary::load(dir).unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
     match gate {
         "allow_llm" => b.allow_llm = open,
@@ -620,6 +650,47 @@ async fn gossip_round(dir: &Path, cfg: &MeshConfig, cred: &GroupCredential) -> u
         }
     }
     reached
+}
+
+/// Automatic-peering bootstrap. With **no covenant yet** and `auto_peer` on, ask each online tailnet
+/// peer to admit us by covenant (attesting the Three Laws). The first peer that admits us (either it
+/// runs `auto_accept_enrollments`, or its human approves) hands us a group credential; we stop and
+/// the supervisor's next iteration proceeds to gossip. Best-effort — every failure is swallowed, and
+/// a peer that only files us as *pending* simply leaves us waiting for the next round. Returns the
+/// number of covenants gained (0 or 1). Never called once we hold a group (the supervisor gates it),
+/// so it can never replace an existing covenant or switch groups.
+async fn auto_join_round(dir: &Path, cfg: &MeshConfig) -> usize {
+    let mut hosts: Vec<String> = enumerate_peers()
+        .into_iter()
+        .filter(|p| p.online)
+        .map(|p| p.ip)
+        .collect();
+    for sp in &cfg.static_peers {
+        // A static peer may carry an explicit `:port`; the enroll client takes host + port apart.
+        hosts.push(sp.split(':').next().unwrap_or(sp).to_string());
+    }
+    hosts.sort();
+    hosts.dedup();
+    let port = cfg.gossip_port;
+    for host in hosts {
+        let dir2 = dir.to_path_buf();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let node = crate::node::NodeKey::load_or_mint(&dir2, "familiar")?;
+            crate::enroll::request_join(
+                &dir2,
+                &host,
+                port,
+                &node,
+                crate::enroll::COVENANT_STATEMENT,
+                now_secs(),
+            )
+        })
+        .await;
+        if let Ok(Ok(crate::enroll::JoinOutcome::Admitted(_))) = outcome {
+            return 1; // we now hold a covenant — let the supervisor pick it up and gossip
+        }
+    }
+    0
 }
 
 /// POST our brief to one peer, verify + stash its reply, and pre-fetch any tool bodies we

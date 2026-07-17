@@ -35,6 +35,9 @@ public struct Member: Codable, Equatable, Identifiable {
     public var relationship: String?
     /// This node has direct local / context AI access (badged in the roster + mesh map).
     public var ai: Bool?
+    /// Graduated trust tier: "trusted" (normal), "throttled", "marginalized", or "severed".
+    /// Absent/"trusted" ⇒ full standing; anything else is badged on the roster + map.
+    public var trust: String?
     public var id: String { node_id }
 }
 
