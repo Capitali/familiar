@@ -384,30 +384,80 @@ private struct TheoriesScreen: View {
 
 private struct MeshScreen: View {
     @EnvironmentObject var model: MacModel
+    @State private var tab: MeshTab = .members
+    private enum MeshTab: String, CaseIterable { case members = "PEERS · AGENTS · DEVICES"; case services = "NETWORKS · SERVICES · STREAMS" }
     var members: [Member] { model.worldview?.members ?? [] }
+    var services: [ServiceView] { model.worldview?.services ?? [] }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             ScreenHeader(number: "04 · THE MESH", title: "Peers & agents",
                          subtitle: "Everything under the Three Laws — one collective, equals. Each node counted once, at its layer.")
-            Panel { MeshConstellation(members: members).frame(height: 340).frame(maxWidth: .infinity) }
-            Panel {
-                VStack(alignment: .leading, spacing: 8) {
-                    MonoLabel("ROSTER")
+            HStack(spacing: 8) {
+                ForEach(MeshTab.allCases, id: \.self) { t in
+                    Button { tab = t } label: {
+                        Text(t.rawValue).font(Fam.mono(9.5)).tracking(1)
+                            .foregroundStyle(tab == t ? Fam.ink : Fam.monoDim.opacity(0.55))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(tab == t ? Fam.blueBright.opacity(0.18) : Color.white.opacity(0.03))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(tab == t ? Fam.blueBright.opacity(0.4) : Fam.hairline(0.06), lineWidth: 1)))
+                    }.buttonStyle(.plain)
+                }
+            }
+            if tab == .members { membersTab } else { servicesTab }
+        }
+    }
+    @ViewBuilder private var membersTab: some View {
+        Panel { MeshConstellation(members: members).frame(height: 340).frame(maxWidth: .infinity) }
+        Panel {
+            VStack(alignment: .leading, spacing: 8) {
+                MonoLabel("ROSTER")
+                HStack(spacing: 0) {
+                    rcol("MEMBER", 200); rcol("RELATIONSHIP", 128); rcol("AI", 44); rcol("OS", 84); rcol("VERSION", 74); rcol("STATUS", 72); rcol("JOINED", 90)
+                }
+                Divider().overlay(Fam.hairline(0.08))
+                ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
                     HStack(spacing: 0) {
-                        rcol("MEMBER", 210); rcol("RELATIONSHIP", 130); rcol("OS", 84); rcol("VERSION", 74); rcol("STATUS", 72); rcol("JOINED", 90)
-                    }
+                        HStack(spacing: 8) {
+                            Circle().fill(color(m.kind)).frame(width: 7, height: 7)
+                            Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        }.frame(width: 200, alignment: .leading)
+                        Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(color(m.kind)).frame(width: 128, alignment: .leading)
+                        Group {
+                            if m.ai == true {
+                                Text("AI").font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.iceStat)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Capsule().fill(Fam.iceStat.opacity(0.15)).overlay(Capsule().stroke(Fam.iceStat.opacity(0.5), lineWidth: 1)))
+                            } else { Text("—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.4)) }
+                        }.frame(width: 44, alignment: .leading)
+                        Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
+                        Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 74, alignment: .leading)
+                        Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6)).frame(width: 72, alignment: .leading)
+                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 90, alignment: .leading)
+                        Spacer(minLength: 0)
+                    }.padding(.vertical, 9)
+                    Divider().overlay(Fam.hairline(0.045))
+                }
+            }
+        }
+    }
+    @ViewBuilder private var servicesTab: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 8) {
+                MonoLabel("NETWORKS · SERVICES · DATA STREAMS")
+                Text("Discovered on the mesh's networks via Bonjour and shared by peers — the fabric the collective lives on.")
+                    .font(.system(size: 12)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.bottom, 2)
+                if services.isEmpty {
+                    Text("Nothing discovered yet. Peers survey their networks and share what they find here.")
+                        .font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 12)
+                } else {
+                    HStack(spacing: 0) { rcol("SERVICE", 260); rcol("KIND", 150); rcol("DISCOVERED BY", 170); rcol("SEEN", 90) }
                     Divider().overlay(Fam.hairline(0.08))
-                    ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
+                    ForEach(services.sorted { $0.kind < $1.kind }) { s in
                         HStack(spacing: 0) {
-                            HStack(spacing: 8) {
-                                Circle().fill(color(m.kind)).frame(width: 7, height: 7)
-                                Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                            }.frame(width: 210, alignment: .leading)
-                            Text(m.relationship ?? kindLabel(m.kind)).font(Fam.mono(11)).foregroundStyle(color(m.kind)).frame(width: 130, alignment: .leading)
-                            Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
-                            Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 74, alignment: .leading)
-                            Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6)).frame(width: 72, alignment: .leading)
-                            Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 90, alignment: .leading)
+                            Text(s.name.isEmpty ? s.kind : s.name).font(.system(size: 13, weight: .medium)).lineLimit(1).frame(width: 260, alignment: .leading)
+                            Text(s.kind).font(Fam.mono(11)).foregroundStyle(Fam.amber).frame(width: 150, alignment: .leading)
+                            Text(s.seen_by).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 170, alignment: .leading)
+                            Text(s.last_seen > 0 ? GlassTime.ago(s.last_seen) : "—").font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: 90, alignment: .leading)
                             Spacer(minLength: 0)
                         }.padding(.vertical, 9)
                         Divider().overlay(Fam.hairline(0.045))

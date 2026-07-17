@@ -120,6 +120,21 @@ pub struct Worldview {
     /// Every mesh participant classified into one layer (self / gossip peer / device peer / device
     /// agent), with os + join date — the roster the iPad renders as a table and a graph.
     pub members: Vec<crate::members::Member>,
+    /// Networks, services, and data streams the mesh has discovered (Bonjour/reach) — the second
+    /// roster tab. Aggregated from `discovered service:*` observations already crossing the mesh.
+    pub services: Vec<ServiceView>,
+}
+
+/// A discovered network service / data stream — from a peer's Bonjour survey, shared over the mesh.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceView {
+    /// The service kind ("airplay", "ssh", "mqtt", …).
+    pub kind: String,
+    /// The advertised instance name.
+    pub name: String,
+    /// Which node saw it (actor).
+    pub seen_by: String,
+    pub last_seen: i64,
 }
 
 /// How many recent observations the snapshot carries. A console shows a live tail, not the archive.
@@ -282,7 +297,37 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         uptime_secs,
         humanity,
         members: crate::members::classify(dir, now),
+        services: discovered_services(&obs),
     })
+}
+
+/// Aggregate discovered network services from the observation log (a peer's Bonjour survey posts
+/// `<actor> discovered service:<kind>` with the instance name in context). Deduped by (kind, name),
+/// newest first, capped.
+fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec<ServiceView> {
+    use std::collections::HashMap;
+    let mut latest: HashMap<String, ServiceView> = HashMap::new();
+    for o in obs {
+        let Some(kind) = o.object.strip_prefix("service:") else { continue };
+        if o.action != "discovered" {
+            continue;
+        }
+        let key = format!("{kind}\u{1}{}", o.context);
+        let e = latest.entry(key).or_insert(ServiceView {
+            kind: kind.to_string(),
+            name: o.context.clone(),
+            seen_by: o.actor.clone(),
+            last_seen: 0,
+        });
+        if o.ts >= e.last_seen {
+            e.seen_by = o.actor.clone();
+            e.last_seen = o.ts;
+        }
+    }
+    let mut v: Vec<ServiceView> = latest.into_values().collect();
+    v.sort_by_key(|s| std::cmp::Reverse(s.last_seen));
+    v.truncate(80);
+    v
 }
 
 #[cfg(test)]

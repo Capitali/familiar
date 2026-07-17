@@ -61,6 +61,11 @@ pub struct Member {
     /// "sensor (direct)", "sensor (via phone)". Human-readable for the roster.
     #[serde(default)]
     pub relationship: String,
+    /// This node has direct local / context-specific AI access (can reason locally): the self node
+    /// with `allow_llm`, or a device that has reasoned (posted a `theorizes` observation — e.g. the
+    /// iPad's on-device Apple Intelligence). Badged in the roster + mesh map.
+    #[serde(default)]
+    pub ai: bool,
 }
 
 /// A device counts as present if it was seen within this window. Generous, because device agents
@@ -136,6 +141,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let last = obs.iter().map(|o| o.ts).max().unwrap_or(now);
         let tools = familiar_kernel::tool::load(dir).map(|t| t.len()).unwrap_or(0);
         let patterns = familiar_kernel::pattern_memory::load(dir).map(|p| p.len()).unwrap_or(0);
+        let self_ai = familiar_kernel::boundary::load(dir).map(|b| b.allow_llm).unwrap_or(false);
         out.push(Member {
             node_id: cred.membership.node_id.clone(),
             label,
@@ -151,11 +157,20 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             patterns,
             addr: "localhost".into(),
             relationship: "self".into(),
+            ai: self_ai,
         });
     }
 
     let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
     let reports = device_reports(&obs);
+    // Nodes with direct local / context AI: anyone who has posted a `theorizes` observation reasoned
+    // locally (the iPad's on-device Apple Intelligence, a headless peer with an LLM adapter, …).
+    let ai_nodes: std::collections::HashSet<String> = obs
+        .iter()
+        .filter(|o| o.action == "theorizes")
+        .map(|o| o.actor.clone())
+        .collect();
+    let ai_node = |node_id: &str, actor: &str| ai_nodes.contains(actor) || ai_nodes.contains(node_id);
     let peers: Vec<PeerRecord> = transport::load_peers(dir);
     let peer_ids: std::collections::HashSet<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
     // Best-probable names for peers on the tailnet: their Tailscale hostname, keyed by IP.
@@ -184,6 +199,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             let v = if p.familiar_version.is_empty() { String::new() } else { format!("v{} · ", p.familiar_version) };
             format!("{v}{} tool(s), {} pattern(s)", p.tools_offered, p.patterns_offered)
         };
+        let has_ai = ai_node(&p.node_id, &actor);
         out.push(Member {
             node_id: p.node_id.clone(),
             label,
@@ -199,6 +215,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             patterns: p.patterns_offered,
             addr: ip,
             relationship,
+            ai: has_ai,
         });
     }
 
@@ -233,6 +250,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             patterns: 0,
             addr: String::new(),
             relationship,
+            ai: ai_node(node, actor),
         });
     }
 

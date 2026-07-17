@@ -32,7 +32,19 @@ public struct Member: Codable, Equatable, Identifiable {
     public var patterns: Int?
     public var addr: String?
     public var relationship: String?
+    /// This node has direct local / context AI access (badged in the roster + mesh map).
+    public var ai: Bool?
     public var id: String { node_id }
+}
+
+/// A discovered network service / data stream — mirrors the Rust `worldview::ServiceView`. The second
+/// roster tab (networks / services / data-streams), aggregated from Bonjour surveys shared over the mesh.
+public struct ServiceView: Codable, Equatable, Identifiable {
+    public var kind: String
+    public var name: String
+    public var seen_by: String
+    public var last_seen: Int64
+    public var id: String { "\(kind)/\(name)/\(seen_by)" }
 }
 
 /// A federated peer as last seen — mirrors the Rust `worldview::PeerView`.
@@ -95,6 +107,7 @@ public struct Worldview: Codable, Equatable {
     public var uptime_secs: Int64?
     public var humanity: [ReflectionView]?
     public var members: [Member]?
+    public var services: [ServiceView]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus

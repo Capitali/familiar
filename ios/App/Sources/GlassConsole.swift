@@ -805,7 +805,10 @@ private struct TheoriesScreen: View {
 
 private struct MeshScreen: View {
     @EnvironmentObject var model: AppModel
+    @State private var tab: MeshTab = .members
+    private enum MeshTab: String, CaseIterable { case members = "PEERS · AGENTS · DEVICES"; case services = "NETWORKS · SERVICES · STREAMS" }
     private var members: [Member] { model.worldview?.members ?? [] }
+    private var services: [ServiceView] { model.worldview?.services ?? [] }
 
     private func kindColor(_ k: Member.Kind) -> Color {
         switch k {
@@ -844,55 +847,133 @@ private struct MeshScreen: View {
                              subtitle: "Everything under the Three Laws — one collective, equals. Each node is counted once, at its layer.")
                 Spacer()
                 HStack(spacing: 18) {
-                    tally("peers", members.filter { $0.kind == .gossip_peer || $0.kind == .device_peer }.count, Fam.blueBright)
-                    tally("agents", members.filter { $0.kind == .device_agent }.count, Fam.amber)
-                    tally("online", members.filter { $0.online }.count, Fam.green)
+                    if tab == .members {
+                        tally("peers", members.filter { $0.kind == .gossip_peer || $0.kind == .device_peer }.count, Fam.blueBright)
+                        tally("agents", members.filter { $0.kind == .device_agent }.count, Fam.amber)
+                        tally("AI", members.filter { $0.ai == true }.count, Fam.iceStat)
+                        tally("online", members.filter { $0.online }.count, Fam.green)
+                    } else {
+                        tally("services", services.count, Fam.blueBright)
+                        tally("kinds", Set(services.map { $0.kind }).count, Fam.amber)
+                    }
                 }
             }
-            // The constellation — the collective as a graph, this node at the center.
-            Panel(fill: 0.03) {
-                MeshConstellation(members: members, color: kindColor, icon: icon)
-                    .frame(height: 360).frame(maxWidth: .infinity)
+            // Two roster tabs: the collective (peers/agents/devices) and the fabric it lives on
+            // (networks/services/data-streams the mesh has discovered via Bonjour).
+            HStack(spacing: 8) {
+                ForEach(MeshTab.allCases, id: \.self) { t in
+                    Button { tab = t } label: {
+                        Text(t.rawValue).font(Fam.mono(9.5)).tracking(1)
+                            .foregroundStyle(tab == t ? Fam.ink : Fam.monoDim.opacity(0.55))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(tab == t ? Fam.blueBright.opacity(0.18) : Color.white.opacity(0.03))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(tab == t ? Fam.blueBright.opacity(0.4) : Fam.hairline(0.06), lineWidth: 1)))
+                    }.buttonStyle(.plain)
+                }
             }
-            // The table — every member with kind, OS, status, joined. Scrolls horizontally on a
-            // narrow screen (iPhone) so the fixed columns stay readable.
-            Panel(fill: 0.03) {
-                VStack(alignment: .leading, spacing: 8) {
-                    MonoLabel(text: "ROSTER")
-                    if members.isEmpty {
-                        Text("No members yet.").font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 12)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            VStack(alignment: .leading, spacing: 0) {
+            if tab == .members { membersTab } else { servicesTab }
+        }
+    }
+
+    @ViewBuilder private var membersTab: some View {
+        // The constellation — the collective as a graph, this node at the center.
+        Panel(fill: 0.03) {
+            MeshConstellation(members: members, color: kindColor, icon: icon)
+                .frame(height: 360).frame(maxWidth: .infinity)
+        }
+        // The table — every member with kind, OS, status, joined. Scrolls horizontally on a
+        // narrow screen (iPhone) so the fixed columns stay readable.
+        Panel(fill: 0.03) {
+            VStack(alignment: .leading, spacing: 8) {
+                MonoLabel(text: "ROSTER")
+                if members.isEmpty {
+                    Text("No members yet.").font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 12)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 0) {
+                                col("MEMBER", 180); col("RELATIONSHIP", 130); col("AI", 44); col("OS", 84); col("VERSION", 70); col("STATUS", 80); col("JOINED", 74); col("SEEN", 60)
+                            }.padding(.bottom, 6)
+                            Divider().overlay(Fam.hairline(0.08)).frame(width: 722)
+                            ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
                                 HStack(spacing: 0) {
-                                    col("MEMBER", 180); col("RELATIONSHIP", 130); col("OS", 84); col("VERSION", 70); col("STATUS", 80); col("JOINED", 74); col("SEEN", 60)
-                                }.padding(.bottom, 6)
-                                Divider().overlay(Fam.hairline(0.08)).frame(width: 678)
-                                ForEach(members.sorted { rank($0.kind) < rank($1.kind) }) { m in
-                                    HStack(spacing: 0) {
-                                        HStack(spacing: 8) {
-                                            Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
-                                            Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                        }.frame(width: 180, alignment: .leading)
-                                        Text(m.kind == .self_node ? "the familiar" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
-                                        Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
-                                        Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 70, alignment: .leading)
-                                        HStack(spacing: 5) {
-                                            Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
-                                            Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
-                                        }.frame(width: 80, alignment: .leading)
-                                        Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 74, alignment: .leading)
-                                        Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 60, alignment: .leading)
-                                    }
-                                    .padding(.vertical, 10)
-                                    Divider().overlay(Fam.hairline(0.045)).frame(width: 678)
+                                    HStack(spacing: 8) {
+                                        Image(systemName: icon(m)).font(.system(size: 12)).foregroundStyle(kindColor(m.kind)).frame(width: 16)
+                                        Text(m.label.isEmpty ? String(m.node_id.prefix(8)) : m.label).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                    }.frame(width: 180, alignment: .leading)
+                                    Text(m.kind == .self_node ? "the familiar" : (m.relationship ?? kindLabel(m.kind))).font(Fam.mono(11)).foregroundStyle(kindColor(m.kind)).frame(width: 130, alignment: .leading)
+                                    Group {
+                                        if m.ai == true { aiBadge } else { Text("—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.4)) }
+                                    }.frame(width: 44, alignment: .leading)
+                                    Text(m.os.isEmpty ? "—" : m.os).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 84, alignment: .leading)
+                                    Text((m.familiar_version?.isEmpty == false) ? "v\(m.familiar_version!)" : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 70, alignment: .leading)
+                                    HStack(spacing: 5) {
+                                        Circle().fill(m.online ? Fam.green : Fam.ink.opacity(0.25)).frame(width: 6, height: 6)
+                                        Text(m.online ? "online" : "away").font(Fam.mono(11)).foregroundStyle(m.online ? Fam.greenSoft : Fam.monoDim.opacity(0.6))
+                                    }.frame(width: 80, alignment: .leading)
+                                    Text(m.first_seen > 0 ? GlassTime.ago(m.first_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 74, alignment: .leading)
+                                    Text(GlassTime.ago(m.last_seen)).font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 60, alignment: .leading)
                                 }
+                                .padding(.vertical, 10)
+                                Divider().overlay(Fam.hairline(0.045)).frame(width: 722)
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder private var servicesTab: some View {
+        Panel(fill: 0.03) {
+            VStack(alignment: .leading, spacing: 8) {
+                MonoLabel(text: "NETWORKS · SERVICES · DATA STREAMS")
+                Text("Discovered on the mesh's networks via Bonjour and shared by peers — the fabric the collective lives on.")
+                    .font(.system(size: 12)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.bottom, 4)
+                if services.isEmpty {
+                    Text("Nothing discovered yet. Peers survey their networks and share what they find here.")
+                        .font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 12)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack(spacing: 0) { col("SERVICE", 220); col("KIND", 130); col("DISCOVERED BY", 150); col("SEEN", 70) }.padding(.bottom, 6)
+                            Divider().overlay(Fam.hairline(0.08)).frame(width: 570)
+                            ForEach(services.sorted { $0.kind < $1.kind }) { s in
+                                HStack(spacing: 0) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: serviceIcon(s.kind)).font(.system(size: 12)).foregroundStyle(Fam.blueBright).frame(width: 16)
+                                        Text(s.name.isEmpty ? s.kind : s.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                    }.frame(width: 220, alignment: .leading)
+                                    Text(s.kind).font(Fam.mono(11)).foregroundStyle(Fam.amber).frame(width: 130, alignment: .leading)
+                                    Text(s.seen_by).font(Fam.mono(11)).foregroundStyle(Fam.ink.opacity(0.7)).frame(width: 150, alignment: .leading)
+                                    Text(s.last_seen > 0 ? GlassTime.ago(s.last_seen) : "—").font(Fam.mono(11)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 70, alignment: .leading)
+                                }
+                                .padding(.vertical, 10)
+                                Divider().overlay(Fam.hairline(0.045)).frame(width: 570)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var aiBadge: some View {
+        Text("AI").font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.iceStat)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(Fam.iceStat.opacity(0.15)).overlay(Capsule().stroke(Fam.iceStat.opacity(0.5), lineWidth: 1)))
+    }
+    private func serviceIcon(_ kind: String) -> String {
+        let k = kind.lowercased()
+        if k.contains("airplay") || k.contains("raop") { return "airplayaudio" }
+        if k.contains("http") || k.contains("web") { return "globe" }
+        if k.contains("ssh") { return "terminal" }
+        if k.contains("mqtt") { return "dot.radiowaves.left.and.right" }
+        if k.contains("smb") || k.contains("afp") || k.contains("nfs") { return "externaldrive.connected.to.line.below" }
+        if k.contains("print") || k.contains("ipp") { return "printer" }
+        if k.contains("homekit") || k.contains("hap") { return "homekit" }
+        if k.contains("spotify") || k.contains("cast") { return "hifispeaker" }
+        return "point.3.connected.trianglepath.dotted"
     }
     private func rank(_ k: Member.Kind) -> Int {
         switch k { case .self_node: return 0; case .gossip_peer: return 1; case .device_peer: return 2; case .device_agent: return 3 }
