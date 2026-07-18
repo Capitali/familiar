@@ -50,7 +50,11 @@ public struct FamiliarConsole: View {
             RadialGradient(colors: [Color(red: 0x0a/255, green: 0x10/255, blue: 0x24/255),
                                     Color(red: 0x03/255, green: 0x05/255, blue: 0x0a/255)],
                            center: .top, startRadius: 40, endRadius: 900).ignoresSafeArea()
-            FamiliarSphereView(mode: mode, pins: pins).ignoresSafeArea()
+            FamiliarSphereView(mode: mode, pins: pins) { dir in
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
+                    panel = (panel + dir + panelCount) % panelCount
+                }
+            }.ignoresSafeArea()
             // vignette to seat the orb
             RadialGradient(colors: [.clear, Color(red: 0x03/255, green: 0x05/255, blue: 0x0a/255).opacity(0.55)],
                            center: .center, startRadius: 260, endRadius: 720)
@@ -59,12 +63,11 @@ public struct FamiliarConsole: View {
             GeometryReader { geo in
                 let compact = geo.size.width < 720
 
-                // Two-finger sweep across the whole surface changes panels (orbit stays one-finger).
-                TwoFingerHSwipe { dir in
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
-                        panel = (panel + dir + panelCount) % panelCount
-                    }
-                }.ignoresSafeArea()
+                // The floating holograms — a horizontal carousel that sweeps ACROSS, past the orb,
+                // when the human two-finger swipes (the orb calls back through onSwipe). Each panel
+                // is a free-floating card; only the active one rests in view, the others waiting
+                // off to the sides, and the outgoing one drifts across the globe as it leaves.
+                panelCarousel(width: geo.size.width, height: geo.size.height, compact: compact)
 
                 // Floating chrome — wordmark + caption (top-left), version pill (top-right).
                 VStack { HStack(alignment: .top) {
@@ -75,19 +78,7 @@ public struct FamiliarConsole: View {
                 .padding(compact ? 20 : 30)
                 .allowsHitTesting(false)
 
-                // The holographic panel — floats to the right (or centred-bottom when compact).
-                HStack {
-                    if !compact { Spacer() }
-                    holographicPanel
-                        .frame(width: compact ? geo.size.width - 40 : 340)
-                    if compact { Spacer(minLength: 0) }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: compact ? .bottom : .trailing)
-                .padding(.trailing, compact ? 0 : 40)
-                .padding(.bottom, compact ? 120 : 0)
-                .padding(.horizontal, compact ? 20 : 0)
-
-                // Bottom: mode switcher + panel dots.
+                // Bottom: panel dots + mode switcher.
                 VStack { Spacer(); VStack(spacing: 14) {
                     panelDots
                     modeSwitcher
@@ -174,25 +165,43 @@ public struct FamiliarConsole: View {
         .background(Capsule().fill(.ultraThinMaterial).overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 1)))
     }
 
-    // MARK: holographic panel
+    // MARK: holographic panels — a floating carousel that sweeps past the orb
 
-    private var holographicPanel: some View {
+    @ViewBuilder private func panelCarousel(width: CGFloat, height: CGFloat, compact: Bool) -> some View {
+        let cardW: CGFloat = compact ? width - 44 : 344
+        let restX: CGFloat = compact ? 0 : width * 0.20          // active card rests right-of-centre
+        let step: CGFloat = compact ? width * 0.94 : width * 0.60 // neighbours wait off to the sides
+        ZStack {
+            ForEach(0..<panelCount, id: \.self) { i in
+                let d = CGFloat(i - panel)
+                holoCard(PanelKind(rawValue: i) ?? .presence)
+                    .frame(width: cardW)
+                    .scaleEffect(1 - min(0.16, abs(d) * 0.16))
+                    .opacity(i == panel ? 1 : max(0, 0.4 - abs(d) * 0.28))
+                    .blur(radius: i == panel ? 0 : 3.5)
+                    .offset(x: restX + d * step, y: compact ? height * 0.20 : 0)
+                    .allowsHitTesting(i == panel)
+                    .zIndex(i == panel ? 1 : 0)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .animation(.spring(response: 0.55, dampingFraction: 0.82), value: panel)
+    }
+
+    private func holoCard(_ kind: PanelKind) -> some View {
         HoloCard {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text(currentPanel.title).font(CSky.mono(10)).tracking(2).foregroundStyle(CSky.soft.opacity(0.85))
+                    Text(kind.title).font(CSky.mono(10)).tracking(2).foregroundStyle(CSky.soft.opacity(0.85))
                     Spacer()
                     HStack(spacing: 6) {
                         Circle().fill(CSky.green).frame(width: 5, height: 5).shadow(color: CSky.green, radius: 5)
                         Text("PROJECTING").font(CSky.mono(9)).foregroundStyle(CSky.green)
                     }
                 }.padding(.bottom, 16)
-                panelBody(currentPanel)
+                panelBody(kind)
             }
         }
-        .id(panel)
-        .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)))
     }
 
     private enum PanelKind: Int, CaseIterable { case presence, mesh, roadmap, gates, theories
@@ -354,67 +363,5 @@ private struct HoloCard<Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: corner)
     }
 }
-
-// A two-finger horizontal swipe recognizer that leaves one-finger orbit to the orb underneath.
-#if canImport(UIKit)
-import UIKit
-private struct TwoFingerHSwipe: UIViewRepresentable {
-    var onSwipe: (Int) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onSwipe: onSwipe) }
-    func makeUIView(context: Context) -> UIView {
-        let v = PassthroughView()
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handle(_:)))
-        pan.minimumNumberOfTouches = 2
-        pan.maximumNumberOfTouches = 2
-        pan.delegate = context.coordinator
-        v.addGestureRecognizer(pan)
-        return v
-    }
-    func updateUIView(_ uiView: UIView, context: Context) {}
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        let onSwipe: (Int) -> Void
-        private var fired = false
-        init(onSwipe: @escaping (Int) -> Void) { self.onSwipe = onSwipe }
-        @objc func handle(_ g: UIPanGestureRecognizer) {
-            let t = g.translation(in: g.view)
-            switch g.state {
-            case .began: fired = false
-            case .changed:
-                if !fired && abs(t.x) > 55 && abs(t.x) > abs(t.y) * 1.3 { fired = true; onSwipe(t.x < 0 ? 1 : -1) }
-            default: fired = false
-            }
-        }
-        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
-    }
-    /// Lets single-finger touches fall through to the orb; the 2-finger recognizer still fires.
-    final class PassthroughView: UIView {
-        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-            (event?.allTouches?.count ?? 0) >= 2
-        }
-    }
-}
-#else
-import AppKit
-private struct TwoFingerHSwipe: NSViewRepresentable {
-    var onSwipe: (Int) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onSwipe: onSwipe) }
-    func makeNSView(context: Context) -> NSView {
-        let v = SwipeView(); v.onSwipe = onSwipe; return v
-    }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-    final class Coordinator: NSObject { let onSwipe: (Int) -> Void; init(onSwipe: @escaping (Int) -> Void) { self.onSwipe = onSwipe } }
-    /// A transparent view that reads two-finger trackpad scroll as horizontal panel sweeps.
-    final class SwipeView: NSView {
-        var onSwipe: ((Int) -> Void)?
-        private var accum: CGFloat = 0
-        override var acceptsFirstResponder: Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil } // let the orb take clicks/drags
-        override func scrollWheel(with event: NSEvent) {
-            accum += event.scrollingDeltaX
-            if abs(accum) > 42 { onSwipe?(accum < 0 ? 1 : -1); accum = 0 }
-        }
-    }
-}
-#endif
 
 #endif

@@ -4,12 +4,11 @@
 // states — Marble (a breathing glass presence), Mesh (the wireframe pipeline over it), and Globe
 // (a displaced blue world with the mesh's peers pinned to it). It lives in the shared package so
 // EVERY Apple shell renders the same surface: iPhone, iPad, Mac, and — as those targets arrive —
-// Apple TV and Vision. SceneKit's `SceneView` isn't on watchOS, so the watch shows a lightweight
-// SwiftUI fallback orb; the concept still travels there.
+// Apple TV and Vision. SceneKit isn't on watchOS, so the watch shows a lightweight fallback orb.
 //
-// Fed live: pass the mesh's members as `SpherePin`s (the local node highlighted). No geolocation is
-// assumed — pins are distributed deterministically by id on a golden-angle spiral, so the same node
-// always lands in the same place, and the sphere reads as "the collective," not a literal map.
+// Gestures are OWNED here (SceneKit's built-in camera control is off), so the interface can
+// distinguish one-finger *orbit* from a two-finger *swipe* that the console turns into panel
+// navigation — the built-in control would otherwise swallow the two-finger gesture as a camera move.
 
 import SwiftUI
 #if !os(watchOS)
@@ -28,15 +27,10 @@ private typealias PColor = NSColor
 public struct SpherePin: Identifiable, Equatable {
     public let id: String
     public let label: String
-    /// The local node — brighter, larger, ice-white.
     public let local: Bool
-    /// This node has direct/context AI (badged with a warmer tint).
     public let ai: Bool
     public init(id: String, label: String, local: Bool, ai: Bool = false) {
-        self.id = id
-        self.label = label
-        self.local = local
-        self.ai = ai
+        self.id = id; self.label = label; self.local = local; self.ai = ai
     }
 }
 
@@ -46,13 +40,8 @@ public enum SphereMode: String, CaseIterable, Identifiable, Sendable {
     case mesh = "Mesh"
     case globe = "Globe"
     public var id: String { rawValue }
-    /// The mono sub-label shown under the mode name (mirrors the design).
     public var hint: String {
-        switch self {
-        case .marble: return "SMOOTH"
-        case .mesh: return "WIREFRAME"
-        case .globe: return "TERRAIN"
-        }
+        switch self { case .marble: return "SMOOTH"; case .mesh: return "WIREFRAME"; case .globe: return "TERRAIN" }
     }
     public var caption: String {
         switch self {
@@ -63,12 +52,9 @@ public enum SphereMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-// MARK: - Palette (self-contained; mirrors the design so the package needs no UI dependency)
-
 private enum Sky {
     static let bg = PColor(red: 0x03/255, green: 0x05/255, blue: 0x0a/255, alpha: 1)
     static let deep = PColor(red: 0.043, green: 0.145, blue: 0.42, alpha: 1)
-    static let blue = PColor(red: 0x2f/255, green: 0x63/255, blue: 0xe6/255, alpha: 1)
     static let bright = PColor(red: 0x6c/255, green: 0x9b/255, blue: 0xff/255, alpha: 1)
     static let cyan = PColor(red: 0x8f/255, green: 0xd0/255, blue: 0xff/255, alpha: 1)
     static let ice = PColor(red: 0xcf/255, green: 0xe0/255, blue: 0xff/255, alpha: 1)
@@ -77,14 +63,12 @@ private enum Sky {
 
 #if os(watchOS)
 
-/// watchOS has no `SceneView`; show a simple breathing orb so the concept still travels to the wrist.
 public struct FamiliarSphereView: View {
     private let mode: SphereMode
     private let pins: [SpherePin]
     @State private var breathe = false
-    public init(mode: SphereMode = .marble, pins: [SpherePin] = []) {
-        self.mode = mode
-        self.pins = pins
+    public init(mode: SphereMode = .marble, pins: [SpherePin] = [], onSwipe: @escaping (Int) -> Void = { _ in }) {
+        self.mode = mode; self.pins = pins
     }
     public var body: some View {
         ZStack {
@@ -95,7 +79,6 @@ public struct FamiliarSphereView: View {
                                      center: .init(x: 0.36, y: 0.30), startRadius: 2, endRadius: 90))
                 .frame(width: 120, height: 120)
                 .scaleEffect(breathe ? 1.04 : 0.98)
-                .shadow(color: Color(red: 0x2f/255, green: 0x63/255, blue: 0xe6/255).opacity(0.6), radius: 24)
                 .onAppear { withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) { breathe = true } }
         }
     }
@@ -103,218 +86,119 @@ public struct FamiliarSphereView: View {
 
 #else
 
-/// Builds and owns the SCNScene; the SwiftUI view drives it and animates state transitions.
-public final class SphereController: ObservableObject {
-    public let scene = SCNScene()
-    public let cameraNode = SCNNode()
-
-    private let group = SCNNode()          // spun + breathed; holds every sphere layer + pins
-    private let coreMat = SCNMaterial()    // the marble/globe surface
-    private let wireMat = SCNMaterial()    // the mesh overlay
-    private let atmoMat = SCNMaterial()    // the halo
-    private let pinRoot = SCNNode()
-    private var built = false
+/// Builds and owns the SCNScene + node references. Rotation is applied per-frame by the coordinator.
+final class SphereScene {
+    let scene = SCNScene()
+    let camera = SCNNode()
+    let group = SCNNode()
+    let coreMat = SCNMaterial()
+    let wireMat = SCNMaterial()
+    let atmoMat = SCNMaterial()
+    let pinRoot = SCNNode()
     private var globeTexture: Any?
+    private var built = false
 
-    public init() {}
-
-    public func build() {
-        guard !built else { return }
-        built = true
+    func build() {
+        guard !built else { return }; built = true
         scene.background.contents = Sky.bg
 
-        // Camera — SceneView drives orbit via allowsCameraControl; we set a sensible start.
-        let cam = SCNCamera()
-        cam.fieldOfView = 40
-        cam.zNear = 0.1
-        cam.zFar = 100
-        cameraNode.camera = cam
-        cameraNode.position = SCNVector3(0, 0, 3.05)
-        scene.rootNode.addChildNode(cameraNode)
+        let cam = SCNCamera(); cam.fieldOfView = 40; cam.zNear = 0.1; cam.zFar = 100
+        camera.camera = cam; camera.position = SCNVector3(0, 0, 3.05)
+        scene.rootNode.addChildNode(camera)
 
-        // Lights — a warm key, cool rim, soft ambient (matching the design's sun-lit marble).
-        addLight(.ambient, color: PColor(red: 0.10, green: 0.14, blue: 0.25, alpha: 1), intensity: 380, at: nil)
-        addLight(.directional, color: PColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1), intensity: 1050,
-                 at: SCNVector3(3, 1.4, 3))
-        addLight(.directional, color: Sky.bright, intensity: 360, at: SCNVector3(-3, -1, -2))
+        addLight(.ambient, Sky.deep, 380, nil)
+        addLight(.directional, PColor(red: 1, green: 0.96, blue: 0.9, alpha: 1), 1050, SCNVector3(3, 1.4, 3))
+        addLight(.directional, Sky.bright, 360, SCNVector3(-3, -1, -2))
 
-        // ---- Core: the marble/globe surface ----
         coreMat.lightingModel = .physicallyBased
         coreMat.diffuse.contents = Sky.deep
         coreMat.metalness.contents = 0.35
         coreMat.roughness.contents = 0.38
         coreMat.emission.contents = PColor(red: 0.07, green: 0.16, blue: 0.44, alpha: 1)
         coreMat.emission.intensity = 0.35
-        coreMat.reflective.contents = Sky.cyan     // built-in fresnel rim — no custom shader needed
+        coreMat.reflective.contents = Sky.cyan
         coreMat.fresnelExponent = 2.2
-        let core = SCNNode(geometry: sphere(radius: 1.0, seg: 96, material: coreMat))
-        group.addChildNode(core)
+        group.addChildNode(node(1.0, 96, coreMat))
 
-        // ---- Mesh: the wireframe pipeline over the surface ----
         wireMat.lightingModel = .constant
         wireMat.fillMode = .lines
         wireMat.diffuse.contents = Sky.cyan
         wireMat.emission.contents = Sky.cyan
-        wireMat.transparency = 0            // faded in for .mesh / .globe
-        let wire = SCNNode(geometry: sphere(radius: 1.004, seg: 48, material: wireMat))
-        group.addChildNode(wire)
+        wireMat.transparency = 0
+        group.addChildNode(node(1.004, 48, wireMat))
 
-        // ---- Atmosphere: a soft additive halo ----
         atmoMat.lightingModel = .constant
         atmoMat.diffuse.contents = PColor.clear
         atmoMat.emission.contents = PColor(red: 0.25, green: 0.51, blue: 1.0, alpha: 1)
         atmoMat.blendMode = .add
-        atmoMat.cullMode = .front            // render the far side → reads as a rim glow
-        atmoMat.isDoubleSided = false
+        atmoMat.cullMode = .front
         atmoMat.writesToDepthBuffer = false
         atmoMat.transparency = 0.55
-        let atmo = SCNNode(geometry: sphere(radius: 1.28, seg: 48, material: atmoMat))
-        group.addChildNode(atmo)
+        group.addChildNode(node(1.28, 48, atmoMat))
 
-        // ---- Pins live under the group so they spin/breathe with the sphere ----
         group.addChildNode(pinRoot)
-
         scene.rootNode.addChildNode(group)
 
-        // Breathing (6s) + a slow autorotate, both on the group so the camera stays free to orbit.
-        let up = SCNAction.scale(to: 1.018, duration: 3)
-        up.timingMode = .easeInEaseOut
-        let down = SCNAction.scale(to: 1.0, duration: 3)
-        down.timingMode = .easeInEaseOut
+        let up = SCNAction.scale(to: 1.018, duration: 3); up.timingMode = .easeInEaseOut
+        let down = SCNAction.scale(to: 1.0, duration: 3); down.timingMode = .easeInEaseOut
         group.runAction(.repeatForever(.sequence([up, down])))
-        group.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 46)))
     }
 
-    /// Cross-fade the layers to a mode. Called on appear and on every mode change.
-    public func apply(_ mode: SphereMode) {
+    func apply(_ mode: SphereMode) {
         globeTextureIfNeeded()
-        SCNTransaction.begin()
-        SCNTransaction.animationDuration = 0.6
+        SCNTransaction.begin(); SCNTransaction.animationDuration = 0.6
         switch mode {
         case .marble:
-            coreMat.diffuse.contents = Sky.deep
-            coreMat.transparency = 1
-            wireMat.transparency = 0
-            atmoMat.transparency = 0.55
-            pinRoot.opacity = 0
+            coreMat.diffuse.contents = Sky.deep; coreMat.transparency = 1
+            wireMat.transparency = 0; atmoMat.transparency = 0.55; pinRoot.opacity = 0
         case .mesh:
-            coreMat.diffuse.contents = Sky.deep
-            coreMat.transparency = 0.5
-            wireMat.transparency = 1
-            atmoMat.transparency = 0.4
-            pinRoot.opacity = 1
+            coreMat.diffuse.contents = Sky.deep; coreMat.transparency = 0.5
+            wireMat.transparency = 1; atmoMat.transparency = 0.4; pinRoot.opacity = 1
         case .globe:
-            coreMat.diffuse.contents = globeTexture ?? Sky.deep
-            coreMat.transparency = 1
-            wireMat.transparency = 0.18
-            atmoMat.transparency = 0.5
-            pinRoot.opacity = 1
+            coreMat.diffuse.contents = globeTexture ?? Sky.deep; coreMat.transparency = 1
+            wireMat.transparency = 0.18; atmoMat.transparency = 0.5; pinRoot.opacity = 1
         }
         SCNTransaction.commit()
     }
 
-    /// Rebuild the pins from the current mesh membership.
-    public func setPins(_ pins: [SpherePin]) {
+    func setPins(_ pins: [SpherePin]) {
         pinRoot.childNodes.forEach { $0.removeFromParentNode() }
         let n = max(1, pins.count)
         for (i, p) in pins.enumerated() {
-            let dir = spiralPoint(index: i, count: n)
+            let dir = spiral(i, n)
             let color: PColor = p.local ? Sky.ice : (p.ai ? Sky.amber : Sky.bright)
             let r: CGFloat = p.local ? 0.032 : 0.022
-
-            let dotMat = SCNMaterial()
-            dotMat.lightingModel = .constant
-            dotMat.diffuse.contents = color
-            dotMat.emission.contents = color
-            let dot = SCNNode(geometry: SCNSphere(radius: r))
-            dot.geometry?.firstMaterial = dotMat
+            let dm = SCNMaterial(); dm.lightingModel = .constant; dm.diffuse.contents = color; dm.emission.contents = color
+            let dot = SCNNode(geometry: SCNSphere(radius: r)); dot.geometry?.firstMaterial = dm
             dot.position = SCNVector3(dir.x * 1.03, dir.y * 1.03, dir.z * 1.03)
-
-            // a faint halo ring around each pin (a flat disc, billboarded to the camera)
-            let halo = SCNNode(geometry: SCNPlane(width: r * 6, height: r * 6))
-            let haloMat = SCNMaterial()
-            haloMat.lightingModel = .constant
-            haloMat.diffuse.contents = radialSprite(color)
-            haloMat.blendMode = .add
-            haloMat.writesToDepthBuffer = false
-            haloMat.isDoubleSided = true
-            halo.geometry?.firstMaterial = haloMat
-            halo.position = dot.position
-            halo.constraints = [SCNBillboardConstraint()]
-
-            pinRoot.addChildNode(halo)
             pinRoot.addChildNode(dot)
         }
     }
 
-    // MARK: helpers
-
-    private func sphere(radius: CGFloat, seg: Int, material: SCNMaterial) -> SCNSphere {
-        let s = SCNSphere(radius: radius)
-        s.segmentCount = seg
-        s.firstMaterial = material
-        return s
+    private func node(_ radius: CGFloat, _ seg: Int, _ mat: SCNMaterial) -> SCNNode {
+        let s = SCNSphere(radius: radius); s.segmentCount = seg; s.firstMaterial = mat
+        return SCNNode(geometry: s)
     }
-
-    private func addLight(_ type: SCNLight.LightType, color: PColor, intensity: CGFloat, at pos: SCNVector3?) {
-        let l = SCNLight()
-        l.type = type
-        l.color = color
-        l.intensity = intensity
-        let node = SCNNode()
-        node.light = l
-        if let pos = pos { node.position = pos }
-        scene.rootNode.addChildNode(node)
+    private func addLight(_ t: SCNLight.LightType, _ c: PColor, _ i: CGFloat, _ pos: SCNVector3?) {
+        let l = SCNLight(); l.type = t; l.color = c; l.intensity = i
+        let nd = SCNNode(); nd.light = l; if let pos = pos { nd.position = pos }
+        scene.rootNode.addChildNode(nd)
     }
-
-    /// Even distribution on a sphere by the golden angle — stable per index.
-    private func spiralPoint(index i: Int, count n: Int) -> SCNVector3 {
+    private func spiral(_ i: Int, _ n: Int) -> SCNVector3 {
         let gold = Double.pi * (3.0 - (5.0).squareRoot())
-        let y = 1.0 - (Double(i) / Double(max(1, n - 1))) * 2.0     // 1 … -1
-        let r = (1.0 - y * y).squareRoot()
-        let theta = gold * Double(i)
-        return SCNVector3(Float(cos(theta) * r), Float(y), Float(sin(theta) * r))
+        let y = 1.0 - (Double(i) / Double(max(1, n - 1))) * 2.0
+        let r = (1.0 - y * y).squareRoot(); let th = gold * Double(i)
+        return SCNVector3(Float(cos(th) * r), Float(y), Float(sin(th) * r))
     }
-
-    /// A soft round sprite for pin halos / the globe — a radial gradient CGImage.
-    private func radialSprite(_ color: PColor) -> Any {
-        let size = 64
-        #if canImport(UIKit)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        return renderer.image { ctx in
-            let cg = ctx.cgContext
-            let c = color.cgColor.components ?? [1, 1, 1, 1]
-            let colors = [PColor(red: c[0], green: c[1], blue: c[2], alpha: 1).cgColor,
-                          PColor(red: c[0], green: c[1], blue: c[2], alpha: 0).cgColor] as CFArray
-            if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
-                cg.drawRadialGradient(grad, startCenter: CGPoint(x: size/2, y: size/2), startRadius: 0,
-                                      endCenter: CGPoint(x: size/2, y: size/2), endRadius: CGFloat(size/2), options: [])
-            }
-        }
-        #else
-        let img = NSImage(size: CGSize(width: size, height: size))
-        img.lockFocus()
-        let c = color.usingColorSpace(.deviceRGB) ?? color
-        let grad = NSGradient(colors: [c.withAlphaComponent(1), c.withAlphaComponent(0)])
-        grad?.draw(fromCenter: CGPoint(x: size/2, y: size/2), radius: 0,
-                   toCenter: CGPoint(x: size/2, y: size/2), radius: CGFloat(size/2), options: [])
-        img.unlockFocus()
-        return img
-        #endif
-    }
-
-    /// A banded blue "blue-marble" gradient generated once for the Globe mode (no external texture).
     private func globeTextureIfNeeded() {
         guard globeTexture == nil else { return }
         let w = 256, h = 128
         let stops: [(CGFloat, [CGFloat])] = [
             (0.0, [6/255, 16/255, 46/255]), (0.45, [0.043, 0.145, 0.42]),
-            (0.62, [0.18, 0.38, 0.90]), (0.80, [0.42, 0.63, 1.0]), (1.0, [0.70, 0.83, 1.0])
-        ]
+            (0.62, [0.18, 0.38, 0.90]), (0.80, [0.42, 0.63, 1.0]), (1.0, [0.70, 0.83, 1.0])]
         func ramp(_ t: CGFloat) -> [CGFloat] {
             for i in 0..<(stops.count - 1) where t <= stops[i + 1].0 {
-                let a = stops[i], b = stops[i + 1]
-                let k = (t - a.0) / max(0.0001, b.0 - a.0)
+                let a = stops[i], b = stops[i + 1]; let k = (t - a.0) / max(0.0001, b.0 - a.0)
                 return (0..<3).map { a.1[$0] + (b.1[$0] - a.1[$0]) * k }
             }
             return stops.last!.1
@@ -322,16 +206,13 @@ public final class SphereController: ObservableObject {
         var px = [UInt8](repeating: 0, count: w * h * 4)
         for y in 0..<h {
             let lat = abs(CGFloat(y) / CGFloat(h) - 0.5) * 2
-            let band = 0.5 + 0.5 * sin(CGFloat(y) * 0.6)       // faint latitude banding
-            let t = max(0, min(1, (1 - lat) * 0.85 + band * 0.12))
-            let c = ramp(t)
-            for x in 0..<w {
-                let i = (y * w + x) * 4
-                px[i] = UInt8(c[0] * 255); px[i+1] = UInt8(c[1] * 255); px[i+2] = UInt8(c[2] * 255); px[i+3] = 255
-            }
+            let band = 0.5 + 0.5 * sin(CGFloat(y) * 0.6)
+            let t = max(0, min(1, (1 - lat) * 0.85 + band * 0.12)); let c = ramp(t)
+            for x in 0..<w { let i = (y * w + x) * 4
+                px[i] = UInt8(c[0]*255); px[i+1] = UInt8(c[1]*255); px[i+2] = UInt8(c[2]*255); px[i+3] = 255 }
         }
         let cs = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w*4,
                                   space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let cg = ctx.makeImage() else { return }
         #if canImport(UIKit)
@@ -342,29 +223,120 @@ public final class SphereController: ObservableObject {
     }
 }
 
-/// The Metal Sphere as a SwiftUI view — drop it anywhere and drive it with `mode` + `pins`.
-public struct FamiliarSphereView: View {
-    @StateObject private var ctrl = SphereController()
-    private let mode: SphereMode
-    private let pins: [SpherePin]
+/// Owns rotation state + gesture handling, and drives the scene each frame (SCNSceneRendererDelegate).
+final class SphereCoordinator: NSObject, SCNSceneRendererDelegate {
+    let world = SphereScene()
+    let onSwipe: (Int) -> Void
+    var yaw: CGFloat = 0, pitch: CGFloat = 0.1
+    var dragging = false
+    private var lastTime: TimeInterval = 0
 
-    public init(mode: SphereMode = .marble, pins: [SpherePin] = []) {
-        self.mode = mode
-        self.pins = pins
+    init(onSwipe: @escaping (Int) -> Void) { self.onSwipe = onSwipe; super.init() }
+
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        let dt = lastTime == 0 ? 0 : min(time - lastTime, 0.05); lastTime = time
+        if !dragging { yaw += CGFloat(dt) * 0.16 }              // idle autorotate
+        world.group.eulerAngles = SCNVector3(Float(pitch), Float(yaw), 0)
     }
-
-    public var body: some View {
-        SceneView(scene: ctrl.scene, pointOfView: ctrl.cameraNode,
-                  options: [.allowsCameraControl])
-            .background(Color(red: 0x03/255, green: 0x05/255, blue: 0x0a/255))
-            .onAppear {
-                ctrl.build()
-                ctrl.setPins(pins)
-                ctrl.apply(mode)
-            }
-            .onChange(of: mode) { _, newValue in ctrl.apply(newValue) }
-            .onChange(of: pins) { _, newValue in ctrl.setPins(newValue) }
+    func orbit(dx: CGFloat, dy: CGFloat) {
+        yaw += dx * 0.006
+        pitch = max(-1.2, min(1.2, pitch + dy * 0.006))
     }
 }
+
+/// The public view — dispatches to a platform representable that owns the SCNView + gestures.
+public struct FamiliarSphereView: View {
+    private let mode: SphereMode
+    private let pins: [SpherePin]
+    private let onSwipe: (Int) -> Void
+    public init(mode: SphereMode = .marble, pins: [SpherePin] = [], onSwipe: @escaping (Int) -> Void = { _ in }) {
+        self.mode = mode; self.pins = pins; self.onSwipe = onSwipe
+    }
+    public var body: some View { SphereRep(mode: mode, pins: pins, onSwipe: onSwipe) }
+}
+
+#if canImport(UIKit)
+struct SphereRep: UIViewRepresentable {
+    let mode: SphereMode; let pins: [SpherePin]; let onSwipe: (Int) -> Void
+    func makeCoordinator() -> SphereCoordinator { SphereCoordinator(onSwipe: onSwipe) }
+    func makeUIView(context: Context) -> SCNView {
+        let c = context.coordinator
+        c.world.build()
+        let v = SCNView()
+        v.scene = c.world.scene
+        v.pointOfView = c.world.camera
+        v.backgroundColor = .clear
+        v.antialiasingMode = .multisampling4X
+        v.rendersContinuously = true
+        v.delegate = c
+        v.allowsCameraControl = false
+        let one = UIPanGestureRecognizer(target: context.coordinator, action: #selector(SphereCoordinator.oneFinger(_:)))
+        one.minimumNumberOfTouches = 1; one.maximumNumberOfTouches = 1
+        let two = UIPanGestureRecognizer(target: context.coordinator, action: #selector(SphereCoordinator.twoFinger(_:)))
+        two.minimumNumberOfTouches = 2; two.maximumNumberOfTouches = 2
+        v.addGestureRecognizer(one); v.addGestureRecognizer(two)
+        return v
+    }
+    func updateUIView(_ v: SCNView, context: Context) {
+        context.coordinator.world.apply(mode)
+        context.coordinator.world.setPins(pins)
+    }
+}
+extension SphereCoordinator {
+    @objc func oneFinger(_ g: UIPanGestureRecognizer) {
+        let t = g.translation(in: g.view); g.setTranslation(.zero, in: g.view)
+        if g.state == .began { dragging = true }
+        if g.state == .changed { orbit(dx: t.x, dy: t.y) }
+        if g.state == .ended || g.state == .cancelled { dragging = false }
+    }
+    private static var swipeFired = false
+    @objc func twoFinger(_ g: UIPanGestureRecognizer) {
+        let t = g.translation(in: g.view)
+        switch g.state {
+        case .began: SphereCoordinator.swipeFired = false
+        case .changed:
+            if !SphereCoordinator.swipeFired && abs(t.x) > 55 && abs(t.x) > abs(t.y) * 1.3 {
+                SphereCoordinator.swipeFired = true; onSwipe(t.x < 0 ? 1 : -1)
+            }
+        default: SphereCoordinator.swipeFired = false
+        }
+    }
+}
+#else
+struct SphereRep: NSViewRepresentable {
+    let mode: SphereMode; let pins: [SpherePin]; let onSwipe: (Int) -> Void
+    func makeCoordinator() -> SphereCoordinator { SphereCoordinator(onSwipe: onSwipe) }
+    func makeNSView(context: Context) -> SCNView {
+        let c = context.coordinator
+        c.world.build()
+        let v = OrbitSCNView()
+        v.coordinator = c
+        v.scene = c.world.scene
+        v.pointOfView = c.world.camera
+        v.backgroundColor = .clear
+        v.antialiasingMode = .multisampling4X
+        v.rendersContinuously = true
+        v.delegate = c
+        v.allowsCameraControl = false
+        return v
+    }
+    func updateNSView(_ v: SCNView, context: Context) {
+        context.coordinator.world.apply(mode)
+        context.coordinator.world.setPins(pins)
+    }
+    /// One-finger drag orbits; two-finger trackpad scroll sweeps the panels.
+    final class OrbitSCNView: SCNView {
+        weak var coordinator: SphereCoordinator?
+        private var accum: CGFloat = 0
+        override func mouseDown(with e: NSEvent) { coordinator?.dragging = true }
+        override func mouseDragged(with e: NSEvent) { coordinator?.orbit(dx: e.deltaX, dy: e.deltaY) }
+        override func mouseUp(with e: NSEvent) { coordinator?.dragging = false }
+        override func scrollWheel(with e: NSEvent) {
+            accum += e.scrollingDeltaX
+            if abs(accum) > 40 { coordinator?.onSwipe(accum < 0 ? 1 : -1); accum = 0 }
+        }
+    }
+}
+#endif
 
 #endif
