@@ -7,7 +7,7 @@ import PackageDescription
 // capture (CoreLocation/CoreMotion/HealthKit) and Keychain live in the app target, not here.
 let package = Package(
     name: "FamiliarMesh",
-    platforms: [.macOS(.v13), .iOS(.v16), .watchOS(.v9)],
+    platforms: [.macOS(.v14), .iOS(.v17), .watchOS(.v9), .tvOS(.v17)],
     products: [
         .library(name: "FamiliarMesh", targets: ["FamiliarMesh"]),
         .executable(name: "familiar-observe", targets: ["familiar-observe"]),

@@ -74,6 +74,7 @@ struct GlassConsole: View {
         case metabolism = "Metabolism"
         case theories = "Theories"
         case roadmap = "Roadmap"
+        case sphere = "Sphere"
         case mesh = "The Mesh"
         case gates = "Gates & Boundary"
         var id: String { rawValue }
@@ -83,6 +84,7 @@ struct GlassConsole: View {
             case .metabolism: return "Metabolism"
             case .theories: return "Theories"
             case .roadmap: return "Roadmap"
+            case .sphere: return "Sphere"
             case .mesh: return "Mesh"
             case .gates: return "Gates"
             }
@@ -93,8 +95,9 @@ struct GlassConsole: View {
             case .metabolism: return "02"
             case .theories: return "03"
             case .roadmap: return "04"
-            case .mesh: return "05"
-            case .gates: return "06"
+            case .sphere: return "05"
+            case .mesh: return "06"
+            case .gates: return "07"
             }
         }
     }
@@ -445,6 +448,7 @@ private struct ScreenArea: View {
                 case .metabolism: MetabolismScreen()
                 case .theories: TheoriesScreen()
                 case .roadmap: RoadmapScreen()
+                case .sphere: SphereScreen()
                 case .mesh: MeshScreen()
                 case .gates: GatesScreen()
                 }
@@ -808,6 +812,45 @@ private struct TheoriesScreen: View {
 
 // MARK: - 04 · The Mesh (all peers + agents: graphic + table)
 
+private struct SphereScreen: View {
+    @EnvironmentObject var model: AppModel
+    @State private var mode: SphereMode = .marble
+    private var pins: [SpherePin] {
+        (model.worldview?.members ?? []).map { m in
+            SpherePin(id: m.node_id, label: m.label, local: m.kind == .self_node, ai: m.ai == true)
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ScreenHeader(number: "05 · SPHERE", title: "The Metal Sphere", subtitle: mode.caption)
+            HStack(spacing: 6) {
+                ForEach(SphereMode.allCases) { m in
+                    let on = mode == m
+                    Button { mode = m } label: {
+                        VStack(spacing: 2) {
+                            Text(m.rawValue).font(.system(size: 14, weight: .semibold)).foregroundStyle(on ? Color(red: 0.04, green: 0.075, blue: 0.19) : Fam.ink.opacity(0.72))
+                            Text(m.hint).font(Fam.mono(8.5)).tracking(1).foregroundStyle(on ? Color(red: 0.04, green: 0.075, blue: 0.19).opacity(0.65) : Fam.monoDim.opacity(0.5))
+                        }
+                        .padding(.horizontal, 26).padding(.vertical, 11)
+                        .background(RoundedRectangle(cornerRadius: 13).fill(on ? AnyShapeStyle(LinearGradient(colors: [Fam.blueSoft, Fam.blue], startPoint: .top, endPoint: .bottom)) : AnyShapeStyle(Color.white.opacity(0.03)))
+                            .overlay(RoundedRectangle(cornerRadius: 13).stroke(on ? Color.clear : Fam.hairline(0.07), lineWidth: 1)))
+                    }.buttonStyle(.plain)
+                }
+            }
+            Panel(fill: 0.02) {
+                FamiliarSphereView(mode: mode, pins: pins)
+                    .frame(height: 620).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+            HStack(spacing: 8) {
+                Circle().fill(Fam.green).frame(width: 5, height: 5)
+                Text("drag to orbit · pinch to zoom · \(pins.count) node\(pins.count == 1 ? "" : "s") on the sphere")
+                    .font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.5))
+            }
+        }
+    }
+}
+
 private struct RoadmapScreen: View {
     @EnvironmentObject var model: AppModel
     var goals: [GoalView] { model.worldview?.goals ?? [] }
@@ -913,7 +956,7 @@ private struct MeshScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top) {
-                ScreenHeader(number: "04 · THE MESH", title: "Peers & agents",
+                ScreenHeader(number: "06 · THE MESH", title: "Peers & agents",
                              subtitle: "Everything under the Three Laws — one collective, equals. Each node is counted once, at its layer.")
                 Spacer()
                 HStack(spacing: 18) {
@@ -1209,7 +1252,7 @@ private struct GatesScreen: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "05 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
+            ScreenHeader(number: "07 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
                          subtitle: "Law III — service must not become obedience. This iPad senses only through gates you open; it never widens them itself.")
             Panel(fill: 0.03) {
                 VStack(alignment: .leading, spacing: 16) {

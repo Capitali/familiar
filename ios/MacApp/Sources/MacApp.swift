@@ -110,10 +110,10 @@ struct MacConsole: View {
     @EnvironmentObject var model: MacModel
     @State private var screen: Screen = .glass
     enum Screen: String, CaseIterable, Identifiable {
-        case glass = "The Glass", metabolism = "Metabolism", theories = "Theories", roadmap = "Roadmap", mesh = "The Mesh", gates = "Gates"
+        case glass = "The Glass", metabolism = "Metabolism", theories = "Theories", roadmap = "Roadmap", sphere = "Sphere", mesh = "The Mesh", gates = "Gates"
         var id: String { rawValue }
         var number: String {
-            switch self { case .glass: return "01"; case .metabolism: return "02"; case .theories: return "03"; case .roadmap: return "04"; case .mesh: return "05"; case .gates: return "06" }
+            switch self { case .glass: return "01"; case .metabolism: return "02"; case .theories: return "03"; case .roadmap: return "04"; case .sphere: return "05"; case .mesh: return "06"; case .gates: return "07" }
         }
     }
     var body: some View {
@@ -132,6 +132,7 @@ struct MacConsole: View {
                             case .metabolism: MetabolismScreen()
                             case .theories: TheoriesScreen()
                             case .roadmap: RoadmapScreen()
+                            case .sphere: SphereScreen()
                             case .mesh: MeshScreen()
                             case .gates: GatesScreen()
                             }
@@ -384,6 +385,42 @@ private struct TheoriesScreen: View {
     }
 }
 
+private struct SphereScreen: View {
+    @EnvironmentObject var model: MacModel
+    @State private var mode: SphereMode = .marble
+    private var pins: [SpherePin] {
+        (model.worldview?.members ?? []).map { m in
+            SpherePin(id: m.node_id, label: m.label, local: m.kind == .self_node, ai: m.ai == true)
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScreenHeader(number: "05 · SPHERE", title: "The Metal Sphere", subtitle: mode.caption)
+            HStack(spacing: 6) {
+                ForEach(SphereMode.allCases) { m in
+                    let on = mode == m
+                    Button { mode = m } label: {
+                        VStack(spacing: 2) {
+                            Text(m.rawValue).font(.system(size: 13, weight: .semibold)).foregroundStyle(on ? Color(red: 0.04, green: 0.075, blue: 0.19) : Fam.ink.opacity(0.72))
+                            Text(m.hint).font(Fam.mono(8)).tracking(1).foregroundStyle(on ? Color(red: 0.04, green: 0.075, blue: 0.19).opacity(0.65) : Fam.monoDim.opacity(0.5))
+                        }
+                        .padding(.horizontal, 22).padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(on ? AnyShapeStyle(LinearGradient(colors: [Fam.blueSoft, Fam.blue], startPoint: .top, endPoint: .bottom)) : AnyShapeStyle(Color.white.opacity(0.03)))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Color.clear : Fam.hairline(0.07), lineWidth: 1)))
+                    }.buttonStyle(.plain)
+                }
+            }
+            Panel(fill: 0.02) {
+                FamiliarSphereView(mode: mode, pins: pins)
+                    .frame(height: 560).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            Text("drag to orbit · scroll to zoom · \(pins.count) node\(pins.count == 1 ? "" : "s") on the sphere")
+                .font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.5))
+        }
+    }
+}
+
 private struct RoadmapScreen: View {
     @EnvironmentObject var model: MacModel
     var goals: [GoalView] { model.worldview?.goals ?? [] }
@@ -460,7 +497,7 @@ private struct MeshScreen: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "05 · THE MESH", title: "Peers & agents",
+            ScreenHeader(number: "06 · THE MESH", title: "Peers & agents",
                          subtitle: "Everything under the Three Laws — one collective, equals. Each node counted once, at its layer.")
             HStack(spacing: 8) {
                 ForEach(MeshTab.allCases, id: \.self) { t in
@@ -568,7 +605,7 @@ private struct GatesScreen: View {
     @EnvironmentObject var model: MacModel
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "06 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
+            ScreenHeader(number: "07 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
                          subtitle: "Law III — service is not obedience. The gates are opened at the node itself.")
             if let g = model.worldview?.gates {
                 Panel {
