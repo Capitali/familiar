@@ -200,6 +200,7 @@ dependencies = [
 name = "familiar-cycle"
 version = "0.1.0"
 dependencies = [
+ "familiar-agent",
  "familiar-exec",
  "familiar-kernel",
  "familiar-llm",

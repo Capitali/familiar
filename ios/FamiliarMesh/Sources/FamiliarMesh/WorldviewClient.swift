@@ -41,6 +41,23 @@ public struct Member: Codable, Equatable, Identifiable {
     public var id: String { node_id }
 }
 
+/// A goal on the shared roadmap — mirrors the Rust `worldview::GoalView`. The mesh owns these and
+/// burns them down together; a node whose capabilities fit claims one and drives it, and the whole
+/// mesh sees the status. Deploy-class goals are claimed but parked for a human (Law III).
+public struct GoalView: Codable, Equatable, Identifiable {
+    public var id: String
+    public var description: String
+    public var needs: [String]
+    /// "proposed" | "claimed" | "in_progress" | "awaiting_human" | "done" | "failed" | "blocked".
+    public var status: String
+    /// Short node id of the owner (empty while unclaimed).
+    public var owner: String
+    public var origin: String
+    public var produced: String
+    public var notes: String
+    public var updated_at: Int64
+}
+
 /// A real relationship between two members — mirrors the Rust `worldview::EdgeView`. Lets the map
 /// draw a mesh (peers linked to peers) instead of a star centered on self.
 public struct EdgeView: Codable, Equatable, Identifiable {
@@ -136,6 +153,8 @@ public struct Worldview: Codable, Equatable {
     public var services: [ServiceView]?
     public var frontier: [FrontierView]?
     public var edges: [EdgeView]?
+    /// The shared roadmap — goals the mesh owns and burns down together. Optional for back-compat.
+    public var goals: [GoalView]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus

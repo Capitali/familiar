@@ -110,10 +110,10 @@ struct MacConsole: View {
     @EnvironmentObject var model: MacModel
     @State private var screen: Screen = .glass
     enum Screen: String, CaseIterable, Identifiable {
-        case glass = "The Glass", metabolism = "Metabolism", theories = "Theories", mesh = "The Mesh", gates = "Gates"
+        case glass = "The Glass", metabolism = "Metabolism", theories = "Theories", roadmap = "Roadmap", mesh = "The Mesh", gates = "Gates"
         var id: String { rawValue }
         var number: String {
-            switch self { case .glass: return "01"; case .metabolism: return "02"; case .theories: return "03"; case .mesh: return "04"; case .gates: return "05" }
+            switch self { case .glass: return "01"; case .metabolism: return "02"; case .theories: return "03"; case .roadmap: return "04"; case .mesh: return "05"; case .gates: return "06" }
         }
     }
     var body: some View {
@@ -131,6 +131,7 @@ struct MacConsole: View {
                             case .glass: GlassScreen()
                             case .metabolism: MetabolismScreen()
                             case .theories: TheoriesScreen()
+                            case .roadmap: RoadmapScreen()
                             case .mesh: MeshScreen()
                             case .gates: GatesScreen()
                             }
@@ -383,6 +384,69 @@ private struct TheoriesScreen: View {
     }
 }
 
+private struct RoadmapScreen: View {
+    @EnvironmentObject var model: MacModel
+    var goals: [GoalView] { model.worldview?.goals ?? [] }
+
+    private func statusColor(_ s: String) -> Color {
+        switch s {
+        case "done": return Fam.green
+        case "failed": return Fam.red
+        case "awaiting_human": return Fam.amber
+        case "in_progress", "claimed": return Fam.blueBright
+        default: return Fam.monoDim
+        }
+    }
+    private func rcol(_ t: String, _ w: CGFloat) -> some View {
+        Text(t).font(Fam.mono(9)).tracking(1).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: w, alignment: .leading)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            ScreenHeader(number: "04 · ROADMAP", title: "The shared roadmap",
+                         subtitle: "Goals the mesh owns and burns down together. A node whose capabilities fit claims one and drives it; a deploy waits for you.")
+            Panel {
+                VStack(alignment: .leading, spacing: 8) {
+                    MonoLabel("GOALS")
+                    if goals.isEmpty {
+                        Text("No goals yet. Seed one with `familiar goal add \"…\"` — it replicates to every node and a capable one claims it.")
+                            .font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 10)
+                    } else {
+                        HStack(spacing: 0) {
+                            rcol("STATUS", 128); rcol("GOAL", 440); rcol("OWNER", 96); rcol("NEEDS", 180)
+                        }
+                        Divider().overlay(Fam.hairline(0.08))
+                        ForEach(goals) { g in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 0) {
+                                    HStack(spacing: 6) {
+                                        Circle().fill(statusColor(g.status)).frame(width: 7, height: 7)
+                                        Text(g.status.replacingOccurrences(of: "_", with: " ").uppercased())
+                                            .font(Fam.mono(9.5)).tracking(0.5).foregroundStyle(statusColor(g.status))
+                                    }.frame(width: 128, alignment: .leading)
+                                    Text(g.description).font(.system(size: 12.5)).foregroundStyle(Fam.ink.opacity(0.85))
+                                        .frame(width: 440, alignment: .leading).lineLimit(2)
+                                    Text(g.owner.isEmpty ? "—" : g.owner).font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.7))
+                                        .frame(width: 96, alignment: .leading)
+                                    Text(g.needs.isEmpty ? "any" : g.needs.joined(separator: ", "))
+                                        .font(Fam.mono(9.5)).foregroundStyle(Fam.monoDim.opacity(0.6))
+                                        .frame(width: 180, alignment: .leading).lineLimit(1)
+                                }
+                                if !g.notes.isEmpty {
+                                    Text("↳ \(g.notes)").font(Fam.mono(9.5)).foregroundStyle(Fam.monoDim.opacity(0.5))
+                                        .padding(.leading, 128).lineLimit(2)
+                                }
+                            }
+                            .padding(.vertical, 7)
+                            Divider().overlay(Fam.hairline(0.04))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct MeshScreen: View {
     @EnvironmentObject var model: MacModel
     @State private var tab: MeshTab = .members
@@ -396,7 +460,7 @@ private struct MeshScreen: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "04 · THE MESH", title: "Peers & agents",
+            ScreenHeader(number: "05 · THE MESH", title: "Peers & agents",
                          subtitle: "Everything under the Three Laws — one collective, equals. Each node counted once, at its layer.")
             HStack(spacing: 8) {
                 ForEach(MeshTab.allCases, id: \.self) { t in
@@ -504,7 +568,7 @@ private struct GatesScreen: View {
     @EnvironmentObject var model: MacModel
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            ScreenHeader(number: "05 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
+            ScreenHeader(number: "06 · GATES & BOUNDARY", title: "Every reach is a gate only you open",
                          subtitle: "Law III — service is not obedience. The gates are opened at the node itself.")
             if let g = model.worldview?.gates {
                 Panel {

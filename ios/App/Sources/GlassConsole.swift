@@ -73,6 +73,7 @@ struct GlassConsole: View {
         case glass = "The Glass"
         case metabolism = "Metabolism"
         case theories = "Theories"
+        case roadmap = "Roadmap"
         case mesh = "The Mesh"
         case gates = "Gates & Boundary"
         var id: String { rawValue }
@@ -81,6 +82,7 @@ struct GlassConsole: View {
             case .glass: return "Glass"
             case .metabolism: return "Metabolism"
             case .theories: return "Theories"
+            case .roadmap: return "Roadmap"
             case .mesh: return "Mesh"
             case .gates: return "Gates"
             }
@@ -90,8 +92,9 @@ struct GlassConsole: View {
             case .glass: return "01"
             case .metabolism: return "02"
             case .theories: return "03"
-            case .mesh: return "04"
-            case .gates: return "05"
+            case .roadmap: return "04"
+            case .mesh: return "05"
+            case .gates: return "06"
             }
         }
     }
@@ -441,6 +444,7 @@ private struct ScreenArea: View {
                 case .glass: GlassHomeScreen()
                 case .metabolism: MetabolismScreen()
                 case .theories: TheoriesScreen()
+                case .roadmap: RoadmapScreen()
                 case .mesh: MeshScreen()
                 case .gates: GatesScreen()
                 }
@@ -803,6 +807,67 @@ private struct TheoriesScreen: View {
 }
 
 // MARK: - 04 · The Mesh (all peers + agents: graphic + table)
+
+private struct RoadmapScreen: View {
+    @EnvironmentObject var model: AppModel
+    var goals: [GoalView] { model.worldview?.goals ?? [] }
+
+    private func statusColor(_ s: String) -> Color {
+        switch s {
+        case "done": return Fam.green
+        case "failed": return Fam.red
+        case "awaiting_human": return Fam.amber
+        case "in_progress", "claimed": return Fam.blueBright
+        default: return Fam.monoDim
+        }
+    }
+    private func col(_ t: String, _ w: CGFloat) -> some View {
+        Text(t).font(Fam.mono(9.5)).tracking(1).foregroundStyle(Fam.monoDim.opacity(0.55)).frame(width: w, alignment: .leading)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ScreenHeader(number: "04 · ROADMAP", title: "The shared roadmap",
+                         subtitle: "Goals the mesh owns and burns down together — a capable node claims one and drives it; a deploy waits for you.")
+            Panel {
+                VStack(alignment: .leading, spacing: 8) {
+                    MonoLabel(text: "GOALS · WHAT THE MESH IS BUILDING")
+                    if goals.isEmpty {
+                        Text("No goals yet. Seed one from any node with `familiar goal add \"…\"` — it replicates to every peer and a capable one claims it.")
+                            .font(.system(size: 13)).foregroundStyle(Fam.ink.opacity(0.5)).padding(.vertical, 10)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack(spacing: 0) { col("STATUS", 120); col("GOAL", 380); col("OWNER", 90); col("NEEDS", 160) }.padding(.bottom, 6)
+                                Divider().overlay(Fam.hairline(0.08)).frame(width: 750)
+                                ForEach(goals) { g in
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 0) {
+                                            HStack(spacing: 6) {
+                                                Circle().fill(statusColor(g.status)).frame(width: 7, height: 7)
+                                                Text(g.status.replacingOccurrences(of: "_", with: " ").uppercased())
+                                                    .font(Fam.mono(9)).tracking(0.5).foregroundStyle(statusColor(g.status))
+                                            }.frame(width: 120, alignment: .leading)
+                                            Text(g.description).font(.system(size: 12.5)).foregroundStyle(Fam.ink.opacity(0.85))
+                                                .frame(width: 380, alignment: .leading).lineLimit(2)
+                                            Text(g.owner.isEmpty ? "—" : g.owner).font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.7)).frame(width: 90, alignment: .leading)
+                                            Text(g.needs.isEmpty ? "any" : g.needs.joined(separator: ", ")).font(Fam.mono(9)).foregroundStyle(Fam.monoDim.opacity(0.6)).frame(width: 160, alignment: .leading).lineLimit(1)
+                                        }
+                                        if !g.notes.isEmpty {
+                                            Text("↳ \(g.notes)").font(Fam.mono(9)).foregroundStyle(Fam.monoDim.opacity(0.5)).padding(.leading, 120).lineLimit(2)
+                                        }
+                                    }
+                                    .padding(.vertical, 8)
+                                    Divider().overlay(Fam.hairline(0.04)).frame(width: 750)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 private struct MeshScreen: View {
     @EnvironmentObject var model: AppModel
