@@ -321,6 +321,7 @@ mod tests {
             allow_camera: false,
             allow_mesh: false,
             allow_agent: false,
+            allow_self_upgrade: false,
             sandbox_execution: true,
             fs_read: vec!["/Users/ian/".into()],
             fs_write: vec!["/Users/ian/Development/familiar/familiar_data/".into()],

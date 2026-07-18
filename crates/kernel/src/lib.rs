@@ -40,3 +40,4 @@ pub mod store;
 pub mod thread;
 pub mod tool;
 pub mod trial;
+pub mod version;

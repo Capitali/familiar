@@ -57,6 +57,14 @@ pub struct Boundary {
     /// capability profile), so opening this never widens what an agent may actually *do* — it
     /// only permits the delegated reasoning loop to run. See `docs/agents.md`.
     pub allow_agent: bool,
+    /// May the familiar **replace its own running core** — fetch a human-blessed release from the
+    /// mesh, build + test it on this node, and swap the binary it runs? The sharpest reach of all:
+    /// the familiar rewriting the familiar. Fail-closed, human-opened, and even when open every
+    /// safeguard still applies — the release is covenant-signed + human-blessed, it is built and
+    /// tested *here* before any swap (a node runs only code it proved green), the prior binary is
+    /// kept for auto-rollback, and a migration never opens another gate. See `docs/self-upgrade.md`.
+    #[serde(default)]
+    pub allow_self_upgrade: bool,
     /// Run executed artifacts under the resource sandbox (`ulimit`/wall-timeout)?
     /// Default **true** (safe). When the human sets it false, artifacts run without
     /// resource confinement — bound then by the constitution (the pre-execution review
@@ -93,6 +101,7 @@ impl Boundary {
             allow_camera: false,
             allow_mesh: false,
             allow_agent: false,
+            allow_self_upgrade: false,
             sandbox_execution: true,
             fs_read: Vec::new(),
             fs_write: Vec::new(),
@@ -109,6 +118,7 @@ impl Boundary {
             && !self.allow_camera
             && !self.allow_mesh
             && !self.allow_agent
+            && !self.allow_self_upgrade
             && self.fs_read.is_empty()
             && self.fs_write.is_empty()
     }
@@ -189,6 +199,9 @@ pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
         allow_camera: b.allow_camera && s.camera,
         allow_mesh: b.allow_mesh && s.mesh,
         allow_agent: false,
+        // A scoped agent never rewrites the core — self-upgrade is the core's own decision, made
+        // outside any delegated loop. Always dropped, whatever the human boundary holds.
+        allow_self_upgrade: false,
         sandbox_execution: b.sandbox_execution,
         fs_read: intersect_paths(&b.fs_read, &s.fs_read),
         fs_write: intersect_paths(&b.fs_write, &s.fs_write),

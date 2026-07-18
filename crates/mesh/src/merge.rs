@@ -279,6 +279,7 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
                 dir,
                 &boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed()),
             ),
+            build_version: familiar_kernel::version::number(),
         },
         knowledge,
         identities,
@@ -1009,6 +1010,7 @@ mod tests {
                     last_exit_ok: true,
                 }],
                 capabilities: Vec::new(),
+                build_version: 0,
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {

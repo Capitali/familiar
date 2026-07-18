@@ -537,6 +537,7 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         "allow_authored_execute" => b.allow_authored_execute = open,
         "allow_agent" => b.allow_agent = open,
         "allow_tool_install" => b.allow_tool_install = open,
+        "allow_self_upgrade" => b.allow_self_upgrade = open,
         _ => return text(StatusCode::BAD_REQUEST, "unknown gate"),
     }
     if b.phase == "closed" && open {

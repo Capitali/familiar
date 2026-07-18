@@ -65,6 +65,12 @@ pub struct Capability {
     /// predate the field.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// The **orderable release version** of the core this node runs (`familiar_kernel::version`).
+    /// Distinct from `familiar_version` (the static crate version): this is the monotonic counter
+    /// self-upgrade compares, so a node can see a peer is running a newer blessed release. 0 on
+    /// briefs that predate it / unstamped builds.
+    #[serde(default)]
+    pub build_version: u64,
 }
 
 /// An abstract pattern offered for merge — never raw private data, a distilled regularity.
@@ -311,6 +317,7 @@ mod tests {
                     last_exit_ok: true,
                 }],
                 capabilities: Vec::new(),
+                build_version: 0,
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {
