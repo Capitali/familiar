@@ -1,15 +1,20 @@
 // FamiliarConsole — the complete Metal interface.
 //
-// Not a screen among screens: the whole console IS the sphere. A full-bleed glowing orb at the
-// centre, and every piece of what the familiar knows floats on a holographic panel beside it —
-// panels the human sweeps through horizontally with a two-finger swipe. Marble / Mesh / Globe
-// switch the orb's state; the Globe carries the mesh as a living world. One shared surface across
-// every Apple shell (watchOS keeps its own small UI and doesn't use this).
+// The whole console IS the globe: a living blue world at the centre with the mesh's nodes pinned to
+// it, and everything the familiar knows projected as TRANSPARENT holographic readouts floating over
+// it — no boxes, no chrome, just glowing data on the world. The human sweeps between readouts with a
+// two-finger swipe that the holograms track 1:1 as they drift across, past the globe. One shared
+// surface across every Apple shell (watchOS keeps its own small UI).
 //
-// Fed a `Worldview`; gate toggles call back out to the host app (which owns the signed write path).
+// Fed a `Worldview`; gate toggles call back to the host app (which owns the signed write path).
 
 #if !os(watchOS)
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 private enum CSky {
     static let ink = Color(red: 0xee/255, green: 0xf2/255, blue: 0xfb/255)
@@ -25,12 +30,20 @@ private enum CSky {
     static func mono(_ s: CGFloat) -> Font { .system(size: s, design: .monospaced) }
 }
 
+/// A tiny modifier that gives floating HUD text a legible glow over the moving globe.
+private extension View {
+    func holo(_ color: Color = .black, _ radius: CGFloat = 8) -> some View {
+        self.shadow(color: color.opacity(0.85), radius: radius)
+            .shadow(color: color.opacity(0.5), radius: radius * 2)
+    }
+}
+
 public struct FamiliarConsole: View {
     private let worldview: Worldview?
     private let onGate: (String, Bool) -> Void
 
-    @State private var mode: SphereMode = .marble
     @State private var panel: Int = 0
+    @State private var dragX: CGFloat = 0
 
     public init(worldview: Worldview?, onGate: @escaping (String, Bool) -> Void = { _, _ in }) {
         self.worldview = worldview
@@ -46,48 +59,60 @@ public struct FamiliarConsole: View {
 
     public var body: some View {
         ZStack {
-            // The world, full-bleed.
             RadialGradient(colors: [Color(red: 0x0a/255, green: 0x10/255, blue: 0x24/255),
                                     Color(red: 0x03/255, green: 0x05/255, blue: 0x0a/255)],
                            center: .top, startRadius: 40, endRadius: 900).ignoresSafeArea()
-            FamiliarSphereView(mode: mode, pins: pins) { dir in
-                withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) {
-                    panel = (panel + dir + panelCount) % panelCount
-                }
-            }.ignoresSafeArea()
-            // vignette to seat the orb
-            RadialGradient(colors: [.clear, Color(red: 0x03/255, green: 0x05/255, blue: 0x0a/255).opacity(0.55)],
-                           center: .center, startRadius: 260, endRadius: 720)
+            FamiliarSphereView(mode: .globe, pins: pins).ignoresSafeArea()
+            RadialGradient(colors: [.clear, Color(red: 0x03/255, green: 0x05/255, blue: 0x0a/255).opacity(0.5)],
+                           center: .center, startRadius: 280, endRadius: 760)
                 .ignoresSafeArea().allowsHitTesting(false)
 
             GeometryReader { geo in
                 let compact = geo.size.width < 720
+                let step: CGFloat = compact ? geo.size.width * 0.96 : geo.size.width * 0.58
+                let restX: CGFloat = compact ? 0 : geo.size.width * 0.19
+                let cardW: CGFloat = compact ? geo.size.width - 44 : 336
 
-                // The floating holograms — a horizontal carousel that sweeps ACROSS, past the orb,
-                // when the human two-finger swipes (the orb calls back through onSwipe). Each panel
-                // is a free-floating card; only the active one rests in view, the others waiting
-                // off to the sides, and the outgoing one drifts across the globe as it leaves.
-                panelCarousel(width: geo.size.width, height: geo.size.height, compact: compact)
+                // The floating readouts — transparent, tracking the finger as they drift past the globe.
+                ZStack {
+                    ForEach(0..<panelCount, id: \.self) { i in
+                        let d = CGFloat(i - panel) + dragX / step   // live distance from centre
+                        panelBodyCard(PanelKind(rawValue: i) ?? .presence)
+                            .frame(width: cardW, alignment: .leading)
+                            .scaleEffect(1 - min(0.18, abs(d) * 0.18))
+                            .opacity(max(0, 1 - abs(d) * 1.15))
+                            .offset(x: restX + d * step)
+                            .allowsHitTesting(i == panel && abs(dragX) < 4)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-                // Floating chrome — wordmark + caption (top-left), version pill (top-right).
-                VStack { HStack(alignment: .top) {
-                    wordmark
-                    Spacer()
-                    versionPill
-                }; Spacer() }
-                .padding(compact ? 20 : 30)
-                .allowsHitTesting(false)
+                // Floating chrome — wordmark (top-left), presence pill (top-right).
+                VStack { HStack(alignment: .top) { wordmark; Spacer(); versionPill }; Spacer() }
+                    .padding(compact ? 20 : 30).allowsHitTesting(false)
 
-                // Bottom: panel dots + mode switcher.
-                VStack { Spacer(); VStack(spacing: 14) {
-                    panelDots
-                    modeSwitcher
-                }.padding(.bottom, compact ? 26 : 30) }
-                .frame(maxWidth: .infinity)
+                // Bottom: panel dots.
+                VStack { Spacer(); panelDots.padding(.bottom, compact ? 30 : 34) }
+                    .frame(maxWidth: .infinity)
+
+                // Window-level two-finger swipe — works over the globe AND the readouts, tracks 1:1.
+                TwoFingerPan(
+                    onDrag: { dx in dragX = dx },
+                    onEnd: { dx in settle(dx: dx, step: step) }
+                ).allowsHitTesting(false)
             }
         }
         .foregroundStyle(CSky.ink)
         .preferredColorScheme(.dark)
+    }
+
+    private func settle(dx: CGFloat, step: CGFloat) {
+        let moved = Int((-dx / step).rounded())
+        let newPanel = min(max(panel + moved, 0), panelCount - 1)
+        // Keep the visual position continuous, then spring the remainder home.
+        dragX = dx + CGFloat(newPanel - panel) * step
+        panel = newPanel
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { dragX = 0 }
     }
 
     // MARK: chrome
@@ -97,125 +122,73 @@ public struct FamiliarConsole: View {
             HStack(spacing: 11) {
                 Circle().fill(RadialGradient(colors: [CSky.ice, CSky.bright, CSky.blue],
                                              center: .init(x: 0.34, y: 0.28), startRadius: 1, endRadius: 18))
-                    .frame(width: 28, height: 28)
-                    .shadow(color: CSky.blue.opacity(0.5), radius: 10)
+                    .frame(width: 28, height: 28).holo(CSky.blue, 10)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("FAMILIAR").font(.system(size: 13, weight: .semibold)).tracking(2.4)
-                    Text(worldview?.group_label ?? "metal · unified surface")
-                        .font(CSky.mono(8.5)).tracking(1).foregroundStyle(CSky.dim.opacity(0.6))
+                    Text(worldview?.group_label ?? "the collective")
+                        .font(CSky.mono(8.5)).tracking(1).foregroundStyle(CSky.dim.opacity(0.7))
                 }
             }
-            Text(mode.rawValue.uppercased() + " · STATE").font(CSky.mono(9.5)).tracking(2.2)
-                .foregroundStyle(CSky.soft.opacity(0.62)).padding(.top, 14)
-            Text(modeTitle).font(.system(size: 26, weight: .semibold)).tracking(-0.3)
-                .shadow(color: .black.opacity(0.6), radius: 18).frame(maxWidth: 320, alignment: .leading)
-            Text(mode.caption).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.6))
-                .frame(maxWidth: 300, alignment: .leading).lineLimit(3)
-        }
-    }
-    private var modeTitle: String {
-        switch mode {
-        case .marble: return "The blue marble, breathing"
-        case .mesh: return "The mesh, exposed"
-        case .globe: return "The world, and everyone on it"
+            Text("THE MESH, AS A WORLD").font(CSky.mono(9.5)).tracking(2.2)
+                .foregroundStyle(CSky.soft.opacity(0.62)).padding(.top, 14).holo()
+            Text(currentPanel.title).font(.system(size: 25, weight: .semibold)).tracking(-0.3)
+                .frame(maxWidth: 320, alignment: .leading).holo(.black, 14)
         }
     }
     private var versionPill: some View {
         HStack(spacing: 8) {
-            Circle().fill(CSky.green).frame(width: 5, height: 5).shadow(color: CSky.green, radius: 5)
+            Circle().fill(CSky.green).frame(width: 5, height: 5).holo(CSky.green, 5)
             Text("\((worldview?.members ?? []).count) node\((worldview?.members ?? []).count == 1 ? "" : "s") · Metal")
-                .font(CSky.mono(10)).foregroundStyle(CSky.ink.opacity(0.72))
-        }
-        .padding(.horizontal, 13).padding(.vertical, 8)
-        .background(Capsule().fill(.ultraThinMaterial).overlay(Capsule().stroke(.white.opacity(0.08), lineWidth: 1)))
+                .font(CSky.mono(10)).foregroundStyle(CSky.ink.opacity(0.78))
+        }.holo(.black, 6)
     }
-
     private var panelDots: some View {
         HStack(spacing: 7) {
             ForEach(0..<panelCount, id: \.self) { i in
                 Button {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) { panel = i }
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) { panel = i; dragX = 0 }
                 } label: {
                     Capsule().fill(i == panel ? CSky.cyan : CSky.dim.opacity(0.3))
-                        .frame(width: i == panel ? 18 : 6, height: 6)
+                        .frame(width: i == panel ? 18 : 6, height: 6).holo(CSky.cyan.opacity(i == panel ? 1 : 0), 4)
                 }.buttonStyle(.plain)
             }
         }
     }
 
-    private var modeSwitcher: some View {
-        HStack(spacing: 5) {
-            ForEach(SphereMode.allCases) { m in
-                let on = mode == m
-                Button { withAnimation(.easeInOut(duration: 0.3)) { mode = m } } label: {
-                    VStack(spacing: 2) {
-                        Text(m.rawValue).font(.system(size: 13.5, weight: .semibold))
-                            .foregroundStyle(on ? Color(red: 0.04, green: 0.075, blue: 0.19) : CSky.ink.opacity(0.72))
-                        Text(m.hint).font(CSky.mono(8)).tracking(1)
-                            .foregroundStyle(on ? Color(red: 0.04, green: 0.075, blue: 0.19).opacity(0.6) : CSky.dim.opacity(0.5))
-                    }
-                    .padding(.horizontal, 24).padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 12)
-                        .fill(on ? AnyShapeStyle(LinearGradient(colors: [CSky.soft, CSky.blue], startPoint: .top, endPoint: .bottom))
-                                 : AnyShapeStyle(Color.clear)))
-                }.buttonStyle(.plain)
-            }
-        }
-        .padding(6)
-        .background(Capsule().fill(.ultraThinMaterial).overlay(Capsule().stroke(.white.opacity(0.09), lineWidth: 1)))
-    }
-
-    // MARK: holographic panels — a floating carousel that sweeps past the orb
-
-    @ViewBuilder private func panelCarousel(width: CGFloat, height: CGFloat, compact: Bool) -> some View {
-        let cardW: CGFloat = compact ? width - 44 : 344
-        let restX: CGFloat = compact ? 0 : width * 0.20          // active card rests right-of-centre
-        let step: CGFloat = compact ? width * 0.94 : width * 0.60 // neighbours wait off to the sides
-        ZStack {
-            ForEach(0..<panelCount, id: \.self) { i in
-                let d = CGFloat(i - panel)
-                holoCard(PanelKind(rawValue: i) ?? .presence)
-                    .frame(width: cardW)
-                    .scaleEffect(1 - min(0.16, abs(d) * 0.16))
-                    .opacity(i == panel ? 1 : max(0, 0.4 - abs(d) * 0.28))
-                    .blur(radius: i == panel ? 0 : 3.5)
-                    .offset(x: restX + d * step, y: compact ? height * 0.20 : 0)
-                    .allowsHitTesting(i == panel)
-                    .zIndex(i == panel ? 1 : 0)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .animation(.spring(response: 0.55, dampingFraction: 0.82), value: panel)
-    }
-
-    private func holoCard(_ kind: PanelKind) -> some View {
-        HoloCard {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(kind.title).font(CSky.mono(10)).tracking(2).foregroundStyle(CSky.soft.opacity(0.85))
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Circle().fill(CSky.green).frame(width: 5, height: 5).shadow(color: CSky.green, radius: 5)
-                        Text("PROJECTING").font(CSky.mono(9)).foregroundStyle(CSky.green)
-                    }
-                }.padding(.bottom, 16)
-                panelBody(kind)
-            }
-        }
-    }
+    // MARK: transparent holographic readouts
 
     private enum PanelKind: Int, CaseIterable { case presence, mesh, roadmap, gates, theories
         var title: String {
             switch self {
-            case .presence: return "PRESENCE · LAW II"
-            case .mesh: return "THE MESH"
-            case .roadmap: return "THE ROADMAP"
-            case .gates: return "GATES · LAW III"
-            case .theories: return "THEORIES"
+            case .presence: return "Presence"
+            case .mesh: return "The mesh"
+            case .roadmap: return "The roadmap"
+            case .gates: return "Gates"
+            case .theories: return "Theories"
+            }
+        }
+        var tag: String {
+            switch self {
+            case .presence: return "LAW II · PRESENCE"
+            case .mesh: return "THE COLLECTIVE"
+            case .roadmap: return "SHARED WORK"
+            case .gates: return "LAW III · REACH"
+            case .theories: return "ITS OWN QUESTIONS"
             }
         }
     }
     private var currentPanel: PanelKind { PanelKind(rawValue: panel) ?? .presence }
+
+    private func panelBodyCard(_ kind: PanelKind) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Rectangle().fill(CSky.cyan).frame(width: 16, height: 1.5)
+                Text(kind.tag).font(CSky.mono(9.5)).tracking(2).foregroundStyle(CSky.cyan.opacity(0.9))
+            }.holo()
+            panelBody(kind)
+        }
+        .padding(.vertical, 8)
+    }
 
     @ViewBuilder private func panelBody(_ kind: PanelKind) -> some View {
         switch kind {
@@ -223,109 +196,84 @@ public struct FamiliarConsole: View {
             signalRow("Service", worldview?.service ?? 0, CSky.blue)
             signalRow("Presence", worldview?.presence ?? 0, CSky.green)
             signalRow("Capacities", worldview?.capacity ?? 0, CSky.amber)
-            equalizer.padding(.top, 8)
         case .mesh:
-            let members = worldview?.members ?? []
-            metricPair("\(members.count)", "NODES", "\(members.filter { $0.online }.count)", "ONLINE")
-            ForEach(members.prefix(6)) { m in
-                rowLine(m.label, m.kind == .self_node ? "you" : (m.relationship ?? "peer"),
-                        dot: m.online ? CSky.green : CSky.dim)
+            HStack(spacing: 22) {
+                bigStat("\((worldview?.members ?? []).count)", "NODES")
+                bigStat("\((worldview?.members ?? []).filter { $0.online }.count)", "ONLINE")
+                bigStat("\(worldview?.observation_count ?? 0)", "SEEN")
+            }
+            ForEach((worldview?.members ?? []).prefix(6)) { m in
+                rowLine(m.label, m.kind == .self_node ? "you" : (m.relationship ?? "peer"), dot: m.online ? CSky.green : CSky.dim)
             }
         case .roadmap:
             let goals = worldview?.goals ?? []
             if goals.isEmpty { emptyLine("No goals yet — seed one with `familiar goal add`.") }
             ForEach(goals.prefix(6)) { g in
-                rowLine(g.description, g.status.replacingOccurrences(of: "_", with: " "),
-                        dot: goalColor(g.status))
+                rowLine(g.description, g.status.replacingOccurrences(of: "_", with: " "), dot: goalColor(g.status))
             }
         case .gates:
-            if let gates = worldview?.gates { gatesGrid(gates) }
-            else { emptyLine("Gates unavailable.") }
+            if let gates = worldview?.gates { gatesList(gates) } else { emptyLine("Gates unavailable.") }
         case .theories:
             let th = worldview?.theories ?? []
             if th.isEmpty { emptyLine("No theories yet.") }
             ForEach(th.prefix(4)) { t in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(t.question).font(.system(size: 12.5, weight: .medium)).lineLimit(2)
-                    Text(t.direction).font(CSky.mono(9.5)).foregroundStyle(CSky.dim.opacity(0.7)).lineLimit(2)
-                }.padding(.vertical, 5)
+                    Text(t.question).font(.system(size: 13, weight: .medium)).lineLimit(2).holo()
+                    Text(t.direction).font(CSky.mono(9.5)).foregroundStyle(CSky.dim.opacity(0.8)).lineLimit(2).holo()
+                }.padding(.vertical, 4)
             }
         }
     }
 
-    // MARK: panel atoms
+    // MARK: readout atoms (all transparent, glowing)
 
     private func signalRow(_ label: String, _ v: Double, _ color: Color) -> some View {
         VStack(spacing: 6) {
             HStack { Text(label).font(.system(size: 13, weight: .medium)); Spacer()
-                Text(String(format: "%.2f", v)).font(CSky.mono(12)).foregroundStyle(color) }
+                Text(String(format: "%.2f", v)).font(CSky.mono(12)).foregroundStyle(color) }.holo()
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.07))
-                    Capsule().fill(color).frame(width: max(4, g.size.width * min(1, max(0, v))))
-                        .shadow(color: color.opacity(0.7), radius: 8)
+                    Capsule().fill(.white.opacity(0.08)).frame(height: 3)
+                    Capsule().fill(color).frame(width: max(4, g.size.width * min(1, max(0, v))), height: 3)
+                        .holo(color, 6)
                 }
-            }.frame(height: 6)
-        }.padding(.bottom, 13)
+            }.frame(height: 4)
+        }.frame(width: 300)
     }
-    private func metricPair(_ a: String, _ al: String, _ b: String, _ bl: String) -> some View {
-        HStack(spacing: 10) {
-            metricBox(a, al); metricBox(b, bl)
-        }.padding(.bottom, 12)
-    }
-    private func metricBox(_ v: String, _ l: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(v).font(.system(size: 22, weight: .semibold)).foregroundStyle(CSky.ice).monospacedDigit()
-            Text(l).font(CSky.mono(8.5)).tracking(1).foregroundStyle(CSky.dim.opacity(0.55))
+    private func bigStat(_ v: String, _ l: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(v).font(.system(size: 34, weight: .light)).foregroundStyle(CSky.ice).monospacedDigit().holo(CSky.blue, 12)
+            Text(l).font(CSky.mono(8)).tracking(1.4).foregroundStyle(CSky.dim.opacity(0.6))
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(CSky.bright.opacity(0.06))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CSky.bright.opacity(0.2), lineWidth: 1)))
     }
     private func rowLine(_ a: String, _ b: String, dot: Color) -> some View {
         HStack(spacing: 8) {
-            Circle().fill(dot).frame(width: 6, height: 6)
-            Text(a).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.85)).lineLimit(1)
+            Circle().fill(dot).frame(width: 6, height: 6).holo(dot, 4)
+            Text(a).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.9)).lineLimit(1)
             Spacer(minLength: 6)
-            Text(b).font(CSky.mono(9.5)).foregroundStyle(CSky.dim.opacity(0.7)).lineLimit(1)
-        }
-        .padding(.vertical, 7)
-        .overlay(Rectangle().fill(.white.opacity(0.06)).frame(height: 1), alignment: .bottom)
+            Text(b).font(CSky.mono(9.5)).foregroundStyle(CSky.dim.opacity(0.8)).lineLimit(1)
+        }.frame(width: 300).padding(.vertical, 5).holo(.black, 5)
     }
     private func emptyLine(_ s: String) -> some View {
-        Text(s).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.5)).padding(.vertical, 10)
+        Text(s).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.6)).frame(width: 300, alignment: .leading).holo()
     }
-    private func gatesGrid(_ g: GateStates) -> some View {
+    private func gatesList(_ g: GateStates) -> some View {
         let items: [(String, String, Bool)] = [
             ("Network", "allow_network", g.network), ("LLM", "allow_llm", g.llm),
             ("Execute", "allow_execute", g.execute), ("Agent", "allow_agent", g.agent),
-            ("Mesh", "allow_mesh", g.mesh), ("Camera", "allow_camera", g.camera),
-            ("Tools", "allow_tool_install", g.tool_install)
-        ]
-        return VStack(spacing: 8) {
+            ("Mesh", "allow_mesh", g.mesh), ("Camera", "allow_camera", g.camera), ("Tools", "allow_tool_install", g.tool_install)]
+        return VStack(spacing: 7) {
             ForEach(items, id: \.1) { item in
                 HStack {
                     Text(item.0).font(.system(size: 13, weight: .medium))
                     Spacer()
                     Button { onGate(item.1, !item.2) } label: {
                         Text(item.2 ? "OPEN" : "shut").font(CSky.mono(9.5)).tracking(1)
-                            .foregroundStyle(item.2 ? Color(red: 0.04, green: 0.075, blue: 0.19) : CSky.dim)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(Capsule().fill(item.2 ? AnyShapeStyle(CSky.green) : AnyShapeStyle(.white.opacity(0.06))))
+                            .foregroundStyle(item.2 ? CSky.green : CSky.dim)
                     }.buttonStyle(.plain)
-                }
-                .padding(.vertical, 5)
-                .overlay(Rectangle().fill(.white.opacity(0.05)).frame(height: 1), alignment: .bottom)
+                }.frame(width: 300).holo(.black, 5)
             }
         }
-    }
-    private var equalizer: some View {
-        HStack(alignment: .bottom, spacing: 3) {
-            ForEach(0..<7, id: \.self) { i in
-                Capsule().fill(LinearGradient(colors: [CSky.cyan, CSky.blue], startPoint: .top, endPoint: .bottom))
-                    .frame(maxWidth: .infinity).frame(height: CGFloat([8, 16, 22, 14, 20, 10, 18][i]))
-            }
-        }.frame(height: 22)
     }
     private func goalColor(_ s: String) -> Color {
         switch s { case "done": return CSky.green; case "failed": return CSky.red
@@ -334,34 +282,73 @@ public struct FamiliarConsole: View {
     }
 }
 
-/// The glassmorphic holographic card — blur, a hair-thin blue frame, and corner brackets.
-private struct HoloCard<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        content()
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 18).fill(.ultraThinMaterial)
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(CSky.cyan.opacity(0.5), lineWidth: 1))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(CSky.cyan.opacity(0.12), lineWidth: 6).blur(radius: 6))
-            )
-            .overlay(bracket(.topLeading)).overlay(bracket(.topTrailing))
-            .overlay(bracket(.bottomLeading)).overlay(bracket(.bottomTrailing))
-            .shadow(color: CSky.blue.opacity(0.3), radius: 30)
+// A window-level two-finger swipe that reports continuous translation, so the holograms track the
+// finger 1:1. It never blocks touches (one-finger orbit + button taps still reach the views below).
+#if canImport(UIKit)
+private struct TwoFingerPan: UIViewRepresentable {
+    var onDrag: (CGFloat) -> Void
+    var onEnd: (CGFloat) -> Void
+    func makeCoordinator() -> Coord { Coord(onDrag: onDrag, onEnd: onEnd) }
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView(); v.isUserInteractionEnabled = false
+        context.coordinator.attach(to: v); return v
     }
-    private func bracket(_ corner: Alignment) -> some View {
-        let h = corner == .topLeading || corner == .bottomLeading
-        let v = corner == .topLeading || corner == .topTrailing
-        return Path { p in
-            p.move(to: CGPoint(x: h ? 0 : 13, y: v ? 0 : 13))
-            p.addLine(to: CGPoint(x: h ? 13 : 0, y: v ? 0 : 13))
-            p.move(to: CGPoint(x: h ? 0 : 13, y: v ? 0 : 13))
-            p.addLine(to: CGPoint(x: h ? 0 : 13, y: v ? 13 : 0))
+    func updateUIView(_ v: UIView, context: Context) { context.coordinator.attach(to: v) }
+    static func dismantleUIView(_ v: UIView, coordinator: Coord) { coordinator.detach() }
+    final class Coord: NSObject, UIGestureRecognizerDelegate {
+        let onDrag: (CGFloat) -> Void; let onEnd: (CGFloat) -> Void
+        private var pan: UIPanGestureRecognizer?
+        private weak var host: UIView?
+        init(onDrag: @escaping (CGFloat) -> Void, onEnd: @escaping (CGFloat) -> Void) { self.onDrag = onDrag; self.onEnd = onEnd }
+        func attach(to v: UIView) {
+            host = v
+            guard pan == nil else { return }
+            guard let win = v.window else { DispatchQueue.main.async { [weak self] in self?.attach(to: v) }; return }
+            let p = UIPanGestureRecognizer(target: self, action: #selector(handle(_:)))
+            p.minimumNumberOfTouches = 2; p.maximumNumberOfTouches = 2; p.delegate = self
+            win.addGestureRecognizer(p); pan = p
         }
-        .stroke(CSky.cyan.opacity(0.85), lineWidth: 1.5)
-        .frame(width: 13, height: 13).padding(9)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: corner)
+        func detach() { if let p = pan, let win = host?.window { win.removeGestureRecognizer(p) }; pan = nil }
+        @objc func handle(_ g: UIPanGestureRecognizer) {
+            let t = g.translation(in: g.view)
+            switch g.state {
+            case .changed: onDrag(t.x)
+            case .ended, .cancelled, .failed: onEnd(t.x)
+            default: break
+            }
+        }
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
     }
 }
+#else
+private struct TwoFingerPan: NSViewRepresentable {
+    var onDrag: (CGFloat) -> Void
+    var onEnd: (CGFloat) -> Void
+    func makeCoordinator() -> Coord { Coord(onDrag: onDrag, onEnd: onEnd) }
+    func makeNSView(context: Context) -> NSView { context.coordinator.start(); return NSView() }
+    func updateNSView(_ v: NSView, context: Context) {}
+    static func dismantleNSView(_ v: NSView, coordinator: Coord) { coordinator.stop() }
+    final class Coord {
+        let onDrag: (CGFloat) -> Void; let onEnd: (CGFloat) -> Void
+        private var monitor: Any?
+        private var accum: CGFloat = 0
+        init(onDrag: @escaping (CGFloat) -> Void, onEnd: @escaping (CGFloat) -> Void) { self.onDrag = onDrag; self.onEnd = onEnd }
+        func start() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+                guard let self = self else { return e }
+                // Trackpad two-finger scroll → a live horizontal drag (scaled to feel like a swipe).
+                if e.phase == .began { self.accum = 0 }
+                self.accum += e.scrollingDeltaX * 2.4
+                let horizontal = abs(e.scrollingDeltaX) >= abs(e.scrollingDeltaY)
+                if e.phase == .changed { self.onDrag(self.accum) }
+                if e.phase == .ended || e.phase == .cancelled { self.onEnd(self.accum); self.accum = 0 }
+                return horizontal ? nil : e   // consume horizontal so it doesn't scroll anything else
+            }
+        }
+        func stop() { if let m = monitor { NSEvent.removeMonitor(m) }; monitor = nil }
+    }
+}
+#endif
 
 #endif

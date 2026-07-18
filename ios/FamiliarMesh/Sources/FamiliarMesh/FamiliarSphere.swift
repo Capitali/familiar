@@ -67,7 +67,7 @@ public struct FamiliarSphereView: View {
     private let mode: SphereMode
     private let pins: [SpherePin]
     @State private var breathe = false
-    public init(mode: SphereMode = .marble, pins: [SpherePin] = [], onSwipe: @escaping (Int) -> Void = { _ in }) {
+    public init(mode: SphereMode = .globe, pins: [SpherePin] = []) {
         self.mode = mode; self.pins = pins
     }
     public var body: some View {
@@ -223,19 +223,20 @@ final class SphereScene {
     }
 }
 
-/// Owns rotation state + gesture handling, and drives the scene each frame (SCNSceneRendererDelegate).
+/// Owns rotation state, and drives the scene each frame (SCNSceneRendererDelegate). One-finger drag
+/// orbits the globe; the panel-sweep gesture lives at the console level so it works over the panels
+/// too (see `FamiliarConsole`).
 final class SphereCoordinator: NSObject, SCNSceneRendererDelegate {
     let world = SphereScene()
-    let onSwipe: (Int) -> Void
     var yaw: CGFloat = 0, pitch: CGFloat = 0.1
     var dragging = false
     private var lastTime: TimeInterval = 0
 
-    init(onSwipe: @escaping (Int) -> Void) { self.onSwipe = onSwipe; super.init() }
+    override init() { super.init() }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         let dt = lastTime == 0 ? 0 : min(time - lastTime, 0.05); lastTime = time
-        if !dragging { yaw += CGFloat(dt) * 0.16 }              // idle autorotate
+        if !dragging { yaw += CGFloat(dt) * 0.14 }              // idle autorotate
         world.group.eulerAngles = SCNVector3(Float(pitch), Float(yaw), 0)
     }
     func orbit(dx: CGFloat, dy: CGFloat) {
@@ -244,21 +245,21 @@ final class SphereCoordinator: NSObject, SCNSceneRendererDelegate {
     }
 }
 
-/// The public view — dispatches to a platform representable that owns the SCNView + gestures.
+/// The public view — a platform representable that owns the SCNView. The Metal interface uses only
+/// the Globe now (Marble/Mesh dropped), but the mode param is retained for callers that still pass it.
 public struct FamiliarSphereView: View {
     private let mode: SphereMode
     private let pins: [SpherePin]
-    private let onSwipe: (Int) -> Void
-    public init(mode: SphereMode = .marble, pins: [SpherePin] = [], onSwipe: @escaping (Int) -> Void = { _ in }) {
-        self.mode = mode; self.pins = pins; self.onSwipe = onSwipe
+    public init(mode: SphereMode = .globe, pins: [SpherePin] = []) {
+        self.mode = mode; self.pins = pins
     }
-    public var body: some View { SphereRep(mode: mode, pins: pins, onSwipe: onSwipe) }
+    public var body: some View { SphereRep(mode: mode, pins: pins) }
 }
 
 #if canImport(UIKit)
 struct SphereRep: UIViewRepresentable {
-    let mode: SphereMode; let pins: [SpherePin]; let onSwipe: (Int) -> Void
-    func makeCoordinator() -> SphereCoordinator { SphereCoordinator(onSwipe: onSwipe) }
+    let mode: SphereMode; let pins: [SpherePin]
+    func makeCoordinator() -> SphereCoordinator { SphereCoordinator() }
     func makeUIView(context: Context) -> SCNView {
         let c = context.coordinator
         c.world.build()
@@ -272,9 +273,7 @@ struct SphereRep: UIViewRepresentable {
         v.allowsCameraControl = false
         let one = UIPanGestureRecognizer(target: context.coordinator, action: #selector(SphereCoordinator.oneFinger(_:)))
         one.minimumNumberOfTouches = 1; one.maximumNumberOfTouches = 1
-        let two = UIPanGestureRecognizer(target: context.coordinator, action: #selector(SphereCoordinator.twoFinger(_:)))
-        two.minimumNumberOfTouches = 2; two.maximumNumberOfTouches = 2
-        v.addGestureRecognizer(one); v.addGestureRecognizer(two)
+        v.addGestureRecognizer(one)
         return v
     }
     func updateUIView(_ v: SCNView, context: Context) {
@@ -289,23 +288,11 @@ extension SphereCoordinator {
         if g.state == .changed { orbit(dx: t.x, dy: t.y) }
         if g.state == .ended || g.state == .cancelled { dragging = false }
     }
-    private static var swipeFired = false
-    @objc func twoFinger(_ g: UIPanGestureRecognizer) {
-        let t = g.translation(in: g.view)
-        switch g.state {
-        case .began: SphereCoordinator.swipeFired = false
-        case .changed:
-            if !SphereCoordinator.swipeFired && abs(t.x) > 55 && abs(t.x) > abs(t.y) * 1.3 {
-                SphereCoordinator.swipeFired = true; onSwipe(t.x < 0 ? 1 : -1)
-            }
-        default: SphereCoordinator.swipeFired = false
-        }
-    }
 }
 #else
 struct SphereRep: NSViewRepresentable {
-    let mode: SphereMode; let pins: [SpherePin]; let onSwipe: (Int) -> Void
-    func makeCoordinator() -> SphereCoordinator { SphereCoordinator(onSwipe: onSwipe) }
+    let mode: SphereMode; let pins: [SpherePin]
+    func makeCoordinator() -> SphereCoordinator { SphereCoordinator() }
     func makeNSView(context: Context) -> SCNView {
         let c = context.coordinator
         c.world.build()
@@ -324,17 +311,12 @@ struct SphereRep: NSViewRepresentable {
         context.coordinator.world.apply(mode)
         context.coordinator.world.setPins(pins)
     }
-    /// One-finger drag orbits; two-finger trackpad scroll sweeps the panels.
+    /// One-finger drag orbits the globe. (The panel sweep is handled at the console level.)
     final class OrbitSCNView: SCNView {
         weak var coordinator: SphereCoordinator?
-        private var accum: CGFloat = 0
         override func mouseDown(with e: NSEvent) { coordinator?.dragging = true }
         override func mouseDragged(with e: NSEvent) { coordinator?.orbit(dx: e.deltaX, dy: e.deltaY) }
         override func mouseUp(with e: NSEvent) { coordinator?.dragging = false }
-        override func scrollWheel(with e: NSEvent) {
-            accum += e.scrollingDeltaX
-            if abs(accum) > 40 { coordinator?.onSwipe(accum < 0 ? 1 : -1); accum = 0 }
-        }
     }
 }
 #endif
