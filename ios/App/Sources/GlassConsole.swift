@@ -103,37 +103,15 @@ struct GlassConsole: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let compact = geo.size.width < kCompactWidth
-            ZStack {
-                Fam.bg.ignoresSafeArea()
-                AuroraBackground()
-                if compact {
-                    VStack(spacing: 0) {
-                        CompactBar(screen: $screen)
-                        Divider().overlay(Fam.hairline(0.055))
-                        ScreenArea(screen: screen)
-                    }
-                } else {
-                    HStack(spacing: 0) {
-                        LeftRail(screen: $screen)
-                            .frame(width: 250)
-                        VStack(spacing: 0) {
-                            TopBar()
-                            Divider().overlay(Fam.hairline(0.055))
-                            ScreenArea(screen: screen)
-                        }
-                    }
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .environment(\.isCompactLayout, compact)
-        }
-        .ignoresSafeArea(.keyboard)
-        .foregroundStyle(Fam.ink)
-        .preferredColorScheme(.dark)
-        .onAppear { model.startWorldviewPolling(); model.startDiscoveryIfConsented(); model.startReasoningIfConsented() }
-        .onDisappear { model.stopWorldviewPolling() }
+        // The complete Metal interface — the orb IS the console; all data lives on the sweeping
+        // holographic panels, swept with a two-finger swipe. The iPad reads a remote familiar and
+        // has no loopback gate-write path, so gate toggles are inert here (gates are opened at the
+        // machine that runs the familiar). The former rail/screens remain in this file for reference.
+        FamiliarConsole(worldview: model.worldview) { _, _ in }
+            .ignoresSafeArea(.keyboard)
+            .preferredColorScheme(.dark)
+            .onAppear { model.startWorldviewPolling(); model.startDiscoveryIfConsented(); model.startReasoningIfConsented() }
+            .onDisappear { model.stopWorldviewPolling() }
     }
 }
 

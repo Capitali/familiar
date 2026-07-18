@@ -117,33 +117,12 @@ struct MacConsole: View {
         }
     }
     var body: some View {
-        ZStack {
-            Fam.bg.ignoresSafeArea()
-            AuroraBackground()
-            HStack(spacing: 0) {
-                MacRail(screen: $screen).frame(width: 240)
-                VStack(spacing: 0) {
-                    MacTopBar()
-                    Divider().overlay(Fam.hairline(0.055))
-                    ScrollView {
-                        Group {
-                            switch screen {
-                            case .glass: GlassScreen()
-                            case .metabolism: MetabolismScreen()
-                            case .theories: TheoriesScreen()
-                            case .roadmap: RoadmapScreen()
-                            case .sphere: SphereScreen()
-                            case .mesh: MeshScreen()
-                            case .gates: GatesScreen()
-                            }
-                        }
-                        .padding(28)
-                    }
-                }
-            }
+        // The complete Metal interface — the orb IS the console; all data lives on the sweeping
+        // holographic panels. (The former rail/screens remain in this file for reference and for
+        // re-folding their richer content into panels as the interface matures.)
+        FamiliarConsole(worldview: model.worldview) { gate, open in
+            Task { await model.setGate(gate, open) }
         }
-        .foregroundStyle(Fam.ink)
-        .preferredColorScheme(.dark)
     }
 }
 
