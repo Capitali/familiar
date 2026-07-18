@@ -13,6 +13,7 @@
 import SwiftUI
 #if !os(watchOS)
 import SceneKit
+import simd
 #endif
 
 #if canImport(UIKit)
@@ -95,6 +96,8 @@ final class SphereScene {
     let wireMat = SCNMaterial()
     let atmoMat = SCNMaterial()
     let pinRoot = SCNNode()
+    let arcRoot = SCNNode()
+    private var arcs: [Arc] = []
     private var globeTexture: Any?
     private var built = false
 
@@ -137,6 +140,7 @@ final class SphereScene {
         group.addChildNode(node(1.28, 48, atmoMat))
 
         group.addChildNode(pinRoot)
+        group.addChildNode(arcRoot)
         scene.rootNode.addChildNode(group)
 
         let up = SCNAction.scale(to: 1.018, duration: 3); up.timingMode = .easeInEaseOut
@@ -164,15 +168,79 @@ final class SphereScene {
     func setPins(_ pins: [SpherePin]) {
         pinRoot.childNodes.forEach { $0.removeFromParentNode() }
         let n = max(1, pins.count)
+        var dirs: [simd_float3] = []
         for (i, p) in pins.enumerated() {
-            let dir = spiral(i, n)
+            let dir = spiralDir(i, n); dirs.append(dir)
             let color: PColor = p.local ? Sky.ice : (p.ai ? Sky.amber : Sky.bright)
             let r: CGFloat = p.local ? 0.032 : 0.022
             let dm = SCNMaterial(); dm.lightingModel = .constant; dm.diffuse.contents = color; dm.emission.contents = color
             let dot = SCNNode(geometry: SCNSphere(radius: r)); dot.geometry?.firstMaterial = dm
-            dot.position = SCNVector3(dir.x * 1.03, dir.y * 1.03, dir.z * 1.03)
+            dot.position = scn(dir * 1.03)
             pinRoot.addChildNode(dot)
         }
+        buildArcs(pins: pins, dirs: dirs)
+    }
+
+    /// Wire the local node to every other node with a living electricity arc (bounded so a big mesh
+    /// can't flood the frame). Rebuilt whenever membership changes; animated each frame in `updateArcs`.
+    private func buildArcs(pins: [SpherePin], dirs: [simd_float3]) {
+        arcRoot.childNodes.forEach { $0.removeFromParentNode() }
+        arcs.removeAll()
+        guard dirs.count >= 2 else { return }
+        let localIdx = pins.firstIndex(where: { $0.local }) ?? 0
+        let a = dirs[localIdx]
+        var made = 0
+        for j in dirs.indices where j != localIdx && made < 12 {
+            made += 1
+            let arc = Arc(a: a, b: dirs[j], seed: Float(j) * 1.7 + 0.3)
+            arcRoot.addChildNode(arc.core); arcRoot.addChildNode(arc.glow)
+            arcs.append(arc)
+        }
+    }
+
+    /// Advance the lightning — layered sine-noise wanders each vertex off the great-circle, pinned at
+    /// the endpoints; a crackle flicker modulates opacity. Line geometry is small, so we rebuild it.
+    func updateArcs(_ t: Float) {
+        for arc in arcs {
+            var corePts = [simd_float3](); corePts.reserveCapacity(arc.n + 1)
+            var glowPts = [simd_float3](); glowPts.reserveCapacity(arc.n + 1)
+            for s in 0...arc.n {
+                let tt = Float(s) / Float(arc.n)
+                let env = sin(Float.pi * tt)
+                let n1 = sin(tt * 17 + t * arc.jrate + arc.seed)
+                let n2 = sin(tt * 41 - t * arc.jrate * 1.7 + arc.seed * 2.1)
+                let n3 = sin(tt * 7 + t * 2 + arc.seed)
+                let off = (n1 * 0.6 + n2 * 0.28 + n3 * 0.5) * 0.05 * env
+                let rOff = (sin(tt * 23 + t * 5 + arc.seed) * 0.5) * 0.03 * env
+                corePts.append(arc.base[s] + arc.bi[s] * off + arc.rad[s] * rOff)
+                let goff = (n1 * 0.6 + n3 * 0.7) * 0.06 * env
+                glowPts.append(arc.base[s] + arc.bi[s] * goff + arc.rad[s] * (rOff * 0.6))
+            }
+            let fl = 0.6 + 0.4 * sin(t * arc.jrate + arc.seed)
+            arc.core.geometry = lineGeom(corePts, PColor(red: 0.9, green: 0.97, blue: 1, alpha: 1), CGFloat(max(0.2, 0.7 + 0.3 * fl)))
+            arc.glow.geometry = lineGeom(glowPts, Sky.bright, CGFloat(0.32 * (0.6 + 0.4 * fl)))
+        }
+    }
+
+    private func lineGeom(_ pts: [simd_float3], _ color: PColor, _ opacity: CGFloat) -> SCNGeometry {
+        let verts = pts.map { SCNVector3($0.x, $0.y, $0.z) }
+        let src = SCNGeometrySource(vertices: verts)
+        var idx = [Int32](); idx.reserveCapacity((pts.count - 1) * 2)
+        for i in 0..<(pts.count - 1) { idx.append(Int32(i)); idx.append(Int32(i + 1)) }
+        let el = SCNGeometryElement(indices: idx, primitiveType: .line)
+        let g = SCNGeometry(sources: [src], elements: [el])
+        let m = SCNMaterial(); m.lightingModel = .constant
+        m.diffuse.contents = color; m.emission.contents = color
+        m.blendMode = .add; m.writesToDepthBuffer = false; m.readsFromDepthBuffer = false; m.transparency = opacity
+        g.materials = [m]
+        return g
+    }
+    private func scn(_ v: simd_float3) -> SCNVector3 { SCNVector3(v.x, v.y, v.z) }
+    private func spiralDir(_ i: Int, _ n: Int) -> simd_float3 {
+        let gold = Double.pi * (3.0 - (5.0).squareRoot())
+        let y = 1.0 - (Double(i) / Double(max(1, n - 1))) * 2.0
+        let r = (1.0 - y * y).squareRoot(); let th = gold * Double(i)
+        return simd_float3(Float(cos(th) * r), Float(y), Float(sin(th) * r))
     }
 
     private func node(_ radius: CGFloat, _ seg: Int, _ mat: SCNMaterial) -> SCNNode {
@@ -190,29 +258,50 @@ final class SphereScene {
         let r = (1.0 - y * y).squareRoot(); let th = gold * Double(i)
         return SCNVector3(Float(cos(th) * r), Float(y), Float(sin(th) * r))
     }
+    /// A satellite-style blue-marble skin, generated once (no external asset): fbm value-noise raises
+    /// continents out of the ocean — deep blue seas, green→tan land, white ice caps — so the globe
+    /// reads as a real world the mesh lives on. Ported from the design's `familiar-sphere.js` maps.
     private func globeTextureIfNeeded() {
         guard globeTexture == nil else { return }
-        let w = 256, h = 128
-        let stops: [(CGFloat, [CGFloat])] = [
-            (0.0, [6/255, 16/255, 46/255]), (0.45, [0.043, 0.145, 0.42]),
-            (0.62, [0.18, 0.38, 0.90]), (0.80, [0.42, 0.63, 1.0]), (1.0, [0.70, 0.83, 1.0])]
-        func ramp(_ t: CGFloat) -> [CGFloat] {
-            for i in 0..<(stops.count - 1) where t <= stops[i + 1].0 {
-                let a = stops[i], b = stops[i + 1]; let k = (t - a.0) / max(0.0001, b.0 - a.0)
-                return (0..<3).map { a.1[$0] + (b.1[$0] - a.1[$0]) * k }
-            }
-            return stops.last!.1
+        let w = 512, h = 256
+        func hash(_ x: Double, _ y: Double) -> Double { let n = sin(x * 127.1 + y * 311.7) * 43758.5453; return n - floor(n) }
+        func smooth(_ t: Double) -> Double { t * t * (3 - 2 * t) }
+        func vnoise(_ x: Double, _ y: Double) -> Double {
+            let xi = floor(x), yi = floor(y), xf = x - xi, yf = y - yi
+            let a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1)
+            let u = smooth(xf), v = smooth(yf)
+            return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v
+        }
+        func fbm(_ x: Double, _ y: Double) -> Double {
+            var f = 0.0, amp = 0.5, freq = 1.0
+            for _ in 0..<6 { f += amp * vnoise(x * freq, y * freq); freq *= 2; amp *= 0.5 }
+            return f
         }
         var px = [UInt8](repeating: 0, count: w * h * 4)
+        let sea = 0.48
         for y in 0..<h {
-            let lat = abs(CGFloat(y) / CGFloat(h) - 0.5) * 2
-            let band = 0.5 + 0.5 * sin(CGFloat(y) * 0.6)
-            let t = max(0, min(1, (1 - lat) * 0.85 + band * 0.12)); let c = ramp(t)
-            for x in 0..<w { let i = (y * w + x) * 4
-                px[i] = UInt8(c[0]*255); px[i+1] = UInt8(c[1]*255); px[i+2] = UInt8(c[2]*255); px[i+3] = 255 }
+            let lat = abs(Double(y) / Double(h) - 0.5) * 2
+            let pole = 1 - lat * lat * 0.55
+            for x in 0..<w {
+                let n = pow(fbm(Double(x) / Double(w) * 7, Double(y) / Double(h) * 7), 1.35)
+                let elev = min(1, max(0, n * pole))
+                var r = 0.0, g = 0.0, b = 0.0
+                if lat > 0.9 {                          // ice caps
+                    r = 0.85; g = 0.91; b = 1.0
+                } else if elev < sea {                  // ocean
+                    let t = elev / sea
+                    r = 0.02 + t * 0.04; g = 0.09 + t * 0.20; b = 0.30 + t * 0.34
+                } else {                                // land
+                    let t = (elev - sea) / (1 - sea)
+                    if t < 0.5 { let u = t * 2; r = 0.12 + u * 0.16; g = 0.30 + u * 0.20; b = 0.15 + u * 0.05 }
+                    else { let u = (t - 0.5) * 2; r = 0.30 + u * 0.45; g = 0.42 + u * 0.40; b = 0.20 + u * 0.45 }
+                }
+                let i = (y * w + x) * 4
+                px[i] = UInt8(min(255, r * 255)); px[i+1] = UInt8(min(255, g * 255)); px[i+2] = UInt8(min(255, b * 255)); px[i+3] = 255
+            }
         }
         let cs = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w*4,
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                   space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let cg = ctx.makeImage() else { return }
         #if canImport(UIKit)
@@ -220,6 +309,44 @@ final class SphereScene {
         #else
         globeTexture = NSImage(cgImage: cg, size: CGSize(width: w, height: h))
         #endif
+    }
+}
+
+/// One living electricity arc between two nodes: a pre-computed great-circle path lifted off the
+/// surface, plus the per-vertex frame (bitangent + radial) the lightning wander is applied along.
+final class Arc {
+    let base: [simd_float3]
+    let bi: [simd_float3]
+    let rad: [simd_float3]
+    let n: Int
+    let seed: Float
+    let jrate: Float
+    let core = SCNNode()
+    let glow = SCNNode()
+
+    init(a: simd_float3, b: simd_float3, seed: Float) {
+        self.seed = seed
+        self.jrate = 7 + abs(sin(seed)) * 4
+        let N = 44; self.n = N
+        let an = simd_normalize(a), bn = simd_normalize(b)
+        let ang = acos(max(-1, min(1, simd_dot(an, bn))))
+        let lift: Float = 0.14 + ang * 0.18
+        var base = [simd_float3](), biN = [simd_float3](), radN = [simd_float3]()
+        for s in 0...N {
+            let t = Float(s) / Float(N)
+            let v: simd_float3
+            if ang < 1e-4 { v = simd_normalize(simd_mix(an, bn, simd_float3(repeating: t))) }
+            else { v = an * (sin((1 - t) * ang) / sin(ang)) + bn * (sin(t * ang) / sin(ang)) }
+            base.append(simd_normalize(v) * (1.02 + sin(Float.pi * t) * lift))
+        }
+        for s in 0...N {
+            let radial = simd_normalize(base[s])
+            let tan = simd_normalize(base[min(N, s + 1)] - base[max(0, s - 1)])
+            var bit = simd_cross(tan, radial)
+            if simd_length(bit) < 1e-5 { bit = simd_float3(0, 1, 0) }
+            biN.append(simd_normalize(bit)); radN.append(radial)
+        }
+        self.base = base; self.bi = biN; self.rad = radN
     }
 }
 
@@ -238,6 +365,7 @@ final class SphereCoordinator: NSObject, SCNSceneRendererDelegate {
         let dt = lastTime == 0 ? 0 : min(time - lastTime, 0.05); lastTime = time
         if !dragging { yaw += CGFloat(dt) * 0.14 }              // idle autorotate
         world.group.eulerAngles = SCNVector3(Float(pitch), Float(yaw), 0)
+        world.updateArcs(Float(time))                           // living electricity
     }
     func orbit(dx: CGFloat, dy: CGFloat) {
         yaw += dx * 0.006

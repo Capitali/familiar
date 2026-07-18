@@ -70,8 +70,9 @@ public struct FamiliarConsole: View {
             GeometryReader { geo in
                 let compact = geo.size.width < 720
                 let step: CGFloat = compact ? geo.size.width * 0.96 : geo.size.width * 0.58
-                let restX: CGFloat = compact ? 0 : geo.size.width * 0.19
-                let cardW: CGFloat = compact ? geo.size.width - 44 : 336
+                // The natural stop-notch centres the active readout on the globe.
+                let restX: CGFloat = 0
+                let cardW: CGFloat = compact ? geo.size.width - 44 : 360
 
                 // The floating readouts — transparent, tracking the finger as they drift past the globe.
                 ZStack {
@@ -188,6 +189,18 @@ public struct FamiliarConsole: View {
             panelBody(kind)
         }
         .padding(.vertical, 8)
+        // A graduated glass scrim — a soft blurred pool that lifts the text off the turning globe,
+        // fading to nothing at the edges so there's no framed border.
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 34).fill(.ultraThinMaterial)
+                    .mask(RadialGradient(colors: [.white.opacity(0.85), .white.opacity(0.3), .clear],
+                                         center: .center, startRadius: 24, endRadius: 250))
+                RadialGradient(colors: [.black.opacity(0.30), .clear], center: .center, startRadius: 24, endRadius: 230)
+            }
+            .padding(-26)
+            .allowsHitTesting(false)
+        )
     }
 
     @ViewBuilder private func panelBody(_ kind: PanelKind) -> some View {
