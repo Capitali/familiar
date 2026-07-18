@@ -69,10 +69,10 @@ public struct FamiliarConsole: View {
 
             GeometryReader { geo in
                 let compact = geo.size.width < 720
-                let step: CGFloat = compact ? geo.size.width * 0.96 : geo.size.width * 0.58
+                let step: CGFloat = compact ? geo.size.width * 0.98 : geo.size.width * 0.66
                 // The natural stop-notch centres the active readout on the globe.
                 let restX: CGFloat = 0
-                let cardW: CGFloat = compact ? geo.size.width - 44 : 360
+                let cardW: CGFloat = compact ? geo.size.width - 32 : min(560, geo.size.width * 0.5)
 
                 // The floating readouts — transparent, tracking the finger as they drift past the globe.
                 ZStack {
@@ -132,8 +132,8 @@ public struct FamiliarConsole: View {
             }
             Text("THE MESH, AS A WORLD").font(CSky.mono(9.5)).tracking(2.2)
                 .foregroundStyle(CSky.soft.opacity(0.62)).padding(.top, 14).holo()
-            Text(currentPanel.title).font(.system(size: 25, weight: .semibold)).tracking(-0.3)
-                .frame(maxWidth: 320, alignment: .leading).holo(.black, 14)
+            Text(currentPanel.title).font(.system(size: 32, weight: .semibold)).tracking(-0.4)
+                .frame(maxWidth: 360, alignment: .leading).holo(.black, 14)
         }
     }
     private var versionPill: some View {
@@ -181,24 +181,24 @@ public struct FamiliarConsole: View {
     private var currentPanel: PanelKind { PanelKind(rawValue: panel) ?? .presence }
 
     private func panelBodyCard(_ kind: PanelKind) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Rectangle().fill(CSky.cyan).frame(width: 16, height: 1.5)
-                Text(kind.tag).font(CSky.mono(9.5)).tracking(2).foregroundStyle(CSky.cyan.opacity(0.9))
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 10) {
+                Rectangle().fill(CSky.cyan).frame(width: 26, height: 2)
+                Text(kind.tag).font(CSky.mono(12)).tracking(2.6).foregroundStyle(CSky.cyan.opacity(0.9))
             }.holo()
             panelBody(kind)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 14)
         // A graduated glass scrim — a soft blurred pool that lifts the text off the turning globe,
         // fading to nothing at the edges so there's no framed border.
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: 34).fill(.ultraThinMaterial)
-                    .mask(RadialGradient(colors: [.white.opacity(0.85), .white.opacity(0.3), .clear],
-                                         center: .center, startRadius: 24, endRadius: 250))
-                RadialGradient(colors: [.black.opacity(0.30), .clear], center: .center, startRadius: 24, endRadius: 230)
+                RoundedRectangle(cornerRadius: 40).fill(.ultraThinMaterial)
+                    .mask(RadialGradient(colors: [.white.opacity(0.88), .white.opacity(0.32), .clear],
+                                         center: .center, startRadius: 40, endRadius: 380))
+                RadialGradient(colors: [.black.opacity(0.32), .clear], center: .center, startRadius: 40, endRadius: 360)
             }
-            .padding(-26)
+            .padding(-40)
             .allowsHitTesting(false)
         )
     }
@@ -210,18 +210,18 @@ public struct FamiliarConsole: View {
             signalRow("Presence", worldview?.presence ?? 0, CSky.green)
             signalRow("Capacities", worldview?.capacity ?? 0, CSky.amber)
         case .mesh:
-            HStack(spacing: 22) {
+            HStack(spacing: 34) {
                 bigStat("\((worldview?.members ?? []).count)", "NODES")
                 bigStat("\((worldview?.members ?? []).filter { $0.online }.count)", "ONLINE")
                 bigStat("\(worldview?.observation_count ?? 0)", "SEEN")
             }
-            ForEach((worldview?.members ?? []).prefix(6)) { m in
+            ForEach((worldview?.members ?? []).prefix(8)) { m in
                 rowLine(m.label, m.kind == .self_node ? "you" : (m.relationship ?? "peer"), dot: m.online ? CSky.green : CSky.dim)
             }
         case .roadmap:
             let goals = worldview?.goals ?? []
             if goals.isEmpty { emptyLine("No goals yet — seed one with `familiar goal add`.") }
-            ForEach(goals.prefix(6)) { g in
+            ForEach(goals.prefix(8)) { g in
                 rowLine(g.description, g.status.replacingOccurrences(of: "_", with: " "), dot: goalColor(g.status))
             }
         case .gates:
@@ -229,62 +229,64 @@ public struct FamiliarConsole: View {
         case .theories:
             let th = worldview?.theories ?? []
             if th.isEmpty { emptyLine("No theories yet.") }
-            ForEach(th.prefix(4)) { t in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(t.question).font(.system(size: 13, weight: .medium)).lineLimit(2).holo()
-                    Text(t.direction).font(CSky.mono(9.5)).foregroundStyle(CSky.dim.opacity(0.8)).lineLimit(2).holo()
-                }.padding(.vertical, 4)
+            ForEach(th.prefix(5)) { t in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(t.question).font(.system(size: 17, weight: .medium)).lineLimit(2).holo()
+                    Text(t.direction).font(CSky.mono(12.5)).foregroundStyle(CSky.dim.opacity(0.85)).lineLimit(2).holo()
+                }.frame(width: rowW, alignment: .leading).padding(.vertical, 6)
             }
         }
     }
 
     // MARK: readout atoms (all transparent, glowing)
 
+    private var rowW: CGFloat { 480 }
+
     private func signalRow(_ label: String, _ v: Double, _ color: Color) -> some View {
-        VStack(spacing: 6) {
-            HStack { Text(label).font(.system(size: 13, weight: .medium)); Spacer()
-                Text(String(format: "%.2f", v)).font(CSky.mono(12)).foregroundStyle(color) }.holo()
+        VStack(spacing: 9) {
+            HStack { Text(label).font(.system(size: 18, weight: .medium)); Spacer()
+                Text(String(format: "%.2f", v)).font(CSky.mono(17)).foregroundStyle(color) }.holo()
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.08)).frame(height: 3)
-                    Capsule().fill(color).frame(width: max(4, g.size.width * min(1, max(0, v))), height: 3)
-                        .holo(color, 6)
+                    Capsule().fill(.white.opacity(0.09)).frame(height: 5)
+                    Capsule().fill(color).frame(width: max(5, g.size.width * min(1, max(0, v))), height: 5)
+                        .holo(color, 7)
                 }
-            }.frame(height: 4)
-        }.frame(width: 300)
+            }.frame(height: 5)
+        }.frame(width: rowW).padding(.bottom, 4)
     }
     private func bigStat(_ v: String, _ l: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(v).font(.system(size: 34, weight: .light)).foregroundStyle(CSky.ice).monospacedDigit().holo(CSky.blue, 12)
-            Text(l).font(CSky.mono(8)).tracking(1.4).foregroundStyle(CSky.dim.opacity(0.6))
+        VStack(alignment: .leading, spacing: 3) {
+            Text(v).font(.system(size: 52, weight: .light)).foregroundStyle(CSky.ice).monospacedDigit().holo(CSky.blue, 14)
+            Text(l).font(CSky.mono(10.5)).tracking(1.6).foregroundStyle(CSky.dim.opacity(0.65))
         }
     }
     private func rowLine(_ a: String, _ b: String, dot: Color) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(dot).frame(width: 6, height: 6).holo(dot, 4)
-            Text(a).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.9)).lineLimit(1)
-            Spacer(minLength: 6)
-            Text(b).font(CSky.mono(9.5)).foregroundStyle(CSky.dim.opacity(0.8)).lineLimit(1)
-        }.frame(width: 300).padding(.vertical, 5).holo(.black, 5)
+        HStack(spacing: 11) {
+            Circle().fill(dot).frame(width: 8, height: 8).holo(dot, 5)
+            Text(a).font(.system(size: 16)).foregroundStyle(CSky.ink.opacity(0.92)).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(b).font(CSky.mono(12.5)).foregroundStyle(CSky.dim.opacity(0.85)).lineLimit(1)
+        }.frame(width: rowW).padding(.vertical, 9).holo(.black, 5)
     }
     private func emptyLine(_ s: String) -> some View {
-        Text(s).font(.system(size: 12.5)).foregroundStyle(CSky.ink.opacity(0.6)).frame(width: 300, alignment: .leading).holo()
+        Text(s).font(.system(size: 16)).foregroundStyle(CSky.ink.opacity(0.65)).frame(width: rowW, alignment: .leading).holo()
     }
     private func gatesList(_ g: GateStates) -> some View {
         let items: [(String, String, Bool)] = [
             ("Network", "allow_network", g.network), ("LLM", "allow_llm", g.llm),
             ("Execute", "allow_execute", g.execute), ("Agent", "allow_agent", g.agent),
             ("Mesh", "allow_mesh", g.mesh), ("Camera", "allow_camera", g.camera), ("Tools", "allow_tool_install", g.tool_install)]
-        return VStack(spacing: 7) {
+        return VStack(spacing: 12) {
             ForEach(items, id: \.1) { item in
                 HStack {
-                    Text(item.0).font(.system(size: 13, weight: .medium))
+                    Text(item.0).font(.system(size: 17, weight: .medium))
                     Spacer()
                     Button { onGate(item.1, !item.2) } label: {
-                        Text(item.2 ? "OPEN" : "shut").font(CSky.mono(9.5)).tracking(1)
+                        Text(item.2 ? "OPEN" : "shut").font(CSky.mono(12.5)).tracking(1)
                             .foregroundStyle(item.2 ? CSky.green : CSky.dim)
                     }.buttonStyle(.plain)
-                }.frame(width: 300).holo(.black, 5)
+                }.frame(width: rowW).holo(.black, 5)
             }
         }
     }

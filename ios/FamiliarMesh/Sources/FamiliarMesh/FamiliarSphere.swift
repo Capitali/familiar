@@ -24,14 +24,17 @@ import AppKit
 private typealias PColor = NSColor
 #endif
 
-/// A member of the mesh rendered as a point on the sphere.
+/// A member of the mesh rendered as a point on the globe. `lat`/`lon` place it geographically when
+/// known; otherwise a stable position is derived from the id so a node always sits in the same spot.
 public struct SpherePin: Identifiable, Equatable {
     public let id: String
     public let label: String
     public let local: Bool
     public let ai: Bool
-    public init(id: String, label: String, local: Bool, ai: Bool = false) {
-        self.id = id; self.label = label; self.local = local; self.ai = ai
+    public let lat: Double?
+    public let lon: Double?
+    public init(id: String, label: String, local: Bool, ai: Bool = false, lat: Double? = nil, lon: Double? = nil) {
+        self.id = id; self.label = label; self.local = local; self.ai = ai; self.lat = lat; self.lon = lon
     }
 }
 
@@ -160,7 +163,7 @@ final class SphereScene {
             wireMat.transparency = 1; atmoMat.transparency = 0.4; pinRoot.opacity = 1
         case .globe:
             coreMat.diffuse.contents = globeTexture ?? Sky.deep; coreMat.transparency = 1
-            wireMat.transparency = 0.18; atmoMat.transparency = 0.5; pinRoot.opacity = 1
+            wireMat.transparency = 0; atmoMat.transparency = 0.4; pinRoot.opacity = 1  // more map, no grid
         }
         SCNTransaction.commit()
     }
@@ -168,9 +171,10 @@ final class SphereScene {
     func setPins(_ pins: [SpherePin]) {
         pinRoot.childNodes.forEach { $0.removeFromParentNode() }
         let n = max(1, pins.count)
+        _ = n
         var dirs: [simd_float3] = []
-        for (i, p) in pins.enumerated() {
-            let dir = spiralDir(i, n); dirs.append(dir)
+        for p in pins {
+            let dir = geoDir(p); dirs.append(dir)
             let color: PColor = p.local ? Sky.ice : (p.ai ? Sky.amber : Sky.bright)
             let r: CGFloat = p.local ? 0.032 : 0.022
             let dm = SCNMaterial(); dm.lightingModel = .constant; dm.diffuse.contents = color; dm.emission.contents = color
@@ -210,10 +214,10 @@ final class SphereScene {
                 let n1 = sin(tt * 17 + t * arc.jrate + arc.seed)
                 let n2 = sin(tt * 41 - t * arc.jrate * 1.7 + arc.seed * 2.1)
                 let n3 = sin(tt * 7 + t * 2 + arc.seed)
-                let off = (n1 * 0.6 + n2 * 0.28 + n3 * 0.5) * 0.05 * env
-                let rOff = (sin(tt * 23 + t * 5 + arc.seed) * 0.5) * 0.03 * env
+                let off = (n1 * 0.6 + n2 * 0.28 + n3 * 0.5) * 0.028 * env
+                let rOff = (sin(tt * 23 + t * 5 + arc.seed) * 0.5) * 0.018 * env
                 corePts.append(arc.base[s] + arc.bi[s] * off + arc.rad[s] * rOff)
-                let goff = (n1 * 0.6 + n3 * 0.7) * 0.06 * env
+                let goff = (n1 * 0.6 + n3 * 0.7) * 0.034 * env
                 glowPts.append(arc.base[s] + arc.bi[s] * goff + arc.rad[s] * (rOff * 0.6))
             }
             let fl = 0.6 + 0.4 * sin(t * arc.jrate + arc.seed)
@@ -236,11 +240,20 @@ final class SphereScene {
         return g
     }
     private func scn(_ v: simd_float3) -> SCNVector3 { SCNVector3(v.x, v.y, v.z) }
-    private func spiralDir(_ i: Int, _ n: Int) -> simd_float3 {
-        let gold = Double.pi * (3.0 - (5.0).squareRoot())
-        let y = 1.0 - (Double(i) / Double(max(1, n - 1))) * 2.0
-        let r = (1.0 - y * y).squareRoot(); let th = gold * Double(i)
-        return simd_float3(Float(cos(th) * r), Float(y), Float(sin(th) * r))
+
+    /// A node's position on the globe: its real lat/lon when known, otherwise a stable geographic
+    /// spot derived from the id (spread across populated latitudes) so it always sits in one place.
+    private func geoDir(_ p: SpherePin) -> simd_float3 {
+        if let lat = p.lat, let lon = p.lon { return latLonDir(lat, lon) }
+        var hsh: UInt64 = 1469598103934665603
+        for byte in p.id.utf8 { hsh = (hsh ^ UInt64(byte)) &* 1099511628211 }
+        let lon = Double(hsh & 0xffff) / 65535.0 * 360.0 - 180.0
+        let lat = (Double((hsh >> 21) & 0xffff) / 65535.0 - 0.5) * 116.0   // ~ -58…58°, where people are
+        return latLonDir(lat, lon)
+    }
+    private func latLonDir(_ lat: Double, _ lon: Double) -> simd_float3 {
+        let phi = (90 - lat) * .pi / 180, theta = (lon + 180) * .pi / 180
+        return simd_normalize(simd_float3(Float(-sin(phi) * cos(theta)), Float(cos(phi)), Float(sin(phi) * sin(theta))))
     }
 
     private func node(_ radius: CGFloat, _ seg: Int, _ mat: SCNMaterial) -> SCNNode {
@@ -330,14 +343,14 @@ final class Arc {
         let N = 44; self.n = N
         let an = simd_normalize(a), bn = simd_normalize(b)
         let ang = acos(max(-1, min(1, simd_dot(an, bn))))
-        let lift: Float = 0.14 + ang * 0.18
+        let lift: Float = 0.035 + ang * 0.06         // hug the surface — a low, tight arc
         var base = [simd_float3](), biN = [simd_float3](), radN = [simd_float3]()
         for s in 0...N {
             let t = Float(s) / Float(N)
             let v: simd_float3
             if ang < 1e-4 { v = simd_normalize(simd_mix(an, bn, simd_float3(repeating: t))) }
             else { v = an * (sin((1 - t) * ang) / sin(ang)) + bn * (sin(t * ang) / sin(ang)) }
-            base.append(simd_normalize(v) * (1.02 + sin(Float.pi * t) * lift))
+            base.append(simd_normalize(v) * (1.012 + sin(Float.pi * t) * lift))
         }
         for s in 0...N {
             let radial = simd_normalize(base[s])
