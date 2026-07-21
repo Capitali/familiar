@@ -1,5 +1,12 @@
 # The Familiar — "The Glass" UI Design Brief
 
+> **⚠ Historical (2026-07):** this brief was written for the egui **Glass**, archived on
+> 2026-07-17 in favor of the SwiftUI consoles
+> ([ADR-0007](decision-records/0007-one-core-many-shells.md)) and their Metal sphere/orb
+> interface. The north star, the jobs-in-priority-order, the importance tiers, and the
+> consent/vision principles (§0–§3, §10) carry forward into the consoles; the
+> platform/technical constraints (§1) and egui specifics do not.
+
 A brief to hand to an AI design tool. It describes **what the interface must convey and
 let a human do**, the data behind each element (content, size, update cadence), and the
 relative importance of every piece — so the design can be reorganized from a cluttered

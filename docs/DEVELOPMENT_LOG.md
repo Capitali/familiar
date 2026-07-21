@@ -6,6 +6,63 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-07-21 — Catch-up: the console arc, mesh autonomy, and the docs trued to the code
+
+A retrospective entry — the log discipline lapsed for the 2026-07-12 → 07-18 arc (commits
+`0766ed7`…`e11fa5a`), which was written up only in commit messages. Recorded here so the
+trail stays unbroken, together with a documentation true-up pass. Grouped by theme; the
+per-change detail is in the git history.
+
+### What changed (the missed arc)
+
+- **The SwiftUI consoles became the human interface; the egui Glass + marble were
+  archived** (`b89070e`, superseding [ADR-0006](decision-records/0006-observatory-gui-egui.md);
+  direction: [ADR-0007 — one core, many shells](decision-records/0007-one-core-many-shells.md)).
+  The arc: the worldview seam (`/mesh/worldview`, loopback `/local/worldview`), the iPad
+  dark console, the native macOS console with dialog + gate control, watch enrolment over
+  WatchConnectivity, durable Keychain enrollment, the roster (AI-access badges,
+  networks/services), the mesh map as a graph of equals, and the Metal sphere/orb
+  interface (native SceneKit, shared across shells; the orb IS the console).
+- **Mesh autonomy.** Federated theory delegation (#45); headless peers proxying
+  human-authority to human-facing peers with a grant-return loop (#47); automatic peering
+  + the graduated, reversible trust ladder (`kernel::corruption`, #58); **Autonomy Stage 1**
+  — the mesh owns a shared roadmap of goals (`kernel::goal` + `kernel::capabilities` +
+  `cycle::pursue_goals`; deploy-class goals park for a human).
+- **The cycle learned to keep what it builds.** Theory-quality scoring
+  (`score.rs::score_theory` — a discarded direction is abandoned, not re-spent); the
+  scenario fixture table pinning scoring→selection across the run-outcome matrix; the
+  **theory→code bridge** (`cycle::cultivate_utilities` — durable, health-tracked,
+  no-argument observation tools instead of ~7,000 disposable artifacts).
+- **Foundations:** the humanity ledger (`kernel::humanity`, append-only; `HUMANITY.md`
+  immutable); the familiar's voice (`kernel::dialog`, Law III as a way of speaking); the
+  orderable build version + `allow_self_upgrade` gate (#67, fail-closed, dormant).
+
+### The docs true-up (this entry's own work)
+
+The documentation described the repo as of ~07-11. Fixed: README quickstart no longer
+points at the archived `familiar-glass`; ARCHITECTURE/03 crate maps match the workspace
+(SQLite store, mesh/agent/reach, the new kernel modules, no glass/marble); 00-overview's
+status + storage lines; 05's test count (77 → 213) and interface/scenario rows; 06's
+scenario + theory-quality limitations; boundaries.md's gate list (nine gates, including
+`allow_agent`/`allow_self_upgrade`); `~/Development/familiar-ios` paths → `ios/`;
+ADR-0006 marked superseded and the one-core-many-shells DR promoted to ADR-0007;
+CHANGELOG caught up. Also: an Apple App Store Connect private key (`AuthKey_*.p8`) was
+found tracked at the repo root — untracked now, `*.p8` gitignored; **the key must be
+revoked and reissued** (it survives in git history).
+
+### Checks
+
+`cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` (213 green) — docs-only
+changes plus the gitignore/untrack.
+
+### For the next developer
+
+Keep this log per brick — the arc above had to be reconstructed from commit messages.
+The packaging scripts (`packaging/build-app.sh`) still reference the archived `glass`/
+`marble` binaries and will not build until updated for the console era; that update is
+open work, as is ADR-0007 phase 1 (UniFFI bindings replacing the Swift `FamiliarMesh`
+reimplementation).
+
 ## 2026-07-11 — Storage, the agentic seam, the mesh, and reach
 
 A large arc: the store moved to SQLite, the familiar gained a multi-step agentic seam, the mesh
@@ -40,7 +97,7 @@ per-change detail is in the git history (commits `78136a2`…`f3ae14f`).
   observable). `familiar reach` prints the map; `reach install <ip> --authorize` is the
   consent-gated act — over the human's OWN SSH access (never an exploit) it opens an invite window
   and has the target's agent request-join by covenant.
-- **The iOS device agent** (`~/Development/familiar-ios`, a separate Swift/SwiftUI project;
+- **The iOS device agent** (then `~/Development/familiar-ios`, since moved into `ios/`;
   `FamiliarMesh` package + XcodeGen). CryptoKit ed25519 byte-matched to the Rust `CertBody`; the
   covenant client (`request-join`/poll); CoreLocation (home/away) + CoreMotion (activity) → derived
   observations. Enrols by covenant; holds only its granted cert.

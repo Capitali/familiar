@@ -1,22 +1,31 @@
-# Familiar Agent (iOS)
+# The Familiar — Apple shells (consoles + device agents)
 
-A lightweight **mesh sensor agent** for the [familiar](../familiar). It enrolls into the familiar's
-mesh with a scanned/pasted join key, then pushes **derived observations** (never raw data) to the
-familiar's `POST /mesh/observe` endpoint, signed with the same ed25519 trust the mesh uses.
+The SwiftUI apps for every Apple platform — since 2026-07-17 the **primary human interface**
+to the familiar (superseding the egui Glass; see
+[ADR-0007](../docs/decision-records/0007-one-core-many-shells.md)). Each app enrolls into the
+familiar's mesh by the covenant handshake, pushes **derived observations** (never raw data) to
+`POST /mesh/observe`, and reads the familiar's **worldview** (`/mesh/worldview`, loopback
+`/local/worldview`) — the standard dark console: the Three Laws as live meters, the roster +
+mesh map, the Roadmap board, the Metal sphere/orb, and dialog with the familiar + gate
+control. All signed with the same ed25519 trust the mesh uses.
 
-Phase 1 (this scaffold): iPhone, **location (home/away)** + **motion (walking/driving/still)**.
-Later phases add HealthKit, Apple Watch, audio/imagery, and a voice + iconographic UI. See the plan:
-`~/.claude/plans/tingly-foraging-quail.md`.
+Still ahead: HealthKit, audio/imagery, a voice-first UI, and ADR-0007 phase 1 (replacing the
+Swift wire reimplementation with UniFFI bindings over the Rust core).
 
 ## Layout
 
-- `FamiliarMesh/` — a Swift package (macOS + iOS + watchOS) with the crypto + wire logic:
-  CryptoKit ed25519 keypair, membership-cert minting (byte-matched to the Rust `CertBody`
-  canonicalization), the `/mesh/observe` client. **Unit-tested on macOS** — no device needed.
-- `App/` — the SwiftUI app: enroll / consent / status + the `SensingCoordinator` (CoreLocation +
-  CoreMotion → derived `ObsRecord`s).
+- `FamiliarMesh/` — a Swift package (macOS + iOS + watchOS + tvOS) with the crypto + wire
+  logic: CryptoKit ed25519 keypair, membership-cert minting (byte-matched to the Rust
+  `CertBody` canonicalization), the `/mesh/observe` + worldview clients, and the shared
+  `FamiliarSphereView` (SceneKit marble/mesh/globe). **Unit-tested on macOS** — no device needed.
+- `App/` — the iPhone/iPad SwiftUI app: enroll / consent / status, the `SensingCoordinator`
+  (CoreLocation + CoreMotion → derived `ObsRecord`s), and the universal console.
+- `MacApp/` — the native macOS console (FamiliarMac).
+- `Watch/` — the watchOS companion (enrolls via WatchConnectivity address handoff).
+- `Shared/` — the canonical design system (`FamiliarUI.swift`: dark-sphere theme,
+  width-driven layout, Marble/Panel/CycleRing/MeshConstellation).
 - `project.yml` — the [XcodeGen](https://github.com/yonaskolb/XcodeGen) spec. The `.xcodeproj` is
-  generated, not hand-maintained (and git-ignored).
+  generated, not hand-maintained (and git-ignored). TestFlight notes: [TESTFLIGHT.md](TESTFLIGHT.md).
 
 ## Build & test
 

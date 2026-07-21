@@ -125,7 +125,8 @@ guard that enforces it with the five-category reason model (`guard.rs`). The fir
 outward capability (the LLM seam) has fired under an opened boundary
 ([05](05-validation-and-results.md#the-full-cycle-live)).
 
-What is **enforced** today: the per-capability gate (network/LLM/install/execute/camera/mesh),
+What is **enforced** today: the per-capability gate (nine, each fail-closed — network / LLM /
+tool-install / execute / authored-execute / camera / mesh / agent / self-upgrade),
 path read/write scope (three-valued — in / ambiguous / out), the consequence and sensitivity
 gates, and — for any executed artifact — a **constitutional pre-execution review**
 (`cycle::review_script`) that reads the script and refuses (records, never runs) plainly
@@ -140,6 +141,13 @@ perception; *exchanging briefs* is gated. Identity sharing is a further, per-hum
 opt-in on top of the open gate (the guard routes an identity-bearing share through
 `SeekConsent`). Merged peer tools still pass `review_script` + sandbox + `allow_execute` on use.
 Full protocol and threat model in [mesh.md](mesh.md).
+
+**Delegation and self-modification — the two sharpest gates.** `allow_agent` opens the
+boundary-mediated agentic loop; a delegated agent runs under a *scoped* boundary that always
+drops `allow_agent` (no sub-agents) and `allow_self_upgrade` (a delegate never rewrites the
+core). `allow_self_upgrade` — the familiar replacing its own running build — is fail-closed
+and dormant until a human deliberately opens it; today only the orderable build version and
+the gate exist (no upgrade path acts on them).
 
 **Executing generated code — the sandbox is a human-owned toggle.** Running an artifact
 needs `allow_execute`; running a *model-authored* one needs the further

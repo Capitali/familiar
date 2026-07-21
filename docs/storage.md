@@ -4,7 +4,7 @@
 **SQLite** database, `<data-dir>/familiar.db`. This replaced the original one-JSONL-file-per-type
 layout, whose every update rewrote the entire file (`store::rewrite`) — O(n) per change and O(n²)
 over a run. The candidate store once reached 7,380 rows at mutation depth 320 and ticks crawled;
-the store change makes updates indexed and lets the daemon and the Glass share the data safely.
+the store change makes updates indexed and lets the daemon and any local reader share the data safely.
 
 ## Shape
 
@@ -13,7 +13,7 @@ the store change makes updates indexed and lets the daemon and the Glass share t
   `json_extract(data,'$.id')`. `data` is the same serde JSON the record always serialized to —
   no schema migration, no hand-mapped columns.
 - **The public API is unchanged.** `store::append` / `load` / `rewrite` keep their signatures, so
-  every consumer (cycle, glass, marble, sense) is untouched. Insertion order is preserved via
+  every consumer (cycle, cli, sense — and, before their archiving, glass/marble) is untouched. Insertion order is preserved via
   `seq`.
 - **Indexed updates.** `store::load_by_id` / `update_by_id` do a single `… WHERE
   json_extract(data,'$.id')=?` — O(log n), not load-all + rewrite-all. The update-heavy paths
@@ -21,15 +21,17 @@ the store change makes updates indexed and lets the daemon and the Glass share t
   `request::update_status`/`set_feedback`, the `question` update helper) use these. Bounded sets
   (`identity`, `loops::save_all`) stay on `rewrite`.
 - **Concurrency.** Opened with `PRAGMA journal_mode=WAL`, `busy_timeout=5000`,
-  `synchronous=NORMAL`: the daemon writes while the Glass reads, without the partial-read races
-  the flat files had. One cached connection per data dir per process.
+  `synchronous=NORMAL`: the daemon writes while another local process reads, without the
+  partial-read races the flat files had. One cached connection per data dir per process.
 
 ## Config is NOT in the database
 
 Human-owned policy files stay plain text, read via `store::load_one` and written directly by
 their owners — never in the DB:
-- `boundary.json` — the capability boundary (Law III). The Glass writes it with `std::fs`, the
-  kernel has no write path, and a person can edit it in any text editor. This must remain a file.
+- `boundary.json` — the capability boundary (Law III). Only the human's instrument writes it —
+  a text editor, or the console via the loopback-only `POST /local/gate` endpoint (a local
+  human boundary-write, never the autonomous cycle); the kernel has no write path. This must
+  remain a file.
 - `parameters.json` — the co-owned tuning parameters.
 - `devices.json`, `llm/`, `mesh/`, `observer.txt` — config and secrets.
 

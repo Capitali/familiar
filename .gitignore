@@ -9,3 +9,5 @@
 # Secrets — never committed (the *.example templates are fine).
 *.env
 !*.env.example
+# Apple private keys (App Store Connect / notarization) — never committed.
+*.p8

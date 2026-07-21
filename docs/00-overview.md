@@ -33,14 +33,20 @@ actually serving the people it exists for.
 A **hybrid**: a compiled, deterministic **Rust** kernel (records, lineage, trial,
 selection, memory, the obedience guard) plus an interpreted/generated periphery the
 factory mutates freely without recompiling itself. The kernel forbids `unsafe` —
-Law III made literal. Storage is local-first JSONL. See
+Law III made literal. Storage is a local-first embedded SQLite store with JSONL
+export for audit ([storage.md](storage.md)). See
 [03-system-architecture.md](03-system-architecture.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Where it stands
 
-Genesis + bootstrap: constitution written; substrate chosen; the observation spine
-and the **service signal (Law I)** are measurable. Next: presence (Law II), the
-obedience guard (Law III), then porting the inherited evolutionary kernel.
+The full cycle runs live: all three law-signals are measurable, the evolutionary
+kernel is ported with its invariants as tests, and the metabolism (sense → detect →
+interpret → generate → test → score → select → inherit) runs as a daemon under the
+human-owned boundary. The **mesh** federates peers under the covenant (join by
+accepting the Three Laws) with a graduated, reversible trust ladder; the **SwiftUI
+consoles** (macOS/iPad/iPhone/watch) are the human interface. Next: the **scenario
+laboratory** — turning the architecture into a repeatable scientific experiment
+([SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](SCENARIO-FRAMEWORK-DESIGN-BRIEF.md)).
 Roadmap: [07-roadmap.md](07-roadmap.md). Results so far:
 [05-validation-and-results.md](05-validation-and-results.md).
 

@@ -13,6 +13,51 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The scenario framework design brief** ([docs/SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](docs/SCENARIO-FRAMEWORK-DESIGN-BRIEF.md))
+  — the directional plan for the scenario laboratory: external evaluation, hidden criteria,
+  four experimental controls, ablations, and the first three scenario families. The
+  mini-project-plan for the next maturity rung.
+- **Self-upgrade foundation.** An orderable build version (repo-root `VERSION` +
+  `build.rs` → `kernel::version`, advertised in the mesh brief) and the
+  `allow_self_upgrade` gate — the sharpest gate, fail-closed and dormant until a human
+  deliberately opens it; a scoped (delegated) boundary always drops it.
+  *Validated by unit tests.*
+- **Autonomy Stage 1 — the mesh owns a shared roadmap.** `kernel::goal` (a legible
+  lifecycle: proposed → claimed → in_progress → awaiting_human → done/failed/blocked),
+  `kernel::capabilities` (what a node can DO — discovered toolchain ∩ open gates; a closed
+  boundary advertises nothing), goal replication in the brief, and `cycle::pursue_goals` —
+  a capable node claims one goal per tick and drives it through the agentic loop;
+  deploy-class goals park for a human (Law III). `familiar goal add/list`; the consoles
+  show the Roadmap board. *Validated by unit tests + live operation.*
+- **The theory→code bridge (`cycle::cultivate_utilities`).** A proven observation-goal
+  theory becomes a durable, re-runnable tool whose output is retained as a `gathered`
+  observation — gated (execute + authored-execute + LLM, fail-closed), paced, deduped via
+  `best_match` (a recurring theory reuses its tool), health-tracked (a sensor gone bad is
+  skipped). Authored tools are self-contained and take no arguments, so they run
+  unattended. *Validated by unit tests + live operation.*
+- **Mesh trust lifecycle + automatic peering (`kernel::corruption`, `crates/mesh`).**
+  Corruption-awareness as a graduated, *reversible* ladder — monitor → throttle →
+  marginalize → sever, derived from per-actor refusal scores, aging out of the window
+  (it marginalizes behavior, not a person); merge respects the tier, and severed peers
+  are raised to the human as recommend-revoke (expulsion stays a human act). `auto_peer` +
+  `auto_accept_enrollments` (both off by default) let peering happen once the human opens
+  the gate. *Validated by unit tests + live operation.*
+- **The SwiftUI consoles ([`ios/`](ios/)).** The standard dark console on every Apple
+  shell: a native macOS console (retiring the egui Glass), the iPad/iPhone apps, and the
+  watch companion — the worldview seam (`POST /mesh/worldview`, loopback
+  `GET /local/worldview`), roster + mesh map (a graph of equals, trust badges), dialog
+  with the familiar + remote gate control, the Roadmap board, and the Metal sphere/orb
+  interface (native SceneKit — marble/mesh/globe — shared across shells).
+  *Validated by real-world operation* (deployed Mac console; iPhone/iPad via TestFlight;
+  watch enrolment live).
+- **Theory quality (`score.rs::score_theory`).** A new theory is scored against the
+  outcomes of the theories before it; a direction its trials already discarded is
+  abandoned as negative evidence instead of spending a candidate. Plus a scenario fixture
+  table pinning scoring→selection across the run-outcome matrix at lax and strict rigor.
+  *Validated by unit tests.*
+- **The humanity ledger (`kernel::humanity`).** An append-only ledger where the familiar
+  grows its *lived* understanding of the people it serves; `HUMANITY.md` itself remains
+  immutable — never edited, summarized, or amended. *Validated by unit tests.*
 - **The mesh became a covenant (`crates/mesh`).** Beyond peer federation, three seams: a
   **device seam** (`POST /mesh/observe`) where a phone/watch that can't gossip pushes a *signed
   batch of derived observations* (signature over the raw body, anti-replay + triple debounce,
@@ -25,7 +70,7 @@ this file is the human-readable summary.
   devices and classify each *agent-capable / protocol-controllable / observable*; `familiar reach`
   prints the map, and `reach install <ip> --authorize` extends into an agent-capable host over the
   human's own SSH access → covenant enrolment. *Validated by real-world operation.*
-- **iOS device agent (`~/Development/familiar-ios`).** A lightweight Swift/SwiftUI mesh agent —
+- **iOS device agent ([`ios/`](ios/)).** A lightweight Swift/SwiftUI mesh agent —
   CryptoKit ed25519 byte-matched to the Rust cert canonicalization, the covenant client, and
   CoreLocation/CoreMotion → derived observations. Enrols by covenant; holds only its granted cert.
   *Validated by real-world operation* (a real iPhone's observations reached the familiar).
@@ -174,6 +219,13 @@ this file is the human-readable summary.
   the lab → many served. Enforced by the obedience guard; no outward capability runs
   until that and the boundary mechanism exist. Wired into the roadmap and human-review
   requirements; Law III in SOUL gains an "operational restraint" note.
+
+### Deprecated
+- **The egui Glass + the menu-bar marble** — superseded by the SwiftUI consoles
+  (2026-07-17); moved to `archive/` and removed from the workspace. The daemon
+  (`crates/cli` → `familiar`) + the SwiftUI apps are the path forward
+  ([ADR-0006](docs/decision-records/0006-observatory-gui-egui.md) → superseded;
+  direction: [ADR-0007](docs/decision-records/0007-one-core-many-shells.md)).
 
 ### Changed
 - **Rename: Substrate → The Familiar.** The project and its CLI binary were renamed; the

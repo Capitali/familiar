@@ -19,17 +19,23 @@ cold-start**:
   model-written code with network reach is an exfiltration surface the in-process runner
   does not sandbox. *Status: Implemented; the authored path is exercised live only when a
   human opens that gate.*
-- **No rigor / no real scenarios.** The promotion bar runs at `rigor = 0` (base 0.70);
-  there is no scenario fixture set, so "fit" is just "ran cleanly," not "addressed the
-  loop." The selection machinery is real and unit-tested
-  (`selection.rs`, `score.rs`); what it judges is thin. *Status of discrimination:
-  **Implemented but not validated** — the unoccupied scenario-tests rung.*
-- **Theorize does not yet weigh its own past.** The familiar now *does* act on a theory —
-  open threads (its own, and the human's answer) become candidate work
-  (`cycle::pursues_open_threads_into_candidates`, Bricks 15–17) — so this is no longer a
-  dead end. What remains thin: it forms a question + theory on a timer without yet
-  scoring a theory against the outcomes of the ones before it. *Status: Implemented;
-  acting-on-theories validated by unit tests; theory-quality feedback Planned.*
+- **No real scenarios.** An in-code fixture table now pins scoring→selection across the
+  run-outcome matrix at both a lax and a strict promotion bar
+  (`cycle::scenario_fixtures_pin_scoring_and_selection`), but there is still no
+  miniature-world scenario framework, so "fit" is just "ran cleanly," not "addressed the
+  loop." The selection machinery is real and unit-tested (`selection.rs`, `score.rs`);
+  what it judges is thin. *Status of discrimination: **Implemented but not validated** —
+  the unoccupied scenario-tests rung; the plan is
+  [SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](SCENARIO-FRAMEWORK-DESIGN-BRIEF.md).* A known gap
+  the fixtures surfaced: `trial_from_run` only ever emits pass/fail, so selection's
+  partial/too-vague branch is unreachable from real execution today.
+- **Theorize now weighs its own past, thinly.** The familiar acts on a theory — open
+  threads become candidate work (`cycle::pursues_open_threads_into_candidates`) — and a
+  new theory is scored against the outcomes of the ones before it
+  (`score.rs::score_theory`): a direction its trials already discarded is abandoned as
+  negative evidence. What remains thin: the theorist track record is a smoothed scalar,
+  not an understanding of *why* a direction failed. *Status: Implemented; acting-on-theories
+  and theory-quality scoring validated by unit tests.*
 
 ## The service signal is a cold-start proxy
 

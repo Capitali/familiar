@@ -1,6 +1,6 @@
 # ADR-0006 — A native GUI (the Glass) via egui/eframe
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0007 — one core, many shells](0007-one-core-many-shells.md)
 - **Date:** 2026-06-24
 
 ## Context
@@ -51,3 +51,8 @@ Rust), in its own crate `crates/observatory` (binary `observatory`).
 
 - 2026-06-24 — accepted. First Glass shows the Three Laws as live meters plus
   the observation log; it will grow as the kernel does.
+- 2026-07-17 — **superseded.** The SwiftUI consoles (the native macOS console + the
+  iPad/iPhone apps + the watch companion, [`../../ios/`](../../ios/)) became the human
+  interface; the egui Glass and the menu-bar marble were archived under `archive/` and
+  removed from the workspace. The direction is
+  [ADR-0007 — one Rust core, many thin shells](0007-one-core-many-shells.md).

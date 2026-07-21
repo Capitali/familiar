@@ -28,8 +28,9 @@ on (where the served are):
   reach must not contain the memory-unsafety that becomes a remote-code-execution
   path "turned against the served."
 - **Law I** wants a lean, no-GC, tiny-static-binary core for small hosts.
-- Minimal dependencies (currently `serde`/`serde_json`) keep the trust surface
-  small and auditable — also Law III.
+- Minimal dependencies (`serde`/`serde_json`, plus the one deliberate `rusqlite`
+  concession for the embedded store) keep the trust surface small and auditable —
+  also Law III.
 
 ## Crate map
 
@@ -41,7 +42,7 @@ the test or log behind it is in the claim→evidence table
 ```
 crates/
   kernel/   familiar-kernel (lib) — the deterministic core         [unit]
-    store.rs            JSONL append/load (serde); data-dir resolution   [unit]
+    store.rs            embedded SQLite store; JSONL export/import       [unit]
     observation.rs      the observation record (the only truth)          [unit]
     service.rs          the service signal (Law I)                       [live]
     presence.rs         the presence signal (Law II)                     [unit]
@@ -53,16 +54,26 @@ crates/
     trial.rs score.rs selection.rs regression_guard.rs   the bar+ladder  [unit]
     mutation.rs pattern_memory.rs lineage.rs   suppression + ancestry    [unit]
     thread.rs           a thread = question + theory (Interpret)         [unit]
+    goal.rs capabilities.rs   the mesh-owned roadmap + node capabilities [unit]
+    corruption.rs       the reversible trust ladder (Law III, outward)   [unit]
+    humanity.rs tool.rs identity.rs dialog.rs …   see ARCHITECTURE.md    [unit]
   sense/    familiar-sense (lib) — perceives the host                    [unit]
   vision/   familiar-vision (lib) — the eye: camera discovery (always)   [unit]
                                     + gated frame capture (familiar-eye)  [live]
-  cycle/    familiar-cycle (lib) — the metabolism (one tick)             [live]
+  cycle/    familiar-cycle (lib) — the metabolism (one tick) + tool      [live]
+                                    cultivation + goal pursuit
   exec/     familiar-exec (lib) — the sandboxed runner                   [unit]
   llm/      familiar-llm (lib) — the LLM seam (boundary-gated)           [unit/live]
+  agent/    familiar-agent (lib) — the boundary-mediated agentic loop    [unit]
+  mesh/     familiar-mesh (lib) — federation, covenant, worldview, trust [live]
+  reach/    familiar-reach (lib) — reach assessment + consented install  [live]
   cli/      familiar-cli (bin: `familiar`) — the thin shell             [live]
-  glass/    familiar-glass (bin) — the Glass (egui GUI, primary UI)      [live]
-  marble/   familiar-marble (bin) — the menu-bar presence (macOS)        [live]
 ```
+
+The human interfaces are the **SwiftUI consoles** in [`../ios/`](../ios/) (macOS console +
+iPhone/iPad apps + watch companion) — thin shells that enrol by covenant and read the
+familiar's worldview [live]. The egui `glass/` and menu-bar `marble/` crates that preceded
+them are archived under `archive/` (superseded 2026-07-17 — ADR-0006).
 
 The eye is split like the boundary asks: **discovery** (which cameras exist) is always
 permitted, but **watching** (capturing a frame) is gated by `allow_camera`, fail-closed, and
@@ -72,10 +83,10 @@ the macOS camera grant attaches to `Familiar.app` rather than to a terminal.
 
 ## Packaging (macOS)
 
-`packaging/` turns the four binaries (`marble`, `glass`, `familiar`, `familiar-eye`) into a
-signed, **notarized** `Familiar.app` and a `.pkg` installer that sets up the launchd agents
-(daemon + marble) at boot. The marble is the bundle's entry point and accessory face; the
-Glass is the window onto the familiar; `familiar-eye` is the eye. See
+`packaging/` turns the workspace binaries into a signed, **notarized** `Familiar.app` and a
+`.pkg` installer that sets up the daemon launchd agent at boot; `familiar-eye` (the bundled
+AVFoundation helper) is the eye. **Note:** the scripts still reference the archived `glass`
+and `marble` binaries and are due for an update to the SwiftUI-console era. See
 [`../packaging/README.md`](../packaging/README.md).
 
 ## The cycle (the metabolism)
@@ -98,8 +109,9 @@ there too.
 
 ## Storage
 
-JSONL-in / JSONL-out via `serde`, append-only, one file per record type under a
-data directory (`familiar_data/` default, `--data-dir` override). Local-first and
-auditable; the familiar sends no telemetry and exfiltrates nothing. The record model
-and schema live in [`../data/`](../data/). SQLite is a deferred option once the file
-model is proven.
+An **embedded SQLite** store (`rusqlite`, `bundled` — no system library) behind the original
+append/load/update API, one logical table per record type under a data directory
+(`familiar_data/` default, `--data-dir` override); `familiar db export`/`import` keeps the
+cat-able JSONL truth available for audit. Local-first; the familiar sends no telemetry and
+exfiltrates nothing. The record model and schema live in [`../data/`](../data/); the store's
+design and migration story in [storage.md](storage.md).

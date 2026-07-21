@@ -31,26 +31,38 @@ should run on (Pis, Cerbo armv7, the router — *where the served are*):
   becomes a remote-code-execution path.
 - **Law I (cheap survival)** wants a lean, no-GC, tiny-static-binary core for
   constrained hardware. Rust gives that without sacrificing safety.
-- Minimal dependencies (`serde`, `serde_json` only, so far) keep the trust
-  surface small and auditable — also Law III.
+- Minimal dependencies keep the trust surface small and auditable — also Law III.
+  The kernel is `serde`/`serde_json` plus one deliberate concession: `rusqlite`
+  (`bundled`) for the embedded store (see [storage.md](storage.md)).
 
 ## Crate map
 
 ```
 crates/
-  kernel/   familiar-kernel (lib)  — the deterministic core (serde-only, no unsafe)
-    store.rs        JSONL append/load/rewrite (serde); the data-dir
+  kernel/   familiar-kernel (lib)  — the deterministic core (no unsafe)
+    store.rs        the embedded SQLite store (append/load/update; JSONL export/import)
     observation.rs  the observation record (the only truth)
     service.rs      the service signal (Law I)
     presence.rs     the presence signal (Law II)
     capacities.rs   the capacities signal (Law II / HUMANITY.md — comfortable replacement)
-    boundary.rs     the human-owned capability boundary (Law III)
+    boundary.rs     the human-owned capability boundary (Law III) — nine fail-closed gates
     guard.rs        the obedience guard (Law III)
     loops.rs        loop detection (temporal view of the log)
     candidate.rs · spec.rs   candidates + the heritable genotype (Weismann barrier)
     trial.rs · score.rs · selection.rs · regression_guard.rs   testing & selection
+                    (score.rs also scores a theory against its predecessors' outcomes)
     mutation.rs · pattern_memory.rs · lineage.rs   variation, memory, ancestry
     thread.rs       the familiar's questions + theories (the Interpret step)
+    question.rs · request.rs · dialog.rs   the interaction channel + the familiar's voice
+    activity.rs     the activity feed (what the familiar did, human-readable)
+    tool.rs         the durable tool registry (health-tracked, judged by output)
+    identity.rs     identities/entities the familiar knows (mesh opt-in sharing)
+    humanity.rs     the append-only lived-understanding ledger (HUMANITY.md stays immutable)
+    goal.rs · capabilities.rs   the mesh-owned roadmap: goals + what a node can DO
+    corruption.rs   the graduated, reversible trust ladder (monitor→throttle→marginalize→sever)
+    parameters.rs   the co-owned tuning parameters (parameters.json)
+    review.rs       constitutional pre-execution review support
+    version.rs      the orderable build version (VERSION + build.rs → self-upgrade)
   sense/    familiar-sense (lib) — perception of the host + LAN device discovery -> observations
   reach/    familiar-reach (lib) — reach assessment: probe discovered devices, classify how the
                                     familiar could extend into each (agent-capable / protocol-
@@ -61,29 +73,31 @@ crates/
   agent/    familiar-agent (lib) — the agentic seam: a boundary-mediated, multi-step loop (the
                                     agent proposes one action at a time; the core decides + gates)
   mesh/     familiar-mesh (lib)  — peer federation over the tailnet/LAN: ed25519 group trust, the
-                                    covenant handshake, device observation ingestion, tool/pattern
-                                    merge. Carries the crypto + async-HTTP floor (see mesh.md).
+                                    covenant handshake, device observation ingestion, tool/pattern/
+                                    goal merge, the worldview seam. Carries the crypto + async-HTTP
+                                    floor (see mesh.md).
   cycle/    familiar-cycle (lib) — the metabolism: one full tick (sense → detect →
-                                    interpret → generate → test → score → select → measure)
+                                    interpret → generate → test → score → select → measure),
+                                    plus tool cultivation (the theory→code bridge) and
+                                    goal pursuit (the mesh roadmap)
   cli/      familiar-cli (bin: `familiar`) — the shell + daemon control (start/stop/
                                     reload/install via pidfile + launchd: src/daemon.rs)
-  glass/    familiar-glass (bin: `glass`) — the GUI (primary human interface; egui/eframe;
-                daemon control bar + the interaction channel + the mesh wizard/accept card;
-                writes only the observer's input; GUI deps isolated). See ADR-0006.
-  marble/   marble (bin: `marble`) — the macOS menu-bar accessory that opens the Glass.
 ```
 
-A separate iOS/watchOS project (`~/Development/familiar-ios`, Swift/SwiftUI) provides lightweight
-**device agents** — they enrol by the covenant handshake and push derived observations to a
-familiar's `/mesh/observe`. See [mesh.md](mesh.md).
+The **SwiftUI consoles** live in [`../ios/`](../ios/) (Swift/SwiftUI, XcodeGen): the macOS
+console, the iPhone/iPad apps, and the watch companion. They enrol by the covenant handshake,
+push derived observations to a familiar's `/mesh/observe`, and read its `/mesh/worldview` —
+thin shells over the Rust core ([ADR-0007](decision-records/0007-one-core-many-shells.md)). The earlier
+egui **Glass** and menu-bar **marble** crates are archived under `archive/` (superseded
+2026-07-17; see ADR-0006's status history).
 
 ## Interfaces
 
-The **Glass** (native egui GUI) is the primary human interface — a local
-window showing the Three Laws as live meters and the observation log, read-only and
-with no network socket (Law III restraint). The **CLI** (`substrate`) is retained
-for scripting, automation, and headless/CI use. Both are thin shells over the same
-kernel.
+The **SwiftUI consoles** (macOS + iPad/iPhone/watch, [`../ios/`](../ios/)) are the primary
+human interface — they show the Three Laws as live meters, the roster/mesh map, the roadmap
+board, and carry the dialog with the familiar; devices enrol by covenant and read the
+worldview seam. The **CLI** (`familiar`) is retained for scripting, automation, and
+headless/CI use. All are thin shells over the same kernel.
 
 ## Storage
 

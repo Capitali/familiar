@@ -60,20 +60,23 @@ claim is **not yet validated**, that is stated, with the limitation that tracks 
 | The LLM seam refuses to fire under a closed boundary, with no side effects | Validated by unit tests | `llm::refused_with_no_side_effects_under_closed_boundary` |
 | The LLM drafts hypotheses (and, behind a separate gate, authors solutions) when a human opens the boundary | Validated by real-world operation | live: the tick below drew a `gemini`-drafted hypothesis; default-off (`allow_execute`, `allow_authored_execute`) |
 | The familiar forms its own question + theory, hourly, grounded in observations | Validated by real-world operation | live: the tick below reports `(theorized)`; daemon log [familiar_data/daemon.log] (untracked, local) |
+| A theory is scored against the outcomes of the theories before it; a known dead end is abandoned as negative evidence | Validated by unit tests | `score.rs::{theory_outcome_reads_the_candidates_decision, a_new_theory_repeating_a_discarded_direction_scores_low}` (kernel) + the cycle abandon test |
+| The theory→code bridge: a proven observation-goal theory is cultivated into a durable, health-tracked tool that reuses rather than re-authors | Validated by unit tests + live operation | `cycle::cultivate_utilities` tests (sensing-vs-action, tool reuse); live: cultivated sensors in the tool registry |
+| Scoring→selection is pinned across the run-outcome matrix at lax and strict rigor | Validated by unit tests | `cycle::scenario_fixtures_pin_scoring_and_selection` + `selection.rs` decision-boundary tests |
 
 ### The human interfaces (no unit tests — GUI/host integration)
 
 | Claim | Status | Evidence |
 |---|---|---|
-| The Glass shows the Three Laws live and carries the interaction channel | Validated by real-world operation | runs as the primary interface; verified live (no automated GUI tests — see *not yet validated*) |
-| The marble (menu-bar) opens the Glass, controls the daemon, dims when it sleeps | Validated by real-world operation | verified live; macOS-gated, no unit tests |
+| The SwiftUI consoles (macOS + iPad/iPhone + watch) show the Three Laws, the roster/mesh map, the Roadmap board, and carry the dialog + gate control | Validated by real-world operation | deployed Mac console; iPhone/iPad via TestFlight; watch enrolment live (no automated GUI tests — see *not yet validated*) |
 | Daemon control + launchd (start at login, stable install path) | Validated by real-world operation | running under `io.river.familiar`; verified live |
+| The egui Glass + menu-bar marble (the previous interface) | **Deprecated** | superseded 2026-07-17 by the SwiftUI consoles; archived under `archive/` ([ADR-0006](decision-records/0006-observatory-gui-egui.md)) |
 
 ### Not yet validated (explicit markers)
 
 | Claim the design *aims* at | Status | Why / tracker |
 |---|---|---|
-| Selection genuinely discriminates *fit to the loop* | **Implemented but not validated** | no scenario fixture set yet; "fit" is currently "ran cleanly" — [06-limitations.md](06-limitations.md#maturity); roadmap *scenario-tests* rung |
+| Selection genuinely discriminates *fit to the loop* | **Implemented but not validated** | an in-code fixture table pins scoring→selection across the run-outcome matrix (`cycle::scenario_fixtures_pin_scoring_and_selection`), but no miniature-world scenario framework exists yet, so "fit" is still "ran cleanly" — [06-limitations.md](06-limitations.md#maturity); the plan is [SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](SCENARIO-FRAMEWORK-DESIGN-BRIEF.md) |
 | Service measures *fulfillment*, not just served-facing attention | **Implemented but not validated** | cold-start proxy — [06-limitations.md](06-limitations.md#the-service-signal-is-a-cold-start-proxy); [../validation/accuracy-metrics.md](../validation/accuracy-metrics.md) |
 | Performance / footprint are acceptable on small hosts | **Planned** | no benchmarks run — [../validation/benchmark-results.md](../validation/benchmark-results.md) |
 | Proper names resolve as served (name → person) | **Planned** | waits on the world-model / entity-tagging port — [06-limitations.md](06-limitations.md#the-service-signal-is-a-cold-start-proxy) |
@@ -81,9 +84,11 @@ claim is **not yet validated**, that is stated, with the limitation that tracks 
 
 ## Test suite (current)
 
-The test suite is the executable specification: **77 tests across the workspace**, all
-passing — kernel 62, cycle 7, sense 4, exec 3, llm 1 (the CLI, the Glass, and the
-marble carry no unit tests; they are validated by real-world operation). The invariants
+The test suite is the executable specification: **213 tests across the workspace**, all
+passing — kernel 107, mesh 53, cycle 32, sense 7, exec 5, reach 4, vision 2, agent 2,
+llm 1 (the CLI and the SwiftUI consoles carry no Rust unit tests; the consoles' crypto/wire
+layer is unit-tested in Swift — `ios/FamiliarMesh`, pinned against a Rust golden vector).
+The invariants
 are encoded as tests (the adaptive promotion bar `0.70 + 0.25·rigor`, pattern
 suppression `neg > pos`, the Weismann barrier, the regression guard, and the guard's
 five-category authorization model). Run: `cargo test`.
@@ -143,15 +148,17 @@ service" when it is not — Law I, operational rather than aspirational.
 Summarized from the *not yet validated* rows above, so this section and the table never
 drift apart:
 
-- **No scenario tests.** The selection machinery is real and unit-tested, but there is no
-  scenario fixture set, so it has not been shown to discriminate *fit to a loop* — only
-  that artifacts run cleanly. This is the next maturity rung
-  ([roadmap](07-roadmap.md#next--sharpen-and-reach)).
+- **No world-level scenario tests.** The selection machinery is real and unit-tested, and
+  an in-code fixture table now pins scoring→selection across the run-outcome matrix — but
+  there is no miniature-world scenario framework, so selection has not been shown to
+  discriminate *fit to a loop* — only that artifacts run cleanly. This is the next maturity
+  rung ([roadmap](07-roadmap.md#next--sharpen-and-reach);
+  plan: [SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](SCENARIO-FRAMEWORK-DESIGN-BRIEF.md)).
 - **No benchmarks** (performance/footprint) — [../validation/benchmark-results.md](../validation/benchmark-results.md).
 - **The service measure is a cold-start proxy** (served-facing *attention*, not service
   *rendered*); its accuracy as a service proxy is not yet meaningful —
   [../validation/accuracy-metrics.md](../validation/accuracy-metrics.md) and
   [06-limitations.md](06-limitations.md).
-- **No automated GUI tests** for the Glass or the marble; they are validated by
-  real-world operation only.
+- **No automated GUI tests** for the SwiftUI consoles; they are validated by real-world
+  operation only (their crypto/wire layer *is* unit-tested — `ios/FamiliarMesh`).
 - Known failures and gaps: [../validation/known-failures.md](../validation/known-failures.md).

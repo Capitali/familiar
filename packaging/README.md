@@ -1,5 +1,12 @@
 # Packaging — `Familiar.app` and the installer
 
+> **⚠ Stale (2026-07):** these scripts predate the archiving of the egui **Glass** and
+> menu-bar **marble** (superseded 2026-07-17 by the SwiftUI consoles — see
+> [ADR-0007](../docs/decision-records/0007-one-core-many-shells.md)). `build-app.sh` still
+> lists `glass` and `marble` in `BINS`, which are no longer workspace members, so the
+> bundle will not build until this is updated for the console era (daemon + `familiar-eye`;
+> the Mac console ships from Xcode). The daemon/launchd parts below remain accurate.
+
 Turns the workspace binaries into a signed, notarized macOS installer: a double-click
 `.pkg` that drops **`Familiar.app`** in `/Applications` and sets the familiar up to live there —
 the metabolism running at boot, the **marble** in the menu bar as the way into the Glass.

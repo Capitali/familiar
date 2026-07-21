@@ -43,15 +43,16 @@ be narrowed — has its own standout page: [`docs/HUMANITY.md`](docs/HUMANITY.md
 
 ## Install & run
 
-### macOS — the installer (recommended)
+### macOS — the installer
 
-The familiar ships as a signed, **notarized** macOS installer that sets everything up to run
-at boot: **`Familiar-<version>.pkg`**. Double-click it; it installs `Familiar.app` to
-`/Applications` and configures two per-user login agents —
+The familiar ships as a signed, **notarized** macOS installer: **`Familiar-<version>.pkg`**
+installs `Familiar.app` to `/Applications` and configures the **daemon**
+(`io.river.familiar.daemon`, KeepAlive) — the always-on metabolism — as a per-user login agent.
 
-- the **daemon** (`io.river.familiar.daemon`, KeepAlive) — the always-on metabolism, and
-- the **marble** (`io.river.familiar.marble`, RunAtLoad) — the glassy blue marble in the
-  menu bar that **breathes** while the familiar is alive and is your way into the Glass.
+> **Note (2026-07):** the installer as built bundles the egui **Glass** window and menu-bar
+> **marble**, which have since been archived (superseded by the SwiftUI consoles —
+> [`ios/README.md`](ios/README.md)). The packaging scripts still reference the archived
+> binaries and are due for an update; the daemon itself is current.
 
 Data lives per-user in `~/Library/Application Support/Familiar/`. The first time the familiar
 watches through the camera (only when you open the `allow_camera` gate) macOS asks for camera
@@ -75,25 +76,27 @@ roadmap — see [docs/TODO-linux.md](docs/TODO-linux.md)).
 
 ```sh
 git clone https://github.com/Capitali/familiar && cd familiar
-cargo build                  # first build pulls dependencies; takes a few minutes
-cargo run -p familiar-glass  # opens the Glass — the primary interface
+cargo build                            # first build pulls dependencies; takes a few minutes
+cargo run -p familiar-cli -- tick      # one cycle: sense → detect → interpret → generate → …
+cargo run -p familiar-cli -- run --daemon   # the metabolism, continuously
 ```
 
-Then, in the Glass window:
+Then:
 
-1. **Introduce yourself.** On first launch the familiar asks your name (it keeps it; it
-   does not assume one). Type it, confirm, and it greets you.
-2. **Give it a mind.** In the **🔌 Connect** panel, click **Get a key →** (Google Gemini is
-   the place to start — one key is enough; Cerebras is optional failover), paste the key,
-   press **Connect**, then **Test connection**. This installs the adapter, stores the key
-   locally (`familiar_data/llm/key.env`, never committed), and opens only the `allow_llm` gate.
-3. **Start the metabolism.** Click **▶ Start** in the header (or run the daemon, below). The
-   familiar begins to sense, theorize, and serve.
-4. **Use it.** Answer — or **Dismiss** — the familiar's questions (it begins with
-   *"What do you need most today?"*); ask it anything in **Ask the familiar**; the eye/voice
-   gates and text size (**A− / A+**) live in the header and Settings.
+1. **Introduce yourself.** The familiar keeps your name in `familiar_data/observer.txt`; it
+   does not assume one.
+2. **Give it a mind.** Install an LLM key (Google Gemini is the place to start — one key is
+   enough; Cerebras is optional failover): the key lives locally in
+   `familiar_data/llm/key.env` (never committed), and only the `allow_llm` gate opens.
+3. **Open a console.** The human interfaces are the **SwiftUI consoles** — a native macOS
+   console plus iPhone/iPad/watch apps that enroll into the familiar's mesh by covenant and
+   read its worldview. See [`ios/README.md`](ios/README.md). (The earlier egui **Glass**
+   window and menu-bar **marble** are archived under [`archive/`](archive/).)
+4. **Use it.** Answer — or dismiss — the familiar's questions (it begins with
+   *"What do you need most today?"*); ask it anything; the camera and other gates are
+   yours to open, per capability, in `boundary.json`.
 
-Data lives in `./familiar_data/` (the boundary, the workspace, observations, the tool and
+Data lives in `./familiar_data/` (the boundary, the workspace, the SQLite store, the tool and
 identity registries). Delete it to start clean.
 
 **The CLI (scripting / headless):**
@@ -119,14 +122,16 @@ capacities — the comfortable-replacement alarm). The metabolism breathes:
 **sense → detect → interpret (the familiar forms its own questions + theories) →
 generate (LLM-drafted hypotheses) → test (sandboxed execution) → score → select →
 inherit**, under the human-owned boundary it can never widen. It runs as a daemon
-(installable under launchd), and the Glass carries the interaction channel —
-the familiar asks ("What do you need most today?"), the human answers.
+(installable under launchd), and the **SwiftUI consoles** (macOS, iPad, iPhone, watch)
+carry the interaction channel — the familiar asks ("What do you need most today?"),
+the human answers. The mesh federates peers under the **covenant** (join by accepting
+the Three Laws), shares tools/patterns/goals, and holds a graduated, reversible trust
+ladder against corrupting peers.
 
 It now also **watches**: with the `allow_camera` gate open, the daemon captures still
 frames through its eye (a bundled AVFoundation helper) and records that it saw. And it
-**ships**: a signed, notarized macOS installer (`Familiar.app` + the breathing menu-bar
-marble) that sets the whole thing up to run at boot — see [Install & run](#install--run)
-and [`packaging/README.md`](packaging/README.md).
+**ships**: a signed, notarized macOS installer sets the daemon up to run at boot — see
+[Install & run](#install--run) and [`packaging/README.md`](packaging/README.md).
 
 Outward reach (network, LLM, executing generated code, **watching through the camera**) is
 each a separate gate only a human opens. See [CHANGELOG.md](CHANGELOG.md) and

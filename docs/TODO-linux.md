@@ -1,5 +1,10 @@
 # TODO: Linux & Raspberry Pi support
 
+> **⚠ Partly stale (2026-07):** items below that concern the egui **Glass** and the
+> **marble** refer to crates archived on 2026-07-17 (superseded by the SwiftUI consoles —
+> [ADR-0007](decision-records/0007-one-core-many-shells.md)). The headless path (daemon +
+> CLI) is unchanged and remains the Linux target; a Linux console is an open question.
+
 **Status: deferred.** macOS is the primary tester platform for now. This document records
 what is *already in place* (the hooks) and what remains, so the build-out can happen later
 without re-discovery.

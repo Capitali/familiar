@@ -1,6 +1,16 @@
-# DR: One Rust core, many thin shells — unifying peers on a single base code
+# ADR-0007 — One Rust core, many thin shells: unifying peers on a single base code
 
-Status: **proposed** (2026-07-15)
+- **Status:** accepted (direction); phase 1 (UniFFI unification) not yet built
+- **Date:** 2026-07-15
+
+## Status history
+
+- 2026-07-15 — proposed.
+- 2026-07-17 — **accepted in practice**: the SwiftUI consoles became the human interface
+  and the egui Glass + marble were archived (superseding
+  [ADR-0006](0006-observatory-gui-egui.md)). The Swift `FamiliarMesh` package still
+  carries the parallel wire implementation — phase 1 below (replace it with UniFFI
+  bindings over the Rust core) remains the open work.
 
 ## Context
 

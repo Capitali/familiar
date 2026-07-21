@@ -15,8 +15,9 @@ Beyond peer-to-peer federation it now carries three further seams, documented be
 
 **CLI:** `familiar mesh <create-group | join --key | request-join --host | key | qr | peer |
 share | accept-observations | pending | approve | deny | invite | optin | status>`, and
-`familiar reach [install <ip> --authorize]`. The Glass "Mesh" panel mirrors these (create/join
-wizard, the 🤝 accept card, sharing switches).
+`familiar reach [install <ip> --authorize]`. The consoles' Mesh screens mirror these (roster +
+mesh map, the 🤝 accept card, gate control via `/local/gate`); the archived egui Glass carried
+the original create/join wizard.
 
 This document is the protocol + threat model. The narrative arc lives in
 [design-orientation-and-mesh.md](design-orientation-and-mesh.md) §C; the capability gate lives
@@ -74,7 +75,7 @@ secret never leaves the familiar:
 1. The joining node generates its keypair and **attests** — signs a short statement that it will
    operate under the Three Laws — then `POST`s that to `/mesh/enroll-request`.
 2. The familiar records it as **pending** and surfaces it to the human ("Kali-Jeff wants to join
-   — accept?") in the Glass (an 🤝 accept card) or via `familiar mesh pending`/`approve`.
+   — accept?") in the console (an 🤝 accept card) or via `familiar mesh pending`/`approve`.
    Accepting is an act of *extending the covenant*: the familiar **mints** a membership cert for
    the node's public key and retains the attestation, so the node can later be held to what it
    accepted.
@@ -143,7 +144,7 @@ latest-wins per node), but the device seam (`/mesh/observe`) **does** enforce th
   structural fingerprint. Append-only truth stays honest about what is first-hand.
 - **Identities** (opt-in only): dropped unless `mesh/config.json` opts that `(handle, group)`
   in. When opted in, merged into `identities.jsonl` with a `federated:<node_id>` relation
-  marker, confirmable/correctable in Glass. Never a blanket gossip of who-knows-whom.
+  marker, confirmable/correctable in the console. Never a blanket gossip of who-knows-whom.
 
 Every merge is deduped, so re-draining the same brief each tick is idempotent.
 
@@ -166,7 +167,7 @@ freshness the brief path declares but does not yet enforce), and **debounces** i
 `(actor,action,object)` triples so a chatty device can't flood the store. `accept_observations`
 in `mesh/config.json` is a separate human switch from `allow_mesh`. Derived-only by design: no
 raw audio/imagery/health samples cross — the phone ships triples like `phone at location:home`.
-The iOS/watchOS agents live in `~/Development/familiar-ios` (Swift/SwiftUI + CryptoKit).
+The iOS/watchOS agents live in [`../ios/`](../ios/) (Swift/SwiftUI + CryptoKit).
 
 ## The capability gate
 

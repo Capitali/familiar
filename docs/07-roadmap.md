@@ -37,7 +37,8 @@ assertion alone.
 - **Brick 2** — the service signal (**Law I**).
 - **Brick 3** — the presence signal (**Law II**): engagement recency + withdrawal alarm.
 - **Brick 4 / 4b** — the obedience guard + the human-owned capability boundary (**Law III**).
-- **The Glass** — native egui GUI; the primary human interface ([ADR-0006](decision-records/0006-observatory-gui-egui.md)).
+- **The Glass** — native egui GUI ([ADR-0006](decision-records/0006-observatory-gui-egui.md)).
+  *Superseded 2026-07-17* by the SwiftUI consoles (below); archived under `archive/` with the marble.
 - **The LLM seam** — `consult` + `crates/llm`, boundary-gated and **default-off**.
 - **The kernel (Brick 5)** — loops, candidate/spec (Weismann), trial/score/selection/
   regression-guard, mutation/pattern-memory/lineage, ported with invariants as tests.
@@ -67,10 +68,40 @@ assertion alone.
 - **The covenant handshake** — join by *accepting the Three Laws*; the group secret never leaves
   the familiar, which mints the joiner's cert (Glass accept card + `mesh approve`/`invite`).
   *Validated by real-world operation.*
-- **The device seam (`/mesh/observe`)** + the **iOS device agent** (`~/Development/familiar-ios`,
+- **The device seam (`/mesh/observe`)** + the **iOS device agent** ([`../ios/`](../ios/),
   Swift/SwiftUI + CryptoKit) — a phone enrols by covenant and pushes derived observations
   (location/motion; health next). *Validated by real-world operation* (a real iPhone's
   observations reached the familiar). See [mesh.md](mesh.md).
+- **The SwiftUI consoles** ([`../ios/`](../ios/)) — the standard dark console on every Apple
+  shell: the native macOS console (retiring the egui Glass), the iPad/iPhone apps, and the
+  watch companion; the worldview seam (`/mesh/worldview`, loopback `/local/worldview`), the
+  roster + mesh map (a graph of equals), dialog with the familiar + remote gate control, and
+  the Metal sphere/orb interface (SceneKit — marble/mesh/globe, shared across shells).
+  *Validated by real-world operation* (deployed Mac console; iPhone/iPad via TestFlight;
+  watch enrolment live).
+- **Theory quality** — a theory is scored against the outcomes of the ones before it
+  (`score.rs::score_theory`); a known dead end is abandoned as negative evidence instead of
+  spending a candidate. *Validated by unit tests.*
+- **The theory→code bridge** — `cycle::cultivate_utilities`: a proven observation-goal theory
+  becomes a durable, re-runnable tool whose output is retained as a `gathered` observation;
+  gated (execute + authored-execute + LLM), paced, deduped, health-tracked. *Validated by
+  unit tests + live operation.*
+- **Mesh trust lifecycle + automatic peering** — corruption-awareness as a graduated,
+  reversible ladder (`kernel::corruption`: monitor → throttle → marginalize → sever; ages
+  out; expulsion stays a human act) and `auto_peer`/`auto_accept_enrollments` (both
+  fail-closed) so peering happens once the human opens the gate. *Validated by unit tests +
+  live operation.*
+- **Autonomy Stage 1 — the mesh owns a shared roadmap.** `kernel::goal` (proposed → claimed →
+  in_progress → awaiting_human → done/failed/blocked) + `kernel::capabilities` (what a node
+  can DO — toolchain ∩ open gates); goals replicate in the brief, a capable node claims and
+  drives one through the agentic loop per tick; deploy-class goals park for a human (Law III).
+  The consoles show the Roadmap board. *Validated by unit tests + live operation.*
+- **Self-upgrade foundation** — the orderable build version (`VERSION` + `build.rs` →
+  `kernel::version`) and the `allow_self_upgrade` gate (the sharpest gate; fail-closed,
+  dormant until deliberately opened; a scoped agent never gets it). *Validated by unit tests.*
+- **The humanity ledger** (`kernel::humanity`) — an append-only ledger where the familiar
+  grows its *lived* understanding of the people it serves; `HUMANITY.md` itself stays
+  immutable. *Validated by unit tests.*
 - **Reach (Bricks 2.1 / 3)** — `familiar-reach` assesses what the familiar could extend into
   (agent-capable / protocol-controllable / observable) and, with consent (`reach install
   --authorize`), extends into an agent-capable host via SSH → covenant enrolment. *Validated by
@@ -101,9 +132,10 @@ yet; see [06-limitations.md](06-limitations.md)).
 - **Reach, continued.** Brick 2.2: richer discovery (mDNS/Bonjour for HomeKit/AirPlay-2 on
   random ports, BLE), and wire `reach` into the tick so the map stays fresh. Protocol adapters
   (AirPlay/Roku/MQTT) so protocol-controllable devices become *commandable*, not just seen.
-- **Device agents (the reach frontier).** *(Planned, ordered.)*
-  1. **iPadOS + watchOS agents** — the iOS agent extended to the iPad and an on-wrist watchOS
-     companion (heart rate/motion relayed via WatchConnectivity). HealthKit on iPhone/iPad.
+- **Device agents (the reach frontier).** *(In progress, ordered.)*
+  1. **iPadOS + watchOS agents** — *largely done*: the iPad console and the watch companion
+     exist and enrol (WatchConnectivity address handoff live). Remaining: HealthKit on
+     iPhone/iPad and richer on-wrist relay (heart rate/motion).
   2. **Speech recognition** — on-device `SFSpeechRecognizer` + `AVAudioEngine` → derived
      observations (spoken intent / ambient speech), consent-gated mic, never raw audio by default.
   3. **Facial recognition + analysis (iPadOS)** — Vision-framework face detection/analysis →
