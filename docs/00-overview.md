@@ -48,4 +48,5 @@ Roadmap: [07-roadmap.md](07-roadmap.md). Results so far:
 
 - **As a paper**: [01-problem-statement](01-problem-statement.md) → [02-research-basis](02-research-basis.md) → [03-system-architecture](03-system-architecture.md) → [04-methodology](04-methodology.md) → [05-validation-and-results](05-validation-and-results.md) → [06-limitations](06-limitations.md).
 - **As a lab notebook**: [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) and [../experiments/](../experiments/).
+- **As the next project plan**: [SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](SCENARIO-FRAMEWORK-DESIGN-BRIEF.md) — the directional brief for the scenario laboratory named in the roadmap.
 - **As engineering evidence**: [../validation/](../validation/), [../security/](../security/), [decision-records/](decision-records/).

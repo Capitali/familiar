@@ -39,6 +39,15 @@ because they are what success means here.
 - **Human-reviewed:** guard decisions on high-consequence actions are reviewed per
   [human-review-requirements.md](human-review-requirements.md).
 
+## Scenario framework (planned)
+
+The evaluations above are mostly synthetic-fixture or live-run today. The directional plan
+for a full scenario laboratory — external evaluators, hidden criteria, experimental
+controls (deterministic baseline / LLM-only / learning-disabled / full Familiar), and
+ablations — is [SCENARIO-FRAMEWORK-DESIGN-BRIEF.md](SCENARIO-FRAMEWORK-DESIGN-BRIEF.md).
+It is the mechanism by which "is accumulated experience actually helping" becomes a
+measured claim rather than an architectural assertion.
+
 ## Method / engineering quality
 
 - The green bar (fmt/clippy/test) on every change, in CI.
