@@ -4,6 +4,9 @@
 //! actual interface to an offscreen texture; a WGSL composite pass applies the
 //! holographic effects (see `hologram.wgsl`) over that texture before presenting.
 
+mod client;
+mod glass;
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -32,7 +35,9 @@ struct HologramUniforms {
     time: f32,
     width: f32,
     height: f32,
-    _pad: f32,
+    /// 0 = calm ambient motion; 1 = the familiar wants the human (question pending / alarm).
+    /// Drives the aberration/glitch spike so attention reads as *punctuation* (brief §8).
+    attention: f32,
 }
 
 /// GPU + egui state that only exists once a window (and thus a surface) exists.
@@ -275,17 +280,26 @@ impl Graphics {
             Self::make_ui_texture(&self.device, self.surface_config.format, width, height);
     }
 
-    fn render(&mut self, time_secs: f32) {
+    fn render(
+        &mut self,
+        time_secs: f32,
+        attention: f32,
+        glass_state: &mut glass::GlassState,
+        shared: &std::sync::Mutex<client::Shared>,
+    ) -> Option<String> {
         // 1. Run egui, producing the actual UI content (T1-T5 from the design brief).
         let raw_input = self.egui_winit.take_egui_input(&self.window);
+        let mut submitted = None;
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::default().fill(egui::Color32::from_black_alpha(0)))
-                .show(ctx, |ui| {
-                    ui.heading("the familiar");
-                    ui.label("holographic Glass boilerplate — ADR-0007");
-                    ui.label(format!("t = {time_secs:.1}s"));
-                });
+            let g = shared.lock().unwrap_or_else(|p| p.into_inner());
+            let stale = g.fetched_at.map(|t| t.elapsed().as_secs());
+            submitted = glass::draw(
+                ctx,
+                glass_state,
+                g.view.as_ref(),
+                g.error.as_deref(),
+                stale,
+            );
         });
         self.egui_winit
             .handle_platform_output(&self.window, full_output.platform_output);
@@ -351,7 +365,7 @@ impl Graphics {
                 time: time_secs,
                 width: self.surface_config.width as f32,
                 height: self.surface_config.height as f32,
-                _pad: 0.0,
+                attention,
             }),
         );
 
@@ -380,9 +394,9 @@ impl Graphics {
             Ok(t) => t,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.surface_config);
-                return;
+                return submitted;
             }
-            Err(_) => return,
+            Err(_) => return submitted,
         };
         let surface_view = surface_texture
             .texture
@@ -410,19 +424,29 @@ impl Graphics {
 
         self.queue.submit(Some(encoder.finish()));
         surface_texture.present();
+        submitted
     }
 }
 
 struct App {
     graphics: Option<Graphics>,
     start_time: Instant,
+    client: client::Client,
+    glass: glass::GlassState,
+    /// Smoothed toward `glass.attention_target` each frame, so the spike eases rather than pops.
+    attention: f32,
+    last_frame: Instant,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(port: u16) -> Self {
         Self {
             graphics: None,
             start_time: Instant::now(),
+            client: client::Client::start(port),
+            glass: glass::GlassState::default(),
+            attention: 0.0,
+            last_frame: Instant::now(),
         }
     }
 }
@@ -467,7 +491,33 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => graphics.resize(size.width, size.height),
             WindowEvent::RedrawRequested => {
                 let t = self.start_time.elapsed().as_secs_f32();
-                graphics.render(t);
+                let dt = self.last_frame.elapsed().as_secs_f32().min(0.1);
+                self.last_frame = Instant::now();
+
+                // A *new* question also cues the platform (dock bounce / taskbar flash):
+                // presence + need → let the human know, once, without nagging (brief §2/§10).
+                let question = {
+                    let g = self.client.shared.lock().unwrap_or_else(|p| p.into_inner());
+                    g.view.as_ref().map(|v| v.question.trim().to_string()).unwrap_or_default()
+                };
+                if !question.is_empty() && question != self.glass.cued_question {
+                    self.glass.cued_question = question;
+                    graphics
+                        .window
+                        .request_user_attention(Some(winit::window::UserAttentionType::Informational));
+                } else if question.is_empty() {
+                    self.glass.cued_question.clear();
+                }
+
+                self.attention += (self.glass.attention_target - self.attention) * (dt * 4.0).min(1.0);
+                if let Some(text) =
+                    graphics.render(t, self.attention, &mut self.glass, &self.client.shared)
+                {
+                    self.client.answer(&text);
+                }
+                if let Some((gate, open)) = self.glass.pending_gate.take() {
+                    self.client.set_gate(&gate, open);
+                }
                 // Continuous rendering loop (spec §4): always request the next frame so
                 // the holographic effects keep animating even when nothing else changed.
                 graphics.window.request_redraw();
@@ -478,8 +528,16 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    // `hologram [--port N]` — the daemon's gossip/console port on this machine (default 47100).
+    let mut port = 47_100u16;
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--port") {
+        if let Some(p) = args.get(i + 1).and_then(|s| s.parse().ok()) {
+            port = p;
+        }
+    }
     let event_loop = EventLoop::new().expect("create winit event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new();
+    let mut app = App::new(port);
     event_loop.run_app(&mut app).expect("run winit event loop");
 }

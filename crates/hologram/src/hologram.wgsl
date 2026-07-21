@@ -6,7 +6,9 @@ struct Uniforms {
     time: f32,
     width: f32,
     height: f32,
-    _pad: f32,
+    // 0 = calm; 1 = the familiar wants the human (question pending / alarm). Sharpens the
+    // aberration + glitch and warms the rim, so attention reads as punctuation (brief §8).
+    attention: f32,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -43,8 +45,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.uv;
     let resolution = vec2<f32>(uniforms.width, uniforms.height);
 
-    // 1. Chromatic aberration — per-channel UV shift driven by a sine-wave time offset.
-    let aberration = 0.0025 * (0.5 + 0.5 * sin(t * 0.7));
+    let attention = clamp(uniforms.attention, 0.0, 1.0);
+
+    // 1. Chromatic aberration — per-channel UV shift driven by a sine-wave time offset;
+    // attention widens it so a pending question visibly charges the projection.
+    let aberration = 0.0025 * (0.5 + 0.5 * sin(t * 0.7)) * (1.0 + attention * 2.5);
     let shift = vec2<f32>(aberration, 0.0);
     let r = textureSample(ui_texture, ui_sampler, uv + shift).r;
     let g = textureSample(ui_texture, ui_sampler, uv).g;
@@ -54,7 +59,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // 2. Procedural glitch/noise — vertical coordinate offsets mapped to an erratic
     // time frequency; rare per-row displacement plus a constant low-level grain.
     let row = floor(uv.y * 220.0);
-    let glitch_gate = step(0.985, hash(vec2<f32>(row, floor(t * 12.0))));
+    let glitch_gate = step(0.985 - attention * 0.04, hash(vec2<f32>(row, floor(t * 12.0))));
     let glitch_offset = (hash(vec2<f32>(row, t)) - 0.5) * 0.02 * glitch_gate;
     let grain = (hash(uv * resolution + t) - 0.5) * 0.03;
 
@@ -71,8 +76,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // light would on curved geometry facing away from the camera.
     let center_dist = distance(uv, vec2<f32>(0.5, 0.5));
     let fresnel = pow(clamp(center_dist * 1.4, 0.0, 1.0), 2.0);
-    let rim_color = vec3<f32>(0.4, 0.9, 1.0);
-    color = color + rim_color * fresnel * 0.35;
+    // Calm rim is cyan; attention warms it toward amber — differentiable from ambient motion.
+    let rim_color = mix(vec3<f32>(0.4, 0.9, 1.0), vec3<f32>(1.0, 0.55, 0.25), attention);
+    color = color + rim_color * fresnel * (0.35 + attention * 0.25);
 
     // 5. Ambient screen flicker — combined high-frequency + slow macro oscillation,
     // emulating plasma instability.
