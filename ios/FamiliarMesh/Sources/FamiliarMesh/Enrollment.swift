@@ -9,16 +9,29 @@ public struct EnrollmentPayload: Codable, Equatable {
     public var label: String
     public var host: String
     public var port: Int
+    /// Every address the familiar can be reached at, most-universal first (tailnet, then LAN).
+    /// Optional on the wire — older payloads carry only `host`.
+    public var hosts: [String]?
     public var group: String?
     public var secret: String?
 
-    public init(v: Int = 1, label: String, host: String, port: Int, group: String? = nil, secret: String? = nil) {
+    public init(v: Int = 1, label: String, host: String, port: Int, hosts: [String]? = nil,
+                group: String? = nil, secret: String? = nil) {
         self.v = v
         self.label = label
         self.host = host
         self.port = port
+        self.hosts = hosts
         self.group = group
         self.secret = secret
+    }
+
+    /// The addresses to try, in order — `hosts` when present, else just `host`. The device should
+    /// walk this list on every failure: whichever interface it is on (wifi, cellular, VPN), some
+    /// candidate may be reachable when the others are not.
+    public var candidateHosts: [String] {
+        let list = (hosts ?? []).filter { !$0.isEmpty }
+        return list.isEmpty ? [host] : list
     }
 
     /// Parse the JSON string carried by the QR/paste. Requires only a reachable `host`/`port`.

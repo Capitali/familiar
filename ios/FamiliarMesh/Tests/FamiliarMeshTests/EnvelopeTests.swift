@@ -34,6 +34,15 @@ final class EnvelopeTests: XCTestCase {
         XCTAssertNil(EnrollmentPayload.parse(#"{"v":1,"label":"y","host":"","port":0}"#), "no address")
     }
 
+    func testEnrollmentPayloadCandidateHosts() {
+        // New payloads carry every reachable address, most-universal first; the device walks them.
+        let multi = #"{"v":1,"label":"river","host":"100.64.0.5","hosts":["100.64.0.5","192.168.1.10"],"port":47100}"#
+        XCTAssertEqual(EnrollmentPayload.parse(multi)?.candidateHosts, ["100.64.0.5", "192.168.1.10"])
+        // Old single-host payloads still yield one candidate.
+        let single = #"{"v":1,"label":"river","host":"100.64.0.5","port":47100}"#
+        XCTAssertEqual(EnrollmentPayload.parse(single)?.candidateHosts, ["100.64.0.5"])
+    }
+
     func testHexRoundTrips() {
         let bytes: [UInt8] = [0x00, 0x0f, 0xa0, 0xff, 0x10]
         let hex = Hex.encode(bytes)

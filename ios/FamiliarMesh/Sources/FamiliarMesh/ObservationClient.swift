@@ -53,6 +53,7 @@ public struct ObservationClient {
 
         var req = URLRequest(url: session.url)
         req.httpMethod = "POST"
+        req.timeoutInterval = 10   // fail fast so the caller can try the next candidate address
         req.setValue(sig, forHTTPHeaderField: "X-Familiar-Sig")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = body

@@ -155,6 +155,9 @@ public struct Worldview: Codable, Equatable {
     public var edges: [EdgeView]?
     /// The shared roadmap — goals the mesh owns and burns down together. Optional for back-compat.
     public var goals: [GoalView]?
+    /// Every address the familiar answers at, most-universal first (tailnet, then LAN). The model
+    /// merges these into its candidate host list so a LAN-enrolled device learns the tailnet path.
+    public var hosts: [String]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus
@@ -210,6 +213,7 @@ public struct WorldviewClient {
 
         var req = URLRequest(url: session.url)
         req.httpMethod = "POST"
+        req.timeoutInterval = 10   // fail fast so the caller can try the next candidate address
         req.setValue(sig, forHTTPHeaderField: "X-Familiar-Sig")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = body

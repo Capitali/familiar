@@ -109,6 +109,8 @@ public struct EnrollmentClient {
     }
 
     private func send(_ r: URLRequest) async throws -> (Data, URLResponse) {
+        var r = r
+        r.timeoutInterval = 10   // fail fast so the caller can try the next candidate address
         do { return try await urlSession.data(for: r) }
         catch { throw EnrollError.transport(error.localizedDescription) }
     }

@@ -31,21 +31,60 @@ final class AppModel: ObservableObject {
     // update). Loaded on init, saved on join, cleared on unenroll.
     var enrollPort: Int = 47100
 
+    // Every address the familiar can be reached at, preferred first. `host` is always the current
+    // preference (hosts.first); on any send/read failure the model rotates to the next candidate,
+    // so whichever interface the device is on (wifi, cellular, tailnet VPN) it finds a path that
+    // answers instead of pinning to the one that worked at enrollment.
+    var hosts: [String] = []
+
     private func saveEnrollment() {
-        let d: [String: Any] = ["host": host, "port": enrollPort, "label": groupLabel]
+        let d: [String: Any] = ["host": host, "hosts": hosts, "port": enrollPort, "label": groupLabel]
         if let data = try? JSONSerialization.data(withJSONObject: d) { KeychainStore.save(data, account: enrollAccount) }
     }
-    private func loadEnrollment() -> (host: String, port: Int, label: String)? {
+    private func loadEnrollment() -> (host: String, hosts: [String], port: Int, label: String)? {
         // Keychain first (durable); fall back to the old UserDefaults keys once, to migrate.
         if let data = KeychainStore.load(account: enrollAccount),
            let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let h = d["host"] as? String, !h.isEmpty {
-            return (h, (d["port"] as? Int) ?? 47100, (d["label"] as? String) ?? "")
+            let list = (d["hosts"] as? [String] ?? []).filter { !$0.isEmpty }
+            return (h, list.isEmpty ? [h] : list, (d["port"] as? Int) ?? 47100, (d["label"] as? String) ?? "")
         }
         if let h = defaults.string(forKey: "enroll.host"), !h.isEmpty {
-            return (h, Int(defaults.string(forKey: "enroll.port") ?? "") ?? 47100, defaults.string(forKey: "enroll.label") ?? "")
+            return (h, [h], Int(defaults.string(forKey: "enroll.port") ?? "") ?? 47100, defaults.string(forKey: "enroll.label") ?? "")
         }
         return nil
+    }
+
+    /// `h` answered — make it the standing preference (front of the candidate list).
+    private func promoteHost(_ h: String) {
+        guard host != h || hosts.first != h else { return }
+        hosts.removeAll { $0 == h }
+        hosts.insert(h, at: 0)
+        host = h
+        saveEnrollment()
+    }
+
+    /// The familiar told us every address it answers at (in a worldview read) — adopt the ones we
+    /// don't hold yet, after the current preference. This is how a device that enrolled on the LAN
+    /// learns the tailnet path and can reach the mesh from cellular without re-enrolling.
+    private func learnHosts(_ advertised: [String]?) {
+        let fresh = (advertised ?? []).filter { !$0.isEmpty && !hosts.contains($0) }
+        guard !fresh.isEmpty else { return }
+        hosts.append(contentsOf: fresh)
+        saveEnrollment()
+        note("learned address\(fresh.count > 1 ? "es" : ""): \(fresh.joined(separator: ", "))")
+    }
+
+    /// The current host went quiet — rotate to the next candidate. Returns the new preference,
+    /// or nil when there is nowhere else to try.
+    private func failoverHost() -> String? {
+        guard hosts.count > 1 else { return nil }
+        let tired = hosts.removeFirst()
+        hosts.append(tired)
+        host = hosts[0]
+        saveEnrollment()
+        note("… \(tired) unreachable — trying \(host)")
+        return host
     }
 
     private(set) var node: NodeKey
@@ -82,7 +121,7 @@ final class AppModel: ObservableObject {
             node = n
         }
         if let e = loadEnrollment() {
-            host = e.host; enrollPort = e.port; groupLabel = e.label
+            host = e.host; hosts = e.hosts; enrollPort = e.port; groupLabel = e.label
         }
         enrolled = storedGrant() != nil && !host.isEmpty
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
@@ -119,44 +158,54 @@ final class AppModel: ObservableObject {
             note("✗ could not read that address")
             return
         }
-        host = p.host
+        hosts = p.candidateHosts
+        host = hosts[0]
         enrollPort = p.port
         groupLabel = p.label
         saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
         note("requesting to join “\(p.label)” — accepting the Three Laws…")
         let node = self.node
-        Task { await self.runHandshake(host: p.host, port: p.port, node: node) }
+        Task { await self.runHandshake(candidates: self.hosts, port: p.port, node: node) }
     }
 
-    private func runHandshake(host: String, port: Int, node: NodeKey) async {
-        let enroller = EnrollmentClient(host: host, port: port)
-        do {
-            var grant = try await enroller.requestJoin(node: node)     // non-nil if auto-approved
-            if grant == nil { note("waiting for the familiar to approve this device…") }
-            var tries = 0
-            while grant == nil, tries < 150 {                          // ~5 min of polling
-                try await Task.sleep(nanoseconds: 2_000_000_000)
-                grant = try await enroller.pollGrant(nodeId: node.nodeId)
-                tries += 1
+    private func runHandshake(candidates: [String], port: Int, node: NodeKey) async {
+        // Walk the candidate addresses until one answers — the payload lists them most-universal
+        // first, but only the device knows which are reachable from where it is right now.
+        var lastError: Error?
+        for host in candidates {
+            let enroller = EnrollmentClient(host: host, port: port)
+            do {
+                var grant = try await enroller.requestJoin(node: node)     // non-nil if auto-approved
+                promoteHost(host)
+                if grant == nil { note("waiting for the familiar to approve this device…") }
+                var tries = 0
+                while grant == nil, tries < 150 {                          // ~5 min of polling
+                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    grant = try await enroller.pollGrant(nodeId: node.nodeId)
+                    tries += 1
+                }
+                guard let g = grant else { enrolling = false; note("… no approval yet — tap to retry"); return }
+                saveGrant(g)
+                enrolling = false
+                enrolled = true
+                note("✓ admitted to “\(g.group_label)” — the covenant is in force")
+                // Hand the paired Apple Watch this familiar's address so it can enrol itself by
+                // covenant (address only — the watch mints its own key + gets its own grant).
+                PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label)
+                startSensingIfConsented()
+                startDiscoveryIfConsented()
+                return
+            } catch EnrollmentClient.EnrollError.denied {
+                enrolling = false
+                note("✗ the familiar declined this device")
+                return
+            } catch {
+                lastError = error      // unreachable on this path — try the next address
             }
-            guard let g = grant else { enrolling = false; note("… no approval yet — tap to retry"); return }
-            saveGrant(g)
-            enrolling = false
-            enrolled = true
-            note("✓ admitted to “\(g.group_label)” — the covenant is in force")
-            // Hand the paired Apple Watch this familiar's address so it can enrol itself by
-            // covenant (address only — the watch mints its own key + gets its own grant).
-            PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label)
-            startSensingIfConsented()
-            startDiscoveryIfConsented()
-        } catch EnrollmentClient.EnrollError.denied {
-            enrolling = false
-            note("✗ the familiar declined this device")
-        } catch {
-            enrolling = false
-            note("… couldn't reach the familiar: \(error)")
         }
+        enrolling = false
+        note("… couldn't reach the familiar at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
     }
 
     /// Activate the watch link and, if we're enrolled, (re)hand the watch our address — so a watch
@@ -172,13 +221,17 @@ final class AppModel: ObservableObject {
     /// member shows this as a QR so a new device can scan it and join the same familiar.
     var addressPayload: String? {
         guard !host.isEmpty else { return nil }
-        return "{\"v\":1,\"host\":\"\(host)\",\"port\":\(enrollPort),\"label\":\"\(groupLabel)\"}"
+        let p = EnrollmentPayload(label: groupLabel, host: host, port: enrollPort,
+                                  hosts: hosts.isEmpty ? nil : hosts)
+        guard let data = try? JSONEncoder().encode(p) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     func unenroll() {
         KeychainStore.delete(account: grantAccount)
         KeychainStore.delete(account: enrollAccount)
         host = ""
+        hosts = []
         coordinator?.stop()
         coordinator = nil
         discovery?.stop()
@@ -221,14 +274,22 @@ final class AppModel: ObservableObject {
     }
 
     func refreshWorldview() async {
-        guard let session = worldviewSession() else { return }
-        do {
-            let view = try await WorldviewClient(session: session)
-                .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease)
-            worldview = view
-            worldviewError = nil
-        } catch {
-            worldviewError = "\(error)"
+        // One read per candidate address at most — the preferred host first, failing over to the
+        // others so a device off-LAN (cellular + tailnet) still reads the worldview.
+        for _ in 0..<max(1, hosts.count) {
+            guard let session = worldviewSession() else { return }
+            do {
+                let view = try await WorldviewClient(session: session)
+                    .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease)
+                worldview = view
+                worldviewError = nil
+                promoteHost(host)
+                learnHosts(view.hosts)
+                return
+            } catch {
+                worldviewError = "\(error)"
+                if failoverHost() == nil { return }
+            }
         }
     }
 
@@ -305,13 +366,20 @@ final class AppModel: ObservableObject {
     }
 
     private func deliver(_ batch: [ObsRecord]) async {
-        guard let session = makeSession() else { return }
-        do {
-            let n = try await ObservationClient(session: session).send(batch)
-            sentCount += n
-            note("→ sent \(n): " + batch.map { $0.object }.joined(separator: ", "))
-        } catch {
-            note("… send failed: \(error)")
+        // Same failover walk as the worldview read: an observation should reach the familiar by
+        // any address that answers, not only the one that worked at enrollment.
+        for _ in 0..<max(1, hosts.count) {
+            guard let session = makeSession() else { return }
+            do {
+                let n = try await ObservationClient(session: session).send(batch)
+                sentCount += n
+                promoteHost(host)
+                note("→ sent \(n): " + batch.map { $0.object }.joined(separator: ", "))
+                return
+            } catch {
+                note("… send failed: \(error)")
+                if failoverHost() == nil { return }
+            }
         }
     }
 
