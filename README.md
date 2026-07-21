@@ -45,6 +45,10 @@ be narrowed — has its own standout page: [`docs/HUMANITY.md`](docs/HUMANITY.md
 
 ### macOS — the installer (recommended)
 
+> The packaged installer below predates the `crates/hologram` pivot (ADR-0007) and needs
+> rework — see [`packaging/README.md`](packaging/README.md). Until then, use *Build from
+> source* below.
+
 The familiar ships as a signed, **notarized** macOS installer that sets everything up to run
 at boot: **`Familiar-<version>.pkg`**. Double-click it; it installs `Familiar.app` to
 `/Applications` and configures two per-user login agents —
@@ -75,8 +79,8 @@ roadmap — see [docs/TODO-linux.md](docs/TODO-linux.md)).
 
 ```sh
 git clone https://github.com/Capitali/familiar && cd familiar
-cargo build                  # first build pulls dependencies; takes a few minutes
-cargo run -p familiar-glass  # opens the Glass — the primary interface
+cargo build                     # first build pulls dependencies; takes a few minutes
+cargo run -p familiar-hologram  # opens the Glass — the holographic wgpu/egui UI (ADR-0007)
 ```
 
 Then, in the Glass window:

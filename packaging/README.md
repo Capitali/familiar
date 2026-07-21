@@ -1,5 +1,11 @@
 # Packaging — `Familiar.app` and the installer
 
+> **Needs rework post-ADR-0007.** This pipeline predates the wgpu/egui holographic Glass
+> and still describes bundling the old `marble`/`glass` binaries (already archived to
+> `archive/`, not workspace members). The signed/notarized `.pkg` flow should be rebuilt
+> against `familiar-hologram` before it's relied on again; treat the steps below as
+> historical until that happens.
+
 Turns the workspace binaries into a signed, notarized macOS installer: a double-click
 `.pkg` that drops **`Familiar.app`** in `/Applications` and sets the familiar up to live there —
 the metabolism running at boot, the **marble** in the menu bar as the way into the Glass.

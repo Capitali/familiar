@@ -1,0 +1,20 @@
+[package]
+name = "familiar-hologram"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "The Glass — a wgpu/egui holographic rendering engine, the primary human interface (ADR-0007)."
+
+[[bin]]
+name = "hologram"
+path = "src/main.rs"
+
+[dependencies]
+familiar-kernel.workspace = true
+wgpu = "24"
+winit = "0.30"
+egui = "0.31"
+egui-wgpu = "0.31"
+egui-winit = "0.31"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
