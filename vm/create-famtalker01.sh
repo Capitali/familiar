@@ -50,19 +50,23 @@ if [ -z "$ISO" ]; then
   ISO_NAME="$(curl -fsSL "$ISO_DIR" | grep -o 'debian-[0-9.]*-[a-z0-9]*-netinst\.iso' | head -1)"
   [ -n "$ISO_NAME" ] || { echo "Could not determine the Debian netinst ISO name — set FAMILIAR_ISO=/path/to.iso"; exit 1; }
   ISO="$HOME/Downloads/$ISO_NAME"
-  [ -f "$ISO" ] || { echo "Downloading $ISO_NAME…"; curl -fL -o "$ISO" "$ISO_DIR$ISO_NAME"; }
+  [ -f "$ISO" ] || { echo "Downloading ${ISO_NAME}…"; curl -fL -o "$ISO" "$ISO_DIR$ISO_NAME"; }
 fi
 echo "✓ ISO: $ISO"
 
 # ---- 3. Create the VM — headless-optimized -------------------------------------------
 BRIDGE_IF="$(VBoxManage list bridgedifs | awk -F': +' '/^Name:/{print $2; exit}')"
 [ -n "$BRIDGE_IF" ] || { echo "No bridgeable network interface found."; exit 1; }
-echo "✓ Bridging to: $BRIDGE_IF (bridged NIC — LAN discovery beacons + inbound gossip need it; NAT would break both)"
+echo "✓ Will bridge to: $BRIDGE_IF after provisioning (bridged NIC — LAN discovery beacons + inbound gossip need it)"
 
+# Install + provision over NAT: this LAN advertises an IPv6 prefix that doesn't route
+# (Starlink), and the Debian installer's wget hangs forever on blackholed v6 connections.
+# VirtualBox NAT is IPv4-only, so the unattended install can't trip on it; we switch the
+# NIC to bridged (which the mesh needs) once provisioning is done.
 VBoxManage createvm --name "$VM" --ostype "$OSTYPE_ID" --register
 VBoxManage modifyvm "$VM" \
   --memory "$MEM_MB" --cpus "$CPUS" \
-  --nic1 bridged --bridgeadapter1 "$BRIDGE_IF" \
+  --nic1 nat \
   --graphicscontroller vmsvga --vram 16 \
   --audio-driver none --usb off --vrde off \
   --boot1 disk --boot2 dvd --boot3 none --boot4 none
@@ -75,6 +79,7 @@ VBoxManage storageattach "$VM" --storagectl SATA --port 1 --device 0 --type dvdd
 VBoxManage unattended install "$VM" \
   --iso "$ISO" \
   --user familiar --password "$GUEST_PASSWORD" \
+  --admin-password "$GUEST_PASSWORD" \
   --full-user-name "Familiar Peer" \
   --hostname famtalker01.local \
   --time-zone UTC \
@@ -102,6 +107,18 @@ GC() { VBoxManage guestcontrol "$VM" --username root --password "$GUEST_PASSWORD
 GC copyto "$HERE/provision-guest.sh" /root/provision-guest.sh
 GC copyto "$HERE/familiar-peer.service" /root/familiar-peer.service
 GC run --timeout 3600000 -- /bin/bash /root/provision-guest.sh
+
+# ---- 5b. Switch the NIC to bridged for mesh runtime, then boot back up ---------------
+GC run -- /bin/systemctl poweroff || true
+echo "⏳ Waiting for the guest to power off…"
+for _ in $(seq 1 60); do
+  state="$(VBoxManage showvminfo "$VM" --machinereadable | sed -n 's/^VMState="\(.*\)"/\1/p')"
+  [ "$state" = "poweroff" ] && break
+  sleep 5
+done
+VBoxManage modifyvm "$VM" --nic1 bridged --bridgeadapter1 "$BRIDGE_IF"
+VBoxManage startvm "$VM" --type headless
+echo "✓ NIC switched to bridged ($BRIDGE_IF) — $VM rebooted onto the LAN."
 
 # ---- 6. Autostart the VM headless at login (optional) --------------------------------
 PLIST="$HOME/Library/LaunchAgents/io.river.famtalker01.plist"

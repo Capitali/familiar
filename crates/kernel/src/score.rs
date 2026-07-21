@@ -175,6 +175,8 @@ mod tests {
             direction: direction.into(),
             created_at: 0,
             status: status.into(),
+            status_at: 0,
+            last_worked_at: 0,
             origin: "llm".into(),
             actor: "familiar".into(),
         }

@@ -57,6 +57,13 @@ pub struct TheoryView {
     pub theory: String,
     pub direction: String,
     pub status: String,
+    /// Whatever the status is, it is dated: created / entered current status / last worked.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub status_at: i64,
+    #[serde(default)]
+    pub last_worked_at: i64,
 }
 
 /// One of the familiar's reflections on humanity — its lived understanding, appended beside (never
@@ -159,6 +166,17 @@ pub struct GoalView {
     /// Progress + learnings that travelled with the goal.
     pub notes: String,
     pub updated_at: i64,
+    /// Lifecycle dates — whatever state the goal is in carries the date it got there.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub status_at: i64,
+    #[serde(default)]
+    pub last_worked_at: i64,
+    #[serde(default)]
+    pub completed_at: i64,
+    #[serde(default)]
+    pub ended_at: i64,
 }
 
 /// A real relationship between two mesh members — an edge in the graph the map draws. The mesh is
@@ -266,7 +284,21 @@ pub(crate) fn read_worldview(
         &req.os_version,
     );
 
-    assemble_worldview(dir, &cred, now)
+    let mut view = assemble_worldview(dir, &cred, now)?;
+    // "You are here" belongs to the *requester*, not to us. classify() marks this serving
+    // node SelfNode (true for our own console); a remote console rendering that verbatim
+    // shows the host as "you" — so re-tag per requester: their row is self, ours is a peer.
+    for m in &mut view.members {
+        if m.kind == crate::members::MemberKind::SelfNode {
+            m.kind = crate::members::MemberKind::GossipPeer;
+            m.relationship = "gossip peer · host".into();
+        }
+        if m.node_id == req.node.node_id {
+            m.kind = crate::members::MemberKind::SelfNode;
+            m.relationship = "self".into();
+        }
+    }
+    Ok(view)
 }
 
 /// Assemble the worldview snapshot from the canonical store + signals + peers + theories + gates +
@@ -326,6 +358,9 @@ pub fn assemble_worldview(
             theory: t.theory.clone(),
             direction: t.direction.clone(),
             status: t.status.clone(),
+            created_at: t.created_at,
+            status_at: if t.status_at > 0 { t.status_at } else { t.created_at },
+            last_worked_at: t.last_worked_at,
         })
         .collect();
 
@@ -419,6 +454,11 @@ fn goal_views(dir: &Path) -> Vec<GoalView> {
             produced: g.produced,
             notes: g.notes,
             updated_at: g.updated_at,
+            created_at: g.created_at,
+            status_at: if g.status_at > 0 { g.status_at } else { g.updated_at },
+            last_worked_at: g.last_worked_at,
+            completed_at: g.completed_at,
+            ended_at: g.ended_at,
         })
         .collect()
 }
@@ -686,6 +726,11 @@ mod tests {
             relationship: String::new(),
             ai: false,
             trust: "trusted".into(),
+            status: "online".into(),
+            session_start: 0,
+            total_online_secs: 0,
+            interactive: false,
+            human: String::new(),
         }
     }
 

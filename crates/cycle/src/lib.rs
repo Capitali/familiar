@@ -445,6 +445,8 @@ fn maybe_theorize(
             direction,
             created_at: now,
             status: "open".to_string(),
+            status_at: now,
+            last_worked_at: 0,
             origin: "llm".to_string(),
             actor: "familiar".to_string(),
         },
@@ -1232,6 +1234,8 @@ fn adopt_device_theories(dir: &Path, now: i64, obs: &[observation::Observation])
             direction: o.object.clone(),
             created_at: now,
             status: "open".into(),
+            status_at: now,
+            last_worked_at: 0,
             origin: "device".into(),
             // Attribute to the reasoning device so corruption-awareness governs it.
             actor: o.actor.clone(),
@@ -1272,7 +1276,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         // attempts stop consuming the resources meant for legitimate service. Behavior is
         // marginalized, not the person; refusals age out, so it is reversible.
         if !t.actor.is_empty() && corruption::is_corrupt(&refusals, &t.actor, now) {
-            thread::update_status(dir, &t.id, "marginalized")?;
+            thread::update_status(dir, &t.id, "marginalized", now)?;
             observation::record(
                 dir,
                 observation::Observation::new(
@@ -1294,7 +1298,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         // rather than spending a candidate on a known dead end.
         let quality = score::score_theory(&t.direction, &threads, &candidates, &trials, RIGOR);
         if quality < PURSUE_FLOOR {
-            thread::update_status(dir, &t.id, "abandoned")?;
+            thread::update_status(dir, &t.id, "abandoned", now)?;
             observation::record(
                 dir,
                 observation::Observation::new(
@@ -1332,7 +1336,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         );
         c.hypothesis = t.direction.clone();
         candidate::append(dir, &c)?;
-        thread::update_status(dir, &t.id, "pursued")?;
+        thread::update_status(dir, &t.id, "pursued", now)?;
         pursued += 1;
     }
     // Theory-quality feedback: when there was theory activity this tick, record the factory's
@@ -2409,6 +2413,8 @@ mod tests {
                 direction: "offer a standing morning digest".into(),
                 created_at: 100,
                 status: "open".into(),
+                status_at: 0,
+                last_worked_at: 0,
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2464,6 +2470,8 @@ mod tests {
         thread::append(dir, &Thread {
             id: "thread-past".into(), question: "q".into(), theory: "th".into(),
             direction: dead.into(), created_at: 100, status: "pursued".into(),
+            status_at: 0,
+            last_worked_at: 0,
             origin: "llm".into(), actor: "familiar".into(),
         }).unwrap();
         let mut c = Candidate::from_loop(
@@ -2485,6 +2493,8 @@ mod tests {
         thread::append(dir, &Thread {
             id: "thread-new".into(), question: "q".into(), theory: "th".into(),
             direction: dead.into(), created_at: 200, status: "open".into(),
+            status_at: 0,
+            last_worked_at: 0,
             origin: "llm".into(), actor: "familiar".into(),
         }).unwrap();
 
@@ -2716,6 +2726,8 @@ mod tests {
                 direction: "monitor connectivity to the mesh peers".into(),
                 created_at: 100,
                 status: "pursued".into(),
+                status_at: 0,
+                last_worked_at: 0,
                 origin: "familiar".into(),
                 actor: "familiar".into(),
             },
@@ -2831,6 +2843,8 @@ mod tests {
                 direction: "monitor connectivity to the mesh peers".into(),
                 created_at: 100,
                 status: "pursued".into(),
+                status_at: 0,
+                last_worked_at: 0,
                 origin: "familiar".into(),
                 actor: "familiar".into(),
             },
@@ -2961,6 +2975,8 @@ mod tests {
                     direction: dir_.into(),
                     created_at: 100,
                     status: "open".into(),
+                    status_at: 0,
+                    last_worked_at: 0,
                     origin: "observer".into(),
                     actor: actor.into(),
                 },

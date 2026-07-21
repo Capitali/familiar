@@ -8,6 +8,10 @@ set -euo pipefail
 FAMILIAR_REPO="${FAMILIAR_REPO:-https://github.com/Capitali/familiar}"
 FAMILIAR_REF="${FAMILIAR_REF:-claude/session-8nlpbv}"
 
+# The LAN advertises an IPv6 prefix that doesn't route upstream (Starlink) — prefer
+# IPv4 so apt/curl/git/cargo don't hang on blackholed v6 connections.
+printf 'precedence ::ffff:0:0/96  100\n' > /etc/gai.conf
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq build-essential curl git ca-certificates
@@ -53,6 +57,16 @@ chown -R familiar-svc:familiar-svc /var/lib/familiar
 install -m 0644 /root/familiar-peer.service /etc/systemd/system/familiar-peer.service
 systemctl daemon-reload
 systemctl enable --now familiar-peer.service
+
+# Name the node after its host (famtalker01, famtalk02, …) — the daemon mints the node
+# identity with a generic "familiar" label on first start; the roster needs a real name.
+sleep 3
+NODE_JSON=/var/lib/familiar/familiar_data/mesh/node.json
+if grep -q '"label": "familiar"' "$NODE_JSON" 2>/dev/null; then
+  sed -i "s/\"label\": \"familiar\"/\"label\": \"$(hostname -s)\"/" "$NODE_JSON"
+  chown familiar-svc:familiar-svc "$NODE_JSON"
+  systemctl restart familiar-peer.service
+fi
 
 echo "✓ familiar peer provisioned — daemon running, mesh gate open, auto-peering."
 systemctl --no-pager --lines 5 status familiar-peer.service || true

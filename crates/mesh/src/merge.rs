@@ -191,6 +191,10 @@ pub fn build_outbox(
                 notes: g.notes,
                 created_at: g.created_at,
                 updated_at: g.updated_at,
+                status_at: g.status_at,
+                last_worked_at: g.last_worked_at,
+                completed_at: g.completed_at,
+                ended_at: g.ended_at,
             })
             .collect();
         Knowledge {
@@ -291,7 +295,17 @@ pub fn build_outbox(
                 dir,
                 &boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed()),
             ),
-            build_version: familiar_kernel::version::number(),
+            // Emit 0 (omitted on the wire) until the fleet's verifiers re-serialize
+            // this field — a peer built before it rejects any brief that carries it.
+            build_version: 0,
+            interactive: !cfg.headless,
+            // The human this node serves — only a handle already opted into this group's
+            // sharing (the same consent gate identity shares pass through).
+            human: people
+                .iter()
+                .find(|p| cfg.identity_opted_in(&p.handle, &cred.group_id))
+                .map(|p| p.handle.clone())
+                .unwrap_or_default(),
         },
         knowledge,
         identities,
@@ -522,38 +536,61 @@ fn merge_one(
             "blocked" => goal::Status::Blocked,
             _ => continue, // an unknown status from a newer peer — leave it be
         };
+        // Lifecycle dates travel with the goal. A brief from a pre-stamp build sends zeros —
+        // fall back to the best date it *did* send, so every status still carries a date.
+        let goal_from_share = |gs: &crate::brief::GoalShare, local: Option<&goal::Goal>| {
+            let terminal_at = |flag: bool, incoming: i64, kept: i64| {
+                if incoming > 0 {
+                    incoming
+                } else if kept > 0 {
+                    kept
+                } else if flag {
+                    gs.updated_at
+                } else {
+                    0
+                }
+            };
+            goal::Goal {
+                id: gs.id.clone(),
+                description: gs.description.clone(),
+                needs: gs.needs.clone(),
+                status: incoming_status,
+                owner_node: gs.owner_node.clone(),
+                origin: gs.origin.clone(),
+                produced: gs.produced.clone(),
+                notes: gs.notes.clone(),
+                created_at: gs.created_at,
+                updated_at: gs.updated_at,
+                status_at: if gs.status_at > 0 {
+                    gs.status_at
+                } else {
+                    gs.updated_at
+                },
+                last_worked_at: gs
+                    .last_worked_at
+                    .max(local.map(|l| l.last_worked_at).unwrap_or(0)),
+                completed_at: terminal_at(
+                    incoming_status == goal::Status::Done,
+                    gs.completed_at,
+                    local.map(|l| l.completed_at).unwrap_or(0),
+                ),
+                ended_at: terminal_at(
+                    incoming_status == goal::Status::Failed,
+                    gs.ended_at,
+                    local.map(|l| l.ended_at).unwrap_or(0),
+                ),
+            }
+        };
         match goal::load_by_id(dir, &gs.id).ok().flatten() {
             Some(local) if local.updated_at >= gs.updated_at => {} // ours is as-new or newer — keep it
-            Some(_) => {
-                let merged = goal::Goal {
-                    id: gs.id.clone(),
-                    description: gs.description.clone(),
-                    needs: gs.needs.clone(),
-                    status: incoming_status,
-                    owner_node: gs.owner_node.clone(),
-                    origin: gs.origin.clone(),
-                    produced: gs.produced.clone(),
-                    notes: gs.notes.clone(),
-                    created_at: gs.created_at,
-                    updated_at: gs.updated_at,
-                };
+            Some(local) => {
+                let merged = goal_from_share(gs, Some(&local));
                 if goal::update(dir, &merged).is_ok() {
                     report.observations_ingested += 1;
                 }
             }
             None => {
-                let adopted = goal::Goal {
-                    id: gs.id.clone(),
-                    description: gs.description.clone(),
-                    needs: gs.needs.clone(),
-                    status: incoming_status,
-                    owner_node: gs.owner_node.clone(),
-                    origin: gs.origin.clone(),
-                    produced: gs.produced.clone(),
-                    notes: gs.notes.clone(),
-                    created_at: gs.created_at,
-                    updated_at: gs.updated_at,
-                };
+                let adopted = goal_from_share(gs, None);
                 if goal::append(dir, &adopted).is_ok() {
                     report.observations_ingested += 1;
                 }
@@ -598,6 +635,8 @@ fn merge_one(
                 direction: req.direction.clone(),
                 created_at: now,
                 status: "open".into(),
+                status_at: now,
+                last_worked_at: 0,
                 origin: "mesh".into(),
                 // Attribute to the originating node so corruption-awareness still governs it and its
                 // outcome can be traced home. A peer's theory, tested on our execution.
@@ -1050,6 +1089,8 @@ mod tests {
                 env_summary: "cpn".into(),
                 familiar_version: "0.1.0".into(),
                 os_version: String::new(),
+                interactive: false,
+                human: String::new(),
                 tools: vec![ToolManifest {
                     tool_id: "tool-0007".into(),
                     name: "battery".into(),
@@ -1371,6 +1412,8 @@ mod tests {
                 question: "q".into(),
                 theory: "th".into(),
                 direction: "try a gentle nudge".into(),
+                status_at: 0,
+                last_worked_at: 0,
                 created_at: NOW,
                 status: "open".into(),
                 origin: "llm".into(),

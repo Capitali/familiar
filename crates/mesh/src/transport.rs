@@ -91,7 +91,24 @@ pub struct PeerRecord {
     /// don't report it. The OS *family* is still derived from the actor; this is the version detail.
     #[serde(default)]
     pub os_version: String,
+    /// When the current continuous-online run began (unix secs). Reset whenever the peer
+    /// reappears after a gap longer than its freshness window. 0 on pre-field rows.
+    #[serde(default)]
+    pub session_start: i64,
+    /// Total seconds of *completed* online runs — the peer's cumulative time in the mesh,
+    /// excluding the live session (add `now - session_start` while it's online).
+    #[serde(default)]
+    pub total_online_secs: i64,
+    /// The peer has an interactive human at its console (from its brief; !headless).
+    #[serde(default)]
+    pub interactive: bool,
+    /// The human handle that node serves, when its brief shares one (identity opt-in gated).
+    #[serde(default)]
+    pub human: String,
 }
+
+/// A gossip peer beacons every ~30s — two missed rounds plus slack and it's no longer "online".
+pub const GOSSIP_FRESH_SECS: i64 = 120;
 
 /// A running mesh transport. Dropping or calling [`MeshHandle::shutdown`] stops it.
 pub struct MeshHandle {
@@ -462,7 +479,7 @@ async fn handle(
                 Ok(b) => b,
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
-            recv_brief(&dir, &bytes)
+            recv_brief(&dir, &bytes, &peer_ip)
         }
         (Method::POST, "/mesh/observe") => {
             // The signature covers the raw body, so grab the header before the body is consumed.
@@ -583,8 +600,8 @@ fn hello(dir: &Path) -> Response<Full<Bytes>> {
 }
 
 /// `POST /mesh/brief` → verify at ingress, stash if trusted, answer with our own brief.
-fn recv_brief(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
-    match ingest_brief(dir, bytes) {
+fn recv_brief(dir: &Path, bytes: &[u8], peer_ip: &str) -> Response<Full<Bytes>> {
+    match ingest_brief(dir, bytes, peer_ip) {
         Ok(()) => {
             // Hand our brief back so a single round exchanges both directions.
             match std::fs::read(dir.join(OUTBOX_FILE)) {
@@ -599,7 +616,7 @@ fn recv_brief(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
 
 /// Verify an inbound brief against our group and, if trusted, write it to the inbox and
 /// record the peer. Returns `Untrusted` if the cert/signature fail — the caller answers 403.
-pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8], addr: &str) -> Result<()> {
     let cred = group::load(dir)?.ok_or_else(|| crate::Error::Untrusted("no group".into()))?;
     let brief: MeshBrief = serde_json::from_slice(bytes)?;
     let revoked = group::load_revoked(dir).unwrap_or_default();
@@ -614,7 +631,7 @@ pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8]) -> Result<()> {
         inbox.join(format!("{node_id}.json")),
         serde_json::to_vec_pretty(&brief)?,
     )?;
-    upsert_peer(dir, &brief, "")?;
+    upsert_peer(dir, &brief, addr)?;
     Ok(())
 }
 
@@ -1085,7 +1102,7 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
         return Ok(()); // peer accepted ours but had nothing to return
     }
     // Verify the peer's brief before it touches disk (defense at ingress).
-    ingest_brief(dir, &reply.body)?;
+    ingest_brief(dir, &reply.body, addr)?;
     // Pre-fetch tool bodies we don't already have, content-addressed for the in-tick merge.
     if let Ok(brief) = serde_json::from_slice::<MeshBrief>(&reply.body) {
         upsert_peer(dir, &brief, addr)?;
@@ -1290,6 +1307,10 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         first_seen: now,
         familiar_version: brief.body.capability.familiar_version.clone(),
         os_version: brief.body.capability.os_version.clone(),
+        session_start: now,
+        total_online_secs: 0,
+        interactive: brief.body.capability.interactive,
+        human: brief.body.capability.human.clone(),
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -1304,9 +1325,31 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
             } else {
                 now
             };
+            // Session accounting: a sighting within the freshness window continues the
+            // current run; a longer gap closes it (bank its duration) and starts a new one.
+            let (session_start, total_online_secs) =
+                if now - existing.last_seen <= GOSSIP_FRESH_SECS {
+                    (
+                        if existing.session_start > 0 {
+                            existing.session_start
+                        } else {
+                            existing.last_seen
+                        },
+                        existing.total_online_secs,
+                    )
+                } else {
+                    let closed = if existing.session_start > 0 {
+                        (existing.last_seen - existing.session_start).max(0)
+                    } else {
+                        0
+                    };
+                    (now, existing.total_online_secs + closed)
+                };
             *existing = PeerRecord {
                 addr: addr_keep,
                 first_seen,
+                session_start,
+                total_online_secs,
                 ..rec
             };
         }
@@ -1345,6 +1388,20 @@ pub(crate) fn register_device_peer(
     let now = now_secs();
     match peers.iter_mut().find(|p| p.node_id == node_id) {
         Some(existing) => {
+            // Session accounting (device window): a read within the freshness window
+            // continues the run; a longer gap banks the old run and starts a new one.
+            if now - existing.last_seen <= crate::members::ONLINE_WINDOW_SECS {
+                if existing.session_start == 0 {
+                    existing.session_start = existing.last_seen;
+                }
+            } else {
+                if existing.session_start > 0 {
+                    existing.total_online_secs +=
+                        (existing.last_seen - existing.session_start).max(0);
+                }
+                existing.session_start = now;
+            }
+            existing.interactive = true; // a console read is a human-facing surface
             existing.last_seen = now;
             if existing.first_seen == 0 {
                 existing.first_seen = now;
@@ -1375,6 +1432,10 @@ pub(crate) fn register_device_peer(
             first_seen: now,
             familiar_version: client_version.to_string(),
             os_version: os_version.to_string(),
+            session_start: now,
+            total_online_secs: 0,
+            interactive: true,
+            human: String::new(),
         }),
     }
     if let Some(parent) = path.parent() {
@@ -1382,6 +1443,24 @@ pub(crate) fn register_device_peer(
     }
     std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
     Ok(())
+}
+
+/// Forget a peer: drop it from the roster by node id (`mesh forget`). The record — join
+/// dates, accumulated online time — is gone for good; a live node will simply re-enroll as
+/// new on its next exchange. Returns whether the id was present.
+pub fn remove_peer(dir: &Path, node_id: &str) -> Result<bool> {
+    let path = dir.join(PEERS_FILE);
+    let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let before = peers.len();
+    peers.retain(|p| p.node_id != node_id);
+    if peers.len() == before {
+        return Ok(false);
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    Ok(true)
 }
 
 /// Load the peer records as last seen — for the worldview read seam (an iPad console shows them).

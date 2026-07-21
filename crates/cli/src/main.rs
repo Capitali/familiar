@@ -541,6 +541,98 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("forget") => {
+            // `mesh forget <node_id>` — drop a departed node from the roster for good.
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh forget <node_id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::transport::remove_peer(&dir, node_id) {
+                Ok(true) => {
+                    println!("✓ forgot {node_id} — removed from the roster");
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("mesh: no roster entry for {node_id}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not update the roster — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("roster") => {
+            // `mesh roster` — every member with its full metadata, one block per node.
+            let now = familiar_mesh::transport::now_secs();
+            let members = familiar_mesh::members::classify(&dir, now);
+            if members.is_empty() {
+                println!("(no mesh members — is the mesh gate open and a group enrolled?)");
+                return ExitCode::SUCCESS;
+            }
+            let date = |ts: i64| -> String {
+                if ts <= 0 {
+                    "—".into()
+                } else {
+                    // civil date from unix secs, UTC — no chrono dependency for a roster print
+                    let days = ts / 86400;
+                    let (y, m, d) = civil_from_days(days);
+                    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", (ts % 86400) / 3600, (ts % 3600) / 60)
+                }
+            };
+            let dur = |secs: i64| -> String {
+                if secs <= 0 {
+                    "—".into()
+                } else if secs < 3600 {
+                    format!("{}m", secs / 60)
+                } else if secs < 86400 {
+                    format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+                } else {
+                    format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
+                }
+            };
+            for m in &members {
+                let who = if m.human.is_empty() {
+                    "—".into()
+                } else {
+                    m.human.clone()
+                };
+                println!(
+                    "{} “{}” [{}]\n  status    {}{}\n  joined    first {} · session {} · total online {}\n  platform  {} {} · familiar v{}\n  human     interactive {} · serves {}\n  offers    {} tool(s), {} pattern(s) · trust {} · addr {}",
+                    match m.kind {
+                        familiar_mesh::members::MemberKind::SelfNode => "self  ",
+                        familiar_mesh::members::MemberKind::GossipPeer => "peer  ",
+                        familiar_mesh::members::MemberKind::DevicePeer => "device",
+                        familiar_mesh::members::MemberKind::DeviceAgent => "agent ",
+                    },
+                    m.label,
+                    &m.node_id.chars().take(8).collect::<String>(),
+                    m.status,
+                    if m.status == "online" {
+                        String::new()
+                    } else {
+                        format!(" (last seen {} ago)", dur(now - m.last_seen))
+                    },
+                    date(m.first_seen),
+                    if m.session_start > 0 {
+                        date(m.session_start)
+                    } else {
+                        "—".into()
+                    },
+                    dur(m.total_online_secs),
+                    m.os,
+                    m.os_version,
+                    if m.familiar_version.is_empty() { "?" } else { &m.familiar_version },
+                    if m.interactive { "yes" } else { "no" },
+                    who,
+                    m.tools,
+                    m.patterns,
+                    m.trust,
+                    if m.addr.is_empty() { "—" } else { &m.addr },
+                );
+            }
+            ExitCode::SUCCESS
+        }
         Some("share") => {
             // `mesh share <tools|knowledge|identities> <on|off>` — the sharing switches,
             // headless. `identities` is the master switch; nothing about a human crosses
@@ -984,6 +1076,21 @@ fn open_mesh_gate(dir: &std::path::Path) {
     if let Ok(json) = serde_json::to_string_pretty(&b) {
         let _ = std::fs::write(dir.join("boundary.json"), json);
     }
+}
+
+/// Civil (year, month, day) from days since the unix epoch — Howard Hinnant's algorithm,
+/// so the roster prints dates without pulling in a chrono dependency.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 fn write_mesh_config(

@@ -27,6 +27,13 @@ pub struct Thread {
     pub created_at: i64,
     /// open | pursued | answered | abandoned | marginalized
     pub status: String,
+    /// When the thread entered its *current* status (unix secs) — whatever state a theory
+    /// is in, it carries the date it got there. Backfilled to `created_at` for old rows.
+    #[serde(default)]
+    pub status_at: i64,
+    /// Last time this thread was actively worked (pursued, evidence added, answered).
+    #[serde(default)]
+    pub last_worked_at: i64,
     /// llm | observer
     pub origin: String,
     /// Who authored the directive — the actor whose reputation governs whether it is
@@ -45,13 +52,20 @@ pub fn load(dir: &Path) -> io::Result<Vec<Thread>> {
     store::load(dir, THREADS_FILE)
 }
 
-/// Set a thread's status — a single indexed update, not a whole-file rewrite. Returns true
-/// if the id was found.
-pub fn update_status(dir: &Path, id: &str, status: &str) -> io::Result<bool> {
+/// Set a thread's status at `now` — a single indexed update, not a whole-file rewrite,
+/// stamping `status_at` (and `last_worked_at` when the transition is active work: pursued
+/// or answered). Returns true if the id was found.
+pub fn update_status(dir: &Path, id: &str, status: &str, now: i64) -> io::Result<bool> {
     let Some(mut t) = store::load_by_id::<Thread>(dir, THREADS_FILE, id)? else {
         return Ok(false);
     };
+    if t.status != status {
+        t.status_at = now;
+    }
     t.status = status.to_string();
+    if matches!(status, "pursued" | "answered") {
+        t.last_worked_at = now;
+    }
     store::update_by_id(dir, THREADS_FILE, id, &t)
 }
 
@@ -72,13 +86,18 @@ mod tests {
             direction: "offer a standing morning digest".into(),
             created_at: 100,
             status: "open".into(),
+            status_at: 100,
+            last_worked_at: 0,
             origin: "llm".into(),
             actor: "familiar".into(),
         };
         append(&p, &t).unwrap();
         assert_eq!(load(&p).unwrap(), vec![t.clone()]);
-        update_status(&p, "thread-0001", "pursued").unwrap();
-        assert_eq!(load(&p).unwrap()[0].status, "pursued");
+        update_status(&p, "thread-0001", "pursued", 200).unwrap();
+        let updated = &load(&p).unwrap()[0];
+        assert_eq!(updated.status, "pursued");
+        assert_eq!(updated.status_at, 200, "a status change is dated");
+        assert_eq!(updated.last_worked_at, 200, "pursuing is active work");
         let _ = fs::remove_dir_all(&p);
     }
 }
