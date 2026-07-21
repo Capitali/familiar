@@ -48,9 +48,9 @@ fn write(dir: &Path, store: &Store) -> io::Result<()> {
 /// a re-decision replaces the prior one (a human may change their mind before it's applied).
 pub fn record(dir: &Path, grant: AuthorityGrant) -> io::Result<()> {
     let mut store = read(dir);
-    store
-        .grants
-        .retain(|g| !(g.target == grant.target && g.kind == grant.kind && g.ref_id == grant.ref_id));
+    store.grants.retain(|g| {
+        !(g.target == grant.target && g.kind == grant.kind && g.ref_id == grant.ref_id)
+    });
     store.grants.push(grant);
     write(dir, &store)
 }
@@ -91,7 +91,11 @@ mod tests {
         record(&dir, g("nodeA", "enrollment", "x", 100)).unwrap();
         record(&dir, g("nodeA", "enrollment", "x", 150)).unwrap(); // same subject → replaces
         record(&dir, g("nodeB", "gate", "allow_execute", 150)).unwrap();
-        assert_eq!(active(&dir, 160).len(), 2, "one per (target,kind,ref); both fresh");
+        assert_eq!(
+            active(&dir, 160).len(),
+            2,
+            "one per (target,kind,ref); both fresh"
+        );
 
         // After the TTL the older grant is pruned.
         let live = active(&dir, 100 + GRANT_TTL_SECS + 200);

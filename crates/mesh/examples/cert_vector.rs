@@ -47,8 +47,15 @@ fn main() {
         *b = u8::from_str_radix(&GROUP_SECRET[i * 2..i * 2 + 2], 16).unwrap();
     }
     let sig = SigningKey::from_bytes(&secret).sign(body.as_bytes());
-    let sig_hex = sig.to_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>();
-    assert_eq!(sig_hex, m.cert, "manual CertBody must reproduce the real cert");
+    let sig_hex = sig
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    assert_eq!(
+        sig_hex, m.cert,
+        "manual CertBody must reproduce the real cert"
+    );
     println!("CERT_BODY      {body}");
 
     let _ = std::fs::remove_dir_all(&dir);
