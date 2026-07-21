@@ -147,6 +147,11 @@ pub struct Worldview {
     /// node claimed each. Every node holds the same list; the console renders it as the to-do board.
     #[serde(default)]
     pub goals: Vec<GoalView>,
+    /// Every address this familiar currently answers at, most-universal first (tailnet, then LAN).
+    /// A console merges these into its candidate list, so a device that enrolled on the LAN learns
+    /// the tailnet path — and can reach the mesh from cellular — without re-enrolling.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
 }
 
 /// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
@@ -298,6 +303,9 @@ pub(crate) fn read_worldview(
             m.relationship = "self".into();
         }
     }
+    // Tell the console every address we answer at — it learns paths (tailnet) it can use from
+    // interfaces (cellular) where the enrollment-time LAN address is unreachable.
+    view.hosts = crate::transport::reachable_hosts();
     Ok(view)
 }
 
@@ -410,6 +418,9 @@ pub fn assemble_worldview(
     Ok(Worldview {
         group_label: cred.label.clone(),
         node_id: cred.membership.node_id.clone(),
+        // Address advertisement is the *served* read path's concern (read_worldview fills it);
+        // the localhost console doesn't need it and assembly stays shell-out-free.
+        hosts: Vec::new(),
         question,
         presence: presence.measure,
         withdrawn: presence.withdrawn,

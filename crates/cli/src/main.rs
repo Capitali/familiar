@@ -485,7 +485,15 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 .get("port")
                 .and_then(|p| p.parse::<u16>().ok())
                 .unwrap_or_else(|| familiar_mesh::config::load(&dir).map(|c| c.gossip_port).unwrap_or(47_100));
-            let host = f.get("host").cloned().unwrap_or_else(tailnet_ip_or_hint);
+            // Every address the device could reach us at, most-universal first (tailnet, then
+            // LAN). An explicit `--host` goes to the front. `host` stays as the single best
+            // candidate so v1 clients keep working; new clients read `hosts` and fail over.
+            let mut hosts = reachable_hosts();
+            if let Some(h) = f.get("host") {
+                hosts.retain(|x| x != h);
+                hosts.insert(0, h.clone());
+            }
+            let host = hosts.first().cloned().unwrap_or_else(|| HOST_PLACEHOLDER.to_string());
             // Compact JSON — the phone parses this after scanning or pasting.
             let payload = serde_json::json!({
                 "v": 1,
@@ -493,6 +501,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 "group": cred.group_id,
                 "label": cred.label,
                 "host": host,
+                "hosts": hosts,
                 "port": port,
             })
             .to_string();
@@ -1127,23 +1136,10 @@ fn host_is_placeholder(host: &str) -> bool {
     host == HOST_PLACEHOLDER
 }
 
-/// This familiar's tailnet IPv4 (via `tailscale ip -4`), so a device can reach it off-LAN. Falls
-/// back to a placeholder the caller flags — the mesh already shells out to tailscale for peers.
-fn tailnet_ip_or_hint() -> String {
-    std::process::Command::new("tailscale")
-        .args(["ip", "-4"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .next()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-        })
-        .unwrap_or_else(|| HOST_PLACEHOLDER.to_string())
+/// Every address a device could reach this familiar at, most-universal first — see
+/// `transport::reachable_hosts` (tailnet, then LAN).
+fn reachable_hosts() -> Vec<String> {
+    familiar_mesh::transport::reachable_hosts()
 }
 
 /// Render `payload` as a scannable terminal QR via `qrencode` if it's installed. Returns whether

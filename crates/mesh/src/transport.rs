@@ -1216,16 +1216,78 @@ pub struct TailscalePeer {
     pub online: bool,
 }
 
+/// Run the tailscale CLI with `args`, trying `tailscale` on PATH first and then the macOS app
+/// bundle's CLI (the GUI install puts nothing on PATH). None if neither answers.
+fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
+    ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]
+        .iter()
+        .find_map(|bin| {
+            std::process::Command::new(bin)
+                .args(args)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+        })
+}
+
 /// Enumerate tailnet peers (read-only shell-out). Empty if tailscale is absent/unreachable —
 /// mesh then relies on `static_peers` only.
 pub fn enumerate_peers() -> Vec<TailscalePeer> {
-    let out = std::process::Command::new("tailscale")
-        .args(["status", "--json"])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => parse_tailscale_status(&String::from_utf8_lossy(&o.stdout)),
-        _ => Vec::new(),
+    match tailscale_output(&["status", "--json"]) {
+        Some(o) => parse_tailscale_status(&String::from_utf8_lossy(&o.stdout)),
+        None => Vec::new(),
     }
+}
+
+/// This node's own tailnet IPv4 (`tailscale ip -4`), if tailscale is up.
+pub fn self_tailnet_ip() -> Option<String> {
+    tailscale_output(&["ip", "-4"]).and_then(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    })
+}
+
+/// The primary LAN IPv4 — the source address the OS would route toward the internet. A connected
+/// UDP socket never sends a packet; it just resolves routing. Std-only, macOS and Linux alike.
+pub fn self_lan_ip() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("1.1.1.1:53").ok()?;
+    let ip = sock.local_addr().ok()?.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        return None;
+    }
+    Some(ip.to_string())
+}
+
+/// Every address a device could reach this node at, most-universal first: the tailnet IP
+/// (reachable from any interface when the device also runs tailscale — cellular included), then
+/// the LAN IP (same-wifi fallback that needs no VPN). Cached for 60s — consoles poll the
+/// worldview every few seconds and this shells out to tailscale.
+pub fn reachable_hosts() -> Vec<String> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+    let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((at, hosts)) = guard.as_ref() {
+        if at.elapsed() < Duration::from_secs(60) {
+            return hosts.clone();
+        }
+    }
+    let mut hosts = Vec::new();
+    if let Some(ts) = self_tailnet_ip() {
+        hosts.push(ts);
+    }
+    if let Some(lan) = self_lan_ip() {
+        if !hosts.contains(&lan) {
+            hosts.push(lan);
+        }
+    }
+    *guard = Some((Instant::now(), hosts.clone()));
+    hosts
 }
 
 /// Parse `tailscale status --json` into peers (pure — unit-tested against a fixture). Takes
