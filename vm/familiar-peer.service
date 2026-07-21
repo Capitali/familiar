@@ -1,0 +1,17 @@
+[Unit]
+Description=The Familiar — headless mesh peer daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=familiar-svc
+WorkingDirectory=/var/lib/familiar
+ExecStart=/usr/local/bin/familiar run --daemon
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/familiar
+
+[Install]
+WantedBy=multi-user.target
