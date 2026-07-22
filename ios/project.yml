@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: 8GHXL328AR
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "16"
+    CURRENT_PROJECT_VERSION: "17"
 packages:
   FamiliarMesh:
     path: FamiliarMesh
@@ -23,6 +23,11 @@ targets:
     sources:
       - App/Sources
       - App/Assets.xcassets
+      # The Metal Sphere console — the same web bundle the Mac console renders, kept as a
+      # folder reference so the page loads from "sphere/" at runtime on every platform.
+      - path: MacApp/Resources/sphere
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ios

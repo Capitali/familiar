@@ -15,9 +15,10 @@ struct RootView: View {
     var body: some View {
         Group {
             if model.enrolled {
-                // The dark futuristic console is the standard UI for every peer with a screen —
-                // iPhone and iPad both. It adapts its own layout to the width (rail vs compact bar).
-                GlassConsole()
+                // The Metal Sphere is the standard console for every peer with a screen —
+                // iPhone and iPad both (same web bundle as the Mac). The prior GlassConsole
+                // remains one glyph away for device housekeeping (consents, watch, unenroll).
+                SphereConsoleIOS()
             } else {
                 EnrollView().background(Fam.bg.ignoresSafeArea()).preferredColorScheme(.dark)
             }

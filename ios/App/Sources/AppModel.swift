@@ -96,6 +96,8 @@ final class AppModel: ObservableObject {
 
     // The familiar's worldview, as this peer reads it (the iPad Glass console). Polled while shown.
     @Published var worldview: Worldview?
+    /// The same snapshot as raw JSON, for the Metal Sphere web layer (window.sphereUpdate).
+    @Published var worldviewJSON: String?
     @Published var worldviewError: String?
     private var worldviewTask: Task<Void, Never>?
 
@@ -297,6 +299,9 @@ final class AppModel: ObservableObject {
                     .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                            lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
                 worldview = view
+                if let data = try? JSONEncoder().encode(view) {
+                    worldviewJSON = String(data: data, encoding: .utf8)
+                }
                 worldviewError = nil
                 promoteHost(host)
                 learnHosts(view.hosts)
