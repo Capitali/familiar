@@ -149,6 +149,8 @@ final class AppModel: ObservableObject {
         let d: [String: Any] = [
             "label": UIDevice.current.name,
             "build": Self.appBuild,
+            "host": host,
+            "hosts": hosts,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "discovery": discoveryEnabled, "reasoning": reasoningEnabled,
@@ -321,7 +323,10 @@ final class AppModel: ObservableObject {
         // One read per candidate address at most — the preferred host first, failing over to the
         // others so a device off-LAN (cellular + tailnet) still reads the worldview.
         for _ in 0..<max(1, hosts.count) {
-            guard let session = worldviewSession() else { return }
+            guard let session = worldviewSession() else {
+                worldviewError = "no session: grant=\(storedGrant() != nil) host=\(host.isEmpty ? "empty" : host)"
+                return
+            }
             do {
                 let fix = coordinator?.lastCoordinate
                 let (view, raw) = try await WorldviewClient(session: session)

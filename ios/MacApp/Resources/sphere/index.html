@@ -393,7 +393,8 @@ function refreshScreen() {
     }
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
     el.innerHTML = `<div style="max-width:720px;">
-      <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:16px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:16px;">${(d.hosts||[]).map((h,i)=>(h===d.host?'▸':'')+esc(h)).join(' · ')}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">` +
       Object.entries(CONSENT_META).map(([key, label]) => {
         const on = !!(d.consents && d.consents[key]);

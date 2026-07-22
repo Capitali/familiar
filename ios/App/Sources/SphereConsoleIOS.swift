@@ -128,8 +128,9 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
         }
     }
     func pushLinkDown(_ message: String = "") {
-        let msg = message.replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\"", with: "'")
-        web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown(\"\(msg)\")", completionHandler: nil)
+        // JSON-encode so quotes/newlines in error text can't break the injection.
+        let quoted = (try? JSONEncoder().encode(message)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"link down\""
+        web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown(\(quoted))", completionHandler: nil)
     }
 
     func pushDevice(_ json: String) {
