@@ -506,12 +506,16 @@ window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidde
 window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
 window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
 function renderInviteQR() {
-  const box = $('inviteqr'); if (!box || !S.invite || typeof qrcode === 'undefined') return;
-  const qr = qrcode(0, 'M');
-  qr.addData(S.invite);
-  qr.make();
-  box.innerHTML = `<div style="padding:12px;border-radius:14px;background:rgba(238,242,251,0.92);display:inline-block;">${qr.createSvgTag({cellSize: 3, margin: 0})}</div>
-    <div class="m" style="max-width:340px;margin-top:8px;font-size:8px;line-height:1.5;color:rgba(150,180,255,0.5);word-break:break-all;">${esc(S.invite)}</div>`;
+  const box = $('inviteqr'); if (!box || !S.invite) return;
+  let svg = '';
+  if (typeof qrcode !== 'undefined') {
+    const qr = qrcode(0, 'M');
+    qr.addData(S.invite);
+    qr.make();
+    svg = `<div style="padding:12px;border-radius:14px;background:rgba(238,242,251,0.92);display:inline-block;">${qr.createSvgTag({cellSize: 3, margin: 0})}</div>`;
+  }
+  // The pasteable payload always renders — the QR is a convenience, not the channel.
+  box.innerHTML = svg + `<div class="m" style="max-width:340px;margin-top:8px;font-size:8px;line-height:1.5;color:rgba(150,180,255,0.5);word-break:break-all;user-select:all;">${esc(S.invite)}</div>`;
 }
 window.sphereUnenroll = () => {
   if (!S.unenrollArmed) {
@@ -524,7 +528,12 @@ window.sphereUnenroll = () => {
 };
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
-window.onerror = (msg, src, line) => { S.jsErr = msg + ' @' + line; renderChrome(); };
+window.onerror = (msg, src, line) => {
+  // Cross-origin scripts (CDN three.js/qrcode) report opaquely as "Script error." with no
+  // detail — that is noise, not diagnosis; only badge errors that carry information.
+  if (String(msg).startsWith('Script error')) return;
+  S.jsErr = msg + ' @' + line; renderChrome();
+};
 window.sphereUpdate = (view) => {
   S.view = view; S.linkOk = true;
   // A renderer error must never mask the data or hold the link badge — draw what we can,
