@@ -536,6 +536,7 @@ fn main() {
     }
     let event_loop = EventLoop::new().expect("create winit event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new(port);
+    // The daemon's local seams live one port above the (TLS) mesh port, loopback-only.
+    let mut app = App::new(port + 1);
     event_loop.run_app(&mut app).expect("run winit event loop");
 }

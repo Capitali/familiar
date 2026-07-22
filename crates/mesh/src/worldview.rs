@@ -312,9 +312,19 @@ pub(crate) fn read_worldview(
             m.relationship = "self".into();
         }
     }
-    // Tell the console every address we answer at — it learns paths (tailnet) it can use from
-    // interfaces (cellular) where the enrollment-time LAN address is unreachable.
-    view.hosts = crate::transport::reachable_hosts();
+    // Tell the console every address the MESH answers at: ours first, then fresh gossip
+    // peers (any member node serves the same verified read seam — the worldview is
+    // gossip-replicated). A device that loses this node fails over to a sibling.
+    let mut hosts = crate::transport::reachable_hosts();
+    for p in crate::transport::load_peers(dir) {
+        if now - p.last_seen <= crate::transport::GOSSIP_FRESH_SECS * 5 {
+            let ip = p.addr.split(':').next().unwrap_or("").to_string();
+            if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_ok() && !hosts.contains(&ip) {
+                hosts.push(ip);
+            }
+        }
+    }
+    view.hosts = hosts;
     Ok(view)
 }
 

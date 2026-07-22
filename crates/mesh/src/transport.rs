@@ -221,6 +221,7 @@ impl LanState {
 /// tear down and idle when the boundary closes.
 async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
     let mut server: Option<tokio::task::JoinHandle<()>> = None;
+    let mut local_server: Option<tokio::task::JoinHandle<()>> = None;
     let mut bound_port: u16 = 0;
     let mut lan_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut lan_bound: u16 = 0;
@@ -263,6 +264,9 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
             if let Some(s) = server.take() {
                 s.abort();
             }
+            if let Some(s) = local_server.take() {
+                s.abort();
+            }
             match TcpListener::bind(("0.0.0.0", cfg.gossip_port)).await {
                 Ok(listener) => {
                     bound_port = cfg.gossip_port;
@@ -270,7 +274,22 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                         dir: dir.clone(),
                         seen: std::sync::Mutex::new(crate::observe::IngestGuard::default()),
                     });
-                    server = Some(tokio::spawn(serve(listener, ctx)));
+                    let acceptor = match tls_acceptor(&dir) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            let _ = write_status(&dir, &format!("mesh tls init failed: {e}"));
+                            None
+                        }
+                    };
+                    server = Some(tokio::spawn(serve(listener, ctx.clone(), acceptor)));
+                    // The /local seams (worldview/answer/gate) stay PLAIN on loopback, one
+                    // port up — local consoles are reading the machine they run on; the
+                    // wire never leaves the host.
+                    if let Ok(local) =
+                        TcpListener::bind(("127.0.0.1", cfg.gossip_port + 1)).await
+                    {
+                        local_server = Some(tokio::spawn(serve(local, ctx, None)));
+                    }
                 }
                 Err(e) => {
                     let _ =
@@ -449,20 +468,144 @@ struct ServerCtx {
     seen: std::sync::Mutex<crate::observe::IngestGuard>,
 }
 
-async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>) {
+// ---- TLS (ADR-0009 Phase 1): covenant-pinned transport security --------------------
+//
+// The mesh port speaks TLS. Authenticity still comes from the covenant signatures on
+// every payload — TLS here adds confidentiality and integrity on any path (open wifi,
+// cellular, raw internet). Each node holds a persistent P-256 TLS key (separate from the
+// ed25519 node key: Apple TLS stacks don't handshake EdDSA certificates), and the key's
+// SPKI SHA-256 rides in the enrollment payload so devices can PIN the node they joined.
+// Peer-to-peer dials accept any certificate (opportunistic encryption): a forged server
+// cannot forge brief/worldview signatures, so active MITM gains nothing it didn't have
+// in the plaintext era — while passive observation dies entirely.
+
+const TLS_KEY_FILE: &str = "mesh/tls_key.der";
+
+/// rustls needs a process-level crypto provider exactly once.
+fn ensure_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+/// This node's persistent TLS keypair (PKCS#8 DER), minted on first use.
+fn tls_keypair(dir: &Path) -> Result<rcgen::KeyPair> {
+    let path = dir.join(TLS_KEY_FILE);
+    if let Ok(der) = std::fs::read(&path) {
+        if let Ok(kp) = rcgen::KeyPair::try_from(der.as_slice()) {
+            return Ok(kp);
+        }
+    }
+    let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .map_err(|e| crate::Error::Malformed(format!("tls keygen: {e}")))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(crate::Error::Io)?;
+    }
+    std::fs::write(&path, kp.serialize_der()).map_err(crate::Error::Io)?;
+    Ok(kp)
+}
+
+/// SHA-256 of this node's TLS SubjectPublicKeyInfo, hex — the pin a device stores at
+/// enrollment (`mesh qr` carries it) and checks on every connection thereafter.
+pub fn tls_spki_pin(dir: &Path) -> Result<String> {
+    use sha2::Digest;
+    let kp = tls_keypair(dir)?;
+    Ok(crate::hex_encode(&sha2::Sha256::digest(kp.public_key_der())))
+}
+
+/// The server's TLS acceptor: a self-signed cert over the persistent key. The cert is
+/// re-minted each boot (cheap); the KEY persists, so the SPKI pin never changes.
+fn tls_acceptor(dir: &Path) -> Result<tokio_rustls::TlsAcceptor> {
+    ensure_crypto_provider();
+    let kp = tls_keypair(dir)?;
+    let mut params = rcgen::CertificateParams::new(vec!["familiar-mesh".into()])
+        .map_err(|e| crate::Error::Malformed(format!("tls cert params: {e}")))?;
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "familiar-mesh");
+    let cert = params
+        .self_signed(&kp)
+        .map_err(|e| crate::Error::Malformed(format!("tls cert: {e}")))?;
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(kp.serialize_der().into());
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert.der().clone()], key)
+        .map_err(|e| crate::Error::Malformed(format!("tls config: {e}")))?;
+    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
+}
+
+/// Outbound TLS: encrypt to whoever answers. Payload signatures carry the authenticity.
+fn tls_connector() -> tokio_rustls::TlsConnector {
+    ensure_crypto_provider();
+    #[derive(Debug)]
+    struct AcceptAny;
+    impl rustls::client::danger::ServerCertVerifier for AcceptAny {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            rustls::crypto::ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AcceptAny))
+        .with_no_client_auth();
+    tokio_rustls::TlsConnector::from(Arc::new(config))
+}
+
+async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>, tls: Option<tokio_rustls::TlsAcceptor>) {
     loop {
         let (stream, remote) = match listener.accept().await {
             Ok(pair) => pair,
             Err(_) => continue,
         };
         let peer_ip = remote.ip().to_string();
-        let io = TokioIo::new(stream);
         let ctx = ctx.clone();
+        let tls = tls.clone();
         tokio::spawn(async move {
             let svc = service_fn(move |req| handle(req, ctx.clone(), peer_ip.clone()));
-            let _ = hyper::server::conn::http1::Builder::new()
-                .serve_connection(io, svc)
-                .await;
+            match tls {
+                Some(acceptor) => {
+                    let Ok(stream) = acceptor.accept(stream).await else { return };
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), svc)
+                        .await;
+                }
+                None => {
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), svc)
+                        .await;
+                }
+            }
         });
     }
 }
@@ -1181,6 +1324,14 @@ async fn http_send(
             ))
         })?
         .map_err(crate::Error::Io)?;
+    // Encrypt to whoever answers (payload signatures carry authenticity — see tls_connector).
+    let host_only = addr.split(':').next().unwrap_or(addr).to_string();
+    let server_name = rustls::pki_types::ServerName::try_from(host_only)
+        .unwrap_or_else(|_| rustls::pki_types::ServerName::try_from("familiar-mesh").unwrap());
+    let stream = tls_connector()
+        .connect(server_name, stream)
+        .await
+        .map_err(|e| crate::Error::Malformed(format!("tls: {e}")))?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await

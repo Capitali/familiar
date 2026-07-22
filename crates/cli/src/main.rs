@@ -532,6 +532,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 "host": host,
                 "hosts": hosts,
                 "port": port,
+                // TLS SPKI pin (ADR-0009): the device checks every connection against it.
+                "tlspin": familiar_mesh::transport::tls_spki_pin(&dir).unwrap_or_default(),
             })
             .to_string();
             println!("enrollment payload (contains the group secret — trusted screen only):");
