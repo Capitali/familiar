@@ -71,6 +71,11 @@ crates/
                 shells via UniFFI (ADR-0009 Phase 0): found/join/worldview/answer/mesh so a
                 capable phone runs the full node itself, not just a console. Built for
                 Apple by tools/build-core.sh → ios/FamiliarCore/.
+  scenario/ familiar-scenario (lib + bin: `familiar-lab`) — the scenario laboratory
+                (ADR-0010): deterministic miniature worlds + an EXTERNAL evaluator with
+                hidden checks; the Three Laws as lexicographic gates; controls A–D so
+                retained experience is measured against memoryless baselines. Fixtures
+                are JSON under scenarios/ at the repository root.
 ```
 
 The iOS/watchOS/macOS apps live on `main` under `ios/` — device consoles and agents that

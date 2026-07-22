@@ -519,6 +519,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "familiar-scenario"
+version = "0.1.0"
+dependencies = [
+ "familiar-exec",
+ "familiar-kernel",
+ "familiar-llm",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "familiar-sense"
 version = "0.1.0"
 dependencies = [

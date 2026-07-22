@@ -1,6 +1,6 @@
 # ADR-0010 — The scenario laboratory: from architecture to experiment
 
-- **Status:** accepted (direction); the fixture framework is **Planned**
+- **Status:** accepted; the laboratory (`crates/scenario` + `scenarios/`) is **implemented**
 - **Date:** 2026-07-22
 - **Relates to:** [evaluation-plan.md](../evaluation-plan.md), [07-roadmap.md](../07-roadmap.md)
   ("Real scenarios & LLM-authored artifacts"), [06-limitations.md](../06-limitations.md)
@@ -183,3 +183,9 @@ experiment; everything else exists to support it.
 
 - 2026-07-22 — accepted as direction. The fixture framework, evaluator harness, and
   control conditions are Planned; this ADR is the specification they are built against.
+- 2026-07-22 (later) — implemented: `crates/scenario` (world/timeline/evaluator/gates/
+  harness/report + the `familiar-lab` bin) and six fixtures across the three families
+  ([scenario-laboratory.md](../scenario-laboratory.md)). First live run against a real
+  adapter immediately demonstrated the hidden-evaluation principle: the model gamed the
+  visible check (backing up the files once instead of repairing the process); a
+  clean-state hidden check now closes that hole, and the same attempt scores partial.

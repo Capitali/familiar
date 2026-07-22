@@ -1344,7 +1344,11 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         } else if t.direction.trim().is_empty() {
             format!("act on the human's answer: {}", t.answers.join("; "))
         } else {
-            format!("{} — the human answered: {}", t.direction, t.answers.join("; "))
+            format!(
+                "{} — the human answered: {}",
+                t.direction,
+                t.answers.join("; ")
+            )
         };
         candidate::append(dir, &c)?;
         thread::update_status(dir, &t.id, "pursued", now)?;

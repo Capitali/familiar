@@ -285,9 +285,7 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                     // The /local seams (worldview/answer/gate) stay PLAIN on loopback, one
                     // port up — local consoles are reading the machine they run on; the
                     // wire never leaves the host.
-                    if let Ok(local) =
-                        TcpListener::bind(("127.0.0.1", cfg.gossip_port + 1)).await
-                    {
+                    if let Ok(local) = TcpListener::bind(("127.0.0.1", cfg.gossip_port + 1)).await {
                         local_server = Some(tokio::spawn(serve(local, ctx, None)));
                     }
                 }
@@ -511,7 +509,9 @@ fn tls_keypair(dir: &Path) -> Result<rcgen::KeyPair> {
 pub fn tls_spki_pin(dir: &Path) -> Result<String> {
     use sha2::Digest;
     let kp = tls_keypair(dir)?;
-    Ok(crate::hex_encode(&sha2::Sha256::digest(kp.public_key_der())))
+    Ok(crate::hex_encode(&sha2::Sha256::digest(
+        kp.public_key_der(),
+    )))
 }
 
 /// The server's TLS acceptor: a self-signed cert over the persistent key. The cert is
@@ -548,7 +548,8 @@ fn tls_connector() -> tokio_rustls::TlsConnector {
             _server_name: &rustls::pki_types::ServerName<'_>,
             _ocsp: &[u8],
             _now: rustls::pki_types::UnixTime,
-        ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error>
+        {
             Ok(rustls::client::danger::ServerCertVerified::assertion())
         }
         fn verify_tls12_signature(
@@ -595,7 +596,9 @@ async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>, tls: Option<tokio_rus
             let svc = service_fn(move |req| handle(req, ctx.clone(), peer_ip.clone()));
             match tls {
                 Some(acceptor) => {
-                    let Ok(stream) = acceptor.accept(stream).await else { return };
+                    let Ok(stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(stream), svc)
                         .await;

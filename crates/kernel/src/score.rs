@@ -218,7 +218,12 @@ mod tests {
         let (c, tr) = spawned("thread-1", "candidate-1", "pass", 0.90);
         // pass at 0.90, low rigor → the candidate promotes → the theory paid off.
         assert_eq!(
-            theory_outcome(&th, &[c.clone()], &[tr.clone()], 0.0),
+            theory_outcome(
+                &th,
+                std::slice::from_ref(&c),
+                std::slice::from_ref(&tr),
+                0.0
+            ),
             TheoryOutcome::Promoted
         );
         // A theory never acted on (no candidate) is pending.

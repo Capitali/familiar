@@ -104,7 +104,13 @@ pub fn answer(data_dir: String, human: String, text: String) {
         return;
     }
     let obs = familiar_kernel::observation::Observation::new(
-        &human, "told the familiar", t, "console", "local", now(), 1.0,
+        &human,
+        "told the familiar",
+        t,
+        "console",
+        "local",
+        now(),
+        1.0,
     );
     let _ = familiar_kernel::observation::record(&dir, obs);
     let _ = std::fs::write(dir.join("question.txt"), "");

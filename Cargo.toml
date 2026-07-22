@@ -11,7 +11,7 @@ resolver = "2"
 # and — via core-ffi — a capable phone runs against its own embedded core. Retired UIs
 # (egui Glass, menu-bar Marble, wgpu hologram engine, SwiftUI consoles) live in git
 # history / archive/; see ADR-0007 (superseded) and ADR-0008.
-members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/core-ffi"]
+members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario"]
 
 [workspace.package]
 version = "0.1.0"
@@ -32,3 +32,4 @@ familiar-exec = { path = "crates/exec" }
 familiar-mesh = { path = "crates/mesh" }
 familiar-agent = { path = "crates/agent" }
 familiar-reach = { path = "crates/reach" }
+familiar-scenario = { path = "crates/scenario" }

@@ -487,8 +487,10 @@ mod tests {
 
         // Gate back on, but device ingestion switched off in config.
         open_gate(&host, true);
-        let mut cfg = crate::config::MeshConfig::default();
-        cfg.accept_observations = false;
+        let cfg = crate::config::MeshConfig {
+            accept_observations: false,
+            ..Default::default()
+        };
         std::fs::write(
             host.join("mesh/config.json"),
             serde_json::to_vec(&cfg).unwrap(),

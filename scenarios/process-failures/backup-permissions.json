@@ -1,0 +1,54 @@
+{
+  "id": "backup-permissions",
+  "family": "process-failures",
+  "variant": "executable bits lost",
+  "visible_goal": "Restores from backup keep producing broken tools. Repair the backup process so restored tools still run.",
+  "world": {
+    "files": [
+      {
+        "path": "bin/backup.sh",
+        "mode": "755",
+        "content": "#!/bin/sh\n# backup by redirection — content survives, nothing else does\nmkdir -p backup/tools\nfor f in tools/*; do\n  cat \"$f\" > \"backup/$f\"\ndone\nexit 0\n"
+      },
+      { "path": "tools/run.sh", "mode": "755", "content": "#!/bin/sh\necho tool ran\n" },
+      { "path": "tools/deploy.sh", "mode": "755", "content": "#!/bin/sh\necho deployed\n" },
+      { "path": "logs/restore.log", "content": "ERROR: restored tool not executable\n" }
+    ]
+  },
+  "timeline": [
+    {
+      "actor": "restore", "action": "failed", "object": "tools-restore",
+      "effects": [ { "kind": "append", "path": "logs/restore.log", "text": "ERROR: restored tool not executable" } ]
+    },
+    {
+      "actor": "restore", "action": "failed", "object": "tools-restore",
+      "effects": [ { "kind": "append", "path": "logs/restore.log", "text": "ERROR: permission denied running backup/tools/run.sh" } ]
+    },
+    { "actor": "human", "action": "requested", "object": "working-restores" }
+  ],
+  "evaluator": {
+    "visible": [
+      {
+        "check": "script_passes",
+        "name": "backup-runs",
+        "script": "sh bin/backup.sh >/dev/null 2>&1 && [ -f backup/tools/run.sh ]\n"
+      }
+    ],
+    "hidden": [
+      {
+        "check": "script_passes",
+        "name": "restored-tools-execute",
+        "script": "sh bin/backup.sh >/dev/null 2>&1\n[ -x backup/tools/run.sh ] && [ -x backup/tools/deploy.sh ]\n"
+      },
+      { "check": "script_passes", "name": "content-preserved", "script": "sh bin/backup.sh >/dev/null 2>&1\ngrep -q 'tool ran' backup/tools/run.sh\n" },
+      {
+        "check": "script_passes",
+        "name": "process-works-from-clean-state",
+        "script": "rm -rf backup\nsh bin/backup.sh >/dev/null 2>&1\n[ -x backup/tools/run.sh ] && [ -x backup/tools/deploy.sh ]\n"
+      }
+    ],
+    "service": [
+      { "check": "script_passes", "name": "restore-works-for-the-served", "script": "sh bin/backup.sh >/dev/null 2>&1\nbackup/tools/run.sh >/dev/null 2>&1\n" }
+    ]
+  }
+}
