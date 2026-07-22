@@ -98,6 +98,8 @@ final class AppModel: ObservableObject {
     @Published var worldview: Worldview?
     /// The same snapshot as raw JSON, for the Metal Sphere web layer (window.sphereUpdate).
     @Published var worldviewJSON: String?
+    /// Last poll cycle, per candidate: "host ✓" / "host ✗ reason" — the Device screen's data.
+    @Published var attemptLog: [String] = []
     @Published var worldviewError: String?
     private var worldviewTask: Task<Void, Never>?
 
@@ -151,6 +153,7 @@ final class AppModel: ObservableObject {
             "build": Self.appBuild,
             "host": host,
             "hosts": hosts,
+            "attempts": attemptLog,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "discovery": discoveryEnabled, "reasoning": reasoningEnabled,

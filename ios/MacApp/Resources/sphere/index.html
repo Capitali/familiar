@@ -394,7 +394,10 @@ function refreshScreen() {
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
-      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:16px;">${(d.hosts||[]).map((h,i)=>(h===d.host?'▸':'')+esc(h)).join(' · ')}</div>
+      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h,i)=>(h===d.host?'▸':'')+esc(h)).join(' · ')}</div>
+      ${(d.attempts||[]).length ? `<div class="m" style="font-size:9px;color:rgba(150,180,255,0.5);margin-bottom:6px;">${d.attempts.map(esc).join('<br>')}</div>` : ''}
+      ${S.jsErr ? `<div class="m" style="font-size:9px;color:rgba(255,160,160,0.8);margin-bottom:6px;">${esc(S.jsErr)}</div>` : ''}
+      <div style="margin-bottom:10px;"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">` +
       Object.entries(CONSENT_META).map(([key, label]) => {
         const on = !!(d.consents && d.consents[key]);
@@ -442,8 +445,11 @@ function renderChrome() {
   $('devbtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
   $('modetoggle').style.display = street ? 'none' : 'flex';
-  $('linkdown').style.display = S.linkOk ? 'none' : 'flex';
-  const lm = $('linkmsg'); lm.textContent = S.linkErr || ''; lm.style.display = S.linkErr ? 'block' : 'none';
+  const showBadge = !S.linkOk || !!S.jsErr;
+  $('linkdown').style.display = showBadge ? 'flex' : 'none';
+  const lm = $('linkmsg');
+  const msg = (!S.linkOk && S.linkErr) ? S.linkErr : (S.jsErr || '');
+  lm.textContent = msg; lm.style.display = msg ? 'block' : 'none';
 }
 
 function renderCallouts() {
@@ -480,7 +486,9 @@ function renderCallouts() {
 function toApp(kind, payload) {
   try { window.webkit.messageHandlers.sphere.postMessage({ kind, ...payload }); } catch (e) { /* browser preview */ }
 }
-window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
+window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderButtons();
+  try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + k + ': ' + e.message; }
+  renderChrome(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
 window.sphereUnenroll = () => {
@@ -494,11 +502,13 @@ window.sphereUnenroll = () => {
 };
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
+window.onerror = (msg, src, line) => { S.jsErr = msg + ' @' + line; renderChrome(); };
 window.sphereUpdate = (view) => {
   S.view = view; S.linkOk = true;
-  // A renderer error must never mask the data or hold the link badge — draw what we can.
-  try { renderCallouts(); } catch (e) {}
-  try { refreshScreen(); } catch (e) {}
+  // A renderer error must never mask the data or hold the link badge — draw what we can,
+  // and confess what failed (S.jsErr surfaces on the Device screen and under the badge).
+  try { renderCallouts(); } catch (e) { S.jsErr = 'callouts: ' + e.message; }
+  try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + S.activeScreen + ': ' + e.message; }
   renderChrome();
   if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };

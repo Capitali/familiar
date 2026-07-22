@@ -280,6 +280,7 @@ struct SphereWebViewIOS: UIViewRepresentable {
         web.scrollView.isScrollEnabled = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
+        if #available(iOS 16.4, *) { web.isInspectable = true }   // Safari Web Inspector, debug aid
         web.navigationDelegate = bridge
         bridge.web = web
         if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "sphere") {
