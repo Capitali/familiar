@@ -100,7 +100,10 @@ impl Client {
 }
 
 fn fetch(port: u16) -> Result<Worldview, String> {
-    let body = request(port, &format!("GET /local/worldview HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"))?;
+    let body = request(
+        port,
+        "GET /local/worldview HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    )?;
     serde_json::from_slice(&body).map_err(|e| format!("decode: {e}"))
 }
 
@@ -117,11 +120,13 @@ fn post(port: u16, path: &str, json: &str) -> Result<(), String> {
 /// never chunked, but read-to-EOF is correct for both).
 fn request(port: u16, raw: &str) -> Result<Vec<u8>, String> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream =
-        TcpStream::connect_timeout(&addr, IO_TIMEOUT).map_err(|e| format!("daemon not reachable on :{port} — is it running? ({e})"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, IO_TIMEOUT)
+        .map_err(|e| format!("daemon not reachable on :{port} — is it running? ({e})"))?;
     stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
     stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
-    stream.write_all(raw.as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(raw.as_bytes())
+        .map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).map_err(|e| e.to_string())?;
     let header_end = buf

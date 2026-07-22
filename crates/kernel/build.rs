@@ -20,7 +20,11 @@ fn main() {
         .filter(|l| !l.is_empty())
         .collect::<Vec<_>>()
         .join(" · ");
-    let stamp = if stamp.is_empty() { "0".to_string() } else { stamp };
+    let stamp = if stamp.is_empty() {
+        "0".to_string()
+    } else {
+        stamp
+    };
     println!("cargo:rustc-env=FAMILIAR_BUILD={stamp}");
     println!("cargo:rerun-if-changed={}", version_path.display());
 }

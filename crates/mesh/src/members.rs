@@ -316,7 +316,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let human = if !p.human.is_empty() {
             p.human.clone()
         } else {
-            actor.split_once(':').map(|(_, h)| h.to_string()).unwrap_or_default()
+            actor
+                .split_once(':')
+                .map(|(_, h)| h.to_string())
+                .unwrap_or_default()
         };
         // Cumulative online time, live session included while it's still fresh.
         let live = if status == "online" && p.session_start > 0 {
@@ -345,7 +348,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             ai: has_ai,
             trust,
             status: status.into(),
-            session_start: if status == "online" { p.session_start } else { 0 },
+            session_start: if status == "online" {
+                p.session_start
+            } else {
+                0
+            },
             total_online_secs: p.total_online_secs + live,
             interactive: p.interactive || is_device,
             human,
@@ -394,7 +401,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             session_start: 0,
             total_online_secs: 0,
             interactive: false,
-            human: actor.split_once(':').map(|(_, h)| h.to_string()).unwrap_or_default(),
+            human: actor
+                .split_once(':')
+                .map(|(_, h)| h.to_string())
+                .unwrap_or_default(),
             lat: 0.0,
             lon: 0.0,
         });

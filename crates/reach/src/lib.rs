@@ -63,20 +63,76 @@ pub struct Service {
 /// (with the human's credentials); the media/home/IoT protocols mean we could command the device
 /// without installing; the rest is presence with a service hint.
 pub const CATALOG: &[Service] = &[
-    Service { port: 22, name: "ssh", class: ReachClass::AgentCapable },
-    Service { port: 62078, name: "ios-lockdown", class: ReachClass::ProtocolControllable },
-    Service { port: 8060, name: "roku-ecp", class: ReachClass::ProtocolControllable },
-    Service { port: 7000, name: "airplay", class: ReachClass::ProtocolControllable },
-    Service { port: 5000, name: "airplay-rtsp", class: ReachClass::ProtocolControllable },
-    Service { port: 1883, name: "mqtt", class: ReachClass::ProtocolControllable },
-    Service { port: 8883, name: "mqtt-tls", class: ReachClass::ProtocolControllable },
-    Service { port: 554, name: "rtsp", class: ReachClass::ProtocolControllable },
-    Service { port: 9100, name: "printer", class: ReachClass::ProtocolControllable },
-    Service { port: 32400, name: "plex", class: ReachClass::ProtocolControllable },
-    Service { port: 445, name: "smb", class: ReachClass::ObservableOnly },
-    Service { port: 548, name: "afp", class: ReachClass::ObservableOnly },
-    Service { port: 80, name: "http", class: ReachClass::ObservableOnly },
-    Service { port: 443, name: "https", class: ReachClass::ObservableOnly },
+    Service {
+        port: 22,
+        name: "ssh",
+        class: ReachClass::AgentCapable,
+    },
+    Service {
+        port: 62078,
+        name: "ios-lockdown",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 8060,
+        name: "roku-ecp",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 7000,
+        name: "airplay",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 5000,
+        name: "airplay-rtsp",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 1883,
+        name: "mqtt",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 8883,
+        name: "mqtt-tls",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 554,
+        name: "rtsp",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 9100,
+        name: "printer",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 32400,
+        name: "plex",
+        class: ReachClass::ProtocolControllable,
+    },
+    Service {
+        port: 445,
+        name: "smb",
+        class: ReachClass::ObservableOnly,
+    },
+    Service {
+        port: 548,
+        name: "afp",
+        class: ReachClass::ObservableOnly,
+    },
+    Service {
+        port: 80,
+        name: "http",
+        class: ReachClass::ObservableOnly,
+    },
+    Service {
+        port: 443,
+        name: "https",
+        class: ReachClass::ObservableOnly,
+    },
 ];
 
 /// A device with its assessed reach.
@@ -111,13 +167,22 @@ pub fn assess_device(label: &str, ip: &str, timeout: Duration) -> DeviceReach {
             }
         }
     }
-    DeviceReach { label: label.to_string(), ip: ip.to_string(), open, class }
+    DeviceReach {
+        label: label.to_string(),
+        ip: ip.to_string(),
+        open,
+        class,
+    }
 }
 
 /// Assess reach across a set of devices — **outward reach**, so the caller gates this behind
 /// `allow_network`. Returns the reach records and observations (`host can-reach device:<label>`
 /// tagged with the class + open services) for the store.
-pub fn assess(devices: &[Device], now: i64, timeout_ms: u64) -> (Vec<DeviceReach>, Vec<Observation>) {
+pub fn assess(
+    devices: &[Device],
+    now: i64,
+    timeout_ms: u64,
+) -> (Vec<DeviceReach>, Vec<Observation>) {
     let timeout = Duration::from_millis(timeout_ms.max(1));
     let mut reaches = Vec::new();
     let mut observations = Vec::new();
@@ -129,7 +194,11 @@ pub fn assess(devices: &[Device], now: i64, timeout_ms: u64) -> (Vec<DeviceReach
         let ctx = format!(
             "class={} open={} ip={}",
             r.class.label(),
-            if r.open.is_empty() { "-".to_string() } else { r.open.join(",") },
+            if r.open.is_empty() {
+                "-".to_string()
+            } else {
+                r.open.join(",")
+            },
             r.ip
         );
         observations.push(Observation::new(
@@ -147,7 +216,12 @@ pub fn assess(devices: &[Device], now: i64, timeout_ms: u64) -> (Vec<DeviceReach
 }
 
 /// Discover devices then assess their reach, in one call. Gated by the caller (`allow_network`).
-pub fn scan(dir: &Path, now: i64, allow_network: bool, timeout_ms: u64) -> (Vec<DeviceReach>, Vec<Observation>) {
+pub fn scan(
+    dir: &Path,
+    now: i64,
+    allow_network: bool,
+    timeout_ms: u64,
+) -> (Vec<DeviceReach>, Vec<Observation>) {
     let devices = familiar_sense::device_list(dir, allow_network);
     assess(&devices, now, timeout_ms)
 }
@@ -180,7 +254,10 @@ mod tests {
         // probing the real catalog against 127.0.0.1 (this host has its own services open).
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
         let port = listener.local_addr().unwrap().port();
-        assert!(port_open("127.0.0.1", port, Duration::from_millis(300)), "listener is reachable");
+        assert!(
+            port_open("127.0.0.1", port, Duration::from_millis(300)),
+            "listener is reachable"
+        );
         drop(listener);
         // 127.0.0.2 has nothing listening on loopback → closed.
         assert!(!port_open("127.0.0.2", port, Duration::from_millis(100)));

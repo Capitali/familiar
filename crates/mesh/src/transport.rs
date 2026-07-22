@@ -1230,15 +1230,18 @@ pub struct TailscalePeer {
 /// Run the tailscale CLI with `args`, trying `tailscale` on PATH first and then the macOS app
 /// bundle's CLI (the GUI install puts nothing on PATH). None if neither answers.
 fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
-    ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]
-        .iter()
-        .find_map(|bin| {
-            std::process::Command::new(bin)
-                .args(args)
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-        })
+    [
+        "tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    ]
+    .iter()
+    .find_map(|bin| {
+        std::process::Command::new(bin)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+    })
 }
 
 /// Enumerate tailnet peers (read-only shell-out). Empty if tailscale is absent/unreachable —
@@ -1279,6 +1282,7 @@ pub fn self_lan_ip() -> Option<String> {
 ///    source (a GPS feed, a survey). Always wins.
 /// 2. The freshest real GPS fix reported by a member device (phones/tablets report theirs on
 ///    every worldview read) — the devices are with the mesh, so their fix locates it.
+///
 /// Returns None when neither exists — an honest unknown, never an invented place. (IP
 /// geolocation was tried and rejected: on satellite links it reports the ground station,
 /// hundreds of km off; a wrong city is worse than no city.)
@@ -1458,13 +1462,14 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                 };
             // A brief without a fix (0/0) never erases a position we already know — and a
             // device-reported fix (real GPS) is never downgraded by a brief-carried one.
-            let (lat, lon, geo_device) = if existing.geo_device && (existing.lat != 0.0 || existing.lon != 0.0) {
-                (existing.lat, existing.lon, true)
-            } else if rec.lat != 0.0 || rec.lon != 0.0 {
-                (rec.lat, rec.lon, false)
-            } else {
-                (existing.lat, existing.lon, existing.geo_device)
-            };
+            let (lat, lon, geo_device) =
+                if existing.geo_device && (existing.lat != 0.0 || existing.lon != 0.0) {
+                    (existing.lat, existing.lon, true)
+                } else if rec.lat != 0.0 || rec.lon != 0.0 {
+                    (rec.lat, rec.lon, false)
+                } else {
+                    (existing.lat, existing.lon, existing.geo_device)
+                };
             *existing = PeerRecord {
                 addr: addr_keep,
                 first_seen,
@@ -1490,6 +1495,9 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
 /// peer roster, not the device-agent list. It can't serve gossip, so `tools/patterns` are 0 and the
 /// gossip loop never dials it (that loop reaches Tailscale-discovered addrs, not `peers.json`);
 /// `addr` is the observed source IP, for display only. Upserts by node_id like [`upsert_peer`].
+// A device report is naturally this wide (identity + versions + position); a params
+// struct would only rename the width.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn register_device_peer(
     dir: &Path,
     node_id: &str,

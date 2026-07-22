@@ -293,13 +293,7 @@ impl Graphics {
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             let g = shared.lock().unwrap_or_else(|p| p.into_inner());
             let stale = g.fetched_at.map(|t| t.elapsed().as_secs());
-            submitted = glass::draw(
-                ctx,
-                glass_state,
-                g.view.as_ref(),
-                g.error.as_deref(),
-                stale,
-            );
+            submitted = glass::draw(ctx, glass_state, g.view.as_ref(), g.error.as_deref(), stale);
         });
         self.egui_winit
             .handle_platform_output(&self.window, full_output.platform_output);
@@ -498,18 +492,22 @@ impl ApplicationHandler for App {
                 // presence + need → let the human know, once, without nagging (brief §2/§10).
                 let question = {
                     let g = self.client.shared.lock().unwrap_or_else(|p| p.into_inner());
-                    g.view.as_ref().map(|v| v.question.trim().to_string()).unwrap_or_default()
+                    g.view
+                        .as_ref()
+                        .map(|v| v.question.trim().to_string())
+                        .unwrap_or_default()
                 };
                 if !question.is_empty() && question != self.glass.cued_question {
                     self.glass.cued_question = question;
-                    graphics
-                        .window
-                        .request_user_attention(Some(winit::window::UserAttentionType::Informational));
+                    graphics.window.request_user_attention(Some(
+                        winit::window::UserAttentionType::Informational,
+                    ));
                 } else if question.is_empty() {
                     self.glass.cued_question.clear();
                 }
 
-                self.attention += (self.glass.attention_target - self.attention) * (dt * 4.0).min(1.0);
+                self.attention +=
+                    (self.glass.attention_target - self.attention) * (dt * 4.0).min(1.0);
                 if let Some(text) =
                     graphics.render(t, self.attention, &mut self.glass, &self.client.shared)
                 {

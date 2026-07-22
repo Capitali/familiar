@@ -309,7 +309,10 @@ mod tests {
             r#"{"phase":"phase-1","allow_llm":true}"#,
         )
         .unwrap();
-        assert!(!load(&t.0).unwrap().allow_mesh, "unspecified mesh stays off");
+        assert!(
+            !load(&t.0).unwrap().allow_mesh,
+            "unspecified mesh stays off"
+        );
         // Opening only the mesh flag is enough to make the boundary no longer closed.
         let mut b = Boundary::closed();
         b.allow_mesh = true;
@@ -341,10 +344,19 @@ mod tests {
 
         let eff = scoped_boundary(&b, &scope);
         assert!(eff.allow_network && eff.allow_execute);
-        assert!(!eff.allow_camera, "scope withholds camera even though boundary allows it");
-        assert!(!eff.allow_agent, "a scoped agent cannot itself spawn agents");
+        assert!(
+            !eff.allow_camera,
+            "scope withholds camera even though boundary allows it"
+        );
+        assert!(
+            !eff.allow_agent,
+            "a scoped agent cannot itself spawn agents"
+        );
         assert_eq!(eff.fs_read, vec!["/Users/ian/Development/".to_string()]);
-        assert!(eff.fs_write.is_empty(), "a path the boundary never granted is not added");
+        assert!(
+            eff.fs_write.is_empty(),
+            "a path the boundary never granted is not added"
+        );
 
         // And a scope can't exceed a closed boundary: everything off in → everything off out.
         let eff2 = scoped_boundary(&Boundary::closed(), &scope);

@@ -376,7 +376,11 @@ pub fn assemble_worldview(
             direction: t.direction.clone(),
             status: t.status.clone(),
             created_at: t.created_at,
-            status_at: if t.status_at > 0 { t.status_at } else { t.created_at },
+            status_at: if t.status_at > 0 {
+                t.status_at
+            } else {
+                t.created_at
+            },
             last_worked_at: t.last_worked_at,
         })
         .collect();
@@ -475,7 +479,11 @@ fn goal_views(dir: &Path) -> Vec<GoalView> {
             notes: g.notes,
             updated_at: g.updated_at,
             created_at: g.created_at,
-            status_at: if g.status_at > 0 { g.status_at } else { g.updated_at },
+            status_at: if g.status_at > 0 {
+                g.status_at
+            } else {
+                g.updated_at
+            },
             last_worked_at: g.last_worked_at,
             completed_at: g.completed_at,
             ended_at: g.ended_at,

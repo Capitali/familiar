@@ -83,7 +83,9 @@ fn top_strip(
         .frame(panel_frame())
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                let title = view.map(|v| v.group_label.as_str()).unwrap_or("the familiar");
+                let title = view
+                    .map(|v| v.group_label.as_str())
+                    .unwrap_or("the familiar");
                 ui.label(RichText::new(title).color(ACCENT).strong().size(16.0));
 
                 if let Some(v) = view {
@@ -111,7 +113,14 @@ fn top_strip(
                         .filter(|(_, on)| *on)
                         .map(|(n, _)| *n)
                         .collect();
-                        ui.label(dim(format!("gates open: {}", if open.is_empty() { "none".into() } else { open.join(" ") })));
+                        ui.label(dim(format!(
+                            "gates open: {}",
+                            if open.is_empty() {
+                                "none".into()
+                            } else {
+                                open.join(" ")
+                            }
+                        )));
                     }
                 }
 
@@ -170,7 +179,11 @@ fn right_rail(ctx: &egui::Context, view: Option<&Worldview>, now: i64) {
                         }
                         for g in &v.goals {
                             ui.label(format!("{} {}", status_dot_word(&g.status), g.description));
-                            let mut dates = vec![format!("{} {}", g.status, fmt_date(pick(g.status_at, g.updated_at)))];
+                            let mut dates = vec![format!(
+                                "{} {}",
+                                g.status,
+                                fmt_date(pick(g.status_at, g.updated_at))
+                            )];
                             if g.last_worked_at > 0 {
                                 dates.push(format!("worked {}", fmt_date(g.last_worked_at)));
                             }
@@ -198,7 +211,11 @@ fn right_rail(ctx: &egui::Context, view: Option<&Worldview>, now: i64) {
                         }
                         for t in theories.iter().take(8) {
                             ui.label(&t.theory);
-                            let mut dates = vec![format!("{} {}", t.status, fmt_date(pick(t.status_at, t.created_at)))];
+                            let mut dates = vec![format!(
+                                "{} {}",
+                                t.status,
+                                fmt_date(pick(t.status_at, t.created_at))
+                            )];
                             if t.created_at > 0 {
                                 dates.push(format!("born {}", fmt_date(t.created_at)));
                             }
@@ -252,19 +269,34 @@ fn member_row(ui: &mut egui::Ui, m: &Member, now: i64) {
         line.push_str(&format!("session {} · ", fmt_span(now - m.session_start)));
     }
     if m.total_online_secs > 0 {
-        line.push_str(&format!("total online {} · ", fmt_span(m.total_online_secs)));
+        line.push_str(&format!(
+            "total online {} · ",
+            fmt_span(m.total_online_secs)
+        ));
     }
     line.push_str(&format!(
         "{}{} · v{}",
         m.os,
-        if m.os_version.is_empty() { String::new() } else { format!(" {}", m.os_version) },
-        if m.familiar_version.is_empty() { "?" } else { &m.familiar_version }
+        if m.os_version.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", m.os_version)
+        },
+        if m.familiar_version.is_empty() {
+            "?"
+        } else {
+            &m.familiar_version
+        }
     ));
     ui.label(dim(line));
     ui.label(dim(format!(
         "interactive {} {}",
         if m.interactive { "yes" } else { "no" },
-        if m.human.is_empty() { String::new() } else { format!("· serves {}", m.human) }
+        if m.human.is_empty() {
+            String::new()
+        } else {
+            format!("· serves {}", m.human)
+        }
     )));
     ui.add_space(6.0);
 }
@@ -295,7 +327,11 @@ fn conversation(
             // The reply/utterance channel — always available, not only when asked.
             ui.horizontal(|ui| {
                 let edit = egui::TextEdit::singleline(&mut state.input)
-                    .hint_text(if question.is_some() { "answer…" } else { "tell the familiar…" })
+                    .hint_text(if question.is_some() {
+                        "answer…"
+                    } else {
+                        "tell the familiar…"
+                    })
                     .desired_width(ui.available_width() - 70.0);
                 let r = ui.add(edit);
                 let send = ui.button("send").clicked()

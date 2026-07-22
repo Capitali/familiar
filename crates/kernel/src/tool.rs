@@ -209,14 +209,21 @@ mod tests {
     #[test]
     fn mark_unhealthy_retires_a_tool_from_reuse() {
         let t = Temp::new("retire");
-        append(&t.0, &tool("tool-0001", "scan", "p", "network scan run results")).unwrap();
+        append(
+            &t.0,
+            &tool("tool-0001", "scan", "p", "network scan run results"),
+        )
+        .unwrap();
         let kw = vec!["network".to_string(), "scan".to_string()];
         // healthy → best_match will reuse it
         assert!(best_match(&load(&t.0).unwrap(), &kw).is_some());
         // the human's "refine" retires it → no longer a reuse candidate
         assert!(mark_unhealthy(&t.0, "tool-0001").unwrap());
         assert!(best_match(&load(&t.0).unwrap(), &kw).is_none());
-        assert_eq!(load(&t.0).unwrap()[0].last_status, "retired by your feedback");
+        assert_eq!(
+            load(&t.0).unwrap()[0].last_status,
+            "retired by your feedback"
+        );
         assert!(!mark_unhealthy(&t.0, "nope").unwrap());
     }
 }

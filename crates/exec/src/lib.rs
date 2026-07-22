@@ -214,7 +214,10 @@ mod tests {
         let s = d.join("t.sh");
         fs::write(&s, "sleep 2; echo sampled\n").unwrap();
         let r = run_script(&s, &Limits::tool_run(), &d).unwrap();
-        assert!(r.exit_ok && !r.timed_out, "a 2s tool must finish under tool_run");
+        assert!(
+            r.exit_ok && !r.timed_out,
+            "a 2s tool must finish under tool_run"
+        );
         assert!(r.output.contains("sampled"));
         // …and the budget is genuinely wider than the tick's candidate-scoring default.
         assert!(Limits::tool_run().wall_secs > Limits::default().wall_secs);

@@ -162,7 +162,9 @@ impl Goal {
     /// Does this goal require a high-consequence, human-gated capability (deploy)? Such a goal's
     /// autonomous work may run, but the gated act itself waits for a human.
     pub fn is_human_gated(&self) -> bool {
-        self.needs.iter().any(|n| n.starts_with(GATED_CAPABILITY_PREFIX))
+        self.needs
+            .iter()
+            .any(|n| n.starts_with(GATED_CAPABILITY_PREFIX))
     }
 
     /// Can a node advertising `caps` take this goal on — does it satisfy every `need`?
@@ -253,12 +255,22 @@ mod tests {
 
         // First claim wins; a second is refused.
         assert!(claim(&dir, "goal-0001", "node-mac", 200).unwrap());
-        assert!(!claim(&dir, "goal-0001", "node-vm", 201).unwrap(), "already claimed");
+        assert!(
+            !claim(&dir, "goal-0001", "node-vm", 201).unwrap(),
+            "already claimed"
+        );
         let after = load_by_id(&dir, "goal-0001").unwrap().unwrap();
         assert_eq!(after.owner_node, "node-mac");
         assert_eq!(after.status, Status::Claimed);
 
-        advance(&dir, "goal-0001", Status::AwaitingHuman, "built + tested; deploy awaits approval", 300).unwrap();
+        advance(
+            &dir,
+            "goal-0001",
+            Status::AwaitingHuman,
+            "built + tested; deploy awaits approval",
+            300,
+        )
+        .unwrap();
         let done = load_by_id(&dir, "goal-0001").unwrap().unwrap();
         assert_eq!(done.status, Status::AwaitingHuman);
         assert!(done.notes.contains("deploy awaits approval"));

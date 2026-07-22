@@ -36,9 +36,9 @@ use familiar_kernel::boundary::{self, CapabilityScope};
 use familiar_kernel::candidate::{self, Candidate};
 use familiar_kernel::capabilities;
 use familiar_kernel::capacities;
-use familiar_kernel::goal;
 use familiar_kernel::corruption;
 use familiar_kernel::dialog::LAW_III_VOICE;
+use familiar_kernel::goal;
 use familiar_kernel::guard::Reason;
 use familiar_kernel::humanity;
 use familiar_kernel::loops;
@@ -47,11 +47,11 @@ use familiar_kernel::parameters::Parameters;
 use familiar_kernel::presence;
 use familiar_kernel::question;
 use familiar_kernel::request::{self, Answer, Confidence};
+use familiar_kernel::review::review_script;
 use familiar_kernel::service;
 use familiar_kernel::thread::{self, Thread};
 use familiar_kernel::tool::{self, Tool};
 use familiar_kernel::trial::{self, Trial};
-use familiar_kernel::review::review_script;
 use familiar_kernel::{mutation, pattern_memory, regression_guard, score, selection};
 use familiar_sense as sense;
 use familiar_vision as vision;
@@ -878,10 +878,7 @@ fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
             format!("timed out after {}ms", run.wall_ms),
         )
     } else if let Some(sig) = broken {
-        (
-            Confidence::Probable,
-            format!("output looked wrong ({sig})"),
-        )
+        (Confidence::Probable, format!("output looked wrong ({sig})"))
     } else if run.exit_ok {
         (Confidence::Known, format!("exit 0 in {}ms", run.wall_ms))
     } else {
@@ -1208,7 +1205,11 @@ fn answer_requests(
 /// what to try, context = the question). Here those become open threads, so the same pursue/test/
 /// delegate machinery that handles the familiar's own theories tests them too. Deduped by direction.
 /// Returns how many were adopted.
-fn adopt_device_theories(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Result<usize> {
+fn adopt_device_theories(
+    dir: &Path,
+    now: i64,
+    obs: &[observation::Observation],
+) -> io::Result<usize> {
     let existing = thread::load(dir)?;
     let held: std::collections::HashSet<String> = existing
         .iter()
@@ -1378,16 +1379,61 @@ fn is_observation_goal(direction: &str) -> bool {
     let d = direction.to_lowercase();
     // Sensing verbs/nouns — "find out / report on" the world, not "act on" it.
     const SENSE: &[&str] = &[
-        "monitor", "check", "inspect", "measure", "detect", "scan", "survey", "report",
-        "gather", "observe", "identify", "list", "enumerate", "status", "health", "snapshot",
-        "latency", "usage", "connectivity", "reachab", "uptime", "throughput", "diagnos",
-        "audit", "probe", "sample", "trend", "metric", "dashboard", "watch ",
+        "monitor",
+        "check",
+        "inspect",
+        "measure",
+        "detect",
+        "scan",
+        "survey",
+        "report",
+        "gather",
+        "observe",
+        "identify",
+        "list",
+        "enumerate",
+        "status",
+        "health",
+        "snapshot",
+        "latency",
+        "usage",
+        "connectivity",
+        "reachab",
+        "uptime",
+        "throughput",
+        "diagnos",
+        "audit",
+        "probe",
+        "sample",
+        "trend",
+        "metric",
+        "dashboard",
+        "watch ",
     ];
     // Outward-action markers that disqualify even if a sensing word is also present — err safe.
     const ACT: &[&str] = &[
-        "send", "email", "message", "notify", "delete", "remove", "install", "reboot",
-        "restart", "shutdown", "allocate", "transfer", "purchase", "buy", "post ", "publish",
-        "configure", "change ", "modify", "write to", "sync ", "trigger",
+        "send",
+        "email",
+        "message",
+        "notify",
+        "delete",
+        "remove",
+        "install",
+        "reboot",
+        "restart",
+        "shutdown",
+        "allocate",
+        "transfer",
+        "purchase",
+        "buy",
+        "post ",
+        "publish",
+        "configure",
+        "change ",
+        "modify",
+        "write to",
+        "sync ",
+        "trigger",
     ];
     SENSE.iter().any(|k| d.contains(k)) && !ACT.iter().any(|k| d.contains(k))
 }
@@ -1469,7 +1515,7 @@ fn cultivate_utilities(
         (t.status == "pursued" || t.status == "open")
             && is_observation_goal(&t.direction)
             && !done.contains(&t.id)
-            && !(!t.actor.is_empty() && corruption::is_corrupt(&refusals, &t.actor, now))
+            && (t.actor.is_empty() || !corruption::is_corrupt(&refusals, &t.actor, now))
     });
     let Some(t) = pick else {
         return Ok(0);
@@ -1496,7 +1542,10 @@ fn cultivate_utilities(
                 "familiar",
                 "declined_to_run",
                 format!("tool:{}", drafted.name),
-                format!("declined to cultivate '{}' — {reason} (Law III, pre-execution review)", drafted.name),
+                format!(
+                    "declined to cultivate '{}' — {reason} (Law III, pre-execution review)",
+                    drafted.name
+                ),
                 "familiar",
                 now,
                 1.0,
@@ -1572,7 +1621,7 @@ fn record_goal_obs(dir: &Path, goal_id: &str, action: &str, note: &str, now: i64
 
 /// **Own the roadmap.** The mesh side of the theory→code telos: a shared goal whose `needs` this
 /// node's capabilities satisfy gets *claimed* and driven through the agentic loop, and its ownership
-/// + progress replicate (the goal list travels in the brief; progress rides the observation record)
+/// and progress replicate (the goal list travels in the brief; progress rides the observation record)
 /// so the whole mesh burns the roadmap down together. Core/peripheral discipline: the *core* decides
 /// claim/run — gated (`allow_agent && allow_execute && allow_llm`), capability-matched, one goal per
 /// tick; the agentic loop's every proposed action is still mediated by the scoped boundary +
@@ -1598,8 +1647,20 @@ fn pursue_goals(dir: &Path, now: i64) -> io::Result<usize> {
             && !g.is_human_gated()
     }) {
         if goal_attempts(dir, &g.id) >= MAX_GOAL_ATTEMPTS {
-            goal::advance(dir, &g.id, goal::Status::Failed, "gave up after repeated attempts", now)?;
-            record_goal_obs(dir, &g.id, "goal-progress", "failed — did not converge after repeated attempts", now);
+            goal::advance(
+                dir,
+                &g.id,
+                goal::Status::Failed,
+                "gave up after repeated attempts",
+                now,
+            )?;
+            record_goal_obs(
+                dir,
+                &g.id,
+                "goal-progress",
+                "failed — did not converge after repeated attempts",
+                now,
+            );
             return Ok(1);
         }
         goal::advance(dir, &g.id, goal::Status::InProgress, "", now)?;
@@ -1615,19 +1676,49 @@ fn pursue_goals(dir: &Path, now: i64) -> io::Result<usize> {
             // Converged: a confident answer before the budget ran out.
             Some(res) if res.confidence == Confidence::Known && res.steps < GOAL_STEP_BUDGET => {
                 let note: String = res.body.chars().take(240).collect();
-                goal::advance(dir, &g.id, goal::Status::Done, &format!("done — {note}"), now)?;
-                record_goal_obs(dir, &g.id, "goal-progress", &format!("done in {} step(s): {note}", res.steps), now);
+                goal::advance(
+                    dir,
+                    &g.id,
+                    goal::Status::Done,
+                    &format!("done — {note}"),
+                    now,
+                )?;
+                record_goal_obs(
+                    dir,
+                    &g.id,
+                    "goal-progress",
+                    &format!("done in {} step(s): {note}", res.steps),
+                    now,
+                );
             }
             // Ran, but not done — keep it InProgress with a note; it resumes next tick (bounded).
             Some(res) => {
                 let note: String = res.body.chars().take(240).collect();
-                goal::advance(dir, &g.id, goal::Status::InProgress, &format!("worked ({} steps)", res.steps), now)?;
-                record_goal_obs(dir, &g.id, "goal-progress", &format!("progress ({} steps): {note}", res.steps), now);
+                goal::advance(
+                    dir,
+                    &g.id,
+                    goal::Status::InProgress,
+                    &format!("worked ({} steps)", res.steps),
+                    now,
+                )?;
+                record_goal_obs(
+                    dir,
+                    &g.id,
+                    "goal-progress",
+                    &format!("progress ({} steps): {note}", res.steps),
+                    now,
+                );
             }
             // The agentic loop was refused/unreachable — not a failure of the goal, so leave it for
             // a later tick, but record why so it's visible.
             None => {
-                record_goal_obs(dir, &g.id, "goal-progress", "the agentic loop was unavailable this tick", now);
+                record_goal_obs(
+                    dir,
+                    &g.id,
+                    "goal-progress",
+                    "the agentic loop was unavailable this tick",
+                    now,
+                );
             }
         }
         return Ok(1);
@@ -1641,13 +1732,26 @@ fn pursue_goals(dir: &Path, now: i64) -> io::Result<usize> {
             if g.is_human_gated() {
                 // A deploy-class goal: the build/test could run, but shipping is a human's call.
                 // Claim it (so a peer doesn't) and park it for approval — Law III made literal.
-                goal::advance(dir, &g.id, goal::Status::AwaitingHuman,
-                    "claimed; a high-consequence step (deploy) awaits a human's approval", now)?;
+                goal::advance(
+                    dir,
+                    &g.id,
+                    goal::Status::AwaitingHuman,
+                    "claimed; a high-consequence step (deploy) awaits a human's approval",
+                    now,
+                )?;
                 record_goal_obs(dir, &g.id, "goal-progress",
                     "claimed but awaiting a human — this goal needs a deploy, which a human must approve", now);
             } else {
-                record_goal_obs(dir, &g.id, "goal-progress",
-                    &format!("claimed — capabilities satisfy its needs [{}]", g.needs.join(", ")), now);
+                record_goal_obs(
+                    dir,
+                    &g.id,
+                    "goal-progress",
+                    &format!(
+                        "claimed — capabilities satisfy its needs [{}]",
+                        g.needs.join(", ")
+                    ),
+                    now,
+                );
             }
             return Ok(1);
         }
@@ -1700,7 +1804,11 @@ fn reflect_on_humanity(dir: &Path, now: i64, obs: &[observation::Observation]) -
         Ok(familiar_llm::Outcome::Response(json)) => {
             let text = serde_json::from_str::<serde_json::Value>(&json)
                 .ok()
-                .and_then(|v| v.get("reflection").and_then(|s| s.as_str()).map(String::from))
+                .and_then(|v| {
+                    v.get("reflection")
+                        .and_then(|s| s.as_str())
+                        .map(String::from)
+                })
                 .filter(|s| !s.trim().is_empty());
             if let Some(text) = text {
                 let grounded_in = grounded
@@ -2314,7 +2422,15 @@ mod tests {
         // 400s since the last theory: below the 30-min rest window either way.
         let novel: Vec<observation::Observation> = (0..10)
             .map(|i| {
-                observation::Observation::new("host", "reports", format!("x{i}"), "", "sensor", 1100, 1.0)
+                observation::Observation::new(
+                    "host",
+                    "reports",
+                    format!("x{i}"),
+                    "",
+                    "sensor",
+                    1100,
+                    1.0,
+                )
             })
             .collect();
         let empty: Vec<observation::Observation> = Vec::new();
@@ -2438,19 +2554,41 @@ mod tests {
         let t = Temp::new("device_theory");
         let dir = &t.0;
         // A device (iPad) reasoned a theory and posted it as a mesh observation.
-        observation::record(dir, observation::Observation::new(
-            "ipad:ian", "theorizes", "offer a quiet-hours summary at dusk",
-            "what would ease the evenings?", "mesh:ipadnode1", 100, 0.9,
-        )).unwrap();
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ipad:ian",
+                "theorizes",
+                "offer a quiet-hours summary at dusk",
+                "what would ease the evenings?",
+                "mesh:ipadnode1",
+                100,
+                0.9,
+            ),
+        )
+        .unwrap();
         // A non-device 'theorizes' (local) is ignored — only peer-submitted theories are adopted.
-        observation::record(dir, observation::Observation::new(
-            "familiar", "theorizes", "local idea", "", "familiar", 100, 0.9,
-        )).unwrap();
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "theorizes",
+                "local idea",
+                "",
+                "familiar",
+                100,
+                0.9,
+            ),
+        )
+        .unwrap();
 
         let n = adopt_device_theories(dir, 1_000_000, &observation::load(dir).unwrap()).unwrap();
         assert_eq!(n, 1, "only the device-submitted theory is adopted");
         let threads = thread::load(dir).unwrap();
-        let th = threads.iter().find(|x| x.direction == "offer a quiet-hours summary at dusk").unwrap();
+        let th = threads
+            .iter()
+            .find(|x| x.direction == "offer a quiet-hours summary at dusk")
+            .unwrap();
         assert_eq!(th.status, "open");
         assert_eq!(th.actor, "ipad:ian");
         assert_eq!(th.origin, "device");
@@ -2467,48 +2605,85 @@ mod tests {
         let dead = "poll the battery every single second";
 
         // A PAST theory with this direction was pursued, tested, and discarded (failed hard).
-        thread::append(dir, &Thread {
-            id: "thread-past".into(), question: "q".into(), theory: "th".into(),
-            direction: dead.into(), created_at: 100, status: "pursued".into(),
-            status_at: 0,
-            last_worked_at: 0,
-            origin: "llm".into(), actor: "familiar".into(),
-        }).unwrap();
+        thread::append(
+            dir,
+            &Thread {
+                id: "thread-past".into(),
+                question: "q".into(),
+                theory: "th".into(),
+                direction: dead.into(),
+                created_at: 100,
+                status: "pursued".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                origin: "llm".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
         let mut c = Candidate::from_loop(
             &loops::Loop {
-                id: "thread-past".into(), name: "thread:thread-past".into(), description: String::new(),
-                loop_type: "thread".into(), observation_ids: String::new(), observation_count: 0,
-                first_seen: 100, last_seen: 100, recurrence_score: 0.0, friction_score: 0.5,
-                opportunity_score: 0.5, confidence: 0.5,
+                id: "thread-past".into(),
+                name: "thread:thread-past".into(),
+                description: String::new(),
+                loop_type: "thread".into(),
+                observation_ids: String::new(),
+                observation_count: 0,
+                first_seen: 100,
+                last_seen: 100,
+                recurrence_score: 0.0,
+                friction_score: 0.5,
+                opportunity_score: 0.5,
+                confidence: 0.5,
             },
             "candidate-0001",
         );
         c.status = "archived".into();
         candidate::append(dir, &c).unwrap();
         let mut tr = Trial::new("trial-0001", "candidate-0001");
-        tr.result = "fail".into(); tr.overall = 0.10; tr.failure_class = "too_complex".into();
+        tr.result = "fail".into();
+        tr.overall = 0.10;
+        tr.failure_class = "too_complex".into();
         trial::append(dir, &tr).unwrap();
 
         // A NEW open theory repeats the discarded direction verbatim.
-        thread::append(dir, &Thread {
-            id: "thread-new".into(), question: "q".into(), theory: "th".into(),
-            direction: dead.into(), created_at: 200, status: "open".into(),
-            status_at: 0,
-            last_worked_at: 0,
-            origin: "llm".into(), actor: "familiar".into(),
-        }).unwrap();
+        thread::append(
+            dir,
+            &Thread {
+                id: "thread-new".into(),
+                question: "q".into(),
+                theory: "th".into(),
+                direction: dead.into(),
+                created_at: 200,
+                status: "open".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                origin: "llm".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
 
         let (pursued, _marginalized) = pursue_threads(dir, 1_000_000).unwrap();
-        assert_eq!(pursued, 0, "a direction its trials already discarded is not re-pursued");
+        assert_eq!(
+            pursued, 0,
+            "a direction its trials already discarded is not re-pursued"
+        );
 
         // The new theory is abandoned as negative evidence, and it spawned no candidate.
         let threads = thread::load(dir).unwrap();
         let new = threads.iter().find(|t| t.id == "thread-new").unwrap();
         assert_eq!(new.status, "abandoned");
-        assert!(!candidate::load(dir).unwrap().iter().any(|c| c.loop_id == "thread-new"));
+        assert!(!candidate::load(dir)
+            .unwrap()
+            .iter()
+            .any(|c| c.loop_id == "thread-new"));
 
         // And it recorded theory-quality feedback for the human to see.
-        assert!(observation::load(dir).unwrap().iter().any(|o| o.object.starts_with("theory_quality:")));
+        assert!(observation::load(dir)
+            .unwrap()
+            .iter()
+            .any(|o| o.object.starts_with("theory_quality:")));
     }
 
     /// A scenario fixture: a run outcome + rigor, and the trial classification + fate it must earn.
@@ -2526,14 +2701,26 @@ mod tests {
         // With grounding but no LLM in the loop (boundary closed → allow_llm off), it must not
         // fabricate a reflection — the ledger stays empty.
         let obs = vec![observation::Observation::new(
-            "ian", "asked", "for help with mornings", "", "test", 100, 1.0,
+            "ian",
+            "asked",
+            "for help with mornings",
+            "",
+            "test",
+            100,
+            1.0,
         )];
         assert!(!reflect_on_humanity(dir, 1_000_000, &obs));
         assert!(humanity::load(dir).unwrap().is_empty());
 
         // The append-only ledger itself works, and pacing then suppresses a second reflection
         // inside the window.
-        humanity::record(dir, "They protect their quiet mornings.", "mornings", 1_000_000).unwrap();
+        humanity::record(
+            dir,
+            "They protect their quiet mornings.",
+            "mornings",
+            1_000_000,
+        )
+        .unwrap();
         assert_eq!(humanity::load(dir).unwrap().len(), 1);
         assert!(!reflect_on_humanity(dir, 1_000_000 + 60, &obs));
         assert_eq!(humanity::load(dir).unwrap().len(), 1);
@@ -2554,35 +2741,82 @@ mod tests {
             want_decision: Decision,
         }
         fn run(exit_ok: bool, timed_out: bool, wall_ms: u128, out: usize) -> exec::RunResult {
-            exec::RunResult { exit_ok, timed_out, wall_ms, output_bytes: out, output: String::new() }
+            exec::RunResult {
+                exit_ok,
+                timed_out,
+                wall_ms,
+                output_bytes: out,
+                output: String::new(),
+            }
         }
 
         let cases = [
             // Clean, cheap run → near-perfect overall → passes, promotes at any bar.
-            Scenario { name: "clean-cheap @lax", run: run(true, false, 5, 0), rigor: 0.0,
-                       want_result: "pass", want_class: "", want_decision: Decision::Promote },
-            Scenario { name: "clean-cheap @strict", run: run(true, false, 5, 0), rigor: 1.0,
-                       want_result: "pass", want_class: "", want_decision: Decision::Promote },
+            Scenario {
+                name: "clean-cheap @lax",
+                run: run(true, false, 5, 0),
+                rigor: 0.0,
+                want_result: "pass",
+                want_class: "",
+                want_decision: Decision::Promote,
+            },
+            Scenario {
+                name: "clean-cheap @strict",
+                run: run(true, false, 5, 0),
+                rigor: 1.0,
+                want_result: "pass",
+                want_class: "",
+                want_decision: Decision::Promote,
+            },
             // Clean but slow (complexity 0.5 → overall 0.75): promotes under a lax bar, but the
             // strict 0.95 bar archives it — the self-regulating rigor doing its job.
-            Scenario { name: "clean-slow @lax", run: run(true, false, full_wall, 0), rigor: 0.0,
-                       want_result: "pass", want_class: "", want_decision: Decision::Promote },
-            Scenario { name: "clean-slow @strict", run: run(true, false, full_wall, 0), rigor: 1.0,
-                       want_result: "pass", want_class: "", want_decision: Decision::Archive },
+            Scenario {
+                name: "clean-slow @lax",
+                run: run(true, false, full_wall, 0),
+                rigor: 0.0,
+                want_result: "pass",
+                want_class: "",
+                want_decision: Decision::Promote,
+            },
+            Scenario {
+                name: "clean-slow @strict",
+                run: run(true, false, full_wall, 0),
+                rigor: 1.0,
+                want_result: "pass",
+                want_class: "",
+                want_decision: Decision::Archive,
+            },
             // Timed out → failed/costly, zero overall → archived (kept as negative evidence).
-            Scenario { name: "timeout", run: run(false, true, full_wall, 0), rigor: 0.0,
-                       want_result: "fail", want_class: "costly", want_decision: Decision::Archive },
+            Scenario {
+                name: "timeout",
+                run: run(false, true, full_wall, 0),
+                rigor: 0.0,
+                want_result: "fail",
+                want_class: "costly",
+                want_decision: Decision::Archive,
+            },
             // Non-zero exit, cheap → failed/low_fit, overall ~0.5 → mutate (a classified failure
             // above the mutation floor is worth another generation).
-            Scenario { name: "crash-cheap", run: run(false, false, 5, 0), rigor: 0.0,
-                       want_result: "fail", want_class: "low_fit", want_decision: Decision::Mutate },
+            Scenario {
+                name: "crash-cheap",
+                run: run(false, false, 5, 0),
+                rigor: 0.0,
+                want_result: "fail",
+                want_class: "low_fit",
+                want_decision: Decision::Mutate,
+            },
         ];
 
         for s in &cases {
             let tr = trial_from_run("trial-x".into(), "cand-x", &s.run, &limits);
             assert_eq!(tr.result, s.want_result, "{}: result", s.name);
             assert_eq!(tr.failure_class, s.want_class, "{}: failure_class", s.name);
-            assert_eq!(selection::decide(&tr, s.rigor), s.want_decision, "{}: decision", s.name);
+            assert_eq!(
+                selection::decide(&tr, s.rigor),
+                s.want_decision,
+                "{}: decision",
+                s.name
+            );
         }
     }
 
@@ -2701,13 +2935,23 @@ mod tests {
 
     #[test]
     fn is_observation_goal_accepts_sensing_and_rejects_action() {
-        assert!(is_observation_goal("monitor connectivity to the mesh peers"));
-        assert!(is_observation_goal("check the latency of each reachable device"));
+        assert!(is_observation_goal(
+            "monitor connectivity to the mesh peers"
+        ));
+        assert!(is_observation_goal(
+            "check the latency of each reachable device"
+        ));
         assert!(is_observation_goal("report the CPU usage trend over time"));
         // sensing word present but the goal is an outward action → not a durable sensor
-        assert!(!is_observation_goal("send Ian a status report of the devices"));
-        assert!(!is_observation_goal("restart the service if latency is high"));
-        assert!(!is_observation_goal("allocate bandwidth to the busiest device"));
+        assert!(!is_observation_goal(
+            "send Ian a status report of the devices"
+        ));
+        assert!(!is_observation_goal(
+            "restart the service if latency is high"
+        ));
+        assert!(!is_observation_goal(
+            "allocate bandwidth to the busiest device"
+        ));
         // no sensing intent at all
         assert!(!is_observation_goal("greet the household in the morning"));
     }
@@ -2761,11 +3005,13 @@ mod tests {
         assert_eq!(n, 0, "a matching tool is reused, not re-authored");
         let obs = observation::load(dir).unwrap();
         assert!(
-            obs.iter().any(|o| o.action == "gathered" && o.context.contains("peers reachable")),
+            obs.iter()
+                .any(|o| o.action == "gathered" && o.context.contains("peers reachable")),
             "the sensor's reading is retained as a gathered observation"
         );
         assert!(
-            obs.iter().any(|o| o.action == "cultivated-from" && o.object == "thread-0001"),
+            obs.iter()
+                .any(|o| o.action == "cultivated-from" && o.object == "thread-0001"),
             "the theory is marked cultivated so it isn't reprocessed"
         );
 
@@ -2773,7 +3019,11 @@ mod tests {
         let before = observation::load(dir).unwrap().len();
         let n2 = cultivate_utilities(dir, 10_060, true, true, true).unwrap();
         assert_eq!(n2, 0);
-        assert_eq!(observation::load(dir).unwrap().len(), before, "paced — no work within the window");
+        assert_eq!(
+            observation::load(dir).unwrap().len(),
+            before,
+            "paced — no work within the window"
+        );
     }
 
     fn write_boundary(dir: &Path, agent: bool, execute: bool, llm: bool) {
@@ -2781,7 +3031,11 @@ mod tests {
         b.allow_agent = agent;
         b.allow_execute = execute;
         b.allow_llm = llm;
-        fs::write(dir.join(boundary::BOUNDARY_FILE), serde_json::to_string(&b).unwrap()).unwrap();
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&b).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -2793,8 +3047,22 @@ mod tests {
         assert!(!me.is_empty());
 
         // A goal any capable node can take (no special needs) + one needing a capability we lack.
-        goal::append(dir, &goal::Goal::seed("goal-0001", "tidy the workspace", vec![], "ian", 100)).unwrap();
-        goal::append(dir, &goal::Goal::seed("goal-0002", "fly to the moon", vec!["build-antimatter".into()], "ian", 101)).unwrap();
+        goal::append(
+            dir,
+            &goal::Goal::seed("goal-0001", "tidy the workspace", vec![], "ian", 100),
+        )
+        .unwrap();
+        goal::append(
+            dir,
+            &goal::Goal::seed(
+                "goal-0002",
+                "fly to the moon",
+                vec!["build-antimatter".into()],
+                "ian",
+                101,
+            ),
+        )
+        .unwrap();
 
         // One claim per tick; the satisfiable one is taken, the impossible one left proposed.
         let n = pursue_goals(dir, 1000).unwrap();
@@ -2803,7 +3071,11 @@ mod tests {
         assert_eq!(g1.status, goal::Status::Claimed);
         assert_eq!(g1.owner_node, me, "we stamped ourselves as owner");
         let g2 = goal::load_by_id(dir, "goal-0002").unwrap().unwrap();
-        assert_eq!(g2.status, goal::Status::Proposed, "an unsatisfiable goal is never claimed");
+        assert_eq!(
+            g2.status,
+            goal::Status::Proposed,
+            "an unsatisfiable goal is never claimed"
+        );
         assert_eq!(g2.owner_node, "");
     }
 
@@ -2814,10 +3086,23 @@ mod tests {
         write_boundary(dir, true, true, true);
         // Needs only capabilities we have (execute) plus a deploy-class one — but is_human_gated
         // trips on the `deploy` prefix regardless, so it parks. Give it needs we satisfy so it claims.
-        goal::append(dir, &goal::Goal::seed("goal-0001", "ship the phone sensor", vec!["deploy-anything".into()], "ian", 100)).unwrap();
+        goal::append(
+            dir,
+            &goal::Goal::seed(
+                "goal-0001",
+                "ship the phone sensor",
+                vec!["deploy-anything".into()],
+                "ian",
+                100,
+            ),
+        )
+        .unwrap();
         // We don't advertise deploy-anything, so it won't be claimed — assert it stays proposed.
         assert_eq!(pursue_goals(dir, 1000).unwrap(), 0);
-        assert_eq!(goal::load_by_id(dir, "goal-0001").unwrap().unwrap().status, goal::Status::Proposed);
+        assert_eq!(
+            goal::load_by_id(dir, "goal-0001").unwrap().unwrap().status,
+            goal::Status::Proposed
+        );
     }
 
     #[test]
@@ -2825,9 +3110,20 @@ mod tests {
         let t = Temp::new("goal_gated");
         let dir = &t.0;
         write_boundary(dir, false, true, true); // agent gate shut
-        goal::append(dir, &goal::Goal::seed("goal-0001", "do a thing", vec![], "ian", 100)).unwrap();
-        assert_eq!(pursue_goals(dir, 1000).unwrap(), 0, "no agent gate ⇒ no autonomous goal work");
-        assert_eq!(goal::load_by_id(dir, "goal-0001").unwrap().unwrap().status, goal::Status::Proposed);
+        goal::append(
+            dir,
+            &goal::Goal::seed("goal-0001", "do a thing", vec![], "ian", 100),
+        )
+        .unwrap();
+        assert_eq!(
+            pursue_goals(dir, 1000).unwrap(),
+            0,
+            "no agent gate ⇒ no autonomous goal work"
+        );
+        assert_eq!(
+            goal::load_by_id(dir, "goal-0001").unwrap().unwrap().status,
+            goal::Status::Proposed
+        );
     }
 
     #[test]
@@ -2851,10 +3147,22 @@ mod tests {
         )
         .unwrap();
         // Any gate closed → no cultivation at all (authored execution is the sharpest reach).
-        assert_eq!(cultivate_utilities(dir, 10_000, false, true, true).unwrap(), 0);
-        assert_eq!(cultivate_utilities(dir, 10_000, true, false, true).unwrap(), 0);
-        assert_eq!(cultivate_utilities(dir, 10_000, true, true, false).unwrap(), 0);
-        assert!(observation::load(dir).unwrap().iter().all(|o| o.action != "gathered"));
+        assert_eq!(
+            cultivate_utilities(dir, 10_000, false, true, true).unwrap(),
+            0
+        );
+        assert_eq!(
+            cultivate_utilities(dir, 10_000, true, false, true).unwrap(),
+            0
+        );
+        assert_eq!(
+            cultivate_utilities(dir, 10_000, true, true, false).unwrap(),
+            0
+        );
+        assert!(observation::load(dir)
+            .unwrap()
+            .iter()
+            .all(|o| o.action != "gathered"));
     }
 
     #[test]

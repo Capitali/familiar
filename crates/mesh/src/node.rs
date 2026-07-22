@@ -108,7 +108,10 @@ impl NodeKey {
 
 /// The host's short name (`uname -n`, first dot-segment), or `None` when unavailable.
 fn hostname() -> Option<String> {
-    let out = std::process::Command::new("uname").arg("-n").output().ok()?;
+    let out = std::process::Command::new("uname")
+        .arg("-n")
+        .output()
+        .ok()?;
     let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let short = name.split('.').next().unwrap_or("").to_string();
     (!short.is_empty()).then_some(short)
