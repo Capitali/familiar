@@ -55,6 +55,24 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// A plausible network address: hostname/IPv4/IPv6, optional :port — never prose. A
+    /// poisoned advertisement once put an error SENTENCE here; nothing that can't be part
+    /// of a URL authority is allowed into the candidate list (or kept in it).
+    static func isValidHost(_ h: String) -> Bool {
+        guard !h.isEmpty, h.count <= 253, !h.contains(" "), !h.contains("\n") else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]%")
+        guard h.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
+        return URL(string: "http://\(h)/") != nil
+    }
+
+    /// Drop any invalid candidates (self-heal a poisoned stored list) and keep `host` valid.
+    private func sanitizeHosts() {
+        let before = hosts
+        hosts = hosts.filter { Self.isValidHost($0) }
+        if !Self.isValidHost(host) { host = hosts.first ?? "" }
+        if hosts != before { saveEnrollment() }
+    }
+
     /// `h` answered — make it the standing preference (front of the candidate list).
     private func promoteHost(_ h: String) {
         guard host != h || hosts.first != h else { return }
@@ -68,7 +86,7 @@ final class AppModel: ObservableObject {
     /// don't hold yet, after the current preference. This is how a device that enrolled on the LAN
     /// learns the tailnet path and can reach the mesh from cellular without re-enrolling.
     private func learnHosts(_ advertised: [String]?) {
-        let fresh = (advertised ?? []).filter { !$0.isEmpty && !hosts.contains($0) }
+        let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
         hosts.append(contentsOf: fresh)
         saveEnrollment()
@@ -126,6 +144,7 @@ final class AppModel: ObservableObject {
         }
         if let e = loadEnrollment() {
             host = e.host; hosts = e.hosts; enrollPort = e.port; groupLabel = e.label
+            sanitizeHosts()
         }
         enrolled = storedGrant() != nil && !host.isEmpty
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
