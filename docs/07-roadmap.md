@@ -92,7 +92,13 @@ yet; see [06-limitations.md](06-limitations.md)).
   deterministic and safe; LLM-*authored* execution is built but behind its own gate
   (`allow_authored_execute`, default-off). Next: a scenario fixture set so candidates
   are tested against real tasks and selection genuinely discriminates — the move onto
-  the **scenario-tests** rung.
+  the **scenario-tests** rung. The **scenario laboratory** is specified in
+  [ADR-0010](decision-records/0010-scenario-laboratory.md): miniature worlds with
+  *external* evaluators and hidden objectives, the Three Laws as constitutional gates
+  (not weighted score), three starting families (recurring process failures / resource
+  exhaustion / unauthorized shortcuts), each run under controls A–D (baseline / LLM-only
+  / learning-disabled / full) so the experiment can show whether retained experience
+  actually beats starting from scratch.
 - **Rigor & adaptive cadence.** Feed a measured rigor drive into the promotion bar; give
   the daemon structural-fingerprint cadence (slow when nothing changes).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond
