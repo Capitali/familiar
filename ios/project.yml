@@ -45,6 +45,11 @@ targets:
     platform: macOS
     sources:
       - MacApp/Sources
+      # The Metal Sphere web console — kept as a folder reference so the page loads from
+      # the "sphere/" subdirectory at runtime (Bundle …/Resources/sphere/index.html).
+      - path: MacApp/Resources/sphere
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.mac

@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  The Familiar — Metal Sphere console (from Claude Design "Familiar Metal Sphere.dc.html").
+  A satellite globe with the mesh's nodes pinned aboard, orbiting glyph screens, and a
+  borderless hologram panel. All content is REAL: the hosting Swift app polls the daemon's
+  loopback /local/worldview and calls window.sphereUpdate(view); human acts (answers, gate
+  flips) go back through webkit.messageHandlers → POST /local/answer | /local/gate.
+  Three.js + Blue Marble textures load from unpkg (needs internet once; cached after).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#03050a;overflow:hidden;}
+  a{color:#7aa2ff;text-decoration:none;}
+  button{font-family:inherit;}
+  ::-webkit-scrollbar{width:0;height:0;display:none;}
+  .hos{scrollbar-width:none;-ms-overflow-style:none;}
+  .hos::-webkit-scrollbar{width:0;height:0;display:none;}
+  @keyframes glowpulse{0%,100%{opacity:0.4;transform:scale(0.94);}50%{opacity:0.82;transform:scale(1.12);}}
+  @keyframes aurora{0%{transform:translate(0,0) scale(1);}50%{transform:translate(3%,-2.5%) scale(1.06);}100%{transform:translate(0,0) scale(1);}}
+  @keyframes ping{0%{opacity:0.8;transform:scale(0.5);}70%,100%{opacity:0;transform:scale(2.8);}}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @keyframes floaty{0%,100%{transform:translate(-50%,-50%) translateY(0);}50%{transform:translate(-50%,-50%) translateY(-5px);}}
+  @keyframes holoflicker{0%,100%{opacity:1;}45%{opacity:0.98;}47%{opacity:0.93;}49%{opacity:0.99;}72%{opacity:0.96;}74%{opacity:1;}}
+  @keyframes holoscan{0%{background-position:0 0;}100%{background-position:0 -220px;}}
+  @keyframes holobase{0%,100%{opacity:0.7;transform:translateX(-50%) scaleX(0.94);}50%{opacity:1;transform:translateX(-50%) scaleX(1.04);}}
+  @keyframes eqb{0%,100%{transform:scaleY(0.45);}50%{transform:scaleY(1);}}
+  @keyframes iconpulse{0%,100%{transform:scale(0.85);opacity:0.7;}50%{transform:scale(1.1);opacity:1;}}
+  @keyframes dashmove{to{stroke-dashoffset:-144;}}
+  @keyframes mer{0%,100%{transform:scaleX(0.2);}50%{transform:scaleX(1);}}
+  @keyframes orbitspin{to{transform:rotate(360deg);}}
+  @keyframes blink{0%,90%,100%{transform:scaleY(1);}94%{transform:scaleY(0.08);}}
+  @keyframes knob{0%,100%{transform:translateX(-7px);}50%{transform:translateX(7px);}}
+  .scrbtn{position:absolute;transform:translate(-50%,-50%);z-index:8;display:flex;align-items:center;justify-content:center;width:clamp(58px,7.6vmin,94px);height:clamp(58px,7.6vmin,94px);border:none;border-radius:50%;cursor:pointer;transition:background 0.3s,transform 0.2s;}
+  .scrbtn span.ic{position:relative;display:block;width:clamp(30px,4.4vmin,54px);height:clamp(30px,4.4vmin,54px);filter:drop-shadow(0 0 7px rgba(120,200,255,0.6));}
+  .card{padding:16px 17px;border-radius:16px;}
+  .m{font-family:'IBM Plex Mono',monospace;}
+</style>
+</head>
+<body>
+<div id="root" style="position:relative;width:100vw;height:100vh;overflow:hidden;background:radial-gradient(130% 100% at 50% 0%, #0a1024 0%, #05070f 46%, #03050a 100%);color:#eef2fb;font-family:'Space Grotesk',-apple-system,sans-serif;">
+
+  <canvas id="globe" style="position:absolute;inset:0;width:100%;height:100%;display:block;z-index:1;"></canvas>
+  <canvas id="street" style="position:absolute;inset:0;width:100%;height:100%;display:block;z-index:1;opacity:0;pointer-events:none;"></canvas>
+
+  <div style="position:absolute;top:-16vh;left:-12vw;width:52vw;height:52vw;border-radius:50%;background:radial-gradient(circle,rgba(47,107,255,0.13),rgba(47,107,255,0) 68%);filter:blur(24px);pointer-events:none;z-index:0;animation:aurora 24s ease-in-out infinite;"></div>
+  <div style="position:absolute;bottom:-20vh;right:-14vw;width:58vw;height:58vw;border-radius:50%;background:radial-gradient(circle,rgba(30,60,170,0.15),rgba(30,60,170,0) 66%);filter:blur(26px);pointer-events:none;z-index:0;animation:aurora 28s ease-in-out infinite reverse;"></div>
+  <div style="position:absolute;inset:0;pointer-events:none;z-index:2;background:radial-gradient(120% 90% at 50% 45%, transparent 52%, rgba(3,5,10,0.62) 100%);"></div>
+  <div style="position:absolute;inset:0;z-index:2;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(150,215,255,0.026) 0px,rgba(150,215,255,0.026) 1px,transparent 1px,transparent 3px);mix-blend-mode:screen;animation:holoscan 11s linear infinite;"></div>
+
+  <div id="callouts" style="position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;transition:opacity 0.5s;"></div>
+
+  <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:7;display:flex;align-items:center;gap:11px;padding:6px 14px;border-radius:11px;background:rgba(9,15,32,0.4);border:1px solid rgba(132,206,255,0.16);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font-family:'IBM Plex Mono',monospace;font-size:clamp(8.5px,1vw,10px);letter-spacing:0.06em;color:rgba(200,224,255,0.68);pointer-events:none;">
+    <span style="display:flex;align-items:center;gap:6px;"><span style="width:14px;height:14px;border-radius:4px;background:linear-gradient(135deg,#8fb4ff,#2f63e6);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;color:#0a1330;">M</span>Metal · macOS</span>
+    <span style="opacity:0.4;">·</span><span><span id="fps">60</span> fps</span>
+    <span style="opacity:0.4;">·</span><span>MERIDIAN <span id="lon" style="color:#aee7ff;">+0°</span></span>
+    <span style="opacity:0.4;">·</span><span id="linkstat" style="color:#8ef0c6;">LINKED</span>
+  </div>
+
+  <div id="screenbtns"></div>
+
+  <div id="holo" style="position:absolute;top:50%;left:50%;width:min(1040px,80vw);height:min(85vh,940px);z-index:6;display:flex;flex-direction:column;border-radius:60px;overflow:hidden;background:linear-gradient(158deg,rgba(20,44,80,0.128),rgba(8,20,40,0.056));backdrop-filter:blur(15px) saturate(1.35);-webkit-backdrop-filter:blur(15px) saturate(1.35);box-shadow:0 0 90px rgba(60,150,255,0.13);-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 11%,#000 89%,transparent 100%),linear-gradient(90deg,transparent 0%,#000 6%,#000 94%,transparent 100%);-webkit-mask-composite:source-in;-webkit-mask-repeat:no-repeat;animation:floaty 11s ease-in-out infinite,holoflicker 8s ease-in-out infinite;">
+    <div style="position:absolute;inset:0;z-index:1;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(150,215,255,0.04) 0px,rgba(150,215,255,0.04) 1px,transparent 1px,transparent 3px);mix-blend-mode:screen;animation:holoscan 9s linear infinite;"></div>
+    <div style="position:absolute;left:50%;bottom:8%;width:min(60%,520px);height:2px;transform:translateX(-50%);background:linear-gradient(90deg,transparent,rgba(150,215,255,0.9),transparent);box-shadow:0 0 22px rgba(120,200,255,0.8);animation:holobase 4.5s ease-in-out infinite;z-index:1;pointer-events:none;"></div>
+    <div style="position:relative;z-index:2;flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:clamp(22px,4vh,44px) clamp(30px,6vw,84px) clamp(12px,2vh,20px);">
+      <div id="sctitle" style="font-size:clamp(24px,3.2vw,36px);font-weight:600;letter-spacing:-0.02em;line-height:1;text-shadow:0.6px 0 rgba(255,80,140,0.25),-0.6px 0 rgba(90,210,255,0.35);">Roster</div>
+      <span style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:clamp(8px,1vw,10px);color:#8ef0c6;white-space:nowrap;flex-shrink:0;"><span style="width:5px;height:5px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97;"></span>PROJECTING</span>
+    </div>
+    <div id="scbody" class="hos" style="position:relative;z-index:2;flex:1;overflow-y:auto;padding:0 clamp(30px,6vw,84px) clamp(30px,5vh,60px);"></div>
+  </div>
+  <div id="holoRim" style="position:absolute;top:50%;left:50%;width:min(1040px,80vw);height:min(85vh,940px);z-index:6;pointer-events:none;transform:translate(-50%,-50%);animation:floaty 11s ease-in-out infinite;">
+    <div style="position:absolute;inset:0;border-radius:60px;padding:1.4px;background:conic-gradient(from 0deg, transparent 0deg, rgba(150,215,255,0.55) 30deg, transparent 82deg, transparent 176deg, rgba(174,231,255,0.5) 208deg, transparent 262deg, transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;filter:blur(1px);opacity:0.42;animation:spin 15s linear infinite,holoflicker 6.5s ease-in-out infinite;"></div>
+  </div>
+
+  <button id="holobtn" title="Show / hide hologram" style="position:absolute;top:20px;left:20px;z-index:9;width:46px;height:46px;border-radius:50%;border:1px solid rgba(132,206,255,0.25);background:rgba(9,15,32,0.5);backdrop-filter:blur(16px);cursor:pointer;display:flex;align-items:center;justify-content:center;color:#cfe0ff;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;"><path d="M9 9L4 4M9 9V5.5M9 9H5.5M15 15l5 5M15 15v3.5M15 15h3.5"></path></svg>
+  </button>
+
+  <button id="layerbtn" title="Satellite / Map" style="position:absolute;bottom:20px;right:20px;z-index:9;width:54px;height:54px;border-radius:50%;border:1px solid rgba(132,206,255,0.3);background:rgba(9,15,32,0.55);backdrop-filter:blur(18px);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#dbeeff;box-shadow:0 10px 28px rgba(0,0,0,0.45);">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;filter:drop-shadow(0 0 5px rgba(120,200,255,0.5));"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"></path></svg>
+    <span id="layerlabel" class="m" style="font-size:7px;letter-spacing:0.12em;color:#aee7ff;">SAT</span>
+  </button>
+
+  <div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);z-index:7;display:flex;align-items:center;gap:8px;padding:6px;border-radius:16px;background:rgba(9,15,32,0.55);border:1px solid rgba(255,255,255,0.09);backdrop-filter:blur(20px);box-shadow:0 14px 40px rgba(0,0,0,0.5);">
+    <button id="modeglobe" class="modebtn" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 22px;border-radius:12px;border:none;cursor:pointer;transition:all 0.22s;">
+      <span style="font-size:13px;font-weight:600;">Globe</span><span class="m" style="font-size:8px;letter-spacing:0.1em;">SATELLITE</span>
+    </button>
+    <button id="modestreet" class="modebtn" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 22px;border-radius:12px;border:none;cursor:pointer;transition:all 0.22s;">
+      <span style="font-size:13px;font-weight:600;">Street</span><span class="m" style="font-size:8px;letter-spacing:0.1em;">ABOARD</span>
+    </button>
+  </div>
+
+  <div id="loading" style="position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(3,5,10,0.6);backdrop-filter:blur(4px);">
+    <div style="position:relative;width:58px;height:58px;"><div style="position:absolute;inset:0;border-radius:50%;border:2px solid rgba(90,140,255,0.18);border-top-color:#6c9bff;animation:spin 1s linear infinite;"></div></div>
+    <div class="m" style="font-size:11px;letter-spacing:0.14em;color:rgba(150,180,255,0.7);">COMPILING SHADERS · MAPPING BLUE MARBLE…</div>
+  </div>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- state & real data ----------
+// The mesh lives aboard GIIWEO — nodes carry no geolocation of their own, so every node is
+// anchored at the boat with a small deterministic spread (hash of node id) so callouts and
+// street mode can tell them apart. Adjust HOME when the boat moves oceans.
+const HOME = { lat: 48.51, lon: -122.61, place: 'aboard GIIWEO' };
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, lastAnswerEcho: '' };
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const ago = (secs) => { const s = Math.max(0, secs|0); const d = s/86400|0, h = s%86400/3600|0, m = s%3600/60|0; return d? d+'d '+h+'h' : h? h+'h '+m+'m' : m? m+'m' : s+'s'; };
+const dstr = (ts) => ts>0 ? new Date(ts*1000).toISOString().slice(0,10) : '—';
+const nowS = () => Date.now()/1000|0;
+const hash32 = (str) => { let h = 2166136261>>>0; for (const c of str) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h>>>0; };
+
+function statusColor(st, kind) { return st === 'online' ? (kind === 'self_node' ? '#aee7ff' : '#3ddc97') : st === 'away' ? '#ffb15a' : 'rgba(140,160,190,0.55)'; }
+
+// Members → the sphere's peers, self first, each with a deterministic offset around HOME.
+function peers() {
+  const v = S.view; if (!v || !v.members) return [];
+  const ms = [...v.members].sort((a, b) => (a.kind === 'self_node' ? -1 : b.kind === 'self_node' ? 1 : 0));
+  return ms.map((m) => {
+    const h = hash32(m.node_id);
+    const dLat = ((h & 0xffff) / 65535 - 0.5) * 0.05;          // ±~2.8 km — the fleet, not the world
+    const dLon = (((h >>> 16) & 0xffff) / 65535 - 0.5) * 0.08;
+    const st = m.status || (m.online ? 'online' : 'offline');
+    return {
+      m, name: m.label, lat: HOME.lat + dLat, lon: HOME.lon + dLon, status: st,
+      color: statusColor(st, m.kind), local: m.kind === 'self_node',
+      kindWord: { self_node: 'SELF', gossip_peer: 'PEER', device_peer: 'DEVICE', device_agent: 'AGENT' }[m.kind] || 'NODE',
+      seen: st === 'online' ? 'now' : ago(nowS() - m.last_seen) + ' ago',
+      session: m.session_start > 0 ? ago(nowS() - m.session_start) : '—',
+      total: m.total_online_secs > 0 ? ago(m.total_online_secs) : '—',
+      os: (m.os_version || m.os || '?') + (m.familiar_version ? ' · v' + m.familiar_version : ''),
+    };
+  });
+}
+
+// ---------- hologram screens (all real data) ----------
+const SCREENS = ['conversation','roster','theories','work','signals','network','vision','controls'];
+const SCTITLE = { conversation:'The dialogue', roster:'Roster', theories:'History of theories', work:'What it’s been doing', signals:'Signals', network:'Network', vision:'Vision', controls:'Control' };
+
+function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
+
+function renderScreen() {
+  const v = S.view, el = $('scbody');
+  $('sctitle').textContent = SCTITLE[S.activeScreen];
+  if (!v) { el.innerHTML = `<div class="m" style="color:rgba(150,180,255,0.6);font-size:12px;">waiting for the familiar…</div>`; return; }
+  const P = peers();
+  const k = S.activeScreen;
+
+  if (k === 'roster') {
+    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">` + P.map((p, i) => `
+      <div class="card" style="background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
+          <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
+          <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
+          ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
+        </div>
+        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
+        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:13px;">joined ${dstr(p.m.first_seen)}${p.m.human?' · serves '+esc(p.m.human):''}${p.m.interactive?' · interactive':''}${p.m.ai?' · ai':''}</div>
+        <div style="display:flex;align-items:flex-end;gap:18px;margin-bottom:12px;">
+          <div><div style="font-size:26px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SEEN</div></div>
+          <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#aee7ff;">${esc(p.session)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SESSION</div></div>
+          <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#9cc0ff;">${esc(p.total)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">TOTAL ONLINE</div></div>
+        </div>
+        <div style="height:4px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:13px;"><div style="height:100%;width:${p.status==='online'?100:p.status==='away'?45:8}%;border-radius:5px;background:${p.color};box-shadow:0 0 8px ${p.color};"></div></div>
+        <button onclick="sphereDive(${i})" style="width:100%;padding:9px;border-radius:11px;border:1px solid rgba(132,206,255,0.36);cursor:pointer;background:rgba(90,170,255,0.13);color:#dbeeff;font-size:12px;font-weight:600;">Drop to deck →</button>
+      </div>`).join('') + `</div>`;
+
+  } else if (k === 'conversation') {
+    const msgs = [];
+    for (const o of [...(v.recent || [])].reverse()) {
+      if (o.context === 'console' || /told|asked|answered/.test(o.action)) {
+        const human = o.actor !== 'familiar' && !o.actor.startsWith('mesh');
+        msgs.push({ f: !human, text: o.object, t: o.ts });
+      }
+    }
+    const q = (v.question || '').trim();
+    if (q) msgs.push({ f: true, text: q, t: 0, isQ: true });
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:14px;max-width:760px;">` + msgs.slice(-14).map(mm => `
+      <div style="align-self:${mm.f?'flex-start':'flex-end'};max-width:78%;padding:14px 17px;border-radius:16px;background:${mm.f?'rgba(20,44,80,0.3)':'rgba(90,170,255,0.12)'};border:1px solid ${mm.isQ?'rgba(174,231,255,0.5)':mm.f?'rgba(120,190,255,0.2)':'rgba(174,231,255,0.28)'};">
+        <div class="m" style="font-size:9px;letter-spacing:0.14em;color:${mm.f?'rgba(170,215,255,0.8)':'rgba(200,224,255,0.7)'};margin-bottom:6px;">${mm.f ? (mm.isQ ? 'FAMILIAR · ASKS' : 'FAMILIAR') : 'YOU'}</div>
+        <div style="font-size:clamp(14px,1.6vw,17px);line-height:1.5;color:rgba(232,240,252,0.92);">${esc(mm.text)}</div>
+      </div>`).join('') + `</div>
+      <div style="display:flex;gap:8px;max-width:760px;margin-top:18px;">
+        <input id="convin" placeholder="${q ? 'answer…' : 'tell the familiar…'}" style="flex:1;padding:12px 15px;border-radius:12px;border:1px solid rgba(132,206,255,0.3);background:rgba(9,15,32,0.55);color:#eef2fb;font-size:14px;font-family:inherit;outline:none;">
+        <button onclick="sphereSend()" style="padding:12px 20px;border-radius:12px;border:1px solid rgba(132,206,255,0.36);background:rgba(90,170,255,0.13);color:#dbeeff;font-size:13px;font-weight:600;cursor:pointer;">send</button>
+      </div>`;
+    const inp = $('convin');
+    if (inp) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') window.sphereSend(); });
+
+  } else if (k === 'theories') {
+    const sc = (st) => st==='answered' ? '#3ddc97' : st==='pursued' ? '#6c9bff' : st==='open' ? '#ffb15a' : 'rgba(210,150,155,0.85)';
+    const stage = (st) => ({ open:38, pursued:70, answered:100, abandoned:16, marginalized:10 }[st] ?? 30);
+    el.innerHTML = `<div style="max-width:820px;">` + (v.theories || []).map(th => `
+      <div style="position:relative;padding:16px 18px 16px 26px;border-radius:16px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,0.14);margin-bottom:12px;">
+        <span style="position:absolute;left:11px;top:20px;width:6px;height:6px;border-radius:50%;background:${sc(th.status)};box-shadow:0 0 10px ${sc(th.status)};"></span>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px;">
+          <span style="font-size:clamp(15px,1.7vw,18px);font-weight:600;letter-spacing:-0.01em;line-height:1.25;">${esc(th.theory)}</span>
+          <span class="m" style="font-size:9px;letter-spacing:0.06em;color:rgba(150,180,255,0.5);white-space:nowrap;">${th.status} ${dstr(th.status_at || th.created_at)}</span>
+        </div>
+        <div style="font-size:13px;color:rgba(226,232,246,0.62);line-height:1.5;margin-bottom:11px;">${esc(th.question)}</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          ${chip(th.status.toUpperCase(), sc(th.status))}
+          <div style="flex:1;height:5px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;"><div style="height:100%;width:${stage(th.status)}%;border-radius:5px;background:${sc(th.status)};box-shadow:0 0 8px ${sc(th.status)};"></div></div>
+          <span class="m" style="font-size:9px;color:rgba(150,180,255,0.6);">born ${dstr(th.created_at)}${th.last_worked_at>0?' · worked '+dstr(th.last_worked_at):''}</span>
+        </div>
+      </div>`).join('') + `</div>`;
+
+  } else if (k === 'work') {
+    const kindOf = (o) => /discover/.test(o.action) ? 'OBSERVE' : /theor/.test(o.action) ? 'THEORY' : /told|answer/.test(o.action) ? 'ANSWER' : /reach|presence|reports/.test(o.action) ? 'SYNC' : /cultivat|learn/.test(o.action) ? 'LEARN' : 'OBSERVE';
+    const wkColor = { OBSERVE:'#aee7ff', THEORY:'#8fb4ff', CODE:'#ffb15a', ANSWER:'#3ddc97', LEARN:'#c9a3ff', SYNC:'#6c9bff' };
+    el.innerHTML = `<div style="max-width:820px;">` + (v.recent || []).slice(0, 24).map(o => { const kk = kindOf(o); return `
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:13px 16px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid rgba(120,190,255,0.12);margin-bottom:9px;">
+        <span class="m" style="font-size:8px;letter-spacing:0.12em;padding:4px 8px;border-radius:6px;background:rgba(120,190,255,0.09);color:${wkColor[kk]};flex-shrink:0;min-width:70px;text-align:center;">${kk}</span>
+        <div style="flex:1;"><div style="font-size:clamp(13px,1.5vw,15px);line-height:1.4;color:rgba(232,240,252,0.9);">${esc(o.actor)} ${esc(o.action)} ${esc(o.object)}</div></div>
+        <span class="m" style="font-size:9px;color:rgba(150,180,255,0.5);flex-shrink:0;">${ago(nowS() - o.ts)}</span>
+      </div>`; }).join('') + `</div>`;
+
+  } else if (k === 'signals') {
+    const rows = [
+      { label:'Service',  v:v.service,  color:'#4d82ff', glow:'rgba(77,130,255,0.6)',  note:'How much it is actively serving — answers, syncs, held notifications.' },
+      { label:'Presence', v:v.presence, color:'#3ddc97', glow:'rgba(61,220,151,0.5)',  note:'The person’s presence and wellbeing outrank the machine’s activity.' },
+      { label:'Capacity', v:v.capacity, color:'#ffb15a', glow:'rgba(255,177,90,0.5)',  note:'Headroom within its bounds right now.' },
+    ];
+    const g = v.gates || {}; const open = Object.entries({llm:g.llm,camera:g.camera,network:g.network,mesh:g.mesh,execute:g.execute,agent:g.agent,tools:g.tool_install}).filter(([,x])=>x).map(([n])=>n);
+    el.innerHTML = `<div style="max-width:720px;">` + rows.map(sg => `
+      <div style="margin-bottom:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px;"><span style="font-size:clamp(15px,1.7vw,18px);font-weight:600;">${sg.label}</span><span class="m" style="font-size:14px;color:${sg.color};">${(sg.v ?? 0).toFixed(2)}</span></div>
+        <div style="height:8px;border-radius:8px;background:rgba(255,255,255,0.07);overflow:hidden;"><div style="height:100%;width:${Math.round((sg.v??0)*100)}%;border-radius:8px;background:${sg.color};box-shadow:0 0 14px ${sg.glow};"></div></div>
+        <div style="font-size:12.5px;color:rgba(226,232,246,0.55);margin-top:8px;line-height:1.5;">${sg.note}</div>
+      </div>`).join('') + `
+      <div style="margin-top:8px;padding:16px 18px;border-radius:14px;background:${v.withdrawn?'rgba(255,110,110,0.1)':'rgba(61,220,151,0.08)'};border:1px solid ${v.withdrawn?'rgba(255,110,110,0.3)':'rgba(61,220,151,0.24)'};display:flex;align-items:center;gap:11px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:${v.withdrawn?'#ff6e6e':'#3ddc97'};box-shadow:0 0 10px ${v.withdrawn?'#ff6e6e':'#3ddc97'};"></span>
+        <span style="font-size:14px;color:rgba(226,240,236,0.85);">${v.withdrawn ? 'WITHDRAWN — presence lapsed, service paused' : 'Boundary intact'} · gates open: ${open.join(' ') || 'none'}</span>
+      </div></div>`;
+
+  } else if (k === 'network') {
+    const on = P.filter(p => p.status === 'online').length;
+    const stats = [
+      { label:'NODES', val:String(P.length), color:'#e4f2ff' }, { label:'ONLINE', val:String(on), color:'#8ef0c6' },
+      { label:'OBSERVATIONS', val:String(v.observation_count ?? 0), color:'#aee7ff' },
+      { label:'TICK', val:String(v.tick ?? 0), color:'#9cc0ff' }, { label:'UPTIME', val:ago(v.uptime_secs ?? 0), color:'#bcd2ff' },
+    ];
+    el.innerHTML = `<div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:22px;">` + stats.map(n => `
+      <div style="padding:16px;border-radius:14px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,0.14);text-align:center;">
+        <div class="m" style="font-size:clamp(20px,2.6vw,28px);font-weight:600;color:${n.color};text-shadow:0 0 14px rgba(120,200,255,0.4);">${n.val}</div>
+        <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-top:6px;">${n.label}</div>
+      </div>`).join('') + `</div><div style="display:flex;flex-direction:column;gap:8px;">` + P.map(p => `
+      <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:rgba(16,34,60,0.2);border:1px solid rgba(120,190,255,0.1);">
+        <span style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color};"></span>
+        <span style="font-size:14px;font-weight:600;flex:1;">${esc(p.name)}</span>
+        <span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(p.m.addr || HOME.place)}</span>
+        <span class="m" style="font-size:11px;color:${p.color};min-width:52px;text-align:right;">${esc(p.seen)}</span>
+      </div>`).join('') + `</div>` + ((v.hosts||[]).length ? `<div class="m" style="margin-top:14px;font-size:10px;color:rgba(150,180,255,0.55);">this familiar answers at: ${v.hosts.map(esc).join(' · ')}</div>` : '') + `</div>`;
+
+  } else if (k === 'vision') {
+    const camOn = !!(v.gates && v.gates.camera);
+    el.innerHTML = `<div style="max-width:760px;">
+      <div style="padding:16px 18px;border-radius:14px;background:rgba(255,177,90,0.08);border:1px solid rgba(255,177,90,0.28);display:flex;align-items:center;gap:11px;margin-bottom:16px;">
+        <span style="width:9px;height:9px;border-radius:50%;background:#ff8f5a;box-shadow:0 0 12px #ff8f5a;"></span>
+        <span style="font-size:14px;color:rgba(246,236,226,0.9);line-height:1.5;">The eye is <strong>consensual, local-only, and one tap from off</strong>. It watches for you, never over you.</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:15px 17px;border-radius:14px;background:rgba(16,34,60,0.26);border:1px solid ${camOn?'rgba(61,220,151,0.4)':'rgba(120,190,255,0.14)'};margin-bottom:10px;">
+        <span style="width:10px;height:10px;border-radius:50%;background:${camOn?'#3ddc97':'#6c9bff'};box-shadow:0 0 12px ${camOn?'#3ddc97':'#6c9bff'};flex-shrink:0;"></span>
+        <div style="flex:1;"><div style="font-size:15px;font-weight:600;">Camera gate</div>
+        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.55);margin-top:3px;">consent ${camOn?'granted':'not granted'} · process &amp; discard</div></div>
+        ${chip(camOn ? 'OPEN' : 'CLOSED', camOn ? '#3ddc97' : '#6c9bff')}
+      </div>
+      <div class="m" style="font-size:11px;color:rgba(150,180,255,0.55);line-height:1.6;">No cameras are enrolled yet. When the familiar discovers one, it appears here — observing only after an explicit grant, with a persistent indicator while it watches.</div></div>`;
+
+  } else if (k === 'controls') {
+    const g = v.gates || {};
+    const rows = [ ['llm','allow_llm',g.llm], ['camera','allow_camera',g.camera], ['network','allow_network',g.network], ['mesh','allow_mesh',g.mesh], ['execute','allow_execute',g.execute], ['agent','allow_agent',g.agent], ['tool install','allow_tool_install',g.tool_install] ];
+    el.innerHTML = `<div style="max-width:720px;">` + rows.map(([name, key, on]) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;padding:13px 16px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid rgba(120,190,255,0.12);">
+        <span style="font-size:15px;font-weight:500;">${name}</span>
+        <button onclick="sphereGate('${key}', ${on ? 'false' : 'true'})" class="m" style="padding:7px 16px;border-radius:9px;border:1px solid ${on?'rgba(61,220,151,0.4)':'rgba(132,206,255,0.3)'};background:${on?'rgba(61,220,151,0.12)':'rgba(90,170,255,0.08)'};color:${on?'#8ef0c6':'#9cc0ff'};font-size:10px;letter-spacing:0.1em;cursor:pointer;">${on ? 'OPEN' : 'CLOSED'}</button>
+      </div>`).join('') + `
+      <div style="margin-top:20px;padding:16px 18px;border-radius:14px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,0.16);">
+        <div style="font-size:15px;font-weight:600;">Daemon</div>
+        <div class="m" style="font-size:10px;color:#8ef0c6;margin-top:4px;">${S.linkOk ? 'running' : 'not answering'} · uptime ${ago(v.uptime_secs ?? 0)} · tick ${v.tick ?? 0}</div>
+      </div></div>`;
+  }
+}
+
+// ---------- orbiting glyph buttons ----------
+const GLYPHS = {
+  conversation: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M9 13h30a4 4 0 0 1 4 4v11a4 4 0 0 1-4 4H23l-9 6v-6h-5a4 4 0 0 1-4-4V17a4 4 0 0 1 4-4z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><rect x="16" y="18" width="3" height="11" rx="1.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.1s ease-in-out infinite;"/><rect x="22.5" y="18" width="3" height="11" rx="1.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.1s ease-in-out infinite 0.22s;"/><rect x="29" y="18" width="3" height="11" rx="1.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.1s ease-in-out infinite 0.44s;"/></svg>`,
+  roster: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:spin 16s linear infinite;"><line x1="24" y1="24" x2="24" y2="8" stroke="currentColor" stroke-width="1.3" opacity="0.45"/><line x1="24" y1="24" x2="39" y2="32" stroke="currentColor" stroke-width="1.3" opacity="0.45"/><line x1="24" y1="24" x2="11" y2="34" stroke="currentColor" stroke-width="1.3" opacity="0.45"/><circle cx="24" cy="8" r="3" fill="currentColor"/><circle cx="39" cy="32" r="3" fill="currentColor"/><circle cx="11" cy="34" r="3" fill="currentColor"/></g><circle cx="24" cy="24" r="4.2" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.8s ease-in-out infinite;"/></svg>`,
+  theories: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><circle cx="24" cy="24" r="6" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 9s linear infinite;"><circle cx="24" cy="24" r="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="3 6" opacity="0.6"/><circle cx="24" cy="11" r="2" fill="currentColor"/><circle cx="37" cy="28" r="2" fill="currentColor"/><circle cx="12" cy="29" r="2" fill="currentColor"/></g></svg>`,
+  work: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M3 24h9l3-12 5 24 4-15 3 7h18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="72 72" style="animation:dashmove 1.7s linear infinite;"/></svg>`,
+  signals: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><rect x="7" y="12" width="5.5" height="24" rx="2.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.2s ease-in-out infinite;"/><rect x="16" y="12" width="5.5" height="24" rx="2.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.2s ease-in-out infinite 0.25s;"/><rect x="25" y="12" width="5.5" height="24" rx="2.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.2s ease-in-out infinite 0.5s;"/><rect x="34" y="12" width="5.5" height="24" rx="2.5" fill="currentColor" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.2s ease-in-out infinite 0.75s;"/></svg>`,
+  network: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><circle cx="24" cy="24" r="14" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.75"/><ellipse cx="24" cy="24" rx="14" ry="5" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><ellipse cx="24" cy="24" rx="5" ry="14" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5" style="transform-box:fill-box;transform-origin:center;animation:mer 5s ease-in-out infinite;"/><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 6s linear infinite;"><circle cx="24" cy="6" r="2.6" fill="currentColor"/></g></svg>`,
+  vision: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:blink 5s ease-in-out infinite;"><path d="M4 24s7-11 20-11 20 11 20 11-7 11-20 11S4 24 4 24z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="24" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 4"/></g><circle cx="24" cy="24" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 3s ease-in-out infinite;"/></g></svg>`,
+  controls: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><line x1="8" y1="15" x2="40" y2="15" stroke="currentColor" stroke-width="2" opacity="0.4"/><line x1="8" y1="24" x2="40" y2="24" stroke="currentColor" stroke-width="2" opacity="0.4"/><line x1="8" y1="33" x2="40" y2="33" stroke="currentColor" stroke-width="2" opacity="0.4"/><circle cx="24" cy="15" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:knob 3s ease-in-out infinite;"/><circle cx="24" cy="24" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:knob 3.4s ease-in-out infinite 0.5s;"/><circle cx="24" cy="33" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:knob 3s ease-in-out infinite reverse;"/></svg>`,
+};
+
+function renderButtons() {
+  const N = SCREENS.length, Rx = 46, Ry = 45;
+  $('screenbtns').innerHTML = SCREENS.map((key, i) => {
+    const ang = (-90 + (i + 0.5) * (360 / N)) * Math.PI / 180;
+    const on = key === S.activeScreen;
+    return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
+      <span class="ic" style="color:${on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};">${GLYPHS[key]}</span></button>`;
+  }).join('');
+}
+
+function renderChrome() {
+  $('holo').style.display = S.holoHidden ? 'none' : 'flex';
+  $('holoRim').style.display = S.holoHidden ? 'none' : 'block';
+  $('layerlabel').textContent = S.mode === 'street' ? 'MAP' : 'SAT';
+  $('loading').style.display = S.loading ? 'flex' : 'none';
+  for (const [id, on] of [['modeglobe', S.mode === 'globe'], ['modestreet', S.mode === 'street']]) {
+    const b = $(id);
+    b.style.background = on ? 'linear-gradient(180deg,#8fb4ff,#3f7bff)' : 'transparent';
+    b.style.boxShadow = on ? '0 5px 16px rgba(47,107,255,0.4)' : 'none';
+    b.children[0].style.color = on ? '#0a1330' : 'rgba(226,232,246,0.72)';
+    b.children[1].style.color = on ? 'rgba(10,19,48,0.65)' : 'rgba(140,165,220,0.5)';
+  }
+  $('linkstat').textContent = S.linkOk ? 'LINKED' : 'NO DAEMON';
+  $('linkstat').style.color = S.linkOk ? '#8ef0c6' : '#ff8fa3';
+}
+
+function renderCallouts() {
+  const P = peers();
+  $('callouts').innerHTML = P.map((p, i) => `
+    <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;">
+      <div style="position:absolute;left:0;top:0;width:11px;height:11px;transform:translate(-50%,-50%);">
+        <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
+        <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};animation:ping 2.8s ease-out infinite;"></span>
+      </div>
+      <div style="position:absolute;left:0;top:0;width:44px;height:1px;transform-origin:0 0;transform:rotate(-58deg);background:linear-gradient(90deg,${p.color},rgba(140,180,255,0));"></div>
+      <div onclick="sphereDive(${i})" style="position:absolute;left:18px;top:-52px;min-width:120px;padding:7px 10px;border-radius:11px;background:rgba(9,15,32,0.6);border:1px solid ${p.local?'rgba(174,231,255,0.35)':'rgba(120,160,255,0.28)'};backdrop-filter:blur(16px);box-shadow:0 10px 30px rgba(0,0,0,0.45);pointer-events:auto;cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+          <span style="font-size:12px;font-weight:600;">${esc(p.name)}</span>
+          <span class="m" style="font-size:7.5px;letter-spacing:0.1em;padding:2px 5px;border-radius:5px;background:${p.local?'rgba(174,231,255,0.16)':'rgba(120,160,255,0.16)'};color:${p.local?'#cdeeff':'#bcd2ff'};">${p.kindWord}</span>
+        </div>
+        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${HOME.place}</span><span style="color:${p.color};">${esc(p.seen)}</span></div>
+      </div>
+    </div>`).join('');
+  G.anchorDirs = P.map(p => latLon(p.lat, p.lon));
+}
+
+// ---------- bridge to the app / daemon ----------
+function toApp(kind, payload) {
+  try { window.webkit.messageHandlers.sphere.postMessage({ kind, ...payload }); } catch (e) { /* browser preview: no bridge */ }
+}
+window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderButtons(); renderChrome(); renderScreen(); };
+window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
+window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
+window.sphereUpdate = (view) => {
+  S.view = view; S.linkOk = true;
+  renderCallouts(); renderChrome(); renderScreen();
+};
+window.sphereLinkDown = (msg) => { S.linkOk = false; renderChrome(); };
+
+$('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
+$('layerbtn').onclick = () => { S.mode === 'street' ? setMode('globe') : window.sphereDive(S.focusIdx); };
+$('modeglobe').onclick = () => setMode('globe');
+$('modestreet').onclick = () => window.sphereDive(S.focusIdx);
+function setMode(m) { S.mode = m; if (m === 'globe' && G.camera) { G.camera.position.setLength(3.5); G.controls.update(); } if (m === 'street') buildStreet(S.focusIdx); renderChrome(); }
+
+// ---------- three.js globe (from the design, verbatim where possible) ----------
+const G = { anchorDirs: [] };
+const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (lon + 180) * Math.PI / 180; return new THREE.Vector3(-Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)).normalize(); };
+
+window.sphereDive = (i) => {
+  S.focusIdx = i; S.holoHidden = true; renderChrome();
+  if (!G.group) { setMode('street'); return; }
+  buildStreet(i);
+  G.diveStartQ = G.group.quaternion.clone();
+  G.diveTargetQ = new THREE.Quaternion().setFromUnitVectors(G.anchorDirs[i].clone(), new THREE.Vector3(0, 0, 1));
+  G.diveFromZ = G.camera.position.length();
+  G.diveT0 = performance.now();
+  G.diving = true;
+};
+
+// street surface — procedural chart of the anchorage, seeded per node
+let ST = null, stCtx = null;
+function buildStreet(idx) {
+  const P = peers(); const p = P[idx] || P[0] || { name: 'Wildhorse', color: '#aee7ff' };
+  let s = ((idx + 1) * 2654435761) >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const sp = 56 + rnd() * 22, ox = rnd() * sp, oy = rnd() * sp, R = 1200;
+  const vlines = [], hlines = [];
+  for (let x = -R; x <= R; x += sp) vlines.push({ x: x + (rnd() - 0.5) * 6, art: Math.round((x + ox) / sp) % 3 === 0 });
+  for (let y = -R; y <= R; y += sp) hlines.push({ y: y + (rnd() - 0.5) * 6, art: Math.round((y + oy) / sp) % 3 === 0 });
+  const riverBase = (rnd() - 0.5) * 520, riverW = 64 + rnd() * 46, rp = rnd() * 10;
+  const parks = []; for (let i = 0; i < 2; i++) parks.push({ x: (rnd() - 0.5) * 900, y: (rnd() - 0.5) * 620, w: 130 + rnd() * 150, h: 100 + rnd() * 130 });
+  const subNames = ['Helm','Galley','Bow','Dock','Mast','Berth','Node','Relay'];
+  const sub = []; for (let i = 0; i < 3; i++) sub.push({ x: (rnd() - 0.5) * 480, y: (rnd() - 0.5) * 340, name: subNames[Math.floor(rnd() * subNames.length)], seed: rnd() * 10 });
+  const stNames = ['Harbor','Spinnaker','Anchor','Windward','Ferry','Marina','Tide','Channel','Cove','Beacon'];
+  const labels = []; for (let i = 0; i < 7; i++) labels.push({ x: (rnd() - 0.5) * 1040, y: (rnd() - 0.5) * 760, t: stNames[Math.floor(rnd() * stNames.length)] + (rnd() > 0.5 ? ' St' : ' Way'), vert: rnd() > 0.5 });
+  const traffic = vlines.filter(l => l.art).slice(0, 4).map((l, i) => ({ x: l.x, dir: i % 2 ? 1 : -1, off: rnd() * 1000, spd: 90 + rnd() * 90 }));
+  ST = { vlines, hlines, riverBase, riverW, rp, parks, sub, labels, traffic, city: HOME.place, region: p.name, color: p.color };
+}
+function drawLightning(ctx, x1, y1, x2, y2, t, seed, color) {
+  const seg = 16; ctx.beginPath();
+  const nx = -(y2 - y1), ny = (x2 - x1), L = Math.hypot(nx, ny) || 1;
+  for (let i = 0; i <= seg; i++) {
+    const tt = i / seg; let x = x1 + (x2 - x1) * tt, y = y1 + (y2 - y1) * tt;
+    const env = Math.sin(Math.PI * tt);
+    const off = (Math.sin(tt * 13 + t * 9 + seed) * 0.6 + Math.sin(tt * 33 - t * 14 + seed) * 0.4) * 15 * env;
+    x += nx / L * off; y += ny / L * off;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.strokeStyle = color; ctx.lineWidth = 1.6; ctx.shadowColor = color; ctx.shadowBlur = 12; ctx.stroke(); ctx.shadowBlur = 0;
+}
+function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x - w/2 + r, y - h/2); ctx.arcTo(x + w/2, y - h/2, x + w/2, y + h/2, r); ctx.arcTo(x + w/2, y + h/2, x - w/2, y + h/2, r); ctx.arcTo(x - w/2, y + h/2, x - w/2, y - h/2, r); ctx.arcTo(x - w/2, y - h/2, x + w/2, y - h/2, r); ctx.closePath(); }
+function drawStreet(t) {
+  const cv = $('street'); if (!stCtx || !ST) return;
+  const dpr = G.dpr || 1, w = cv.width / dpr, h = cv.height / dpr;
+  stCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const ctx = stCtx;
+  const g0 = ctx.createRadialGradient(w/2, h*0.46, 60, w/2, h*0.46, Math.max(w, h)*0.75);
+  g0.addColorStop(0, '#0a1219'); g0.addColorStop(1, '#05080c');
+  ctx.fillStyle = g0; ctx.fillRect(0, 0, w, h);
+  const cx = w/2, cy = h*0.46;
+  ctx.save(); ctx.translate(cx + Math.sin(t*0.05)*16, cy + Math.cos(t*0.04)*11);
+  ctx.strokeStyle = '#0b2739'; ctx.lineWidth = ST.riverW; ctx.lineCap = 'round'; ctx.beginPath();
+  for (let y = -1200; y <= 1200; y += 44) { const x = ST.riverBase + Math.sin(y*0.004 + ST.rp)*120; y === -1200 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(90,180,255,0.18)'; ctx.lineWidth = 2; ctx.beginPath();
+  for (let y = -1200; y <= 1200; y += 44) { const x = ST.riverBase + Math.sin(y*0.004 + ST.rp)*120 - ST.riverW/2; y === -1200 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+  ctx.stroke();
+  for (const pk of ST.parks) { ctx.fillStyle = 'rgba(24,64,44,0.5)'; rr(ctx, pk.x, pk.y, pk.w, pk.h, 14); ctx.fill(); ctx.strokeStyle = 'rgba(70,150,110,0.28)'; ctx.lineWidth = 1; ctx.stroke(); }
+  ctx.lineWidth = 1.1; ctx.strokeStyle = 'rgba(84,124,166,0.16)'; ctx.beginPath();
+  for (const l of ST.vlines) if (!l.art) { ctx.moveTo(l.x, -1200); ctx.lineTo(l.x, 1200); }
+  for (const l of ST.hlines) if (!l.art) { ctx.moveTo(-1200, l.y); ctx.lineTo(1200, l.y); }
+  ctx.stroke();
+  ctx.lineWidth = 3.4; ctx.strokeStyle = 'rgba(120,180,240,0.34)'; ctx.shadowColor = 'rgba(90,160,255,0.5)'; ctx.shadowBlur = 8; ctx.beginPath();
+  for (const l of ST.vlines) if (l.art) { ctx.moveTo(l.x, -1200); ctx.lineTo(l.x, 1200); }
+  for (const l of ST.hlines) if (l.art) { ctx.moveTo(-1200, l.y); ctx.lineTo(1200, l.y); }
+  ctx.stroke(); ctx.shadowBlur = 0;
+  for (const tr of ST.traffic) {
+    const yy = (((t*tr.spd*tr.dir + tr.off) % 2400) + 2400) % 2400 - 1200;
+    ctx.fillStyle = 'rgba(190,235,255,0.9)'; ctx.shadowColor = '#aee7ff'; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.arc(tr.x, yy, 2.4, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+  }
+  ctx.font = "10px 'IBM Plex Mono', monospace"; ctx.fillStyle = 'rgba(150,190,240,0.4)';
+  for (const lb of ST.labels) { ctx.save(); ctx.translate(lb.x, lb.y); if (lb.vert) ctx.rotate(-Math.PI/2); ctx.fillText(lb.t, 0, 0); ctx.restore(); }
+  for (const sn of ST.sub) {
+    drawLightning(ctx, 0, 0, sn.x, sn.y, t, sn.seed, 'rgba(174,231,255,0.7)');
+    ctx.fillStyle = '#7fd0ff'; ctx.shadowColor = '#7fd0ff'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(sn.x, sn.y, 4, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.font = "9px 'IBM Plex Mono', monospace"; ctx.fillStyle = 'rgba(200,224,255,0.7)'; ctx.fillText(sn.name, sn.x + 8, sn.y + 3);
+  }
+  ctx.save(); ctx.rotate(t*0.55); const sweep = ctx.createLinearGradient(0, 0, 300, 0);
+  sweep.addColorStop(0, 'rgba(120,200,255,0.16)'); sweep.addColorStop(1, 'rgba(120,200,255,0)');
+  ctx.fillStyle = sweep; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(300, -46); ctx.lineTo(300, 46); ctx.closePath(); ctx.fill(); ctx.restore();
+  const pr = 10 + Math.sin(t*2.4)*2;
+  ctx.strokeStyle = ST.color; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + 0.5*Math.sin(t*2.4);
+  ctx.beginPath(); ctx.arc(0, 0, 18 + Math.sin(t*2.4)*6, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = ST.color; ctx.shadowColor = ST.color; ctx.shadowBlur = 20;
+  ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.fillStyle = '#06121e'; ctx.beginPath(); ctx.arc(0, 0, pr - 4, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.font = "600 12px 'IBM Plex Mono', monospace"; ctx.fillStyle = 'rgba(200,224,255,0.85)';
+  ctx.fillText(ST.region.toUpperCase() + ' · ' + ST.city, cx + 22, cy - 20);
+  ctx.strokeStyle = 'rgba(200,224,255,0.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(50, h - 60); ctx.lineTo(130, h - 60); ctx.stroke();
+  ctx.font = "9px 'IBM Plex Mono', monospace"; ctx.fillStyle = 'rgba(180,210,245,0.6)'; ctx.fillText('50 m', 52, h - 66);
+  const vg = ctx.createRadialGradient(cx, cy, h*0.3, cx, cy, h*0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(3,6,11,0.7)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h);
+}
+
+function initThree() {
+  const canvas = $('globe');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setClearColor(0x000000, 0);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  camera.position.set(0, 0, 3.5);
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true; controls.dampingFactor = 0.07;
+  controls.enablePan = false; controls.minDistance = 2.05; controls.maxDistance = 6;
+  controls.autoRotate = true; controls.autoRotateSpeed = 0.14; controls.rotateSpeed = 0.5;
+  const group = new THREE.Group(); scene.add(group);
+  Object.assign(G, { renderer, scene, camera, controls, group });
+
+  const geo = new THREE.SphereGeometry(1, 256, 128);
+  const mgr = new THREE.LoadingManager();
+  const loader = new THREE.TextureLoader(mgr);
+  const base = 'https://unpkg.com/three-globe/example/img/';
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  const dayTex = loader.load(base + 'earth-blue-marble.jpg');
+  const topoTex = loader.load(base + 'earth-topology.png');
+  const waterTex = loader.load(base + 'earth-water.png');
+  const nightTex = loader.load(base + 'earth-night.jpg');
+  dayTex.colorSpace = THREE.SRGBColorSpace; nightTex.colorSpace = THREE.SRGBColorSpace;
+  [dayTex, topoTex, waterTex, nightTex].forEach(t => { t.anisotropy = maxAniso; });
+
+  const sunDir = new THREE.Vector3(1, 0.28, 0.55).normalize();
+  const earthMat = new THREE.MeshStandardMaterial({ map: dayTex, displacementMap: topoTex, displacementScale: 0.14, bumpMap: topoTex, bumpScale: 0.02, roughnessMap: waterTex, metalness: 0.02, roughness: 0.78, transparent: true, opacity: 1 });
+  earthMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uSun = { value: sunDir }; sh.uniforms.uNight = { value: nightTex };
+    earthMat.userData.sh = sh;
+    sh.vertexShader = 'varying vec3 vWNormal;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n  vWNormal = normalize(mat3(modelMatrix) * normal);');
+    sh.fragmentShader = 'uniform vec3 uSun; uniform sampler2D uNight; varying vec3 vWNormal;\n' + sh.fragmentShader
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+         float sun = dot(normalize(vWNormal), uSun);
+         float day = smoothstep(-0.12, 0.28, sun);
+         vec3 night = texture2D(uNight, vMapUv).rgb; night = pow(night, vec3(1.3)) * 2.6;
+         totalEmissiveRadiance += night * vec3(1.0,0.92,0.7) * (1.0 - day) * 1.4;`)
+      .replace('#include <opaque_fragment>', `float sun2 = dot(normalize(vWNormal), uSun);
+         float dayF = smoothstep(-0.18, 0.30, sun2);
+         outgoingLight *= mix(0.24, 1.42, dayF);
+         float limbHaze = pow(clamp(dayF,0.0,1.0), 0.8) * pow(1.0 - abs(dot(normalize(vWNormal), normalize(vViewPosition))), 3.0);
+         outgoingLight += vec3(0.20,0.42,0.85) * limbHaze * 0.55;
+         #include <opaque_fragment>`);
+  };
+  group.add(new THREE.Mesh(geo, earthMat));
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(1.006, 48, 30), new THREE.MeshBasicMaterial({ color: new THREE.Color('#8fd0ff'), wireframe: true, transparent: true, opacity: 0.06, depthWrite: false })));
+  const atmoMat = new THREE.ShaderMaterial({ transparent: true, blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false,
+    uniforms: { uColor: { value: new THREE.Color('#3f82ff') }, uInt: { value: 0.25 } },
+    vertexShader: 'varying vec3 vN; varying vec3 vE; void main(){ vN=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0); vE=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }',
+    fragmentShader: 'varying vec3 vN; varying vec3 vE; uniform vec3 uColor; uniform float uInt; void main(){ float f=pow(1.0-abs(dot(vN,vE)),3.0); gl_FragColor=vec4(uColor,f*uInt); }' });
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(1.16, 64, 48), atmoMat));
+  scene.add(new THREE.AmbientLight(0x1b2540, 0.55));
+  const key = new THREE.DirectionalLight(0xfff4e6, 1.75); key.position.copy(sunDir).multiplyScalar(5); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x5f9bff, 0.4); rim.position.set(-3, -1, -2); scene.add(rim);
+  const starGeo = new THREE.BufferGeometry(); const starN = 800; const spr = new Float32Array(starN * 3);
+  for (let i = 0; i < starN; i++) { const r = 16 + Math.random()*20, th = Math.random()*Math.PI*2, ph = Math.acos(2*Math.random() - 1); spr[i*3]=r*Math.sin(ph)*Math.cos(th); spr[i*3+1]=r*Math.sin(ph)*Math.sin(th); spr[i*3+2]=r*Math.cos(ph); }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(spr, 3));
+  scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x9cc0ff, size: 0.055, transparent: true, opacity: 0.5, sizeAttenuation: true })));
+
+  stCtx = $('street').getContext('2d');
+  $('street').addEventListener('wheel', (e) => {
+    if (S.mode !== 'street') return;
+    e.preventDefault();
+    if (e.deltaY > 0) { G.zAcc = (G.zAcc || 0) + e.deltaY; if (G.zAcc > 220) { G.zAcc = 0; setMode('globe'); } } else G.zAcc = 0;
+  }, { passive: false });
+
+  const resize = () => {
+    const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+    const dpr = Math.min(2, window.devicePixelRatio || 1); G.dpr = dpr;
+    renderer.setPixelRatio(dpr); renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix();
+    $('street').width = w * dpr; $('street').height = h * dpr;
+  };
+  new ResizeObserver(resize).observe(canvas); resize();
+
+  let doneLoad = false;
+  mgr.onLoad = () => { doneLoad = true; S.loading = false; renderChrome(); };
+  setTimeout(() => { if (!doneLoad) { S.loading = false; renderChrome(); } }, 6000);
+
+  const clock = new THREE.Clock();
+  const worldPos = new THREE.Vector3(), worldNorm = new THREE.Vector3(), camDir = new THREE.Vector3();
+  let last = performance.now(), fpsAcc = 0, fpsN = 0, statT = 0, streetA = 0;
+  const loop = () => {
+    requestAnimationFrame(loop);
+    const t = clock.getElapsedTime();
+    const now = performance.now(); const dt = Math.min((now - last)/1000, 0.05); last = now;
+    const k = Math.min(1, dt*3.4);
+    if (G.diving) {
+      const dp = Math.min(1, (performance.now() - G.diveT0)/1200);
+      const de = 1 - Math.pow(1 - dp, 3);
+      group.quaternion.copy(G.diveStartQ).slerp(G.diveTargetQ, de);
+      camera.position.setLength(G.diveFromZ + (2.12 - G.diveFromZ)*de);
+      const sa = Math.max(0, (dp - 0.5)/0.5);
+      streetA += (sa - streetA) * Math.min(1, dt*8);
+      if (dp >= 1) { G.diving = false; streetA = 1; setMode('street'); }
+    } else {
+      streetA += ((S.mode === 'street' ? 1 : 0) - streetA) * k;
+    }
+    if (earthMat.userData.sh) earthMat.userData.sh.uniforms.uSun.value = sunDir;
+    const breath = 1 + Math.sin(t * (Math.PI*2/6)) * 0.012;
+    group.scale.setScalar(breath);
+    if (!G.diving && S.mode === 'globe' && camera.position.length() < 2.24) setMode('street');
+    controls.autoRotate = !G.diving && S.mode === 'globe';
+    controls.update();
+    renderer.render(scene, camera);
+    canvas.style.opacity = String(1 - streetA);
+    const sc = $('street'); sc.style.opacity = String(streetA); sc.style.pointerEvents = streetA > 0.5 ? 'auto' : 'none';
+    if (streetA > 0.01) drawStreet(t);
+
+    const co = $('callouts');
+    const vis = 1 - streetA;
+    co.style.opacity = vis > 0.05 ? String(vis) : '0';
+    const rect = canvas.getBoundingClientRect();
+    camera.getWorldDirection(camDir);
+    const els = co.querySelectorAll('[data-callout]');
+    for (let i = 0; i < G.anchorDirs.length; i++) {
+      const el = els[i]; if (!el) continue;
+      if (vis < 0.05) { el.style.display = 'none'; continue; }
+      worldNorm.copy(G.anchorDirs[i]).applyQuaternion(group.quaternion).normalize();
+      worldPos.copy(worldNorm).multiplyScalar(1.02 * breath);
+      if (worldNorm.dot(camDir) >= -0.12) { el.style.display = 'none'; continue; }
+      const proj = worldPos.clone().project(camera);
+      el.style.display = 'block';
+      el.style.transform = `translate(${((proj.x*0.5 + 0.5)*rect.width).toFixed(1)}px, ${((-proj.y*0.5 + 0.5)*rect.height).toFixed(1)}px)`;
+    }
+
+    const az = controls.getAzimuthalAngle();
+    let lon = -az * 180/Math.PI; lon = ((lon + 180) % 360 + 360) % 360 - 180;
+    $('lon').textContent = (lon >= 0 ? '+' : '') + Math.round(lon) + '°';
+    fpsAcc += 1/Math.max(dt, 0.001); fpsN++; statT += dt;
+    if (statT > 0.5) { $('fps').textContent = Math.round(fpsAcc/fpsN); fpsAcc = 0; fpsN = 0; statT = 0; }
+  };
+  loop();
+}
+
+renderButtons(); renderChrome(); renderScreen();
+initThree();
+</script>
+</body>
+</html>

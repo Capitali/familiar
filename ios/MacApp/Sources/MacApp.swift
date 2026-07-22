@@ -117,12 +117,14 @@ struct MacConsole: View {
         }
     }
     var body: some View {
-        // The complete Metal interface — the orb IS the console; all data lives on the sweeping
-        // holographic panels. (The former rail/screens remain in this file for reference and for
-        // re-folding their richer content into panels as the interface matures.)
-        FamiliarConsole(worldview: model.worldview) { gate, open in
-            Task { await model.setGate(gate, open) }
-        }
+        // The Metal Sphere console (Claude Design import): a satellite globe with the mesh's
+        // nodes pinned aboard and a borderless hologram of screens over it. The web layer is
+        // presentation only — this app does all daemon I/O natively (see SphereWebView).
+        // The prior SwiftUI console (FamiliarConsole + rail screens below) remains for
+        // reference and fallback.
+        SphereWebView()
+            .ignoresSafeArea()
+            .background(Color(hex: 0x03050a))
     }
 }
 
