@@ -60,6 +60,10 @@
 
   <div id="callouts" style="position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;transition:opacity 0.5s;"></div>
 
+  <!-- electric arcs OVER the real map: the host projects node coordinates to screen points
+       (streetArcPoints) and this canvas draws the same lightning language in 2D -->
+  <canvas id="streetArcs" style="position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;opacity:0;transition:opacity 1.6s;"></canvas>
+
   <!-- daemon-down badge: appears only when the link is lost (otherwise no chrome) -->
   <div id="linkdown" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:9;width:34px;height:34px;border-radius:50%;background:rgba(60,10,16,0.6);border:1px solid rgba(255,110,110,0.5);backdrop-filter:blur(12px);align-items:center;justify-content:center;">
     <svg viewBox="0 0 24 24" fill="none" stroke="#ff6e6e" stroke-width="1.8" stroke-linecap="round" style="width:18px;height:18px;"><path d="M12 3v10"/><circle cx="12" cy="18.5" r="1.2" fill="#ff6e6e" stroke="none"/></svg>
@@ -343,14 +347,14 @@ function refreshScreen() {
       <div style="padding:16px;border-radius:14px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,0.14);text-align:center;">
         <div class="m" style="font-size:clamp(20px,2.6vw,28px);font-weight:600;color:${n.color};text-shadow:0 0 14px rgba(120,200,255,0.4);">${n.val}</div>
         <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-top:6px;">${labels[i]}</div>
-      </div>`).join('') + `</div><div style="display:flex;flex-direction:column;gap:8px;">` + P.map(p => `
-      <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:rgba(16,34,60,0.2);border:1px solid rgba(120,190,255,0.1);">
+      </div>`).join('') + `</div><div style="display:flex;flex-direction:column;gap:8px;">` + P.map((p, i) => `
+      <div onclick="sphereDive(${i})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:rgba(16,34,60,0.2);border:1px solid rgba(120,190,255,0.1);">
         <span style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color};"></span>
         <span style="font-size:14px;font-weight:600;flex:1;">${esc(p.name)}</span>
         <span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(p.m.addr || '')}</span>
         <span class="m" style="font-size:11px;color:${p.color};min-width:52px;text-align:right;">${esc(p.seen)}</span>
-      </div>`).join('') + F.map(fn => `
-      <div style="display:flex;align-items:center;gap:12px;padding:9px 14px;border-radius:12px;background:rgba(16,34,60,0.12);border:1px solid rgba(125,147,168,0.14);opacity:0.66;">
+      </div>`).join('') + F.map((fn, fi) => `
+      <div onclick="sphereDiveFrontier(${fi})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:9px 14px;border-radius:12px;background:rgba(16,34,60,0.12);border:1px solid rgba(125,147,168,0.14);opacity:0.66;">
         <span style="width:6px;height:6px;border-radius:50%;background:${FRONTIER_COLOR};box-shadow:0 0 7px ${FRONTIER_COLOR};"></span>
         <span style="font-size:12.5px;flex:1;color:rgba(220,230,240,0.75);">${esc(fn.name)}</span>
         <span class="m" style="font-size:9px;color:rgba(160,180,200,0.55);">${esc(fn.ip)} · ${esc(fn.reach)}</span>
@@ -439,14 +443,24 @@ window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true ||
 window.sphereUpdate = (view) => {
   S.view = view; S.linkOk = true;
   renderCallouts(); renderChrome(); refreshScreen();
+  if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };
 window.sphereLinkDown = () => { S.linkOk = false; renderChrome(); };
 // The native map finished its own flight and the human surfaced back to orbit.
+// Reverse of the dive: called at the crossfade point of the ascent (25% street zoom-out
+// behind us). Satellite fades back in over the 50% window while the globe camera rises,
+// then the last 25% is pure satellite zoom-out.
 window.sphereBackToGlobe = () => {
   S.mode = 'globe';
-  G.diving = false; G.streetA = 0;
-  if (G.camera) { G.camera.position.setLength(3.5); G.controls.update(); }
-  $('space').style.opacity = '1'; $('globe').style.opacity = '1'; $('vignette').style.opacity = '1';
+  G.diving = false;
+  const fade = (ZOOM_MS * 0.5 / 1000) + 's';
+  for (const id of ['space','globe','vignette']) { const e = $(id); e.style.transition = 'opacity ' + fade; e.style.opacity = '1'; }
+  const sa = $('streetArcs'); sa.style.transition = 'opacity ' + fade; sa.style.opacity = '0';
+  if (G.camera) {
+    G.camera.position.setLength(2.05);
+    G.ascendT0 = performance.now();
+    G.ascending = true;
+  }
   renderChrome();
 };
 
@@ -462,25 +476,39 @@ const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (
 // crossfade — satellite fading out while REAL Apple Maps fades in, both descending in
 // step; last 25% street map only, zooming to close detail (MapKit finishes the flight).
 const ROTATE_MS = 900, ZOOM_MS = 3200;
-window.sphereDive = (i) => {
-  const P = peers(); const p = P[i]; if (!p) return;
-  if (!p.located && !p.hasAnchor) { window.sphereScreen('network'); return; }
-  S.focusIdx = i; S.holoHidden = true; renderChrome();
-  if (!G.group) { handoff(p); return; }
-  G.diveTarget = p;
+function beginDive(target, dir) {
+  S.holoHidden = true; renderChrome();
+  if (!G.group) { handoff(target); return; }
+  G.diveTarget = target;
   G.diveStartQ = G.group.quaternion.clone();
-  G.diveTargetQ = new THREE.Quaternion().setFromUnitVectors(G.anchorDirs[i].clone(), new THREE.Vector3(0, 0, 1));
+  G.diveTargetQ = new THREE.Quaternion().setFromUnitVectors(dir.clone(), new THREE.Vector3(0, 0, 1));
   G.diveFromZ = G.camera.position.length();
   G.diveT0 = performance.now();
   G.diving = true;
   G.handedOff = false;
+}
+window.sphereDive = (i) => {
+  const P = peers(); const p = P[i]; if (!p) return;
+  if (!p.located && !p.hasAnchor) { window.sphereScreen('network'); return; }
+  S.focusIdx = i;
+  beginDive(p, G.anchorDirs[i]);
 };
+window.sphereDiveFrontier = (i) => {
+  const F = frontierNodes(); const f = F[i]; if (!f || !f.located) return;
+  beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, G.frontierDirs[i] || latLon(f.lat, f.lon));
+};
+function collectNodes() {
+  const P = peers(), F = frontierNodes();
+  return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, color: p.color, frontier: false, self: p.local }))
+    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, color: FRONTIER_COLOR, frontier: true, self: false })));
+}
 function handoff(p) {
   S.mode = 'street'; renderChrome();
-  toApp('street', { lat: p.lat, lon: p.lon, label: p.name, color: p.color });
-  // synchronized crossfade: satellite out over the middle 50% of the zoom
+  toApp('street', { lat: p.lat, lon: p.lon, label: p.name || p.label, color: p.color, nodes: collectNodes() });
+  // synchronized crossfade: satellite out over the middle 50% of the zoom; arcs surface with the map
   const fade = (ZOOM_MS * 0.5 / 1000) + 's';
   for (const id of ['space','globe','vignette']) { const e = $(id); e.style.transition = 'opacity ' + fade; e.style.opacity = '0'; }
+  const sa = $('streetArcs'); sa.style.transition = 'opacity ' + fade; sa.style.opacity = '1';
 }
 
 function initThree() {
@@ -569,6 +597,12 @@ function initThree() {
     requestAnimationFrame(loop);
     const t = clock.getElapsedTime();
     const now = performance.now(); const dt = Math.min((now - last)/1000, 0.05); last = now;
+    if (G.ascending) {
+      const ap = Math.min(1, (performance.now() - G.ascendT0)/(ZOOM_MS * 0.75));
+      const ae = ap < 0.5 ? 2*ap*ap : 1 - Math.pow(-2*ap + 2, 2)/2;
+      camera.position.setLength(2.05 + (3.5 - 2.05)*ae);
+      if (ap >= 1) G.ascending = false;
+    }
     if (G.diving) {
       const el = performance.now() - G.diveT0;
       if (el < ROTATE_MS) {
@@ -676,6 +710,64 @@ function animateArcs(t) {
     });
   }
 }
+
+// ---- street-level arcs: 2D lightning between host-projected screen points ----
+let streetPts = [];
+window.streetArcPoints = (pts) => { streetPts = pts || []; };
+(function streetArcLoop() {
+  const cv = $('streetArcs'); const ctx = cv.getContext('2d');
+  const draw = (tms) => {
+    requestAnimationFrame(draw);
+    if (S.mode !== 'street' && !parseFloat(cv.style.opacity)) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (cv.width !== w*dpr || cv.height !== h*dpr) { cv.width = w*dpr; cv.height = h*dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const t = tms/1000;
+    const selfP = streetPts.find(p => p.self);
+    if (!selfP) return;
+    for (const p of streetPts) {
+      if (p.self) continue;
+      const seg = 22, x1 = selfP.x, y1 = selfP.y, x2 = p.x, y2 = p.y;
+      const nx = -(y2 - y1), ny = (x2 - x1), L = Math.hypot(nx, ny) || 1;
+      if (L < 8) continue;
+      const bright = !p.frontier;
+      const seed = (p.label || '').length * 7.3;
+      for (const [width, alpha, amp, color] of bright
+        ? [[2.2, 0.85, 18, '#e4f6ff'], [4.5, 0.25, 22, '#4d93ff'], [1.2, 0.5, 26, '#8fd0ff']]
+        : [[1.4, 0.35, 12, '#7d93a8']]) {
+        ctx.beginPath();
+        for (let i = 0; i <= seg; i++) {
+          const tt = i/seg;
+          let x = x1 + (x2 - x1)*tt, y = y1 + (y2 - y1)*tt;
+          const env = Math.sin(Math.PI*tt);
+          const off = (Math.sin(tt*13 + t*9 + seed)*0.6 + Math.sin(tt*33 - t*14 + seed)*0.4) * amp * env;
+          x += nx/L*off; y += ny/L*off;
+          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        const crackle = (Math.sin(t*30 + seed) > 0.86) ? 0.4 : 1.0;
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.globalAlpha = alpha * crackle;
+        ctx.shadowColor = color; ctx.shadowBlur = bright ? 10 : 5;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      // travelling spark on bright arcs
+      if (bright) {
+        const pp = (t*0.35 + seed) % 1;
+        const tt = pp, env = Math.sin(Math.PI*tt);
+        let x = x1 + (x2 - x1)*tt, y = y1 + (y2 - y1)*tt;
+        const off = (Math.sin(tt*13 + t*9 + seed)*0.6 + Math.sin(tt*33 - t*14 + seed)*0.4) * 18 * env;
+        x += nx/L*off; y += ny/L*off;
+        ctx.fillStyle = '#ffffff'; ctx.shadowColor = '#aee7ff'; ctx.shadowBlur = 12;
+        ctx.globalAlpha = 0.9 * env;
+        ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI*2); ctx.fill();
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      }
+    }
+  };
+  requestAnimationFrame(draw);
+})();
 
 renderButtons(); renderChrome(); buildScreen();
 initThree();

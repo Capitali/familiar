@@ -5,9 +5,10 @@ import CoreLocation
 
 // The Metal Sphere console (imported from Claude Design "Familiar Metal Sphere.dc.html"):
 // a WKWebView renders the satellite globe + hologram (Resources/sphere/index.html), and the
-// street surface is REAL Apple Maps — a native MKMapView this host surfaces when the globe
-// dive reaches map altitude, continuing the same zoom down to street detail. The host does
-// all daemon I/O natively (loopback /local/worldview → window.sphereUpdate(); answers and
+// street surface is REAL Apple Maps — a native MKMapView under the (transparent) web layer.
+// In street mode the web layer stays as the arc overlay: the host projects every node's
+// coordinate to screen points ~10×/s and the page draws the electric arcs over the map.
+// All daemon I/O is native (loopback /local/worldview → window.sphereUpdate(); answers and
 // gate flips back over the script-message bridge). The web layer never fakes a map and
 // never touches the network for data.
 struct SphereConsole: View {
@@ -19,23 +20,19 @@ struct SphereConsole: View {
                 .ignoresSafeArea()
             SphereWebView(bridge: bridge)
                 .ignoresSafeArea()
-                .opacity(bridge.mode == .street ? 0 : 1)
                 .allowsHitTesting(bridge.mode != .street)
-                .animation(.easeInOut(duration: 1.6), value: bridge.mode)
             if bridge.mode == .street {
-                // Wordless exit: the orbit glyph, bottom-center — back up to the globe.
+                // Wordless exit, in the house glyph language — back up to orbit.
                 VStack {
                     Spacer()
                     Button(action: { bridge.backToGlobe() }) {
-                        Image(systemName: "globe.americas.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(Color(red: 0.81, green: 0.88, blue: 1.0))
-                            .frame(width: 52, height: 52)
-                            .background(.black.opacity(0.55), in: Circle())
-                            .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 1))
+                        OrbitGlyph()
+                            .frame(width: 56, height: 56)
+                            .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                            .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, 18)
+                    .padding(.bottom, 16)
                 }
             }
             // Invisible drag region: the window has no titlebar or visible edge, so the top
@@ -48,24 +45,55 @@ struct SphereConsole: View {
     }
 }
 
+// The orbit glyph (sphere + meridians + orbiting satellite dot), matching the page's
+// animated glyph language — stroked cyan, breathing meridian, dot in continuous orbit.
+struct OrbitGlyph: View {
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                let c = CGPoint(x: size.width / 2, y: size.height / 2)
+                let r = min(size.width, size.height) * 0.30
+                let ink = Color(red: 0.81, green: 0.88, blue: 1.0)
+                var sphere = Path()
+                sphere.addEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+                ctx.stroke(sphere, with: .color(ink.opacity(0.8)), lineWidth: 1.5)
+                var equator = Path()
+                equator.addEllipse(in: CGRect(x: c.x - r, y: c.y - r * 0.36, width: 2 * r, height: 0.72 * r))
+                ctx.stroke(equator, with: .color(ink.opacity(0.5)), lineWidth: 1.2)
+                let squash = abs(sin(t * 0.63)) * 0.9 + 0.1   // breathing meridian (matches `mer`)
+                var meridian = Path()
+                meridian.addEllipse(in: CGRect(x: c.x - r * squash, y: c.y - r, width: 2 * r * squash, height: 2 * r))
+                ctx.stroke(meridian, with: .color(ink.opacity(0.5)), lineWidth: 1.2)
+                let ang = t * (2 * .pi / 6)                    // 6s orbit (matches `orbitspin`)
+                let dot = CGPoint(x: c.x + cos(ang) * r * 1.28, y: c.y + sin(ang) * r * 1.28)
+                var dp = Path()
+                dp.addEllipse(in: CGRect(x: dot.x - 2.6, y: dot.y - 2.6, width: 5.2, height: 5.2))
+                ctx.fill(dp, with: .color(ink))
+            }
+        }
+    }
+}
+
 // MARK: - the shared bridge (web ↔ native ↔ daemon)
 
 @MainActor
-final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CLLocationManagerDelegate {
+final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CLLocationManagerDelegate, MKMapViewDelegate {
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
-    @Published var streetTarget: (lat: Double, lon: Double, label: String)?
-    @Published var members: [MapNode] = []
 
     weak var web: WKWebView?
     weak var map: MKMapView?
     private var timer: Timer?
+    private var projectTimer: Timer?
     private let base = URL(string: "http://127.0.0.1:47100")!
 
-    struct MapNode: Identifiable {
-        let id: String, label: String, lat: Double, lon: Double
-        let online: Bool, frontier: Bool
+    final class NodeAnnotation: MKPointAnnotation {
+        var colorHex = "#3ddc97"
+        var frontier = false
+        var isSelf = false
     }
+    private var nodes: [[String: Any]] = []
 
     // Covenant baseline: this node provides its position too. macOS CoreLocation (wifi
     // positioning) writes the daemon's mesh/geo.json seam — the same file any shell with a
@@ -90,50 +118,94 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             guard (resp as? HTTPURLResponse)?.statusCode == 200,
                   let json = String(data: data, encoding: .utf8) else { throw URLError(.badServerResponse) }
             web?.evaluateJavaScript("window.sphereUpdate(\(json))", completionHandler: nil)
-            updateMapNodes(from: data)
         } catch {
             web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown()", completionHandler: nil)
         }
     }
 
-    /// Members + frontier with real coordinates → native map annotations.
-    private func updateMapNodes(from data: Data) {
-        guard let v = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        var nodes: [MapNode] = []
-        for m in v["members"] as? [[String: Any]] ?? [] {
-            let lat = m["lat"] as? Double ?? 0, lon = m["lon"] as? Double ?? 0
-            guard lat != 0 || lon != 0 else { continue }
-            nodes.append(MapNode(id: m["node_id"] as? String ?? UUID().uuidString,
-                                 label: m["label"] as? String ?? "?",
-                                 lat: lat, lon: lon,
-                                 online: (m["status"] as? String ?? "") == "online" || (m["online"] as? Bool ?? false),
-                                 frontier: false))
-        }
-        members = nodes
-        map.map { syncAnnotations(on: $0) }
-    }
+    // ---- nodes on the real map ----
 
-    func syncAnnotations(on map: MKMapView) {
+    private func setNodes(_ list: [[String: Any]]) {
+        nodes = list
+        guard let map else { return }
         map.removeAnnotations(map.annotations)
-        for n in members {
-            let a = MKPointAnnotation()
-            a.coordinate = CLLocationCoordinate2D(latitude: n.lat, longitude: n.lon)
-            a.title = n.label
+        for n in nodes {
+            let a = NodeAnnotation()
+            a.coordinate = CLLocationCoordinate2D(latitude: n["lat"] as? Double ?? 0,
+                                                  longitude: n["lon"] as? Double ?? 0)
+            a.title = n["label"] as? String
+            a.colorHex = n["color"] as? String ?? "#3ddc97"
+            a.frontier = n["frontier"] as? Bool ?? false
+            a.isSelf = n["self"] as? Bool ?? false
             map.addAnnotation(a)
         }
     }
 
-    // The globe reached handoff altitude — surface Apple Maps at the matching height and
-    // fly the rest of the way down. Satellite→street continuity: the camera starts high
-    // (the globe's visual altitude), then descends to close detail in one native flight.
-    func surfaceStreet(lat: Double, lon: Double, label: String) {
-        streetTarget = (lat, lon, label)
+    nonisolated func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+        guard let node = annotation as? NodeAnnotation else { return nil }
+        let id = node.frontier ? "frontier" : "member"
+        let v = mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView
+            ?? MKMarkerAnnotationView(annotation: node, reuseIdentifier: id)
+        v.annotation = node
+        v.markerTintColor = NSColor(hex: node.colorHex)
+        v.displayPriority = node.frontier ? .defaultLow : .required
+        v.alphaValue = node.frontier ? 0.45 : 1.0
+        v.titleVisibility = node.frontier ? .hidden : .visible
+        return v
+    }
+
+    // A tap on a map node re-centers and dives the camera to it (same act as a roster dive).
+    nonisolated func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+        guard let node = view.annotation as? NodeAnnotation else { return }
+        let target = node.coordinate
+        Task { @MainActor in
+            let close = MKMapCamera(lookingAtCenter: target, fromDistance: 900, pitch: 35, heading: 0)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 1.4
+                ctx.allowsImplicitAnimation = true
+                self.map?.camera = close
+            }
+        }
+    }
+
+    /// While the map is up, feed the arc overlay the nodes' projected screen positions —
+    /// the page draws the electric arcs; this side only does geometry.
+    private func startProjecting() {
+        stopProjecting()
+        projectTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pushProjectedPoints() }
+        }
+    }
+    private func stopProjecting() {
+        projectTimer?.invalidate()
+        projectTimer = nil
+    }
+    private func pushProjectedPoints() {
+        guard mode == .street, let map, let web else { return }
+        var pts: [[String: Any]] = []
+        for n in nodes {
+            let coord = CLLocationCoordinate2D(latitude: n["lat"] as? Double ?? 0,
+                                               longitude: n["lon"] as? Double ?? 0)
+            let p = map.convert(coord, toPointTo: map)
+            pts.append(["x": p.x, "y": p.y,
+                        "label": n["label"] as? String ?? "",
+                        "frontier": n["frontier"] as? Bool ?? false,
+                        "self": n["self"] as? Bool ?? false])
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: pts),
+           let json = String(data: data, encoding: .utf8) {
+            web.evaluateJavaScript("window.streetArcPoints(\(json))", completionHandler: nil)
+        }
+    }
+
+    // ---- surface transitions ----
+
+    // The globe reached the crossfade point — surface Apple Maps at matching altitude and
+    // descend in step with the fade, ending in pure-street close detail.
+    func surfaceStreet(lat: Double, lon: Double) {
         mode = .street
         guard let map else { return }
-        syncAnnotations(on: map)
         let target = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-        // Surfaced at the globe's altitude; descend in step with the crossfade, ending in
-        // pure-street close detail — one continuous flight, no jump in the zoom range.
         map.camera = MKMapCamera(lookingAtCenter: target, fromDistance: 220_000, pitch: 0, heading: 0)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak map] in
             let close = MKMapCamera(lookingAtCenter: target, fromDistance: 900, pitch: 35, heading: 0)
@@ -143,14 +215,31 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 map?.camera = close
             }
         }
+        startProjecting()
     }
 
+    // The reverse pattern, mirrored: 25% pure street zoom-out first, then at the crossfade
+    // point the satellite fades back in (the page runs its globe ascent while this map
+    // keeps rising underneath), last 25% pure satellite zoom-out.
     func backToGlobe() {
-        mode = .globe
-        web?.evaluateJavaScript("window.sphereBackToGlobe && window.sphereBackToGlobe()", completionHandler: nil)
+        guard let map else { mode = .globe; return }
+        let center = map.centerCoordinate
+        let up = MKMapCamera(lookingAtCenter: center, fromDistance: 220_000, pitch: 0, heading: 0)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 2.4
+            ctx.allowsImplicitAnimation = true
+            map.camera = up
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self else { return }
+            self.mode = .globe
+            self.stopProjecting()
+            self.web?.evaluateJavaScript("window.sphereBackToGlobe && window.sphereBackToGlobe()", completionHandler: nil)
+        }
     }
 
-    // web → native acts
+    // ---- web → native acts ----
+
     nonisolated func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
         Task { @MainActor in
@@ -162,9 +251,11 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     self.post("local/gate", ["gate": gate, "open": body["open"] as? Bool ?? false])
                 }
             case "street":
+                self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
                 self.surfaceStreet(lat: body["lat"] as? Double ?? 0,
-                                   lon: body["lon"] as? Double ?? 0,
-                                   label: body["label"] as? String ?? "")
+                                   lon: body["lon"] as? Double ?? 0)
+            case "nodes":
+                self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
             case "surface":
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
             default: break
@@ -199,7 +290,18 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     }
 }
 
-// MARK: - the web layer (globe + holograms)
+extension NSColor {
+    convenience init(hex: String) {
+        var h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        if h.count == 3 { h = h.map { "\($0)\($0)" }.joined() }
+        let v = UInt64(h, radix: 16) ?? 0x3ddc97
+        self.init(red: CGFloat((v >> 16) & 0xff) / 255,
+                  green: CGFloat((v >> 8) & 0xff) / 255,
+                  blue: CGFloat(v & 0xff) / 255, alpha: 1)
+    }
+}
+
+// MARK: - the web layer (globe + holograms + street arc overlay)
 
 struct SphereWebView: NSViewRepresentable {
     let bridge: SphereBridge
@@ -231,8 +333,8 @@ struct MeshMapView: NSViewRepresentable {
         map.showsCompass = false
         map.showsZoomControls = false
         map.pointOfInterestFilter = .includingAll
+        map.delegate = bridge
         bridge.map = map
-        bridge.syncAnnotations(on: map)
         return map
     }
 
