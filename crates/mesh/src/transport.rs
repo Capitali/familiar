@@ -682,6 +682,15 @@ async fn handle(
                 }
             }
         }
+        (Method::GET, "/local/invite") => {
+            // The enrollment payload (contains the group secret — trusted screen only), for
+            // the local console to render as a QR. Loopback-gated like every /local seam.
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                local_invite(&dir)
+            }
+        }
         (Method::POST, "/local/gate") => {
             if peer_ip != "127.0.0.1" && peer_ip != "::1" {
                 text(StatusCode::FORBIDDEN, "local only")
@@ -846,6 +855,28 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     let _ = std::fs::write(dir.join("question.txt"), "");
     let _ = std::fs::write(dir.join("active_question.txt"), "");
     text(StatusCode::OK, "ok")
+}
+
+/// `GET /local/invite` → the enrollment payload a new device scans/pastes to join: group
+/// secret + every address the mesh answers at + the TLS pin. The same payload `mesh qr`
+/// prints; here the local console renders it as a QR hologram.
+fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    let port = config::load(dir).map(|c| c.gossip_port).unwrap_or(47_100);
+    let hosts = reachable_hosts();
+    let payload = serde_json::json!({
+        "v": 1,
+        "secret": cred.join_key(),
+        "group": cred.group_id,
+        "label": cred.label,
+        "host": hosts.first().cloned().unwrap_or_default(),
+        "hosts": hosts,
+        "port": port,
+        "tlspin": tls_spki_pin(dir).unwrap_or_default(),
+    });
+    text(StatusCode::OK, payload.to_string())
 }
 
 /// `POST /local/gate {"gate":"allow_execute","open":true}` → the human at this machine opens or
