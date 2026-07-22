@@ -271,6 +271,8 @@ struct SphereWebViewIOS: UIViewRepresentable {
         web.isOpaque = false
         web.backgroundColor = .clear
         web.scrollView.isScrollEnabled = false
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.scrollView.bounces = false
         web.navigationDelegate = bridge
         bridge.web = web
         if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "sphere") {

@@ -16,39 +16,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>The familiar notes when you are home or away — only "home" or "away", never your coordinates.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>The familiar notes home/away in the background so it can serve you without the app open. Only "home" or "away" is ever sent — never your coordinates.</string>
-	<key>NSMotionUsageDescription</key>
-	<string>The familiar notes coarse activity (walking, driving, still) — never raw motion data.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Used to scan a familiar's join QR code, and (if you enable it) on-device facial presence analysis — never a stored image.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Push-to-talk: your spoken note is transcribed on-device and sent to the familiar. No audio leaves the device.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Transcribes your push-to-talk speech on-device so the familiar can act on it.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>The familiar surveys the local network to notice devices and services around you (like printers, speakers, and other familiars) and reports what kind of thing it saw — never their addresses or contents.</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_familiar-mesh._tcp</string>
@@ -78,9 +49,40 @@
 		<string>_workstation._tcp</string>
 		<string>_device-info._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to scan a familiar's join QR code, and (if you enable it) on-device facial presence analysis — never a stored image.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The familiar surveys the local network to notice devices and services around you (like printers, speakers, and other familiars) and reports what kind of thing it saw — never their addresses or contents.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>The familiar notes home/away in the background so it can serve you without the app open. Only "home" or "away" is ever sent — never your coordinates.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>The familiar notes when you are home or away — only "home" or "away", never your coordinates.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Push-to-talk: your spoken note is transcribed on-device and sent to the familiar. No audio leaves the device.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>The familiar notes coarse activity (walking, driving, still) — never raw motion data.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribes your push-to-talk speech on-device so the familiar can act on it.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

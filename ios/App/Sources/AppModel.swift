@@ -295,13 +295,11 @@ final class AppModel: ObservableObject {
             guard let session = worldviewSession() else { return }
             do {
                 let fix = coordinator?.lastCoordinate
-                let view = try await WorldviewClient(session: session)
-                    .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease,
-                           lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
+                let (view, raw) = try await WorldviewClient(session: session)
+                    .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
+                                  lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
                 worldview = view
-                if let data = try? JSONEncoder().encode(view) {
-                    worldviewJSON = String(data: data, encoding: .utf8)
-                }
+                worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
                 promoteHost(host)
                 learnHosts(view.hosts)

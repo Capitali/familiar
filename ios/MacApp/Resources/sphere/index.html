@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <!--
   The Familiar — Metal Sphere console (from Claude Design "Familiar Metal Sphere.dc.html").
   Presentation layer only: the Swift host injects real worldview JSON via window.sphereUpdate()
@@ -442,7 +442,10 @@ window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
 window.sphereUpdate = (view) => {
   S.view = view; S.linkOk = true;
-  renderCallouts(); renderChrome(); refreshScreen();
+  // A renderer error must never mask the data or hold the link badge — draw what we can.
+  try { renderCallouts(); } catch (e) {}
+  try { refreshScreen(); } catch (e) {}
+  renderChrome();
   if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };
 window.sphereLinkDown = () => { S.linkOk = false; renderChrome(); };

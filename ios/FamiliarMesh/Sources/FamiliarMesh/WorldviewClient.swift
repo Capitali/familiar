@@ -264,6 +264,52 @@ public struct WorldviewClient {
         return view
     }
 
+    /// Same read, returning the daemon's raw JSON too — the sphere web layer takes the
+    /// bytes untouched, immune to any mirror-struct drift or re-encode difference.
+    public func fetchWithRaw(
+        now: Int64 = Int64(Date().timeIntervalSince1970),
+        nonce: String = ObservationClient.freshNonce(),
+        clientVersion: String = "",
+        osVersion: String = "",
+        lat: Double = 0,
+        lon: Double = 0
+    ) async throws -> (view: Worldview, raw: Data) {
+        let request = ViewRequest(
+            node: session.node.identity,
+            membership: session.membership,
+            ts: now,
+            nonce: nonce,
+            client_version: clientVersion.isEmpty ? nil : clientVersion,
+            os_version: osVersion.isEmpty ? nil : osVersion,
+            lat: lat == 0 && lon == 0 ? nil : lat,
+            lon: lat == 0 && lon == 0 ? nil : lon
+        )
+        guard let body = try? JSONEncoder().encode(request) else { throw ReadError.encoding }
+        let sig = try session.node.sign(body)
+
+        var req = URLRequest(url: session.url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 10   // fail fast so the caller can try the next candidate address
+        req.setValue(sig, forHTTPHeaderField: "X-Familiar-Sig")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await urlSession.data(for: req)
+        } catch {
+            throw ReadError.transport(error.localizedDescription)
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            throw ReadError.http(status: status, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let view = try? JSONDecoder().decode(Worldview.self, from: data) else {
+            throw ReadError.decoding
+        }
+        return (view, data)
+    }
+
     /// Turn an enrollment host+port into the worldview endpoint URL.
     public static func worldviewURL(host: String, port: Int) -> URL? {
         URL(string: "http://\(host):\(port)/mesh/worldview")
