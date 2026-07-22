@@ -85,7 +85,21 @@ require a separate computer, a host, or anyone to introduce them. The answer is 
    (addresses + pin + optionally the secret), carried as a share-sheet deep link
    (`familiar://join?...`) over any channel the humans already share. The QR is just
    this payload with a camera; Messages is the same payload without one.
-4. **Two meshes meet → federate.** Founding-first means many small meshes; the existing
+4. **Capability tiers, not device categories** *(doctrine, 2026-07-22)*: what a node IS
+   follows what it CAN do, decided at the shell layer:
+   - **Full peer** — any device capable of running the core runs it: macOS hosts AND
+     capable phones/tablets alike. A modern iPhone/iPad embeds the Rust core (UniFFI/
+     static lib), founds or joins as a first-class node — gossips briefs, serves the
+     worldview seam, holds group trust, answers devices of its own. "Host" stops being
+     a machine class and becomes a capability every strong node has.
+   - **Agent** — lesser phones/tablets that can't carry the core run today's console/
+     observer app: covenant-enrolled, observation-pushing, worldview-reading, never
+     serving.
+   - **Observer** — watches, routers, cameras, IoT: purpose-built shell agents that
+     enroll by the same covenant and push what they sense. The core never needs to know
+     their species; the shell layer owns each device family's adapter.
+
+5. **Two meshes meet → federate.** Founding-first means many small meshes; the existing
    group-trust machinery (a node holding two credentials, or group cross-signing) is the
    long-term merge path when two founders decide their familiars should be one. Open
    design work, explicitly out of scope here.
