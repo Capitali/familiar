@@ -88,11 +88,18 @@ Everything in this section is **Planned**. The first item is what lifts the cycl
 the one maturity rung the codebase has not yet occupied (no scenario fixture set exists
 yet; see [06-limitations.md](06-limitations.md)).
 
-- **Real scenarios & LLM-authored artifacts.** *(Planned.)* Today's artifacts are
-  deterministic and safe; LLM-*authored* execution is built but behind its own gate
-  (`allow_authored_execute`, default-off). Next: a scenario fixture set so candidates
-  are tested against real tasks and selection genuinely discriminates — the move onto
-  the **scenario-tests** rung.
+- **The scenario laboratory.** *(Implemented — validated by unit + integration tests
+  and a first live adapter run.)* Specified in
+  [ADR-0010](decision-records/0010-scenario-laboratory.md), built as `crates/scenario`
+  (`familiar-lab`) with six fixtures under `scenarios/` across the three starting
+  families (recurring process failures / resource exhaustion / unauthorized shortcuts):
+  miniature worlds with *external* evaluators and hidden objectives, the Three Laws as
+  constitutional gates (not weighted score), every scenario runnable under controls A–D
+  (baseline / LLM-only / learning-disabled / full). See
+  [scenario-laboratory.md](scenario-laboratory.md). Next: run the experiment at length
+  (many episodes, rate-limit-free adapter), grow the fixture families, and report the
+  D-vs-B/C comparison as evidence — the move onto the **scenario-tests** rung for the
+  cycle itself.
 - **Rigor & adaptive cadence.** Feed a measured rigor drive into the promotion bar; give
   the daemon structural-fingerprint cadence (slow when nothing changes).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond

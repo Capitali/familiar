@@ -90,6 +90,31 @@ itself, attests to the Laws, and is admitted by an act that can later hold it ac
 same motion whether the joiner is a phone, a Linux host, or (someday) another AI
 (see [design-orientation-and-mesh.md](design-orientation-and-mesh.md)).
 
+### Any member can admit (enrollment relay)
+
+Enrollment no longer depends on reaching the founder host. A covenant-joined member holds no
+group secret (`can_mint() == false`), so it cannot mint a cert itself — but when an enroll
+request (or a status poll) reaches it, it **relays** the joiner's raw signed body to
+mint-capable peers and passes the answer back. The relay is a courier, not an authority: the
+signature covers the raw body, so a relaying node can neither alter the request nor forge a
+grant. One hop only (an `X-Familiar-Relayed` marker stops loops), and a relayed request that
+lands on another non-minting node answers 403 rather than filing a dead-end pending record.
+A joiner therefore approaches *whichever node it can reach*.
+
+### Auto-formation (any two nodes establish the mesh)
+
+When `auto_peer` is on and a join round finds **no group anywhere in reach**, the node probes
+each candidate's `/mesh/hello`. If another *ungrouped* node is visible, the strictly-lowest
+node id creates the group (label `auto-formed`) and opens a bounded invite window (10 min);
+the other nodes' next join round is then admitted by covenant. The tie-break is deterministic
+— two mutually-visible nodes cannot both believe they are the strict minimum, so at most one
+forms; ties (impossible for distinct key fingerprints) and asymmetric visibility simply retry
+next round. The mesh thus establishes from **any two nodes brought online** — no designated
+founder host — and a node that already holds a covenant never forms or switches groups.
+Note the deliberate trade: turning `auto_peer` on delegates the *first* admission to the
+tie-break + invite window instead of a per-node human tap; leave it off to keep every
+admission a human act.
+
 ## Reach — extending into agent-capable hosts
 
 `familiar-reach` turns discovery into a **reach map**: it probes each device `sense` discovered
@@ -102,10 +127,22 @@ by covenant. Every expansion is recorded (`familiar extended-into device:<ip>`) 
 
 ## Discovery + wire protocol
 
-Discovery is **gossip, no central server.** Tailscale is L3 (WireGuard) with no multicast, so
-each node enumerates the tailnet peer set with `tailscale status --json` (read-only shell-out),
-plus any `static_peers` from config, then exchanges briefs peer-to-peer over HTTP on the tailnet
-IPs. Endpoints (bound on `gossip_port`, default 47100):
+Discovery is **gossip, no central server**, over **two paths at once**:
+
+1. **Tailnet enumeration** — Tailscale is L3 (WireGuard) with no multicast, so each node
+   enumerates the tailnet peer set with `tailscale status --json` (read-only shell-out).
+2. **LAN broadcast beacons** (`lan_discovery`, on by default; UDP `lan_port`, default 47101) —
+   each node periodically broadcasts a tiny `{familiar_mesh, node_id, gossip_port}` beacon and
+   records the senders it hears, so nodes on one LAN find each other even when Tailscale is
+   absent or down. Beacons are *discovery only*: a LAN-discovered peer earns zero trust it
+   can't prove with a membership cert, exactly like a tailnet or static peer.
+
+Plus any `static_peers` from config. Briefs are then exchanged peer-to-peer over HTTP on the
+discovered addresses — **concurrently**, every peer dialed in parallel each round, so one dead
+or slow peer never stalls the rest and the mesh talks through multiple connections at once.
+The server binds whenever `allow_mesh` is open, **including before any group exists**, so an
+ungrouped node is visible (`/mesh/hello` answers with an empty `group_id`) and reachable for
+auto-formation and enrollment. Endpoints (bound on `gossip_port`, default 47100):
 
 - `GET  /mesh/hello` → `{node_id, group_id, label}` — a cheap same-group precheck.
 - `POST /mesh/brief` → receive a peer's `MeshBrief`; verify at ingress; if trusted, stash to

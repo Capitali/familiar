@@ -89,6 +89,20 @@ pub struct Goal {
     pub created_at: i64,
     #[serde(default)]
     pub updated_at: i64,
+    /// When the goal entered its *current* status (unix secs) — every state a goal is in
+    /// carries the date it got there. Backfilled to `updated_at` for pre-field rows.
+    #[serde(default)]
+    pub status_at: i64,
+    /// Last time a node actively advanced this goal (claim, progress note, artifact) —
+    /// distinct from `updated_at`, which moves on any mutation including merges.
+    #[serde(default)]
+    pub last_worked_at: i64,
+    /// When it reached `Done`. 0 until then; survives later status edits.
+    #[serde(default)]
+    pub completed_at: i64,
+    /// When it reached `Failed` (abandoned/ended). 0 until then.
+    #[serde(default)]
+    pub ended_at: i64,
 }
 
 impl Goal {
@@ -105,13 +119,52 @@ impl Goal {
             notes: String::new(),
             created_at: now,
             updated_at: now,
+            status_at: now,
+            last_worked_at: 0,
+            completed_at: 0,
+            ended_at: 0,
         }
+    }
+
+    /// Move to `status` at `now`, stamping every lifecycle date the transition implies:
+    /// `status_at` always; `completed_at`/`ended_at` on the terminal states; and (for the
+    /// active states) `last_worked_at`. The single place transitions get dated — call this
+    /// rather than assigning `status` directly.
+    pub fn transition(&mut self, status: Status, now: i64) {
+        if self.status != status {
+            self.status_at = now;
+        }
+        self.status = status;
+        self.updated_at = now;
+        match status {
+            Status::Claimed | Status::InProgress => self.last_worked_at = now,
+            Status::Done => {
+                self.last_worked_at = now;
+                if self.completed_at == 0 {
+                    self.completed_at = now;
+                }
+            }
+            Status::Failed => {
+                if self.ended_at == 0 {
+                    self.ended_at = now;
+                }
+            }
+            Status::Proposed | Status::AwaitingHuman | Status::Blocked => {}
+        }
+    }
+
+    /// Record active work at `now` without a status change (a progress note, an artifact).
+    pub fn touch_worked(&mut self, now: i64) {
+        self.last_worked_at = now;
+        self.updated_at = now;
     }
 
     /// Does this goal require a high-consequence, human-gated capability (deploy)? Such a goal's
     /// autonomous work may run, but the gated act itself waits for a human.
     pub fn is_human_gated(&self) -> bool {
-        self.needs.iter().any(|n| n.starts_with(GATED_CAPABILITY_PREFIX))
+        self.needs
+            .iter()
+            .any(|n| n.starts_with(GATED_CAPABILITY_PREFIX))
     }
 
     /// Can a node advertising `caps` take this goal on — does it satisfy every `need`?
@@ -148,8 +201,7 @@ pub fn claim(dir: &Path, id: &str, node_id: &str, now: i64) -> io::Result<bool> 
         return Ok(false); // already claimed (by us or a peer) — don't steal it
     }
     g.owner_node = node_id.to_string();
-    g.status = Status::Claimed;
-    g.updated_at = now;
+    g.transition(Status::Claimed, now);
     update(dir, &g)?;
     Ok(true)
 }
@@ -160,13 +212,13 @@ pub fn advance(dir: &Path, id: &str, status: Status, note: &str, now: i64) -> io
     let Some(mut g) = load_by_id(dir, id)? else {
         return Ok(false);
     };
-    g.status = status;
-    g.updated_at = now;
+    g.transition(status, now);
     if !note.is_empty() {
         if !g.notes.is_empty() {
             g.notes.push_str("; ");
         }
         g.notes.push_str(note);
+        g.touch_worked(now);
     }
     update(dir, &g)
 }
@@ -203,12 +255,22 @@ mod tests {
 
         // First claim wins; a second is refused.
         assert!(claim(&dir, "goal-0001", "node-mac", 200).unwrap());
-        assert!(!claim(&dir, "goal-0001", "node-vm", 201).unwrap(), "already claimed");
+        assert!(
+            !claim(&dir, "goal-0001", "node-vm", 201).unwrap(),
+            "already claimed"
+        );
         let after = load_by_id(&dir, "goal-0001").unwrap().unwrap();
         assert_eq!(after.owner_node, "node-mac");
         assert_eq!(after.status, Status::Claimed);
 
-        advance(&dir, "goal-0001", Status::AwaitingHuman, "built + tested; deploy awaits approval", 300).unwrap();
+        advance(
+            &dir,
+            "goal-0001",
+            Status::AwaitingHuman,
+            "built + tested; deploy awaits approval",
+            300,
+        )
+        .unwrap();
         let done = load_by_id(&dir, "goal-0001").unwrap().unwrap();
         assert_eq!(done.status, Status::AwaitingHuman);
         assert!(done.notes.contains("deploy awaits approval"));

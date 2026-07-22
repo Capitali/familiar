@@ -106,7 +106,15 @@ mod tests {
         // The served's phone/watch reporting on them is evidence they are present, even with no
         // direct engagement — the device seam feeding Law II.
         let now = 1_000_000;
-        let phone = Observation::new("phone:ian", "reports", "location:home", "", "mesh:abc", now, 0.9);
+        let phone = Observation::new(
+            "phone:ian",
+            "reports",
+            "location:home",
+            "",
+            "mesh:abc",
+            now,
+            0.9,
+        );
         let s = presence_signal(&[phone], now);
         assert_eq!(s.measure, 1.0);
         assert!(!s.withdrawn);

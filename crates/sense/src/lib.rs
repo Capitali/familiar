@@ -378,14 +378,18 @@ pub fn parse_arp(output: &str) -> Vec<Neighbor> {
     for line in output.lines() {
         let line = line.trim();
         // shape: "name (ip) at mac on iface ..."  (name is "?" when unresolved)
-        let Some(open) = line.find(" (") else { continue };
+        let Some(open) = line.find(" (") else {
+            continue;
+        };
         let Some(rel_close) = line[open..].find(')') else {
             continue;
         };
         let ip = &line[open + 2..open + rel_close];
         let name_tok = line[..open].trim();
         let after = &line[open + rel_close + 1..]; // " at mac on ..."
-        let Some(at) = after.find(" at ") else { continue };
+        let Some(at) = after.find(" at ") else {
+            continue;
+        };
         let mac = after[at + 4..].split_whitespace().next().unwrap_or("");
         if mac.is_empty() || mac.starts_with('(') {
             continue; // "(incomplete)"
@@ -537,8 +541,14 @@ mdns.mcast.net (224.0.0.251) at 1:0:5e:0:0:fb on en0 ifscope permanent [ethernet
         assert_eq!(ipad.name.as_deref(), Some("ipad.river.io"));
         let unnamed = n.iter().find(|x| x.ip == "192.168.108.42").unwrap();
         assert_eq!(unnamed.name, None);
-        assert!(mac_randomized("96:b3:58:2e:74:b1"), "phone MAC is randomised");
-        assert!(!mac_randomized("f8:ff:c2:49:a7:93"), "the Mac's burned-in MAC is not");
+        assert!(
+            mac_randomized("96:b3:58:2e:74:b1"),
+            "phone MAC is randomised"
+        );
+        assert!(
+            !mac_randomized("f8:ff:c2:49:a7:93"),
+            "the Mac's burned-in MAC is not"
+        );
     }
 
     #[test]
@@ -557,9 +567,7 @@ duid 00:03:00:01:1a:69:a5:9e:66:6f";
         assert!(leases
             .iter()
             .any(|l| l.name.as_deref() == Some("Watch") && l.ip == "192.168.108.41"));
-        assert!(leases
-            .iter()
-            .any(|l| l.name.as_deref() == Some("iPhone")));
+        assert!(leases.iter().any(|l| l.name.as_deref() == Some("iPhone")));
         let anon = leases.iter().find(|l| l.ip == "192.168.108.188").unwrap();
         assert_eq!(anon.name, None); // "*" → None
     }

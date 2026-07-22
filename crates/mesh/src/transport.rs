@@ -1,12 +1,22 @@
 //! Transport — the async half. **Does IO, never constitutional merge.**
 //!
-//! A background tokio runtime (spawned once at daemon start via [`spawn`]) does three
+//! A background tokio runtime (spawned once at daemon start via [`spawn`]) does four
 //! things while `allow_mesh` is open:
-//! - **serves** `/mesh/hello`, `/mesh/brief`, `/mesh/tool/{id}` on the tailnet,
-//! - **gossips**: enumerates tailnet peers (`tailscale status --json`, read-only) plus any
-//!   `static_peers`, POSTs our brief to each, and takes theirs in return,
+//! - **serves** `/mesh/hello`, `/mesh/brief`, `/mesh/tool/{id}` — bound whenever the gate
+//!   is open, *including before any group exists*, so an ungrouped node is discoverable
+//!   and can take part in auto-formation,
+//! - **discovers** peers two ways: tailnet enumeration (`tailscale status --json`,
+//!   read-only) and, when `lan_discovery` is on, UDP broadcast beacons on the local
+//!   network — plus any `static_peers`. Discovery never grants trust; certs do,
+//! - **gossips concurrently**: POSTs our brief to every discovered peer in parallel (one
+//!   slow or dead peer no longer stalls the rest), taking theirs in return,
 //! - **verifies at ingress**: every inbound brief's membership cert + node signature are
 //!   checked against our group key *before* it touches disk; junk is dropped.
+//!
+//! Enrollment no longer depends on one founder host: a member that cannot mint (a
+//! covenant-joined node) **relays** enroll requests/status to mint-capable peers, and two
+//! ungrouped `auto_peer` nodes **auto-form** a group (lowest node id creates it and opens
+//! a bounded invite window) — so the mesh establishes from any two nodes.
 //!
 //! What survives is written to `mesh/inbox/<node_id>.json` and referenced tool bodies are
 //! pre-fetched (content-addressed) to `mesh/inbox_tools/<sha>.script`. The transport
@@ -53,7 +63,7 @@ pub fn now_secs() -> i64 {
 }
 
 /// A peer as last seen — surfaced in Glass, refreshed each successful exchange.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PeerRecord {
     pub node_id: String,
     pub label: String,
@@ -81,7 +91,35 @@ pub struct PeerRecord {
     /// don't report it. The OS *family* is still derived from the actor; this is the version detail.
     #[serde(default)]
     pub os_version: String,
+    /// When the current continuous-online run began (unix secs). Reset whenever the peer
+    /// reappears after a gap longer than its freshness window. 0 on pre-field rows.
+    #[serde(default)]
+    pub session_start: i64,
+    /// Total seconds of *completed* online runs — the peer's cumulative time in the mesh,
+    /// excluding the live session (add `now - session_start` while it's online).
+    #[serde(default)]
+    pub total_online_secs: i64,
+    /// The peer has an interactive human at its console (from its brief; !headless).
+    #[serde(default)]
+    pub interactive: bool,
+    /// The human handle that node serves, when its brief shares one (identity opt-in gated).
+    #[serde(default)]
+    pub human: String,
+    /// Where the node is (decimal degrees) — from its brief (gossip peers) or its worldview
+    /// reads (devices with GPS). 0/0 = unknown.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
+    /// True when the fix came from a device's own GPS (worldview read) rather than a peer's
+    /// brief. Only device fixes seed `self_geo` — a brief-carried position may itself be
+    /// inherited or stale, and trusting it circularly spread one bad fix mesh-wide.
+    #[serde(default)]
+    pub geo_device: bool,
 }
+
+/// A gossip peer beacons every ~30s — two missed rounds plus slack and it's no longer "online".
+pub const GOSSIP_FRESH_SECS: i64 = 120;
 
 /// A running mesh transport. Dropping or calling [`MeshHandle::shutdown`] stops it.
 pub struct MeshHandle {
@@ -147,63 +185,86 @@ fn mesh_allowed(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// The supervisor loop: (re)bind the server while active, gossip each interval, tear down
-/// and idle when the boundary closes or the group isn't enrolled.
+/// Peers seen via LAN broadcast beacons: ip → (gossip_port, last_seen). Discovery only —
+/// an entry here earns nothing a membership cert doesn't prove.
+#[derive(Default)]
+struct LanState {
+    peers: std::sync::Mutex<std::collections::HashMap<String, (u16, i64)>>,
+}
+
+impl LanState {
+    /// LAN peers seen within `max_age_secs`, as `ip:port` gossip addresses.
+    fn addrs(&self, max_age_secs: i64) -> Vec<String> {
+        let now = now_secs();
+        self.peers
+            .lock()
+            .map(|m| {
+                m.iter()
+                    .filter(|(_, (_, seen))| now - seen <= max_age_secs)
+                    .map(|(ip, (port, _))| format!("{ip}:{port}"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Same peers as bare hosts (for enroll/hello, which take host + port apart).
+    fn hosts(&self, max_age_secs: i64) -> Vec<String> {
+        self.addrs(max_age_secs)
+            .into_iter()
+            .map(|a| a.split(':').next().unwrap_or_default().to_string())
+            .collect()
+    }
+}
+
+/// The supervisor loop: keep the server + LAN discovery up while the gate is open (with or
+/// without a group), auto-join/auto-form when ungrouped, gossip each interval when enrolled,
+/// tear down and idle when the boundary closes.
 async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
     let mut server: Option<tokio::task::JoinHandle<()>> = None;
+    let mut local_server: Option<tokio::task::JoinHandle<()>> = None;
     let mut bound_port: u16 = 0;
+    let mut lan_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut lan_bound: u16 = 0;
+    let lan = Arc::new(LanState::default());
 
     loop {
         if stop.load(Ordering::SeqCst) {
             if let Some(s) = server.take() {
                 s.abort();
             }
+            if let Some(l) = lan_task.take() {
+                l.abort();
+            }
             return;
         }
 
         let cfg = config::load(&dir).unwrap_or_default();
         let interval = Duration::from_secs(cfg.gossip_interval_secs.max(1));
+        let lan_window = (cfg.gossip_interval_secs.saturating_mul(3).max(90)) as i64;
 
         // Gate 1: the human-owned boundary.
         if !mesh_allowed(&dir) {
             if let Some(s) = server.take() {
                 s.abort();
             }
+            if let Some(l) = lan_task.take() {
+                l.abort();
+            }
             bound_port = 0;
+            lan_bound = 0;
             let _ = write_status(&dir, "mesh idle — allow_mesh is off");
             sleep_or_stop(&stop, interval).await;
             continue;
         }
 
-        // Gate 2: an enrolled group (a human handed us a credential).
-        let cred = match group::load(&dir).ok().flatten() {
-            Some(c) => c,
-            None => {
-                if let Some(s) = server.take() {
-                    s.abort();
-                }
-                bound_port = 0;
-                // Automatic peering (bootstrap): the gate is open but we hold no covenant. If the
-                // human turned on auto_peer, reach out to the tailnet and ask to be admitted; the
-                // next loop iteration then finds a group and gossips. Otherwise idle for the human.
-                if cfg.auto_peer && auto_join_round(&dir, &cfg).await > 0 {
-                    let _ = write_status(&dir, "✓ auto-peer — admitted by covenant, joining the mesh");
-                    continue; // skip the sleep so we start serving/gossiping immediately
-                }
-                let msg = if cfg.auto_peer {
-                    "mesh auto-peer — seeking a covenant on the tailnet…"
-                } else {
-                    "mesh waiting — no group enrolled yet"
-                };
-                let _ = write_status(&dir, msg);
-                sleep_or_stop(&stop, interval).await;
-                continue;
-            }
-        };
-
-        // Ensure the server is bound (rebind if the port changed).
+        // The server binds whenever the gate is open — before any group exists, too, so an
+        // ungrouped node answers /mesh/hello (auto-formation needs mutual visibility) and can
+        // receive an enroll grant. Every state-changing endpoint still requires a group/cert.
         if server.is_none() || bound_port != cfg.gossip_port {
             if let Some(s) = server.take() {
+                s.abort();
+            }
+            if let Some(s) = local_server.take() {
                 s.abort();
             }
             match TcpListener::bind(("0.0.0.0", cfg.gossip_port)).await {
@@ -213,19 +274,87 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                         dir: dir.clone(),
                         seen: std::sync::Mutex::new(crate::observe::IngestGuard::default()),
                     });
-                    server = Some(tokio::spawn(serve(listener, ctx)));
+                    let acceptor = match tls_acceptor(&dir) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            let _ = write_status(&dir, &format!("mesh tls init failed: {e}"));
+                            None
+                        }
+                    };
+                    server = Some(tokio::spawn(serve(listener, ctx.clone(), acceptor)));
+                    // The /local seams (worldview/answer/gate) stay PLAIN on loopback, one
+                    // port up — local consoles are reading the machine they run on; the
+                    // wire never leaves the host.
+                    if let Ok(local) = TcpListener::bind(("127.0.0.1", cfg.gossip_port + 1)).await {
+                        local_server = Some(tokio::spawn(serve(local, ctx, None)));
+                    }
                 }
                 Err(e) => {
-                    let _ = write_status(&dir, &format!("mesh bind :{} failed: {e}", cfg.gossip_port));
+                    let _ =
+                        write_status(&dir, &format!("mesh bind :{} failed: {e}", cfg.gossip_port));
                     sleep_or_stop(&stop, interval).await;
                     continue;
                 }
             }
         }
 
-        // One gossip round, then report the count of peers we're actually federating with —
-        // fresh entries in peers.json in EITHER direction, not just this round's outbound reach.
-        let _ = gossip_round(&dir, &cfg, &cred).await;
+        // LAN discovery beacons (second discovery path beside the tailnet).
+        if cfg.lan_discovery {
+            if lan_task.is_none() || lan_bound != cfg.lan_port {
+                if let Some(l) = lan_task.take() {
+                    l.abort();
+                }
+                lan_bound = cfg.lan_port;
+                let our_id = node_id_of(&dir);
+                lan_task = Some(tokio::spawn(lan_loop(
+                    cfg.lan_port,
+                    cfg.gossip_port,
+                    our_id,
+                    lan.clone(),
+                    stop.clone(),
+                )));
+            }
+        } else if let Some(l) = lan_task.take() {
+            l.abort();
+            lan_bound = 0;
+        }
+
+        // Gate 2: an enrolled group (a human handed us a credential, or auto-peer earned one).
+        let cred = match group::load(&dir).ok().flatten() {
+            Some(c) => c,
+            None => {
+                if cfg.auto_peer {
+                    // Bootstrap 1 — join: ask every discovered host (tailnet + LAN + static) to
+                    // admit us by covenant; first admission wins.
+                    if auto_join_round(&dir, &cfg, lan.hosts(lan_window)).await > 0 {
+                        let _ = write_status(
+                            &dir,
+                            "✓ auto-peer — admitted by covenant, joining the mesh",
+                        );
+                        continue; // skip the sleep so we start serving/gossiping immediately
+                    }
+                    // Bootstrap 2 — form: no group in reach. If another ungrouped auto_peer node is
+                    // visible and we hold the lowest node id, create the group + open an invite
+                    // window; the others join by covenant on their next round.
+                    if auto_form_round(&dir, &cfg, lan.hosts(lan_window)).await {
+                        let _ = write_status(
+                            &dir,
+                            "✓ auto-peer — no group in reach; formed one (invite window open)",
+                        );
+                        continue;
+                    }
+                    let _ = write_status(&dir, "mesh auto-peer — seeking a covenant…");
+                } else {
+                    let _ = write_status(&dir, "mesh waiting — no group enrolled yet");
+                }
+                sleep_or_stop(&stop, interval).await;
+                continue;
+            }
+        };
+
+        // One concurrent gossip round, then report the count of peers we're actually federating
+        // with — fresh entries in peers.json in EITHER direction, not just this round's reach.
+        let _ = gossip_round(&dir, &cfg, &cred, lan.addrs(lan_window)).await;
         let _ = write_status(
             &dir,
             &format!(
@@ -236,6 +365,82 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
         );
 
         sleep_or_stop(&stop, interval).await;
+    }
+}
+
+/// This node's stable id (minting the key on first use). Empty string on failure.
+fn node_id_of(dir: &Path) -> String {
+    crate::node::NodeKey::load_or_mint(dir, "familiar")
+        .map(|n| n.node_id())
+        .unwrap_or_default()
+}
+
+// ---- LAN discovery (UDP broadcast beacons) ------------------------------------------
+
+/// A discovery beacon. Presence only — carries no trust; certs do.
+#[derive(Serialize, Deserialize)]
+struct LanBeacon {
+    familiar_mesh: u32,
+    node_id: String,
+    gossip_port: u16,
+}
+
+/// Parse a beacon datagram; `None` for junk or a foreign format (pure — unit-tested).
+fn parse_beacon(bytes: &[u8]) -> Option<LanBeacon> {
+    let b: LanBeacon = serde_json::from_slice(bytes).ok()?;
+    if b.familiar_mesh != 1 || b.node_id.is_empty() {
+        return None;
+    }
+    Some(b)
+}
+
+/// Broadcast our beacon and collect peers' — the LAN half of discovery. Own beacons are
+/// filtered by node id (broadcast loops back). Socket errors end the task; the supervisor
+/// respawns it next interval.
+async fn lan_loop(
+    lan_port: u16,
+    gossip_port: u16,
+    our_id: String,
+    state: Arc<LanState>,
+    stop: Arc<AtomicBool>,
+) {
+    let sock = match tokio::net::UdpSocket::bind(("0.0.0.0", lan_port)).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    if sock.set_broadcast(true).is_err() {
+        return;
+    }
+    let beacon = match serde_json::to_vec(&LanBeacon {
+        familiar_mesh: 1,
+        node_id: our_id.clone(),
+        gossip_port,
+    }) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let mut buf = [0u8; 512];
+    let mut next_send = std::time::Instant::now();
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
+        if std::time::Instant::now() >= next_send {
+            let _ = sock.send_to(&beacon, ("255.255.255.255", lan_port)).await;
+            next_send = std::time::Instant::now() + Duration::from_secs(15);
+        }
+        // A timeout is normal (it paces the send check); transient recv errors are skipped.
+        if let Ok(Ok((n, from))) =
+            tokio::time::timeout(Duration::from_secs(1), sock.recv_from(&mut buf)).await
+        {
+            if let Some(b) = parse_beacon(&buf[..n]) {
+                if b.node_id != our_id {
+                    if let Ok(mut m) = state.peers.lock() {
+                        m.insert(from.ip().to_string(), (b.gossip_port, now_secs()));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -261,20 +466,149 @@ struct ServerCtx {
     seen: std::sync::Mutex<crate::observe::IngestGuard>,
 }
 
-async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>) {
+// ---- TLS (ADR-0009 Phase 1): covenant-pinned transport security --------------------
+//
+// The mesh port speaks TLS. Authenticity still comes from the covenant signatures on
+// every payload — TLS here adds confidentiality and integrity on any path (open wifi,
+// cellular, raw internet). Each node holds a persistent P-256 TLS key (separate from the
+// ed25519 node key: Apple TLS stacks don't handshake EdDSA certificates), and the key's
+// SPKI SHA-256 rides in the enrollment payload so devices can PIN the node they joined.
+// Peer-to-peer dials accept any certificate (opportunistic encryption): a forged server
+// cannot forge brief/worldview signatures, so active MITM gains nothing it didn't have
+// in the plaintext era — while passive observation dies entirely.
+
+const TLS_KEY_FILE: &str = "mesh/tls_key.der";
+
+/// rustls needs a process-level crypto provider exactly once.
+fn ensure_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+/// This node's persistent TLS keypair (PKCS#8 DER), minted on first use.
+fn tls_keypair(dir: &Path) -> Result<rcgen::KeyPair> {
+    let path = dir.join(TLS_KEY_FILE);
+    if let Ok(der) = std::fs::read(&path) {
+        if let Ok(kp) = rcgen::KeyPair::try_from(der.as_slice()) {
+            return Ok(kp);
+        }
+    }
+    let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .map_err(|e| crate::Error::Malformed(format!("tls keygen: {e}")))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(crate::Error::Io)?;
+    }
+    std::fs::write(&path, kp.serialize_der()).map_err(crate::Error::Io)?;
+    Ok(kp)
+}
+
+/// SHA-256 of this node's TLS SubjectPublicKeyInfo, hex — the pin a device stores at
+/// enrollment (`mesh qr` carries it) and checks on every connection thereafter.
+pub fn tls_spki_pin(dir: &Path) -> Result<String> {
+    use sha2::Digest;
+    let kp = tls_keypair(dir)?;
+    Ok(crate::hex_encode(&sha2::Sha256::digest(
+        kp.public_key_der(),
+    )))
+}
+
+/// The server's TLS acceptor: a self-signed cert over the persistent key. The cert is
+/// re-minted each boot (cheap); the KEY persists, so the SPKI pin never changes.
+fn tls_acceptor(dir: &Path) -> Result<tokio_rustls::TlsAcceptor> {
+    ensure_crypto_provider();
+    let kp = tls_keypair(dir)?;
+    let mut params = rcgen::CertificateParams::new(vec!["familiar-mesh".into()])
+        .map_err(|e| crate::Error::Malformed(format!("tls cert params: {e}")))?;
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "familiar-mesh");
+    let cert = params
+        .self_signed(&kp)
+        .map_err(|e| crate::Error::Malformed(format!("tls cert: {e}")))?;
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(kp.serialize_der().into());
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert.der().clone()], key)
+        .map_err(|e| crate::Error::Malformed(format!("tls config: {e}")))?;
+    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
+}
+
+/// Outbound TLS: encrypt to whoever answers. Payload signatures carry the authenticity.
+fn tls_connector() -> tokio_rustls::TlsConnector {
+    ensure_crypto_provider();
+    #[derive(Debug)]
+    struct AcceptAny;
+    impl rustls::client::danger::ServerCertVerifier for AcceptAny {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error>
+        {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &rustls::DigitallySignedStruct,
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            rustls::crypto::ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AcceptAny))
+        .with_no_client_auth();
+    tokio_rustls::TlsConnector::from(Arc::new(config))
+}
+
+async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>, tls: Option<tokio_rustls::TlsAcceptor>) {
     loop {
         let (stream, remote) = match listener.accept().await {
             Ok(pair) => pair,
             Err(_) => continue,
         };
         let peer_ip = remote.ip().to_string();
-        let io = TokioIo::new(stream);
         let ctx = ctx.clone();
+        let tls = tls.clone();
         tokio::spawn(async move {
             let svc = service_fn(move |req| handle(req, ctx.clone(), peer_ip.clone()));
-            let _ = hyper::server::conn::http1::Builder::new()
-                .serve_connection(io, svc)
-                .await;
+            match tls {
+                Some(acceptor) => {
+                    let Ok(stream) = acceptor.accept(stream).await else {
+                        return;
+                    };
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), svc)
+                        .await;
+                }
+                None => {
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(TokioIo::new(stream), svc)
+                        .await;
+                }
+            }
         });
     }
 }
@@ -302,7 +636,7 @@ async fn handle(
                 Ok(b) => b,
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
-            recv_brief(&dir, &bytes)
+            recv_brief(&dir, &bytes, &peer_ip)
         }
         (Method::POST, "/mesh/observe") => {
             // The signature covers the raw body, so grab the header before the body is consumed.
@@ -351,6 +685,15 @@ async fn handle(
                 }
             }
         }
+        (Method::GET, "/local/invite") => {
+            // The enrollment payload (contains the group secret — trusted screen only), for
+            // the local console to render as a QR. Loopback-gated like every /local seam.
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                local_invite(&dir)
+            }
+        }
         (Method::POST, "/local/gate") => {
             if peer_ip != "127.0.0.1" && peer_ip != "::1" {
                 text(StatusCode::FORBIDDEN, "local only")
@@ -368,15 +711,17 @@ async fn handle(
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("")
                 .to_string();
+            let relayed = req.headers().contains_key("x-familiar-relayed");
             let bytes = match collect(req).await {
                 Ok(b) => b,
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
-            recv_enroll_request(&dir, &bytes, &sig)
+            enroll_or_relay(&dir, bytes, sig, relayed).await
         }
         (Method::GET, p) if p.starts_with("/mesh/enroll-status/") => {
-            let node_id = p.trim_start_matches("/mesh/enroll-status/");
-            enroll_status(&dir, node_id)
+            let node_id = p.trim_start_matches("/mesh/enroll-status/").to_string();
+            let relayed = req.headers().contains_key("x-familiar-relayed");
+            enroll_status_or_relay(&dir, node_id, relayed).await
         }
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
@@ -396,23 +741,33 @@ async fn collect(req: Request<hyper::body::Incoming>) -> Result<Bytes> {
         .to_bytes())
 }
 
-/// `GET /mesh/hello` → who we are + which group (cheap same-group precheck).
+/// `GET /mesh/hello` → who we are + which group (cheap same-group precheck). An ungrouped
+/// node answers too, with an empty `group_id` — that visibility is what lets two fresh
+/// nodes find each other and auto-form (identity is public by design: node ids are
+/// self-certifying fingerprints, and hello grants nothing).
 fn hello(dir: &Path) -> Response<Full<Bytes>> {
-    let Some(cred) = group::load(dir).ok().flatten() else {
-        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    let (node_id, group_id, label) = match group::load(dir).ok().flatten() {
+        Some(cred) => (
+            cred.membership.node_id.clone(),
+            cred.group_id.clone(),
+            cred.label.clone(),
+        ),
+        None => (node_id_of(dir), String::new(), String::new()),
     };
-    let node = cred.membership.node_id.clone();
+    if node_id.is_empty() {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no node identity");
+    }
     let body = serde_json::json!({
-        "node_id": node,
-        "group_id": cred.group_id,
-        "label": cred.label,
+        "node_id": node_id,
+        "group_id": group_id,
+        "label": label,
     });
     text(StatusCode::OK, body.to_string())
 }
 
 /// `POST /mesh/brief` → verify at ingress, stash if trusted, answer with our own brief.
-fn recv_brief(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
-    match ingest_brief(dir, bytes) {
+fn recv_brief(dir: &Path, bytes: &[u8], peer_ip: &str) -> Response<Full<Bytes>> {
+    match ingest_brief(dir, bytes, peer_ip) {
         Ok(()) => {
             // Hand our brief back so a single round exchanges both directions.
             match std::fs::read(dir.join(OUTBOX_FILE)) {
@@ -427,7 +782,7 @@ fn recv_brief(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
 
 /// Verify an inbound brief against our group and, if trusted, write it to the inbox and
 /// record the peer. Returns `Untrusted` if the cert/signature fail — the caller answers 403.
-pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8], addr: &str) -> Result<()> {
     let cred = group::load(dir)?.ok_or_else(|| crate::Error::Untrusted("no group".into()))?;
     let brief: MeshBrief = serde_json::from_slice(bytes)?;
     let revoked = group::load_revoked(dir).unwrap_or_default();
@@ -442,7 +797,7 @@ pub(crate) fn ingest_brief(dir: &Path, bytes: &[u8]) -> Result<()> {
         inbox.join(format!("{node_id}.json")),
         serde_json::to_vec_pretty(&brief)?,
     )?;
-    upsert_peer(dir, &brief, "")?;
+    upsert_peer(dir, &brief, addr)?;
     Ok(())
 }
 
@@ -481,22 +836,70 @@ fn local_worldview(dir: &Path) -> Response<Full<Bytes>> {
 /// `POST /local/answer {"text": "..."}` → the human at this machine speaks to the familiar. Records
 /// a served-facing observation and retires the current question. Loopback-gated by the caller.
 fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
-    let text_val = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| v.get("text").and_then(|s| s.as_str()).map(String::from))
-        .unwrap_or_default();
+    let v = serde_json::from_slice::<serde_json::Value>(body).unwrap_or_default();
+    let text_val = v
+        .get("text")
+        .and_then(|s| s.as_str())
+        .unwrap_or_default()
+        .to_string();
     let t = text_val.trim();
     if t.is_empty() {
         return text(StatusCode::BAD_REQUEST, "empty");
     }
+    // An answer aimed at a specific THREAD attaches as that thread's evidence and travels
+    // with its pursuit (kernel::thread::add_answer) — never a dead end. An untargeted
+    // answer is the console channel: recorded, and the open question retired.
+    if let Some(thread_id) = v.get("thread").and_then(|s| s.as_str()) {
+        let now = now_secs();
+        let _ = familiar_kernel::thread::add_answer(dir, thread_id, t, now);
+        let obs = familiar_kernel::observation::Observation::new(
+            "ian",
+            "answered",
+            t,
+            format!("thread:{thread_id}"),
+            "local",
+            now,
+            1.0,
+        );
+        let _ = familiar_kernel::observation::record(dir, obs);
+        return text(StatusCode::OK, "ok");
+    }
     let obs = familiar_kernel::observation::Observation::new(
-        "ian", "told the familiar", t, "console", "local", now_secs(), 1.0,
+        "ian",
+        "told the familiar",
+        t,
+        "console",
+        "local",
+        now_secs(),
+        1.0,
     );
     let _ = familiar_kernel::observation::record(dir, obs);
     // Retire the open question so the cycle re-coordinates.
     let _ = std::fs::write(dir.join("question.txt"), "");
     let _ = std::fs::write(dir.join("active_question.txt"), "");
     text(StatusCode::OK, "ok")
+}
+
+/// `GET /local/invite` → the enrollment payload a new device scans/pastes to join: group
+/// secret + every address the mesh answers at + the TLS pin. The same payload `mesh qr`
+/// prints; here the local console renders it as a QR hologram.
+fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    let port = config::load(dir).map(|c| c.gossip_port).unwrap_or(47_100);
+    let hosts = reachable_hosts();
+    let payload = serde_json::json!({
+        "v": 1,
+        "secret": cred.join_key(),
+        "group": cred.group_id,
+        "label": cred.label,
+        "host": hosts.first().cloned().unwrap_or_default(),
+        "hosts": hosts,
+        "port": port,
+        "tlspin": tls_spki_pin(dir).unwrap_or_default(),
+    });
+    text(StatusCode::OK, payload.to_string())
 }
 
 /// `POST /local/gate {"gate":"allow_execute","open":true}` → the human at this machine opens or
@@ -527,7 +930,8 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
             Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
         };
     }
-    let mut b = familiar_kernel::boundary::load(dir).unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
+    let mut b = familiar_kernel::boundary::load(dir)
+        .unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
     match gate {
         "allow_llm" => b.allow_llm = open,
         "allow_camera" => b.allow_camera = open,
@@ -552,9 +956,10 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     }
 }
 
-/// `POST /mesh/worldview` → a member device asks for a snapshot of what the familiar knows. Signed
-/// + membership-bearing (verified like an observe batch); 200 + JSON worldview, 409 replay, 403
-/// untrusted, 400 malformed. The read seam that lets an iPad be a peer console, not just a sensor.
+/// `POST /mesh/worldview` → a member device asks for a snapshot of what the familiar knows.
+/// Signed and membership-bearing (verified like an observe batch); 200 + JSON worldview, 409
+/// replay, 403 untrusted, 400 malformed. The read seam that lets an iPad be a peer console,
+/// not just a sensor.
 fn recv_worldview(
     dir: &Path,
     bytes: &[u8],
@@ -571,6 +976,115 @@ fn recv_worldview(
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad request"),
     }
+}
+
+/// Mint-capable peers this member can relay an enrollment to: roster addresses first (already
+/// `ip:port`), then the tailnet, deduped and bounded. The relay carries the joiner's own raw
+/// body + signature, so a relaying node can't alter what's admitted — it is a courier, not an
+/// authority.
+fn relay_targets(dir: &Path, cfg: &MeshConfig) -> Vec<String> {
+    let mut targets: Vec<String> = load_peers(dir)
+        .into_iter()
+        .filter(|p| !p.addr.is_empty())
+        .map(|p| p.addr)
+        .collect();
+    for p in enumerate_peers().into_iter().filter(|p| p.online) {
+        targets.push(with_port(&p.ip, cfg.gossip_port));
+    }
+    targets.sort();
+    targets.dedup();
+    targets.truncate(8);
+    targets
+}
+
+/// Enrollment, from **any** member node: a mint-capable node admits directly; a covenant-joined
+/// node (no group secret) **relays** the signed request to mint-capable peers and passes the
+/// answer back — so a joiner can approach whichever node it can reach, not one founder host.
+/// `relayed` (the `X-Familiar-Relayed` header) stops a relay from being re-relayed (no loops).
+async fn enroll_or_relay(
+    dir: &Path,
+    bytes: Bytes,
+    sig: String,
+    relayed: bool,
+) -> Response<Full<Bytes>> {
+    let can_mint = group::load(dir)
+        .ok()
+        .flatten()
+        .map(|c| c.can_mint())
+        .unwrap_or(false);
+    if can_mint {
+        return recv_enroll_request(dir, &bytes, &sig);
+    }
+    if relayed {
+        // One hop only: a relayed request that lands on another non-minting node stops here —
+        // filing it as pending would be a dead end (approval could never mint).
+        return text(StatusCode::FORBIDDEN, "relay target cannot mint");
+    }
+    if group::load(dir).ok().flatten().is_none() {
+        return recv_enroll_request(dir, &bytes, &sig); // yields the honest "no group" 403
+    }
+    let cfg = config::load(dir).unwrap_or_default();
+    for target in relay_targets(dir, &cfg) {
+        let headers = [
+            ("x-familiar-sig", sig.as_str()),
+            ("x-familiar-relayed", "1"),
+        ];
+        if let Ok(resp) = http_send(
+            &target,
+            Method::POST,
+            "/mesh/enroll-request",
+            Some(bytes.to_vec()),
+            &headers,
+        )
+        .await
+        {
+            if resp.status == StatusCode::OK || resp.status == StatusCode::ACCEPTED {
+                return text(resp.status, resp.body);
+            }
+        }
+    }
+    text(
+        StatusCode::FORBIDDEN,
+        "no admitting peer reachable from this node",
+    )
+}
+
+/// Status polling, from any member node: answer locally when we know the request; otherwise
+/// relay the poll to mint-capable peers (same one-hop guard), so a joiner can poll whichever
+/// node it submitted through even if a different node holds the grant.
+async fn enroll_status_or_relay(
+    dir: &Path,
+    node_id: String,
+    relayed: bool,
+) -> Response<Full<Bytes>> {
+    let local = enroll_status(dir, &node_id);
+    let unknown = local.status() == StatusCode::NOT_FOUND;
+    let can_mint = group::load(dir)
+        .ok()
+        .flatten()
+        .map(|c| c.can_mint())
+        .unwrap_or(false);
+    if !unknown || can_mint || relayed {
+        return local;
+    }
+    let cfg = config::load(dir).unwrap_or_default();
+    for target in relay_targets(dir, &cfg) {
+        let headers = [("x-familiar-relayed", "1")];
+        if let Ok(resp) = http_send(
+            &target,
+            Method::GET,
+            &format!("/mesh/enroll-status/{node_id}"),
+            None,
+            &headers,
+        )
+        .await
+        {
+            if resp.status == StatusCode::OK || resp.status == StatusCode::ACCEPTED {
+                return text(resp.status, resp.body);
+            }
+        }
+    }
+    local
 }
 
 /// `POST /mesh/enroll-request` → a node attests to the Laws and asks to join. `sig` is the
@@ -625,8 +1139,15 @@ fn serve_tool(dir: &Path, id: &str) -> Response<Full<Bytes>> {
 
 // ---- gossip client ------------------------------------------------------------------
 
-/// One gossip round: enumerate peers, exchange briefs with each, return the number reached.
-async fn gossip_round(dir: &Path, cfg: &MeshConfig, cred: &GroupCredential) -> usize {
+/// One gossip round: exchange briefs with every discovered peer **concurrently** — the mesh
+/// talks through multiple connections at once, so one dead/slow peer no longer stalls the
+/// rest of the round. Returns the number reached.
+async fn gossip_round(
+    dir: &Path,
+    cfg: &MeshConfig,
+    cred: &GroupCredential,
+    lan_addrs: Vec<String>,
+) -> usize {
     let our_brief = match std::fs::read(dir.join(OUTBOX_FILE)) {
         Ok(b) => b,
         Err(_) => return live_peer_count(dir), // no outbox yet (first tick pending)
@@ -640,27 +1161,29 @@ async fn gossip_round(dir: &Path, cfg: &MeshConfig, cred: &GroupCredential) -> u
     for sp in &cfg.static_peers {
         addrs.push(with_port(sp, cfg.gossip_port));
     }
+    addrs.extend(lan_addrs);
     addrs.sort();
     addrs.dedup();
 
     let _ = cred; // group identity is applied via ingest_brief on each reply
-    let mut reached = 0;
+    let mut set = tokio::task::JoinSet::new();
     for addr in addrs {
-        if exchange_with(dir, &addr, &our_brief).await.is_ok() {
+        let dir = dir.to_path_buf();
+        let brief = our_brief.clone();
+        set.spawn(async move { exchange_with(&dir, &addr, &brief).await.is_ok() });
+    }
+    let mut reached = 0;
+    while let Some(res) = set.join_next().await {
+        if matches!(res, Ok(true)) {
             reached += 1;
         }
     }
     reached
 }
 
-/// Automatic-peering bootstrap. With **no covenant yet** and `auto_peer` on, ask each online tailnet
-/// peer to admit us by covenant (attesting the Three Laws). The first peer that admits us (either it
-/// runs `auto_accept_enrollments`, or its human approves) hands us a group credential; we stop and
-/// the supervisor's next iteration proceeds to gossip. Best-effort — every failure is swallowed, and
-/// a peer that only files us as *pending* simply leaves us waiting for the next round. Returns the
-/// number of covenants gained (0 or 1). Never called once we hold a group (the supervisor gates it),
-/// so it can never replace an existing covenant or switch groups.
-async fn auto_join_round(dir: &Path, cfg: &MeshConfig) -> usize {
+/// Every candidate host for bootstrap: online tailnet peers + static peers + LAN-discovered,
+/// bare hosts, deduped.
+fn candidate_hosts(cfg: &MeshConfig, lan_hosts: Vec<String>) -> Vec<String> {
     let mut hosts: Vec<String> = enumerate_peers()
         .into_iter()
         .filter(|p| p.online)
@@ -670,10 +1193,23 @@ async fn auto_join_round(dir: &Path, cfg: &MeshConfig) -> usize {
         // A static peer may carry an explicit `:port`; the enroll client takes host + port apart.
         hosts.push(sp.split(':').next().unwrap_or(sp).to_string());
     }
+    hosts.extend(lan_hosts);
     hosts.sort();
     hosts.dedup();
+    hosts
+}
+
+/// Automatic-peering bootstrap. With **no covenant yet** and `auto_peer` on, ask each discovered
+/// host (tailnet + static + LAN) to admit us by covenant (attesting the Three Laws). The first that
+/// admits us (it runs `auto_accept_enrollments`, an invite window is open, a mint-capable peer it
+/// relays to admits, or its human approves) hands us a group credential; we stop and the
+/// supervisor's next iteration proceeds to gossip. Best-effort — every failure is swallowed, and a
+/// peer that only files us as *pending* simply leaves us waiting for the next round. Returns the
+/// number of covenants gained (0 or 1). Never called once we hold a group (the supervisor gates
+/// it), so it can never replace an existing covenant or switch groups.
+async fn auto_join_round(dir: &Path, cfg: &MeshConfig, lan_hosts: Vec<String>) -> usize {
     let port = cfg.gossip_port;
-    for host in hosts {
+    for host in candidate_hosts(cfg, lan_hosts) {
         let dir2 = dir.to_path_buf();
         let outcome = tokio::task::spawn_blocking(move || {
             let node = crate::node::NodeKey::load_or_mint(&dir2, "familiar")?;
@@ -694,15 +1230,87 @@ async fn auto_join_round(dir: &Path, cfg: &MeshConfig) -> usize {
     0
 }
 
+/// Deterministic formation tie-break: among the ungrouped nodes that can see each other, the
+/// strictly-lowest node id creates the group; everyone else waits and joins it. Pure —
+/// unit-tested. (If views are asymmetric for a round, at worst nobody forms and the next
+/// round retries; both forming requires each to believe it is the strict minimum, which two
+/// mutually-visible nodes cannot both believe.)
+fn should_form(our_id: &str, ungrouped_peer_ids: &[String]) -> bool {
+    !our_id.is_empty()
+        && !ungrouped_peer_ids.is_empty()
+        && ungrouped_peer_ids.iter().all(|p| our_id < p.as_str())
+}
+
+/// How long the invite window stays open after auto-forming — long enough for the peers that
+/// triggered formation to come back on their next join round, bounded so it isn't a standing
+/// open door.
+const AUTO_FORM_INVITE_SECS: i64 = 10 * 60;
+
+/// Auto-formation. Reached only when `auto_peer` is on and a join round found **no group
+/// anywhere in reach**. Probe every candidate's `/mesh/hello`; if another *ungrouped* node is
+/// visible and [`should_form`] elects us, create the group and open a bounded invite window so
+/// the others' next `auto_join_round` is admitted by covenant. Returns whether we formed.
+async fn auto_form_round(dir: &Path, cfg: &MeshConfig, lan_hosts: Vec<String>) -> bool {
+    let mut ungrouped: Vec<String> = Vec::new();
+    for host in candidate_hosts(cfg, lan_hosts) {
+        let addr = with_port(&host, cfg.gossip_port);
+        let Ok(resp) = http_send(&addr, Method::GET, "/mesh/hello", None, &[]).await else {
+            continue;
+        };
+        if resp.status != StatusCode::OK {
+            continue;
+        }
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(&resp.body) else {
+            continue;
+        };
+        let node_id = v.get("node_id").and_then(|s| s.as_str()).unwrap_or("");
+        let group_id = v.get("group_id").and_then(|s| s.as_str()).unwrap_or("");
+        if !node_id.is_empty() && group_id.is_empty() {
+            ungrouped.push(node_id.to_string());
+        }
+    }
+
+    let dir2 = dir.to_path_buf();
+    let formed = tokio::task::spawn_blocking(move || {
+        let node = crate::node::NodeKey::load_or_mint(&dir2, "familiar")?;
+        if !should_form(&node.node_id(), &ungrouped) {
+            return Ok(false);
+        }
+        // Re-check under no races with an admission that landed mid-probe.
+        if group::load(&dir2)?.is_some() {
+            return Ok(false);
+        }
+        let now = now_secs();
+        group::create_group(
+            &dir2,
+            &node,
+            "auto-formed",
+            now,
+            group::DEFAULT_CERT_TTL_SECS,
+        )?;
+        crate::enroll::open_invite(&dir2, now + AUTO_FORM_INVITE_SECS)?;
+        Ok::<bool, crate::Error>(true)
+    })
+    .await;
+    matches!(formed, Ok(Ok(true)))
+}
+
 /// POST our brief to one peer, verify + stash its reply, and pre-fetch any tool bodies we
 /// lack. Errors (connection refused, non-peer host, forged reply) are swallowed by design.
 async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
-    let reply = http_send(addr, Method::POST, "/mesh/brief", Some(our_brief.to_vec())).await?;
+    let reply = http_send(
+        addr,
+        Method::POST,
+        "/mesh/brief",
+        Some(our_brief.to_vec()),
+        &[],
+    )
+    .await?;
     if reply.status != StatusCode::OK || reply.body.is_empty() {
         return Ok(()); // peer accepted ours but had nothing to return
     }
     // Verify the peer's brief before it touches disk (defense at ingress).
-    ingest_brief(dir, &reply.body)?;
+    ingest_brief(dir, &reply.body, addr)?;
     // Pre-fetch tool bodies we don't already have, content-addressed for the in-tick merge.
     if let Ok(brief) = serde_json::from_slice::<MeshBrief>(&reply.body) {
         upsert_peer(dir, &brief, addr)?;
@@ -712,7 +1320,14 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
             if known.contains(sha) || inbox_tool_path(dir, sha).exists() {
                 continue;
             }
-            if let Ok(resp) = http_send(addr, Method::GET, &format!("/mesh/tool/{}", t.tool_id), None).await
+            if let Ok(resp) = http_send(
+                addr,
+                Method::GET,
+                &format!("/mesh/tool/{}", t.tool_id),
+                None,
+                &[],
+            )
+            .await
             {
                 if resp.status == StatusCode::OK && &sha256_hex(&resp.body) == sha {
                     let _ = std::fs::create_dir_all(dir.join(INBOX_TOOLS_DIR));
@@ -746,12 +1361,31 @@ struct HttpResp {
 }
 
 /// A minimal one-shot HTTP/1.1 request over a fresh tailnet TCP connection.
-async fn http_send(addr: &str, method: Method, path: &str, body: Option<Vec<u8>>) -> Result<HttpResp> {
+async fn http_send(
+    addr: &str,
+    method: Method,
+    path: &str,
+    body: Option<Vec<u8>>,
+    headers: &[(&str, &str)],
+) -> Result<HttpResp> {
     let connect = tokio::time::timeout(Duration::from_secs(4), TcpStream::connect(addr));
     let stream = connect
         .await
-        .map_err(|_| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timeout")))?
+        .map_err(|_| {
+            crate::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "connect timeout",
+            ))
+        })?
         .map_err(crate::Error::Io)?;
+    // Encrypt to whoever answers (payload signatures carry authenticity — see tls_connector).
+    let host_only = addr.split(':').next().unwrap_or(addr).to_string();
+    let server_name = rustls::pki_types::ServerName::try_from(host_only)
+        .unwrap_or_else(|_| rustls::pki_types::ServerName::try_from("familiar-mesh").unwrap());
+    let stream = tls_connector()
+        .connect(server_name, stream)
+        .await
+        .map_err(|e| crate::Error::Malformed(format!("tls: {e}")))?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
@@ -759,15 +1393,24 @@ async fn http_send(addr: &str, method: Method, path: &str, body: Option<Vec<u8>>
     tokio::spawn(async move {
         let _ = conn.await;
     });
-    let req = Request::builder()
+    let mut builder = Request::builder()
         .method(method)
         .uri(path)
-        .header("host", addr)
+        .header("host", addr);
+    for (k, v) in headers {
+        builder = builder.header(*k, *v);
+    }
+    let req = builder
         .body(Full::new(Bytes::from(body.unwrap_or_default())))
         .map_err(|e| crate::Error::Malformed(format!("request: {e}")))?;
     let resp = tokio::time::timeout(Duration::from_secs(6), sender.send_request(req))
         .await
-        .map_err(|_| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "request timeout")))?
+        .map_err(|_| {
+            crate::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "request timeout",
+            ))
+        })?
         .map_err(|e| crate::Error::Malformed(format!("send: {e}")))?;
     let status = resp.status();
     let body = resp
@@ -789,16 +1432,121 @@ pub struct TailscalePeer {
     pub online: bool,
 }
 
+/// Run the tailscale CLI with `args`, trying `tailscale` on PATH first and then the macOS app
+/// bundle's CLI (the GUI install puts nothing on PATH). None if neither answers.
+fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
+    [
+        "tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    ]
+    .iter()
+    .find_map(|bin| {
+        std::process::Command::new(bin)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+    })
+}
+
 /// Enumerate tailnet peers (read-only shell-out). Empty if tailscale is absent/unreachable —
 /// mesh then relies on `static_peers` only.
 pub fn enumerate_peers() -> Vec<TailscalePeer> {
-    let out = std::process::Command::new("tailscale")
-        .args(["status", "--json"])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => parse_tailscale_status(&String::from_utf8_lossy(&o.stdout)),
-        _ => Vec::new(),
+    match tailscale_output(&["status", "--json"]) {
+        Some(o) => parse_tailscale_status(&String::from_utf8_lossy(&o.stdout)),
+        None => Vec::new(),
     }
+}
+
+/// This node's own tailnet IPv4 (`tailscale ip -4`), if tailscale is up. The output must
+/// PARSE as an IP address: the CLI has been seen exiting 0 while printing an error line
+/// ("The Tailscale GUI failed to start…"), and an advertised address is only ever an
+/// address — a node once gossiped that error text as its host and poisoned its devices'
+/// candidate lists.
+pub fn self_tailnet_ip() -> Option<String> {
+    tailscale_output(&["ip", "-4"]).and_then(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .next()
+            .map(str::trim)
+            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+            .map(|ip| ip.to_string())
+    })
+}
+
+/// The primary LAN IPv4 — the source address the OS would route toward the internet. A connected
+/// UDP socket never sends a packet; it just resolves routing. Std-only, macOS and Linux alike.
+pub fn self_lan_ip() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("1.1.1.1:53").ok()?;
+    let ip = sock.local_addr().ok()?.ip();
+    if ip.is_loopback() || ip.is_unspecified() {
+        return None;
+    }
+    Some(ip.to_string())
+}
+
+/// Where this node is (decimal degrees), if it can know. Sources, in order:
+/// 1. `mesh/geo.json` — `{"lat":..,"lon":..}`, written by the human or a shell with a better
+///    source (a GPS feed, a survey). Always wins.
+/// 2. The freshest real GPS fix reported by a member device (phones/tablets report theirs on
+///    every worldview read) — the devices are with the mesh, so their fix locates it.
+///
+/// Returns None when neither exists — an honest unknown, never an invented place. (IP
+/// geolocation was tried and rejected: on satellite links it reports the ground station,
+/// hundreds of km off; a wrong city is worse than no city.)
+pub fn self_geo(dir: &Path) -> Option<(f64, f64)> {
+    #[derive(serde::Deserialize)]
+    struct Geo {
+        lat: f64,
+        lon: f64,
+    }
+    if let Ok(s) = std::fs::read_to_string(dir.join("mesh/geo.json")) {
+        if let Ok(g) = serde_json::from_str::<Geo>(&s) {
+            if g.lat != 0.0 || g.lon != 0.0 {
+                return Some((g.lat, g.lon));
+            }
+        }
+    }
+    freshest_device_fix(dir)
+}
+
+/// The most recently seen member whose fix came from its own GPS (`geo_device`). Devices
+/// refresh theirs on every worldview read, so this tracks the mesh's location in
+/// near-real-time. Brief-carried fixes are excluded — they may themselves be inherited.
+pub fn freshest_device_fix(dir: &Path) -> Option<(f64, f64)> {
+    load_peers(dir)
+        .into_iter()
+        .filter(|p| p.geo_device && (p.lat != 0.0 || p.lon != 0.0))
+        .max_by_key(|p| p.last_seen)
+        .map(|p| (p.lat, p.lon))
+}
+
+/// Every address a device could reach this node at, most-universal first: the tailnet IP
+/// (reachable from any interface when the device also runs tailscale — cellular included), then
+/// the LAN IP (same-wifi fallback that needs no VPN). Cached for 60s — consoles poll the
+/// worldview every few seconds and this shells out to tailscale.
+pub fn reachable_hosts() -> Vec<String> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static CACHE: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+    let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((at, hosts)) = guard.as_ref() {
+        if at.elapsed() < Duration::from_secs(60) {
+            return hosts.clone();
+        }
+    }
+    let mut hosts = Vec::new();
+    if let Some(ts) = self_tailnet_ip() {
+        hosts.push(ts);
+    }
+    if let Some(lan) = self_lan_ip() {
+        if !hosts.contains(&lan) {
+            hosts.push(lan);
+        }
+    }
+    *guard = Some((Instant::now(), hosts.clone()));
+    hosts
 }
 
 /// Parse `tailscale status --json` into peers (pure — unit-tested against a fixture). Takes
@@ -825,7 +1573,10 @@ pub fn parse_tailscale_status(json: &str) -> Vec<TailscalePeer> {
                 .and_then(|h| h.as_str())
                 .unwrap_or("")
                 .to_string(),
-            online: peer.get("Online").and_then(|o| o.as_bool()).unwrap_or(false),
+            online: peer
+                .get("Online")
+                .and_then(|o| o.as_bool())
+                .unwrap_or(false),
         });
     }
     out
@@ -877,6 +1628,13 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         first_seen: now,
         familiar_version: brief.body.capability.familiar_version.clone(),
         os_version: brief.body.capability.os_version.clone(),
+        session_start: now,
+        total_online_secs: 0,
+        interactive: brief.body.capability.interactive,
+        human: brief.body.capability.human.clone(),
+        lat: brief.body.capability.lat,
+        lon: brief.body.capability.lon,
+        geo_device: false,
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -886,10 +1644,49 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                 rec.addr.clone()
             };
             // Preserve the original join date (backfill 0 from a pre-field row to now).
-            let first_seen = if existing.first_seen > 0 { existing.first_seen } else { now };
+            let first_seen = if existing.first_seen > 0 {
+                existing.first_seen
+            } else {
+                now
+            };
+            // Session accounting: a sighting within the freshness window continues the
+            // current run; a longer gap closes it (bank its duration) and starts a new one.
+            let (session_start, total_online_secs) =
+                if now - existing.last_seen <= GOSSIP_FRESH_SECS {
+                    (
+                        if existing.session_start > 0 {
+                            existing.session_start
+                        } else {
+                            existing.last_seen
+                        },
+                        existing.total_online_secs,
+                    )
+                } else {
+                    let closed = if existing.session_start > 0 {
+                        (existing.last_seen - existing.session_start).max(0)
+                    } else {
+                        0
+                    };
+                    (now, existing.total_online_secs + closed)
+                };
+            // A brief without a fix (0/0) never erases a position we already know — and a
+            // device-reported fix (real GPS) is never downgraded by a brief-carried one.
+            let (lat, lon, geo_device) =
+                if existing.geo_device && (existing.lat != 0.0 || existing.lon != 0.0) {
+                    (existing.lat, existing.lon, true)
+                } else if rec.lat != 0.0 || rec.lon != 0.0 {
+                    (rec.lat, rec.lon, false)
+                } else {
+                    (existing.lat, existing.lon, existing.geo_device)
+                };
             *existing = PeerRecord {
                 addr: addr_keep,
                 first_seen,
+                session_start,
+                total_online_secs,
+                lat,
+                lon,
+                geo_device,
                 ..rec
             };
         }
@@ -907,6 +1704,9 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
 /// peer roster, not the device-agent list. It can't serve gossip, so `tools/patterns` are 0 and the
 /// gossip loop never dials it (that loop reaches Tailscale-discovered addrs, not `peers.json`);
 /// `addr` is the observed source IP, for display only. Upserts by node_id like [`upsert_peer`].
+// A device report is naturally this wide (identity + versions + position); a params
+// struct would only rename the width.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn register_device_peer(
     dir: &Path,
     node_id: &str,
@@ -914,6 +1714,8 @@ pub(crate) fn register_device_peer(
     addr: &str,
     client_version: &str,
     os_version: &str,
+    lat: f64,
+    lon: f64,
 ) -> Result<()> {
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
@@ -928,6 +1730,20 @@ pub(crate) fn register_device_peer(
     let now = now_secs();
     match peers.iter_mut().find(|p| p.node_id == node_id) {
         Some(existing) => {
+            // Session accounting (device window): a read within the freshness window
+            // continues the run; a longer gap banks the old run and starts a new one.
+            if now - existing.last_seen <= crate::members::ONLINE_WINDOW_SECS {
+                if existing.session_start == 0 {
+                    existing.session_start = existing.last_seen;
+                }
+            } else {
+                if existing.session_start > 0 {
+                    existing.total_online_secs +=
+                        (existing.last_seen - existing.session_start).max(0);
+                }
+                existing.session_start = now;
+            }
+            existing.interactive = true; // a console read is a human-facing surface
             existing.last_seen = now;
             if existing.first_seen == 0 {
                 existing.first_seen = now;
@@ -944,6 +1760,13 @@ pub(crate) fn register_device_peer(
             if !os_version.is_empty() {
                 existing.os_version = os_version.to_string();
             }
+            // A device with GPS reports where it is on every read; 0/0 means "not reported"
+            // and never overwrites a real fix.
+            if lat != 0.0 || lon != 0.0 {
+                existing.lat = lat;
+                existing.lon = lon;
+                existing.geo_device = true;
+            }
         }
         None => peers.push(PeerRecord {
             node_id: node_id.to_string(),
@@ -958,6 +1781,13 @@ pub(crate) fn register_device_peer(
             first_seen: now,
             familiar_version: client_version.to_string(),
             os_version: os_version.to_string(),
+            session_start: now,
+            total_online_secs: 0,
+            interactive: true,
+            human: String::new(),
+            lat,
+            lon,
+            geo_device: lat != 0.0 || lon != 0.0,
         }),
     }
     if let Some(parent) = path.parent() {
@@ -965,6 +1795,24 @@ pub(crate) fn register_device_peer(
     }
     std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
     Ok(())
+}
+
+/// Forget a peer: drop it from the roster by node id (`mesh forget`). The record — join
+/// dates, accumulated online time — is gone for good; a live node will simply re-enroll as
+/// new on its next exchange. Returns whether the id was present.
+pub fn remove_peer(dir: &Path, node_id: &str) -> Result<bool> {
+    let path = dir.join(PEERS_FILE);
+    let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let before = peers.len();
+    peers.retain(|p| p.node_id != node_id);
+    if peers.len() == before {
+        return Ok(false);
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    Ok(true)
 }
 
 /// Load the peer records as last seen — for the worldview read seam (an iPad console shows them).
@@ -1040,6 +1888,47 @@ mod tests {
     fn with_port_respects_explicit_port() {
         assert_eq!(with_port("100.64.0.1", 47100), "100.64.0.1:47100");
         assert_eq!(with_port("127.0.0.1:9000", 47100), "127.0.0.1:9000");
+    }
+
+    #[test]
+    fn beacon_roundtrip_and_junk_rejection() {
+        let b = LanBeacon {
+            familiar_mesh: 1,
+            node_id: "abc123".into(),
+            gossip_port: 47100,
+        };
+        let bytes = serde_json::to_vec(&b).unwrap();
+        let parsed = parse_beacon(&bytes).unwrap();
+        assert_eq!(parsed.node_id, "abc123");
+        assert_eq!(parsed.gossip_port, 47100);
+        // Junk, foreign versions, and empty ids are all dropped.
+        assert!(parse_beacon(b"not json").is_none());
+        assert!(parse_beacon(br#"{"familiar_mesh":2,"node_id":"x","gossip_port":1}"#).is_none());
+        assert!(parse_beacon(br#"{"familiar_mesh":1,"node_id":"","gossip_port":1}"#).is_none());
+    }
+
+    #[test]
+    fn formation_tiebreak_elects_exactly_the_strict_minimum() {
+        let peers = vec!["bbb".to_string(), "ccc".to_string()];
+        assert!(should_form("aaa", &peers)); // strictly lowest → forms
+        assert!(!should_form("bbb", &peers)); // ties never form (both would create)
+        assert!(!should_form("zzz", &peers)); // higher waits for the lower to form
+        assert!(!should_form("aaa", &[])); // nobody visible → nothing to form with
+        assert!(!should_form("", &peers)); // no identity → never form
+    }
+
+    #[test]
+    fn lan_state_ages_out_stale_peers() {
+        let lan = LanState::default();
+        let now = now_secs();
+        {
+            let mut m = lan.peers.lock().unwrap();
+            m.insert("192.168.1.7".into(), (47100, now));
+            m.insert("192.168.1.9".into(), (47100, now - 1000));
+        }
+        let addrs = lan.addrs(90);
+        assert_eq!(addrs, vec!["192.168.1.7:47100".to_string()]);
+        assert_eq!(lan.hosts(90), vec!["192.168.1.7".to_string()]);
     }
 
     #[test]

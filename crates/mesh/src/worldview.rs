@@ -34,6 +34,13 @@ pub struct ViewRequest {
     /// The reading device's OS release (e.g. "iPadOS 26.1"). Optional for the same reason.
     #[serde(default)]
     pub os_version: String,
+    /// The device's position (decimal degrees) when it has GPS and consent — near-real-time,
+    /// refreshed on every read. 0/0 = not reported. The request is verified over the raw
+    /// received bytes, so optional fields are wire-safe here.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
 }
 
 /// One observation as the console shows it — a flat view of the kernel's `Observation`.
@@ -57,6 +64,16 @@ pub struct TheoryView {
     pub theory: String,
     pub direction: String,
     pub status: String,
+    /// Whatever the status is, it is dated: created / entered current status / last worked.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub status_at: i64,
+    #[serde(default)]
+    pub last_worked_at: i64,
+    /// The human's answers so far — shown under the question, carried by the pursuit.
+    #[serde(default)]
+    pub answers: Vec<String>,
 }
 
 /// One of the familiar's reflections on humanity — its lived understanding, appended beside (never
@@ -140,6 +157,11 @@ pub struct Worldview {
     /// node claimed each. Every node holds the same list; the console renders it as the to-do board.
     #[serde(default)]
     pub goals: Vec<GoalView>,
+    /// Every address this familiar currently answers at, most-universal first (tailnet, then LAN).
+    /// A console merges these into its candidate list, so a device that enrolled on the LAN learns
+    /// the tailnet path — and can reach the mesh from cellular — without re-enrolling.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
 }
 
 /// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
@@ -159,6 +181,17 @@ pub struct GoalView {
     /// Progress + learnings that travelled with the goal.
     pub notes: String,
     pub updated_at: i64,
+    /// Lifecycle dates — whatever state the goal is in carries the date it got there.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub status_at: i64,
+    #[serde(default)]
+    pub last_worked_at: i64,
+    #[serde(default)]
+    pub completed_at: i64,
+    #[serde(default)]
+    pub ended_at: i64,
 }
 
 /// A real relationship between two mesh members — an edge in the graph the map draws. The mesh is
@@ -218,7 +251,10 @@ pub(crate) fn read_worldview(
     guard: &Mutex<IngestGuard>,
     peer_ip: &str,
 ) -> Result<Worldview> {
-    if !familiar_kernel::boundary::load(dir).map_err(Error::Io)?.allow_mesh {
+    if !familiar_kernel::boundary::load(dir)
+        .map_err(Error::Io)?
+        .allow_mesh
+    {
         return Err(Error::Untrusted("mesh gate closed".into()));
     }
     let cred = group::load(dir)?.ok_or_else(|| Error::Untrusted("no group enrolled".into()))?;
@@ -261,16 +297,56 @@ pub(crate) fn read_worldview(
         peer_ip,
         &req.client_version,
         &req.os_version,
+        req.lat,
+        req.lon,
     );
 
-    assemble_worldview(dir, &cred, now)
+    let mut view = assemble_worldview(dir, &cred, now)?;
+    // "You are here" belongs to the *requester*, not to us. classify() marks this serving
+    // node SelfNode (true for our own console); a remote console rendering that verbatim
+    // shows the host as "you" — so re-tag per requester: their row is self, ours is a peer.
+    for m in &mut view.members {
+        if m.kind == crate::members::MemberKind::SelfNode {
+            m.kind = crate::members::MemberKind::GossipPeer;
+            m.relationship = "gossip peer · host".into();
+        }
+        if m.node_id == req.node.node_id {
+            m.kind = crate::members::MemberKind::SelfNode;
+            m.relationship = "self".into();
+        }
+    }
+    // Tell the console every address the MESH answers at: human-asserted first (a
+    // lighthouse's NAT-hidden public IP or DNS name — `advertise_hosts`), then ours, then
+    // fresh gossip peers (any member node serves the same verified read seam — the
+    // worldview is gossip-replicated). A device that loses this node fails over to a
+    // sibling.
+    let mut hosts = crate::config::load(dir).unwrap_or_default().advertise_hosts;
+    for h in crate::transport::reachable_hosts() {
+        if !hosts.contains(&h) {
+            hosts.push(h);
+        }
+    }
+    for p in crate::transport::load_peers(dir) {
+        if now - p.last_seen <= crate::transport::GOSSIP_FRESH_SECS * 5 {
+            let ip = p.addr.split(':').next().unwrap_or("").to_string();
+            if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_ok() && !hosts.contains(&ip) {
+                hosts.push(ip);
+            }
+        }
+    }
+    view.hosts = hosts;
+    Ok(view)
 }
 
 /// Assemble the worldview snapshot from the canonical store + signals + peers + theories + gates +
 /// humanity + members. The auth-free core of a read — used by the verified mesh path (after it
 /// checks membership) and by the **localhost-only** `GET /local/worldview` a peer's own SwiftUI
 /// console reads (it's reading the node on its own machine; no mesh signature needed for that).
-pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now: i64) -> Result<Worldview> {
+pub fn assemble_worldview(
+    dir: &Path,
+    cred: &crate::group::GroupCredential,
+    now: i64,
+) -> Result<Worldview> {
     let obs = familiar_kernel::observation::load(dir).map_err(Error::Io)?;
     let presence = familiar_kernel::presence::presence_signal(&obs, now);
     let service = familiar_kernel::service::service_signal(&obs);
@@ -319,10 +395,19 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
             theory: t.theory.clone(),
             direction: t.direction.clone(),
             status: t.status.clone(),
+            created_at: t.created_at,
+            status_at: if t.status_at > 0 {
+                t.status_at
+            } else {
+                t.created_at
+            },
+            last_worked_at: t.last_worked_at,
+            answers: t.answers.clone(),
         })
         .collect();
 
-    let b = familiar_kernel::boundary::load(dir).unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
+    let b = familiar_kernel::boundary::load(dir)
+        .unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
     let gates = GateStates {
         llm: b.allow_llm,
         camera: b.allow_camera,
@@ -332,8 +417,15 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         agent: b.allow_agent,
         tool_install: b.allow_tool_install,
     };
-    let tick = familiar_kernel::activity::load(dir).map(|a| a.len() as u64).unwrap_or(0);
-    let uptime_secs = obs.iter().map(|o| o.ts).min().map(|t0| (now - t0).max(0)).unwrap_or(0);
+    let tick = familiar_kernel::activity::load(dir)
+        .map(|a| a.len() as u64)
+        .unwrap_or(0);
+    let uptime_secs = obs
+        .iter()
+        .map(|o| o.ts)
+        .min()
+        .map(|t0| (now - t0).max(0))
+        .unwrap_or(0);
 
     let humanity: Vec<ReflectionView> = familiar_kernel::humanity::load(dir)
         .unwrap_or_default()
@@ -348,7 +440,10 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
         })
         .collect();
 
-    let question = std::fs::read_to_string(dir.join("question.txt")).unwrap_or_default().trim().to_string();
+    let question = std::fs::read_to_string(dir.join("question.txt"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let members = crate::members::classify(dir, now);
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
@@ -357,6 +452,9 @@ pub fn assemble_worldview(dir: &Path, cred: &crate::group::GroupCredential, now:
     Ok(Worldview {
         group_label: cred.label.clone(),
         node_id: cred.membership.node_id.clone(),
+        // Address advertisement is the *served* read path's concern (read_worldview fills it);
+        // the localhost console doesn't need it and assembly stays shell-out-free.
+        hosts: Vec::new(),
         question,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
@@ -401,6 +499,15 @@ fn goal_views(dir: &Path) -> Vec<GoalView> {
             produced: g.produced,
             notes: g.notes,
             updated_at: g.updated_at,
+            created_at: g.created_at,
+            status_at: if g.status_at > 0 {
+                g.status_at
+            } else {
+                g.updated_at
+            },
+            last_worked_at: g.last_worked_at,
+            completed_at: g.completed_at,
+            ended_at: g.ended_at,
         })
         .collect()
 }
@@ -437,7 +544,11 @@ fn mesh_edges(
             (a.to_string(), b.to_string(), kind)
         };
         if seen.insert(key) {
-            edges.push(EdgeView { from: from.to_string(), to: to.to_string(), kind: kind.to_string() });
+            edges.push(EdgeView {
+                from: from.to_string(),
+                to: to.to_string(),
+                kind: kind.to_string(),
+            });
         }
     };
 
@@ -454,7 +565,9 @@ fn mesh_edges(
         let ns = m.actor.split(':').next().unwrap_or("");
         if ns == "watch" {
             let human = human_of(&m.actor);
-            if let Some(parent) = members.iter().find(|p| is_parent_ns(&p.actor) && human_of(&p.actor) == human && !human.is_empty()) {
+            if let Some(parent) = members.iter().find(|p| {
+                is_parent_ns(&p.actor) && human_of(&p.actor) == human && !human.is_empty()
+            }) {
                 push(&m.node_id, &parent.node_id, "attribution", &mut edges);
                 attributed.insert(m.node_id.clone());
             }
@@ -469,7 +582,10 @@ fn mesh_edges(
         let hay = format!("{} {}", o.action, o.context);
         if let Some(pos) = hay.find(marker) {
             let after = &hay[pos + marker.len()..];
-            let short: String = after.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+            let short: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
             if short.len() >= 4 {
                 if let Some(origin) = members.iter().find(|m| m.node_id.starts_with(&short)) {
                     // Executor is the member whose actor matches the observation actor, else self.
@@ -529,14 +645,19 @@ fn frontier_devices(
     use std::collections::HashMap;
     let member_labels: std::collections::HashSet<String> =
         members.iter().map(|m| m.label.to_lowercase()).collect();
-    let member_addrs: std::collections::HashSet<String> =
-        members.iter().map(|m| m.addr.clone()).filter(|a| !a.is_empty()).collect();
+    let member_addrs: std::collections::HashSet<String> = members
+        .iter()
+        .map(|m| m.addr.clone())
+        .filter(|a| !a.is_empty())
+        .collect();
     let mut latest: HashMap<String, FrontierView> = HashMap::new();
     for o in obs {
         if o.action != "can-reach" {
             continue;
         }
-        let Some(label) = o.object.strip_prefix("device:") else { continue };
+        let Some(label) = o.object.strip_prefix("device:") else {
+            continue;
+        };
         // Parse "class=<c> open=<a,b> ip=<x>" from the context.
         let mut reach = "observable-only".to_string();
         let mut open: Vec<String> = Vec::new();
@@ -560,7 +681,13 @@ fn frontier_devices(
             last_seen: 0,
         });
         if o.ts >= e.last_seen {
-            *e = FrontierView { label: label.to_string(), ip, reach, open, last_seen: o.ts };
+            *e = FrontierView {
+                label: label.to_string(),
+                ip,
+                reach,
+                open,
+                last_seen: o.ts,
+            };
         }
     }
     let rank = |r: &str| match r {
@@ -570,9 +697,15 @@ fn frontier_devices(
     };
     let mut v: Vec<FrontierView> = latest
         .into_values()
-        .filter(|f| !member_labels.contains(&f.label.to_lowercase()) && !member_addrs.contains(&f.ip))
+        .filter(|f| {
+            !member_labels.contains(&f.label.to_lowercase()) && !member_addrs.contains(&f.ip)
+        })
         .collect();
-    v.sort_by(|a, b| rank(&b.reach).cmp(&rank(&a.reach)).then(b.last_seen.cmp(&a.last_seen)));
+    v.sort_by(|a, b| {
+        rank(&b.reach)
+            .cmp(&rank(&a.reach))
+            .then(b.last_seen.cmp(&a.last_seen))
+    });
     v.truncate(60);
     v
 }
@@ -584,7 +717,9 @@ fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec
     use std::collections::HashMap;
     let mut latest: HashMap<String, ServiceView> = HashMap::new();
     for o in obs {
-        let Some(kind) = o.object.strip_prefix("service:") else { continue };
+        let Some(kind) = o.object.strip_prefix("service:") else {
+            continue;
+        };
         if o.action != "discovered" {
             continue;
         }
@@ -617,7 +752,11 @@ mod tests {
 
     const NOW: i64 = 1_000_000;
 
-    fn member(node_id: &str, actor: &str, kind: crate::members::MemberKind) -> crate::members::Member {
+    fn member(
+        node_id: &str,
+        actor: &str,
+        kind: crate::members::MemberKind,
+    ) -> crate::members::Member {
         crate::members::Member {
             node_id: node_id.into(),
             label: node_id.into(),
@@ -636,6 +775,13 @@ mod tests {
             relationship: String::new(),
             ai: false,
             trust: "trusted".into(),
+            status: "online".into(),
+            session_start: 0,
+            total_online_secs: 0,
+            interactive: false,
+            human: String::new(),
+            lat: 0.0,
+            lon: 0.0,
         }
     }
 
@@ -644,7 +790,7 @@ mod tests {
         use crate::members::MemberKind::*;
         let members = vec![
             member("aaaa1111", "", SelfNode),
-            member("bbbb2222", "", GossipPeer),  // another full peer
+            member("bbbb2222", "", GossipPeer), // another full peer
             member("cccc3333", "ipad:ian", DevicePeer),
             member("dddd4444", "watch:ian", DeviceAgent),
         ];
@@ -660,20 +806,35 @@ mod tests {
         )];
         let edges = mesh_edges(&members, &obs, "aaaa1111");
         let has = |from: &str, to: &str, kind: &str| {
-            edges.iter().any(|e| e.from == from && e.to == to && e.kind == kind)
+            edges
+                .iter()
+                .any(|e| e.from == from && e.to == to && e.kind == kind)
         };
         // Full peers (self + gossip) mesh with each other — not through a hub.
-        assert!(has("aaaa1111", "bbbb2222", "gossip"), "full peers form the gossip mesh");
+        assert!(
+            has("aaaa1111", "bbbb2222", "gossip"),
+            "full peers form the gossip mesh"
+        );
         // The watch reaches the mesh through its phone/iPad, not self.
-        assert!(has("dddd4444", "cccc3333", "attribution"), "watch attributed to the iPad");
+        assert!(
+            has("dddd4444", "cccc3333", "attribution"),
+            "watch attributed to the iPad"
+        );
         // The device peer with a parent is NOT also linked to self.
-        assert!(!has("dddd4444", "aaaa1111", "gossip"), "attributed sub-device skips the self link");
+        assert!(
+            !has("dddd4444", "aaaa1111", "gossip"),
+            "attributed sub-device skips the self link"
+        );
         // The delegation edge runs iPad -> executor (self), a real workload handoff.
-        assert!(has("cccc3333", "aaaa1111", "delegation"), "delegation origin -> executor");
+        assert!(
+            has("cccc3333", "aaaa1111", "delegation"),
+            "delegation origin -> executor"
+        );
     }
 
     fn fresh(tag: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_worldview_{}_{tag}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("familiar_worldview_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -688,16 +849,33 @@ mod tests {
     fn setup(tag: &str) -> (PathBuf, GroupCredential, NodeKey) {
         let host = fresh(&format!("host_{tag}"));
         let host_node = NodeKey::load_or_mint(&host, "host").unwrap();
-        let cred = group::create_group(&host, &host_node, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred =
+            group::create_group(&host, &host_node, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
         open_gate(&host, true);
         let device = NodeKey::load_or_mint(&fresh(&format!("dev_{tag}")), "iPad").unwrap();
         (host, cred, device)
     }
 
-    fn signed_request(cred: &GroupCredential, device: &NodeKey, ts: i64, nonce: &str) -> (Vec<u8>, String) {
+    fn signed_request(
+        cred: &GroupCredential,
+        device: &NodeKey,
+        ts: i64,
+        nonce: &str,
+    ) -> (Vec<u8>, String) {
         let id = device.identity();
-        let membership = cred.mint_membership(&id.node_id, &id.pubkey, NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        let req = ViewRequest { node: id, membership, ts, nonce: nonce.into(), client_version: String::new(), os_version: String::new() };
+        let membership = cred
+            .mint_membership(&id.node_id, &id.pubkey, NOW, DEFAULT_CERT_TTL_SECS)
+            .unwrap();
+        let req = ViewRequest {
+            node: id,
+            membership,
+            ts,
+            nonce: nonce.into(),
+            client_version: String::new(),
+            os_version: String::new(),
+            lat: 0.0,
+            lon: 0.0,
+        };
         let raw = serde_json::to_vec(&req).unwrap();
         let sig = device.sign(&raw);
         (raw, sig)
@@ -713,7 +891,15 @@ mod tests {
         // Seed a served-facing observation so presence is non-zero and it appears in `recent`.
         observation::record(
             &host,
-            Observation::new("ian", "asked", "the familiar for help", "", "local", NOW, 0.9),
+            Observation::new(
+                "ian",
+                "asked",
+                "the familiar for help",
+                "",
+                "local",
+                NOW,
+                0.9,
+            ),
         )
         .unwrap();
 
@@ -723,6 +909,22 @@ mod tests {
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
         assert_eq!(view.recent[0].object, "the familiar for help");
+    }
+
+    #[test]
+    fn asserted_advertise_hosts_lead_the_hosts_list() {
+        let (host, cred, device) = setup("advertise");
+        std::fs::create_dir_all(host.join("mesh")).unwrap();
+        std::fs::write(
+            host.join(crate::config::CONFIG_FILE),
+            r#"{"advertise_hosts":["lighthouse.river.io","203.0.113.7"]}"#,
+        )
+        .unwrap();
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        // Human-asserted addresses come first, verbatim — DNS names included; the
+        // interface-derived addresses follow.
+        assert_eq!(&view.hosts[..2], ["lighthouse.river.io", "203.0.113.7"]);
     }
 
     #[test]
@@ -757,7 +959,9 @@ mod tests {
         let other = group::create_group(
             &fresh("othergrp"),
             &NodeKey::load_or_mint(&fresh("othernode"), "h2").unwrap(),
-            "other", NOW, DEFAULT_CERT_TTL_SECS,
+            "other",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
         )
         .unwrap();
         let (raw, sig) = signed_request(&other, &device, NOW, "v1");

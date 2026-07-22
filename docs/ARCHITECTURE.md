@@ -67,23 +67,41 @@ crates/
                                     interpret → generate → test → score → select → measure)
   cli/      familiar-cli (bin: `familiar`) — the shell + daemon control (start/stop/
                                     reload/install via pidfile + launchd: src/daemon.rs)
-  glass/    familiar-glass (bin: `glass`) — the GUI (primary human interface; egui/eframe;
-                daemon control bar + the interaction channel + the mesh wizard/accept card;
-                writes only the observer's input; GUI deps isolated). See ADR-0006.
-  marble/   marble (bin: `marble`) — the macOS menu-bar accessory that opens the Glass.
+  core-ffi/ familiar-core-ffi (lib: `familiar_core`) — the core embedded in device
+                shells via UniFFI (ADR-0009 Phase 0): found/join/worldview/answer/mesh so a
+                capable phone runs the full node itself, not just a console. Built for
+                Apple by tools/build-core.sh → ios/FamiliarCore/.
+  scenario/ familiar-scenario (lib + bin: `familiar-lab`) — the scenario laboratory
+                (ADR-0010): deterministic miniature worlds + an EXTERNAL evaluator with
+                hidden checks; the Three Laws as lexicographic gates; controls A–D so
+                retained experience is measured against memoryless baselines. Fixtures
+                are JSON under scenarios/ at the repository root.
 ```
 
-A separate iOS/watchOS project (`~/Development/familiar-ios`, Swift/SwiftUI) provides lightweight
-**device agents** — they enrol by the covenant handshake and push derived observations to a
-familiar's `/mesh/observe`. See [mesh.md](mesh.md).
+The iOS/watchOS/macOS apps live on `main` under `ios/` — device consoles and agents that
+enrol by the covenant handshake, push observations to `/mesh/observe`, and read the
+worldview seam. On macOS the console is the **Metal Sphere** (ADR-0008): a Claude-Design
+web bundle in a WKWebView, fed real worldview JSON by its Swift host. See [mesh.md](mesh.md).
 
 ## Interfaces
 
-The **Glass** (native egui GUI) is the primary human interface — a local
-window showing the Three Laws as live meters and the observation log, read-only and
-with no network socket (Law III restraint). The **CLI** (`substrate`) is retained
-for scripting, automation, and headless/CI use. Both are thin shells over the same
-kernel.
+The **Metal Sphere** (ADR-0008) is the human interface everywhere it can run — the macOS
+and iOS apps host the same web+MapKit console, reading the worldview over the daemon's
+loopback seam (Mac) or the signed mesh read seam (devices), and on a capable phone against
+its own embedded core (ADR-0009 Phase 0). The **CLI** (`familiar`) is retained for
+scripting, automation, and headless/CI use (`mesh roster` prints the full-metadata
+roster). The earlier wgpu/egui Glass (ADR-0007) is retired.
+
+## Reachability
+
+A node advertises **every address it answers at** — tailnet IPv4 first (reachable from
+any interface when the device also runs tailscale, cellular included), then the LAN IPv4
+(`transport::reachable_hosts`). The list rides in the `mesh qr` enrollment payload
+(`hosts`) and in every served worldview response, and device clients keep a candidate
+list they walk on failure — so a device that enrolled on the boat wifi learns the tailnet
+path and still reaches the mesh from anywhere. Peer liveness decays on a real cadence
+(gossip 120 s, devices 180 s to "away"), and the roster carries per-member session and
+lifetime-online accounting.
 
 ## Storage
 

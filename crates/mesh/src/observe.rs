@@ -91,10 +91,15 @@ impl IngestGuard {
                 break;
             }
         }
-        if self.nonces.iter().any(|(n, x, _)| n == node_id && x == nonce) {
+        if self
+            .nonces
+            .iter()
+            .any(|(n, x, _)| n == node_id && x == nonce)
+        {
             return false;
         }
-        self.nonces.push_back((node_id.to_string(), nonce.to_string(), now));
+        self.nonces
+            .push_back((node_id.to_string(), nonce.to_string(), now));
         true
     }
 
@@ -129,7 +134,10 @@ pub(crate) fn ingest_observations(
     guard: &Mutex<IngestGuard>,
 ) -> Result<usize> {
     // Gate: the human must have opened the mesh and not disabled device ingestion.
-    if !familiar_kernel::boundary::load(dir).map_err(Error::Io)?.allow_mesh {
+    if !familiar_kernel::boundary::load(dir)
+        .map_err(Error::Io)?
+        .allow_mesh
+    {
         return Err(Error::Untrusted("mesh gate closed".into()));
     }
     if !crate::config::load(dir)?.accept_observations {
@@ -175,7 +183,9 @@ pub(crate) fn ingest_observations(
             .iter()
             .enumerate()
             .filter(|(_, o)| {
-                !o.actor.trim().is_empty() && !o.action.trim().is_empty() && !o.object.trim().is_empty()
+                !o.actor.trim().is_empty()
+                    && !o.action.trim().is_empty()
+                    && !o.object.trim().is_empty()
             })
             .filter(|(_, o)| g.allow_triple(&o.actor, &o.action, &o.object, now))
             .map(|(i, _)| i)
@@ -195,6 +205,11 @@ pub(crate) fn ingest_observations(
             env.ts,
             o.confidence.clamp(0.0, 1.0),
         );
+        // A device's answer aimed at a thread ("thread:<id>" context) attaches as that
+        // thread's evidence — the same non-dead-end path as a local console answer.
+        if let Some(thread_id) = obs.context.strip_prefix("thread:") {
+            let _ = familiar_kernel::thread::add_answer(dir, thread_id, &obs.object, env.ts);
+        }
         observation::record(dir, obs).map_err(Error::Io)?;
     }
     Ok(keep.len())
@@ -214,7 +229,8 @@ mod tests {
     fn setup(tag: &str) -> (PathBuf, GroupCredential, NodeKey) {
         let host = fresh(&format!("host_{tag}"));
         let host_node = NodeKey::load_or_mint(&host, "host").unwrap();
-        let cred = group::create_group(&host, &host_node, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred =
+            group::create_group(&host, &host_node, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
         open_gate(&host, true);
         let device = NodeKey::load_or_mint(&fresh(&format!("dev_{tag}")), "iPhone").unwrap();
         (host, cred, device)
@@ -254,7 +270,9 @@ mod tests {
         records: Vec<ObsRecord>,
     ) -> (Vec<u8>, String) {
         let id = device.identity();
-        let membership = cred.mint_membership(&id.node_id, &id.pubkey, issued, ttl).unwrap();
+        let membership = cred
+            .mint_membership(&id.node_id, &id.pubkey, issued, ttl)
+            .unwrap();
         let env = ObserveEnvelope {
             node: id,
             membership,
@@ -288,8 +306,13 @@ mod tests {
         assert!(g.allow_triple("phone:ian", "reports", "motion:still", 1000));
         assert!(!g.allow_triple("phone:ian", "reports", "motion:still", 1010)); // repeat within window
         assert!(g.allow_triple("phone:ian", "reports", "motion:walking", 1010)); // a change passes
-        // once the debounce window elapses, the same state may be re-affirmed
-        assert!(g.allow_triple("phone:ian", "reports", "motion:still", 1000 + DEBOUNCE_SECS + 1));
+                                                                                 // once the debounce window elapses, the same state may be re-affirmed
+        assert!(g.allow_triple(
+            "phone:ian",
+            "reports",
+            "motion:still",
+            1000 + DEBOUNCE_SECS + 1
+        ));
     }
 
     #[test]
@@ -299,9 +322,21 @@ mod tests {
         // Same triple in three quick batches (distinct nonces): only the first records.
         for (i, nonce) in ["a", "b", "c"].iter().enumerate() {
             let ts = NOW + i as i64; // all within the debounce window
-            let (raw, sig) = signed(&cred, &device, ts, nonce, NOW, DEFAULT_CERT_TTL_SECS, vec![obs("motion:still")]);
+            let (raw, sig) = signed(
+                &cred,
+                &device,
+                ts,
+                nonce,
+                NOW,
+                DEFAULT_CERT_TTL_SECS,
+                vec![obs("motion:still")],
+            );
             let n = ingest_observations(&host, &raw, &sig, ts, &g).unwrap();
-            assert_eq!(n, if i == 0 { 1 } else { 0 }, "only the first unchanged repeat records");
+            assert_eq!(
+                n,
+                if i == 0 { 1 } else { 0 },
+                "only the first unchanged repeat records"
+            );
         }
         assert_eq!(observation::load(&host).unwrap().len(), 1);
     }
@@ -310,13 +345,28 @@ mod tests {
     fn trusted_batch_lands_tagged_then_replay_is_rejected() {
         let (host, cred, device) = setup("happy");
         let r = ring();
-        let (raw, sig) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![obs("location:home")]);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("location:home")],
+        );
 
         let n = ingest_observations(&host, &raw, &sig, NOW, &r).unwrap();
         assert_eq!(n, 1);
         let stored = observation::load(&host).unwrap();
-        let rec = stored.iter().find(|o| o.object == "location:home").expect("recorded");
-        assert_eq!(rec.source, format!("mesh:{}", device.node_id()), "tagged with the device node");
+        let rec = stored
+            .iter()
+            .find(|o| o.object == "location:home")
+            .expect("recorded");
+        assert_eq!(
+            rec.source,
+            format!("mesh:{}", device.node_id()),
+            "tagged with the device node"
+        );
         assert_eq!(rec.actor, "phone:ian");
 
         // Same nonce again → rejected as a replay, and nothing new is written.
@@ -328,7 +378,15 @@ mod tests {
     #[test]
     fn a_bad_signature_is_untrusted() {
         let (host, cred, device) = setup("badsig");
-        let (raw, _good) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![obs("x")]);
+        let (raw, _good) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("x")],
+        );
         // A signature over *different* bytes: the cert still verifies, but node.verify(raw) fails.
         let wrong = device.sign(b"not the body");
         let err = ingest_observations(&host, &raw, &wrong, NOW, &ring()).unwrap_err();
@@ -348,7 +406,15 @@ mod tests {
             DEFAULT_CERT_TTL_SECS,
         )
         .unwrap();
-        let (raw, sig) = signed(&other, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![obs("x")]);
+        let (raw, sig) = signed(
+            &other,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("x")],
+        );
         let err = ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap_err();
         assert!(matches!(err, Error::Untrusted(_)));
     }
@@ -370,7 +436,15 @@ mod tests {
             serde_json::to_vec(&vec![device.node_id()]).unwrap(),
         )
         .unwrap();
-        let (raw, sig) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![obs("x")]);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("x")],
+        );
         let err = ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap_err();
         assert!(matches!(err, Error::Untrusted(m) if m.contains("revoked")));
     }
@@ -379,7 +453,15 @@ mod tests {
     fn a_stale_timestamp_is_rejected() {
         let (host, cred, device) = setup("stale");
         let ts = NOW - (REPLAY_WINDOW_SECS + 10); // outside the window; cert itself still valid
-        let (raw, sig) = signed(&cred, &device, ts, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![obs("x")]);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            ts,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("x")],
+        );
         let err = ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap_err();
         assert!(matches!(err, Error::Untrusted(m) if m.contains("timestamp")));
     }
@@ -387,7 +469,15 @@ mod tests {
     #[test]
     fn a_closed_gate_or_disabled_ingestion_refuses() {
         let (host, cred, device) = setup("gate");
-        let (raw, sig) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![obs("x")]);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("x")],
+        );
 
         open_gate(&host, false); // allow_mesh off
         assert!(matches!(
@@ -397,9 +487,15 @@ mod tests {
 
         // Gate back on, but device ingestion switched off in config.
         open_gate(&host, true);
-        let mut cfg = crate::config::MeshConfig::default();
-        cfg.accept_observations = false;
-        std::fs::write(host.join("mesh/config.json"), serde_json::to_vec(&cfg).unwrap()).unwrap();
+        let cfg = crate::config::MeshConfig {
+            accept_observations: false,
+            ..Default::default()
+        };
+        std::fs::write(
+            host.join("mesh/config.json"),
+            serde_json::to_vec(&cfg).unwrap(),
+        )
+        .unwrap();
         assert!(matches!(
             ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap_err(),
             Error::Untrusted(m) if m.contains("disabled")

@@ -62,7 +62,9 @@ const PERSONAL_DEVICE_PREFIXES: &[&str] = &["phone:", "watch:", "ipad:", "iphone
 /// Is this a personal-device report about its owner (e.g. `phone:ian`, `watch:ian`)?
 pub fn is_personal_device_report(obs: &Observation) -> bool {
     let actor = obs.actor.to_ascii_lowercase();
-    PERSONAL_DEVICE_PREFIXES.iter().any(|p| actor.starts_with(p))
+    PERSONAL_DEVICE_PREFIXES
+        .iter()
+        .any(|p| actor.starts_with(p))
 }
 
 /// The service signal (Law I): to what degree is the factory's attention on the

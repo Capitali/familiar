@@ -66,9 +66,28 @@ pub struct MeshConfig {
     /// asks to join (attesting the Laws). Paired with a peer running `auto_accept_enrollments`, a
     /// fresh node self-enrolls without a manual `mesh request-join`. Never fires once we hold a
     /// covenant (it would replace it) and never switches an existing group. Off by default — the
-    /// human opens the gate first; this only removes the last manual tap. See `docs/mesh.md`.
+    /// human opens the gate first; this only removes the last manual tap.
+    ///
+    /// When *no* group exists anywhere in reach, `auto_peer` also covers **auto-formation**: two
+    /// (or more) ungrouped auto_peer nodes that discover each other form a group without a human
+    /// tap — the lowest node id creates it and opens a bounded invite window so its peers enroll
+    /// by covenant on their next round. The mesh thus needs any two nodes, not a designated
+    /// founder host. See `docs/mesh.md`.
     #[serde(default)]
     pub auto_peer: bool,
+    /// Discover peers on the local network by UDP broadcast beacons, alongside (not instead of)
+    /// tailnet enumeration. Discovery only — a LAN-discovered peer earns zero trust it can't
+    /// prove with a membership cert, exactly like a tailnet or static peer. On by default so
+    /// nodes on one LAN mesh even when Tailscale is absent or down.
+    pub lan_discovery: bool,
+    /// UDP port the discovery beacons use (distinct from the TCP `gossip_port`).
+    pub lan_port: u16,
+    /// Addresses this node answers at that no interface reveals — asserted by the human,
+    /// advertised verbatim and first in the worldview `hosts` list. A lighthouse behind a
+    /// cloud 1:1 NAT asserts its public IP here; any node may assert a stable DNS name so
+    /// devices survive an IP change. Interface-derived addresses still follow; empty for
+    /// almost every node.
+    pub advertise_hosts: Vec<String>,
 }
 
 impl Default for MeshConfig {
@@ -86,6 +105,9 @@ impl Default for MeshConfig {
             headless: false,
             auto_accept_enrollments: false,
             auto_peer: false,
+            lan_discovery: true,
+            lan_port: 47_101,
+            advertise_hosts: Vec::new(),
         }
     }
 }
@@ -143,7 +165,10 @@ mod tests {
         let c = load(&dir).unwrap();
         assert_eq!(c.gossip_interval_secs, 30); // default filled
         assert!(c.identity_opted_in("betty", "river"));
-        assert!(!c.identity_opted_in("betty", "other"), "opt-in is per-group");
+        assert!(
+            !c.identity_opted_in("betty", "other"),
+            "opt-in is per-group"
+        );
         assert!(!c.identity_opted_in("ian", "river"), "opt-in is per-handle");
         let _ = fs::remove_dir_all(&dir);
     }

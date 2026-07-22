@@ -92,7 +92,10 @@ mod tests {
     fn a_closed_boundary_advertises_nothing() {
         let dir = std::env::temp_dir();
         let caps = detect(&dir, &Boundary::closed());
-        assert!(caps.is_empty(), "no reach opened ⇒ no capabilities, whatever tools exist");
+        assert!(
+            caps.is_empty(),
+            "no reach opened ⇒ no capabilities, whatever tools exist"
+        );
     }
 
     #[test]

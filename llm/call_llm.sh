@@ -17,9 +17,19 @@
 #   SUBSTRATE_LLM_PROVIDER   provider chain, comma-separated   (default: gemini,cerebras)
 #
 # Keys (per provider; each falls back to SUBSTRATE_LLM_API_KEY):
+#   ANTHROPIC_API_KEY        https://console.anthropic.com (provider name: claude)
 #   GEMINI_API_KEY           https://aistudio.google.com/apikey
 #   CEREBRAS_API_KEY         https://cloud.cerebras.ai
-# Models (optional): GEMINI_MODEL (default gemini-2.5-flash), CEREBRAS_MODEL (default gpt-oss-120b)
+# Models (optional): ANTHROPIC_MODEL (default claude-haiku-4-5-20251001),
+#   GEMINI_MODEL (default gemini-2.5-flash), CEREBRAS_MODEL (default gpt-oss-120b)
+#
+# Spend governor (self-imposed, enforced HERE — independent of any console limit):
+# a per-provider daily ledger in $SCRIPT_DIR/spend.json. When a provider's budget is
+# reached it is put in cooldown until UTC midnight and the chain rolls to the next.
+#   <PROVIDER>_DAILY_TOKEN_BUDGET / <PROVIDER>_DAILY_CALL_BUDGET  (e.g. CLAUDE_...)
+# The paid provider (claude) defaults to 200000 tokens / 300 calls per day even if
+# unset; free-tier providers have no default budget. Set a budget to 0 to disable a
+# provider outright.
 #
 # Resilience: each provider is tried in turn; a failure is recorded in health.json with a
 # reason and a cooldown (`available_after`). Providers in cooldown are deprioritised, so the
@@ -58,7 +68,9 @@ script_dir, providers_str, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 prompt_path = os.path.join(script_dir, "prompt.txt")
 response_path = os.path.join(script_dir, "response.json")
 health_path = os.path.join(script_dir, "health.json")
+spend_path = os.path.join(script_dir, "spend.json")
 now = int(time.time())
+today = time.strftime("%Y-%m-%d", time.gmtime(now))
 
 if mode == "consult":
     with open(prompt_path) as f:
@@ -88,6 +100,61 @@ def save_health(h):
     try:
         with open(health_path, "w") as f:
             json.dump(h, f, indent=2)
+    except Exception:
+        pass
+
+
+# ---- the spend governor: a self-imposed daily budget, enforced locally ---------------
+# The ledger survives in spend.json; a provider over budget raises BudgetReached and is
+# cooled until UTC midnight. This is the human-owned cost boundary made local — no
+# remote console required for the cap to hold.
+
+class BudgetReached(Exception):
+    pass
+
+
+def load_spend():
+    try:
+        with open(spend_path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def budget_of(name):
+    tok = os.environ.get(f"{name.upper()}_DAILY_TOKEN_BUDGET")
+    calls = os.environ.get(f"{name.upper()}_DAILY_CALL_BUDGET")
+    if tok is None and calls is None and name == "claude":
+        tok, calls = "200000", "300"  # the paid provider is never uncapped by default
+    return (int(tok) if tok is not None else None,
+            int(calls) if calls is not None else None)
+
+
+def spend_guard(name):
+    tok_budget, call_budget = budget_of(name)
+    if tok_budget is None and call_budget is None:
+        return
+    s = load_spend().get(today, {}).get(name, {"calls": 0, "tokens": 0})
+    if (tok_budget is not None and s["tokens"] >= tok_budget) or (
+        call_budget is not None and s["calls"] >= call_budget
+    ):
+        raise BudgetReached(
+            f"self-imposed daily budget reached "
+            f"({s['calls']} calls, {s['tokens']} tokens today)"
+        )
+
+
+def spend_record(name, tokens):
+    sp = load_spend()
+    entry = sp.setdefault(today, {}).setdefault(name, {"calls": 0, "tokens": 0})
+    entry["calls"] += 1
+    entry["tokens"] += int(tokens)
+    cutoff = time.strftime("%Y-%m-%d", time.gmtime(now - 7 * 86400))
+    for day in [d for d in sp if d < cutoff]:  # keep a week of ledger for the human
+        del sp[day]
+    try:
+        with open(spend_path, "w") as f:
+            json.dump(sp, f, indent=2)
     except Exception:
         pass
 
@@ -153,7 +220,27 @@ def call_cerebras(max_tokens):
     return body["choices"][0]["message"]["content"]
 
 
-PROVIDERS = {"gemini": call_gemini, "cerebras": call_cerebras}
+def call_claude(max_tokens):
+    key = os.environ.get("ANTHROPIC_API_KEY") or shared_key
+    if not key:
+        raise RuntimeError("no ANTHROPIC_API_KEY (or SUBSTRATE_LLM_API_KEY)")
+    spend_guard("claude")
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt_text}],
+    }
+    body = post("https://api.anthropic.com/v1/messages", payload,
+                {"x-api-key": key, "anthropic-version": "2023-06-01"})
+    usage = body.get("usage", {})
+    spend_record("claude",
+                 usage.get("input_tokens", 0) + usage.get("output_tokens", 0))
+    return body["content"][0]["text"]
+
+
+PROVIDERS = {"claude": call_claude, "anthropic": call_claude,
+             "gemini": call_gemini, "cerebras": call_cerebras}
 
 
 def http_detail(e):
@@ -214,6 +301,11 @@ for name in order:
             print(f"LLM response via {name} ({len(text)} bytes)", file=sys.stderr)
             sys.exit(0)
         answered = True  # probe: keep going to refresh every provider
+    except BudgetReached as e:
+        # The human's own cost boundary — cool until UTC midnight, roll to the next
+        # provider. Not an error: the cap holding is the feature.
+        mark(health, name, "budget", str(e), 86400 - (now % 86400))
+        errors.append(f"{name}: {e}")
     except urllib.error.HTTPError as e:
         retry, afford, body = http_detail(e)
         if e.code == 429:

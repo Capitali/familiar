@@ -1,6 +1,10 @@
 # DR: One Rust core, many thin shells — unifying peers on a single base code
 
-Status: **proposed** (2026-07-15)
+Status: **superseded by ADR-0007** (2026-07-21) — the SwiftUI-shell-via-UniFFI plan
+described below was not carried out; Apple platforms now run the same wgpu/egui
+`crates/hologram` engine as every other peer instead of a native shell. The "one Rust
+core" principle survives; the "many shells" half does not. Original proposal (2026-07-15)
+kept below for history.
 
 ## Context
 

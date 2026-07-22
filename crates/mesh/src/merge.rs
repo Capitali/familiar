@@ -18,8 +18,10 @@
 //!
 //! Every merge is deduped so re-draining the same brief each tick is idempotent.
 
-use crate::brief::{sign_brief, BriefBody, Capability, ConsentedIdentityPayload, IdentityShare,
-    Knowledge, MeshBrief, ObsShare, PatternOffer, Presence, ToolManifest, BRIEF_VERSION};
+use crate::brief::{
+    sign_brief, BriefBody, Capability, ConsentedIdentityPayload, IdentityShare, Knowledge,
+    MeshBrief, ObsShare, PatternOffer, Presence, ToolManifest, BRIEF_VERSION,
+};
 use crate::config::{self, MeshConfig};
 use crate::group::{self, GroupCredential};
 use crate::node::NodeKey;
@@ -41,7 +43,10 @@ pub(crate) fn os_release() -> String {
     V.get_or_init(|| {
         #[cfg(target_os = "macos")]
         {
-            if let Ok(out) = std::process::Command::new("sw_vers").arg("-productVersion").output() {
+            if let Ok(out) = std::process::Command::new("sw_vers")
+                .arg("-productVersion")
+                .output()
+            {
                 let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !v.is_empty() {
                     return format!("macOS {v}");
@@ -101,7 +106,12 @@ pub fn federate(dir: &Path, now: i64) -> MergeReport {
 
 /// Build + sign our outbound brief from local state, redacted by config, and write it to
 /// `mesh/outbox.json`. Public so tests (and a future explicit "share now") can call it.
-pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i64) -> crate::Result<()> {
+pub fn build_outbox(
+    dir: &Path,
+    cred: &GroupCredential,
+    cfg: &MeshConfig,
+    now: i64,
+) -> crate::Result<()> {
     let node = NodeKey::load_or_mint(dir, "familiar")?;
     let id = node.identity();
 
@@ -141,7 +151,9 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
         // Theories this node can't test locally, offered for a peer to test. Only when THIS node
         // cannot execute (allow_execute off) — an executor keeps its own theories and tests them.
         // A device peer / a headless node with execution gated becomes a theorist that delegates.
-        let can_execute = boundary::load(dir).map(|b| b.allow_execute).unwrap_or(false);
+        let can_execute = boundary::load(dir)
+            .map(|b| b.allow_execute)
+            .unwrap_or(false);
         let theory_requests = if can_execute {
             Vec::new()
         } else {
@@ -179,6 +191,10 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
                 notes: g.notes,
                 created_at: g.created_at,
                 updated_at: g.updated_at,
+                status_at: g.status_at,
+                last_worked_at: g.last_worked_at,
+                completed_at: g.completed_at,
+                ended_at: g.ended_at,
             })
             .collect();
         Knowledge {
@@ -279,7 +295,21 @@ pub fn build_outbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i
                 dir,
                 &boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed()),
             ),
-            build_version: familiar_kernel::version::number(),
+            // Emit 0 (omitted on the wire) until the fleet's verifiers re-serialize
+            // this field — a peer built before it rejects any brief that carries it.
+            build_version: 0,
+            interactive: !cfg.headless,
+            // Where this node is, when it can know (geo.json / IP geolocation) — so peers can
+            // place it on the mesh map. 0/0 (omitted on the wire) when unknown.
+            lat: crate::transport::self_geo(dir).map(|g| g.0).unwrap_or(0.0),
+            lon: crate::transport::self_geo(dir).map(|g| g.1).unwrap_or(0.0),
+            // The human this node serves — only a handle already opted into this group's
+            // sharing (the same consent gate identity shares pass through).
+            human: people
+                .iter()
+                .find(|p| cfg.identity_opted_in(&p.handle, &cred.group_id))
+                .map(|p| p.handle.clone())
+                .unwrap_or_default(),
         },
         knowledge,
         identities,
@@ -312,7 +342,9 @@ fn drain_inbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i64) -
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
         let Ok(brief) = serde_json::from_slice::<MeshBrief>(&bytes) else {
             let _ = std::fs::remove_file(&path);
             continue;
@@ -320,8 +352,14 @@ fn drain_inbox(dir: &Path, cred: &GroupCredential, cfg: &MeshConfig, now: i64) -
         // Re-verify at the constitutional boundary (transport already checked at ingress).
         if crate::brief::verify_brief(&brief, &gk, &cred.group_id, now, &revoked).is_err() {
             report.rejected += 1;
-            record_obs(dir, "mesh", "rejected_brief", &brief.body.node.node_id,
-                "a brief failed re-verification at merge (untrusted/expired/revoked)", now);
+            record_obs(
+                dir,
+                "mesh",
+                "rejected_brief",
+                &brief.body.node.node_id,
+                "a brief failed re-verification at merge (untrusted/expired/revoked)",
+                now,
+            );
             let _ = std::fs::remove_file(&path); // don't re-reject the same junk each tick
             continue;
         }
@@ -353,7 +391,10 @@ fn merge_one(
     };
     if tier == corruption::Trust::Severed {
         // Still note the peer exists (presence is knowledge, not influence), then stop.
-        let ctx = format!("peer {} — SEVERED (repeated covenant breaches)", brief.body.node.label);
+        let ctx = format!(
+            "peer {} — SEVERED (repeated covenant breaches)",
+            brief.body.node.label
+        );
         if record_mesh_presence(dir, node_id, &ctx, now) {
             report.observations_ingested += 1;
         }
@@ -376,7 +417,9 @@ fn merge_one(
             continue;
         }
         let body_path = inbox_tool_path(dir, &m.script_sha256);
-        let Ok(body) = std::fs::read(&body_path) else { continue }; // not fetched yet; next tick
+        let Ok(body) = std::fs::read(&body_path) else {
+            continue;
+        }; // not fetched yet; next tick
         if sha256_hex(&body) != m.script_sha256 {
             continue; // integrity mismatch — never install
         }
@@ -438,9 +481,7 @@ fn merge_one(
     // --- Peer presence: a tagged observation, never laundered into local sensing. ---
     let ctx = format!(
         "peer {} — {} observer(s), {}",
-        brief.body.node.label,
-        brief.body.presence.observer_count,
-        brief.body.knowledge.obs_summary,
+        brief.body.node.label, brief.body.presence.observer_count, brief.body.knowledge.obs_summary,
     );
     if record_mesh_presence(dir, node_id, &ctx, now) {
         report.observations_ingested += 1;
@@ -499,38 +540,61 @@ fn merge_one(
             "blocked" => goal::Status::Blocked,
             _ => continue, // an unknown status from a newer peer — leave it be
         };
+        // Lifecycle dates travel with the goal. A brief from a pre-stamp build sends zeros —
+        // fall back to the best date it *did* send, so every status still carries a date.
+        let goal_from_share = |gs: &crate::brief::GoalShare, local: Option<&goal::Goal>| {
+            let terminal_at = |flag: bool, incoming: i64, kept: i64| {
+                if incoming > 0 {
+                    incoming
+                } else if kept > 0 {
+                    kept
+                } else if flag {
+                    gs.updated_at
+                } else {
+                    0
+                }
+            };
+            goal::Goal {
+                id: gs.id.clone(),
+                description: gs.description.clone(),
+                needs: gs.needs.clone(),
+                status: incoming_status,
+                owner_node: gs.owner_node.clone(),
+                origin: gs.origin.clone(),
+                produced: gs.produced.clone(),
+                notes: gs.notes.clone(),
+                created_at: gs.created_at,
+                updated_at: gs.updated_at,
+                status_at: if gs.status_at > 0 {
+                    gs.status_at
+                } else {
+                    gs.updated_at
+                },
+                last_worked_at: gs
+                    .last_worked_at
+                    .max(local.map(|l| l.last_worked_at).unwrap_or(0)),
+                completed_at: terminal_at(
+                    incoming_status == goal::Status::Done,
+                    gs.completed_at,
+                    local.map(|l| l.completed_at).unwrap_or(0),
+                ),
+                ended_at: terminal_at(
+                    incoming_status == goal::Status::Failed,
+                    gs.ended_at,
+                    local.map(|l| l.ended_at).unwrap_or(0),
+                ),
+            }
+        };
         match goal::load_by_id(dir, &gs.id).ok().flatten() {
             Some(local) if local.updated_at >= gs.updated_at => {} // ours is as-new or newer — keep it
-            Some(_) => {
-                let merged = goal::Goal {
-                    id: gs.id.clone(),
-                    description: gs.description.clone(),
-                    needs: gs.needs.clone(),
-                    status: incoming_status,
-                    owner_node: gs.owner_node.clone(),
-                    origin: gs.origin.clone(),
-                    produced: gs.produced.clone(),
-                    notes: gs.notes.clone(),
-                    created_at: gs.created_at,
-                    updated_at: gs.updated_at,
-                };
+            Some(local) => {
+                let merged = goal_from_share(gs, Some(&local));
                 if goal::update(dir, &merged).is_ok() {
                     report.observations_ingested += 1;
                 }
             }
             None => {
-                let adopted = goal::Goal {
-                    id: gs.id.clone(),
-                    description: gs.description.clone(),
-                    needs: gs.needs.clone(),
-                    status: incoming_status,
-                    owner_node: gs.owner_node.clone(),
-                    origin: gs.origin.clone(),
-                    produced: gs.produced.clone(),
-                    notes: gs.notes.clone(),
-                    created_at: gs.created_at,
-                    updated_at: gs.updated_at,
-                };
+                let adopted = goal_from_share(gs, None);
                 if goal::append(dir, &adopted).is_ok() {
                     report.observations_ingested += 1;
                 }
@@ -544,7 +608,9 @@ fn merge_one(
     // (origin, direction) against threads we already hold. We lend our execution to a peer's ideas. ---
     if !brief.body.knowledge.theory_requests.is_empty()
         && tier.heeds_directives()
-        && boundary::load(dir).map(|b| b.allow_execute).unwrap_or(false)
+        && boundary::load(dir)
+            .map(|b| b.allow_execute)
+            .unwrap_or(false)
     {
         let existing = thread::load(dir).unwrap_or_default();
         let held: std::collections::HashSet<String> = existing
@@ -557,7 +623,11 @@ fn merge_one(
                 continue; // our own, echoed back
             }
             let origin_actor = format!("mesh:{}", req.origin);
-            let key = format!("{}\u{1}{}", origin_actor, req.direction.trim().to_lowercase());
+            let key = format!(
+                "{}\u{1}{}",
+                origin_actor,
+                req.direction.trim().to_lowercase()
+            );
             if held.contains(&key) {
                 continue; // already adopted this peer's theory
             }
@@ -569,6 +639,9 @@ fn merge_one(
                 direction: req.direction.clone(),
                 created_at: now,
                 status: "open".into(),
+                status_at: now,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "mesh".into(),
                 // Attribute to the originating node so corruption-awareness still governs it and its
                 // outcome can be traced home. A peer's theory, tested on our execution.
@@ -582,7 +655,11 @@ fn merge_one(
                     "familiar",
                     "adopted-theory",
                     &format!("theory:{}", req.thread_id),
-                    &format!("testing a theory delegated by {} — '{}'", short(&req.origin), req.direction),
+                    &format!(
+                        "testing a theory delegated by {} — '{}'",
+                        short(&req.origin),
+                        req.direction
+                    ),
                     now,
                 );
                 report.observations_ingested += 1;
@@ -681,11 +758,7 @@ fn tool_manifests(dir: &Path) -> Vec<ToolManifest> {
                 tool_id: t.id,
                 name: t.name,
                 purpose: t.purpose,
-                keywords: t
-                    .keywords
-                    .split_whitespace()
-                    .map(String::from)
-                    .collect(),
+                keywords: t.keywords.split_whitespace().map(String::from).collect(),
                 script_sha256: sha256_hex(&body),
                 uses: t.uses as u64,
                 last_exit_ok: t.last_exit_ok,
@@ -821,7 +894,11 @@ fn obs_origin(source: &str, self_node: &str) -> Option<String> {
     }
     if let Some(rest) = source.strip_prefix("mesh:") {
         let node = rest.split(['#', ':']).next().unwrap_or("");
-        return if node.is_empty() { None } else { Some(node.to_string()) };
+        return if node.is_empty() {
+            None
+        } else {
+            Some(node.to_string())
+        };
     }
     Some(self_node.to_string())
 }
@@ -882,11 +959,21 @@ fn apply_authority_grant(
             if grant.approved && !grant.note.trim().is_empty() {
                 // The remote human answered our open question — record it as observer input and
                 // retire the question so the cycle moves on.
-                record_obs(dir, "ian", "answered", grant.note.trim(),
-                           &format!("via a human at peer {}", short(granting_node)), now);
+                record_obs(
+                    dir,
+                    "ian",
+                    "answered",
+                    grant.note.trim(),
+                    &format!("via a human at peer {}", short(granting_node)),
+                    now,
+                );
                 let _ = std::fs::write(dir.join("question.txt"), "");
                 let _ = std::fs::write(dir.join("active_question.txt"), "");
-                Some(format!("a human at peer {} answered: {}", short(granting_node), grant.note.trim()))
+                Some(format!(
+                    "a human at peer {} answered: {}",
+                    short(granting_node),
+                    grant.note.trim()
+                ))
             } else {
                 None
             }
@@ -935,7 +1022,10 @@ fn record_obs(dir: &Path, actor: &str, action: &str, object: &str, ctx: &str, no
 fn note_refusal_if_pending(dir: &Path, now: i64) {
     let inbox = dir.join(INBOX_DIR);
     let pending = std::fs::read_dir(&inbox)
-        .map(|d| d.flatten().any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json")))
+        .map(|d| {
+            d.flatten()
+                .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+        })
         .unwrap_or(false);
     if !pending {
         return;
@@ -965,7 +1055,8 @@ mod tests {
     const NOW: i64 = 1_770_000_000;
 
     fn tmp(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_mesh_merge_{tag}_{}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("familiar_mesh_merge_{tag}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
@@ -993,13 +1084,18 @@ mod tests {
             membership: cred.membership.clone(),
             ts: NOW,
             nonce: "n".into(),
-            presence: Presence { observer_count: 2, last_active: NOW },
+            presence: Presence {
+                observer_count: 2,
+                last_active: NOW,
+            },
             capability: Capability {
                 os: "linux".into(),
                 arch: "arm".into(),
                 env_summary: "cpn".into(),
                 familiar_version: "0.1.0".into(),
                 os_version: String::new(),
+                interactive: false,
+                human: String::new(),
                 tools: vec![ToolManifest {
                     tool_id: "tool-0007".into(),
                     name: "battery".into(),
@@ -1011,6 +1107,8 @@ mod tests {
                 }],
                 capabilities: Vec::new(),
                 build_version: 0,
+                lat: 0.0,
+                lon: 0.0,
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {
@@ -1040,7 +1138,11 @@ mod tests {
         let mut bnd = boundary::Boundary::closed();
         bnd.allow_mesh = true;
         bnd.allow_execute = false;
-        fs::write(dir_t.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
+        fs::write(
+            dir_t.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&bnd).unwrap(),
+        )
+        .unwrap();
 
         // A third node X has a pending enrollment at T (so the enrollment grant has something to act on).
         let x = NodeKey::load_or_mint(&tmp("grant_joiner"), "joiner").unwrap();
@@ -1063,39 +1165,83 @@ mod tests {
         // Peer H (in the group) relays two approved grants addressed to T.
         let dir_h = tmp("grant_human");
         let h_node = NodeKey::load_or_mint(&dir_h, "human").unwrap();
-        let cred_h =
-            group::join_group(&dir_h, &h_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_h = group::join_group(
+            &dir_h,
+            &h_node,
+            &cred.join_key(),
+            "g",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
         let mut body = peer_brief_with_tool(&h_node, &cred_h, b"#!/bin/sh\n").body;
         body.authority_grants = vec![
             crate::brief::AuthorityGrant {
-                by: h_node.node_id(), target: t_node.node_id(), kind: "gate".into(),
-                ref_id: "allow_execute".into(), approved: true, note: String::new(), ts: NOW,
+                by: h_node.node_id(),
+                target: t_node.node_id(),
+                kind: "gate".into(),
+                ref_id: "allow_execute".into(),
+                approved: true,
+                note: String::new(),
+                ts: NOW,
             },
             crate::brief::AuthorityGrant {
-                by: h_node.node_id(), target: t_node.node_id(), kind: "enrollment".into(),
-                ref_id: xid.node_id.clone(), approved: true, note: String::new(), ts: NOW,
+                by: h_node.node_id(),
+                target: t_node.node_id(),
+                kind: "enrollment".into(),
+                ref_id: xid.node_id.clone(),
+                approved: true,
+                note: String::new(),
+                ts: NOW,
             },
         ];
         let brief = sign_brief(body, &h_node).unwrap();
         fs::create_dir_all(dir_t.join(INBOX_DIR)).unwrap();
-        fs::write(dir_t.join(INBOX_DIR).join(format!("{}.json", h_node.node_id())),
-                  serde_json::to_vec(&brief).unwrap()).unwrap();
+        fs::write(
+            dir_t
+                .join(INBOX_DIR)
+                .join(format!("{}.json", h_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
 
         federate(&dir_t, NOW + 1);
 
         // The gate is now open — but only because a human at H authorized it (audited).
-        assert!(boundary::load(&dir_t).unwrap().allow_execute, "the human-granted gate opened");
+        assert!(
+            boundary::load(&dir_t).unwrap().allow_execute,
+            "the human-granted gate opened"
+        );
         // The enrollment was admitted (no longer pending).
-        assert!(crate::enroll::list_pending(&dir_t).unwrap().is_empty(), "the enrollment was admitted");
+        assert!(
+            crate::enroll::list_pending(&dir_t).unwrap().is_empty(),
+            "the enrollment was admitted"
+        );
         let obs = observation::load(&dir_t).unwrap();
-        assert_eq!(obs.iter().filter(|o| o.action == "applied-grant").count(), 2, "both grants audited");
+        assert_eq!(
+            obs.iter().filter(|o| o.action == "applied-grant").count(),
+            2,
+            "both grants audited"
+        );
 
         // Idempotent: re-draining applies nothing new.
-        fs::write(dir_t.join(INBOX_DIR).join(format!("{}.json", h_node.node_id())),
-                  serde_json::to_vec(&brief).unwrap()).unwrap();
+        fs::write(
+            dir_t
+                .join(INBOX_DIR)
+                .join(format!("{}.json", h_node.node_id())),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
         federate(&dir_t, NOW + 2);
-        assert_eq!(observation::load(&dir_t).unwrap().iter().filter(|o| o.action == "applied-grant").count(), 2,
-                   "grants apply once");
+        assert_eq!(
+            observation::load(&dir_t)
+                .unwrap()
+                .iter()
+                .filter(|o| o.action == "applied-grant")
+                .count(),
+            2,
+            "grants apply once"
+        );
 
         let _ = fs::remove_dir_all(&dir_t);
         let _ = fs::remove_dir_all(&dir_h);
@@ -1111,8 +1257,15 @@ mod tests {
 
         let dir_a = tmp("auth_peer");
         let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
-        let cred_a =
-            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_a = group::join_group(
+            &dir_a,
+            &a_node,
+            &cred.join_key(),
+            "g",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
 
         let mut body = peer_brief_with_tool(&a_node, &cred_a, b"#!/bin/sh\n").body;
         body.authority_requests = vec![crate::brief::AuthorityRequest {
@@ -1125,7 +1278,9 @@ mod tests {
 
         fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
@@ -1134,18 +1289,27 @@ mod tests {
 
         // B's human can now see that peer A needs a decision.
         let obs = observation::load(&dir_b).unwrap();
-        let ask = obs.iter().find(|o| o.action == "asked-to-decide").expect("surfaced for the human");
+        let ask = obs
+            .iter()
+            .find(|o| o.action == "asked-to-decide")
+            .expect("surfaced for the human");
         assert!(ask.object.starts_with("enrollment:"));
         assert!(ask.context.contains("kali-jeff"));
 
         // Idempotent: re-draining doesn't surface it twice.
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
         federate(&dir_b, NOW + 2);
-        let n = observation::load(&dir_b).unwrap().iter().filter(|o| o.action == "asked-to-decide").count();
+        let n = observation::load(&dir_b)
+            .unwrap()
+            .iter()
+            .filter(|o| o.action == "asked-to-decide")
+            .count();
         assert_eq!(n, 1, "an authority request surfaces once, not every round");
 
         let _ = fs::remove_dir_all(&dir_b);
@@ -1161,12 +1325,23 @@ mod tests {
         let mut bnd = boundary::Boundary::closed();
         bnd.allow_mesh = true;
         bnd.allow_execute = true; // B is an executor
-        fs::write(dir_b.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
+        fs::write(
+            dir_b.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&bnd).unwrap(),
+        )
+        .unwrap();
 
         let dir_a = tmp("delegate_peer");
         let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
-        let cred_a =
-            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_a = group::join_group(
+            &dir_a,
+            &a_node,
+            &cred.join_key(),
+            "g",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
 
         let mut body = peer_brief_with_tool(&a_node, &cred_a, b"#!/bin/sh\n").body;
         body.knowledge.theory_requests = vec![crate::brief::TheoryRequest {
@@ -1179,7 +1354,9 @@ mod tests {
 
         fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
@@ -1200,7 +1377,9 @@ mod tests {
 
         // Idempotent: a second round doesn't re-adopt the same theory.
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
@@ -1210,7 +1389,10 @@ mod tests {
             .iter()
             .filter(|t| t.direction == "offer a standing morning digest")
             .count();
-        assert_eq!(n, 1, "the delegated theory is adopted once, not every round");
+        assert_eq!(
+            n, 1,
+            "the delegated theory is adopted once, not every round"
+        );
 
         let _ = fs::remove_dir_all(&dir_b);
         let _ = fs::remove_dir_all(&dir_a);
@@ -1225,27 +1407,57 @@ mod tests {
         let mut bnd = boundary::Boundary::closed();
         bnd.allow_mesh = true;
         bnd.allow_execute = false; // a theorist, not an executor
-        fs::write(dir.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
-        familiar_kernel::thread::append(&dir, &familiar_kernel::thread::Thread {
-            id: "thread-0001".into(), question: "q".into(), theory: "th".into(),
-            direction: "try a gentle nudge".into(), created_at: NOW, status: "open".into(),
-            origin: "llm".into(), actor: "familiar".into(),
-        }).unwrap();
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&bnd).unwrap(),
+        )
+        .unwrap();
+        familiar_kernel::thread::append(
+            &dir,
+            &familiar_kernel::thread::Thread {
+                id: "thread-0001".into(),
+                question: "q".into(),
+                theory: "th".into(),
+                direction: "try a gentle nudge".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                created_at: NOW,
+                status: "open".into(),
+                answers: Vec::new(),
+                origin: "llm".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
 
         let cfg = MeshConfig::default();
         build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
         let brief: MeshBrief =
             serde_json::from_str(&fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap()).unwrap();
-        assert_eq!(brief.body.knowledge.theory_requests.len(), 1, "a theorist offers its theory");
-        assert_eq!(brief.body.knowledge.theory_requests[0].direction, "try a gentle nudge");
+        assert_eq!(
+            brief.body.knowledge.theory_requests.len(),
+            1,
+            "a theorist offers its theory"
+        );
+        assert_eq!(
+            brief.body.knowledge.theory_requests[0].direction,
+            "try a gentle nudge"
+        );
 
         // Flip to executor: it keeps its theories to itself (tests them locally instead).
         bnd.allow_execute = true;
-        fs::write(dir.join(boundary::BOUNDARY_FILE), serde_json::to_string(&bnd).unwrap()).unwrap();
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&bnd).unwrap(),
+        )
+        .unwrap();
         build_outbox(&dir, &cred, &cfg, NOW + 2).unwrap();
         let brief2: MeshBrief =
             serde_json::from_str(&fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap()).unwrap();
-        assert!(brief2.body.knowledge.theory_requests.is_empty(), "an executor delegates nothing");
+        assert!(
+            brief2.body.knowledge.theory_requests.is_empty(),
+            "an executor delegates nothing"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1260,7 +1472,15 @@ mod tests {
         // Peer A shares the SAME group secret (join key), so its cert verifies for B.
         let dir_a = tmp("peer");
         let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
-        let cred_a = group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_a = group::join_group(
+            &dir_a,
+            &a_node,
+            &cred.join_key(),
+            "g",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
 
         let tool_body = b"#!/bin/sh\necho soc\n";
         let brief = peer_brief_with_tool(&a_node, &cred_a, tool_body);
@@ -1268,7 +1488,9 @@ mod tests {
         // Transport would have written these; simulate that here.
         fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
@@ -1288,8 +1510,9 @@ mod tests {
 
         // Peer observation is tagged, namespaced, and sourced from mesh — never laundered.
         let obs = observation::load(&dir_b).unwrap();
-        assert!(obs.iter().any(|o| o.actor == format!("mesh:{}", a_node.node_id())
-            && o.source == "mesh"));
+        assert!(obs
+            .iter()
+            .any(|o| o.actor == format!("mesh:{}", a_node.node_id()) && o.source == "mesh"));
 
         // Idempotent: draining again merges nothing new.
         let r2 = federate(&dir_b, NOW + 2);
@@ -1309,8 +1532,15 @@ mod tests {
         open_mesh_boundary(&dir_b);
         let dir_a = tmp("obs_peer");
         let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
-        let cred_a =
-            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_a = group::join_group(
+            &dir_a,
+            &a_node,
+            &cred.join_key(),
+            "g",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
 
         let mut body = peer_brief_with_tool(&a_node, &cred_a, b"#!/bin/sh\n").body;
         body.knowledge.observations = vec![ObsShare {
@@ -1326,7 +1556,9 @@ mod tests {
 
         fs::create_dir_all(dir_b.join(INBOX_DIR)).unwrap();
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
@@ -1344,7 +1576,9 @@ mod tests {
 
         // Idempotent: the same observation arriving again is deduped by content hash.
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
@@ -1366,13 +1600,19 @@ mod tests {
         let peer = NodeKey::load_or_mint(&tmp("closedpeer"), "p").unwrap();
         let brief = peer_brief_with_tool(&peer, &cred, b"#!/bin/sh\n"); // cert won't matter; closed short-circuits
         fs::create_dir_all(dir.join(INBOX_DIR)).unwrap();
-        fs::write(dir.join(INBOX_DIR).join("x.json"), serde_json::to_vec(&brief).unwrap()).unwrap();
+        fs::write(
+            dir.join(INBOX_DIR).join("x.json"),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
 
         let r = federate(&dir, NOW + 1);
         assert_eq!(r, MergeReport::default(), "closed mesh merges nothing");
         // A refusal is recorded (once) as visible truth.
         let obs = observation::load(&dir).unwrap();
-        assert!(obs.iter().any(|o| o.object == "mesh_federation" && o.action == "refused"));
+        assert!(obs
+            .iter()
+            .any(|o| o.object == "mesh_federation" && o.action == "refused"));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1386,10 +1626,15 @@ mod tests {
         // A brief from a DIFFERENT group — its cert won't verify against ours.
         let odir = tmp("outsider");
         let outsider = NodeKey::load_or_mint(&odir, "o").unwrap();
-        let other = group::create_group(&odir, &outsider, "other", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let other =
+            group::create_group(&odir, &outsider, "other", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
         let brief = peer_brief_with_tool(&outsider, &other, b"#!/bin/sh\n");
         fs::create_dir_all(dir.join(INBOX_DIR)).unwrap();
-        fs::write(dir.join(INBOX_DIR).join("x.json"), serde_json::to_vec(&brief).unwrap()).unwrap();
+        fs::write(
+            dir.join(INBOX_DIR).join("x.json"),
+            serde_json::to_vec(&brief).unwrap(),
+        )
+        .unwrap();
 
         let r = federate(&dir, NOW + 1);
         assert_eq!(r.rejected, 1);
@@ -1411,13 +1656,26 @@ mod tests {
         // A covenanted peer A — a legitimate member whose behavior has slipped.
         let dir_a = tmp("marginal_peer");
         let a_node = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
-        let cred_a =
-            group::join_group(&dir_a, &a_node, &cred.join_key(), "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_a = group::join_group(
+            &dir_a,
+            &a_node,
+            &cred.join_key(),
+            "g",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
         let actor = format!("mesh:{}", a_node.node_id());
 
         // Marginalize A (5 breaches within the window) → its tool + pattern must NOT merge.
         for i in 0..corruption::MARGINALIZE_THRESHOLD as i64 {
-            corruption::record(&dir_b, &actor, Reason::ViolatesConstitutionalBoundary, NOW - i).unwrap();
+            corruption::record(
+                &dir_b,
+                &actor,
+                Reason::ViolatesConstitutionalBoundary,
+                NOW - i,
+            )
+            .unwrap();
         }
         let tool_body = b"#!/bin/sh\necho soc\n";
         let brief = peer_brief_with_tool(&a_node, &cred_a, tool_body);
@@ -1426,25 +1684,41 @@ mod tests {
         fs::create_dir_all(dir_b.join(INBOX_TOOLS_DIR)).unwrap();
         fs::write(inbox_tool_path(&dir_b, &sha256_hex(tool_body)), tool_body).unwrap();
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();
 
         let r = federate(&dir_b, NOW + 1);
-        assert_eq!(r.tools_merged, 0, "a marginalized peer's tool does not merge");
+        assert_eq!(
+            r.tools_merged, 0,
+            "a marginalized peer's tool does not merge"
+        );
         assert_eq!(r.patterns_merged, 0, "nor its patterns");
         assert!(
-            observation::load(&dir_b).unwrap().iter().any(|o| o.context.contains("MARGINALIZED")),
+            observation::load(&dir_b)
+                .unwrap()
+                .iter()
+                .any(|o| o.context.contains("MARGINALIZED")),
             "the peer is still noted, badged marginalized"
         );
 
         // Push A over the sever line → its next brief is dropped and a revoke recommendation is raised.
         for i in 0..(corruption::SEVER_THRESHOLD - corruption::MARGINALIZE_THRESHOLD) as i64 {
-            corruption::record(&dir_b, &actor, Reason::ViolatesConstitutionalBoundary, NOW - 100 - i).unwrap();
+            corruption::record(
+                &dir_b,
+                &actor,
+                Reason::ViolatesConstitutionalBoundary,
+                NOW - 100 - i,
+            )
+            .unwrap();
         }
         fs::write(
-            dir_b.join(INBOX_DIR).join(format!("{}.json", a_node.node_id())),
+            dir_b
+                .join(INBOX_DIR)
+                .join(format!("{}.json", a_node.node_id())),
             serde_json::to_vec(&brief).unwrap(),
         )
         .unwrap();

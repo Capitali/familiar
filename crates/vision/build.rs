@@ -33,9 +33,7 @@ fn main() {
         .map(|o| o.status.success())
         .unwrap_or(false);
     if !swiftc_ok {
-        println!(
-            "cargo:warning=swiftc not found — camera capture helper (familiar-eye) not built"
-        );
+        println!("cargo:warning=swiftc not found — camera capture helper (familiar-eye) not built");
         return;
     }
 

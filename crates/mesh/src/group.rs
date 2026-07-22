@@ -92,8 +92,7 @@ impl GroupCredential {
     /// The group verifying (public) key.
     pub fn verifying_key(&self) -> Result<VerifyingKey> {
         let bytes = exactly_32(&hex_decode(&self.group_pubkey)?, "group pubkey")?;
-        VerifyingKey::from_bytes(&bytes)
-            .map_err(|e| Error::Malformed(format!("group pubkey: {e}")))
+        VerifyingKey::from_bytes(&bytes).map_err(|e| Error::Malformed(format!("group pubkey: {e}")))
     }
 
     /// The join key to hand another node so it can enroll — this is the group secret.
@@ -109,7 +108,12 @@ impl GroupCredential {
     }
 
     /// Build the credential a node stores after joining by covenant (no secret). See [`can_mint`].
-    pub fn covenant(group_id: String, group_pubkey: String, label: String, membership: Membership) -> Self {
+    pub fn covenant(
+        group_id: String,
+        group_pubkey: String,
+        label: String,
+        membership: Membership,
+    ) -> Self {
         GroupCredential {
             group_id,
             group_pubkey,
@@ -137,7 +141,14 @@ impl GroupCredential {
         now: i64,
         ttl_secs: i64,
     ) -> Result<Membership> {
-        mint_with(&self.group_signing_key()?, &self.group_id, node_id, node_pubkey, now, ttl_secs)
+        mint_with(
+            &self.group_signing_key()?,
+            &self.group_id,
+            node_id,
+            node_pubkey,
+            now,
+            ttl_secs,
+        )
     }
 }
 
@@ -261,7 +272,9 @@ pub fn verify_membership(
     // node_id must be the fingerprint of the certified pubkey — a cert can't rename a node.
     let pk = exactly_32(&hex_decode(&m.node_pubkey)?, "cert node pubkey")?;
     if fingerprint(&pk) != m.node_id {
-        return Err(Error::Untrusted("membership: node_id ≠ pubkey fingerprint".into()));
+        return Err(Error::Untrusted(
+            "membership: node_id ≠ pubkey fingerprint".into(),
+        ));
     }
     let sig_bytes = crate::node::exactly_64(&hex_decode(&m.cert)?, "cert")?;
     let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
@@ -321,8 +334,15 @@ mod tests {
         let b = NodeKey::load_or_mint(&dir_b, "b").unwrap();
 
         let cred_a = create_group(&dir_a, &a, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        let cred_b =
-            join_group(&dir_b, &b, &cred_a.join_key(), "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let cred_b = join_group(
+            &dir_b,
+            &b,
+            &cred_a.join_key(),
+            "river",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+        )
+        .unwrap();
 
         // Same group id + pubkey derived independently.
         assert_eq!(cred_a.group_id, cred_b.group_id);
@@ -350,24 +370,33 @@ mod tests {
         // Expired.
         assert!(verify_membership(m, &gk, &cred.group_id, m.expiry, &[]).is_err());
         // Revoked.
-        assert!(
-            verify_membership(m, &gk, &cred.group_id, NOW + 1, std::slice::from_ref(&m.node_id))
-                .is_err()
-        );
+        assert!(verify_membership(
+            m,
+            &gk,
+            &cred.group_id,
+            NOW + 1,
+            std::slice::from_ref(&m.node_id)
+        )
+        .is_err());
         // Wrong group id.
         assert!(verify_membership(m, &gk, "deadbeef", NOW + 1, &[]).is_err());
         // Forged cert: flip a signature byte.
         let mut bad = m.clone();
-        bad.cert.replace_range(0..2, if &bad.cert[0..2] == "00" { "01" } else { "00" });
+        bad.cert
+            .replace_range(0..2, if &bad.cert[0..2] == "00" { "01" } else { "00" });
         assert!(verify_membership(&bad, &gk, &cred.group_id, NOW + 1, &[]).is_err());
         // Different group key can't validate this cert.
         let dir2 = tmp("reject2");
         let n2 = NodeKey::load_or_mint(&dir2, "n2").unwrap();
         let other = create_group(&dir2, &n2, "other", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        assert!(
-            verify_membership(m, &other.verifying_key().unwrap(), &cred.group_id, NOW + 1, &[])
-                .is_err()
-        );
+        assert!(verify_membership(
+            m,
+            &other.verifying_key().unwrap(),
+            &cred.group_id,
+            NOW + 1,
+            &[]
+        )
+        .is_err());
 
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&dir2);
@@ -382,10 +411,14 @@ mod tests {
         let cred = create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
         let mut m = cred.membership.clone();
         m.node_id = "0000000000000000".into(); // lie about the id
-        assert!(
-            verify_membership(&m, &cred.verifying_key().unwrap(), &cred.group_id, NOW + 1, &[])
-                .is_err()
-        );
+        assert!(verify_membership(
+            &m,
+            &cred.verifying_key().unwrap(),
+            &cred.group_id,
+            NOW + 1,
+            &[]
+        )
+        .is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 }

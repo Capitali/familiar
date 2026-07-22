@@ -74,11 +74,57 @@ pub struct Member {
     /// recommended). Reversible; derived from the corruption-awareness score. See `corruption::Trust`.
     #[serde(default)]
     pub trust: String,
+    /// Liveness as a word — "online" (inside its kind's freshness window), "away" (missed
+    /// its cadence but recent), "offline" (gone). Derived at classify time from `last_seen`,
+    /// so a phone in airplane mode decays on the mesh's real cadence, not a 10-minute grace.
+    #[serde(default)]
+    pub status: String,
+    /// When the current continuous-online run began (unix secs). 0 when offline/unknown.
+    #[serde(default)]
+    pub session_start: i64,
+    /// Cumulative seconds this member has spent online in the mesh, live session included.
+    #[serde(default)]
+    pub total_online_secs: i64,
+    /// A human can interact at this node's console (false = headless / sensor-only).
+    #[serde(default)]
+    pub interactive: bool,
+    /// The human that node serves, when shared/derivable ("ian"). Empty when none/unknown.
+    #[serde(default)]
+    pub human: String,
+    /// Where the node is (decimal degrees) — self from `transport::self_geo`, peers from their
+    /// briefs, devices from the GPS they report on worldview reads. 0/0 = unknown, and the map
+    /// says so rather than inventing a place.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
+}
+
+/// Liveness thresholds, per member kind: a gossip peer beacons every ~30s, so two missed
+/// rounds means it's off; device consoles/sensors report on change and get a longer leash.
+/// Beyond `away`, it's offline. (secs)
+fn status_of(kind: MemberKind, age: i64) -> &'static str {
+    let (online, away) = match kind {
+        MemberKind::SelfNode => return "online",
+        MemberKind::GossipPeer => (transport::GOSSIP_FRESH_SECS, 3600),
+        MemberKind::DevicePeer | MemberKind::DeviceAgent => (DEVICE_FRESH_SECS, 3600),
+    };
+    if age <= online {
+        "online"
+    } else if age <= away {
+        "away"
+    } else {
+        "offline"
+    }
 }
 
 /// A device counts as present if it was seen within this window. Generous, because device agents
 /// report on change (they can be quiet for a while yet still be "here").
 pub const ONLINE_WINDOW_SECS: i64 = 600;
+/// The window for a device to still read **"online"** in the roster — tighter than
+/// [`ONLINE_WINDOW_SECS`] (which still governs session continuity), so a phone that drops
+/// off the network (airplane mode) visibly decays within minutes, not ten.
+pub const DEVICE_FRESH_SECS: i64 = 180;
 /// A device agent older than this has departed — dropped from the roster.
 const AGENT_FRESH_SECS: i64 = 6 * 3600;
 
@@ -88,8 +134,8 @@ const AGENT_FRESH_SECS: i64 = 6 * 3600;
 /// This is what keeps a headless gossip peer (whose replicated `familiar` observations arrive tagged
 /// `mesh:<node>`) from being misread as a device peer.
 const DEVICE_NAMESPACES: &[&str] = &[
-    "phone", "iphone", "ipad", "watch", "mac", "tv", "appletv", "roku", "android",
-    "tablet", "tizen", "wearable", "windows", "linux",
+    "phone", "iphone", "ipad", "watch", "mac", "tv", "appletv", "roku", "android", "tablet",
+    "tizen", "wearable", "windows", "linux",
 ];
 
 fn is_device_actor(actor: &str) -> bool {
@@ -102,14 +148,20 @@ fn is_device_actor(actor: &str) -> bool {
 /// The latest device report per node id: `node -> (actor, object, ts)`, over **device-namespace**
 /// actors only (`phone:`/`ipad:`/`watch:`/`tv:`…). Non-device actors (a peer's `familiar` cycle,
 /// human `ian`, gossip `mesh:*`) are ignored so a gossip peer isn't misclassified as a device.
-fn device_reports(obs: &[familiar_kernel::observation::Observation]) -> HashMap<String, (String, String, i64)> {
+fn device_reports(
+    obs: &[familiar_kernel::observation::Observation],
+) -> HashMap<String, (String, String, i64)> {
     let mut latest: HashMap<String, (String, String, i64)> = HashMap::new();
     for o in obs {
-        let Some(node) = o.source.strip_prefix("mesh:") else { continue };
+        let Some(node) = o.source.strip_prefix("mesh:") else {
+            continue;
+        };
         if !is_device_actor(&o.actor) {
             continue; // not a device-sensor report (peer cycle / human / gossip presence)
         }
-        let e = latest.entry(node.to_string()).or_insert((String::new(), String::new(), 0));
+        let e = latest
+            .entry(node.to_string())
+            .or_insert((String::new(), String::new(), 0));
         if o.ts >= e.2 {
             *e = (o.actor.clone(), o.object.clone(), o.ts);
         }
@@ -147,9 +199,17 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
         let first = obs.iter().map(|o| o.ts).min().unwrap_or(now);
         let last = obs.iter().map(|o| o.ts).max().unwrap_or(now);
-        let tools = familiar_kernel::tool::load(dir).map(|t| t.len()).unwrap_or(0);
-        let patterns = familiar_kernel::pattern_memory::load(dir).map(|p| p.len()).unwrap_or(0);
-        let self_ai = familiar_kernel::boundary::load(dir).map(|b| b.allow_llm).unwrap_or(false);
+        let tools = familiar_kernel::tool::load(dir)
+            .map(|t| t.len())
+            .unwrap_or(0);
+        let patterns = familiar_kernel::pattern_memory::load(dir)
+            .map(|p| p.len())
+            .unwrap_or(0);
+        let self_ai = familiar_kernel::boundary::load(dir)
+            .map(|b| b.allow_llm)
+            .unwrap_or(false);
+        let cfg = crate::config::load(dir).unwrap_or_default();
+        let (self_lat, self_lon) = transport::self_geo(dir).unwrap_or((0.0, 0.0));
         out.push(Member {
             node_id: cred.membership.node_id.clone(),
             label,
@@ -168,6 +228,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             relationship: "self".into(),
             ai: self_ai,
             trust: "trusted".into(),
+            status: "online".into(),
+            session_start: 0,
+            total_online_secs: 0,
+            interactive: !cfg.headless,
+            human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+            lat: self_lat,
+            lon: self_lon,
         });
     }
 
@@ -183,9 +250,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         .filter(|o| o.action == "theorizes")
         .map(|o| o.actor.clone())
         .collect();
-    let ai_node = |node_id: &str, actor: &str| ai_nodes.contains(actor) || ai_nodes.contains(node_id);
+    let ai_node =
+        |node_id: &str, actor: &str| ai_nodes.contains(actor) || ai_nodes.contains(node_id);
     let peers: Vec<PeerRecord> = transport::load_peers(dir);
-    let peer_ids: std::collections::HashSet<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
+    let peer_ids: std::collections::HashSet<&str> =
+        peers.iter().map(|p| p.node_id.as_str()).collect();
     // Best-probable names for peers on the tailnet: their Tailscale hostname, keyed by IP.
     let tailnet: std::collections::HashMap<String, String> = transport::enumerate_peers()
         .into_iter()
@@ -196,26 +265,70 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let ip = p.addr.split(':').next().unwrap_or("").to_string();
         let is_device = reports.contains_key(&p.node_id);
         let (kind, os, actor, relationship) = if let Some((actor, _, _)) = reports.get(&p.node_id) {
-            (MemberKind::DevicePeer, os_from_actor(actor), actor.clone(), "reads worldview".to_string())
+            (
+                MemberKind::DevicePeer,
+                os_from_actor(actor),
+                actor.clone(),
+                "reads worldview".to_string(),
+            )
         } else {
-            (MemberKind::GossipPeer, os_pretty(&p.os), String::new(), "gossip peer".to_string())
+            (
+                MemberKind::GossipPeer,
+                os_pretty(&p.os),
+                String::new(),
+                "gossip peer".to_string(),
+            )
         };
         // Prefer a resolved tailnet hostname for gossip peers; keep the device's own label otherwise.
         let label = if !is_device {
-            tailnet.get(&ip).cloned().filter(|h| !h.is_empty()).unwrap_or_else(|| p.label.clone())
+            tailnet
+                .get(&ip)
+                .cloned()
+                .filter(|h| !h.is_empty())
+                .unwrap_or_else(|| p.label.clone())
         } else {
             p.label.clone()
         };
         let detail = if is_device {
-            reports.get(&p.node_id).map(|(_, o, _)| o.clone()).unwrap_or_default()
+            reports
+                .get(&p.node_id)
+                .map(|(_, o, _)| o.clone())
+                .unwrap_or_default()
         } else {
-            let v = if p.familiar_version.is_empty() { String::new() } else { format!("v{} · ", p.familiar_version) };
-            format!("{v}{} tool(s), {} pattern(s)", p.tools_offered, p.patterns_offered)
+            let v = if p.familiar_version.is_empty() {
+                String::new()
+            } else {
+                format!("v{} · ", p.familiar_version)
+            };
+            format!(
+                "{v}{} tool(s), {} pattern(s)",
+                p.tools_offered, p.patterns_offered
+            )
         };
         let has_ai = ai_node(&p.node_id, &actor);
-        let trust = familiar_kernel::corruption::trust(&refusals, &format!("mesh:{}", p.node_id), now)
-            .label()
-            .to_string();
+        let trust =
+            familiar_kernel::corruption::trust(&refusals, &format!("mesh:{}", p.node_id), now)
+                .label()
+                .to_string();
+        let status = status_of(kind, now - p.last_seen);
+        // The human at that node: what its brief shared, else the device's actor namespace
+        // (`ipad:ian` → "ian" — the device is inherently a human's console).
+        let human = if !p.human.is_empty() {
+            p.human.clone()
+        } else {
+            actor
+                .split_once(':')
+                .map(|(_, h)| h.to_string())
+                .unwrap_or_default()
+        };
+        // Cumulative online time, live session included while it's still fresh.
+        let live = if status == "online" && p.session_start > 0 {
+            (now - p.session_start).max(0)
+        } else if p.session_start > 0 {
+            (p.last_seen - p.session_start).max(0)
+        } else {
+            0
+        };
         out.push(Member {
             node_id: p.node_id.clone(),
             label,
@@ -226,7 +339,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             detail,
             first_seen: p.first_seen,
             last_seen: p.last_seen,
-            online: now - p.last_seen <= ONLINE_WINDOW_SECS,
+            online: status == "online",
             familiar_version: p.familiar_version.clone(),
             tools: p.tools_offered,
             patterns: p.patterns_offered,
@@ -234,6 +347,17 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             relationship,
             ai: has_ai,
             trust,
+            status: status.into(),
+            session_start: if status == "online" {
+                p.session_start
+            } else {
+                0
+            },
+            total_online_secs: p.total_online_secs + live,
+            interactive: p.interactive || is_device,
+            human,
+            lat: p.lat,
+            lon: p.lon,
         });
     }
 
@@ -273,6 +397,16 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             trust: familiar_kernel::corruption::trust(&refusals, actor, now)
                 .label()
                 .to_string(),
+            status: status_of(MemberKind::DeviceAgent, now - *ts).into(),
+            session_start: 0,
+            total_online_secs: 0,
+            interactive: false,
+            human: actor
+                .split_once(':')
+                .map(|(_, h)| h.to_string())
+                .unwrap_or_default(),
+            lat: 0.0,
+            lon: 0.0,
         });
     }
 
@@ -323,13 +457,27 @@ mod tests {
         // A device agent: an observation tagged mesh:<node> under a phone actor.
         observation::record(
             &dir,
-            Observation::new("phone:ian", "reports", "location:home", "", "mesh:phonenode1", NOW, 0.9),
+            Observation::new(
+                "phone:ian",
+                "reports",
+                "location:home",
+                "",
+                "mesh:phonenode1",
+                NOW,
+                0.9,
+            ),
         )
         .unwrap();
 
         let members = classify(&dir, NOW + 10);
-        let self_n = members.iter().filter(|m| m.kind == MemberKind::SelfNode).count();
-        let agents: Vec<_> = members.iter().filter(|m| m.kind == MemberKind::DeviceAgent).collect();
+        let self_n = members
+            .iter()
+            .filter(|m| m.kind == MemberKind::SelfNode)
+            .count();
+        let agents: Vec<_> = members
+            .iter()
+            .filter(|m| m.kind == MemberKind::DeviceAgent)
+            .collect();
         assert_eq!(self_n, 1, "exactly one self node");
         assert_eq!(agents.len(), 1, "the phone is a device agent");
         assert_eq!(agents[0].os, "iOS");

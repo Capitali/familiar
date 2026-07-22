@@ -112,7 +112,10 @@ enum Step {
 /// constitutional review clears it. A refusal is *not* an error: it's fed back as an
 /// observation so the agent re-plans within its granted capability.
 fn run_gated(dir: &Path, scoped: &Boundary, script: &str, _now: i64) -> io::Result<String> {
-    let verdict = guard::evaluate(&Action::new(ActionKind::ExecuteArtifact, "agent-script"), scoped);
+    let verdict = guard::evaluate(
+        &Action::new(ActionKind::ExecuteArtifact, "agent-script"),
+        scoped,
+    );
     if verdict.decision != Decision::Allow {
         return Ok(format!(
             "REFUSED by your scoped boundary — {}. Propose only what's within your granted \
@@ -245,8 +248,12 @@ mod tests {
             Some(Step::Run { script }) => assert!(script.contains("echo hi")),
             _ => panic!("expected a run step"),
         }
-        match parse_action(r#"{"action":"answer","body":"12 hosts up","confidence":"known","evidence":"nmap -sn"}"#) {
-            Some(Step::Answer { body, confidence, .. }) => {
+        match parse_action(
+            r#"{"action":"answer","body":"12 hosts up","confidence":"known","evidence":"nmap -sn"}"#,
+        ) {
+            Some(Step::Answer {
+                body, confidence, ..
+            }) => {
                 assert_eq!(body, "12 hosts up");
                 assert_eq!(confidence, Confidence::Known);
             }
@@ -262,7 +269,8 @@ mod tests {
     fn delegation_is_a_noop_when_the_boundary_is_closed() {
         // No boundary.json → fully closed → allow_agent false → run_agent must not reach out
         // (no LLM consult) and returns None so the caller falls back.
-        let dir = std::env::temp_dir().join(format!("familiar_agent_closed_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("familiar_agent_closed_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let scope = {

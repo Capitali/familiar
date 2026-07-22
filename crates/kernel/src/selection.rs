@@ -121,8 +121,14 @@ mod tests {
         assert_eq!(decide(&trial("pass", 0.70, ""), 0.0), Decision::Promote);
         assert_eq!(decide(&trial("pass", 0.699, ""), 0.0), Decision::Archive);
         // Exactly at the mutation floor for a classified failure → mutate.
-        assert_eq!(decide(&trial("fail", 0.35, "low_fit"), 0.0), Decision::Mutate);
-        assert_eq!(decide(&trial("fail", 0.349, "low_fit"), 0.0), Decision::Archive);
+        assert_eq!(
+            decide(&trial("fail", 0.35, "low_fit"), 0.0),
+            Decision::Mutate
+        );
+        assert_eq!(
+            decide(&trial("fail", 0.349, "low_fit"), 0.0),
+            Decision::Archive
+        );
     }
 
     #[test]

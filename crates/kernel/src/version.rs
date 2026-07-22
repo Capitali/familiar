@@ -28,6 +28,9 @@ mod tests {
         // stamp() is whatever this build baked in; number() must be a clean parse of its first int.
         let n = number();
         // The repo VERSION is at least 1 in any real build; 0 only if unstamped.
-        assert!(n >= 1 || stamp() == "0", "a stamped build has a positive version");
+        assert!(
+            n >= 1 || stamp() == "0",
+            "a stamped build has a positive version"
+        );
     }
 }

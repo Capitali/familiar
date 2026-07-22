@@ -5,10 +5,13 @@
 # artifacts / data / the LLM seam), so the compiled core changes rarely.
 [workspace]
 resolver = "2"
-# The egui Glass (crates/glass) and the menu-bar Marble (crates/marble) were superseded by the SwiftUI
-# consoles (FamiliarMac + the iOS/iPad app) and archived under `archive/` — nothing depends on them.
-# The daemon (crates/cli → `familiar`) + the SwiftUI apps are the path forward.
-members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach"]
+# The Rust workspace is the FAMILIAR CORE: the daemon (crates/cli → `familiar`) and the
+# embeddable library (crates/core-ffi → device shells, ADR-0009 Phase 0). The human
+# interface is the Metal Sphere (ADR-0008), a web+MapKit console the macOS/iOS apps host
+# and — via core-ffi — a capable phone runs against its own embedded core. Retired UIs
+# (egui Glass, menu-bar Marble, wgpu hologram engine, SwiftUI consoles) live in git
+# history / archive/; see ADR-0007 (superseded) and ADR-0008.
+members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario"]
 
 [workspace.package]
 version = "0.1.0"
@@ -29,3 +32,4 @@ familiar-exec = { path = "crates/exec" }
 familiar-mesh = { path = "crates/mesh" }
 familiar-agent = { path = "crates/agent" }
 familiar-reach = { path = "crates/reach" }
+familiar-scenario = { path = "crates/scenario" }

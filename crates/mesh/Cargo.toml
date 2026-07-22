@@ -20,4 +20,11 @@ getrandom = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util"] }
 hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+# Phase-1 transport security (ADR-0009): covenant-pinned TLS on the mesh port. rustls +
+# a per-node persistent P-256 key (rcgen) — Apple clients can't handshake EdDSA certs,
+# so the TLS key is separate from the ed25519 node key and pinned via the enrollment
+# payload instead.
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = "0.13"
 http-body-util = "0.1"
