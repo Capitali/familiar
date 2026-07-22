@@ -205,6 +205,11 @@ pub(crate) fn ingest_observations(
             env.ts,
             o.confidence.clamp(0.0, 1.0),
         );
+        // A device's answer aimed at a thread ("thread:<id>" context) attaches as that
+        // thread's evidence — the same non-dead-end path as a local console answer.
+        if let Some(thread_id) = obs.context.strip_prefix("thread:") {
+            let _ = familiar_kernel::thread::add_answer(dir, thread_id, &obs.object, env.ts);
+        }
         observation::record(dir, obs).map_err(Error::Io)?;
     }
     Ok(keep.len())

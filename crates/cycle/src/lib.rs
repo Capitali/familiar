@@ -447,6 +447,7 @@ fn maybe_theorize(
             status: "open".to_string(),
             status_at: now,
             last_worked_at: 0,
+            answers: Vec::new(),
             origin: "llm".to_string(),
             actor: "familiar".to_string(),
         },
@@ -1237,6 +1238,7 @@ fn adopt_device_theories(
             status: "open".into(),
             status_at: now,
             last_worked_at: 0,
+            answers: Vec::new(),
             origin: "device".into(),
             // Attribute to the reasoning device so corruption-awareness governs it.
             actor: o.actor.clone(),
@@ -1269,7 +1271,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
     let mut abandoned = 0;
     let mut marginalized = 0;
     for t in &threads {
-        if t.status != "open" || t.direction.trim().is_empty() {
+        if t.status != "open" || (t.direction.trim().is_empty() && t.answers.is_empty()) {
             continue;
         }
         // Corruption awareness (Law III, outward): a directive from a flagged corruptor —
@@ -1335,7 +1337,15 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
             },
             format!("candidate-{seq:04}"),
         );
-        c.hypothesis = t.direction.clone();
+        // The human's answers to this thread's question travel WITH the pursuit — an
+        // answered question is evidence, never a dead end.
+        c.hypothesis = if t.answers.is_empty() {
+            t.direction.clone()
+        } else if t.direction.trim().is_empty() {
+            format!("act on the human's answer: {}", t.answers.join("; "))
+        } else {
+            format!("{} — the human answered: {}", t.direction, t.answers.join("; "))
+        };
         candidate::append(dir, &c)?;
         thread::update_status(dir, &t.id, "pursued", now)?;
         pursued += 1;
@@ -2531,6 +2541,7 @@ mod tests {
                 status: "open".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2616,6 +2627,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2658,6 +2670,7 @@ mod tests {
                 status: "open".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2972,6 +2985,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "familiar".into(),
                 actor: "familiar".into(),
             },
@@ -3141,6 +3155,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "familiar".into(),
                 actor: "familiar".into(),
             },
@@ -3285,6 +3300,7 @@ mod tests {
                     status: "open".into(),
                     status_at: 0,
                     last_worked_at: 0,
+                    answers: Vec::new(),
                     origin: "observer".into(),
                     actor: actor.into(),
                 },

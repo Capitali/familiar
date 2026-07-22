@@ -833,13 +833,33 @@ fn local_worldview(dir: &Path) -> Response<Full<Bytes>> {
 /// `POST /local/answer {"text": "..."}` → the human at this machine speaks to the familiar. Records
 /// a served-facing observation and retires the current question. Loopback-gated by the caller.
 fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
-    let text_val = serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|v| v.get("text").and_then(|s| s.as_str()).map(String::from))
-        .unwrap_or_default();
+    let v = serde_json::from_slice::<serde_json::Value>(body).unwrap_or_default();
+    let text_val = v
+        .get("text")
+        .and_then(|s| s.as_str())
+        .unwrap_or_default()
+        .to_string();
     let t = text_val.trim();
     if t.is_empty() {
         return text(StatusCode::BAD_REQUEST, "empty");
+    }
+    // An answer aimed at a specific THREAD attaches as that thread's evidence and travels
+    // with its pursuit (kernel::thread::add_answer) — never a dead end. An untargeted
+    // answer is the console channel: recorded, and the open question retired.
+    if let Some(thread_id) = v.get("thread").and_then(|s| s.as_str()) {
+        let now = now_secs();
+        let _ = familiar_kernel::thread::add_answer(dir, thread_id, t, now);
+        let obs = familiar_kernel::observation::Observation::new(
+            "ian",
+            "answered",
+            t,
+            format!("thread:{thread_id}"),
+            "local",
+            now,
+            1.0,
+        );
+        let _ = familiar_kernel::observation::record(dir, obs);
+        return text(StatusCode::OK, "ok");
     }
     let obs = familiar_kernel::observation::Observation::new(
         "ian",

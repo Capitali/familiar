@@ -177,6 +177,7 @@ mod tests {
             status: status.into(),
             status_at: 0,
             last_worked_at: 0,
+            answers: Vec::new(),
             origin: "llm".into(),
             actor: "familiar".into(),
         }

@@ -71,6 +71,9 @@ pub struct TheoryView {
     pub status_at: i64,
     #[serde(default)]
     pub last_worked_at: i64,
+    /// The human's answers so far — shown under the question, carried by the pursuit.
+    #[serde(default)]
+    pub answers: Vec<String>,
 }
 
 /// One of the familiar's reflections on humanity — its lived understanding, appended beside (never
@@ -392,6 +395,7 @@ pub fn assemble_worldview(
                 t.created_at
             },
             last_worked_at: t.last_worked_at,
+            answers: t.answers.clone(),
         })
         .collect();
 

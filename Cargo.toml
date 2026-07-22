@@ -9,7 +9,7 @@ resolver = "2"
 # SwiftUI consoles (FamiliarMac + the iOS/iPad app, archived to `archive/ios`) are all
 # superseded by crates/hologram — one wgpu/egui holographic engine, every platform. See
 # ADR-0007. The daemon (crates/cli → `familiar`) + crates/hologram are the path forward.
-members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/hologram"]
+members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/hologram", "crates/core-ffi"]
 
 [workspace.package]
 version = "0.1.0"
