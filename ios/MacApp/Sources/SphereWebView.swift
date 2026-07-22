@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import MapKit
+import CoreLocation
 
 // The Metal Sphere console (imported from Claude Design "Familiar Metal Sphere.dc.html"):
 // a WKWebView renders the satellite globe + hologram (Resources/sphere/index.html), and the
@@ -50,7 +51,7 @@ struct SphereConsole: View {
 // MARK: - the shared bridge (web ↔ native ↔ daemon)
 
 @MainActor
-final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler {
+final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CLLocationManagerDelegate {
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
     @Published var streetTarget: (lat: Double, lon: Double, label: String)?
@@ -66,9 +67,17 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         let online: Bool, frontier: Bool
     }
 
+    // Covenant baseline: this node provides its position too. macOS CoreLocation (wifi
+    // positioning) writes the daemon's mesh/geo.json seam — the same file any shell with a
+    // better source (a GPS feed) may own instead.
+    private let locator = CLLocationManager()
+
     func start(web: WKWebView) {
         self.web = web
         guard timer == nil else { return }
+        locator.delegate = self
+        locator.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        locator.startUpdatingLocation()
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { await self?.poll() }
         }
@@ -162,6 +171,21 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             }
         }
     }
+
+    nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
+        guard let loc = locs.last else { return }
+        let geo = ["lat": loc.coordinate.latitude, "lon": loc.coordinate.longitude]
+        Task { @MainActor in
+            let dir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/Familiar/data/mesh")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            if let data = try? JSONSerialization.data(withJSONObject: geo) {
+                try? data.write(to: dir.appendingPathComponent("geo.json"))
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {}
 
     private func post(_ path: String, _ payload: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }

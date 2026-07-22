@@ -128,6 +128,18 @@ final class AppModel: ObservableObject {
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
         // Migrate an existing UserDefaults-only enrollment into the Keychain so it stops evaporating.
         if enrolled { saveEnrollment() }
+        // Covenant baseline: an enrolled device with GPS provides its position to the mesh.
+        if enrolled { startFixBaseline() }
+    }
+
+    /// Position reporting is part of the covenant — hold a fix whenever enrolled, without
+    /// turning on the richer derived sensing (that stays behind its own toggles).
+    private func startFixBaseline() {
+        let coord = coordinator ?? SensingCoordinator { [weak self] batch in
+            await self?.deliver(batch)
+        }
+        coordinator = coord
+        coord.startFixBaseline()
     }
 
     /// A single derived observation from any sensor → the /mesh/observe pipe.
@@ -193,6 +205,7 @@ final class AppModel: ObservableObject {
                 // Hand the paired Apple Watch this familiar's address so it can enrol itself by
                 // covenant (address only — the watch mints its own key + gets its own grant).
                 PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label)
+                startFixBaseline()
                 startSensingIfConsented()
                 startDiscoveryIfConsented()
                 return
@@ -279,7 +292,7 @@ final class AppModel: ObservableObject {
         for _ in 0..<max(1, hosts.count) {
             guard let session = worldviewSession() else { return }
             do {
-                let fix = locationEnabled ? coordinator?.lastCoordinate : nil
+                let fix = coordinator?.lastCoordinate
                 let view = try await WorldviewClient(session: session)
                     .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                            lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)

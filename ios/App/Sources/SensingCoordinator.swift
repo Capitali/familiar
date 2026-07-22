@@ -32,7 +32,17 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
         location.pausesLocationUpdatesAutomatically = false
     }
 
+    /// The covenant baseline: every device with GPS provides its position to the mesh —
+    /// location matters to the familiar's understanding of patterns and locality. This
+    /// starts position updates only; the richer derived sensing (home/away observations,
+    /// motion) remains behind its own consent toggles via `start`.
+    func startFixBaseline() {
+        location.requestAlwaysAuthorization()
+        location.startMonitoringSignificantLocationChanges()
+    }
+
     func start(location wantLocation: Bool, motion wantMotion: Bool) {
+        derivedLocationObs = wantLocation
         if wantLocation {
             location.requestAlwaysAuthorization()
             location.startMonitoringSignificantLocationChanges()
@@ -56,9 +66,13 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
     }
 
     func stop() {
-        location.stopMonitoringSignificantLocationChanges()
+        // The fix baseline continues (covenant contract); only derived sensing stops.
+        derivedLocationObs = false
         motion.stopActivityUpdates()
     }
+
+    /// Whether location updates should also emit derived home/away observations (consent).
+    private var derivedLocationObs = false
 
     /// Anchor "home" at the current location (a user gesture). Home/away is derived from this.
     func markHomeAtCurrent() {
@@ -71,6 +85,7 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
     func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
         guard let loc = locs.last else { return }
         current = loc
+        guard derivedLocationObs else { return }   // baseline mode: hold the fix, no observations
         let place = placeLabel(for: loc)
         guard place != lastPlace else { return }
         lastPlace = place
