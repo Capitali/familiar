@@ -11,3 +11,4 @@
 !*.env.example
 # Apple API/auth private keys (App Store Connect, APNs) — never committed.
 *.p8
+lab-runs/
