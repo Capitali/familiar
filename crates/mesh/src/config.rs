@@ -82,6 +82,12 @@ pub struct MeshConfig {
     pub lan_discovery: bool,
     /// UDP port the discovery beacons use (distinct from the TCP `gossip_port`).
     pub lan_port: u16,
+    /// Addresses this node answers at that no interface reveals — asserted by the human,
+    /// advertised verbatim and first in the worldview `hosts` list. A lighthouse behind a
+    /// cloud 1:1 NAT asserts its public IP here; any node may assert a stable DNS name so
+    /// devices survive an IP change. Interface-derived addresses still follow; empty for
+    /// almost every node.
+    pub advertise_hosts: Vec<String>,
 }
 
 impl Default for MeshConfig {
@@ -101,6 +107,7 @@ impl Default for MeshConfig {
             auto_peer: false,
             lan_discovery: true,
             lan_port: 47_101,
+            advertise_hosts: Vec::new(),
         }
     }
 }

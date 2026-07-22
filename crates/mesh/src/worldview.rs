@@ -315,10 +315,17 @@ pub(crate) fn read_worldview(
             m.relationship = "self".into();
         }
     }
-    // Tell the console every address the MESH answers at: ours first, then fresh gossip
-    // peers (any member node serves the same verified read seam — the worldview is
-    // gossip-replicated). A device that loses this node fails over to a sibling.
-    let mut hosts = crate::transport::reachable_hosts();
+    // Tell the console every address the MESH answers at: human-asserted first (a
+    // lighthouse's NAT-hidden public IP or DNS name — `advertise_hosts`), then ours, then
+    // fresh gossip peers (any member node serves the same verified read seam — the
+    // worldview is gossip-replicated). A device that loses this node fails over to a
+    // sibling.
+    let mut hosts = crate::config::load(dir).unwrap_or_default().advertise_hosts;
+    for h in crate::transport::reachable_hosts() {
+        if !hosts.contains(&h) {
+            hosts.push(h);
+        }
+    }
     for p in crate::transport::load_peers(dir) {
         if now - p.last_seen <= crate::transport::GOSSIP_FRESH_SECS * 5 {
             let ip = p.addr.split(':').next().unwrap_or("").to_string();
@@ -902,6 +909,22 @@ mod tests {
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
         assert_eq!(view.recent[0].object, "the familiar for help");
+    }
+
+    #[test]
+    fn asserted_advertise_hosts_lead_the_hosts_list() {
+        let (host, cred, device) = setup("advertise");
+        std::fs::create_dir_all(host.join("mesh")).unwrap();
+        std::fs::write(
+            host.join(crate::config::CONFIG_FILE),
+            r#"{"advertise_hosts":["lighthouse.river.io","203.0.113.7"]}"#,
+        )
+        .unwrap();
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        // Human-asserted addresses come first, verbatim — DNS names included; the
+        // interface-derived addresses follow.
+        assert_eq!(&view.hosts[..2], ["lighthouse.river.io", "203.0.113.7"]);
     }
 
     #[test]

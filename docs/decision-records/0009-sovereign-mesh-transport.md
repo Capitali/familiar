@@ -44,8 +44,15 @@ underlined the cost of leaning on external tooling.
   headless familiar on any machine with a public address and `mesh peer <addr>` it from
   each node. Gossip is store-and-forward, so relay-only connectivity still converges the
   whole mesh; devices learn the lighthouse address through `hosts` like any other. No new
-  protocol was needed — a lighthouse is just a member with a good address. (Works today;
-  none deployed — the fleet currently has no public endpoint.)
+  protocol was needed — a lighthouse is just a member with a good address.
+  - *Doctrine (2026-07-22): every headless peer IS a lighthouse.* Lighthouse is not a
+    role a node opts into but the posture every headless peer already runs — bind all
+    interfaces, serve everything, relay everything; the network decides which of them
+    the world can actually reach. Consequently there is no lighthouse flag anywhere in
+    the code, and deploying one is pure provisioning: `vps/provision-lighthouse.sh`
+    stands up the same peer FamTalker01 runs, on a box with a public address. The one
+    knob added for it: `advertise_hosts` in `mesh/config.json`, for addresses no
+    interface reveals (cloud 1:1 NAT, stable DNS names).
 - **Hole punching** (direct paths between CGNAT'd nodes, lighthouse as rendezvous):
   designed, not implemented — belongs with Phase 3's QUIC, whose UDP substrate is what
   punches well.
