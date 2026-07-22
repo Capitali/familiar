@@ -259,6 +259,8 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
             case "surface":
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
+            case "invite":
+                self.fetchInvite()
             default: break
             }
         }
@@ -278,6 +280,19 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     }
 
     nonisolated func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {}
+
+    /// The enrollment payload for a new device (group secret — trusted screen only): fetch
+    /// from the loopback seam and hand it to the page to render as a QR.
+    private func fetchInvite() {
+        Task { @MainActor in
+            guard let (data, resp) = try? await URLSession.shared.data(from: base.appendingPathComponent("local/invite")),
+                  (resp as? HTTPURLResponse)?.statusCode == 200,
+                  let payload = String(data: data, encoding: .utf8),
+                  let quoted = (try? JSONEncoder().encode(payload)).flatMap({ String(data: $0, encoding: .utf8) })
+            else { return }
+            self.web?.evaluateJavaScript("window.sphereInvite(\(quoted))", completionHandler: nil)
+        }
+    }
 
     private func post(_ path: String, _ payload: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }

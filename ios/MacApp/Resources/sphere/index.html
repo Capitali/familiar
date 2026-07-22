@@ -120,6 +120,7 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="importmap">
 {"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
 </script>
@@ -387,8 +388,20 @@ function refreshScreen() {
   } else if (k === 'device') {
     const d = S.device;
     if (!d) {
-      // No device push (the Mac console): show what this node is, from the worldview.
-      el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);">${esc(v.group_label)} · ${esc(v.node_id)}</div>`;
+      // No device push → this console speaks for the node itself (the Mac): identity plus
+      // the invitation QR a new device scans to join (the payload holds the group secret —
+      // it renders on request only, on this trusted screen).
+      el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:18px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
+        <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+          <button onclick="toApp('invite',{})" class="glybtn" title="invite" style="width:52px;height:52px;border-radius:14px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:24px;height:24px;">
+              <rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/>
+              <path d="M14 14h3v3h-3zM18 18h3v3h-3z" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/>
+            </svg>
+          </button>
+          <div id="inviteqr"></div>
+        </div>`;
+      if (S.invite) renderInviteQR();
       return;
     }
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
@@ -491,6 +504,15 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
   renderChrome(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
+window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
+function renderInviteQR() {
+  const box = $('inviteqr'); if (!box || !S.invite || typeof qrcode === 'undefined') return;
+  const qr = qrcode(0, 'M');
+  qr.addData(S.invite);
+  qr.make();
+  box.innerHTML = `<div style="padding:12px;border-radius:14px;background:rgba(238,242,251,0.92);display:inline-block;">${qr.createSvgTag({cellSize: 3, margin: 0})}</div>
+    <div class="m" style="max-width:340px;margin-top:8px;font-size:8px;line-height:1.5;color:rgba(150,180,255,0.5);word-break:break-all;">${esc(S.invite)}</div>`;
+}
 window.sphereUnenroll = () => {
   if (!S.unenrollArmed) {
     S.unenrollArmed = true; refreshScreen();
