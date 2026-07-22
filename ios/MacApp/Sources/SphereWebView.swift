@@ -20,7 +20,7 @@ struct SphereConsole: View {
                 .ignoresSafeArea()
                 .opacity(bridge.mode == .street ? 0 : 1)
                 .allowsHitTesting(bridge.mode != .street)
-                .animation(.easeInOut(duration: 0.7), value: bridge.mode)
+                .animation(.easeInOut(duration: 1.6), value: bridge.mode)
             if bridge.mode == .street {
                 // Wordless exit: the orbit glyph, bottom-center — back up to the globe.
                 VStack {
@@ -123,11 +123,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler {
         guard let map else { return }
         syncAnnotations(on: map)
         let target = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        // Surfaced at the globe's altitude; descend in step with the crossfade, ending in
+        // pure-street close detail — one continuous flight, no jump in the zoom range.
         map.camera = MKMapCamera(lookingAtCenter: target, fromDistance: 220_000, pitch: 0, heading: 0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak map] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak map] in
             let close = MKMapCamera(lookingAtCenter: target, fromDistance: 900, pitch: 35, heading: 0)
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 2.2
+                ctx.duration = 2.4
                 ctx.allowsImplicitAnimation = true
                 map?.camera = close
             }

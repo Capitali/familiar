@@ -85,25 +85,15 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;"><path d="M9 9L4 4M9 9V5.5M9 9H5.5M15 15l5 5M15 15v3.5M15 15h3.5"></path></svg>
   </button>
 
-  <!-- globe / street surface toggles (animated glyphs, no words) -->
-  <div style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:7;display:flex;align-items:center;gap:10px;padding:8px;border-radius:20px;background:rgba(9,15,32,0.55);border:1px solid rgba(255,255,255,0.09);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:0 14px 40px rgba(0,0,0,0.5);">
-    <button id="modeglobe" class="glybtn" title="orbit" style="width:52px;height:52px;border:none;">
-      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:30px;height:30px;overflow:visible;">
-        <circle cx="24" cy="24" r="14" stroke-width="1.5" opacity="0.8"/>
-        <ellipse cx="24" cy="24" rx="14" ry="5" stroke-width="1.2" opacity="0.5"/>
-        <ellipse cx="24" cy="24" rx="5" ry="14" stroke-width="1.2" opacity="0.5" style="transform-box:fill-box;transform-origin:center;animation:mer 5s ease-in-out infinite;"/>
-        <g style="transform-box:fill-box;transform-origin:24px 24px;animation:orbitspin 6s linear infinite;"><circle cx="24" cy="6" r="2.6" fill="currentColor" stroke="none"/></g>
-      </svg>
-    </button>
-    <button id="modestreet" class="glybtn" title="surface" style="width:52px;height:52px;border:none;">
-      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:30px;height:30px;overflow:visible;">
-        <path d="M8 40 L18 8 M30 8 L40 40" stroke-width="1.6" opacity="0.7"/>
-        <path d="M12 30 H36 M15 20 H33" stroke-width="1.3" opacity="0.5"/>
-        <circle cx="24" cy="25" r="3.4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.4s ease-in-out infinite;"/>
-        <path d="M24 25 v10" stroke-width="1.4" stroke-dasharray="2 3" style="animation:dashmove 1.6s linear infinite;"/>
-      </svg>
-    </button>
-  </div>
+  <!-- ONE surface control: shows the surface you'd dive to -->
+  <button id="modetoggle" class="glybtn" title="surface" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:7;width:56px;height:56px;">
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:32px;height:32px;overflow:visible;">
+      <path d="M8 40 L18 8 M30 8 L40 40" stroke-width="1.6" opacity="0.7"/>
+      <path d="M12 30 H36 M15 20 H33" stroke-width="1.3" opacity="0.5"/>
+      <circle cx="24" cy="25" r="3.4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.4s ease-in-out infinite;"/>
+      <path d="M24 25 v10" stroke-width="1.4" stroke-dasharray="2 3" style="animation:dashmove 1.6s linear infinite;"/>
+    </svg>
+  </button>
 
   <!-- loading: spinner only -->
   <div id="loading" style="position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:rgba(3,5,10,0.6);backdrop-filter:blur(4px);">
@@ -404,8 +394,7 @@ function renderChrome() {
   $('screenbtns').style.display = street ? 'none' : 'block';
   $('holobtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
-  $('modeglobe').classList.toggle('on', !street);
-  $('modestreet').classList.toggle('on', street);
+  $('modetoggle').style.display = street ? 'none' : 'flex';
   $('linkdown').style.display = S.linkOk ? 'none' : 'flex';
 }
 
@@ -462,17 +451,17 @@ window.sphereBackToGlobe = () => {
 };
 
 $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
-$('modeglobe').onclick = () => { if (S.mode !== 'globe') toApp('surface', { to: 'globe' }); };
-$('modestreet').onclick = () => window.sphereDive(S.focusIdx);
+$('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------
 const G = { anchorDirs: [], frontierDirs: [], arcs: [], frontierArcs: [], streetA: 0 };
 const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (lon + 180) * Math.PI / 180; return new THREE.Vector3(-Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)).normalize(); };
 
-// The staged dive: a slow satellite zoom (globe camera 3.5 → 2.05 over ~2.4s) while the
-// target rotates to face the camera; past the midpoint the host is told to surface REAL
-// Apple Maps at the matching altitude, this layer fades, and MapKit carries the zoom the
-// rest of the way to street detail.
+// The choreographed dive. Phase 0: the globe ROTATES to center the target (no zoom).
+// Then the zoom timeline: first 25% pure satellite zoom; middle 50% a synchronized
+// crossfade — satellite fading out while REAL Apple Maps fades in, both descending in
+// step; last 25% street map only, zooming to close detail (MapKit finishes the flight).
+const ROTATE_MS = 900, ZOOM_MS = 3200;
 window.sphereDive = (i) => {
   const P = peers(); const p = P[i]; if (!p) return;
   if (!p.located && !p.hasAnchor) { window.sphereScreen('network'); return; }
@@ -489,8 +478,9 @@ window.sphereDive = (i) => {
 function handoff(p) {
   S.mode = 'street'; renderChrome();
   toApp('street', { lat: p.lat, lon: p.lon, label: p.name, color: p.color });
-  // fade the space scene under the incoming map
-  $('space').style.opacity = '0'; $('globe').style.opacity = '0'; $('vignette').style.opacity = '0';
+  // synchronized crossfade: satellite out over the middle 50% of the zoom
+  const fade = (ZOOM_MS * 0.5 / 1000) + 's';
+  for (const id of ['space','globe','vignette']) { const e = $(id); e.style.transition = 'opacity ' + fade; e.style.opacity = '0'; }
 }
 
 function initThree() {
@@ -580,14 +570,22 @@ function initThree() {
     const t = clock.getElapsedTime();
     const now = performance.now(); const dt = Math.min((now - last)/1000, 0.05); last = now;
     if (G.diving) {
-      // Slow, staged: 2.4s of satellite zoom; the map is asked to surface at 60% so the
-      // crossfade happens at matched altitude, never a jump cut.
-      const dp = Math.min(1, (performance.now() - G.diveT0)/2400);
-      const de = dp < 0.5 ? 2*dp*dp : 1 - Math.pow(-2*dp + 2, 2)/2;   // easeInOut
-      group.quaternion.copy(G.diveStartQ).slerp(G.diveTargetQ, de);
-      camera.position.setLength(G.diveFromZ + (2.05 - G.diveFromZ)*de);
-      if (dp >= 0.6 && !G.handedOff) { G.handedOff = true; handoff(G.diveTarget); }
-      if (dp >= 1) G.diving = false;
+      const el = performance.now() - G.diveT0;
+      if (el < ROTATE_MS) {
+        // Phase 0 — rotate to center the target; no zoom yet.
+        const rp = el / ROTATE_MS;
+        const re = rp < 0.5 ? 2*rp*rp : 1 - Math.pow(-2*rp + 2, 2)/2;
+        group.quaternion.copy(G.diveStartQ).slerp(G.diveTargetQ, re);
+      } else {
+        group.quaternion.copy(G.diveTargetQ);
+        const dp = Math.min(1, (el - ROTATE_MS)/ZOOM_MS);
+        const de = dp < 0.5 ? 2*dp*dp : 1 - Math.pow(-2*dp + 2, 2)/2;
+        camera.position.setLength(G.diveFromZ + (2.05 - G.diveFromZ)*de);
+        // 25% in: the map surfaces and the 50%-window synchronized crossfade begins
+        // (the host fades layers over ZOOM_MS*0.5 while both keep descending).
+        if (dp >= 0.25 && !G.handedOff) { G.handedOff = true; handoff(G.diveTarget); }
+        if (dp >= 1) G.diving = false;
+      }
     }
     if (earthMat.userData.sh) earthMat.userData.sh.uniforms.uSun.value = sunDir;
     const breath = 1 + Math.sin(t * (Math.PI*2/6)) * 0.012;
