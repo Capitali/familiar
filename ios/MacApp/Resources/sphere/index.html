@@ -499,6 +499,7 @@ function renderCallouts() {
 function toApp(kind, payload) {
   try { window.webkit.messageHandlers.sphere.postMessage({ kind, ...payload }); } catch (e) { /* browser preview */ }
 }
+window.toApp = toApp;   // inline onclick handlers resolve names on window, not module scope
 window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderButtons();
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + k + ': ' + e.message; }
   renderChrome(); };
