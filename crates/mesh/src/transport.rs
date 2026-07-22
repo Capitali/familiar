@@ -111,6 +111,11 @@ pub struct PeerRecord {
     pub lat: f64,
     #[serde(default)]
     pub lon: f64,
+    /// True when the fix came from a device's own GPS (worldview read) rather than a peer's
+    /// brief. Only device fixes seed `self_geo` — a brief-carried position may itself be
+    /// inherited or stale, and trusting it circularly spread one bad fix mesh-wide.
+    #[serde(default)]
+    pub geo_device: bool,
 }
 
 /// A gossip peer beacons every ~30s — two missed rounds plus slack and it's no longer "online".
@@ -1293,12 +1298,13 @@ pub fn self_geo(dir: &Path) -> Option<(f64, f64)> {
     freshest_device_fix(dir)
 }
 
-/// The most recently seen member that reported a real GPS fix. Devices refresh theirs on
-/// every worldview read, so this tracks the mesh's location in near-real-time.
+/// The most recently seen member whose fix came from its own GPS (`geo_device`). Devices
+/// refresh theirs on every worldview read, so this tracks the mesh's location in
+/// near-real-time. Brief-carried fixes are excluded — they may themselves be inherited.
 pub fn freshest_device_fix(dir: &Path) -> Option<(f64, f64)> {
     load_peers(dir)
         .into_iter()
-        .filter(|p| p.lat != 0.0 || p.lon != 0.0)
+        .filter(|p| p.geo_device && (p.lat != 0.0 || p.lon != 0.0))
         .max_by_key(|p| p.last_seen)
         .map(|p| (p.lat, p.lon))
 }
@@ -1415,6 +1421,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         human: brief.body.capability.human.clone(),
         lat: brief.body.capability.lat,
         lon: brief.body.capability.lon,
+        geo_device: false,
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -1449,11 +1456,14 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                     };
                     (now, existing.total_online_secs + closed)
                 };
-            // A brief without a fix (0/0) never erases a position we already know.
-            let (lat, lon) = if rec.lat != 0.0 || rec.lon != 0.0 {
-                (rec.lat, rec.lon)
+            // A brief without a fix (0/0) never erases a position we already know — and a
+            // device-reported fix (real GPS) is never downgraded by a brief-carried one.
+            let (lat, lon, geo_device) = if existing.geo_device && (existing.lat != 0.0 || existing.lon != 0.0) {
+                (existing.lat, existing.lon, true)
+            } else if rec.lat != 0.0 || rec.lon != 0.0 {
+                (rec.lat, rec.lon, false)
             } else {
-                (existing.lat, existing.lon)
+                (existing.lat, existing.lon, existing.geo_device)
             };
             *existing = PeerRecord {
                 addr: addr_keep,
@@ -1462,6 +1472,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                 total_online_secs,
                 lat,
                 lon,
+                geo_device,
                 ..rec
             };
         }
@@ -1537,6 +1548,7 @@ pub(crate) fn register_device_peer(
             if lat != 0.0 || lon != 0.0 {
                 existing.lat = lat;
                 existing.lon = lon;
+                existing.geo_device = true;
             }
         }
         None => peers.push(PeerRecord {
@@ -1558,6 +1570,7 @@ pub(crate) fn register_device_peer(
             human: String::new(),
             lat,
             lon,
+            geo_device: lat != 0.0 || lon != 0.0,
         }),
     }
     if let Some(parent) = path.parent() {
