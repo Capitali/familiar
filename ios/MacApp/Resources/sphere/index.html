@@ -65,8 +65,11 @@
   <canvas id="streetArcs" style="position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;opacity:0;transition:opacity 1.6s;"></canvas>
 
   <!-- daemon-down badge: appears only when the link is lost (otherwise no chrome) -->
-  <div id="linkdown" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:9;width:34px;height:34px;border-radius:50%;background:rgba(60,10,16,0.6);border:1px solid rgba(255,110,110,0.5);backdrop-filter:blur(12px);align-items:center;justify-content:center;">
-    <svg viewBox="0 0 24 24" fill="none" stroke="#ff6e6e" stroke-width="1.8" stroke-linecap="round" style="width:18px;height:18px;"><path d="M12 3v10"/><circle cx="12" cy="18.5" r="1.2" fill="#ff6e6e" stroke="none"/></svg>
+  <div id="linkdown" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;">
+    <div style="width:34px;height:34px;border-radius:50%;background:rgba(60,10,16,0.6);border:1px solid rgba(255,110,110,0.5);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#ff6e6e" stroke-width="1.8" stroke-linecap="round" style="width:18px;height:18px;"><path d="M12 3v10"/><circle cx="12" cy="18.5" r="1.2" fill="#ff6e6e" stroke="none"/></svg>
+    </div>
+    <div id="linkmsg" class="m" style="max-width:70vw;font-size:9px;color:rgba(255,160,160,0.85);background:rgba(30,8,12,0.55);padding:3px 8px;border-radius:7px;text-align:center;"></div>
   </div>
 
   <div id="screenbtns"></div>
@@ -83,6 +86,18 @@
   <div id="holoRim" style="position:absolute;top:50%;left:50%;width:min(1040px,80vw);height:min(85vh,940px);z-index:6;pointer-events:none;transform:translate(-50%,-50%);animation:floaty 11s ease-in-out infinite;">
     <div style="position:absolute;inset:0;border-radius:60px;padding:1.4px;background:conic-gradient(from 0deg, transparent 0deg, rgba(150,215,255,0.55) 30deg, transparent 82deg, transparent 176deg, rgba(174,231,255,0.5) 208deg, transparent 262deg, transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;filter:blur(1px);opacity:0.42;animation:spin 15s linear infinite,holoflicker 6.5s ease-in-out infinite;"></div>
   </div>
+
+  <!-- device/settings (glyph, top-right) -->
+  <button id="devbtn" class="glybtn" title="device" style="position:absolute;top:20px;right:20px;z-index:9;width:46px;height:46px;">
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:24px;height:24px;overflow:visible;">
+      <line x1="8" y1="15" x2="40" y2="15" stroke-width="2" opacity="0.4"/>
+      <line x1="8" y1="24" x2="40" y2="24" stroke-width="2" opacity="0.4"/>
+      <line x1="8" y1="33" x2="40" y2="33" stroke-width="2" opacity="0.4"/>
+      <circle cx="18" cy="15" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3.2s ease-in-out infinite;"/>
+      <circle cx="30" cy="24" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3.6s ease-in-out infinite reverse;"/>
+      <circle cx="22" cy="33" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3s ease-in-out infinite 0.4s;"/>
+    </svg>
+  </button>
 
   <!-- hologram show/hide (glyph) -->
   <button id="holobtn" class="glybtn" title="hologram" style="position:absolute;top:20px;left:20px;z-index:9;width:46px;height:46px;">
@@ -190,7 +205,7 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 
 // ---------- hologram screens (real data; skeleton built once per screen, data refreshed in place) ----------
 const SCREENS = ['conversation','roster','theories','work','signals','network','vision','controls'];
-const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', controls:'Gates', node:'' };
+const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', controls:'Gates', node:'', device:'Device' };
 
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 
@@ -369,6 +384,32 @@ function refreshScreen() {
         ${gateGlyph(camOn)}
       </div></div>`;
 
+  } else if (k === 'device') {
+    const d = S.device;
+    if (!d) {
+      // No device push (the Mac console): show what this node is, from the worldview.
+      el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);">${esc(v.group_label)} · ${esc(v.node_id)}</div>`;
+      return;
+    }
+    const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
+    el.innerHTML = `<div style="max-width:720px;">
+      <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:16px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">` +
+      Object.entries(CONSENT_META).map(([key, label]) => {
+        const on = !!(d.consents && d.consents[key]);
+        return `<button onclick="toApp('consent',{key:'${key}',on:${!on}})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${on?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
+          ${gateGlyph(on)}
+          <span class="m" style="font-size:9px;letter-spacing:0.14em;color:rgba(200,216,248,0.6);">${label}</span>
+        </button>`;
+      }).join('') + `</div>
+      <div style="margin-top:24px;display:flex;align-items:center;gap:12px;">
+        <button id="unenroll" onclick="sphereUnenroll()" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:rgba(60,10,16,${S.unenrollArmed?'0.55':'0.25'});border:1px solid rgba(255,110,110,${S.unenrollArmed?'0.7':'0.3'});cursor:pointer;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#ff8fa3" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          <span class="m" style="font-size:9px;letter-spacing:0.14em;color:#ff8fa3;">${S.unenrollArmed ? 'CONFIRM' : 'SEVER'}</span>
+        </button>
+      </div>
+    </div>`;
+
   } else if (k === 'controls') {
     const g = v.gates || {};
     const rows = [ ['llm','allow_llm',g.llm], ['camera','allow_camera',g.camera], ['network','allow_network',g.network], ['mesh','allow_mesh',g.mesh], ['execute','allow_execute',g.execute], ['agent','allow_agent',g.agent], ['tools','allow_tool_install',g.tool_install] ];
@@ -397,9 +438,11 @@ function renderChrome() {
   $('holoRim').style.display = (S.holoHidden || street) ? 'none' : 'block';
   $('screenbtns').style.display = street ? 'none' : 'block';
   $('holobtn').style.display = street ? 'none' : 'flex';
+  $('devbtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
   $('modetoggle').style.display = street ? 'none' : 'flex';
   $('linkdown').style.display = S.linkOk ? 'none' : 'flex';
+  const lm = $('linkmsg'); lm.textContent = S.linkErr || ''; lm.style.display = S.linkErr ? 'block' : 'none';
 }
 
 function renderCallouts() {
@@ -438,6 +481,16 @@ function toApp(kind, payload) {
 }
 window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
+window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
+window.sphereUnenroll = () => {
+  if (!S.unenrollArmed) {
+    S.unenrollArmed = true; refreshScreen();
+    setTimeout(() => { S.unenrollArmed = false; if (S.activeScreen === 'device') refreshScreen(); }, 3000);
+  } else {
+    S.unenrollArmed = false;
+    toApp('unenroll', {});
+  }
+};
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
 window.sphereUpdate = (view) => {
@@ -448,7 +501,7 @@ window.sphereUpdate = (view) => {
   renderChrome();
   if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };
-window.sphereLinkDown = () => { S.linkOk = false; renderChrome(); };
+window.sphereLinkDown = (msg) => { S.linkOk = false; S.linkErr = msg || ''; renderChrome(); };
 // The native map finished its own flight and the human surfaced back to orbit.
 // Reverse of the dive: called at the crossfade point of the ascent (25% street zoom-out
 // behind us). Satellite fades back in over the 50% window while the globe camera rises,
@@ -468,6 +521,7 @@ window.sphereBackToGlobe = () => {
 };
 
 $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
+$('devbtn').onclick = () => window.sphereScreen('device');
 $('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------

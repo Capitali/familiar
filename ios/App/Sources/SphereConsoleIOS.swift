@@ -13,7 +13,6 @@ import FamiliarMesh
 struct SphereConsoleIOS: View {
     @EnvironmentObject var model: AppModel
     @StateObject private var bridge = SphereBridgeIOS()
-    @State private var showLegacy = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -35,34 +34,30 @@ struct SphereConsoleIOS: View {
                     .padding(.bottom, 16)
                 }
             }
-            // Device housekeeping (consents, watch link, unenroll) lives in the prior console,
-            // one glyph away — the sphere stays pure.
-            HStack {
-                Spacer()
-                Button(action: { showLegacy = true }) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color(red: 0.81, green: 0.88, blue: 1.0).opacity(0.7))
-                        .frame(width: 40, height: 40)
-                        .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.5), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 14)
-                .padding(.trailing, 16)
-            }
         }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showLegacy) { GlassConsole().environmentObject(model) }
         .onAppear {
             model.startWorldviewPolling()
             bridge.onAnswer = { [weak model] text in
                 model?.consoleAnswer = text
                 model?.submitConsoleAnswer()
             }
+            bridge.onConsent = { [weak model] key, on in
+                model?.setConsent(key, on)
+                model.map { bridge.pushDevice($0.deviceStateJSON()) }
+            }
+            bridge.onUnenroll = { [weak model] in model?.unenroll() }
+            bridge.pushDevice(model.deviceStateJSON())
         }
         .onReceive(model.$worldviewJSON) { json in
-            if let json { bridge.push(worldviewJSON: json) }
+            if let json {
+                bridge.push(worldviewJSON: json)
+                bridge.pushDevice(model.deviceStateJSON())
+            }
+        }
+        .onReceive(model.$worldviewError) { err in
+            if let err { bridge.pushLinkDown(err) }
         }
     }
 }
@@ -106,6 +101,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     weak var web: WKWebView?
     weak var map: MKMapView?
     var onAnswer: ((String) -> Void)?
+    var onConsent: ((String, Bool) -> Void)?
+    var onUnenroll: (() -> Void)?
     private var projectTimer: Timer?
     private var nodes: [[String: Any]] = []
 
@@ -130,8 +127,13 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             }
         }
     }
-    func pushLinkDown() {
-        web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown()", completionHandler: nil)
+    func pushLinkDown(_ message: String = "") {
+        let msg = message.replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\"", with: "'")
+        web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown(\"\(msg)\")", completionHandler: nil)
+    }
+
+    func pushDevice(_ json: String) {
+        web?.evaluateJavaScript("window.sphereDevice && window.sphereDevice(\(json))", completionHandler: nil)
     }
 
     private func setNodes(_ list: [[String: Any]]) {
@@ -240,6 +242,10 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
             case "surface":
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
+            case "consent":
+                if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
+            case "unenroll":
+                self.onUnenroll?()
             case "gate":
                 break   // boundary writes are a local human act at the familiar, never from a device
             default: break

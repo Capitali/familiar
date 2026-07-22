@@ -16,8 +16,8 @@ struct RootView: View {
         Group {
             if model.enrolled {
                 // The Metal Sphere is the standard console for every peer with a screen —
-                // iPhone and iPad both (same web bundle as the Mac). The prior GlassConsole
-                // remains one glyph away for device housekeeping (consents, watch, unenroll).
+                // iPhone and iPad both (same web bundle as the Mac). Device housekeeping
+                // (consents, unenroll) lives on its Device screen, through the bridge.
                 SphereConsoleIOS()
             } else {
                 EnrollView().background(Fam.bg.ignoresSafeArea()).preferredColorScheme(.dark)

@@ -144,6 +144,35 @@ final class AppModel: ObservableObject {
         coord.startFixBaseline()
     }
 
+    /// The sphere's device screen state — consents + identity, as JSON for the web layer.
+    func deviceStateJSON() -> String {
+        let d: [String: Any] = [
+            "label": UIDevice.current.name,
+            "build": Self.appBuild,
+            "consents": [
+                "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
+                "discovery": discoveryEnabled, "reasoning": reasoningEnabled,
+            ],
+        ]
+        return (try? JSONSerialization.data(withJSONObject: d)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
+    /// A consent flipped on the sphere's device screen — apply it and start/stop the sensing.
+    func setConsent(_ key: String, _ on: Bool) {
+        switch key {
+        case "location": locationEnabled = on
+        case "motion": motionEnabled = on
+        case "face": faceEnabled = on
+        case "discovery": discoveryEnabled = on
+        case "reasoning": reasoningEnabled = on
+        default: return
+        }
+        startSensingIfConsented()
+        startDiscoveryIfConsented()
+        startFaceIfConsented()
+        startReasoningIfConsented()
+    }
+
     /// A single derived observation from any sensor → the /mesh/observe pipe.
     func emit(_ obs: ObsRecord) {
         Task { await deliver([obs]) }
