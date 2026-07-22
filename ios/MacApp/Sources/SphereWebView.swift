@@ -18,6 +18,8 @@ struct SphereConsole: View {
         ZStack(alignment: .top) {
             MeshMapView(bridge: bridge)
                 .ignoresSafeArea()
+                .opacity(bridge.mode == .street ? 1 : 0)
+                .animation(.easeInOut(duration: 1.6), value: bridge.mode)
             SphereWebView(bridge: bridge)
                 .ignoresSafeArea()
                 .allowsHitTesting(bridge.mode != .street)
