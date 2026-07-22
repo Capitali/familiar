@@ -1253,15 +1253,19 @@ pub fn enumerate_peers() -> Vec<TailscalePeer> {
     }
 }
 
-/// This node's own tailnet IPv4 (`tailscale ip -4`), if tailscale is up.
+/// This node's own tailnet IPv4 (`tailscale ip -4`), if tailscale is up. The output must
+/// PARSE as an IP address: the CLI has been seen exiting 0 while printing an error line
+/// ("The Tailscale GUI failed to start…"), and an advertised address is only ever an
+/// address — a node once gossiped that error text as its host and poisoned its devices'
+/// candidate lists.
 pub fn self_tailnet_ip() -> Option<String> {
     tailscale_output(&["ip", "-4"]).and_then(|o| {
         String::from_utf8_lossy(&o.stdout)
             .lines()
             .next()
             .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
+            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+            .map(|ip| ip.to_string())
     })
 }
 
