@@ -1,6 +1,9 @@
 # ADR-0007 — A wgpu/egui holographic engine as the primary UI, superseding the SwiftUI shells and the egui Glass
 
-- **Status:** accepted
+- **Status:** superseded by ADR-0008 (Metal Sphere) — the wgpu/egui engine
+  (`crates/hologram`) was retired 2026-07-22; nothing shipped on it and the sphere became
+  the interface on every platform it can run. This record is kept for history.
+- **Was:** accepted
 - **Date:** 2026-07-21
 - **Supersedes:** ADR-0006 (the egui Glass), and the SwiftUI-shell portion of
   `one-core-many-shells.md`

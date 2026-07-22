@@ -67,11 +67,10 @@ crates/
                                     interpret → generate → test → score → select → measure)
   cli/      familiar-cli (bin: `familiar`) — the shell + daemon control (start/stop/
                                     reload/install via pidfile + launchd: src/daemon.rs)
-  hologram/ familiar-hologram (bin: `hologram`) — the Glass: the wgpu/egui holographic
-                engine (ADR-0007). Conversation channel, trust strip, full-metadata
-                roster, dated roadmap/theories, attention-cue composite pass. Reads and
-                speaks through the daemon's loopback seam only (`/local/worldview`,
-                `/local/answer`, `/local/gate`).
+  core-ffi/ familiar-core-ffi (lib: `familiar_core`) — the core embedded in device
+                shells via UniFFI (ADR-0009 Phase 0): found/join/worldview/answer/mesh so a
+                capable phone runs the full node itself, not just a console. Built for
+                Apple by tools/build-core.sh → ios/FamiliarCore/.
 ```
 
 The iOS/watchOS/macOS apps live on `main` under `ios/` — device consoles and agents that
@@ -81,11 +80,12 @@ web bundle in a WKWebView, fed real worldview JSON by its Swift host. See [mesh.
 
 ## Interfaces
 
-The **Glass** (`hologram`, ADR-0007) is the primary human interface on this machine; the
-**Metal Sphere** (ADR-0008) is the designed macOS console; device apps carry the same
-worldview to iPhone/iPad/Watch. The **CLI** (`familiar`) is retained for scripting,
-automation, and headless/CI use (`mesh roster` prints the full-metadata roster). All are
-shells over the same kernel, through the daemon's seams.
+The **Metal Sphere** (ADR-0008) is the human interface everywhere it can run — the macOS
+and iOS apps host the same web+MapKit console, reading the worldview over the daemon's
+loopback seam (Mac) or the signed mesh read seam (devices), and on a capable phone against
+its own embedded core (ADR-0009 Phase 0). The **CLI** (`familiar`) is retained for
+scripting, automation, and headless/CI use (`mesh roster` prints the full-metadata
+roster). The earlier wgpu/egui Glass (ADR-0007) is retired.
 
 ## Reachability
 
