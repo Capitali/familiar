@@ -171,6 +171,10 @@ struct ViewRequest: Codable {
     /// Optional — omitted when empty so the signed bytes stay minimal and older familiars ignore them.
     var client_version: String?
     var os_version: String?
+    /// The device's position (decimal degrees) when GPS consent is on — refreshed every read so
+    /// the mesh map is near-real-time. Omitted when unknown.
+    var lat: Double?
+    var lon: Double?
 }
 
 /// Reads a familiar's worldview over `POST /mesh/worldview`. The device is a member peer: it signs
@@ -198,7 +202,9 @@ public struct WorldviewClient {
         now: Int64 = Int64(Date().timeIntervalSince1970),
         nonce: String = ObservationClient.freshNonce(),
         clientVersion: String = "",
-        osVersion: String = ""
+        osVersion: String = "",
+        lat: Double = 0,
+        lon: Double = 0
     ) async throws -> Worldview {
         let request = ViewRequest(
             node: session.node.identity,
@@ -206,7 +212,9 @@ public struct WorldviewClient {
             ts: now,
             nonce: nonce,
             client_version: clientVersion.isEmpty ? nil : clientVersion,
-            os_version: osVersion.isEmpty ? nil : osVersion
+            os_version: osVersion.isEmpty ? nil : osVersion,
+            lat: lat == 0 && lon == 0 ? nil : lat,
+            lon: lat == 0 && lon == 0 ? nil : lon
         )
         guard let body = try? JSONEncoder().encode(request) else { throw ReadError.encoding }
         let sig = try session.node.sign(body)

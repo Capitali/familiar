@@ -117,14 +117,11 @@ struct MacConsole: View {
         }
     }
     var body: some View {
-        // The Metal Sphere console (Claude Design import): a satellite globe with the mesh's
-        // nodes pinned aboard and a borderless hologram of screens over it. The web layer is
-        // presentation only — this app does all daemon I/O natively (see SphereWebView).
-        // The prior SwiftUI console (FamiliarConsole + rail screens below) remains for
-        // reference and fallback.
-        SphereWebView()
-            .ignoresSafeArea()
-            .background(Color(hex: 0x03050a))
+        // The Metal Sphere console (Claude Design import): satellite globe + hologram in a
+        // web layer, street surface on REAL Apple Maps (native MKMapView), all daemon I/O
+        // native (see SphereConsole). The prior SwiftUI console (FamiliarConsole + rail
+        // screens below) remains for reference and fallback.
+        SphereConsole()
     }
 }
 

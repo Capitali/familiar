@@ -279,8 +279,10 @@ final class AppModel: ObservableObject {
         for _ in 0..<max(1, hosts.count) {
             guard let session = worldviewSession() else { return }
             do {
+                let fix = locationEnabled ? coordinator?.lastCoordinate : nil
                 let view = try await WorldviewClient(session: session)
-                    .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease)
+                    .fetch(clientVersion: Self.appBuild, osVersion: Self.osRelease,
+                           lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
                 worldview = view
                 worldviewError = nil
                 promoteHost(host)

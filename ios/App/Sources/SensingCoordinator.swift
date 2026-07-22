@@ -17,6 +17,12 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
     private var lastActivity: String?
     private var current: CLLocation?
 
+    /// The most recent fix, for consent-gated reporting (worldview reads carry it so the mesh
+    /// can place this device). Nil until location sensing has produced one.
+    var lastCoordinate: (lat: Double, lon: Double)? {
+        current.map { ($0.coordinate.latitude, $0.coordinate.longitude) }
+    }
+
     init(deliver: @escaping ([ObsRecord]) async -> Void) {
         self.deliver = deliver
         super.init()
