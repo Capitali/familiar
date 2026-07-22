@@ -14,9 +14,12 @@ public struct EnrollmentPayload: Codable, Equatable {
     public var hosts: [String]?
     public var group: String?
     public var secret: String?
+    /// SHA-256 of the familiar's TLS SubjectPublicKeyInfo — the device pins every mesh
+    /// connection to it (ADR-0009). Absent on older payloads (encryption-only then).
+    public var tlspin: String?
 
     public init(v: Int = 1, label: String, host: String, port: Int, hosts: [String]? = nil,
-                group: String? = nil, secret: String? = nil) {
+                group: String? = nil, secret: String? = nil, tlspin: String? = nil) {
         self.v = v
         self.label = label
         self.host = host
@@ -24,6 +27,7 @@ public struct EnrollmentPayload: Codable, Equatable {
         self.hosts = hosts
         self.group = group
         self.secret = secret
+        self.tlspin = tlspin
     }
 
     /// The addresses to try, in order — `hosts` when present, else just `host`. The device should

@@ -86,7 +86,8 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     weak var map: MKMapView?
     private var timer: Timer?
     private var projectTimer: Timer?
-    private let base = URL(string: "http://127.0.0.1:47100")!
+    // The daemon's local seams: plain HTTP, loopback-only, one port above the TLS mesh port.
+    private let base = URL(string: "http://127.0.0.1:47101")!
 
     final class NodeAnnotation: MKPointAnnotation {
         var colorHex = "#3ddc97"

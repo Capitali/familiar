@@ -55,13 +55,13 @@ public struct EnrollmentClient {
     public var port: Int
     public var urlSession: URLSession
 
-    public init(host: String, port: Int, urlSession: URLSession = .shared) {
+    public init(host: String, port: Int, urlSession: URLSession = MeshTLS.session) {
         self.host = host
         self.port = port
         self.urlSession = urlSession
     }
 
-    private var base: String { "http://\(host):\(port)" }
+    private var base: String { "https://\(host):\(port)" }
 
     /// Submit an attested join request. Returns a `Grant` if it was auto-approved (an invite/pairing
     /// window was open on the familiar), or `nil` if it is now pending a human's approval — in which

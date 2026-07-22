@@ -37,8 +37,14 @@ final class AppModel: ObservableObject {
     // answers instead of pinning to the one that worked at enrollment.
     var hosts: [String] = []
 
+    /// The familiar's TLS key pin from enrollment (nil on older enrollments).
+    var tlsPin: String? {
+        didSet { MeshTLS.pin = tlsPin }
+    }
+
     private func saveEnrollment() {
-        let d: [String: Any] = ["host": host, "hosts": hosts, "port": enrollPort, "label": groupLabel]
+        var d: [String: Any] = ["host": host, "hosts": hosts, "port": enrollPort, "label": groupLabel]
+        if let pin = tlsPin { d["tlspin"] = pin }
         if let data = try? JSONSerialization.data(withJSONObject: d) { KeychainStore.save(data, account: enrollAccount) }
     }
     private func loadEnrollment() -> (host: String, hosts: [String], port: Int, label: String)? {
@@ -47,6 +53,7 @@ final class AppModel: ObservableObject {
            let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let h = d["host"] as? String, !h.isEmpty {
             let list = (d["hosts"] as? [String] ?? []).filter { !$0.isEmpty }
+            tlsPin = d["tlspin"] as? String
             return (h, list.isEmpty ? [h] : list, (d["port"] as? Int) ?? 47100, (d["label"] as? String) ?? "")
         }
         if let h = defaults.string(forKey: "enroll.host"), !h.isEmpty {
@@ -229,6 +236,7 @@ final class AppModel: ObservableObject {
         host = hosts[0]
         enrollPort = p.port
         groupLabel = p.label
+        tlsPin = p.tlspin
         saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
         note("requesting to join “\(p.label)” — accepting the Three Laws…")
@@ -311,7 +319,7 @@ final class AppModel: ObservableObject {
     /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
     func makeSession() -> ObservationClient.Session? {
         guard let g = storedGrant(), !host.isEmpty,
-              let url = URL(string: "http://\(host):\(enrollPort)/mesh/observe")
+              let url = URL(string: "https://\(host):\(enrollPort)/mesh/observe")
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }

@@ -36,7 +36,7 @@ func obtainGrant() async throws -> Grant {
 
 do {
     let grant = try await obtainGrant()
-    let url = URL(string: "http://\(host):\(port)/mesh/observe")!
+    let url = URL(string: "https://\(host):\(port)/mesh/observe")!
     let client = ObservationClient(session: .init(node: node, membership: grant.membership, url: url))
     let n = try await client.send([ObsRecord(actor: "phone:swift", action: "reports", object: object,
                                              context: "post-covenant observe", confidence: 0.95)])

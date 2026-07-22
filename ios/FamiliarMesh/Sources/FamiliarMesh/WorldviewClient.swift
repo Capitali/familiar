@@ -214,7 +214,7 @@ public struct WorldviewClient {
     public var urlSession: URLSession
 
     /// `session.url` should point at the familiar's `/mesh/worldview` (see `worldviewURL`).
-    public init(session: ObservationClient.Session, urlSession: URLSession = .shared) {
+    public init(session: ObservationClient.Session, urlSession: URLSession = MeshTLS.session) {
         self.session = session
         self.urlSession = urlSession
     }
@@ -312,6 +312,6 @@ public struct WorldviewClient {
 
     /// Turn an enrollment host+port into the worldview endpoint URL.
     public static func worldviewURL(host: String, port: Int) -> URL? {
-        URL(string: "http://\(host):\(port)/mesh/worldview")
+        URL(string: "https://\(host):\(port)/mesh/worldview")
     }
 }

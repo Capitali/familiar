@@ -27,7 +27,7 @@ public struct ObservationClient {
     public var session: Session
     public var urlSession: URLSession
 
-    public init(session: Session, urlSession: URLSession = .shared) {
+    public init(session: Session, urlSession: URLSession = MeshTLS.session) {
         self.session = session
         self.urlSession = urlSession
     }
