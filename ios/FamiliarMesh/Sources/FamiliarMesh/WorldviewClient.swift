@@ -38,6 +38,19 @@ public struct Member: Codable, Equatable, Identifiable {
     /// Graduated trust tier: "trusted" (normal), "throttled", "marginalized", or "severed".
     /// Absent/"trusted" ⇒ full standing; anything else is badged on the roster + map.
     public var trust: String?
+    /// Liveness as a word — "online" | "away" | "offline" (derived on the familiar's cadence).
+    public var status: String?
+    /// When the current continuous-online run began (unix secs); 0 when offline/unknown.
+    public var session_start: Int64?
+    /// Cumulative seconds online in the mesh, live session included.
+    public var total_online_secs: Int64?
+    /// A human can interact at this node's console.
+    public var interactive: Bool?
+    /// The human that node serves ("ian"), when shared/derivable.
+    public var human: String?
+    /// Where the node is (decimal degrees); 0/0 or absent = unknown.
+    public var lat: Double?
+    public var lon: Double?
     public var id: String { node_id }
 }
 
@@ -56,6 +69,11 @@ public struct GoalView: Codable, Equatable, Identifiable {
     public var produced: String
     public var notes: String
     public var updated_at: Int64
+    /// Lifecycle dates — whatever state the goal is in carries the date it got there.
+    public var status_at: Int64?
+    public var last_worked_at: Int64?
+    public var completed_at: Int64?
+    public var ended_at: Int64?
 }
 
 /// A real relationship between two members — mirrors the Rust `worldview::EdgeView`. Lets the map
@@ -107,6 +125,10 @@ public struct TheoryView: Codable, Equatable, Identifiable {
     public var theory: String
     public var direction: String
     public var status: String
+    /// Whatever the status is, it is dated: created / entered current status / last worked.
+    public var created_at: Int64?
+    public var status_at: Int64?
+    public var last_worked_at: Int64?
 }
 
 /// One reflection on humanity — mirrors the Rust `worldview::ReflectionView`.

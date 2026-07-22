@@ -99,7 +99,7 @@ struct OrbitGlyphShared: View {
 // MARK: - bridge (web ↔ native; data pushed in by AppModel)
 
 @MainActor
-final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler, MKMapViewDelegate {
+final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler, MKMapViewDelegate, WKNavigationDelegate {
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
 
@@ -115,8 +115,20 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
         var isSelf = false
     }
 
+    private var lastJSON: String?
+
     func push(worldviewJSON: String) {
+        lastJSON = worldviewJSON
         web?.evaluateJavaScript("window.sphereUpdate(\(worldviewJSON))", completionHandler: nil)
+    }
+
+    // A push that raced the page load is replayed once the page is ready.
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor in
+            if let json = self.lastJSON {
+                webView.evaluateJavaScript("window.sphereUpdate(\(json))", completionHandler: nil)
+            }
+        }
     }
     func pushLinkDown() {
         web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown()", completionHandler: nil)
@@ -259,6 +271,7 @@ struct SphereWebViewIOS: UIViewRepresentable {
         web.isOpaque = false
         web.backgroundColor = .clear
         web.scrollView.isScrollEnabled = false
+        web.navigationDelegate = bridge
         bridge.web = web
         if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "sphere") {
             web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
