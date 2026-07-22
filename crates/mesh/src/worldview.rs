@@ -34,6 +34,13 @@ pub struct ViewRequest {
     /// The reading device's OS release (e.g. "iPadOS 26.1"). Optional for the same reason.
     #[serde(default)]
     pub os_version: String,
+    /// The device's position (decimal degrees) when it has GPS and consent — near-real-time,
+    /// refreshed on every read. 0/0 = not reported. The request is verified over the raw
+    /// received bytes, so optional fields are wire-safe here.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
 }
 
 /// One observation as the console shows it — a flat view of the kernel's `Observation`.
@@ -287,6 +294,8 @@ pub(crate) fn read_worldview(
         peer_ip,
         &req.client_version,
         &req.os_version,
+        req.lat,
+        req.lon,
     );
 
     let mut view = assemble_worldview(dir, &cred, now)?;
@@ -742,6 +751,8 @@ mod tests {
             total_online_secs: 0,
             interactive: false,
             human: String::new(),
+            lat: 0.0,
+            lon: 0.0,
         }
     }
 
@@ -833,6 +844,8 @@ mod tests {
             nonce: nonce.into(),
             client_version: String::new(),
             os_version: String::new(),
+            lat: 0.0,
+            lon: 0.0,
         };
         let raw = serde_json::to_vec(&req).unwrap();
         let sig = device.sign(&raw);

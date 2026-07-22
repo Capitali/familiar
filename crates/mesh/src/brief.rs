@@ -34,6 +34,12 @@ fn u64_zero_i64(v: &i64) -> bool {
     *v == 0
 }
 
+/// Same as [`u64_zero`], for the geolocation degrees (0.0 = unknown, never a real fix here).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn f64_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
 /// Presence: how busy this node is and when it last served — **counts, never names**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Presence {
@@ -57,7 +63,7 @@ pub struct ToolManifest {
 }
 
 /// Host capability summary + the tool manifest offered to peers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Capability {
     pub os: String,
     pub arch: String,
@@ -83,6 +89,13 @@ pub struct Capability {
     /// briefs that predate it / unstamped builds.
     #[serde(default, skip_serializing_if = "u64_zero")]
     pub build_version: u64,
+    /// Where this node is (decimal degrees), when it knows — from a device's GPS, an explicit
+    /// `mesh/geo.json`, or IP geolocation. 0/0 = unknown; skip-when-zero keeps pre-field briefs
+    /// byte-identical for verifiers that re-serialize.
+    #[serde(default, skip_serializing_if = "f64_zero")]
+    pub lat: f64,
+    #[serde(default, skip_serializing_if = "f64_zero")]
+    pub lon: f64,
     /// This node has an interactive human at its console (`!headless`). Skip-when-false so
     /// briefs from headless nodes stay byte-identical for pre-field verifiers.
     #[serde(default, skip_serializing_if = "bool_false")]
@@ -242,7 +255,7 @@ pub struct ConsentedIdentityPayload {
 /// The signed body of a brief. Field order is fixed (serde derive, no maps) so the bytes
 /// are deterministic across nodes and runs — that determinism is what makes the signature
 /// verifiable elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BriefBody {
     pub version: u32,
     pub node: NodeIdentity,
@@ -274,7 +287,7 @@ impl BriefBody {
 }
 
 /// A signed brief: the body plus the node's signature over `body.signing_bytes()`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshBrief {
     pub body: BriefBody,
     /// ed25519 signature (hex, 64 bytes) by the node key over the canonical body.
@@ -356,6 +369,8 @@ mod tests {
                 }],
                 capabilities: Vec::new(),
                 build_version: 0,
+                lat: 0.0,
+                lon: 0.0,
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {

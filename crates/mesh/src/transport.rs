@@ -63,7 +63,7 @@ pub fn now_secs() -> i64 {
 }
 
 /// A peer as last seen — surfaced in Glass, refreshed each successful exchange.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PeerRecord {
     pub node_id: String,
     pub label: String,
@@ -105,6 +105,12 @@ pub struct PeerRecord {
     /// The human handle that node serves, when its brief shares one (identity opt-in gated).
     #[serde(default)]
     pub human: String,
+    /// Where the node is (decimal degrees) — from its brief (gossip peers) or its worldview
+    /// reads (devices with GPS). 0/0 = unknown.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
 }
 
 /// A gossip peer beacons every ~30s — two missed rounds plus slack and it's no longer "online".
@@ -1263,6 +1269,40 @@ pub fn self_lan_ip() -> Option<String> {
     Some(ip.to_string())
 }
 
+/// Where this node is (decimal degrees), if it can know. Sources, in order:
+/// 1. `mesh/geo.json` — `{"lat":..,"lon":..}`, written by the human or a shell with a better
+///    source (a GPS feed, a survey). Always wins.
+/// 2. The freshest real GPS fix reported by a member device (phones/tablets report theirs on
+///    every worldview read) — the devices are with the mesh, so their fix locates it.
+/// Returns None when neither exists — an honest unknown, never an invented place. (IP
+/// geolocation was tried and rejected: on satellite links it reports the ground station,
+/// hundreds of km off; a wrong city is worse than no city.)
+pub fn self_geo(dir: &Path) -> Option<(f64, f64)> {
+    #[derive(serde::Deserialize)]
+    struct Geo {
+        lat: f64,
+        lon: f64,
+    }
+    if let Ok(s) = std::fs::read_to_string(dir.join("mesh/geo.json")) {
+        if let Ok(g) = serde_json::from_str::<Geo>(&s) {
+            if g.lat != 0.0 || g.lon != 0.0 {
+                return Some((g.lat, g.lon));
+            }
+        }
+    }
+    freshest_device_fix(dir)
+}
+
+/// The most recently seen member that reported a real GPS fix. Devices refresh theirs on
+/// every worldview read, so this tracks the mesh's location in near-real-time.
+pub fn freshest_device_fix(dir: &Path) -> Option<(f64, f64)> {
+    load_peers(dir)
+        .into_iter()
+        .filter(|p| p.lat != 0.0 || p.lon != 0.0)
+        .max_by_key(|p| p.last_seen)
+        .map(|p| (p.lat, p.lon))
+}
+
 /// Every address a device could reach this node at, most-universal first: the tailnet IP
 /// (reachable from any interface when the device also runs tailscale — cellular included), then
 /// the LAN IP (same-wifi fallback that needs no VPN). Cached for 60s — consoles poll the
@@ -1373,6 +1413,8 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         total_online_secs: 0,
         interactive: brief.body.capability.interactive,
         human: brief.body.capability.human.clone(),
+        lat: brief.body.capability.lat,
+        lon: brief.body.capability.lon,
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -1407,11 +1449,19 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                     };
                     (now, existing.total_online_secs + closed)
                 };
+            // A brief without a fix (0/0) never erases a position we already know.
+            let (lat, lon) = if rec.lat != 0.0 || rec.lon != 0.0 {
+                (rec.lat, rec.lon)
+            } else {
+                (existing.lat, existing.lon)
+            };
             *existing = PeerRecord {
                 addr: addr_keep,
                 first_seen,
                 session_start,
                 total_online_secs,
+                lat,
+                lon,
                 ..rec
             };
         }
@@ -1436,6 +1486,8 @@ pub(crate) fn register_device_peer(
     addr: &str,
     client_version: &str,
     os_version: &str,
+    lat: f64,
+    lon: f64,
 ) -> Result<()> {
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
@@ -1480,6 +1532,12 @@ pub(crate) fn register_device_peer(
             if !os_version.is_empty() {
                 existing.os_version = os_version.to_string();
             }
+            // A device with GPS reports where it is on every read; 0/0 means "not reported"
+            // and never overwrites a real fix.
+            if lat != 0.0 || lon != 0.0 {
+                existing.lat = lat;
+                existing.lon = lon;
+            }
         }
         None => peers.push(PeerRecord {
             node_id: node_id.to_string(),
@@ -1498,6 +1556,8 @@ pub(crate) fn register_device_peer(
             total_online_secs: 0,
             interactive: true,
             human: String::new(),
+            lat,
+            lon,
         }),
     }
     if let Some(parent) = path.parent() {

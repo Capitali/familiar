@@ -91,6 +91,13 @@ pub struct Member {
     /// The human that node serves, when shared/derivable ("ian"). Empty when none/unknown.
     #[serde(default)]
     pub human: String,
+    /// Where the node is (decimal degrees) — self from `transport::self_geo`, peers from their
+    /// briefs, devices from the GPS they report on worldview reads. 0/0 = unknown, and the map
+    /// says so rather than inventing a place.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
 }
 
 /// Liveness thresholds, per member kind: a gossip peer beacons every ~30s, so two missed
@@ -202,6 +209,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             .map(|b| b.allow_llm)
             .unwrap_or(false);
         let cfg = crate::config::load(dir).unwrap_or_default();
+        let (self_lat, self_lon) = transport::self_geo(dir).unwrap_or((0.0, 0.0));
         out.push(Member {
             node_id: cred.membership.node_id.clone(),
             label,
@@ -225,6 +233,8 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: 0,
             interactive: !cfg.headless,
             human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+            lat: self_lat,
+            lon: self_lon,
         });
     }
 
@@ -339,6 +349,8 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: p.total_online_secs + live,
             interactive: p.interactive || is_device,
             human,
+            lat: p.lat,
+            lon: p.lon,
         });
     }
 
@@ -383,6 +395,8 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: 0,
             interactive: false,
             human: actor.split_once(':').map(|(_, h)| h.to_string()).unwrap_or_default(),
+            lat: 0.0,
+            lon: 0.0,
         });
     }
 
