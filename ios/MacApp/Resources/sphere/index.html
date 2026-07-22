@@ -308,6 +308,8 @@ function refreshScreen() {
     </div>`;
 
   } else if (k === 'theories') {
+    // While an answer is being typed, data refreshes must not clobber the input.
+    if (S.answeringThread && document.activeElement && document.activeElement.id === 'thanswer') return;
     const sc = (st) => st==='answered' ? '#3ddc97' : st==='pursued' ? '#6c9bff' : st==='open' ? '#ffb15a' : 'rgba(210,150,155,0.85)';
     const stage = (st) => ({ open:38, pursued:70, answered:100, abandoned:16, marginalized:10 }[st] ?? 30);
     el.innerHTML = `<div style="max-width:820px;">` + (v.theories || []).map(th => `
@@ -317,12 +319,26 @@ function refreshScreen() {
           <span style="font-size:clamp(15px,1.7vw,18px);font-weight:600;letter-spacing:-0.01em;line-height:1.25;">${esc(th.theory)}</span>
           <span class="m" style="font-size:9px;letter-spacing:0.06em;color:rgba(150,180,255,0.5);white-space:nowrap;">${th.status} ${dstr(th.status_at || th.created_at)}</span>
         </div>
-        <div style="font-size:13px;color:rgba(226,232,246,0.62);line-height:1.5;margin-bottom:11px;">${esc(th.question)}</div>
+        <div onclick="sphereAnswerThread('${th.id}')" style="font-size:13px;color:rgba(174,231,255,0.85);line-height:1.5;margin-bottom:8px;cursor:pointer;">${esc(th.question)}</div>
+        ${(th.answers||[]).map(a => `<div class="m" style="font-size:11px;color:rgba(142,240,198,0.75);line-height:1.5;margin:0 0 6px 12px;">↳ ${esc(a)}</div>`).join('')}
+        ${S.answeringThread === th.id ? `
+        <div style="display:flex;gap:8px;margin:4px 0 10px;">
+          <input id="thanswer" placeholder="${esc(th.question)}" style="flex:1;padding:10px 13px;border-radius:11px;border:1px solid rgba(174,231,255,0.4);background:rgba(9,15,32,0.6);color:#eef2fb;font-size:13px;font-family:inherit;outline:none;">
+          <button onclick="sphereSubmitThreadAnswer('${th.id}')" class="glybtn" style="width:42px;height:40px;border-radius:11px;flex-shrink:0;">${SEND_GLYPH}</button>
+        </div>` : ''}
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="flex:1;height:5px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;"><div style="height:100%;width:${stage(th.status)}%;border-radius:5px;background:${sc(th.status)};box-shadow:0 0 8px ${sc(th.status)};"></div></div>
           <span class="m" style="font-size:9px;color:rgba(150,180,255,0.6);">${dstr(th.created_at)}${th.last_worked_at>0?' → '+dstr(th.last_worked_at):''}</span>
         </div>
       </div>`).join('') + `</div>`;
+    const inp = $('thanswer');
+    if (inp) {
+      inp.focus();
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') window.sphereSubmitThreadAnswer(S.answeringThread);
+        if (e.key === 'Escape') { S.answeringThread = null; refreshScreen(); }
+      });
+    }
 
   } else if (k === 'work') {
     const kindOf = (o) => /discover/.test(o.action) ? 'OBSERVE' : /theor/.test(o.action) ? 'THEORY' : /told|answer/.test(o.action) ? 'ANSWER' : /reach|presence|reports/.test(o.action) ? 'SYNC' : /cultivat|learn/.test(o.action) ? 'LEARN' : 'OBSERVE';
@@ -504,6 +520,14 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + k + ': ' + e.message; }
   renderChrome(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
+window.sphereAnswerThread = (id) => { S.answeringThread = id; refreshScreen(); };
+window.sphereSubmitThreadAnswer = (id) => {
+  const inp = $('thanswer');
+  const text = inp ? inp.value.trim() : '';
+  S.answeringThread = null;
+  if (text) toApp('answerThread', { id, text });
+  refreshScreen();
+};
 window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
 window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
 function renderInviteQR() {

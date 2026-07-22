@@ -263,6 +263,10 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
             case "invite":
                 self.fetchInvite()
+            case "answerThread":
+                if let id = body["id"] as? String, let text = body["text"] as? String, !text.isEmpty {
+                    self.post("local/answer", ["text": text, "thread": id])
+                }
             default: break
             }
         }

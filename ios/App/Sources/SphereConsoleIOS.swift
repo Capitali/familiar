@@ -50,6 +50,7 @@ struct SphereConsoleIOS: View {
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
             bridge.onUnenroll = { [weak model] in model?.unenroll() }
+            bridge.onAnswerThread = { [weak model] id, text in model?.answerThread(id, text) }
             bridge.pushDevice(model.deviceStateJSON())
         }
         .onReceive(model.$worldviewJSON) { json in
@@ -104,6 +105,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     weak var map: MKMapView?
     var onAnswer: ((String) -> Void)?
     var onConsent: ((String, Bool) -> Void)?
+    var onAnswerThread: ((String, String) -> Void)?
     var onUnenroll: (() -> Void)?
     private var projectTimer: Timer?
     private var nodes: [[String: Any]] = []
@@ -245,6 +247,10 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
             case "surface":
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
+            case "answerThread":
+                if let id = body["id"] as? String, let text = body["text"] as? String, !text.isEmpty {
+                    self.onAnswerThread?(id, text)
+                }
             case "consent":
                 if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
             case "unenroll":

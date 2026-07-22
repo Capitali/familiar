@@ -204,6 +204,15 @@ final class AppModel: ObservableObject {
         startReasoningIfConsented()
     }
 
+    /// The human answered a specific theory's question — the answer attaches to that
+    /// thread on the familiar (context "thread:<id>") and travels with its pursuit.
+    func answerThread(_ id: String, _ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        emit(ObsRecord(actor: "ian", action: "answered", object: t, context: "thread:\(id)", confidence: 1.0))
+        note("answered theory: \(t)")
+    }
+
     /// A single derived observation from any sensor → the /mesh/observe pipe.
     func emit(_ obs: ObsRecord) {
         Task { await deliver([obs]) }

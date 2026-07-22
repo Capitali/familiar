@@ -1,0 +1,4 @@
+module familiar_coreFFI {
+    header "familiar_coreFFI.h"
+    export *
+}
