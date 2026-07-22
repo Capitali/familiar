@@ -753,7 +753,10 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "familiar-kernel",
+ "familiar-mesh",
  "pollster",
+ "serde",
+ "serde_json",
  "wgpu",
  "winit",
 ]

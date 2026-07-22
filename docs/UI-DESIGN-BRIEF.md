@@ -1,5 +1,13 @@
 # The Familiar — Holographic Glass UI Design Brief
 
+> **Status 2026-07-21:** two implementations exist. `crates/hologram` (ADR-0007) ships
+> v1 of the tiers below — T1 conversation with a working keyboard channel, T2 trust
+> strip, full-metadata roster, dated roadmap/theories, and the attention-cue composite
+> pass. The design side converged in Claude Design as **"Familiar Metal Sphere"**, now
+> implemented as the macOS console (ADR-0008, `ios/MacApp/Resources/sphere/` on `main`).
+> Voice/speech and presence-gated human identification (new humans introduce themselves)
+> are the next phase.
+
 A brief to hand to an AI design tool. It describes **what the interface must convey and
 let a human do**, the data behind each element (content, size, update cadence), and the
 relative importance of every piece. See ADR-0007 for why the presentation layer moved to
