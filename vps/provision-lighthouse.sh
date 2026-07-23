@@ -76,8 +76,13 @@ chown -R familiar-svc:familiar-svc /var/lib/familiar
 # Join the covenant by key — offline: the key IS the group secret; holding it mints
 # membership with no dial back to the (CGNAT-unreachable) fleet.
 if [ -n "$JOIN_KEY" ]; then
+  # familiar's default --data-dir ("familiar_data") is relative to CWD, and runuser
+  # sets none — without an explicit CWD/--data-dir this resolves against whatever
+  # directory the provisioning shell happened to start in (typically /root, not
+  # writable by familiar-svc) instead of the service's actual data dir.
   runuser -u familiar-svc -- env HOME=/var/lib/familiar \
-    /usr/local/bin/familiar mesh join --key "$JOIN_KEY" --label "$(hostname -s)"
+    /usr/local/bin/familiar mesh join --key "$JOIN_KEY" --label "$(hostname -s)" \
+    --data-dir /var/lib/familiar/familiar_data
 fi
 
 # Firewall: the mesh port only. The /local console seam binds loopback and the
