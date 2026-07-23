@@ -44,7 +44,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 ## Deployment (stop-and-confirm before each — real devices/production)
 
-- [ ] T20. Rust workspace: build, test, deploy updated daemon to this Mac
+- [x] T20. Rust workspace: build, test, deploy updated daemon to this Mac
 - [ ] T21. iOS: build, install to Aphelion (iPhone) + Codex (iPad) — confirm before device install
 - [ ] T22. watchOS: build, install to paired watch — confirm before device install
 - [ ] T23. Lighthouse VPS: redeploy with updated mesh/kernel code — confirm before remote deploy
