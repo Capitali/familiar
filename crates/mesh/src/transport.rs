@@ -116,6 +116,16 @@ pub struct PeerRecord {
     /// inherited or stale, and trusting it circularly spread one bad fix mesh-wide.
     #[serde(default)]
     pub geo_device: bool,
+    /// "" (active, default) | "abandoned" — a human's call that this peer is gone for good
+    /// (decommissioned hardware, a retired VM), set via `familiar mesh forget <node_id>`.
+    /// Never deletes the record — the full history (first_seen, total_online_secs, tools/
+    /// patterns it once offered) stays; abandoned peers are just excluded from the active
+    /// roster/worldview so they stop being carried around in every gossip round and device
+    /// read. Self-healing: any fresh contact (a brief, a worldview read) revives it to active
+    /// automatically — renewed contact is itself evidence it isn't defunct after all. A human
+    /// re-abandons if it turns out to be a one-off.
+    #[serde(default)]
+    pub status: String,
 }
 
 /// A gossip peer beacons every ~30s — two missed rounds plus slack and it's no longer "online".
@@ -743,6 +753,10 @@ async fn handle(
             let id = p.trim_start_matches("/mesh/tool/");
             serve_tool(&dir, id)
         }
+        (Method::POST, "/mesh/tool-push") => match collect(req).await {
+            Ok(b) => push_tool(&dir, &b),
+            Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+        },
         _ => text(StatusCode::NOT_FOUND, "not found"),
     };
     Ok(resp)
@@ -1193,6 +1207,73 @@ fn serve_tool(dir: &Path, id: &str) -> Response<Full<Bytes>> {
     }
 }
 
+/// `POST /mesh/tool-push {"manifest": ToolManifest, "body_b64": "..."}` → a peer proactively
+/// hands us a tool it has that our reply brief showed we lack — the fix for a structural gap
+/// `GET /mesh/tool/{id}` alone can't close: that pull only ever runs on the *dialing* side
+/// (`exchange_with`), so a peer that can only ever be dialed *into* (the lighthouse — CGNAT'd
+/// fleet members dial it, it can never dial them back) could never accumulate tools from
+/// anyone, no matter how long they stayed peered. This is the other half: the dialer pushes
+/// what the dialed side is missing, discovered from the same round-trip brief exchange.
+///
+/// Same trust posture as the existing pull endpoint (`serve_tool`) — no extra signature beyond
+/// the TLS transport and `share_tools` being on; the content-hash check is what a forged or
+/// corrupted body can't pass, exactly like the pull path a peer already trusts.
+fn push_tool(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
+    let cfg = config::load(dir).unwrap_or_default();
+    if !cfg.share_tools {
+        return text(StatusCode::FORBIDDEN, "tool sharing disabled");
+    }
+    #[derive(serde::Deserialize)]
+    struct Push {
+        manifest: crate::brief::ToolManifest,
+        body_hex: String,
+        /// The pusher's own node id — same provenance field the pull-based tick-merge records
+        /// (`origin: node_id`, merge.rs). Not independently re-verified at this endpoint (same
+        /// trust posture as the pull path); the content-hash check is the integrity guard.
+        from_node_id: String,
+    }
+    let Ok(push) = serde_json::from_slice::<Push>(body) else {
+        return text(StatusCode::BAD_REQUEST, "bad json");
+    };
+    let Ok(script_body) = crate::hex_decode(&push.body_hex) else {
+        return text(StatusCode::BAD_REQUEST, "bad hex");
+    };
+    if sha256_hex(&script_body) != push.manifest.script_sha256 {
+        return text(StatusCode::BAD_REQUEST, "hash mismatch");
+    }
+    if known_tool_shas(dir).contains(&push.manifest.script_sha256) {
+        return text(StatusCode::OK, "already known");
+    }
+    let ws = crate::merge_workspace(dir);
+    if std::fs::create_dir_all(&ws).is_err() {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "workspace");
+    }
+    let seq = familiar_kernel::tool::load(dir).map(|t| t.len()).unwrap_or(0) + 1;
+    let id = format!("tool-{seq:04}");
+    let script_path = ws.join(format!("{id}.sh"));
+    if std::fs::write(&script_path, &script_body).is_err() {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "write");
+    }
+    let t = familiar_kernel::tool::Tool {
+        id,
+        name: push.manifest.name,
+        purpose: push.manifest.purpose,
+        keywords: push.manifest.keywords.join(" "),
+        script_path: script_path.display().to_string(),
+        created_at: now_secs(),
+        uses: 0,
+        last_used: 0,
+        last_exit_ok: push.manifest.last_exit_ok,
+        last_status: String::new(),
+        origin: push.from_node_id,
+        origin_verified_at: now_secs(),
+    };
+    match familiar_kernel::tool::append(dir, &t) {
+        Ok(_) => text(StatusCode::OK, "ok"),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "append"),
+    }
+}
+
 // ---- gossip client ------------------------------------------------------------------
 
 /// One gossip round: exchange briefs with every discovered peer **concurrently** — the mesh
@@ -1371,6 +1452,13 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
     if let Ok(brief) = serde_json::from_slice::<MeshBrief>(&reply.body) {
         upsert_peer(dir, &brief, addr)?;
         let known = known_tool_shas(dir);
+        let peer_known: std::collections::HashSet<String> = brief
+            .body
+            .capability
+            .tools
+            .iter()
+            .map(|t| t.script_sha256.clone())
+            .collect();
         for t in &brief.body.capability.tools {
             let sha = &t.script_sha256;
             if known.contains(sha) || inbox_tool_path(dir, sha).exists() {
@@ -1391,8 +1479,50 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
                 }
             }
         }
+        // The other half of the fix: push tools WE have that the peer's own brief shows it
+        // lacks. Needed for any peer that can only ever be dialed *into* (the lighthouse) —
+        // it would otherwise never accumulate a tool from anyone, since the pull above only
+        // ever runs on the dialing side. See push_tool's doc comment.
+        push_missing_tools(dir, addr, &peer_known).await;
     }
     Ok(())
+}
+
+/// Push every local tool whose content hash isn't in `peer_known` to `addr`'s
+/// `/mesh/tool-push`. Best-effort: a failed push just means the peer catches it on someone
+/// else's round, or the next time we dial this same peer.
+async fn push_missing_tools(dir: &Path, addr: &str, peer_known: &std::collections::HashSet<String>) {
+    let Ok(id) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return;
+    };
+    let our_node_id = id.identity().node_id;
+    for t in familiar_kernel::tool::load(dir).unwrap_or_default() {
+        let Ok(body) = std::fs::read(&t.script_path) else {
+            continue;
+        };
+        let sha = sha256_hex(&body);
+        if peer_known.contains(&sha) {
+            continue;
+        }
+        let manifest = crate::brief::ToolManifest {
+            tool_id: t.id.clone(),
+            name: t.name.clone(),
+            purpose: t.purpose.clone(),
+            keywords: t.keywords.split_whitespace().map(String::from).collect(),
+            script_sha256: sha,
+            uses: t.uses as u64,
+            last_exit_ok: t.last_exit_ok,
+        };
+        let payload = serde_json::json!({
+            "manifest": manifest,
+            "body_hex": crate::hex_encode(&body),
+            "from_node_id": our_node_id,
+        });
+        let Ok(bytes) = serde_json::to_vec(&payload) else {
+            continue;
+        };
+        let _ = http_send(addr, Method::POST, "/mesh/tool-push", Some(bytes), &[]).await;
+    }
 }
 
 fn inbox_tool_path(dir: &Path, sha: &str) -> PathBuf {
@@ -1743,6 +1873,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         lat: brief.body.capability.lat,
         lon: brief.body.capability.lon,
         geo_device: false,
+        status: String::new(),
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -1853,6 +1984,7 @@ pub(crate) fn register_device_peer(
             }
             existing.interactive = true; // a console read is a human-facing surface
             existing.last_seen = now;
+            existing.status = String::new(); // a fresh worldview read revives an abandoned peer
             if existing.first_seen == 0 {
                 existing.first_seen = now;
             }
@@ -1896,6 +2028,7 @@ pub(crate) fn register_device_peer(
             lat,
             lon,
             geo_device: lat != 0.0 || lon != 0.0,
+            status: String::new(),
         }),
     }
     if let Some(parent) = path.parent() {
@@ -1929,6 +2062,23 @@ pub(crate) fn load_peers(dir: &Path) -> Vec<PeerRecord> {
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<PeerRecord>>(&s).ok())
         .unwrap_or_default()
+}
+
+/// A human's call that `node_id` is gone for good — decommissioned hardware, a retired VM
+/// (`familiar mesh abandon <node_id>`). The record is never deleted, only excluded from the
+/// active roster/worldview (`members::classify`) — full history stays queryable. Self-healing:
+/// any fresh contact from that node (a brief, a worldview read) revives it automatically, since
+/// renewed contact is itself evidence it isn't defunct after all — see `upsert_peer`/
+/// `register_device_peer`. Returns `false` if no peer with that id exists.
+pub fn abandon_peer(dir: &Path, node_id: &str) -> Result<bool> {
+    let path = dir.join(PEERS_FILE);
+    let mut peers = load_peers(dir);
+    let Some(p) = peers.iter_mut().find(|p| p.node_id == node_id) else {
+        return Ok(false);
+    };
+    p.status = "abandoned".to_string();
+    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    Ok(true)
 }
 
 fn live_peer_count(dir: &Path) -> usize {
@@ -2014,6 +2164,107 @@ mod tests {
             familiar_kernel::identity::current(&dir).as_deref(),
             Some("betty")
         );
+    }
+
+    #[test]
+    fn push_tool_rejects_malformed_and_mismatched_input() {
+        let dir = fresh_dir("push_tool_bad");
+        assert_eq!(body_status(&push_tool(&dir, b"not json")), StatusCode::BAD_REQUEST);
+
+        let body = br#"{"manifest":{"tool_id":"t-1","name":"n","purpose":"p","keywords":[],
+            "script_sha256":"deadbeef","uses":0,"last_exit_ok":true},
+            "body_hex":"68656c6c6f","from_node_id":"peer1"}"#;
+        // sha256("hello") != "deadbeef" — the integrity check must reject it.
+        assert_eq!(body_status(&push_tool(&dir, body)), StatusCode::BAD_REQUEST);
+        assert!(familiar_kernel::tool::load(&dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn push_tool_installs_a_valid_push_with_correct_provenance() {
+        let dir = fresh_dir("push_tool_ok");
+        let script = b"#!/bin/sh\necho hi\n";
+        let sha = sha256_hex(script);
+        let manifest = serde_json::json!({
+            "tool_id": "t-1", "name": "greet", "purpose": "say hi",
+            "keywords": ["greet", "hi"], "script_sha256": sha, "uses": 3, "last_exit_ok": true,
+        });
+        let payload = serde_json::json!({
+            "manifest": manifest,
+            "body_hex": crate::hex_encode(script),
+            "from_node_id": "peer-node-id",
+        });
+        let body = serde_json::to_vec(&payload).unwrap();
+        assert_eq!(body_status(&push_tool(&dir, &body)), StatusCode::OK);
+
+        let tools = familiar_kernel::tool::load(&dir).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "greet");
+        assert_eq!(tools[0].origin, "peer-node-id");
+        assert_eq!(std::fs::read(&tools[0].script_path).unwrap(), script);
+
+        // Pushing the exact same content again is a harmless no-op, not a duplicate.
+        assert_eq!(body_status(&push_tool(&dir, &body)), StatusCode::OK);
+        assert_eq!(familiar_kernel::tool::load(&dir).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn push_tool_respects_the_share_tools_gate() {
+        let dir = fresh_dir("push_tool_gated");
+        let cfg = config::MeshConfig {
+            share_tools: false,
+            ..Default::default()
+        };
+        let _ = std::fs::create_dir_all(dir.join("mesh"));
+        std::fs::write(
+            dir.join(config::CONFIG_FILE),
+            serde_json::to_vec(&cfg).unwrap(),
+        )
+        .unwrap();
+        let body = br#"{"manifest":{"tool_id":"t","name":"n","purpose":"p","keywords":[],
+            "script_sha256":"x","uses":0,"last_exit_ok":true},"body_hex":"","from_node_id":"p"}"#;
+        assert_eq!(body_status(&push_tool(&dir, body)), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn abandon_peer_marks_status_without_deleting_history() {
+        let dir = fresh_dir("abandon");
+        let peers = vec![PeerRecord {
+            node_id: "node1".into(),
+            label: "Old Box".into(),
+            addr: "10.0.0.5:47100".into(),
+            group_id: "g".into(),
+            last_seen: 100,
+            tools_offered: 3,
+            patterns_offered: 5,
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            first_seen: 1,
+            familiar_version: "0.1.0".into(),
+            os_version: String::new(),
+            session_start: 0,
+            total_online_secs: 500,
+            interactive: false,
+            human: String::new(),
+            lat: 0.0,
+            lon: 0.0,
+            geo_device: false,
+            status: String::new(),
+        }];
+        std::fs::create_dir_all(dir.join(PEERS_FILE).parent().unwrap()).unwrap();
+        std::fs::write(
+            dir.join(PEERS_FILE),
+            serde_json::to_vec_pretty(&peers).unwrap(),
+        )
+        .unwrap();
+
+        assert!(abandon_peer(&dir, "node1").unwrap());
+        let after = load_peers(&dir);
+        assert_eq!(after.len(), 1, "the record is never deleted");
+        assert_eq!(after[0].status, "abandoned");
+        assert_eq!(after[0].total_online_secs, 500, "history is preserved");
+
+        // An unknown node id is a no-op, not an error.
+        assert!(!abandon_peer(&dir, "nobody").unwrap());
     }
 
     #[test]

@@ -252,7 +252,14 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         .collect();
     let ai_node =
         |node_id: &str, actor: &str| ai_nodes.contains(actor) || ai_nodes.contains(node_id);
-    let peers: Vec<PeerRecord> = transport::load_peers(dir);
+    // Abandoned peers (familiar mesh abandon <node_id>) are excluded from the active
+    // roster/worldview entirely — their full record stays in peers.jsonl (never deleted), they
+    // just stop being carried around in every gossip round and device read. Self-healing: any
+    // fresh contact revives one automatically (see transport::upsert_peer/register_device_peer).
+    let peers: Vec<PeerRecord> = transport::load_peers(dir)
+        .into_iter()
+        .filter(|p| p.status != "abandoned")
+        .collect();
     let peer_ids: std::collections::HashSet<&str> =
         peers.iter().map(|p| p.node_id.as_str()).collect();
     // Best-probable names for peers on the tailnet: their Tailscale hostname, keyed by IP.
@@ -489,6 +496,44 @@ mod tests {
         let uniq = ids.len();
         ids.dedup();
         assert_eq!(uniq, ids.len(), "no node double-counted across layers");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_abandoned_peer_is_hidden_but_revives_on_fresh_contact() {
+        let dir = fresh("abandon_revive");
+        let host = NodeKey::load_or_mint(&dir, "host").unwrap();
+        group::create_group(&dir, &host, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        transport::register_device_peer(
+            &dir, "retired1", "Old iPad", "192.168.1.9", "v1", "iPadOS 18", 0.0, 0.0,
+        )
+        .unwrap();
+        assert!(
+            classify(&dir, NOW).iter().any(|m| m.node_id == "retired1"),
+            "present before being abandoned"
+        );
+
+        assert!(transport::abandon_peer(&dir, "retired1").unwrap());
+        assert!(
+            !classify(&dir, NOW).iter().any(|m| m.node_id == "retired1"),
+            "abandoned peers are excluded from the active roster"
+        );
+        // The record itself is never deleted, only hidden.
+        assert!(transport::load_peers(&dir)
+            .iter()
+            .any(|p| p.node_id == "retired1" && p.status == "abandoned"));
+
+        // Fresh contact (this device reads the worldview again) revives it automatically —
+        // a human re-abandons if it turns out to be a one-off blip, not a real departure.
+        transport::register_device_peer(
+            &dir, "retired1", "Old iPad", "192.168.1.9", "v1", "iPadOS 18", 0.0, 0.0,
+        )
+        .unwrap();
+        assert!(
+            classify(&dir, NOW).iter().any(|m| m.node_id == "retired1"),
+            "renewed contact revives an abandoned peer"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

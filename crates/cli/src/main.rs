@@ -54,6 +54,7 @@ commands:
                  `mesh create-group [--label L]` | `mesh join --key K [--label L]`
                  | `mesh key` (print the join key — it IS the group secret)
                  | `mesh peer <ip[:port]>` (add a static peer)
+                 | `mesh abandon <node_id>` (retired hardware — hidden from the roster, history kept)
                  | `mesh share <tools|knowledge|identities> <on|off>`
                  | `mesh accept-observations <on|off>` (device agents) | `mesh qr` (enroll a device)
                  | `mesh pending`/`approve <id>`/`deny <id>` (covenant handshake) | `mesh invite`
@@ -584,8 +585,36 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("abandon") => {
+            // `mesh abandon <node_id>` — decommissioned hardware, a retired VM. The RECOMMENDED
+            // way to clean the roster: unlike `forget`, this never deletes the record. It's
+            // excluded from the active roster/worldview but the full history (first_seen,
+            // total_online_secs, tools/patterns it once offered) stays. Any fresh contact from
+            // that node revives it automatically — a human re-abandons if it turns out to be a
+            // one-off blip, not a real departure.
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh abandon <node_id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::transport::abandon_peer(&dir, node_id) {
+                Ok(true) => {
+                    println!("✓ {node_id} marked abandoned — hidden from the active roster, history kept");
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("mesh: no roster entry for {node_id}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not update the roster — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("forget") => {
-            // `mesh forget <node_id>` — drop a departed node from the roster for good.
+            // `mesh forget <node_id>` — hard delete, the record is gone for good (no history
+            // kept). Prefer `mesh abandon` for a real departure (decommissioned hardware) —
+            // this is for correcting a mistaken/test entry, not normal roster hygiene.
             let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
                 eprintln!("mesh: usage: familiar mesh forget <node_id>");
                 return ExitCode::FAILURE;
@@ -1110,6 +1139,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
                  | request-join --host H | key | qr | peer <ip[:port]> \
+                 | abandon <node_id> | forget <node_id> \
                  | share <tools|knowledge|identities> <on|off> | accept-observations <on|off> \
                  | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
                  | invite [--minutes N] | optin <handle> | status>"
