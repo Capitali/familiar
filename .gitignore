@@ -9,3 +9,7 @@
 # Secrets — never committed (the *.example templates are fine).
 *.env
 !*.env.example
+# Xcode cruft — user-local state, never source.
+xcuserdata/
+*.xcuserstate
+DerivedData/
