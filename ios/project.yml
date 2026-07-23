@@ -58,12 +58,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.mac
-        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: MacApp/Support/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
         CODE_SIGN_STYLE: Automatic
-        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
-        # Covenant baseline: the node reports its position; macOS uses wifi positioning.
-        INFOPLIST_KEY_NSLocationUsageDescription: The familiar reports this node's position to your mesh — location is part of the covenant.
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh

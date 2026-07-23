@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleName</key>
+	<string>Familiar</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_familiar-mesh._tcp</string>
+		<string>_ssh._tcp</string>
+		<string>_sftp-ssh._tcp</string>
+		<string>_rfb._tcp</string>
+		<string>_http._tcp</string>
+		<string>_https._tcp</string>
+		<string>_airplay._tcp</string>
+		<string>_raop._tcp</string>
+		<string>_airport._tcp</string>
+		<string>_googlecast._tcp</string>
+		<string>_spotify-connect._tcp</string>
+		<string>_ipp._tcp</string>
+		<string>_ipps._tcp</string>
+		<string>_printer._tcp</string>
+		<string>_pdl-datastream._tcp</string>
+		<string>_homekit._tcp</string>
+		<string>_hap._tcp</string>
+		<string>_companion-link._tcp</string>
+		<string>_apple-mobdev2._tcp</string>
+		<string>_smb._tcp</string>
+		<string>_afpovertcp._tcp</string>
+		<string>_daap._tcp</string>
+		<string>_dacp._tcp</string>
+		<string>_mqtt._tcp</string>
+		<string>_workstation._tcp</string>
+		<string>_device-info._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The familiar surveys the local network to notice devices and services around you (like printers, speakers, and other familiars) and reports what kind of thing it saw — never their addresses or contents.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>The familiar reports this node's position to your mesh — location is part of the covenant.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Push-to-talk: your spoken note is transcribed on-device and sent to the familiar. No audio leaves the device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribes your push-to-talk speech on-device so the familiar can act on it.</string>
+</dict>
+</plist>

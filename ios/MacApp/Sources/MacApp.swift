@@ -7,11 +7,26 @@ import SwiftUI
 
 @main
 struct FamiliarMacApp: App {
+    @StateObject private var bridge = SphereBridge()
+
     var body: some Scene {
         WindowGroup {
             SphereConsole()
+                .environmentObject(bridge)
                 .frame(minWidth: 1040, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandMenu("Familiar") {
+                Button(bridge.mic.isListening ? "Stop Talking" : "Push to Talk") {
+                    bridge.micTapped()
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            }
+        }
+
+        Settings {
+            MacConsentSettings()
+        }
     }
 }
