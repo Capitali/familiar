@@ -21,7 +21,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 ## Wave 3 — Swift: small, independent
 
-- [ ] T9. R8: watch consent defaults → false, add first-pair consent prompt
+- [x] T9. R8: watch consent defaults → false, add first-pair consent prompt
 
 ## Wave 4 — Swift: macOS sensing build-out (depends on T4)
 
