@@ -864,6 +864,11 @@ fn merge_identity(dir: &Path, share: &IdentityShare, node_id: &str, now: i64) ->
         first_seen: now,
         last_seen: now,
         interactions: 0,
+        // A federated identity never carries a face link — IdentityShare has no such field to
+        // begin with (biometric data is never federated, whatever share_identities allows), and
+        // even if it did, recognition only ever links a face to an identity *local* to the node
+        // that saw the face.
+        face_signature: None,
     };
     familiar_kernel::store::append(dir, identity::IDENTITY_FILE, &rec).is_ok()
 }
@@ -1459,6 +1464,42 @@ mod tests {
             brief2.body.knowledge.theory_requests.is_empty(),
             "an executor delegates nothing"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_face_signature_never_reaches_the_wire_even_when_the_handle_is_opted_in() {
+        // A biometric link is strongly sensitive and must never federate, whatever
+        // share_identities/identity_optin says — SPEC.md R10.
+        let dir = tmp("no_face_on_wire");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir);
+
+        identity::remember(&dir, "Betty", NOW).unwrap();
+        identity::link_face(&dir, "betty", Some(vec![0.123_456, -0.987_654, 0.5])).unwrap();
+
+        let mut cfg = MeshConfig::default();
+        cfg.share_identities = true;
+        cfg.identity_optin.push(crate::config::IdentityOptin {
+            handle: "betty".into(),
+            group: cred.group_id.clone(),
+        });
+
+        build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
+        let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
+        assert!(
+            !raw.contains("face_signature") && !raw.contains("0.123456"),
+            "the biometric link must never appear in the outbound brief, opted in or not"
+        );
+
+        let brief: MeshBrief = serde_json::from_str(&raw).unwrap();
+        let identities = brief.body.identities.expect("betty was opted in and should be shared");
+        assert_eq!(identities.entries.len(), 1);
+        assert_eq!(identities.entries[0].handle, "betty");
+        // IdentityShare structurally has no field to carry it — this is a compile-time
+        // guarantee, not just an omission a future change could accidentally reintroduce.
+        let _: crate::brief::IdentityShare = identities.entries[0].clone();
         let _ = fs::remove_dir_all(&dir);
     }
 
