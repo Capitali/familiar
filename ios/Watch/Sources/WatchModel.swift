@@ -15,9 +15,16 @@ final class WatchModel: NSObject, ObservableObject {
     @Published var sentCount = 0
     @Published var lastHeartRate: Int?
     @Published var log: [String] = []
+    /// True right after first enrollment, until the human resolves the consent prompt —
+    /// sensing never starts silently on a newly-paired watch. See `consentAsked`.
+    @Published var needsConsentPrompt = false
 
-    @AppStorage("watch.consent.motion") var motionEnabled = true
-    @AppStorage("watch.consent.heart") var heartEnabled = true
+    /// Off by default, matching phone/iPad's posture — a watch left on a wrist unattended
+    /// shouldn't silently start reporting health/motion data. `consentAsked` distinguishes
+    /// "never asked" from "asked and declined" (a plain bool default can't tell those apart).
+    @AppStorage("watch.consent.motion") var motionEnabled = false
+    @AppStorage("watch.consent.heart") var heartEnabled = false
+    @AppStorage("watch.consent.asked") var consentAsked = false
 
     private let grantAccount = "watch.grant.json"
     private let defaults = UserDefaults.standard
@@ -84,11 +91,27 @@ final class WatchModel: NSObject, ObservableObject {
 
     private func startSensing() {
         guard enrolled else { return }
+        guard consentAsked else {
+            // First pairing (or a still-unresolved prompt from a prior launch) — ask before
+            // sensing anything, rather than defaulting silently the way this used to.
+            needsConsentPrompt = true
+            return
+        }
         let s = sensing ?? WatchSensing { [weak self] batch in await self?.deliver(batch) }
         s.onHeartRate = { [weak self] bpm in Task { @MainActor in self?.lastHeartRate = bpm } }
         sensing = s
         s.start(motionOn: motionEnabled, heartOn: heartEnabled)
         note("sensing armed")
+    }
+
+    /// The human resolved the first-pair consent prompt — record it (so it never asks again
+    /// unless the watch is reset) and start sensing with whatever they chose.
+    func resolveConsent(motion: Bool, heart: Bool) {
+        motionEnabled = motion
+        heartEnabled = heart
+        consentAsked = true
+        needsConsentPrompt = false
+        startSensing()
     }
 
     private func makeSession() -> ObservationClient.Session? {

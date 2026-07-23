@@ -11,6 +11,14 @@ struct FamiliarWatchApp: App {
 struct WatchRootView: View {
     @EnvironmentObject var model: WatchModel
     var body: some View {
+        if model.needsConsentPrompt {
+            WatchConsentView(model: model)
+        } else {
+            mainBody
+        }
+    }
+
+    var mainBody: some View {
         VStack(spacing: 4) {
             Text("Familiar").font(.headline)
             if model.enrolled {
@@ -30,5 +38,24 @@ struct WatchRootView: View {
         }
         .padding(4)
         .onAppear { model.start() }
+    }
+}
+
+/// First-pair consent — shown once, right after enrollment, before any sensing starts. Off
+/// by default; the human must explicitly opt each one in (or leave both off and continue).
+struct WatchConsentView: View {
+    @ObservedObject var model: WatchModel
+    @State private var motion = false
+    @State private var heart = false
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text("Share from this watch?").font(.headline).multilineTextAlignment(.center)
+            Toggle("Motion", isOn: $motion).font(.caption)
+            Toggle("Heart rate", isOn: $heart).font(.caption)
+            Button("Continue") { model.resolveConsent(motion: motion, heart: heart) }
+                .font(.caption2)
+        }
+        .padding(4)
     }
 }
