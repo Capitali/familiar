@@ -92,16 +92,17 @@ final class MacMicrophone: NSObject, ObservableObject {
 /// Gated by `allow_network_discovery` (SPEC.md R9/R1). Derived-only by design: reports service
 /// kind + advertised instance name, never a resolved address or payload.
 ///
-/// Not yet wired into a mesh observation — unlike iOS/watch, this app has no NodeKey/membership
-/// cert of its own to sign a `/mesh/observe` push with (it talks to the local daemon over plain
-/// loopback HTTP, never doing mesh crypto itself). Feeding findings into the mesh would need a
-/// new daemon-side local endpoint that signs on this node's behalf; left for a follow-up rather
-/// than inventing that API under this task's scope. For now this satisfies the gated-capability
-/// requirement — permission is requested and the survey runs — with findings published locally.
+/// Wired into the daemon via `POST /local/observe` (SphereBridge sets `onDiscovery`) — this app
+/// has no NodeKey/membership cert of its own to sign a `/mesh/observe` push with (it talks to
+/// the local daemon over plain loopback HTTP, never doing mesh crypto itself), so the loopback
+/// seam is its only path to the mesh's observation log.
 @MainActor
 final class MacNetworkDiscovery: NSObject, ObservableObject {
     @Published var found: [String] = []
     private var browsers: [NWBrowser] = []
+    /// Called once per genuinely new (type, instance name) finding — never re-fired for one
+    /// already in `found`. The caller (SphereBridge) turns this into a `/local/observe` push.
+    var onDiscovery: ((String, String) -> Void)?
 
     static let serviceTypes = [
         "_familiar-mesh._tcp", "_ssh._tcp", "_sftp-ssh._tcp", "_rfb._tcp", "_http._tcp",
@@ -121,7 +122,9 @@ final class MacNetworkDiscovery: NSObject, ObservableObject {
                     for r in results {
                         if case let .service(name, _, _, _) = r.endpoint {
                             let entry = "\(type):\(name)"
-                            if let self, !self.found.contains(entry) { self.found.append(entry) }
+                            guard let self, !self.found.contains(entry) else { continue }
+                            self.found.append(entry)
+                            self.onDiscovery?(type, name)
                         }
                     }
                 }

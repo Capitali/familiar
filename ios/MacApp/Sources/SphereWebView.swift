@@ -119,6 +119,20 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     func start(web: WKWebView) {
         self.web = web
         mic.onTranscript = { [weak self] text in self?.post("local/answer", ["text": text]) }
+        // Both close a follow-up gap: this app has no NodeKey to sign a /mesh/observe push
+        // with, so /local/observe (loopback, same trust class as local/answer) is its only
+        // path to the daemon's observation/identity registries.
+        discovery.onDiscovery = { [weak self] type, name in
+            self?.post("local/observe", [
+                "actor": "host", "action": "discovered", "object": "service:\(type)", "context": name,
+            ])
+        }
+        face.onIdentityConfirmed = { [weak self] handle in
+            self?.post("local/observe", [
+                "actor": "host", "action": "recognized", "object": "face:\(handle)",
+                "context": "on-device match, confirmed by human", "confidence": 0.95,
+            ])
+        }
         guard timer == nil else { return }
         locator.delegate = self
         locator.desiredAccuracy = kCLLocationAccuracyHundredMeters

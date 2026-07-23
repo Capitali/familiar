@@ -79,6 +79,11 @@ final class MacFaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutput
     private var recognitionOn = false
     let recognizer = MacFaceRecognizer()
     private var pendingEmbedding: [Float]?
+    /// Called with the confirmed handle — the caller (SphereBridge) turns this into a
+    /// `POST /local/observe {"action":"recognized","object":"face:<handle>"}` push, which
+    /// `identity::maybe_learn_from_observation` on the daemon side turns into a real registry
+    /// entry, not just this on-device cache.
+    var onIdentityConfirmed: ((String) -> Void)?
 
     func start(recognize: Bool) {
         recognitionOn = recognize
@@ -113,9 +118,7 @@ final class MacFaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutput
         recognizer.learn(handle: handle, embedding: embedding)
         needsIdentification = false
         proposedHandle = nil
-        // Same gap as iOS's FaceSensing.confirmIdentity: no daemon-side identity::remember()
-        // trigger exists yet (production-code, not test-only) — this link is real and useful
-        // on THIS device, not yet fed to the mesh identity registry. See that file's note.
+        onIdentityConfirmed?(handle)
     }
 
     nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,

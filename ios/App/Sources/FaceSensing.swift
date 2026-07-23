@@ -78,15 +78,12 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
             self.needsIdentification = false
             self.proposedHandle = nil
         }
-        // Feed the confirmed name toward the daemon's identity registry. NOTE: as of this
-        // change, familiar_kernel::identity::remember() has no production trigger anywhere in
-        // the daemon (only called from tests) — the general "human introduces themselves"
-        // pipeline (docs/UI-DESIGN-BRIEF.md's "next phase") isn't built yet, and /local/*
-        // endpoints are loopback-only (unreachable from a phone). Wiring this to the daemon's
-        // registry needs a new signed mesh endpoint — left for a follow-up rather than
-        // inventing that endpoint under this task's scope. For now the link is real and
-        // useful on-device (this phone recognizes this face next time) even though it doesn't
-        // yet reach the daemon.
+        // Feed the confirmed name toward the daemon's identity registry, over the same signed
+        // observation channel this device already uses for everything else — no new endpoint
+        // needed. The daemon's observe::ingest_observations now recognizes exactly this shape
+        // (action "recognized", object "face:<name>") via
+        // familiar_kernel::identity::maybe_learn_from_observation and turns it into a real
+        // registry entry + the current observer, not just this device's local cache.
         deliver(ObsRecord(actor: DeviceActor.current, action: "recognized", object: "face:\(handle)",
                           context: "on-device match, confirmed by human", confidence: 0.95))
     }
