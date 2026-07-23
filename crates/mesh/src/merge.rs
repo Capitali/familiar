@@ -1479,12 +1479,14 @@ mod tests {
         identity::remember(&dir, "Betty", NOW).unwrap();
         identity::link_face(&dir, "betty", Some(vec![0.123_456, -0.987_654, 0.5])).unwrap();
 
-        let mut cfg = MeshConfig::default();
-        cfg.share_identities = true;
-        cfg.identity_optin.push(crate::config::IdentityOptin {
-            handle: "betty".into(),
-            group: cred.group_id.clone(),
-        });
+        let cfg = MeshConfig {
+            share_identities: true,
+            identity_optin: vec![crate::config::IdentityOptin {
+                handle: "betty".into(),
+                group: cred.group_id.clone(),
+            }],
+            ..Default::default()
+        };
 
         build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
         let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();

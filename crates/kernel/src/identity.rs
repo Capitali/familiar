@@ -128,6 +128,30 @@ pub fn link_face(dir: &Path, handle: &str, signature: Option<Vec<f32>>) -> io::R
     Ok(Some(updated))
 }
 
+/// The production trigger `remember()` never had until now: a device-side "human introduced
+/// themselves" observation (a confirmed face match, a typed/spoken name) becomes a real entry
+/// in the registry and the current observer, not just a local, on-device cache. Recognizes
+/// `action == "recognized"` with `object` shaped `"face:<name-or-handle>"` — the exact shape
+/// both the iOS/macOS confirm-before-keep flows emit (FaceSensing.swift/MacFaceSensing.swift).
+/// A no-op (`Ok(None)`) for anything else, so callers can run this unconditionally over every
+/// incoming observation without a separate dispatch.
+pub fn maybe_learn_from_observation(
+    dir: &Path,
+    action: &str,
+    object: &str,
+    now: i64,
+) -> io::Result<Option<Identity>> {
+    let Some(who) = object.strip_prefix("face:").map(str::trim) else {
+        return Ok(None);
+    };
+    if action != "recognized" || who.is_empty() {
+        return Ok(None);
+    }
+    let id = remember(dir, who, now)?;
+    set_current(dir, &id.handle)?;
+    Ok(Some(id))
+}
+
 /// The handle of whoever is present now (`None` until someone introduces themselves).
 pub fn current(dir: &Path) -> Option<String> {
     std::fs::read_to_string(dir.join(OBSERVER_FILE))
@@ -167,6 +191,36 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn a_recognized_face_observation_learns_and_becomes_current() {
+        let t = Temp::new("learn_from_obs");
+        let learned = maybe_learn_from_observation(&t.0, "recognized", "face:Betty", 100)
+            .unwrap()
+            .expect("a recognized face: observation should learn someone");
+        assert_eq!(learned.handle, "betty");
+        assert_eq!(current(&t.0).as_deref(), Some("betty"));
+
+        // Seeing the same person again bumps interactions rather than duplicating.
+        maybe_learn_from_observation(&t.0, "recognized", "face:Betty", 200).unwrap();
+        assert_eq!(load(&t.0).unwrap().len(), 1);
+        assert_eq!(find(&load(&t.0).unwrap(), "betty").unwrap().interactions, 2);
+    }
+
+    #[test]
+    fn unrelated_observations_are_a_no_op() {
+        let t = Temp::new("learn_no_op");
+        // Wrong action.
+        assert!(maybe_learn_from_observation(&t.0, "reports", "face:Betty", 100)
+            .unwrap()
+            .is_none());
+        // Wrong object shape.
+        assert!(maybe_learn_from_observation(&t.0, "recognized", "location:home", 100)
+            .unwrap()
+            .is_none());
+        assert!(load(&t.0).unwrap().is_empty());
+        assert!(current(&t.0).is_none());
     }
 
     #[test]

@@ -210,6 +210,12 @@ pub(crate) fn ingest_observations(
         if let Some(thread_id) = obs.context.strip_prefix("thread:") {
             let _ = familiar_kernel::thread::add_answer(dir, thread_id, &obs.object, env.ts);
         }
+        // A confirmed face recognition ("recognized face:<name>") is the production trigger
+        // identity::remember() never had before — the device already ran its own
+        // confirm-before-keep flow; this is where that confirmation reaches the registry.
+        let _ = familiar_kernel::identity::maybe_learn_from_observation(
+            dir, &obs.action, &obs.object, env.ts,
+        );
         observation::record(dir, obs).map_err(Error::Io)?;
     }
     Ok(keep.len())
@@ -373,6 +379,27 @@ mod tests {
         let err = ingest_observations(&host, &raw, &sig, NOW, &r).unwrap_err();
         assert!(matches!(err, Error::Untrusted(m) if m.contains("replay")));
         assert_eq!(observation::load(&host).unwrap().len(), stored.len());
+    }
+
+    #[test]
+    fn a_recognized_face_observation_reaches_the_identity_registry() {
+        // The gap this closes: a device's confirm-before-keep flow used to only update its own
+        // on-device cache. Ingesting the observation it emits must now also learn the identity.
+        let (host, cred, device) = setup("identity");
+        let r = ring();
+        let mut record = obs("face:Betty");
+        record.action = "recognized".into();
+        record.actor = "phone:ian".into();
+        let (raw, sig) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![record]);
+
+        ingest_observations(&host, &raw, &sig, NOW, &r).unwrap();
+        let people = familiar_kernel::identity::load(&host).unwrap();
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].handle, "betty");
+        assert_eq!(
+            familiar_kernel::identity::current(&host).as_deref(),
+            Some("betty")
+        );
     }
 
     #[test]

@@ -710,6 +710,16 @@ async fn handle(
                 }
             }
         }
+        (Method::POST, "/local/observe") => {
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                match collect(req).await {
+                    Ok(b) => local_observe(&dir, &b),
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                }
+            }
+        }
         (Method::POST, "/mesh/enroll-request") => {
             let sig = req
                 .headers()
@@ -941,6 +951,11 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     match gate {
         "allow_llm" => b.allow_llm = open,
         "allow_camera" => b.allow_camera = open,
+        "allow_microphone" => b.allow_microphone = open,
+        "allow_location" => b.allow_location = open,
+        "allow_motion" => b.allow_motion = open,
+        "allow_network_discovery" => b.allow_network_discovery = open,
+        "allow_face_recognition" => b.allow_face_recognition = open,
         "allow_network" => b.allow_network = open,
         "allow_mesh" => b.allow_mesh = open,
         "allow_execute" => b.allow_execute = open,
@@ -959,6 +974,41 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
             text(StatusCode::OK, "ok")
         }
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+    }
+}
+
+/// `POST /local/observe {"actor":"host","action":"...","object":"...","context":"","confidence":0.9}`
+/// → the local console records an observation directly, no mesh signature (loopback-gated by the
+/// caller, same trust class as `/local/answer`). Closes two gaps macOS specifically has: it has no
+/// NodeKey/membership cert of its own to sign a `/mesh/observe` push with (unlike iOS/watchOS,
+/// which already have that path), so network-discovery findings and confirmed face identities had
+/// nowhere real to go — this is that seam. `actor`/`context`/`confidence` are optional; `action`
+/// and `object` are required. A `"recognized" "face:<name>"` pair also reaches the identity
+/// registry, same as the signed mesh path (`observe::ingest_observations`).
+fn local_observe(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
+    let v = match serde_json::from_slice::<serde_json::Value>(body) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad json"),
+    };
+    let action = v.get("action").and_then(|s| s.as_str()).unwrap_or("").trim();
+    let object = v.get("object").and_then(|s| s.as_str()).unwrap_or("").trim();
+    if action.is_empty() || object.is_empty() {
+        return text(StatusCode::BAD_REQUEST, "action and object are required");
+    }
+    let actor = v.get("actor").and_then(|s| s.as_str()).unwrap_or("host");
+    let context = v.get("context").and_then(|s| s.as_str()).unwrap_or("");
+    let confidence = v
+        .get("confidence")
+        .and_then(|c| c.as_f64())
+        .unwrap_or(0.9)
+        .clamp(0.0, 1.0);
+    let now = now_secs();
+    let _ = familiar_kernel::identity::maybe_learn_from_observation(dir, action, object, now);
+    let obs =
+        familiar_kernel::observation::Observation::new(actor, action, object, context, "local", now, confidence);
+    match familiar_kernel::observation::record(dir, obs) {
+        Ok(_) => text(StatusCode::OK, "ok"),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "record"),
     }
 }
 
@@ -1915,6 +1965,56 @@ fn write_status(dir: &Path, msg: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fresh_dir(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("familiar_transport_{}_{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn body_status(resp: &Response<Full<Bytes>>) -> StatusCode {
+        resp.status()
+    }
+
+    #[test]
+    fn local_observe_requires_action_and_object() {
+        let dir = fresh_dir("observe_missing");
+        assert_eq!(
+            body_status(&local_observe(&dir, br#"{"action":"discovered"}"#)),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            body_status(&local_observe(&dir, br#"{"object":"service:x"}"#)),
+            StatusCode::BAD_REQUEST
+        );
+        assert!(familiar_kernel::observation::load(&dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn local_observe_records_a_discovery_with_defaults() {
+        let dir = fresh_dir("observe_discovery");
+        let body = br#"{"action":"discovered","object":"service:_airplay._tcp:Living Room"}"#;
+        assert_eq!(body_status(&local_observe(&dir, body)), StatusCode::OK);
+        let recorded = familiar_kernel::observation::load(&dir).unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].actor, "host"); // default when the caller doesn't set one
+        assert_eq!(recorded[0].action, "discovered");
+        assert_eq!(recorded[0].source, "local");
+    }
+
+    #[test]
+    fn local_observe_recognized_face_reaches_the_identity_registry() {
+        // The other half of the gap this closes — macOS has no NodeKey to sign a /mesh/observe
+        // push with, so this loopback seam is its only path to the identity registry.
+        let dir = fresh_dir("observe_identity");
+        let body = br#"{"actor":"host","action":"recognized","object":"face:Betty"}"#;
+        assert_eq!(body_status(&local_observe(&dir, body)), StatusCode::OK);
+        assert_eq!(
+            familiar_kernel::identity::current(&dir).as_deref(),
+            Some("betty")
+        );
+    }
 
     #[test]
     fn parses_tailscale_status_fixture() {
