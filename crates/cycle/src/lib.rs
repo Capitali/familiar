@@ -63,14 +63,6 @@ const LAST_THEORY_FILE: &str = "last_theory.txt";
 const LAST_CULTIVATE_FILE: &str = "last_cultivate.txt";
 /// The structural fingerprint of the last tick's environment (a single u64).
 const STRUCTURE_FILE: &str = "structure.fp";
-/// Where the eye's latest captured frame and its rate-limit stamp live, under the data dir.
-const EYE_DIR: &str = "eye";
-const EYE_FRAME: &str = "latest.jpg";
-const EYE_STAMP: &str = "last_capture.txt";
-/// Minimum gap between camera frames the always-on daemon grabs, so watching never holds the
-/// camera light on or fills the disk. The boundary's `allow_camera` is the real switch —
-/// close it and watching stops entirely; this only paces it while open.
-const CAPTURE_INTERVAL_SECS: i64 = 60;
 /// The most times a single candidate lineage may mutate before it is retired (archived)
 /// rather than mutated again. Bounds the self-improvement search so a non-converging line
 /// can't spawn an unbounded chain of ever-deeper children (which once filled the store to
@@ -2124,8 +2116,9 @@ pub fn tick(
     perceived.extend(sense::interfaces(now));
     perceived.extend(sense::capabilities(now, sense::DEFAULT_TOOLS));
     // Discover cameras in the environment — perception, always permitted (the boundary
-    // governs reach, not perception). *Watching* one is gated (camera_allowed) and not
-    // done here; the familiar only learns that an eye is available, never opens it itself.
+    // governs reach, not perception). *Watching* one never happens on this headless
+    // daemon at all, regardless of the gate — camera work lives only in GUI-session
+    // processes now (SPEC.md R3). The familiar only learns that an eye is available.
     perceived.extend(vision::discover(now));
     // Discover the devices sharing this network — perception, like discovering a camera
     // (knowing a phone/watch is present is not reaching into it). The local ARP read is
@@ -2243,8 +2236,8 @@ pub fn tick(
     //     a no-op when the human hasn't opened it). Publishes our brief and merges verified
     //     peer briefs the async transport left in mesh/inbox: tools (auto-merged into the
     //     library, still gated on *use*), patterns, and tagged peer observations — never
-    //     laundered into local sensing. Best-effort, like watch_camera: internal errors fold
-    //     into the report, they never abort the tick.
+    //     laundered into local sensing. Best-effort: internal errors fold into the report,
+    //     they never abort the tick.
     let mesh = familiar_mesh::federate(dir, now);
 
     let report = TickReport {
@@ -2336,9 +2329,9 @@ pub fn execute_allowed(dir: &Path) -> bool {
     boundary_allows(dir, familiar_kernel::guard::ActionKind::ExecuteArtifact)
 }
 
-/// Resolve whether the boundary permits **watching** through a camera (capturing frames).
-/// Discovery is perception and not gated; this gates the act of watching, which later
-/// bricks build on. Fail-closed: the eye stays shut until a human opens it.
+/// Resolve whether the boundary's `allow_camera` gate is open. Kept as a general query —
+/// nothing in this (headless) daemon's own tick loop acts on it: camera capture happens
+/// only in GUI-session processes now (SPEC.md R3), never here regardless of this gate.
 pub fn camera_allowed(dir: &Path) -> bool {
     boundary_allows(dir, familiar_kernel::guard::ActionKind::Camera)
 }
@@ -2354,11 +2347,15 @@ pub fn authored_execute_allowed(dir: &Path) -> bool {
 /// Convenience: a tick whose connectivity, LLM use, and execution are gated by the
 /// boundary on disk. This is what the daemon runs — outward reach (and running
 /// generated code) only where a human opened that gate.
+///
+/// Camera capture deliberately never runs here. Headless peers (this daemon included)
+/// gather no visual data, full stop — a decision made independent of `allow_camera`'s
+/// state, not merely gated by it (the risk that motivated it was never about consent:
+/// a headless launchd process may not reliably hold a macOS TCC grant at all, and this
+/// session hit a live, analogous bug in a different subsystem for exactly that reason).
+/// Camera/face-recognition work lives only in GUI-session processes (`FamiliarMac.app`,
+/// the iOS app) — see SPEC.md R3.
 pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
-    // Watching through the camera is the most invasive reach, so it is done only here — the
-    // gated driver — and only when the boundary's allow_camera is open. Best-effort: a
-    // capture failure never aborts the tick.
-    let _ = watch_camera(dir, now);
     tick(
         dir,
         now,
@@ -2367,56 +2364,6 @@ pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
         execute_allowed(dir),
         authored_execute_allowed(dir),
     )
-}
-
-/// Refresh the eye's latest frame at `<dir>/eye/latest.jpg` when the boundary permits it,
-/// rate-limited to one frame per [`CAPTURE_INTERVAL_SECS`]. The frame file is overwritten in
-/// place (the live view); the *observation* that the familiar has working sight is recorded
-/// only once (a constant triple), so an always-on daemon doesn't flood the log. Fail-closed:
-/// records nothing and returns `Ok(false)` when the gate is shut, the interval hasn't
-/// elapsed, or capture fails.
-fn watch_camera(dir: &Path, now: i64) -> io::Result<bool> {
-    if !camera_allowed(dir) {
-        return Ok(false);
-    }
-    let eye = dir.join(EYE_DIR);
-    let stamp = eye.join(EYE_STAMP);
-    let last = fs::read_to_string(&stamp)
-        .ok()
-        .and_then(|s| s.trim().parse::<i64>().ok())
-        .unwrap_or(0);
-    if last != 0 && now.saturating_sub(last) < CAPTURE_INTERVAL_SECS {
-        return Ok(false);
-    }
-
-    let frame = eye.join(EYE_FRAME);
-    if !vision::capture_frame(&frame, None) {
-        return Ok(false);
-    }
-    fs::create_dir_all(&eye)?;
-    fs::write(&stamp, now.to_string())?;
-
-    // Record the milestone once: the familiar now has working sight. The constant object means
-    // the structural dedup keeps it to a single fact; the frame file refreshes silently after.
-    let obj = format!("camera-frame:{EYE_DIR}/{EYE_FRAME}");
-    let already = observation::load(dir)?
-        .iter()
-        .any(|o| o.actor == "host" && o.action == "watched" && o.object == obj);
-    if !already {
-        observation::record(
-            dir,
-            observation::Observation::new(
-                "host",
-                "watched",
-                obj,
-                "a still frame the familiar captured through its eye".to_string(),
-                "sensor",
-                now,
-                0.9,
-            ),
-        )?;
-    }
-    Ok(true)
 }
 
 #[cfg(test)]

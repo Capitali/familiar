@@ -912,7 +912,10 @@ fn obs_key(origin: &str, actor: &str, action: &str, object: &str, ts: i64) -> St
 
 /// Gates a remote human grant is allowed to open — the reach/build capabilities a headless peer
 /// asks for. `allow_mesh` is excluded (it must already be open to receive the grant) and the
-/// sandbox toggle is excluded (loosening the jail is a local-only choice).
+/// sandbox toggle is excluded (loosening the jail is a local-only choice). `allow_camera` and
+/// the sensor gates (microphone/location/motion/network_discovery/face_recognition) are
+/// deliberately excluded too — those are personal-consent gates a human opens locally, in a
+/// GUI app, never by a remote grant; a headless peer never acts on them regardless (SPEC.md R3).
 const GRANTABLE_GATES: &[&str] = &[
     "allow_execute",
     "allow_authored_execute",
@@ -920,7 +923,6 @@ const GRANTABLE_GATES: &[&str] = &[
     "allow_network",
     "allow_tool_install",
     "allow_agent",
-    "allow_camera",
 ];
 
 /// Apply one authenticated authority grant addressed to this node. Returns a human-facing audit note
@@ -990,7 +992,6 @@ fn apply_authority_grant(
                 "allow_network" => &mut b.allow_network,
                 "allow_tool_install" => &mut b.allow_tool_install,
                 "allow_agent" => &mut b.allow_agent,
-                "allow_camera" => &mut b.allow_camera,
                 _ => return None,
             };
             if *already {
