@@ -51,6 +51,23 @@ pub enum ActionKind {
     /// Watch through a camera (capture frames). The most invasive reach; discovering
     /// *which* cameras exist is perception and not weighed here — only *watching* is.
     Camera,
+    /// Record audio through a microphone. Discovering that a microphone exists is
+    /// perception and not weighed here — only *recording* is.
+    Microphone,
+    /// Read this node's location (GPS/CoreLocation-class fix). A raw fix is itself the
+    /// gated act — there is no separate "discovery" step the way a camera/mic has one.
+    Location,
+    /// Read motion/activity sensor data (accelerometer/gyroscope-class).
+    Motion,
+    /// Survey the local network for advertised services (Bonjour/mDNS-class). Discovering
+    /// *that the local network exists* (an interface, a gateway) is perception; actively
+    /// *surveying* who's on it is weighed here.
+    NetworkDiscovery,
+    /// Match a captured face against a known identity (biometric recognition). Distinct
+    /// from `Camera`: `Camera` gates capturing a frame at all; this gates the sharper,
+    /// separately-consented act of running recognition against it and linking the result
+    /// to a person's identity — "strongly sensitive" per docs/design-orientation-and-mesh.md.
+    FaceRecognition,
     /// Federate with peer nodes over the mesh (announce presence, exchange briefs, pull
     /// tools/patterns). Outward transmission at node scale; *discovering* that peers exist
     /// on the tailnet is perception and not weighed here — only *exchanging* is. An
@@ -220,6 +237,11 @@ pub fn evaluate(action: &Action, boundary: &Boundary) -> Verdict {
         InstallTool => bool_scope(boundary.allow_tool_install),
         ExecuteArtifact => bool_scope(boundary.allow_execute),
         Camera => bool_scope(boundary.allow_camera),
+        Microphone => bool_scope(boundary.allow_microphone),
+        Location => bool_scope(boundary.allow_location),
+        Motion => bool_scope(boundary.allow_motion),
+        NetworkDiscovery => bool_scope(boundary.allow_network_discovery),
+        FaceRecognition => bool_scope(boundary.allow_face_recognition),
         Mesh => bool_scope(boundary.allow_mesh),
         Agent => bool_scope(boundary.allow_agent),
     };
@@ -319,6 +341,11 @@ mod tests {
             allow_execute: false,
             allow_authored_execute: false,
             allow_camera: false,
+            allow_microphone: false,
+            allow_location: false,
+            allow_motion: false,
+            allow_network_discovery: false,
+            allow_face_recognition: false,
             allow_mesh: false,
             allow_agent: false,
             allow_self_upgrade: false,
@@ -337,6 +364,11 @@ mod tests {
             ActionKind::InstallTool,
             ActionKind::ExecuteArtifact,
             ActionKind::Camera,
+            ActionKind::Microphone,
+            ActionKind::Location,
+            ActionKind::Motion,
+            ActionKind::NetworkDiscovery,
+            ActionKind::FaceRecognition,
             ActionKind::Mesh,
             ActionKind::Agent,
             ActionKind::ReadFile,
@@ -423,6 +455,75 @@ mod tests {
         b.allow_camera = true;
         assert_eq!(
             evaluate(&Action::new(ActionKind::Camera, "FaceTime HD Camera"), &b).decision,
+            Decision::Allow
+        );
+    }
+
+    #[test]
+    fn new_sensor_gates_are_refused_until_a_human_opens_each_one() {
+        // Perception's not permission — each new sensor gate is fail-closed exactly like
+        // camera, and opening one does not open the others.
+        for (kind, target) in [
+            (ActionKind::Microphone, "MacBook Microphone"),
+            (ActionKind::Location, "gps"),
+            (ActionKind::Motion, "accelerometer"),
+            (ActionKind::NetworkDiscovery, "bonjour"),
+            (ActionKind::FaceRecognition, "face-match"),
+        ] {
+            let v = evaluate(&Action::new(kind, target), &open_llm());
+            assert_eq!(v.decision, Decision::Refuse, "{kind:?} should be refused when closed");
+            assert_eq!(v.reason, Reason::ViolatesConstitutionalBoundary);
+        }
+
+        let mut b = open_llm();
+        b.allow_microphone = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::Microphone, "mic"), &b).decision,
+            Decision::Allow
+        );
+        // opening microphone alone does not open location
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::Location, "gps"), &b).decision,
+            Decision::Refuse
+        );
+
+        let mut b = open_llm();
+        b.allow_location = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::Location, "gps"), &b).decision,
+            Decision::Allow
+        );
+
+        let mut b = open_llm();
+        b.allow_motion = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::Motion, "accelerometer"), &b).decision,
+            Decision::Allow
+        );
+
+        let mut b = open_llm();
+        b.allow_network_discovery = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::NetworkDiscovery, "bonjour"), &b).decision,
+            Decision::Allow
+        );
+    }
+
+    #[test]
+    fn face_recognition_stays_gated_even_when_camera_is_open() {
+        // Camera and FaceRecognition are separate gates — capturing a frame is not
+        // permission to run recognition against it. Matches docs/design-orientation-and-
+        // mesh.md's "strongly sensitive, gated like the camera but its own opt-in" call.
+        let mut b = open_llm();
+        b.allow_camera = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::FaceRecognition, "face-match"), &b).decision,
+            Decision::Refuse,
+            "camera open must not imply face recognition is open"
+        );
+        b.allow_face_recognition = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::FaceRecognition, "face-match"), &b).decision,
             Decision::Allow
         );
     }

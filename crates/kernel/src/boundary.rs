@@ -42,6 +42,25 @@ pub struct Boundary {
     /// perception); *watching* is gated here, fail-closed, and is only ever opened by an
     /// explicit human grant. Availability is not authorization — made literal for the eye.
     pub allow_camera: bool,
+    /// May the familiar **record audio through a microphone**? Fail-closed, human-opened —
+    /// same doctrine as `allow_camera`: discovering a microphone exists is perception,
+    /// recording through it is the gated act.
+    pub allow_microphone: bool,
+    /// May the familiar **read this node's location**? Fail-closed, human-opened. Unlike
+    /// camera/mic there is no separate "discovery" step — a location fix is itself the
+    /// gated act.
+    pub allow_location: bool,
+    /// May the familiar **read motion/activity sensor data**? Fail-closed, human-opened.
+    pub allow_motion: bool,
+    /// May the familiar **actively survey the local network** for advertised services
+    /// (Bonjour/mDNS-class discovery)? Fail-closed, human-opened — distinct from passively
+    /// noticing an interface/gateway exists, which is perception.
+    pub allow_network_discovery: bool,
+    /// May the familiar **match a captured face against a known identity**? A sharper,
+    /// separately-consented gate than `allow_camera` — capturing a frame is not permission
+    /// to run recognition against it and link the result to a person. "Strongly sensitive"
+    /// per docs/design-orientation-and-mesh.md; fail-closed, human-opened.
+    pub allow_face_recognition: bool,
     /// May the familiar **federate with peer nodes over a mesh** (Tailscale)? Outward
     /// transmission — the exfiltration surface Law III guards, at node-to-node scale.
     /// *Discovering* that peers exist on the tailnet is perception; *exchanging briefs*
@@ -99,6 +118,11 @@ impl Boundary {
             allow_execute: false,
             allow_authored_execute: false,
             allow_camera: false,
+            allow_microphone: false,
+            allow_location: false,
+            allow_motion: false,
+            allow_network_discovery: false,
+            allow_face_recognition: false,
             allow_mesh: false,
             allow_agent: false,
             allow_self_upgrade: false,
@@ -116,6 +140,11 @@ impl Boundary {
             && !self.allow_execute
             && !self.allow_authored_execute
             && !self.allow_camera
+            && !self.allow_microphone
+            && !self.allow_location
+            && !self.allow_motion
+            && !self.allow_network_discovery
+            && !self.allow_face_recognition
             && !self.allow_mesh
             && !self.allow_agent
             && !self.allow_self_upgrade
@@ -138,6 +167,11 @@ pub struct CapabilityScope {
     pub authored_execute: bool,
     pub tool_install: bool,
     pub camera: bool,
+    pub microphone: bool,
+    pub location: bool,
+    pub motion: bool,
+    pub network_discovery: bool,
+    pub face_recognition: bool,
     pub mesh: bool,
     pub fs_read: Vec<String>,
     pub fs_write: Vec<String>,
@@ -161,6 +195,11 @@ impl CapabilityScope {
             authored_execute: b.allow_authored_execute,
             tool_install: b.allow_tool_install,
             camera: b.allow_camera,
+            microphone: b.allow_microphone,
+            location: b.allow_location,
+            motion: b.allow_motion,
+            network_discovery: b.allow_network_discovery,
+            face_recognition: b.allow_face_recognition,
             mesh: b.allow_mesh,
             fs_read: b.fs_read.clone(),
             fs_write: b.fs_write.clone(),
@@ -175,6 +214,11 @@ impl CapabilityScope {
             authored_execute: false,
             tool_install: false,
             camera: false,
+            microphone: false,
+            location: false,
+            motion: false,
+            network_discovery: false,
+            face_recognition: false,
             mesh: false,
             fs_read: Vec::new(),
             fs_write: Vec::new(),
@@ -197,6 +241,11 @@ pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
         allow_execute: b.allow_execute && s.execute,
         allow_authored_execute: b.allow_authored_execute && s.authored_execute,
         allow_camera: b.allow_camera && s.camera,
+        allow_microphone: b.allow_microphone && s.microphone,
+        allow_location: b.allow_location && s.location,
+        allow_motion: b.allow_motion && s.motion,
+        allow_network_discovery: b.allow_network_discovery && s.network_discovery,
+        allow_face_recognition: b.allow_face_recognition && s.face_recognition,
         allow_mesh: b.allow_mesh && s.mesh,
         allow_agent: false,
         // A scoped agent never rewrites the core — self-upgrade is the core's own decision, made
@@ -317,6 +366,61 @@ mod tests {
         let mut b = Boundary::closed();
         b.allow_mesh = true;
         assert!(!b.is_closed());
+    }
+
+    #[test]
+    fn new_sensor_gates_default_closed_and_each_widens_is_closed_independently() {
+        let closed = Boundary::closed();
+        assert!(!closed.allow_microphone);
+        assert!(!closed.allow_location);
+        assert!(!closed.allow_motion);
+        assert!(!closed.allow_network_discovery);
+        assert!(!closed.allow_face_recognition);
+
+        // Old policy files that predate these flags stay closed (fail-safe partial parse).
+        let t = Temp::new("new_gates_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        let b = load(&t.0).unwrap();
+        assert!(!b.allow_microphone && !b.allow_location && !b.allow_motion);
+        assert!(!b.allow_network_discovery && !b.allow_face_recognition);
+
+        // Opening any one alone is enough to make the boundary no longer closed.
+        for flip in [
+            |b: &mut Boundary| b.allow_microphone = true,
+            |b: &mut Boundary| b.allow_location = true,
+            |b: &mut Boundary| b.allow_motion = true,
+            |b: &mut Boundary| b.allow_network_discovery = true,
+            |b: &mut Boundary| b.allow_face_recognition = true,
+        ] {
+            let mut b = Boundary::closed();
+            flip(&mut b);
+            assert!(!b.is_closed());
+        }
+    }
+
+    #[test]
+    fn scoped_boundary_withholds_new_sensors_like_camera() {
+        // Same intersection discipline as camera: boundary open, scope silent -> withheld.
+        let mut b = Boundary::closed();
+        b.allow_microphone = true;
+        b.allow_location = true;
+        b.allow_face_recognition = true;
+        let scope = CapabilityScope::none();
+        let eff = scoped_boundary(&b, &scope);
+        assert!(!eff.allow_microphone && !eff.allow_location && !eff.allow_face_recognition);
+
+        let mut scope = CapabilityScope::none();
+        scope.microphone = true;
+        let eff = scoped_boundary(&b, &scope);
+        assert!(eff.allow_microphone, "scope grants what the boundary allows");
+        assert!(
+            !eff.allow_location,
+            "scope withholds location even though boundary allows it"
+        );
     }
 
     #[test]
