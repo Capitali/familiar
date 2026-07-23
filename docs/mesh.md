@@ -186,6 +186,12 @@ Every merge is deduped, so re-draining the same brief each tick is idempotent.
 
 ## The device seam (`/mesh/observe`)
 
+> The current app lives at `~/Development/familiar-main/ios/` (a worktree of this repo, `main`
+> branch) — not `~/Development/familiar-ios` (stale path, below) and not `archive/ios/` in this
+> repo (retired). ADR-0009 Phase 0 is embedding the core in-process for capable phones/tablets,
+> which supersedes the "cannot be a full gossip peer" claim below for those devices; it still
+> holds for anything that stays console/agent-only.
+
 A phone or watch cannot be a full gossip peer — iOS can't run a background TCP server to answer
 `POST /mesh/brief`. So a device is a **pure client**: it reuses the mesh trust primitives (an
 ed25519 node key, a covenant-minted membership cert) and `POST`s a **signed batch of derived
@@ -203,7 +209,7 @@ freshness the brief path declares but does not yet enforce), and **debounces** i
 `(actor,action,object)` triples so a chatty device can't flood the store. `accept_observations`
 in `mesh/config.json` is a separate human switch from `allow_mesh`. Derived-only by design: no
 raw audio/imagery/health samples cross — the phone ships triples like `phone at location:home`.
-The iOS/watchOS agents live in `~/Development/familiar-ios` (Swift/SwiftUI + CryptoKit).
+The iOS/watchOS agents live in `~/Development/familiar-main/ios/` (Swift/SwiftUI + CryptoKit).
 
 ## The capability gate
 

@@ -40,7 +40,7 @@ per-change detail is in the git history (commits `78136a2`…`f3ae14f`).
   observable). `familiar reach` prints the map; `reach install <ip> --authorize` is the
   consent-gated act — over the human's OWN SSH access (never an exploit) it opens an invite window
   and has the target's agent request-join by covenant.
-- **The iOS device agent** (`~/Development/familiar-ios`, a separate Swift/SwiftUI project;
+- **The iOS device agent** (`~/Development/familiar-main/ios/`, a worktree of this repo on `main`;
   `FamiliarMesh` package + XcodeGen). CryptoKit ed25519 byte-matched to the Rust `CertBody`; the
   covenant client (`request-join`/poll); CoreLocation (home/away) + CoreMotion (activity) → derived
   observations. Enrols by covenant; holds only its granted cert.
