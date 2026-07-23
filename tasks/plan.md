@@ -12,7 +12,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 - [x] T4. R1: `ActionKind::Microphone/::Location/::Motion/::NetworkDiscovery` + matching `Boundary`/`CapabilityScope` fields, fail-closed, tested
 - [x] T5. R1: extend with a distinct biometric-recognition gate (`allow_face_recognition` or similar) for R10's "new consent toggle distinct from plain camera" requirement — not in original R1 list, added here since R10 depends on it
-- [ ] T6. R2: `GateStates` + merge.rs gain the new gate names, tested (depends on T4, T5)
+- [x] T6. R2: `GateStates` + merge.rs gain the new gate names, tested (depends on T4, T5)
 
 ## Wave 2 — daemon simplification & hardening (independent of Wave 1)
 
