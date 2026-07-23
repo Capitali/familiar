@@ -25,10 +25,10 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 ## Wave 4 — Swift: macOS sensing build-out (depends on T4)
 
-- [ ] T10. R9: macOS mic (Speech, push-to-talk) in FamiliarMac.app
-- [ ] T11. R9: macOS location consent gate wired to `allow_location`
-- [ ] T12. R9: macOS Bonjour network discovery
-- [ ] T13. R9: macOS consent-gate UI surface
+- [x] T10. R9: macOS mic (Speech, push-to-talk) in FamiliarMac.app
+- [x] T11. R9: macOS location consent gate wired to `allow_location`
+- [x] T12. R9: macOS Bonjour network discovery
+- [x] T13. R9: macOS consent-gate UI surface
 
 ## Wave 5 — identity & recognition (depends on T5)
 
