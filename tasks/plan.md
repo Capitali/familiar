@@ -16,7 +16,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 ## Wave 2 — daemon simplification & hardening (independent of Wave 1)
 
-- [ ] T7. R3: remove `watch_camera`/`camera_allowed` driver from `crates/cycle`'s daemon tick loop; confirm `discover()` unaffected
+- [x] T7. R3: remove `watch_camera`/`camera_allowed` driver from `crates/cycle`'s daemon tick loop; confirm `discover()` unaffected
 - [ ] T8. R4: triage `crates/mesh` unwrap/expect on network-input paths (brief ingestion, worldview parsing, observation batch parsing, TLS/handshake)
 
 ## Wave 3 — Swift: small, independent
