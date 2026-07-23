@@ -171,6 +171,9 @@ pub fn spawn(dir: impl Into<PathBuf>) -> MeshHandle {
             };
             rt.block_on(supervisor(dir, stop_thread));
         })
+        // SAFETY: one-time OS thread spawn at mesh startup, not reachable from any network
+        // input — a failure here means the process can't spawn threads at all (OOM-adjacent),
+        // which nothing downstream could gracefully continue from anyway.
         .expect("spawn mesh thread");
     MeshHandle {
         stop,
@@ -614,6 +617,9 @@ async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>, tls: Option<tokio_rus
 }
 
 fn text(status: StatusCode, body: impl Into<Bytes>) -> Response<Full<Bytes>> {
+    // SAFETY: `body()` only fails on invalid header state set earlier in the builder chain —
+    // never called here, and `body` (arbitrary bytes, no header validation) can't trigger it.
+    // Every caller passes a fixed StatusCode and our own response bytes, never attacker input.
     Response::builder()
         .status(status)
         .body(Full::new(body.into()))
@@ -1379,6 +1385,9 @@ async fn http_send(
         })?
         .map_err(crate::Error::Io)?;
     // Encrypt to whoever answers (payload signatures carry authenticity — see tls_connector).
+    // SAFETY: the outer try_from can fail on a malformed `addr` (our own configured peer
+    // address, not attacker input — this is the outbound dial path); the fallback parses the
+    // hardcoded constant "familiar-mesh", a valid DNS-name-shaped string that always succeeds.
     let host_only = addr.split(':').next().unwrap_or(addr).to_string();
     let server_name = rustls::pki_types::ServerName::try_from(host_only)
         .unwrap_or_else(|_| rustls::pki_types::ServerName::try_from("familiar-mesh").unwrap());
