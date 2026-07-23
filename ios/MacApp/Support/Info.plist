@@ -23,6 +23,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to scan a familiar's join QR code, and (if you enable it) on-device facial presence/recognition analysis — never a stored image.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_familiar-mesh._tcp</string>

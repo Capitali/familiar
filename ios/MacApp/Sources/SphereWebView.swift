@@ -111,8 +111,10 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     // `micTapped`) so its permission dialog only ever appears on an explicit human act, never
     // from this reactive gate-check.
     let mic = MacMicrophone()
+    let face = MacFaceSensing()
     private let discovery = MacNetworkDiscovery()
     private var discovering = false
+    private var watching = false
 
     func start(web: WKWebView) {
         self.web = web
@@ -148,6 +150,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
         if gates.allow_network_discovery != discovering {
             discovering = gates.allow_network_discovery
             if discovering { discovery.start() } else { discovery.stop() }
+        }
+        let wantFace = gates.allow_camera
+        if wantFace != watching {
+            watching = wantFace
+            if watching { face.start(recognize: gates.allow_face_recognition) } else { face.stop() }
+        } else if watching {
+            face.setRecognition(gates.allow_face_recognition)
         }
     }
 

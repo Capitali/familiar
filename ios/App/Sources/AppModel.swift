@@ -20,6 +20,9 @@ final class AppModel: ObservableObject {
     @AppStorage("consent.location") var locationEnabled = false
     @AppStorage("consent.motion") var motionEnabled = false
     @AppStorage("consent.face") var faceEnabled = false
+    /// Recognition (matching a face to a known identity) is "strongly sensitive" per
+    /// docs/design-orientation-and-mesh.md — its own opt-in above plain presence (SPEC.md R10).
+    @AppStorage("consent.faceRecognition") var faceRecognitionEnabled = false
     @AppStorage("consent.discovery") var discoveryEnabled = false
 
     private let grantAccount = "grant.json"
@@ -182,6 +185,7 @@ final class AppModel: ObservableObject {
             "attempts": attemptLog,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
+                "faceRecognition": faceRecognitionEnabled,
                 "discovery": discoveryEnabled, "reasoning": reasoningEnabled,
             ],
         ]
@@ -194,6 +198,7 @@ final class AppModel: ObservableObject {
         case "location": locationEnabled = on
         case "motion": motionEnabled = on
         case "face": faceEnabled = on
+        case "faceRecognition": faceRecognitionEnabled = on
         case "discovery": discoveryEnabled = on
         case "reasoning": reasoningEnabled = on
         default: return
@@ -229,9 +234,10 @@ final class AppModel: ObservableObject {
     }
 
     /// Start/stop on-device facial analysis per consent (heavier than location/motion, so its own
-    /// toggle). Only while enrolled.
+    /// toggle). Only while enrolled. Recognition is a further, separately-consented layer on top
+    /// of plain presence — faceEnabled alone never triggers identity matching.
     func startFaceIfConsented() {
-        if enrolled, faceEnabled { face.start() } else { face.stop() }
+        if enrolled, faceEnabled { face.start(recognize: faceRecognitionEnabled) } else { face.stop() }
     }
 
     /// Request to join from a scanned QR / pasted address payload: attest the Three Laws, ask the

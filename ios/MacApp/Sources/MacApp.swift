@@ -27,6 +27,7 @@ struct FamiliarMacApp: App {
 
         Settings {
             MacConsentSettings()
+                .environmentObject(bridge)
         }
     }
 }

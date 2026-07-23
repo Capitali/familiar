@@ -126,16 +126,57 @@ struct VoiceControl: View {
 }
 
 /// A toggle for on-device facial *presence* analysis (front camera): derived presence/attention,
-/// never a frame or an identity.
+/// never a frame or an identity. Recognition (matching a face to a known person) is a separate,
+/// sharper toggle — SPEC.md R10, "strongly sensitive" per docs/design-orientation-and-mesh.md.
 struct FaceControl: View {
     @ObservedObject var model: AppModel
     @ObservedObject var face: FaceSensing
     var body: some View {
         Toggle("Presence — faces at the iPad (front camera)", isOn: $model.faceEnabled)
             .onChange(of: model.faceEnabled) { _ in model.startFaceIfConsented() }
+        Toggle("Recognition — match faces to people I know", isOn: $model.faceRecognitionEnabled)
+            .disabled(!model.faceEnabled)
+            .onChange(of: model.faceRecognitionEnabled) { _ in model.startFaceIfConsented() }
         if face.running {
             Text("watching · \(face.lastCount) face(s)").font(.footnote).foregroundStyle(.secondary)
         }
+        if face.needsIdentification || face.proposedHandle != nil {
+            FaceIdentifyPrompt(face: face)
+        }
+    }
+}
+
+/// The interactive-identification fallback (SPEC.md R10, a hard requirement): a face is present
+/// and engaged but not confidently matched, so the familiar asks rather than silently treating
+/// the interaction as anyone's. When recognition *does* propose a guess, this becomes a
+/// confirm-or-correct prompt instead — a wrong link must always be fixable, never sticky.
+struct FaceIdentifyPrompt: View {
+    @ObservedObject var face: FaceSensing
+    @State private var typed = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let proposed = face.proposedHandle {
+                Text("Is this \(proposed)?").font(.footnote)
+                HStack {
+                    Button("Yes") { face.confirmIdentity(handle: proposed) }
+                    Button("No — someone else") { face.proposedHandle = nil; face.needsIdentification = true }
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("I don't recognize this person yet — who is it?").font(.footnote)
+                HStack {
+                    TextField("Name", text: $typed).textFieldStyle(.roundedBorder)
+                    Button("Confirm") {
+                        let name = typed.trimmingCharacters(in: .whitespaces)
+                        guard !name.isEmpty else { return }
+                        face.confirmIdentity(handle: name)
+                        typed = ""
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
