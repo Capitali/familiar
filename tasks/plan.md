@@ -32,7 +32,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 ## Wave 5 — identity & recognition (depends on T5)
 
-- [ ] T14. R10: `Identity` gains biometric-link field, kernel-side tests, hard-excluded from mesh federation payloads
+- [x] T14. R10: `Identity` gains biometric-link field, kernel-side tests, hard-excluded from mesh federation payloads
 - [ ] T15. R10: iOS face recognition — verify current Vision API against Apple docs, then implement embedding/match
 - [ ] T16. R10: confirm-before-keep UI + interactive identification fallback
 - [ ] T17. R10: macOS equivalent in FamiliarMac.app
