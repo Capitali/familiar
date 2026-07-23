@@ -93,6 +93,16 @@ pub struct ReflectionView {
 pub struct GateStates {
     pub llm: bool,
     pub camera: bool,
+    #[serde(default)]
+    pub microphone: bool,
+    #[serde(default)]
+    pub location: bool,
+    #[serde(default)]
+    pub motion: bool,
+    #[serde(default)]
+    pub network_discovery: bool,
+    #[serde(default)]
+    pub face_recognition: bool,
     pub network: bool,
     pub mesh: bool,
     pub execute: bool,
@@ -411,6 +421,11 @@ pub fn assemble_worldview(
     let gates = GateStates {
         llm: b.allow_llm,
         camera: b.allow_camera,
+        microphone: b.allow_microphone,
+        location: b.allow_location,
+        motion: b.allow_motion,
+        network_discovery: b.allow_network_discovery,
+        face_recognition: b.allow_face_recognition,
         network: b.allow_network,
         mesh: b.allow_mesh,
         execute: b.allow_execute,
@@ -909,6 +924,32 @@ mod tests {
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
         assert_eq!(view.recent[0].object, "the familiar for help");
+    }
+
+    #[test]
+    fn new_sensor_gates_round_trip_through_the_worldview() {
+        // A peer reading the worldview must see the new sensor gates' real state — off by
+        // default, and reflecting exactly what's open once a human opens one.
+        let (host, cred, device) = setup("sensor_gates");
+        let mut b = familiar_kernel::boundary::Boundary::closed();
+        b.allow_mesh = true;
+        b.allow_microphone = true;
+        b.allow_face_recognition = true;
+        // location/motion/network_discovery stay off, to confirm they're independent
+        std::fs::write(host.join("boundary.json"), serde_json::to_vec(&b).unwrap()).unwrap();
+
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(view.gates.microphone);
+        assert!(view.gates.face_recognition);
+        assert!(!view.gates.location);
+        assert!(!view.gates.motion);
+        assert!(!view.gates.network_discovery);
+
+        // And the wire format really carries them — not just the in-memory struct.
+        let json = serde_json::to_string(&view).unwrap();
+        let back: Worldview = serde_json::from_str(&json).unwrap();
+        assert!(back.gates.microphone && back.gates.face_recognition);
     }
 
     #[test]
