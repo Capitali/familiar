@@ -28,6 +28,9 @@ targets:
       - path: MacApp/Resources/sphere
         type: folder
         buildPhase: resources
+      # ADR-0009 Phase 0: the embeddable Rust core (built by tools/build-core.sh in the Rust
+      # repo). Generated bindings only — FamiliarCore.xcframework is linked below.
+      - path: FamiliarCore/Generated/familiar_core.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ios
@@ -35,9 +38,15 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        # FamiliarCore.xcframework's simulator slice is arm64-only (tools/build-core.sh, this
+        # Mac's own architecture) — exclude x86_64 for the simulator SDK so linking doesn't look
+        # for symbols in an architecture the framework was never built for.
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh
+      - framework: FamiliarCore/FamiliarCore.xcframework
+        embed: true
       # Embed the watch app inside the iPhone app so iOS registers it as the companion:
       # WCSession.isWatchAppInstalled turns true, the address hand-off flows, and the watch
       # rides along through TestFlight. (Standalone-installed watch apps never link.)
