@@ -1432,8 +1432,60 @@ pub struct TailscalePeer {
     pub online: bool,
 }
 
+/// Run a child to completion or kill it at `timeout` — a hung subprocess must never hang
+/// its caller. `Command::output()` has no such bound, and this is shelled out to from inside
+/// async request handlers: one stuck child there is one permanently blocked tokio worker
+/// thread, and enough of them stall the entire mesh server (observed 2026-07-22 — a
+/// `Tailscale ip -4` child spawned by the daemon never returned, even though the same binary
+/// answered instantly when run interactively; cause unconfirmed, but any hang here is now
+/// bounded regardless of cause).
+fn run_with_timeout(
+    bin: &str,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> Option<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::Instant;
+    let mut child = std::process::Command::new(bin)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut o) = child.stdout.take() {
+                    let _ = o.read_to_end(&mut stdout);
+                }
+                if let Some(mut e) = child.stderr.take() {
+                    let _ = e.read_to_end(&mut stderr);
+                }
+                return Some(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
 /// Run the tailscale CLI with `args`, trying `tailscale` on PATH first and then the macOS app
-/// bundle's CLI (the GUI install puts nothing on PATH). None if neither answers.
+/// bundle's CLI (the GUI install puts nothing on PATH). None if neither answers within 3s.
 fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
     [
         "tailscale",
@@ -1441,10 +1493,7 @@ fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
     ]
     .iter()
     .find_map(|bin| {
-        std::process::Command::new(bin)
-            .args(args)
-            .output()
-            .ok()
+        run_with_timeout(bin, args, std::time::Duration::from_secs(3))
             .filter(|o| o.status.success())
     })
 }
