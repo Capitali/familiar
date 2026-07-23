@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: 8GHXL328AR
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "21"
+    CURRENT_PROJECT_VERSION: "22"
 packages:
   FamiliarMesh:
     path: FamiliarMesh
@@ -45,8 +45,14 @@ targets:
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh
+      # Static library xcframework — link only, never embed. `embed: true` copies it into
+      # Frameworks/ as a standalone .a file, which Apple's upload validation rejects outright
+      # (error 90171/90432: "only the Swift runtime libraries are permitted" there) — a static
+      # lib is compiled directly into the executable, it has nothing to embed. Sideloading via
+      # devicectl never runs this validation, so this only surfaced on the real TestFlight
+      # upload, not the earlier device installs.
       - framework: FamiliarCore/FamiliarCore.xcframework
-        embed: true
+        embed: false
       # Embed the watch app inside the iPhone app so iOS registers it as the companion:
       # WCSession.isWatchAppInstalled turns true, the address hand-off flows, and the watch
       # rides along through TestFlight. (Standalone-installed watch apps never link.)
