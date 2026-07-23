@@ -66,6 +66,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>io.river.familiar.ios.refresh</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

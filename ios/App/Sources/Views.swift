@@ -5,8 +5,20 @@ import WatchConnectivity
 @main
 struct FamiliarAgentApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Must register before launch finishes (SPEC.md R12) — can't wait for a view's
+        // onAppear, and can't depend on `model` existing yet (a background-only launch may
+        // never create the SwiftUI scene at all). See BackgroundSync.swift.
+        BackgroundSync.register()
+    }
+
     var body: some Scene {
         WindowGroup { RootView().environmentObject(model) }
+            .onChange(of: scenePhase) { phase in
+                if phase == .background { BackgroundSync.scheduleNext() }
+            }
     }
 }
 
