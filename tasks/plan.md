@@ -6,7 +6,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 - [x] T1. R5: CI push trigger includes `claude/**`
 - [x] T2. R6: gitignore gaps (`llm/spend.json`/`health.json`, familiar-main Xcode cruft)
-- [ ] T3. R7: fix stale iOS-path doc references
+- [x] T3. R7: fix stale iOS-path doc references
 
 ## Wave 1 — kernel foundation (blocks R2, R9, R10)
 
