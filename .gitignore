@@ -12,3 +12,6 @@
 # Apple API/auth private keys (App Store Connect, APNs) — never committed.
 *.p8
 lab-runs/
+# LLM adapter runtime state — spend ledger + health probe, not source.
+llm/spend.json
+llm/health.json
