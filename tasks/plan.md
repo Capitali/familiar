@@ -4,7 +4,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 
 ## Wave 0 — quick wins, zero dependencies
 
-- [ ] T1. R5: CI push trigger includes `claude/**`
+- [x] T1. R5: CI push trigger includes `claude/**`
 - [ ] T2. R6: gitignore gaps (`llm/spend.json`/`health.json`, familiar-main Xcode cruft)
 - [ ] T3. R7: fix stale iOS-path doc references
 
