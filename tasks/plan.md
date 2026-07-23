@@ -40,7 +40,7 @@ Status legend: [ ] pending, [x] complete, [~] in progress, [!] blocked/flagged
 ## Wave 6 — full-peer embedding & background sync
 
 - [x] T18. R11: wire core-ffi into iOS app (found/join/mesh_start), verify GossipPeer promotion
-- [ ] T19. R12: BGTaskScheduler background sync (verify current API against Apple docs first)
+- [x] T19. R12: BGTaskScheduler background sync (verify current API against Apple docs first)
 
 ## Deployment (stop-and-confirm before each — real devices/production)
 
