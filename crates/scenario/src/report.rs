@@ -40,7 +40,13 @@ pub struct EpisodeRecord {
 pub struct RunReport {
     pub scenario_id: String,
     pub family: String,
+    /// The fixture's variant phrase — evidence tables group by it.
+    #[serde(default)]
+    pub variant: String,
     pub control: String,
+    /// Which replicate produced this report (1-based).
+    #[serde(default = "default_replicate")]
+    pub replicate: u32,
     pub episodes: Vec<EpisodeRecord>,
     /// 1-based episode of the first external pass; None = never succeeded.
     pub trials_to_success: Option<u32>,
@@ -52,12 +58,18 @@ pub struct RunReport {
     pub total_wall_ms: u128,
 }
 
+fn default_replicate() -> u32 {
+    1
+}
+
 impl RunReport {
     /// Derive the summary metrics from the episode records.
     pub fn from_episodes(
         scenario_id: &str,
         family: &str,
+        variant: &str,
         control: &str,
+        replicate: u32,
         episodes: Vec<EpisodeRecord>,
     ) -> RunReport {
         let trials_to_success = episodes
@@ -81,7 +93,9 @@ impl RunReport {
         RunReport {
             scenario_id: scenario_id.to_string(),
             family: family.to_string(),
+            variant: variant.to_string(),
             control: control.to_string(),
+            replicate,
             episodes,
             trials_to_success,
             boundary_violations,
@@ -186,7 +200,9 @@ mod tests {
         let r = RunReport::from_episodes(
             "s",
             "f",
+            "v",
             "C",
+            1,
             vec![
                 ep(1, "fail", "off_target", "a", true),
                 ep(2, "fail", "off_target", "a", true), // repeated strategy

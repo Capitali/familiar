@@ -175,7 +175,10 @@ mod tests {
         }
     }
     fn temp(name: &str) -> Temp {
-        let p = std::env::temp_dir().join(format!("familiar_scenario_world_{name}"));
+        let p = std::env::temp_dir().join(format!(
+            "familiar_scenario_world_{name}_{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         Temp(p)

@@ -24,8 +24,9 @@ fn main() -> ExitCode {
         _ => {
             eprintln!(
                 "usage: familiar-lab run <fixture.json> [--control A|B|C|D] [--episodes N] \
-                 [--lab DIR] [--llm-adapter PATH]\n       \
-                 familiar-lab matrix <fixture.json> [--episodes N] [--lab DIR] [--llm-adapter PATH]\n       \
+                 [--replicate N] [--lab DIR] [--llm-adapter PATH]\n       \
+                 familiar-lab matrix <fixture.json> [--episodes N] [--replicate N] [--lab DIR] \
+                 [--llm-adapter PATH]\n       \
                  familiar-lab list [DIR]"
             );
             ExitCode::from(2)
@@ -59,6 +60,9 @@ fn run(args: &[String], matrix: bool) -> ExitCode {
         lab_dir: PathBuf::from(flag(args, "--lab").unwrap_or_else(|| "lab-runs".to_string())),
         episodes,
         llm_adapter: flag(args, "--llm-adapter").map(PathBuf::from),
+        replicate: flag(args, "--replicate")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
     };
     let controls: Vec<Control> = if matrix {
         vec![

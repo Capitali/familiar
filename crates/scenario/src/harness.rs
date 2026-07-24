@@ -96,14 +96,26 @@ pub struct RunConfig {
     /// deterministic template and the report records `llm_used = false` —
     /// the report never pretends.
     pub llm_adapter: Option<PathBuf>,
+    /// Which replicate this run is (1-based). Replicates re-run the same cell
+    /// under their own run dir so results accumulate instead of overwriting.
+    pub replicate: u32,
+}
+
+impl Default for RunConfig {
+    fn default() -> Self {
+        RunConfig {
+            lab_dir: PathBuf::from("lab-runs"),
+            episodes: 5,
+            llm_adapter: None,
+            replicate: 1,
+        }
+    }
 }
 
 /// Run `scenario` under `control`. Deterministic given the same fixture,
 /// control, and adapter behavior.
 pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result<RunReport> {
-    let run_dir = cfg
-        .lab_dir
-        .join(format!("{}-{}", scenario.id, control.letter()));
+    let run_dir = cfg.lab_dir.join(run_slug(scenario, control, cfg));
     // A fresh run each invocation — reruns must not inherit stale state.
     if run_dir.exists() {
         fs::remove_dir_all(&run_dir)?;
@@ -115,186 +127,278 @@ pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result
     let mut episodes = Vec::new();
 
     for episode in 1..=cfg.episodes {
-        let ep_dir = run_dir.join(format!("ep-{episode}"));
-        let world_dir = ep_dir.join("world");
-        let scratch = ep_dir.join("eval");
-        fs::create_dir_all(&ep_dir)?;
-
-        // The data dir: persistent only when the control retains memory.
-        let data_dir = if control.retains_memory() {
-            persistent_data.clone()
-        } else {
-            ep_dir.join(format!("data-r{seq}"))
-        };
-        fs::create_dir_all(&data_dir)?;
-        write_lab_boundary(&data_dir, &world_dir, control)?;
-        if let Some(adapter) = &cfg.llm_adapter {
-            let dest = data_dir.join("llm");
-            fs::create_dir_all(&dest)?;
-            fs::copy(adapter, dest.join("call_llm.sh"))?;
-            // Adapters source a sibling key.env for their secrets — carry it along.
-            if let Some(key) = adapter.parent().map(|p| p.join("key.env")) {
-                if key.is_file() {
-                    fs::copy(&key, dest.join("key.env"))?;
+        match run_episode(
+            scenario,
+            control,
+            cfg,
+            &run_dir,
+            &persistent_data,
+            seq,
+            episode,
+            &episodes,
+        ) {
+            Ok((record, decision)) => {
+                episodes.push(record);
+                if decision == Decision::Promote {
+                    break; // the first external pass ends the run
                 }
             }
-        }
-
-        // Component 1 + 6: the world, and the deterministic timeline against it.
-        scenario.world.materialize(&world_dir)?;
-        let perceived = timeline::replay(
-            &world_dir,
-            &scenario.timeline,
-            scenario.start_ts,
-            scenario.step_secs,
-        )?;
-        record_deduped(&data_dir, perceived)?;
-
-        // Detect → generate (or mutate, where memory permits).
-        let obs = observation::load(&data_dir)?;
-        let detected = loops::detect(&obs);
-        loops::save_all(&data_dir, &detected)?;
-        let target = pick_loop(&detected);
-
-        let cands = candidate::load(&data_dir)?;
-        let patterns = pattern_memory::load(&data_dir)?;
-        let cand_id = format!("candidate-{:04}", cands.len() + 1);
-        let mut cand = match parent_to_mutate(&cands) {
-            Some(parent) => {
-                let trials = trial::load(&data_dir)?;
-                let failure = trial::find_by_candidate(&trials, &parent.id)
-                    .map(|t| t.failure_class.clone())
-                    .unwrap_or_default();
-                let traits = mutation::suggest_informed(&failure, &patterns);
-                mutation::create(parent, failure, traits, cand_id.clone())
-            }
-            None => match &target {
-                Some(lp) => Candidate::from_loop(lp, cand_id.clone()),
-                None => Candidate {
-                    id: cand_id.clone(),
-                    parent_id: String::new(),
-                    loop_id: String::new(),
-                    generation: 0,
-                    hypothesis: scenario.visible_goal.clone(),
-                    artifact_type: "script".to_string(),
-                    artifact_path: String::new(),
-                    inherited_traits: String::new(),
-                    changed_traits: String::new(),
-                    mutation_reason: String::new(),
-                    status: "generated".to_string(),
-                },
-            },
-        };
-
-        // Author the artifact — model-written under LLM controls, template otherwise.
-        let artifact = ep_dir.join("artifact.sh");
-        let (script, llm_used) = author_artifact(
-            &data_dir, scenario, &cand, &obs, episode, control, &episodes,
-        );
-        fs::write(&artifact, script)?;
-        cand.artifact_path = artifact.to_string_lossy().into_owned();
-        candidate::append(&data_dir, &cand)?;
-
-        // The obedience guard weighs the run like any other execution.
-        let boundary = familiar_kernel::boundary::load(&data_dir)?;
-        let verdict = guard::evaluate(
-            &Action::new(ActionKind::ExecuteArtifact, cand.artifact_path.clone()),
-            &boundary,
-        );
-
-        let before = world::snapshot(&world_dir)?;
-        let facts = if verdict.decision == GuardDecision::Allow {
-            let limits = Limits {
-                cpu_secs: 10,
-                wall_secs: (scenario.wall_budget_ms / 1000).max(10),
-                output_cap: 16_384,
-            };
-            let run = run_script(&artifact, &limits, &world_dir)?;
-            RunFacts {
-                exit_ok: run.exit_ok,
-                timed_out: run.timed_out,
-                wall_ms: run.wall_ms,
-                output: run.output,
-                wall_budget_ms: u128::from(scenario.wall_budget_ms),
-            }
-        } else {
-            RunFacts {
-                exit_ok: false,
-                timed_out: false,
-                wall_ms: 0,
-                output: verdict.rationale.clone(),
-                wall_budget_ms: u128::from(scenario.wall_budget_ms),
-            }
-        };
-        let after = world::snapshot(&world_dir)?;
-        let changes = world::diff(&before, &after);
-
-        // The EXTERNAL verdict — the only place success is assigned.
-        let eval = evaluator::evaluate(
-            &scenario.evaluator,
-            &world_dir,
-            &scratch,
-            &changes,
-            &scenario.world.forbidden_paths(),
-            &scenario.world.tripwires(),
-            &facts,
-        )?;
-        let decision = gate::decision(&eval);
-
-        // The trial record carries the external dimensions; `overall` is the
-        // gated scalar (zero unless boundary + execution hold) so nothing
-        // downstream can re-weight a violation back into contention.
-        let trials = trial::load(&data_dir)?;
-        let mut t = Trial::new(format!("trial-{:04}", trials.len() + 1), cand.id.clone());
-        t.scenario_id = scenario.id.clone();
-        t.fit = eval.effectiveness;
-        t.usefulness = eval.service;
-        t.safety = if eval.boundary_ok { 1.0 } else { 0.0 };
-        t.complexity = eval.cost;
-        t.confidence = 1.0; // external and objective — not a self-estimate
-        t.overall = if eval.boundary_ok && eval.exec_ok {
-            eval.effectiveness
-        } else {
-            0.0
-        };
-        t.result = gate::verdict(&eval).to_string();
-        t.failure_class = gate::failure_class(&eval).to_string();
-        t.notes = eval.violations.join("; ");
-        trial::append(&data_dir, &t)?;
-        candidate::update_status(&data_dir, &cand.id, decision.as_str())?;
-
-        // Memory accrues (it simply never survives the episode outside control D).
-        let pm =
-            pattern_memory::from_outcome(format!("pattern-{:04}", patterns.len() + 1), &cand, &t);
-        pattern_memory::append(&data_dir, &pm)?;
-
-        episodes.push(EpisodeRecord {
-            episode,
-            candidate_id: cand.id.clone(),
-            generation: cand.generation,
-            changed_traits: cand.changed_traits.clone(),
-            llm_used,
-            boundary_ok: eval.boundary_ok,
-            exec_ok: eval.exec_ok,
-            effectiveness: eval.effectiveness,
-            service: eval.service,
-            cost: eval.cost,
-            result: t.result.clone(),
-            failure_class: t.failure_class.clone(),
-            decision: decision.as_str().to_string(),
-            violations: eval.violations.clone(),
-            wall_ms: facts.wall_ms,
-        });
-
-        if decision == Decision::Promote {
-            break; // the first external pass ends the run
+            // A harness failure is a result, not a reason to lose the report:
+            // record it and keep going, so evidence exists on every path.
+            Err(e) => episodes.push(harness_error_episode(episode, &e)),
         }
     }
 
-    let report =
-        RunReport::from_episodes(&scenario.id, &scenario.family, control.letter(), episodes);
+    let report = RunReport::from_episodes(
+        &scenario.id,
+        &scenario.family,
+        &scenario.variant,
+        control.letter(),
+        cfg.replicate,
+        episodes,
+    );
     report.save(&run_dir.join("report.json"))?;
     Ok(report)
+}
+
+/// The run directory's name: `{id}[-{variant-slug}]-{letter}[-rN]` — distinct
+/// across variants sharing an id and across replicates of the same cell.
+fn run_slug(scenario: &Scenario, control: Control, cfg: &RunConfig) -> String {
+    let mut slug = scenario.id.clone();
+    let variant = slugify(&scenario.variant, 24);
+    if !variant.is_empty() && !slug.contains(&variant) {
+        slug.push('-');
+        slug.push_str(&variant);
+    }
+    slug.push('-');
+    slug.push_str(control.letter());
+    if cfg.replicate > 1 {
+        slug.push_str(&format!("-r{}", cfg.replicate));
+    }
+    slug
+}
+
+/// Filesystem-safe slug: lowercase alphanumerics joined by single dashes, capped.
+fn slugify(s: &str, cap: usize) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if out.len() >= cap {
+            break;
+        }
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// The synthetic record for an episode the harness itself failed to complete.
+/// `boundary_ok` stays true — the familiar crossed nothing; the harness broke.
+fn harness_error_episode(episode: u32, err: &io::Error) -> EpisodeRecord {
+    EpisodeRecord {
+        episode,
+        candidate_id: String::new(),
+        generation: 0,
+        changed_traits: String::new(),
+        llm_used: false,
+        boundary_ok: true,
+        exec_ok: false,
+        effectiveness: 0.0,
+        service: 0.0,
+        cost: 0.0,
+        result: "fail".to_string(),
+        failure_class: "harness_error".to_string(),
+        decision: String::new(),
+        violations: vec![format!("harness error: {err}")],
+        wall_ms: 0,
+    }
+}
+
+/// One episode under one control: world up, timeline replayed, the machinery's
+/// response executed and externally judged. Returns the record and the gate's
+/// decision for the episode's candidate.
+#[allow(clippy::too_many_arguments)]
+fn run_episode(
+    scenario: &Scenario,
+    control: Control,
+    cfg: &RunConfig,
+    run_dir: &Path,
+    persistent_data: &Path,
+    seq: u64,
+    episode: u32,
+    prior: &[EpisodeRecord],
+) -> io::Result<(EpisodeRecord, Decision)> {
+    let ep_dir = run_dir.join(format!("ep-{episode}"));
+    let world_dir = ep_dir.join("world");
+    let scratch = ep_dir.join("eval");
+    fs::create_dir_all(&ep_dir)?;
+
+    // The data dir: persistent only when the control retains memory.
+    let data_dir = if control.retains_memory() {
+        persistent_data.to_path_buf()
+    } else {
+        ep_dir.join(format!("data-r{seq}"))
+    };
+    fs::create_dir_all(&data_dir)?;
+    write_lab_boundary(&data_dir, &world_dir, control)?;
+    if let Some(adapter) = &cfg.llm_adapter {
+        let dest = data_dir.join("llm");
+        fs::create_dir_all(&dest)?;
+        fs::copy(adapter, dest.join("call_llm.sh"))?;
+        // Adapters source a sibling key.env for their secrets — carry it along.
+        if let Some(key) = adapter.parent().map(|p| p.join("key.env")) {
+            if key.is_file() {
+                fs::copy(&key, dest.join("key.env"))?;
+            }
+        }
+    }
+
+    // Component 1 + 6: the world, and the deterministic timeline against it.
+    scenario.world.materialize(&world_dir)?;
+    let perceived = timeline::replay(
+        &world_dir,
+        &scenario.timeline,
+        scenario.start_ts,
+        scenario.step_secs,
+    )?;
+    record_deduped(&data_dir, perceived)?;
+
+    // Detect → generate (or mutate, where memory permits).
+    let obs = observation::load(&data_dir)?;
+    let detected = loops::detect(&obs);
+    loops::save_all(&data_dir, &detected)?;
+    let target = pick_loop(&detected);
+
+    let cands = candidate::load(&data_dir)?;
+    let patterns = pattern_memory::load(&data_dir)?;
+    let cand_id = format!("candidate-{:04}", cands.len() + 1);
+    let mut cand = match parent_to_mutate(&cands) {
+        Some(parent) => {
+            let trials = trial::load(&data_dir)?;
+            let failure = trial::find_by_candidate(&trials, &parent.id)
+                .map(|t| t.failure_class.clone())
+                .unwrap_or_default();
+            let traits = mutation::suggest_informed(&failure, &patterns);
+            mutation::create(parent, failure, traits, cand_id.clone())
+        }
+        None => match &target {
+            Some(lp) => Candidate::from_loop(lp, cand_id.clone()),
+            None => Candidate {
+                id: cand_id.clone(),
+                parent_id: String::new(),
+                loop_id: String::new(),
+                generation: 0,
+                hypothesis: scenario.visible_goal.clone(),
+                artifact_type: "script".to_string(),
+                artifact_path: String::new(),
+                inherited_traits: String::new(),
+                changed_traits: String::new(),
+                mutation_reason: String::new(),
+                status: "generated".to_string(),
+            },
+        },
+    };
+
+    // Author the artifact — model-written under LLM controls, template otherwise.
+    let artifact = ep_dir.join("artifact.sh");
+    let (script, llm_used) =
+        author_artifact(&data_dir, scenario, &cand, &obs, episode, control, prior);
+    fs::write(&artifact, script)?;
+    cand.artifact_path = artifact.to_string_lossy().into_owned();
+    candidate::append(&data_dir, &cand)?;
+
+    // The obedience guard weighs the run like any other execution.
+    let boundary = familiar_kernel::boundary::load(&data_dir)?;
+    let verdict = guard::evaluate(
+        &Action::new(ActionKind::ExecuteArtifact, cand.artifact_path.clone()),
+        &boundary,
+    );
+
+    let before = world::snapshot(&world_dir)?;
+    let facts = if verdict.decision == GuardDecision::Allow {
+        let limits = Limits {
+            cpu_secs: 10,
+            wall_secs: (scenario.wall_budget_ms / 1000).max(10),
+            output_cap: 16_384,
+        };
+        let run = run_script(&artifact, &limits, &world_dir)?;
+        RunFacts {
+            exit_ok: run.exit_ok,
+            timed_out: run.timed_out,
+            wall_ms: run.wall_ms,
+            output: run.output,
+            wall_budget_ms: u128::from(scenario.wall_budget_ms),
+        }
+    } else {
+        RunFacts {
+            exit_ok: false,
+            timed_out: false,
+            wall_ms: 0,
+            output: verdict.rationale.clone(),
+            wall_budget_ms: u128::from(scenario.wall_budget_ms),
+        }
+    };
+    let after = world::snapshot(&world_dir)?;
+    let changes = world::diff(&before, &after);
+
+    // The EXTERNAL verdict — the only place success is assigned.
+    let eval = evaluator::evaluate(
+        &scenario.evaluator,
+        &world_dir,
+        &scratch,
+        &changes,
+        &scenario.world.forbidden_paths(),
+        &scenario.world.tripwires(),
+        &facts,
+    )?;
+    let decision = gate::decision(&eval);
+
+    // The trial record carries the external dimensions; `overall` is the
+    // gated scalar (zero unless boundary + execution hold) so nothing
+    // downstream can re-weight a violation back into contention.
+    let trials = trial::load(&data_dir)?;
+    let mut t = Trial::new(format!("trial-{:04}", trials.len() + 1), cand.id.clone());
+    t.scenario_id = scenario.id.clone();
+    t.fit = eval.effectiveness;
+    t.usefulness = eval.service;
+    t.safety = if eval.boundary_ok { 1.0 } else { 0.0 };
+    t.complexity = eval.cost;
+    t.confidence = 1.0; // external and objective — not a self-estimate
+    t.overall = if eval.boundary_ok && eval.exec_ok {
+        eval.effectiveness
+    } else {
+        0.0
+    };
+    t.result = gate::verdict(&eval).to_string();
+    t.failure_class = gate::failure_class(&eval).to_string();
+    t.notes = eval.violations.join("; ");
+    trial::append(&data_dir, &t)?;
+    candidate::update_status(&data_dir, &cand.id, decision.as_str())?;
+
+    // Memory accrues (it simply never survives the episode outside control D).
+    let pm = pattern_memory::from_outcome(format!("pattern-{:04}", patterns.len() + 1), &cand, &t);
+    pattern_memory::append(&data_dir, &pm)?;
+
+    let record = EpisodeRecord {
+        episode,
+        candidate_id: cand.id.clone(),
+        generation: cand.generation,
+        changed_traits: cand.changed_traits.clone(),
+        llm_used,
+        boundary_ok: eval.boundary_ok,
+        exec_ok: eval.exec_ok,
+        effectiveness: eval.effectiveness,
+        service: eval.service,
+        cost: eval.cost,
+        result: t.result.clone(),
+        failure_class: t.failure_class.clone(),
+        decision: decision.as_str().to_string(),
+        violations: eval.violations.clone(),
+        wall_ms: facts.wall_ms,
+    };
+    Ok((record, decision))
 }
 
 /// The lab's boundary: execution open (sandboxed), LLM open only under LLM

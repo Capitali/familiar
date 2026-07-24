@@ -116,7 +116,10 @@ mod tests {
 
     #[test]
     fn replay_is_deterministic_and_bounds_perception() {
-        let p = std::env::temp_dir().join("familiar_scenario_timeline_replay");
+        let p = std::env::temp_dir().join(format!(
+            "familiar_scenario_timeline_replay_{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         let t = Temp(p.clone());

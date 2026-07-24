@@ -68,7 +68,8 @@ mod tests {
 
     #[test]
     fn refused_with_no_side_effects_under_closed_boundary() {
-        let p = std::env::temp_dir().join("familiar_llm_test_closed");
+        let p =
+            std::env::temp_dir().join(format!("familiar_llm_test_closed_{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         let t = Temp(p.clone());

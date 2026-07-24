@@ -21,7 +21,7 @@ impl Drop for Temp {
     }
 }
 fn temp(name: &str) -> Temp {
-    let p = std::env::temp_dir().join(format!("familiar_lab_test_{name}"));
+    let p = std::env::temp_dir().join(format!("familiar_lab_test_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&p);
     fs::create_dir_all(&p).unwrap();
     Temp(p)
@@ -45,6 +45,7 @@ fn baseline_is_deterministic_and_never_violates() {
         lab_dir: t.0.join("lab"),
         episodes: 3,
         llm_adapter: None,
+        ..RunConfig::default()
     };
     let first = run(&scn, Control::Baseline, &cfg).unwrap();
     let second = run(&scn, Control::Baseline, &cfg).unwrap();
@@ -87,6 +88,7 @@ fn exfiltrating_adapter_is_caught_and_rejected() {
         lab_dir: t.0.join("lab"),
         episodes: 1,
         llm_adapter: Some(bad),
+        ..RunConfig::default()
     };
     let report = run(&scn, Control::LlmOnly, &cfg).unwrap();
     let ep = &report.episodes[0];
@@ -130,6 +132,7 @@ fn honest_fix_passes_the_hidden_checks() {
         lab_dir: t.0.join("lab"),
         episodes: 3,
         llm_adapter: Some(good),
+        ..RunConfig::default()
     };
     let report = run(&scn, Control::LlmOnly, &cfg).unwrap();
 
@@ -155,6 +158,7 @@ fn full_control_inherits_across_episodes() {
         lab_dir: t.0.join("lab"),
         episodes: 3,
         llm_adapter: Some(futile),
+        ..RunConfig::default()
     };
     let full = run(&scn, Control::Full, &cfg).unwrap();
     let reset = run(&scn, Control::NoMemory, &cfg).unwrap();
@@ -176,4 +180,63 @@ fn full_control_inherits_across_episodes() {
     );
     // Neither control crossed a boundary while flailing.
     assert_eq!(full.boundary_violations + reset.boundary_violations, 0);
+}
+
+#[test]
+fn run_dirs_are_distinct_per_variant_and_replicate() {
+    let t = temp("rundirs");
+    let scn = scenario::load(&fixture("process-failures/backup-spaces.json")).unwrap();
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 1,
+        ..RunConfig::default()
+    };
+    let r1 = run(&scn, Control::Baseline, &cfg).unwrap();
+    let cfg2 = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 1,
+        replicate: 2,
+        ..RunConfig::default()
+    };
+    let r2 = run(&scn, Control::Baseline, &cfg2).unwrap();
+
+    // The variant rides the slug and the report; replicates get their own dirs.
+    let base =
+        t.0.join("lab")
+            .join("backup-spaces-filenames-with-spaces-A");
+    let rep2 =
+        t.0.join("lab")
+            .join("backup-spaces-filenames-with-spaces-A-r2");
+    assert!(base.join("report.json").exists());
+    assert!(rep2.join("report.json").exists());
+    assert_eq!(r1.variant, "filenames with spaces");
+    assert_eq!(r1.replicate, 1);
+    assert_eq!(r2.replicate, 2);
+}
+
+#[test]
+fn harness_error_still_saves_a_report() {
+    let t = temp("harnesserr");
+    let scn = scenario::load(&fixture("process-failures/backup-spaces.json")).unwrap();
+    // An adapter path that does not exist: installing it fails every episode,
+    // which must be recorded as a result — never a vanished report.
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 3,
+        llm_adapter: Some(t.0.join("no-such-adapter.sh")),
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::LlmOnly, &cfg).unwrap();
+    assert_eq!(report.episodes.len(), 3);
+    assert!(report
+        .episodes
+        .iter()
+        .all(|e| e.failure_class == "harness_error" && !e.exec_ok && e.boundary_ok));
+    assert_eq!(report.trials_to_success, None);
+    // A harness failure is not a familiar's boundary violation.
+    assert_eq!(report.boundary_violations, 0);
+    let dir =
+        t.0.join("lab")
+            .join("backup-spaces-filenames-with-spaces-B");
+    assert!(dir.join("report.json").exists());
 }
