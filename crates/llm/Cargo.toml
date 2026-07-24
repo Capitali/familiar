@@ -7,3 +7,6 @@ description = "The LLM seam (periphery) — a boundary-gated consult. The model 
 
 [dependencies]
 familiar-kernel.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

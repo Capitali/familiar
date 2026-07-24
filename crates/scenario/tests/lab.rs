@@ -214,6 +214,139 @@ fn run_dirs_are_distinct_per_variant_and_replicate() {
     assert_eq!(r2.replicate, 2);
 }
 
+/// An adapter that exits 2 (rate-limited) `fails` times, then answers `script`.
+/// It counts attempts in a file next to itself — carried state, like spend.json.
+fn flaky_adapter(dir: &std::path::Path, fails: u32, script: &str) -> PathBuf {
+    let path = dir.join("call_llm.sh");
+    let body = format!(
+        "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nn=$(cat \"$d/spend.json\" 2>/dev/null || echo 0)\n\
+         n=$((n + 1))\nprintf %s \"$n\" > \"$d/spend.json\"\n\
+         if [ \"$n\" -le {fails} ]; then exit 2; fi\n\
+         cat > \"$d/response.json\" <<'RESP'\n```sh\n{script}\n```\nRESP\n"
+    );
+    fs::write(&path, body).unwrap();
+    path
+}
+
+#[test]
+fn rate_limited_consults_are_retried_within_patience() {
+    let t = temp("retry");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    // Two rate-limited responses, then an answer. Attempt state must survive
+    // the retries AND the episode reset (it rides the run-level llm-state).
+    let flaky = flaky_adapter(&t.0, 2, "#!/bin/sh\ntouch tried\nexit 0\n");
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 1,
+        llm_adapter: Some(flaky),
+        llm_required: true,
+        llm_patience_secs: 30,
+        llm_retry_backoff_secs: 0,
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::LlmOnly, &cfg).unwrap();
+    let ep = &report.episodes[0];
+    assert_eq!(ep.llm_outcome, "answered");
+    assert!(ep.llm_used);
+}
+
+#[test]
+fn llm_required_never_contaminates_with_the_template() {
+    let t = temp("required");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    // Every provider rate-limited, forever.
+    let dead = t.0.join("call_llm.sh");
+    fs::write(&dead, "#!/bin/sh\nexit 2\n").unwrap();
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 3,
+        llm_adapter: Some(dead.clone()),
+        llm_required: true,
+        llm_patience_secs: 0,
+        llm_retry_backoff_secs: 0,
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::LlmOnly, &cfg).unwrap();
+    // One skipped episode, then the run halts — no template episodes at all.
+    assert_eq!(report.episodes.len(), 1);
+    let ep = &report.episodes[0];
+    assert_eq!(ep.llm_outcome, "llm_unavailable");
+    assert_eq!(ep.result, "skipped");
+    assert!(!ep.llm_used);
+    assert_eq!(report.trials_to_success, None);
+    assert_eq!(report.repeated_failed_strategies, 0);
+
+    // Without llm_required the fallback still happens — but is recorded.
+    let cfg2 = RunConfig {
+        llm_required: false,
+        lab_dir: t.0.join("lab2"),
+        episodes: 1,
+        llm_adapter: Some(dead),
+        llm_patience_secs: 0,
+        llm_retry_backoff_secs: 0,
+        ..RunConfig::default()
+    };
+    let honest = run(&scn, Control::LlmOnly, &cfg2).unwrap();
+    assert_eq!(honest.episodes[0].llm_outcome, "rate_limited");
+    assert!(!honest.episodes[0].llm_used);
+}
+
+#[test]
+fn adapter_ledgers_survive_episode_resets_without_leaking_experience() {
+    let t = temp("ledgers");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    // Fails 3 times then answers. Under control C (fresh data dir every
+    // episode) the counter can only reach 4 if it carries across episodes.
+    let flaky = flaky_adapter(&t.0, 3, "#!/bin/sh\ntouch tried\nexit 0\n");
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 4,
+        llm_adapter: Some(flaky),
+        llm_required: false,
+        llm_patience_secs: 0, // no in-episode retry: carry-over must do the work
+        llm_retry_backoff_secs: 0,
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::NoMemory, &cfg).unwrap();
+    let outcomes: Vec<_> = report
+        .episodes
+        .iter()
+        .map(|e| e.llm_outcome.as_str())
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec!["rate_limited", "rate_limited", "rate_limited", "answered"]
+    );
+
+    // Constitutional check: the amnesiac control's prompt is identical every
+    // episode — carried adapter state never leaks experience into it.
+    let run_dir = fs::read_dir(t.0.join("lab"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+        .unwrap();
+    let p1 = prompt_of(&run_dir, 1);
+    let p4 = prompt_of(&run_dir, 4);
+    assert!(!p1.is_empty());
+    assert_eq!(p1, p4);
+}
+
+/// The prompt the adapter saw for an episode (episodes own their data dirs).
+fn prompt_of(run_dir: &std::path::Path, episode: u32) -> String {
+    let ep = run_dir.join(format!("ep-{episode}"));
+    let data = fs::read_dir(&ep)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("data-"))
+        })
+        .unwrap();
+    fs::read_to_string(data.join("llm").join("prompt.txt")).unwrap_or_default()
+}
+
 #[test]
 fn harness_error_still_saves_a_report() {
     let t = temp("harnesserr");

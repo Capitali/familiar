@@ -1866,7 +1866,10 @@ fn cmd_tool(args: &[String]) -> ExitCode {
                     for (id, name) in &removed {
                         println!("  removed {id} ({name})");
                     }
-                    println!("tool prune: {} network-reaching tool(s) removed.", removed.len());
+                    println!(
+                        "tool prune: {} network-reaching tool(s) removed.",
+                        removed.len()
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -2078,6 +2081,11 @@ fn cmd_consult(args: &[String]) -> ExitCode {
         Ok(familiar_llm::Outcome::Refused(why)) => {
             println!("REFUSE: {why}");
             println!("  a human opens the LLM seam via boundary.json (docs/boundaries.md)");
+            ExitCode::SUCCESS
+        }
+        Ok(familiar_llm::Outcome::RateLimited(why)) => {
+            println!("RATE-LIMITED: {why}");
+            println!("  try again later — every configured provider is cooling down");
             ExitCode::SUCCESS
         }
         Err(e) => {

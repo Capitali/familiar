@@ -405,7 +405,9 @@ fn maybe_theorize(
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => return Ok(false),
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
+            return Ok(false)
+        }
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
         return Ok(false);
@@ -644,7 +646,7 @@ fn analyze_with_llm(
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => return None,
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => return None,
     };
     let v: serde_json::Value = serde_json::from_str(&json).ok()?;
     let field = |k: &str| {
@@ -757,7 +759,7 @@ fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => return None,
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => return None,
     };
     let v: serde_json::Value = serde_json::from_str(&json).ok()?;
     let field = |k: &str| {
@@ -1026,7 +1028,7 @@ fn fetch_and_answer(dir: &Path, text: &str, url: &str) -> Option<(String, Confid
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => {
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
             return Some((
                 format!("I fetched {url}, but couldn't reach a model to read it just now — try again shortly."),
                 Confidence::Unknown,
@@ -3201,7 +3203,10 @@ mod tests {
         // Gate shut (allow_execute on so we clear the execute gate, but allow_network off).
         write_boundary(dir, true, true, true);
         let run = execute_tool(dir, &tl, 100).unwrap();
-        assert!(run.declined.is_some(), "network tool declined while gate shut");
+        assert!(
+            run.declined.is_some(),
+            "network tool declined while gate shut"
+        );
         assert!(run.status.contains("network is closed"));
 
         // Open the network gate → the same tool is no longer declined for network reasons.
@@ -3215,8 +3220,7 @@ mod tests {
         .unwrap();
         let run = execute_tool(dir, &tl, 100).unwrap();
         assert!(
-            run.declined.is_none()
-                || !run.status.contains("network is closed"),
+            run.declined.is_none() || !run.status.contains("network is closed"),
             "network tool runs once the gate is open"
         );
     }

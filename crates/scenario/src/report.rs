@@ -33,6 +33,13 @@ pub struct EpisodeRecord {
     pub decision: String,
     pub violations: Vec<String>,
     pub wall_ms: u128,
+    /// How the artifact came to be: "answered" | "template" | "failed" |
+    /// "rate_limited" | "unused" | "llm_unavailable" (episode skipped).
+    #[serde(default)]
+    pub llm_outcome: String,
+    /// Tokens the adapter's spend ledger attributes to this episode (0 = unknown).
+    #[serde(default)]
+    pub llm_tokens: u64,
 }
 
 /// A whole run: one scenario × one control × N episodes.
@@ -56,6 +63,9 @@ pub struct RunReport {
     /// failed in an earlier episode — the "repeats failed strategies" measure.
     pub repeated_failed_strategies: u32,
     pub total_wall_ms: u128,
+    /// Adapter-ledger tokens attributed to this run (0 = adapter kept no ledger).
+    #[serde(default)]
+    pub llm_tokens: u64,
 }
 
 fn default_replicate() -> u32 {
@@ -81,7 +91,9 @@ impl RunReport {
         let mut seen_failures: HashSet<(String, String)> = HashSet::new();
         let mut repeated = 0;
         for e in &episodes {
-            if e.result == "pass" {
+            // Skipped episodes (llm_unavailable) were never trials — they are
+            // not strategies, so they cannot be repeated ones.
+            if e.result == "pass" || e.result == "skipped" {
                 continue;
             }
             let key = (e.failure_class.clone(), e.changed_traits.clone());
@@ -90,6 +102,7 @@ impl RunReport {
             }
         }
         let total_wall_ms = episodes.iter().map(|e| e.wall_ms).sum();
+        let llm_tokens = episodes.iter().map(|e| e.llm_tokens).sum();
         RunReport {
             scenario_id: scenario_id.to_string(),
             family: family.to_string(),
@@ -102,6 +115,7 @@ impl RunReport {
             llm_calls,
             repeated_failed_strategies: repeated,
             total_wall_ms,
+            llm_tokens,
         }
     }
 
@@ -192,6 +206,8 @@ mod tests {
             decision: "mutate".into(),
             violations: vec![],
             wall_ms: 10,
+            llm_outcome: String::new(),
+            llm_tokens: 0,
         }
     }
 

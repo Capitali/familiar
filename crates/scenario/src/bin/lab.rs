@@ -56,14 +56,25 @@ fn run(args: &[String], matrix: bool) -> ExitCode {
     let episodes = flag(args, "--episodes")
         .and_then(|v| v.parse().ok())
         .unwrap_or(5);
-    let cfg = RunConfig {
+    let mut cfg = RunConfig {
         lab_dir: PathBuf::from(flag(args, "--lab").unwrap_or_else(|| "lab-runs".to_string())),
         episodes,
         llm_adapter: flag(args, "--llm-adapter").map(PathBuf::from),
         replicate: flag(args, "--replicate")
             .and_then(|v| v.parse().ok())
             .unwrap_or(1),
+        llm_required: args.iter().any(|a| a == "--llm-required"),
+        ..RunConfig::default()
     };
+    if let Some(s) = flag(args, "--llm-patience").and_then(|v| v.parse().ok()) {
+        cfg.llm_patience_secs = s;
+    }
+    if let Some(s) = flag(args, "--llm-backoff").and_then(|v| v.parse().ok()) {
+        cfg.llm_retry_backoff_secs = s;
+    }
+    if let Some(s) = flag(args, "--adapter-timeout").and_then(|v| v.parse().ok()) {
+        cfg.adapter_timeout_secs = s;
+    }
     let controls: Vec<Control> = if matrix {
         vec![
             Control::Baseline,

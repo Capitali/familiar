@@ -59,7 +59,9 @@ pub fn run_agent(
         let prompt = build_prompt(task, &transcript);
         let resp = match familiar_llm::consult(dir, &prompt)? {
             familiar_llm::Outcome::Response(j) => j,
-            familiar_llm::Outcome::Refused(_) => return Ok(None), // fall back to one-shot
+            familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
+                return Ok(None); // fall back to one-shot
+            }
         };
         match parse_action(&resp) {
             Some(Step::Answer {
@@ -306,7 +308,10 @@ mod tests {
         let mut scoped = Boundary::closed();
         scoped.allow_execute = true; // execute open, network shut
         let out = run_gated(&dir, &scoped, "#!/bin/sh\nnmap -sn 10.0.0.0/24\n", 0).unwrap();
-        assert!(out.contains("REFUSED"), "the network reach is refused: {out}");
+        assert!(
+            out.contains("REFUSED"),
+            "the network reach is refused: {out}"
+        );
         assert!(out.to_lowercase().contains("network"));
         // nothing was written to run
         assert!(!dir.join("agent").join("work").join("step.sh").exists());
