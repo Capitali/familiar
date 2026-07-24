@@ -263,6 +263,45 @@ fn last_theory_at(dir: &Path) -> i64 {
 ///   muse on → sooner), floored so the familiar stays present (Law II).
 /// - Otherwise the full **rest** cadence ([`Parameters::theorize_every_secs`]) — a stable
 ///   world with nothing new gets the quiet it deserves.
+/// The familiar's own plumbing telemetry — reach probes, LAN discovery, device
+/// sightings. Facts about the mesh's body, not about the served: a muse fed on
+/// them theorizes about the familiar itself (connectivity navel-gazing), so the
+/// muse and its novelty clock look past them. They still feed the worldview,
+/// the roster, and the frontier — they simply are not *musings* material.
+fn infra_observation(o: &observation::Observation) -> bool {
+    matches!(o.action.as_str(), "can-reach" | "sees" | "discovered")
+}
+
+/// Does an open or pursued thread already say substantially this? Word-set
+/// overlap (Jaccard, words > 3 chars) over theory+direction — the muse asking
+/// the same thing twice in different words wastes the human's attention, which
+/// is the coin service is priced in (Law I).
+fn similar_thread_exists(existing: &[Thread], theory: &str, direction: &str) -> bool {
+    let words = |s: &str| -> std::collections::HashSet<String> {
+        s.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 3)
+            .map(str::to_string)
+            .collect()
+    };
+    let candidate = words(&format!("{theory} {direction}"));
+    if candidate.is_empty() {
+        return false;
+    }
+    existing
+        .iter()
+        .filter(|t| t.status == "open" || t.status == "pursued")
+        .any(|t| {
+            let held = words(&format!("{} {}", t.theory, t.direction));
+            if held.is_empty() {
+                return false;
+            }
+            let inter = candidate.intersection(&held).count() as f64;
+            let union = candidate.union(&held).count() as f64;
+            inter / union >= 0.5
+        })
+}
+
 fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool {
     let last = last_theory_at(dir);
     let base = Parameters::load_or_default(dir).sane().theorize_every_secs;
@@ -273,7 +312,10 @@ fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool 
     // Novelty = genuinely-new facts the world has shown us since we last mused (deduped
     // sensing). More novelty → a shorter wait, but never faster than the presence floor and
     // never slower than the human-set rest cadence.
-    let novel = obs.iter().filter(|o| o.ts > last).count() as i64;
+    let novel = obs
+        .iter()
+        .filter(|o| o.ts > last && !infra_observation(o))
+        .count() as i64;
     let floor = THEORIZE_FLOOR_SECS.max(base / 6);
     let interval = (base / (1 + novel)).max(floor).min(base);
     now - last >= interval
@@ -382,11 +424,18 @@ fn maybe_theorize(
     let recent: Vec<String> = obs
         .iter()
         .rev()
+        .filter(|o| !infra_observation(o))
         .take(20)
         .map(|o| format!("- {} {} {}", o.actor, o.action, o.object))
         .collect();
+    if recent.is_empty() {
+        return Ok(false); // nothing but plumbing to muse on — wait for the world
+    }
+    let infra_loop =
+        |s: &str| s.contains("can-reach") || s.contains("|sees|") || s.contains("discovered");
     let loops_s: Vec<String> = detected
         .iter()
+        .filter(|l| !infra_loop(&l.name) && !infra_loop(&l.description))
         .map(|l| format!("- {} (x{})", l.name, l.observation_count))
         .collect();
     let who = observer_phrase(dir);
@@ -423,13 +472,20 @@ fn maybe_theorize(
     if q.is_empty() && theory.is_empty() {
         return Ok(false);
     }
+    // A musing that substantially repeats a standing thread is not a new thought —
+    // it is the same thought asked louder. Hold it; the standing thread carries it.
+    let existing = thread::load(dir)?;
+    if similar_thread_exists(&existing, &theory, &direction) {
+        fs::write(dir.join(LAST_THEORY_FILE), now.to_string())?;
+        return Ok(false);
+    }
     // The theorized question doesn't go straight to the human — it enters the question
     // registry, where the factory coordinates *all* its questions and decides which to
     // surface, and when (see `coordinate_questions`). One voice, not a pile.
     if !q.is_empty() {
         question::add(dir, &q, "llm", now)?;
     }
-    let seq = thread::load(dir)?.len() + 1;
+    let seq = existing.len() + 1;
     thread::append(
         dir,
         &Thread {
@@ -1236,6 +1292,9 @@ fn adopt_device_theories(
         }
         let key = o.object.trim().to_lowercase();
         if held.contains(&key) || !fresh.insert(key) {
+            continue;
+        }
+        if similar_thread_exists(&existing, &o.context, &o.object) {
             continue;
         }
         seq += 1;
@@ -2839,6 +2898,51 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn infra_telemetry_is_not_musing_material() {
+        let mk = |action: &str| {
+            observation::Observation::new("host", action, "device:tv", "", "sense", 10, 1.0)
+        };
+        assert!(infra_observation(&mk("can-reach")));
+        assert!(infra_observation(&mk("sees")));
+        assert!(infra_observation(&mk("discovered")));
+        assert!(!infra_observation(&mk("reports")));
+        assert!(!infra_observation(&mk("asked")));
+    }
+
+    #[test]
+    fn near_duplicate_theories_are_held() {
+        let held = Thread {
+            id: "thread-0001".into(),
+            question: "which device needs help?".into(),
+            theory: "repeated connectivity monitoring suggests Ian is watching device \
+                      reachability across the mesh"
+                .into(),
+            direction: "ask which device needs attention right now".into(),
+            created_at: 1,
+            status: "pursued".into(),
+            status_at: 1,
+            last_worked_at: 0,
+            answers: Vec::new(),
+            origin: "llm".into(),
+            actor: "familiar".into(),
+        };
+        let existing = vec![held];
+        // The same musing in slightly different words is the same musing.
+        assert!(similar_thread_exists(
+            &existing,
+            "the repeated connectivity monitoring pattern suggests Ian is watching \
+             reachability across mesh devices",
+            "ask Ian which device needs attention now",
+        ));
+        // A genuinely different theory passes.
+        assert!(!similar_thread_exists(
+            &existing,
+            "morning kitchen activity suggests breakfast routines matter",
+            "prepare a morning summary of overnight events",
+        ));
+    }
+
     fn theorize_is_due_on_fresh_observer_input_within_the_window() {
         let t = Temp::new("theorize_due");
         // last theory stamped recently, so the hourly window has NOT elapsed.
