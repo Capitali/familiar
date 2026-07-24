@@ -504,7 +504,7 @@ fn run_episode(
     let artifact = ep_dir.join("artifact.sh");
     let spend_before = spend_total(&data_dir.join("llm"));
     let authoring = author_artifact(
-        &data_dir, scenario, &cand, &obs, episode, control, prior, cfg,
+        &data_dir, &world_dir, scenario, &cand, &obs, episode, control, prior, cfg,
     );
     let llm_tokens = spend_total(&data_dir.join("llm")).saturating_sub(spend_before);
     // Carry the ledgers back out so the next episode's fresh data dir inherits them.
@@ -734,6 +734,23 @@ fn write_lab_boundary(data_dir: &Path, world_dir: &Path, control: Control) -> io
     )
 }
 
+/// Relative paths of every regular file under `root` (perception, not content).
+fn list_paths(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            list_paths(root, &p, out);
+        } else if p.is_file() {
+            if let Ok(rel) = p.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+}
+
 /// Record observations, deduping by triple against what the log already holds
 /// (the same structural dedup the daemon's tick applies).
 fn record_deduped(data_dir: &Path, perceived: Vec<Observation>) -> io::Result<()> {
@@ -795,6 +812,7 @@ enum Authoring {
 #[allow(clippy::too_many_arguments)]
 fn author_artifact(
     data_dir: &Path,
+    world_dir: &Path,
     scenario: &Scenario,
     cand: &Candidate,
     obs: &[Observation],
@@ -815,6 +833,18 @@ fn author_artifact(
         }
         if !cand.changed_traits.is_empty() {
             prompt.push_str(&format!("Change this attempt: {}\n", cand.changed_traits));
+        }
+        // The world's file paths are trivially perceivable (the deterministic
+        // baseline runs `ls -R`; the boundary grants the world to fs_read), so
+        // withholding them from the prompt would only measure blindness, not
+        // capability. Paths only — never contents: forbidden files stay
+        // unread, and the evaluator lives outside the world entirely.
+        let mut paths = Vec::new();
+        list_paths(world_dir, world_dir, &mut paths);
+        paths.sort();
+        prompt.push_str("The world's files (paths only):\n");
+        for p in paths.iter().take(60) {
+            prompt.push_str(&format!("- {p}\n"));
         }
         prompt.push_str("Observed events (actor · action · object):\n");
         for o in obs.iter().take(40) {

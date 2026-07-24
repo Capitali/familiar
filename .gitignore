@@ -15,3 +15,4 @@ lab-runs/
 # LLM adapter runtime state — spend ledger + health probe, not source.
 llm/spend.json
 llm/health.json
+campaign-out/

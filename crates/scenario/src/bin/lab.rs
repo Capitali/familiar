@@ -140,7 +140,9 @@ fn fixtures_under(root: &Path) -> Vec<PathBuf> {
             let p = entry.path();
             if p.is_dir() {
                 stack.push(p);
-            } else if p.extension().is_some_and(|e| e == "json") {
+            } else if p.extension().is_some_and(|e| e == "json")
+                && !p.to_string_lossy().ends_with(".curriculum.json")
+            {
                 fixtures.push(p);
             }
         }

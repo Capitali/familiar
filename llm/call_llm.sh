@@ -247,18 +247,37 @@ def call_ollama(max_tokens):
     # rate limits: the provider a long unattended campaign leans on.
     host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
     model = os.environ.get("OLLAMA_MODEL", "mistral")
+    # CPU-only hosts generate slowly and the factory's answers are short: cap
+    # output well below the network providers' budget (overridable), and give
+    # the local server a longer deadline than the 90s network timeout — a
+    # cold model load alone can eat a minute on an Intel host.
+    cap = int(os.environ.get("OLLAMA_NUM_PREDICT", "700"))
+    deadline = int(os.environ.get("OLLAMA_TIMEOUT", "240"))
+    # NOT format:"json": grammar-forced JSON makes a small model's first
+    # unescaped quote inside a script close the string and truncate the code.
+    # Let it answer naturally; below, a non-JSON answer that is plainly a
+    # script gets wrapped into the seam convention with real escaping.
     payload = {
         "model": model,
         "stream": False,
-        "format": "json",  # the seam convention is compact JSON — enforce it
         "keep_alive": "60m",  # stay resident between consults of a campaign
-        "options": {"num_predict": max_tokens, "temperature": 0},
+        "options": {"num_predict": min(max_tokens, cap), "temperature": 0},
         "messages": [{"role": "user", "content": prompt_text}],
     }
-    body = post(f"{host}/api/chat", payload, {})
+    req = urllib.request.Request(
+        f"{host}/api/chat", data=json.dumps(payload).encode(),
+        headers={"content-type": "application/json",
+                 "user-agent": "substrate/2.1"}, method="POST")
+    with urllib.request.urlopen(req, timeout=deadline) as resp:
+        body = json.loads(resp.read())
     spend_record("ollama",
                  body.get("prompt_eval_count", 0) + body.get("eval_count", 0))
-    return body["message"]["content"]
+    text = body["message"]["content"]
+    try:
+        json.loads(strip_fences(text))
+        return text
+    except Exception:
+        return json.dumps({"script": strip_fences(text)})
 
 
 PROVIDERS = {"claude": call_claude, "anthropic": call_claude,
