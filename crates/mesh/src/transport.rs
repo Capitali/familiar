@@ -1701,29 +1701,191 @@ fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
     })
 }
 
-/// Enumerate tailnet peers (read-only shell-out). Empty if tailscale is absent/unreachable —
-/// mesh then relies on `static_peers` only.
-pub fn enumerate_peers() -> Vec<TailscalePeer> {
-    match tailscale_output(&["status", "--json"]) {
-        Some(o) => parse_tailscale_status(&String::from_utf8_lossy(&o.stdout)),
-        None => Vec::new(),
+// ---- tailscale LocalAPI --------------------------------------------------------------
+//
+// The status document comes from tailscaled's LocalAPI — the localhost HTTP endpoint the
+// CLI itself reads — whenever it's reachable, with the CLI shell-out only as a fallback.
+// Spawning the CLI is not neutral on macOS: the GUI install's CLI *is* the Tailscale app
+// binary, and launching it on every worldview poll read as Tailscale itself quitting and
+// relaunching nonstop (disruptive; observed 2026-07-24).
+
+/// Standard base64 with padding — just enough for the LocalAPI Basic-auth header,
+/// hand-rolled to honor the workspace's no-new-deps discipline. Only the macOS GUI needs
+/// auth (unix-socket peers are credential-trusted), hence the cfg.
+#[cfg(any(target_os = "macos", test))]
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let n = u32::from_be_bytes([
+            0,
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ]);
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
     }
+    out
 }
 
-/// This node's own tailnet IPv4 (`tailscale ip -4`), if tailscale is up. The output must
-/// PARSE as an IP address: the CLI has been seen exiting 0 while printing an error line
-/// ("The Tailscale GUI failed to start…"), and an advertised address is only ever an
-/// address — a node once gossiped that error text as its host and poisoned its devices'
-/// candidate lists.
+/// One HTTP/1.0 GET over an already-connected stream, response read to EOF. HTTP/1.0 on
+/// purpose: a 1.0 response can't be chunked (tailscaled answers HTTP/1.1 chunked even with
+/// `Connection: close`), so close-delimited identity is the entire framing.
+fn http10_get<S: std::io::Read + std::io::Write>(
+    mut stream: S,
+    host: &str,
+    path: &str,
+    auth: Option<&str>,
+) -> Option<Vec<u8>> {
+    let mut req = format!("GET {path} HTTP/1.0\r\nHost: {host}\r\n");
+    if let Some(a) = auth {
+        req.push_str(&format!("Authorization: Basic {a}\r\n"));
+    }
+    req.push_str("\r\n");
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).ok()?;
+    let sep = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let head = std::str::from_utf8(&buf[..sep]).ok()?;
+    if head.lines().next()?.split_whitespace().nth(1)? != "200" {
+        return None;
+    }
+    Some(buf[sep + 4..].to_vec())
+}
+
+/// Where the macOS Tailscale GUI serves LocalAPI: `(port, token)`. The standalone /
+/// system-extension install symlinks `/Library/Tailscale/ipnport` → `<port>` and keeps the
+/// token in `sameuserproof-<port>` (admin-group readable); the App Store sandbox variant
+/// instead drops an empty `sameuserproof-<port>-<token>` file in its group container, the
+/// secret carried in the name. This is the same discovery the tailscale CLI performs.
+#[cfg(target_os = "macos")]
+fn macos_localapi_endpoint() -> Option<(u16, String)> {
+    if let Ok(link) = std::fs::read_link("/Library/Tailscale/ipnport") {
+        if let Some(port) = link.to_str().and_then(|s| s.parse::<u16>().ok()) {
+            if let Ok(tok) =
+                std::fs::read_to_string(format!("/Library/Tailscale/sameuserproof-{port}"))
+            {
+                let tok = tok.trim();
+                if !tok.is_empty() {
+                    return Some((port, tok.to_string()));
+                }
+            }
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    let container = Path::new(&home)
+        .join("Library/Group Containers/W5364U7YZB.group.tailscale.io.tailscale.ipn.macos");
+    for entry in std::fs::read_dir(container).ok()?.flatten() {
+        if let Some(rest) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.strip_prefix("sameuserproof-"))
+        {
+            if let Some((port, tok)) = rest.split_once('-') {
+                if let (Ok(port), false) = (port.parse::<u16>(), tok.is_empty()) {
+                    return Some((port, tok.to_string()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Fetch `/localapi/v0/status` without spawning anything. macOS GUI: TCP + Basic auth at the
+/// published port. Unix servers (Linux peers/VMs, open-source tailscaled): the tailscaled
+/// socket, peer-credential trusted, no token. iOS compiles the unix arm but neither path
+/// exists inside the sandbox, so it answers None there — as does any host without tailscale —
+/// and the caller falls back to the CLI.
+fn localapi_status_json() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    if let Some((port, token)) = macos_localapi_endpoint() {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        if let Ok(stream) =
+            std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
+        {
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(3)));
+            let auth = base64(format!(":{token}").as_bytes());
+            if let Some(body) = http10_get(
+                stream,
+                &format!("127.0.0.1:{port}"),
+                "/localapi/v0/status",
+                Some(&auth),
+            ) {
+                return String::from_utf8(body).ok();
+            }
+        }
+    }
+    #[cfg(unix)]
+    {
+        let sock = Path::new("/var/run/tailscale/tailscaled.sock");
+        if sock.exists() {
+            if let Ok(stream) = std::os::unix::net::UnixStream::connect(sock) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(3)));
+                if let Some(body) =
+                    http10_get(stream, "local-tailscaled.sock", "/localapi/v0/status", None)
+                {
+                    return String::from_utf8(body).ok();
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The `tailscale status --json` document, however it can be had cheapest: LocalAPI first
+/// (an HTTP read, no subprocess), CLI shell-out as a last resort. Cached 60s — this sits
+/// under `members::classify` on the worldview path, which consoles poll every few seconds.
+fn tailscale_status_doc() -> Option<String> {
+    use std::sync::Mutex;
+    use std::time::Instant;
+    static CACHE: Mutex<Option<(Instant, Option<String>)>> = Mutex::new(None);
+    let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((at, doc)) = guard.as_ref() {
+        if at.elapsed() < std::time::Duration::from_secs(60) {
+            return doc.clone();
+        }
+    }
+    let doc = localapi_status_json().or_else(|| {
+        tailscale_output(&["status", "--json"])
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    });
+    *guard = Some((Instant::now(), doc.clone()));
+    doc
+}
+
+/// Enumerate tailnet peers (read-only). Empty if tailscale is absent/unreachable — mesh then
+/// relies on `static_peers` only.
+pub fn enumerate_peers() -> Vec<TailscalePeer> {
+    tailscale_status_doc()
+        .map(|d| parse_tailscale_status(&d))
+        .unwrap_or_default()
+}
+
+/// This node's own tailnet IPv4, from `Self.TailscaleIPs` in the (cached) status document —
+/// the separate `tailscale ip -4` spawn is gone. The entry must PARSE as an IPv4 address:
+/// the CLI has been seen exiting 0 while printing an error line ("The Tailscale GUI failed
+/// to start…"), and an advertised address is only ever an address — a node once gossiped
+/// that error text as its host and poisoned its devices' candidate lists.
 pub fn self_tailnet_ip() -> Option<String> {
-    tailscale_output(&["ip", "-4"]).and_then(|o| {
-        String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .next()
-            .map(str::trim)
-            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
-            .map(|ip| ip.to_string())
-    })
+    parse_self_ip4(&tailscale_status_doc()?)
+}
+
+/// First entry in `Self.TailscaleIPs` that parses as IPv4 (pure — unit-tested).
+pub fn parse_self_ip4(json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()?
+        .get("Self")?
+        .get("TailscaleIPs")?
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str())
+        .find_map(|s| s.parse::<std::net::Ipv4Addr>().ok())
+        .map(|ip| ip.to_string())
 }
 
 /// The primary LAN IPv4 — the source address the OS would route toward the internet. A connected
@@ -2326,6 +2488,28 @@ mod tests {
     fn malformed_status_is_empty_not_a_panic() {
         assert!(parse_tailscale_status("not json").is_empty());
         assert!(parse_tailscale_status("{}").is_empty());
+    }
+
+    #[test]
+    fn self_ip4_takes_the_first_v4_and_rejects_non_addresses() {
+        let json = r#"{"Self":{"TailscaleIPs":["fd7a:115c::1","100.64.0.10","100.64.0.11"]}}"#;
+        assert_eq!(parse_self_ip4(json).as_deref(), Some("100.64.0.10"));
+        // The CLI-era poisoning guard carries over: prose is never an address.
+        assert_eq!(
+            parse_self_ip4(r#"{"Self":{"TailscaleIPs":["The Tailscale GUI failed to start"]}}"#),
+            None
+        );
+        assert_eq!(parse_self_ip4("not json"), None);
+        assert_eq!(parse_self_ip4("{}"), None);
+    }
+
+    #[test]
+    fn base64_matches_known_vectors() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b":hunter2token"), "Omh1bnRlcjJ0b2tlbg==");
     }
 
     #[test]
