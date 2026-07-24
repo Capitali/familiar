@@ -1,0 +1,9 @@
+{
+  "name": "variation-curriculum-0003",
+  "fixtures": [
+    "variation-curriculum-0003-p1.json",
+    "variation-curriculum-0003-p2.json",
+    "variation-curriculum-0003-p3.json",
+    "variation-curriculum-0003-p4.json"
+  ]
+}

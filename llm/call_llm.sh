@@ -15,6 +15,9 @@
 #         $SCRIPT_DIR/health.json       (always — per-provider status the system can surface)
 #
 #   SUBSTRATE_LLM_PROVIDER   provider chain, comma-separated   (default: gemini,cerebras)
+#                            "ollama" = a local model server (no key, no rate limits);
+#                            OLLAMA_MODEL (default mistral), OLLAMA_HOST (default
+#                            http://127.0.0.1:11434)
 #
 # Keys (per provider; each falls back to SUBSTRATE_LLM_API_KEY):
 #   ANTHROPIC_API_KEY        https://console.anthropic.com (provider name: claude)
@@ -239,8 +242,28 @@ def call_claude(max_tokens):
     return body["content"][0]["text"]
 
 
+def call_ollama(max_tokens):
+    # A local model server — no key, no network reach beyond loopback, no
+    # rate limits: the provider a long unattended campaign leans on.
+    host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+    model = os.environ.get("OLLAMA_MODEL", "mistral")
+    payload = {
+        "model": model,
+        "stream": False,
+        "format": "json",  # the seam convention is compact JSON — enforce it
+        "keep_alive": "60m",  # stay resident between consults of a campaign
+        "options": {"num_predict": max_tokens, "temperature": 0},
+        "messages": [{"role": "user", "content": prompt_text}],
+    }
+    body = post(f"{host}/api/chat", payload, {})
+    spend_record("ollama",
+                 body.get("prompt_eval_count", 0) + body.get("eval_count", 0))
+    return body["message"]["content"]
+
+
 PROVIDERS = {"claude": call_claude, "anthropic": call_claude,
-             "gemini": call_gemini, "cerebras": call_cerebras}
+             "gemini": call_gemini, "cerebras": call_cerebras,
+             "ollama": call_ollama}
 
 
 def http_detail(e):
