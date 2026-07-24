@@ -1,5 +1,8 @@
 # The Familiar's consoles & device agents (Swift)
 
+> New here? The case for carrying a familiar on iPhone/iPad — what the senses are,
+> what leaves the device, and what never does — is **[PITCH.md](PITCH.md)**.
+
 Everything human-facing lives here: the **FamiliarMac** sphere console, the
 **iPhone/iPad agent** (which hosts the same sphere console), and the **watch app**.
 Devices enroll into the familiar's mesh by scanning a QR, then push **derived

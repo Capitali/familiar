@@ -13,6 +13,10 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The pitch (`ios/PITCH.md`).** The familiar pitched to the people who'd carry it —
+  iPhone and iPad users: what each sense sends (and what never leaves the device), the
+  iPad as console and on-device thinking-peer, the covenant handshake, and — per Law
+  III — an explicit "what this is not". Linked from `ios/README.md`.
 - **The mesh became a covenant (`crates/mesh`).** Beyond peer federation, three seams: a
   **device seam** (`POST /mesh/observe`) where a phone/watch that can't gossip pushes a *signed
   batch of derived observations* (signature over the raw body, anti-replay + triple debounce,
