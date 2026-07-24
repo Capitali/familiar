@@ -75,6 +75,14 @@ assertion alone.
   (agent-capable / protocol-controllable / observable) and, with consent (`reach install
   --authorize`), extends into an agent-capable host via SSH → covenant enrolment. *Validated by
   real-world operation* (a LAN reach map; a VM admitted as a covenant agent).
+- **Discovery moved to the periphery + authored-tool network gate.** Network discovery is no
+  longer a core reflex: `sense::devices`/`reach` are off the tick/daemon loops (they polluted the
+  theory pipeline with trivial recurrence), replaced by `familiar discover` — a periphery-invoked,
+  `allow_network`-gated survey on the shell's cadence (a launchd timer), feeding the frontier
+  through the observe seam. Authored tools that reach the network are gated at execution and no
+  longer federate to peers (`review::reaches_network`; `familiar tool prune`). Content-addressed
+  `tool-push` + peer archival (`mesh abandon`/`status`) round out the mesh. *Validated by unit
+  tests + real-world operation.*
 
 The full cycle now runs — observe → detect → generate (LLM-drafted) → test → score →
 select → inherit — under the law-signals (service, presence, capacities) and the
@@ -105,7 +113,8 @@ yet; see [06-limitations.md](06-limitations.md)).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond
   the verb-lexicon proxy; presence per-person.
 - **Reach, continued.** Brick 2.2: richer discovery (mDNS/Bonjour for HomeKit/AirPlay-2 on
-  random ports, BLE), and wire `reach` into the tick so the map stays fresh. Protocol adapters
+  random ports, BLE), driven from the **periphery** on the shell's cadence (the core no longer
+  sweeps on the tick — see Done) and fed back through the observe seam. Protocol adapters
   (AirPlay/Roku/MQTT) so protocol-controllable devices become *commandable*, not just seen.
 - **Device agents (the reach frontier).** *(Planned, ordered.)*
   1. **iPadOS + watchOS agents** — the iOS agent extended to the iPad and an on-wrist watchOS
