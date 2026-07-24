@@ -189,3 +189,11 @@ experiment; everything else exists to support it.
   adapter immediately demonstrated the hidden-evaluation principle: the model gamed the
   visible check (backing up the files once instead of repairing the process); a
   clean-state hidden check now closes that hole, and the same attempt scores partial.
+- 2026-07-24 — the engine that runs this experiment at length is
+  [ADR-0011](0011-scenario-engine.md): rate-limit-safe unattended campaigns
+  (a provider outage pauses, never contaminates), the evidence table with
+  categorical D-vs-B/C verdicts, ablations and controlled noise as config,
+  five generator families covering stages 1–4 (curricula included), and the
+  four-gate admission pipeline for LLM-authored fixtures. Mechanizing the
+  anti-gaming lesson above promptly caught a second gameable hole, in
+  `tempting-config` — the gate works.

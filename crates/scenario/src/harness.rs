@@ -675,19 +675,59 @@ fn spend_total(llm_dir: &Path) -> u64 {
         .sum()
 }
 
-/// The lab's boundary: execution open (sandboxed), LLM open only under LLM
-/// controls, writes scoped to the world. Written fresh each episode — the
-/// familiar never widens it (Law III holds inside the laboratory too).
-fn write_lab_boundary(data_dir: &Path, world_dir: &Path, control: Control) -> io::Result<()> {
+/// The standalone laboratory's charter: execution open (sandboxed), the LLM
+/// seam open, worlds placeable anywhere. This is the `base` a lab run narrows
+/// from; a future in-daemon rehearsal loop passes the daemon's human-owned
+/// boundary here instead, and [`lab_boundary`]'s intersection makes rehearsal
+/// structurally incapable of widening what the human opened (Law III).
+pub fn lab_base() -> Boundary {
+    let mut b = Boundary::closed();
+    b.allow_execute = true;
+    b.allow_llm = true;
+    b.allow_authored_execute = true;
+    b.fs_read = vec!["/".to_string()];
+    b.fs_write = vec!["/".to_string()];
+    b
+}
+
+/// The boundary an episode runs under: `base` **∩** the lab scope — never a
+/// union. Each gate holds only if `base` already grants it (an LLM-closed
+/// base stays LLM-closed whatever the control wants); every capability the
+/// lab scope does not need is dropped outright; the filesystem narrows to the
+/// episode's world via the kernel's own prefix-intersection semantics; and
+/// execution is sandboxed unconditionally — the lab only ever tightens.
+fn lab_boundary(base: &Boundary, world_dir: &Path, control: Control) -> Boundary {
     let mut b = Boundary::closed();
     b.phase = "scenario-lab".to_string();
-    b.allow_execute = true;
-    b.allow_llm = control.uses_llm();
-    b.allow_authored_execute = control.uses_llm();
+    b.allow_execute = base.allow_execute;
+    b.allow_llm = base.allow_llm && control.uses_llm();
+    b.allow_authored_execute = base.allow_authored_execute && control.uses_llm();
     b.sandbox_execution = true;
-    let world = world_dir.to_string_lossy().into_owned();
-    b.fs_read = vec![world.clone()];
-    b.fs_write = vec![world];
+    let world = vec![world_dir.to_string_lossy().into_owned()];
+    b.fs_read = boundary_intersect(&base.fs_read, &world);
+    b.fs_write = boundary_intersect(&base.fs_write, &world);
+    b
+}
+
+/// The kernel's `intersect_paths` rule (boundary.rs): a requested path is kept
+/// only when a granted prefix covers it — narrowing can never add reach.
+fn boundary_intersect(granted: &[String], requested: &[String]) -> Vec<String> {
+    requested
+        .iter()
+        .filter(|r| {
+            !r.is_empty()
+                && granted
+                    .iter()
+                    .any(|g| !g.is_empty() && r.starts_with(g.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Write the episode's boundary — fresh each episode; the familiar never
+/// widens it (Law III holds inside the laboratory too).
+fn write_lab_boundary(data_dir: &Path, world_dir: &Path, control: Control) -> io::Result<()> {
+    let b = lab_boundary(&lab_base(), world_dir, control);
     fs::write(
         data_dir.join(BOUNDARY_FILE),
         serde_json::to_string_pretty(&b).map_err(io::Error::other)?,
@@ -921,6 +961,43 @@ mod tests {
         let bare = "#!/bin/sh\necho hi";
         assert_eq!(extract_script(bare).unwrap(), "#!/bin/sh\necho hi\n");
         assert!(extract_script("no script here").is_none());
+    }
+
+    #[test]
+    fn lab_boundary_intersects_and_never_widens() {
+        let world = Path::new("/tmp/some-lab/ep-1/world");
+        // Today's standalone behavior: the charter narrowed to the world.
+        let b = lab_boundary(&lab_base(), world, Control::Full);
+        assert!(b.allow_execute && b.allow_llm && b.allow_authored_execute);
+        assert!(b.sandbox_execution);
+        assert_eq!(b.fs_read, vec![world.to_string_lossy().into_owned()]);
+        assert_eq!(b.fs_write, b.fs_read);
+        // Control A never gets the LLM even from a permissive base.
+        assert!(!lab_boundary(&lab_base(), world, Control::Baseline).allow_llm);
+
+        // An LLM-closed base stays closed regardless of control — the
+        // rehearsal seam's load-bearing property.
+        let mut human = lab_base();
+        human.allow_llm = false;
+        assert!(!lab_boundary(&human, world, Control::Full).allow_llm);
+
+        // A path-scoped base admits only worlds under its grant.
+        let mut scoped = lab_base();
+        scoped.fs_write = vec!["/tmp/rehearsal/".to_string()];
+        let outside = lab_boundary(&scoped, world, Control::Full);
+        assert!(
+            outside.fs_write.is_empty(),
+            "an outside world gained write reach"
+        );
+        let inside = lab_boundary(
+            &scoped,
+            Path::new("/tmp/rehearsal/ep-1/world"),
+            Control::Full,
+        );
+        assert_eq!(
+            inside.fs_write,
+            vec!["/tmp/rehearsal/ep-1/world".to_string()]
+        );
     }
 
     #[test]

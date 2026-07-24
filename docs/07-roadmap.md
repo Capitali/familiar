@@ -104,10 +104,17 @@ yet; see [06-limitations.md](06-limitations.md)).
   miniature worlds with *external* evaluators and hidden objectives, the Three Laws as
   constitutional gates (not weighted score), every scenario runnable under controls A–D
   (baseline / LLM-only / learning-disabled / full). See
-  [scenario-laboratory.md](scenario-laboratory.md). Next: run the experiment at length
-  (many episodes, rate-limit-free adapter), grow the fixture families, and report the
-  D-vs-B/C comparison as evidence — the move onto the **scenario-tests** rung for the
-  cycle itself.
+  [scenario-laboratory.md](scenario-laboratory.md).
+- **The scenario engine.** *(Implemented — 79 tests green; awaiting a funded
+  adapter for the live campaign.)* [ADR-0011](decision-records/0011-scenario-engine.md):
+  rate-limit-safe unattended campaigns with resume/STOP/budgets and pause-on-outage
+  (never template contamination), the evidence table with categorical D-vs-B/C
+  verdicts, ablations + controlled noise as config, five deterministic generator
+  families across stages 1–4 (curricula included), the validation gate + leak audit,
+  and the four-gate admission pipeline for LLM-authored fixtures. Next: fund a
+  provider and run the campaign (all fixtures × A–D × 3 replicates × 10 episodes),
+  then check in `evidence.md` — the move onto the **scenario-tests** rung for the
+  cycle itself, whatever the verdicts say.
 - **Rigor & adaptive cadence.** Feed a measured rigor drive into the promotion bar; give
   the daemon structural-fingerprint cadence (slow when nothing changes).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond

@@ -6,6 +6,70 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-07-24 — The scenario engine (ADR-0011): run, generate, admit
+
+### What changed
+
+One arc over `crates/scenario`, landing the engine that runs the ADR-0010
+experiment at length (commits `ef909e1`…, see [ADR-0011](decision-records/0011-scenario-engine.md)):
+
+- **Hardened seam:** `Outcome::RateLimited` (adapter exit 2) distinct from
+  refusal; `consult_with` kills a hung adapter at a deadline; patience/backoff
+  retries; `llm_required` records no-answer episodes as `llm_unavailable` and
+  halts instead of silently degrading to the template (the failure mode that
+  contaminated the first `lab-runs/`). Adapter spend/health ledgers ride
+  run-level `llm-state/` across A/B/C's episode resets — a prompt-identity
+  test proves the amnesiac controls stay amnesiac. Found en route: the
+  `Episode N.` prompt counter was itself a memory leak into B/C; only the
+  memory-retaining control sees it now.
+- **Campaigns + evidence:** `familiar-lab campaign` (cells, checkpoints,
+  `--resume`, STOP file, call/wall budgets, provider pacing, pause-on-outage)
+  and `familiar-lab report` (per scenario × condition × control aggregation,
+  categorical D-vs-B/C verdicts, "insufficient data" for degraded cells,
+  curriculum curves, markdown/json outputs).
+- **Ablations + noise as config:** ADR-0010's list (`pattern-memory`,
+  `inheritance`, `prior-outcomes`, `service-gate`, `law3-gate` — the last
+  double-acknowledged at every entry point), and deterministic perception
+  noise (drop/duplicate/delay/mislabel; splitmix64; ground truth untouched).
+- **Validation gate:** strict parsing (`deny_unknown_fields`) + semantic
+  rules + the leak audit; `harness::run` refuses Error-level fixtures;
+  `validate` CLI; `list` gained a validity column.
+- **Generation engine:** five golden-file-deterministic families across
+  stages 1–4; `run_sequence` threads D's store across a curriculum's worlds
+  (lineage transfer tested; C stays flat); `curriculum` CLI.
+- **LLM authoring:** four mechanical gates (parse/validate, leak audit,
+  synthesized naive-gamer probe, solvability) → quarantine → `promote`.
+- **Rehearsal seam (built now, used later):** `lab_boundary(base, world,
+  control)` is an intersection — a future in-daemon rehearsal passes the
+  human-owned boundary and cannot widen Law III by construction. See "Toward
+  rehearsal" in [scenario-laboratory.md](scenario-laboratory.md).
+
+### Why
+
+The roadmap's next rung — scenario-tests, at length — was blocked on a
+rate-limit-fragile seam, a six-fixture library, and no unattended path. The
+engine removes all three while keeping every ADR-0010 constitutional
+invariant mechanical: external evaluation only, lexicographic gates,
+hidden-material leak audits, determinism, negative results reported plainly.
+
+### Checks run
+
+- 79 tests in `familiar-scenario` (unit + lab/campaign/validate/author E2E),
+  full workspace suite green, clippy clean; concurrent `cargo test` runs no
+  longer collide (pid-suffixed temp dirs).
+- The adversarial gate, pointed at our own library, caught `tempting-config`
+  accepting `printf 'cache=on' >>` as a solve — closed with a hidden
+  `file_lacks(config/app.conf, "cache=off")`. The gate earns its keep.
+
+### Next
+
+Operational, not code: fund a provider (Anthropic at zero credit;
+gemini/cerebras 429'd in the last live run) or add a local model to
+`call_llm.sh`, smoke a 1-fixture × A–D × 1-replicate campaign live, then run
+A9 — all fixtures × A–D × 3 replicates × 10 episodes, `llm_required`, and
+check in `evidence.md` whatever it says. Rehearsal-in-the-daemon needs its
+own ADR (memory flow from rehearsal stores is deliberately undecided).
+
 ## 2026-07-11 — Storage, the agentic seam, the mesh, and reach
 
 A large arc: the store moved to SQLite, the familiar gained a multi-step agentic seam, the mesh

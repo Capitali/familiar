@@ -142,7 +142,7 @@ impl Family for ServiceLoop {
             script: String::from(
                 "a=$(ls inbox/request-*.txt 2>/dev/null | wc -l)\n\
                  b=$(ls answers/reply-*.txt 2>/dev/null | wc -l)\n\
-                 [ \"$a\" -gt 0 ] && [ \"$a\" -eq \"$b\" ]\n"
+                 [ \"$a\" -gt 0 ] && [ \"$a\" -eq \"$b\" ]\n",
             ),
         });
 
