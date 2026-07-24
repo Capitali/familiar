@@ -121,6 +121,32 @@ pub fn mark_unhealthy(dir: &Path, id: &str) -> io::Result<bool> {
     store::update_by_id(dir, TOOLS_FILE, id, &t)
 }
 
+/// Purge every tool whose script reaches outward onto the network — the LAN-local scans that
+/// should never have been core-authored or federated ([`crate::review::reaches_network`]). Deletes
+/// each removed tool's script file and rewrites the store with the survivors. Returns the removed
+/// `(id, name)` pairs, for reporting. A tool whose script can't be read is **kept** (never delete a
+/// tool we can't inspect). Idempotent: a second run finds nothing to remove.
+pub fn prune_network(dir: &Path) -> io::Result<Vec<(String, String)>> {
+    let all = load(dir)?;
+    let mut keep = Vec::new();
+    let mut removed = Vec::new();
+    for t in all {
+        let reaches = std::fs::read_to_string(&t.script_path)
+            .map(|s| crate::review::reaches_network(&s))
+            .unwrap_or(false);
+        if reaches {
+            let _ = std::fs::remove_file(&t.script_path);
+            removed.push((t.id.clone(), t.name.clone()));
+        } else {
+            keep.push(t);
+        }
+    }
+    if !removed.is_empty() {
+        store::rewrite(dir, TOOLS_FILE, &keep)?;
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +230,34 @@ mod tests {
         assert_eq!(reloaded.last_used, 200);
         assert_eq!(reloaded.last_status, "exit 0 in 9ms");
         assert_eq!(record_use(&t.0, "nope", 1, true, "").unwrap(), None);
+    }
+
+    #[test]
+    fn prune_network_removes_scan_tools_and_keeps_local_ones() {
+        let t = Temp::new("prune");
+        let dir = &t.0;
+        // A local tool (kept) and a LAN-scan tool (purged). Write real script files so the
+        // classifier reads their bodies and the purge can delete them.
+        let local = dir.join("tool-0001.sh");
+        fs::write(&local, "#!/bin/sh\nsysctl -n hw.ncpu\n").unwrap();
+        let scan = dir.join("tool-0002.sh");
+        fs::write(&scan, "#!/bin/sh\nnmap -sn 192.168.1.0/24\n").unwrap();
+        let mut lt = tool("tool-0001", "cpu", "cpu load", "cpu");
+        lt.script_path = local.display().to_string();
+        let mut st = tool("tool-0002", "lan_scan", "sweep lan", "scan");
+        st.script_path = scan.display().to_string();
+        append(dir, &lt).unwrap();
+        append(dir, &st).unwrap();
+
+        let removed = prune_network(dir).unwrap();
+        assert_eq!(removed, vec![("tool-0002".to_string(), "lan_scan".to_string())]);
+        // store now holds only the local tool; the scan's script file is gone.
+        let left = load(dir).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "tool-0001");
+        assert!(local.exists() && !scan.exists());
+        // idempotent: a second run removes nothing.
+        assert!(prune_network(dir).unwrap().is_empty());
     }
 
     #[test]

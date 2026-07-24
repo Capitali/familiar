@@ -36,6 +36,7 @@ commands:
                  classify each (agent-capable / protocol-controllable / observable)
   discover       periphery-invoked LAN survey: discover devices + assess reach in one
                  pass, recording the observations that seed the roster and the frontier
+  tool prune     purge authored tools that reach the network (LAN scans); --dry-run to list
   tick           run one cycle of the metabolism (sense → detect → muse → act → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
                  (unbounded; Ctrl-C to stop). Adaptive cadence: --interval S is the
@@ -92,6 +93,7 @@ fn main() -> ExitCode {
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
+        Some("tool") => cmd_tool(rest),
         Some("tick") => cmd_tick(rest),
         Some("run") => cmd_run(rest),
         Some("daemon") => cmd_daemon(rest),
@@ -1833,6 +1835,51 @@ fn cmd_discover(args: &[String]) -> ExitCode {
         reaches.len()
     );
     ExitCode::SUCCESS
+}
+
+/// `familiar tool prune [--dry-run]` — purge every authored tool whose script reaches the network
+/// (LAN scans/probes that should never have been core-authored or federated). `--dry-run` lists
+/// what would be removed without touching anything. The purge deletes each tool's script file and
+/// rewrites the store with the survivors.
+fn cmd_tool(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        Some("prune") => {
+            if f.contains_key("dry-run") {
+                let tools = familiar_kernel::tool::load(&dir).unwrap_or_default();
+                let mut n = 0;
+                for t in &tools {
+                    let reaches = std::fs::read_to_string(&t.script_path)
+                        .map(|s| familiar_kernel::review::reaches_network(&s))
+                        .unwrap_or(false);
+                    if reaches {
+                        println!("  would remove {} ({})", t.id, t.name);
+                        n += 1;
+                    }
+                }
+                println!("tool prune --dry-run: {n} network-reaching tool(s) would be removed.");
+                return ExitCode::SUCCESS;
+            }
+            match familiar_kernel::tool::prune_network(&dir) {
+                Ok(removed) => {
+                    for (id, name) in &removed {
+                        println!("  removed {id} ({name})");
+                    }
+                    println!("tool prune: {} network-reaching tool(s) removed.", removed.len());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("tool prune: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: familiar tool prune [--dry-run]");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn cmd_run(args: &[String]) -> ExitCode {
