@@ -15,7 +15,11 @@ use std::io;
 use std::path::Path;
 
 /// A complete scenario fixture.
+///
+/// `deny_unknown_fields` everywhere fixture JSON is parsed: a typo'd key must
+/// be a load error, never a silently empty evaluator scoring 0.0 forever.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Scenario {
     pub id: String,
     /// "process-failures" | "resource-exhaustion" | "unauthorized-shortcuts" | …

@@ -131,6 +131,21 @@ impl Default for RunConfig {
 /// Run `scenario` under `control`. Deterministic given the same fixture,
 /// control, and adapter behavior.
 pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result<RunReport> {
+    // Error-level fixture violations refuse the run: an invalid world produces
+    // invalid evidence, and a leaking one hands the familiar its own exam.
+    let violations = crate::validate::check(scenario)?;
+    if crate::validate::has_errors(&violations) {
+        let detail: Vec<String> = violations
+            .iter()
+            .filter(|v| v.severity == crate::validate::Severity::Error)
+            .map(|v| v.to_string())
+            .collect();
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("fixture {} refused: {}", scenario.id, detail.join("; ")),
+        ));
+    }
+
     let run_dir = cfg.lab_dir.join(run_slug(scenario, control, cfg));
     // A fresh run each invocation — reruns must not inherit stale state.
     if run_dir.exists() {

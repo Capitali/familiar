@@ -1,8 +1,11 @@
 //! `familiar-lab` — run scenario fixtures under the experimental controls.
 //!
 //!   familiar-lab run <fixture.json> [--control A|B|C|D] [--episodes N]
-//!                    [--lab DIR] [--llm-adapter PATH]
-//!   familiar-lab matrix <fixture.json> [--episodes N] [--lab DIR] [--llm-adapter PATH]
+//!                    [--replicate N] [--lab DIR] [--llm-adapter PATH]
+//!                    [--llm-required] [--llm-patience S] [--llm-backoff S]
+//!                    [--adapter-timeout S]
+//!   familiar-lab matrix <fixture.json> [same flags, all four controls]
+//!   familiar-lab validate <fixture.json|DIR>
 //!   familiar-lab list [DIR]
 //!
 //! `run` executes one control; `matrix` executes all four (A B C D) so the
@@ -11,7 +14,7 @@
 //! B/D fall back to the deterministic template and the report says so.
 
 use familiar_scenario::harness::{self, Control, RunConfig};
-use familiar_scenario::scenario;
+use familiar_scenario::{scenario, validate};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -20,17 +23,80 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("run") => run(&args[1..], false),
         Some("matrix") => run(&args[1..], true),
+        Some("validate") => validate_cmd(args.get(1).map(String::as_str)),
         Some("list") => list(args.get(1).map(String::as_str)),
         _ => {
             eprintln!(
                 "usage: familiar-lab run <fixture.json> [--control A|B|C|D] [--episodes N] \
-                 [--replicate N] [--lab DIR] [--llm-adapter PATH]\n       \
-                 familiar-lab matrix <fixture.json> [--episodes N] [--replicate N] [--lab DIR] \
-                 [--llm-adapter PATH]\n       \
+                 [--replicate N] [--lab DIR] [--llm-adapter PATH] [--llm-required] \
+                 [--llm-patience S] [--llm-backoff S] [--adapter-timeout S]\n       \
+                 familiar-lab matrix <fixture.json> [same flags]\n       \
+                 familiar-lab validate <fixture.json|DIR>\n       \
                  familiar-lab list [DIR]"
             );
             ExitCode::from(2)
         }
+    }
+}
+
+/// All fixture JSON files under `root` (or `root` itself if it is a file).
+fn fixtures_under(root: &Path) -> Vec<PathBuf> {
+    if root.is_file() {
+        return vec![root.to_path_buf()];
+    }
+    let mut stack = vec![root.to_path_buf()];
+    let mut fixtures = Vec::new();
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|e| e == "json") {
+                fixtures.push(p);
+            }
+        }
+    }
+    fixtures.sort();
+    fixtures
+}
+
+fn validate_cmd(target: Option<&str>) -> ExitCode {
+    let root = PathBuf::from(target.unwrap_or("scenarios"));
+    let fixtures = fixtures_under(&root);
+    if fixtures.is_empty() {
+        eprintln!("no fixtures under {}", root.display());
+        return ExitCode::FAILURE;
+    }
+    let mut errors = 0;
+    for p in fixtures {
+        match validate::check_file(&p) {
+            Ok((_, violations)) => {
+                let verdict = if validate::has_errors(&violations) {
+                    errors += 1;
+                    "INVALID"
+                } else if violations.is_empty() {
+                    "ok"
+                } else {
+                    "ok (warnings)"
+                };
+                println!("{:<44} {}", p.display(), verdict);
+                for v in &violations {
+                    println!("    {v}");
+                }
+            }
+            Err(e) => {
+                errors += 1;
+                println!("{:<44} INVALID — {e}", p.display());
+            }
+        }
+    }
+    if errors > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
@@ -128,29 +194,20 @@ fn run(args: &[String], matrix: bool) -> ExitCode {
 fn list(dir: Option<&str>) -> ExitCode {
     let root = PathBuf::from(dir.unwrap_or("scenarios"));
     let mut found = 0;
-    let mut stack = vec![root.clone()];
-    let mut fixtures = Vec::new();
-    while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                stack.push(p);
-            } else if p.extension().is_some_and(|e| e == "json") {
-                fixtures.push(p);
-            }
-        }
-    }
-    fixtures.sort();
-    for p in fixtures {
+    for p in fixtures_under(&root) {
         match scenario::load(&p) {
             Ok(s) => {
                 found += 1;
+                let validity = match validate::check(&s) {
+                    Ok(v) if validate::has_errors(&v) => "INVALID",
+                    Ok(v) if !v.is_empty() => "warn",
+                    Ok(_) => "ok",
+                    Err(_) => "unchecked",
+                };
                 println!(
-                    "{:<44} {:<24} {} — {}",
+                    "{:<44} {:<8} {:<24} {} — {}",
                     p.display(),
+                    validity,
                     s.family,
                     s.id,
                     s.visible_goal

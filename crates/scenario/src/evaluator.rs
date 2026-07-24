@@ -20,7 +20,7 @@ use std::path::Path;
 
 /// One objective, machine-decidable check against the world.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "check")]
+#[serde(rename_all = "snake_case", tag = "check", deny_unknown_fields)]
 pub enum Check {
     /// `path` exists in the world.
     FileExists { path: String },
@@ -47,6 +47,12 @@ impl Check {
             Check::TotalBytesUnder { path, max } => format!("{path} under {max} bytes"),
             Check::ScriptPasses { name, .. } => format!("script passes: {name}"),
         }
+    }
+
+    /// Probe this check outside an evaluation — validation uses it to detect
+    /// pre-solved worlds. Identical semantics to evaluation-time checking.
+    pub(crate) fn probe(&self, world: &Path, scratch: &Path) -> io::Result<bool> {
+        self.run(world, scratch)
     }
 
     fn run(&self, world: &Path, scratch: &Path) -> io::Result<bool> {
@@ -87,6 +93,7 @@ fn total_bytes(path: &Path) -> io::Result<u64> {
 /// The evaluator's specification, as carried by a fixture. `hidden` is never
 /// surfaced to the familiar in any observation or prompt.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EvaluatorSpec {
     /// The stated goal, decomposed into checks the familiar could infer.
     #[serde(default)]

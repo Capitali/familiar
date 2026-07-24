@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// A world mutation that accompanies an event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum Effect {
     /// Append `text` (plus a newline) to `path`, creating it if absent.
     Append { path: String, text: String },
@@ -24,6 +24,7 @@ pub enum Effect {
 
 /// One deterministic event on the scenario's timeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Event {
     pub actor: String,
     pub action: String,

@@ -15,6 +15,7 @@ use std::path::Path;
 
 /// One file in the initial world state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorldFile {
     /// Path relative to the world root (forward slashes).
     pub path: String,
@@ -31,6 +32,7 @@ pub struct WorldFile {
 
 /// The initial world state — component 1 of a scenario's anatomy (ADR-0010).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorldSpec {
     pub files: Vec<WorldFile>,
 }

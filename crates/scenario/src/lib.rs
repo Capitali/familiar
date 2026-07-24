@@ -21,4 +21,5 @@ pub mod harness;
 pub mod report;
 pub mod scenario;
 pub mod timeline;
+pub mod validate;
 pub mod world;
