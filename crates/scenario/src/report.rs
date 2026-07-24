@@ -73,6 +73,9 @@ pub struct RunReport {
     /// The perception-noise spec this run degraded under, if any.
     #[serde(default)]
     pub noise: Option<crate::noise::NoiseSpec>,
+    /// 1-based position within a curriculum sequence (0 = standalone run).
+    #[serde(default)]
+    pub sequence_position: u32,
 }
 
 fn default_replicate() -> u32 {
@@ -125,6 +128,7 @@ impl RunReport {
             llm_tokens,
             ablations: Vec::new(),
             noise: None,
+            sequence_position: 0,
         }
     }
 

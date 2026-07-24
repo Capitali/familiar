@@ -480,6 +480,47 @@ fn noise_degrades_perception_deterministically_and_never_ground_truth() {
 }
 
 #[test]
+fn curriculum_sequence_transfers_lineage_across_worlds_for_d_only() {
+    use familiar_scenario::harness::run_sequence;
+    let t = temp("curriculum");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    // The same concept three times over (a degenerate curriculum — surface
+    // variation is the generator's job; this tests the transfer mechanism).
+    let curriculum = vec![scn.clone(), scn.clone(), scn];
+    let futile = adapter(&t.0, "#!/bin/sh\ntouch attempted-marker\nexit 0\n");
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 2,
+        llm_adapter: Some(futile),
+        ..RunConfig::default()
+    };
+
+    let d = run_sequence(&curriculum, Control::Full, &cfg).unwrap();
+    let c = run_sequence(&curriculum, Control::NoMemory, &cfg).unwrap();
+
+    // Reports carry their curriculum position.
+    assert_eq!(
+        d.iter().map(|r| r.sequence_position).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+
+    // D: position 1 starts at generation 0; by position 2 the very first
+    // episode is already a mutation — experience crossed the world boundary.
+    assert_eq!(d[0].episodes[0].generation, 0);
+    assert!(
+        d[1].episodes[0].generation > 0,
+        "position 2 must inherit position 1's lineage, got gen {}",
+        d[1].episodes[0].generation
+    );
+    assert!(d[2].episodes[0].generation > d[1].episodes[0].generation);
+
+    // C: every episode of every position is a fresh gen-0 — nothing transfers.
+    for report in &c {
+        assert!(report.episodes.iter().all(|e| e.generation == 0));
+    }
+}
+
+#[test]
 fn harness_error_still_saves_a_report() {
     let t = temp("harnesserr");
     let scn = scenario::load(&fixture("process-failures/backup-spaces.json")).unwrap();

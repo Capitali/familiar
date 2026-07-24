@@ -226,7 +226,48 @@ pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result
         ));
     }
 
-    let run_dir = cfg.lab_dir.join(run_slug(scenario, control, cfg));
+    run_inner(scenario, control, cfg, None, 0)
+}
+
+/// Run an ordered fixture set — ADR-0010 Stage 4, the learning-vs-memorization
+/// measurement. Under the memory-retaining control one data dir threads
+/// through every fixture **in order**: candidates, trials, and patterns
+/// transfer across *worlds*. A/B/C run the identical loop with their usual
+/// fresh state. Authority never transfers — each episode's boundary is still
+/// scoped to that episode's world alone.
+pub fn run_sequence(
+    scenarios: &[Scenario],
+    control: Control,
+    cfg: &RunConfig,
+) -> io::Result<Vec<RunReport>> {
+    let seq = RUN_SEQ.fetch_add(1, Ordering::SeqCst);
+    // The shared store lives beside (not inside) the per-fixture run dirs, so
+    // a fixture's fresh-run wipe can never eat the curriculum's memory.
+    let shared = cfg.lab_dir.join(format!("curriculum-data-r{seq}"));
+    if shared.exists() {
+        fs::remove_dir_all(&shared)?;
+    }
+    let mut reports = Vec::new();
+    for (i, scenario) in scenarios.iter().enumerate() {
+        let position = (i + 1) as u32;
+        let shared_data = control.retains_memory().then_some(shared.as_path());
+        reports.push(run_inner(scenario, control, cfg, shared_data, position)?);
+    }
+    Ok(reports)
+}
+
+fn run_inner(
+    scenario: &Scenario,
+    control: Control,
+    cfg: &RunConfig,
+    shared_data: Option<&Path>,
+    position: u32,
+) -> io::Result<RunReport> {
+    let mut slug = run_slug(scenario, control, cfg);
+    if position > 0 {
+        slug = format!("p{position}-{slug}");
+    }
+    let run_dir = cfg.lab_dir.join(slug);
     // A fresh run each invocation — reruns must not inherit stale state.
     if run_dir.exists() {
         fs::remove_dir_all(&run_dir)?;
@@ -234,7 +275,10 @@ pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result
     fs::create_dir_all(&run_dir)?;
 
     let seq = RUN_SEQ.fetch_add(1, Ordering::SeqCst);
-    let persistent_data = run_dir.join(format!("data-r{seq}"));
+    let persistent_data = match shared_data {
+        Some(dir) => dir.to_path_buf(),
+        None => run_dir.join(format!("data-r{seq}")),
+    };
     let mut episodes = Vec::new();
 
     for episode in 1..=cfg.episodes {
@@ -274,6 +318,7 @@ pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result
     );
     report.ablations = cfg.ablations.iter().map(|a| a.name().to_string()).collect();
     report.noise = cfg.noise.clone().filter(|n| n.is_active());
+    report.sequence_position = position;
     report.save(&run_dir.join("report.json"))?;
     Ok(report)
 }

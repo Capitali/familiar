@@ -44,6 +44,10 @@ pub struct Scenario {
     /// Wall budget (ms) a candidate run is normalized against for the cost gate.
     #[serde(default = "default_wall_budget_ms")]
     pub wall_budget_ms: u64,
+    /// Where this fixture came from: "" (hand-written), "gen:{family}:{seed}",
+    /// or "llm:{model}:{date}". Never enters anything the familiar perceives.
+    #[serde(default)]
+    pub provenance: String,
 }
 
 fn default_start_ts() -> i64 {

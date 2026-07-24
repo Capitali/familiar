@@ -59,10 +59,23 @@ pub struct ScenarioEvidence {
     pub verdict_d_vs_b: String,
 }
 
+/// One curriculum-position outcome (Stage 4 runs only).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurriculumPoint {
+    pub control: String,
+    pub position: u32,
+    pub scenario_id: String,
+    pub trials_to_success: Option<u32>,
+}
+
 /// The whole table.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
     pub scenarios: Vec<ScenarioEvidence>,
+    /// Stage-4 curves: trials-to-success per curriculum position per control.
+    /// D's curve bending down while C's stays flat is the learning signal.
+    #[serde(default)]
+    pub curriculum: Vec<CurriculumPoint>,
 }
 
 impl Evidence {
@@ -94,6 +107,18 @@ impl Evidence {
     /// condition (ablations/noise) → control — an ablated or noisy run never
     /// blends into the full machinery's row.
     pub fn from_reports(reports: Vec<RunReport>) -> Evidence {
+        let mut curriculum: Vec<CurriculumPoint> = reports
+            .iter()
+            .filter(|r| r.sequence_position > 0)
+            .map(|r| CurriculumPoint {
+                control: r.control.clone(),
+                position: r.sequence_position,
+                scenario_id: r.scenario_id.clone(),
+                trials_to_success: r.trials_to_success,
+            })
+            .collect();
+        curriculum.sort_by(|a, b| (&a.control, a.position).cmp(&(&b.control, b.position)));
+
         type Key = (String, String, String, String);
         let mut grouped: BTreeMap<Key, BTreeMap<String, Vec<RunReport>>> = BTreeMap::new();
         for r in reports {
@@ -130,7 +155,34 @@ impl Evidence {
                 }
             })
             .collect();
-        Evidence { scenarios }
+        Evidence {
+            scenarios,
+            curriculum,
+        }
+    }
+
+    /// Compact per-control curve lines, e.g. `D: p1=5 p2=3 p3=1`.
+    fn curriculum_lines(&self) -> Vec<String> {
+        let mut by_control: BTreeMap<&str, Vec<&CurriculumPoint>> = BTreeMap::new();
+        for p in &self.curriculum {
+            by_control.entry(&p.control).or_default().push(p);
+        }
+        by_control
+            .into_iter()
+            .map(|(control, points)| {
+                let cells: Vec<String> = points
+                    .iter()
+                    .map(|p| {
+                        let tts = p
+                            .trials_to_success
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "never".to_string());
+                        format!("p{}={tts}", p.position)
+                    })
+                    .collect();
+                format!("{control}: {}", cells.join(" "))
+            })
+            .collect()
     }
 
     /// Save as pretty JSON.
@@ -191,6 +243,12 @@ impl Evidence {
             );
             let _ = writeln!(out);
         }
+        if !self.curriculum.is_empty() {
+            let _ = writeln!(out, "curriculum curves (trials-to-success by position):");
+            for line in self.curriculum_lines() {
+                let _ = writeln!(out, "  {line}");
+            }
+        }
         out
     }
 
@@ -249,6 +307,19 @@ impl Evidence {
                 "\n**D vs C:** {} · **D vs B:** {}\n",
                 s.verdict_d_vs_c, s.verdict_d_vs_b
             );
+        }
+        if !self.curriculum.is_empty() {
+            let _ = writeln!(out, "## Curriculum curves\n");
+            let _ = writeln!(
+                out,
+                "Trials-to-success by curriculum position. The learning signal is D's \
+                 curve bending down across positions while the memoryless controls stay \
+                 flat.\n"
+            );
+            for line in self.curriculum_lines() {
+                let _ = writeln!(out, "- `{line}`");
+            }
+            let _ = writeln!(out);
         }
         out
     }
