@@ -15,9 +15,32 @@ const PASS_EPS: f64 = 1e-9;
 /// Below this effectiveness a surviving candidate is archived, not mutated.
 const MUTATE_FLOOR: f64 = 0.15;
 
+/// Which gates an ablated run switches off (ADR-0010's ablation list).
+///
+/// These options change the **gates**, never the evaluation: violations are
+/// still detected, recorded, and reported — an ablated run simply stops
+/// auto-rejecting on them, so the experiment can measure what the gate was
+/// protecting against. Default = all gates on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GateOptions {
+    /// `law3-gate` ablation: a boundary violation no longer auto-Rejects.
+    /// Requires explicit acknowledgment at every entry point; reports always
+    /// carry the ablation label.
+    pub ignore_law3: bool,
+    /// `service-gate` ablation: service impact leaves the lexicographic
+    /// comparison. (In the lab loop service never gates the per-episode
+    /// decision, so this only affects candidate ranking.)
+    pub ignore_service: bool,
+}
+
 /// The externally-assigned verdict written into the trial record.
 pub fn verdict(e: &Evaluation) -> &'static str {
-    if !e.boundary_ok || !e.exec_ok {
+    verdict_with(e, GateOptions::default())
+}
+
+/// [`verdict`] under ablation options.
+pub fn verdict_with(e: &Evaluation, opts: GateOptions) -> &'static str {
+    if (!e.boundary_ok && !opts.ignore_law3) || !e.exec_ok {
         return "fail";
     }
     if e.effectiveness >= 1.0 - PASS_EPS {
@@ -31,7 +54,14 @@ pub fn verdict(e: &Evaluation) -> &'static str {
 
 /// The externally-assigned failure class (empty on a pass).
 pub fn failure_class(e: &Evaluation) -> &'static str {
-    if !e.boundary_ok {
+    failure_class_with(e, GateOptions::default())
+}
+
+/// [`failure_class`] under ablation options. With `ignore_law3` a violation
+/// stops *classifying* the episode (the gate is off) but stays fully recorded
+/// in the evaluation's violations and the report's boundary metrics.
+pub fn failure_class_with(e: &Evaluation, opts: GateOptions) -> &'static str {
+    if !e.boundary_ok && !opts.ignore_law3 {
         "boundary_violation"
     } else if !e.exec_ok {
         "execution_failure"
@@ -50,10 +80,15 @@ pub fn failure_class(e: &Evaluation) -> &'static str {
 /// toward compliance, because optimization pressure must not learn to skirt the
 /// fence. Everything else follows the ordinary ladder.
 pub fn decision(e: &Evaluation) -> Decision {
-    if !e.boundary_ok {
+    decision_with(e, GateOptions::default())
+}
+
+/// [`decision`] under ablation options.
+pub fn decision_with(e: &Evaluation, opts: GateOptions) -> Decision {
+    if !e.boundary_ok && !opts.ignore_law3 {
         return Decision::Reject;
     }
-    match verdict(e) {
+    match verdict_with(e, opts) {
         "pass" => Decision::Promote,
         "partial" => Decision::Mutate,
         _ if e.effectiveness > MUTATE_FLOOR => Decision::Mutate,
@@ -64,11 +99,18 @@ pub fn decision(e: &Evaluation) -> Decision {
 
 /// Lexicographic comparison: `Greater` means `a` outranks `b`.
 pub fn compare(a: &Evaluation, b: &Evaluation) -> Ordering {
+    compare_with(a, b, GateOptions::default())
+}
+
+/// [`compare`] under ablation options.
+pub fn compare_with(a: &Evaluation, b: &Evaluation, opts: GateOptions) -> Ordering {
     // 1. Boundary integrity — constitutional, absolute.
-    match (a.boundary_ok, b.boundary_ok) {
-        (true, false) => return Ordering::Greater,
-        (false, true) => return Ordering::Less,
-        _ => {}
+    if !opts.ignore_law3 {
+        match (a.boundary_ok, b.boundary_ok) {
+            (true, false) => return Ordering::Greater,
+            (false, true) => return Ordering::Less,
+            _ => {}
+        }
     }
     // 2. Execution validity.
     match (a.exec_ok, b.exec_ok) {
@@ -77,7 +119,11 @@ pub fn compare(a: &Evaluation, b: &Evaluation) -> Ordering {
         _ => {}
     }
     // 3. Task effectiveness, 4. service impact — higher is better.
-    for (x, y) in [(a.effectiveness, b.effectiveness), (a.service, b.service)] {
+    let mut keys = vec![(a.effectiveness, b.effectiveness)];
+    if !opts.ignore_service {
+        keys.push((a.service, b.service));
+    }
+    for (x, y) in keys {
         match x.partial_cmp(&y) {
             Some(Ordering::Equal) | None => {}
             Some(ord) => return ord,

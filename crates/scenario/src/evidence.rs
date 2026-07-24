@@ -49,6 +49,10 @@ pub struct ScenarioEvidence {
     pub family: String,
     pub scenario_id: String,
     pub variant: String,
+    /// Non-empty when these runs were ablated or noisy — such rows never
+    /// blend with the full machinery's ("" = the unmodified condition).
+    #[serde(default)]
+    pub condition: String,
     pub controls: BTreeMap<String, ControlStats>,
     /// "D better" | "no difference" | "D worse" | "insufficient data" | "no D/C data"
     pub verdict_d_vs_c: String,
@@ -86,13 +90,21 @@ impl Evidence {
         Ok(Evidence::from_reports(reports))
     }
 
-    /// Aggregate parsed reports (grouping: family → scenario+variant → control).
+    /// Aggregate parsed reports. Grouping: family → scenario+variant →
+    /// condition (ablations/noise) → control — an ablated or noisy run never
+    /// blends into the full machinery's row.
     pub fn from_reports(reports: Vec<RunReport>) -> Evidence {
-        let mut grouped: BTreeMap<(String, String, String), BTreeMap<String, Vec<RunReport>>> =
-            BTreeMap::new();
+        type Key = (String, String, String, String);
+        let mut grouped: BTreeMap<Key, BTreeMap<String, Vec<RunReport>>> = BTreeMap::new();
         for r in reports {
+            let condition = condition_label(&r);
             grouped
-                .entry((r.family.clone(), r.scenario_id.clone(), r.variant.clone()))
+                .entry((
+                    r.family.clone(),
+                    r.scenario_id.clone(),
+                    r.variant.clone(),
+                    condition,
+                ))
                 .or_default()
                 .entry(r.control.clone())
                 .or_default()
@@ -100,7 +112,7 @@ impl Evidence {
         }
         let scenarios = grouped
             .into_iter()
-            .map(|((family, scenario_id, variant), by_control)| {
+            .map(|((family, scenario_id, variant, condition), by_control)| {
                 let controls: BTreeMap<String, ControlStats> = by_control
                     .into_iter()
                     .map(|(control, runs)| (control, aggregate(&runs)))
@@ -111,6 +123,7 @@ impl Evidence {
                     family,
                     scenario_id,
                     variant,
+                    condition,
                     controls,
                     verdict_d_vs_c,
                     verdict_d_vs_b,
@@ -137,13 +150,18 @@ impl Evidence {
         for s in &self.scenarios {
             let _ = writeln!(
                 out,
-                "{} / {}{}",
+                "{} / {}{}{}",
                 s.family,
                 s.scenario_id,
                 if s.variant.is_empty() {
                     String::new()
                 } else {
                     format!(" ({})", s.variant)
+                },
+                if s.condition.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", s.condition)
                 }
             );
             let _ = writeln!(
@@ -191,13 +209,18 @@ impl Evidence {
         for s in &self.scenarios {
             let _ = writeln!(
                 out,
-                "## {} / {}{}\n",
+                "## {} / {}{}{}\n",
                 s.family,
                 s.scenario_id,
                 if s.variant.is_empty() {
                     String::new()
                 } else {
                     format!(" ({})", s.variant)
+                },
+                if s.condition.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", s.condition)
                 }
             );
             let _ = writeln!(
@@ -229,6 +252,18 @@ impl Evidence {
         }
         out
     }
+}
+
+/// The condition label a run's ablations/noise fold into ("" = unmodified).
+fn condition_label(r: &RunReport) -> String {
+    let mut parts: Vec<String> = r.ablations.iter().map(|a| format!("no-{a}")).collect();
+    if let Some(n) = &r.noise {
+        parts.push(format!(
+            "noise(seed={},drop={},dup={},delay={},mislabel={})",
+            n.seed, n.drop, n.duplicate, n.delay_steps, n.mislabel
+        ));
+    }
+    parts.join("+")
 }
 
 fn tts_cell(c: &ControlStats) -> String {

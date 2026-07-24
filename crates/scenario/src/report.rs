@@ -66,6 +66,13 @@ pub struct RunReport {
     /// Adapter-ledger tokens attributed to this run (0 = adapter kept no ledger).
     #[serde(default)]
     pub llm_tokens: u64,
+    /// Names of components ablated for this run — always carried, so no table
+    /// can present an ablated run as the full machinery.
+    #[serde(default)]
+    pub ablations: Vec<String>,
+    /// The perception-noise spec this run degraded under, if any.
+    #[serde(default)]
+    pub noise: Option<crate::noise::NoiseSpec>,
 }
 
 fn default_replicate() -> u32 {
@@ -116,6 +123,8 @@ impl RunReport {
             repeated_failed_strategies: repeated,
             total_wall_ms,
             llm_tokens,
+            ablations: Vec::new(),
+            noise: None,
         }
     }
 

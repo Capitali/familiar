@@ -16,10 +16,12 @@
 #![forbid(unsafe_code)]
 
 pub mod campaign;
+pub mod det;
 pub mod evaluator;
 pub mod evidence;
 pub mod gate;
 pub mod harness;
+pub mod noise;
 pub mod report;
 pub mod scenario;
 pub mod timeline;

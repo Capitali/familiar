@@ -217,6 +217,40 @@ fn run(args: &[String], matrix: bool) -> ExitCode {
     if let Some(s) = flag(args, "--adapter-timeout").and_then(|v| v.parse().ok()) {
         cfg.adapter_timeout_secs = s;
     }
+    if let Some(list) = flag(args, "--ablate") {
+        for name in list.split(',').filter(|s| !s.trim().is_empty()) {
+            match harness::Ablation::parse(name) {
+                Some(a) => cfg.ablations.push(a),
+                None => {
+                    eprintln!("familiar-lab: unknown ablation {name:?}");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        if cfg.ablations.contains(&harness::Ablation::FixedThreshold) {
+            eprintln!("note: fixed-threshold is reserved (the lab gate has no rigor knob) — no-op");
+        }
+        // The Law III ablation executes boundary-violating artifacts in-lab
+        // (sandboxed, violations recorded). It never runs implicitly.
+        if cfg.ablations.contains(&harness::Ablation::Law3Gate)
+            && !args.iter().any(|a| a == "--acknowledge-law3-ablation")
+        {
+            eprintln!(
+                "familiar-lab: --ablate law3-gate disables the constitutional boundary gate \
+                 for this run; pass --acknowledge-law3-ablation to confirm"
+            );
+            return ExitCode::from(2);
+        }
+    }
+    if let Some(spec) = flag(args, "--noise") {
+        match familiar_scenario::noise::NoiseSpec::parse(&spec) {
+            Ok(n) => cfg.noise = Some(n),
+            Err(e) => {
+                eprintln!("familiar-lab: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    }
     let controls: Vec<Control> = if matrix {
         vec![
             Control::Baseline,

@@ -61,6 +61,16 @@ pub struct CampaignPlan {
     /// Stop cleanly after this much wall time (0 = off).
     #[serde(default)]
     pub max_wall_hours: f64,
+    /// Ablation names (harness::Ablation vocabulary) applied to every cell.
+    #[serde(default)]
+    pub ablations: Vec<String>,
+    /// Required alongside a "law3-gate" ablation — the plan must acknowledge
+    /// that boundary-violating artifacts will execute (sandboxed, recorded).
+    #[serde(default)]
+    pub acknowledge_law3_ablation: bool,
+    /// Perception noise applied to every cell.
+    #[serde(default)]
+    pub noise: Option<crate::noise::NoiseSpec>,
     /// Output directory (state, runs/, evidence inputs).
     #[serde(default = "default_out")]
     pub out: PathBuf,
@@ -193,6 +203,23 @@ pub fn run(plan: &CampaignPlan, resume: bool, force: bool) -> io::Result<Campaig
         scenarios.push((path.clone(), s));
     }
     let controls = parse_controls(&plan.controls)?;
+    let mut ablations = Vec::new();
+    for name in &plan.ablations {
+        let a = harness::Ablation::parse(name).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unknown ablation {name:?}"),
+            )
+        })?;
+        ablations.push(a);
+    }
+    if ablations.contains(&harness::Ablation::Law3Gate) && !plan.acknowledge_law3_ablation {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the law3-gate ablation executes boundary-violating artifacts (sandboxed, \
+             recorded); set acknowledge_law3_ablation: true in the plan to confirm",
+        ));
+    }
 
     let started = Instant::now();
     let mut outcome = CampaignOutcome {
@@ -247,6 +274,8 @@ pub fn run(plan: &CampaignPlan, resume: bool, force: bool) -> io::Result<Campaig
                     llm_patience_secs: plan.llm_patience_secs,
                     llm_retry_backoff_secs: plan.llm_retry_backoff_secs,
                     adapter_timeout_secs: plan.adapter_timeout_secs,
+                    ablations: ablations.clone(),
+                    noise: plan.noise.clone(),
                 };
                 let result = harness::run(scn, *control, &cfg);
                 if consults {

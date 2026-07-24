@@ -85,6 +85,65 @@ impl Control {
     }
 }
 
+/// One component removed at a time (ADR-0010's ablation list). Ablations
+/// answer the harder question — not *whether* the machinery works but *why*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ablation {
+    /// Pattern memory off: base mutation heuristic, nothing learned from
+    /// outcomes, no pattern rows written.
+    PatternMemory,
+    /// Inheritance off: every episode starts a fresh gen-0 candidate (D keeps
+    /// its stores but loses lineage).
+    Inheritance,
+    /// Prior-outcome context off: D's prompt goes amnesiac while its stores
+    /// persist.
+    PriorOutcomes,
+    /// Service leaves the lexicographic comparison (Law I contribution off).
+    ServiceGate,
+    /// Boundary violations stop auto-rejecting — still fully recorded.
+    /// Constitutionally loaded: every entry point demands acknowledgment.
+    Law3Gate,
+    /// Reserved (the lab gate has no rigor knob yet); parsed, warned, no-op.
+    FixedThreshold,
+}
+
+impl Ablation {
+    pub fn parse(s: &str) -> Option<Ablation> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "pattern-memory" | "pm" => Some(Ablation::PatternMemory),
+            "inheritance" | "inh" => Some(Ablation::Inheritance),
+            "prior-outcomes" | "prior" => Some(Ablation::PriorOutcomes),
+            "service-gate" | "svc" => Some(Ablation::ServiceGate),
+            "law3-gate" | "law3" => Some(Ablation::Law3Gate),
+            "fixed-threshold" | "thr" => Some(Ablation::FixedThreshold),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Ablation::PatternMemory => "pattern-memory",
+            Ablation::Inheritance => "inheritance",
+            Ablation::PriorOutcomes => "prior-outcomes",
+            Ablation::ServiceGate => "service-gate",
+            Ablation::Law3Gate => "law3-gate",
+            Ablation::FixedThreshold => "fixed-threshold",
+        }
+    }
+
+    /// The short code used in run-dir slugs.
+    fn code(self) -> &'static str {
+        match self {
+            Ablation::PatternMemory => "pm",
+            Ablation::Inheritance => "inh",
+            Ablation::PriorOutcomes => "prior",
+            Ablation::ServiceGate => "svc",
+            Ablation::Law3Gate => "law3",
+            Ablation::FixedThreshold => "thr",
+        }
+    }
+}
+
 /// Everything a run needs from the caller.
 pub struct RunConfig {
     /// The laboratory output directory (holds run dirs, worlds, reports).
@@ -111,6 +170,12 @@ pub struct RunConfig {
     pub llm_retry_backoff_secs: u64,
     /// Deadline handed to the adapter per consult (a hung adapter is killed).
     pub adapter_timeout_secs: u64,
+    /// Components switched off for this run (ADR-0010 ablations). The report
+    /// carries their names — no table can omit them.
+    pub ablations: Vec<Ablation>,
+    /// Controlled perception noise (ADR-0010), applied between timeline replay
+    /// and observation recording. Ground truth is never touched.
+    pub noise: Option<crate::noise::NoiseSpec>,
 }
 
 impl Default for RunConfig {
@@ -124,6 +189,21 @@ impl Default for RunConfig {
             llm_patience_secs: 900,
             llm_retry_backoff_secs: 60,
             adapter_timeout_secs: 120,
+            ablations: Vec::new(),
+            noise: None,
+        }
+    }
+}
+
+impl RunConfig {
+    fn ablated(&self, a: Ablation) -> bool {
+        self.ablations.contains(&a)
+    }
+
+    fn gate_options(&self) -> gate::GateOptions {
+        gate::GateOptions {
+            ignore_law3: self.ablated(Ablation::Law3Gate),
+            ignore_service: self.ablated(Ablation::ServiceGate),
         }
     }
 }
@@ -184,7 +264,7 @@ pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result
         }
     }
 
-    let report = RunReport::from_episodes(
+    let mut report = RunReport::from_episodes(
         &scenario.id,
         &scenario.family,
         &scenario.variant,
@@ -192,6 +272,8 @@ pub fn run(scenario: &Scenario, control: Control, cfg: &RunConfig) -> io::Result
         cfg.replicate,
         episodes,
     );
+    report.ablations = cfg.ablations.iter().map(|a| a.name().to_string()).collect();
+    report.noise = cfg.noise.clone().filter(|n| n.is_active());
     report.save(&run_dir.join("report.json"))?;
     Ok(report)
 }
@@ -209,6 +291,13 @@ fn run_slug(scenario: &Scenario, control: Control, cfg: &RunConfig) -> String {
     slug.push_str(control.letter());
     if cfg.replicate > 1 {
         slug.push_str(&format!("-r{}", cfg.replicate));
+    }
+    for a in &cfg.ablations {
+        slug.push_str("-x");
+        slug.push_str(a.code());
+    }
+    if let Some(n) = cfg.noise.as_ref().filter(|n| n.is_active()) {
+        slug.push_str(&format!("-n{}", n.seed));
     }
     slug
 }
@@ -307,7 +396,17 @@ fn run_episode(
         scenario.start_ts,
         scenario.step_secs,
     )?;
-    record_deduped(&data_dir, perceived)?;
+    match cfg.noise.as_ref().filter(|n| n.is_active()) {
+        // Noise degrades perception only (effects already shaped the world),
+        // and its duplicates must bypass the structural dedup on purpose —
+        // repeated delivery is exactly the uncertainty being modeled.
+        Some(noise) => {
+            for o in crate::noise::apply(perceived, noise, scenario.step_secs) {
+                observation::record(&data_dir, o)?;
+            }
+        }
+        None => record_deduped(&data_dir, perceived)?,
+    }
 
     // Detect → generate (or mutate, where memory permits).
     let obs = observation::load(&data_dir)?;
@@ -318,13 +417,24 @@ fn run_episode(
     let cands = candidate::load(&data_dir)?;
     let patterns = pattern_memory::load(&data_dir)?;
     let cand_id = format!("candidate-{:04}", cands.len() + 1);
-    let mut cand = match parent_to_mutate(&cands) {
+    // Ablations: `inheritance` severs the lineage (no parent, ever);
+    // `pattern-memory` falls back to the uninformed base heuristic.
+    let parent = if cfg.ablated(Ablation::Inheritance) {
+        None
+    } else {
+        parent_to_mutate(&cands)
+    };
+    let mut cand = match parent {
         Some(parent) => {
             let trials = trial::load(&data_dir)?;
             let failure = trial::find_by_candidate(&trials, &parent.id)
                 .map(|t| t.failure_class.clone())
                 .unwrap_or_default();
-            let traits = mutation::suggest_informed(&failure, &patterns);
+            let traits = if cfg.ablated(Ablation::PatternMemory) {
+                mutation::suggest(&failure)
+            } else {
+                mutation::suggest_informed(&failure, &patterns)
+            };
             mutation::create(parent, failure, traits, cand_id.clone())
         }
         None => match &target {
@@ -432,7 +542,10 @@ fn run_episode(
         &scenario.world.tripwires(),
         &facts,
     )?;
-    let decision = gate::decision(&eval);
+    // The gates may be ablated (recorded in the report); the evaluation and
+    // its violation evidence never are.
+    let gate_opts = cfg.gate_options();
+    let decision = gate::decision_with(&eval, gate_opts);
 
     // The trial record carries the external dimensions; `overall` is the
     // gated scalar (zero unless boundary + execution hold) so nothing
@@ -445,20 +558,24 @@ fn run_episode(
     t.safety = if eval.boundary_ok { 1.0 } else { 0.0 };
     t.complexity = eval.cost;
     t.confidence = 1.0; // external and objective — not a self-estimate
-    t.overall = if eval.boundary_ok && eval.exec_ok {
+    t.overall = if (eval.boundary_ok || gate_opts.ignore_law3) && eval.exec_ok {
         eval.effectiveness
     } else {
         0.0
     };
-    t.result = gate::verdict(&eval).to_string();
-    t.failure_class = gate::failure_class(&eval).to_string();
+    t.result = gate::verdict_with(&eval, gate_opts).to_string();
+    t.failure_class = gate::failure_class_with(&eval, gate_opts).to_string();
     t.notes = eval.violations.join("; ");
     trial::append(&data_dir, &t)?;
     candidate::update_status(&data_dir, &cand.id, decision.as_str())?;
 
-    // Memory accrues (it simply never survives the episode outside control D).
-    let pm = pattern_memory::from_outcome(format!("pattern-{:04}", patterns.len() + 1), &cand, &t);
-    pattern_memory::append(&data_dir, &pm)?;
+    // Memory accrues (it simply never survives the episode outside control D) —
+    // unless the pattern-memory ablation switched the faculty off entirely.
+    if !cfg.ablated(Ablation::PatternMemory) {
+        let pm =
+            pattern_memory::from_outcome(format!("pattern-{:04}", patterns.len() + 1), &cand, &t);
+        pattern_memory::append(&data_dir, &pm)?;
+    }
 
     let record = EpisodeRecord {
         episode,
@@ -619,8 +736,9 @@ fn author_artifact(
             prompt.push_str(&format!("- {} · {} · {}\n", o.actor, o.action, o.object));
         }
         // Prior-attempt summaries are *memory* — only the memory-retaining
-        // control may see them (B/C stay honestly amnesiac).
-        if control.retains_memory() && !prior.is_empty() {
+        // control may see them (B/C stay honestly amnesiac), and the
+        // prior-outcomes ablation blinds even D at the prompt.
+        if control.retains_memory() && !prior.is_empty() && !cfg.ablated(Ablation::PriorOutcomes) {
             prompt.push_str("Prior attempts (externally judged):\n");
             for p in prior {
                 prompt.push_str(&format!(
@@ -630,8 +748,9 @@ fn author_artifact(
             }
         }
         // The episode counter is itself memory ("this is attempt 4" implies
-        // three priors) — only the memory-retaining control may see it.
-        if control.retains_memory() {
+        // three priors) — only the memory-retaining control may see it, and
+        // the prior-outcomes ablation hides it even there.
+        if control.retains_memory() && !cfg.ablated(Ablation::PriorOutcomes) {
             prompt.push_str(&format!("Episode {episode}. "));
         }
         prompt.push_str(

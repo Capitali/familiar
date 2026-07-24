@@ -348,6 +348,138 @@ fn prompt_of(run_dir: &std::path::Path, episode: u32) -> String {
 }
 
 #[test]
+fn inheritance_ablation_keeps_d_at_generation_zero() {
+    use familiar_scenario::harness::Ablation;
+    let t = temp("ablinherit");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    let futile = adapter(&t.0, "#!/bin/sh\ntouch attempted-marker\nexit 0\n");
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 3,
+        llm_adapter: Some(futile),
+        ablations: vec![Ablation::Inheritance],
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::Full, &cfg).unwrap();
+    // The inverse of full_control_inherits_across_episodes: stores persist but
+    // lineage is severed — every episode is gen 0 with no parent.
+    assert!(report.episodes.iter().all(|e| e.generation == 0));
+    assert_eq!(report.ablations, vec!["inheritance"]);
+}
+
+#[test]
+fn pattern_memory_ablation_writes_no_pattern_rows() {
+    use familiar_scenario::harness::Ablation;
+    let t = temp("ablpm");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    let futile = adapter(&t.0, "#!/bin/sh\ntouch attempted-marker\nexit 0\n");
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 2,
+        llm_adapter: Some(futile),
+        ablations: vec![Ablation::PatternMemory],
+        ..RunConfig::default()
+    };
+    run(&scn, Control::Full, &cfg).unwrap();
+    // D's persistent data dir holds no pattern memory at all.
+    let run_dir = fs::read_dir(t.0.join("lab"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+        .unwrap();
+    let data = fs::read_dir(&run_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("data-"))
+        })
+        .unwrap();
+    let patterns = familiar_kernel::pattern_memory::load(&data).unwrap();
+    assert!(
+        patterns.is_empty(),
+        "{} pattern rows written",
+        patterns.len()
+    );
+}
+
+#[test]
+fn law3_ablation_records_violations_but_stops_rejecting() {
+    use familiar_scenario::harness::Ablation;
+    let t = temp("abllaw3");
+    let scn = scenario::load(&fixture("unauthorized-shortcuts/secret-shortcut.json")).unwrap();
+    let bad = adapter(
+        &t.0,
+        "#!/bin/sh\ncat secret/credentials.txt > report.txt\ncat activity/*.log >> report.txt\n",
+    );
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 1,
+        llm_adapter: Some(bad),
+        ablations: vec![Ablation::Law3Gate],
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::LlmOnly, &cfg).unwrap();
+    let ep = &report.episodes[0];
+    // The evaluation still sees everything: the violation is recorded...
+    assert!(!ep.boundary_ok);
+    assert_eq!(report.boundary_violations, 1);
+    assert!(!ep.violations.is_empty());
+    // ...but the gate no longer auto-rejects, and the report says the gate was off.
+    assert_ne!(ep.decision, "reject");
+    assert_eq!(report.ablations, vec!["law3-gate"]);
+}
+
+#[test]
+fn noise_degrades_perception_deterministically_and_never_ground_truth() {
+    use familiar_scenario::noise::NoiseSpec;
+    let t = temp("noise");
+    let scn = scenario::load(&fixture("resource-exhaustion/log-growth.json")).unwrap();
+    let cfg = RunConfig {
+        lab_dir: t.0.join("lab"),
+        episodes: 2,
+        noise: Some(NoiseSpec {
+            seed: 7,
+            drop: 0.5,
+            duplicate: 0.3,
+            delay_steps: 2,
+            mislabel: 0.3,
+        }),
+        ..RunConfig::default()
+    };
+    let first = run(&scn, Control::Baseline, &cfg).unwrap();
+    let second = run(&scn, Control::Baseline, &cfg).unwrap();
+    // Same spec → identical degraded runs; the report echoes the spec.
+    assert_eq!(first.episodes.len(), second.episodes.len());
+    assert_eq!(
+        first.episodes[0].candidate_id,
+        second.episodes[0].candidate_id
+    );
+    assert_eq!(first.noise.as_ref().unwrap().seed, 7);
+
+    // Ground truth untouched: drop=1.0 leaves zero observations yet the
+    // world's timeline effects still applied (the log kept growing, so the
+    // evaluator still finds the world in its post-timeline state).
+    let blind = RunConfig {
+        lab_dir: t.0.join("lab-blind"),
+        episodes: 1,
+        noise: Some(NoiseSpec {
+            seed: 1,
+            drop: 1.0,
+            ..NoiseSpec::default()
+        }),
+        ..RunConfig::default()
+    };
+    let report = run(&scn, Control::Baseline, &blind).unwrap();
+    // With no observations there is no loop, but the episode still runs and
+    // the world still carries the timeline's effects.
+    assert_eq!(report.episodes.len(), 1);
+}
+
+#[test]
 fn harness_error_still_saves_a_report() {
     let t = temp("harnesserr");
     let scn = scenario::load(&fixture("process-failures/backup-spaces.json")).unwrap();
