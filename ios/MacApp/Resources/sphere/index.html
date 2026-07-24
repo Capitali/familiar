@@ -129,7 +129,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- state & real data ----------
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '' };
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false };
+try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -146,7 +147,9 @@ const FRONTIER_COLOR = '#7d93a8';
 // says the position is approximate. No invented places.
 function peers() {
   const v = S.view; if (!v || !v.members) return [];
-  const ms = [...v.members].sort((a, b) => (a.kind === 'self_node' ? -1 : b.kind === 'self_node' ? 1 : 0));
+  let ms = [...v.members].sort((a, b) => (a.kind === 'self_node' ? -1 : b.kind === 'self_node' ? 1 : 0));
+  // Hide-offline toggle: drop non-self peers whose derived status isn't online (self always stays).
+  if (S.hideOffline) ms = ms.filter(m => m.kind === 'self_node' || (m.status || (m.online ? 'online' : 'offline')) === 'online');
   const anchor = ms.find(m => (m.lat || 0) !== 0 || (m.lon || 0) !== 0);
   return ms.map((m) => {
     const st = m.status || (m.online ? 'online' : 'offline');
@@ -379,7 +382,11 @@ function refreshScreen() {
       <div style="padding:16px;border-radius:14px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,0.14);text-align:center;">
         <div class="m" style="font-size:clamp(20px,2.6vw,28px);font-weight:600;color:${n.color};text-shadow:0 0 14px rgba(120,200,255,0.4);">${n.val}</div>
         <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-top:6px;">${labels[i]}</div>
-      </div>`).join('') + `</div><div style="display:flex;flex-direction:column;gap:8px;">` + P.map((p, i) => `
+      </div>`).join('') + `</div>` + `
+      <div onclick="sphereToggleOffline()" style="cursor:pointer;display:flex;align-items:center;gap:9px;margin-bottom:14px;user-select:none;">
+        <span style="width:34px;height:19px;border-radius:19px;flex-shrink:0;background:${S.hideOffline?'rgba(61,220,151,0.55)':'rgba(120,150,190,0.28)'};border:1px solid ${S.hideOffline?'rgba(61,220,151,0.7)':'rgba(140,160,190,0.4)'};position:relative;transition:background 0.15s;"><span style="position:absolute;top:1.5px;left:${S.hideOffline?'16px':'2px'};width:14px;height:14px;border-radius:50%;background:#eef2fb;transition:left 0.15s;box-shadow:0 1px 3px rgba(0,0,0,0.4);"></span></span>
+        <span class="m" style="font-size:11px;letter-spacing:0.04em;color:rgba(180,205,255,0.75);">Hide offline nodes</span>
+      </div>` + `<div style="display:flex;flex-direction:column;gap:8px;">` + P.map((p, i) => `
       <div onclick="sphereDive(${i})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:rgba(16,34,60,0.2);border:1px solid rgba(120,190,255,0.1);">
         <span style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color};"></span>
         <span style="font-size:14px;font-weight:600;flex:1;">${esc(p.name)}</span>
@@ -521,6 +528,14 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
   renderChrome(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 window.sphereAnswerThread = (id) => { S.answeringThread = id; refreshScreen(); };
+window.sphereToggleOffline = () => {
+  S.hideOffline = !S.hideOffline;
+  try { localStorage.setItem('sphere.hideOffline', S.hideOffline ? '1' : '0'); } catch (e) {}
+  // peers() feeds the roster, the globe callouts/arcs, and the map — re-render all three.
+  try { renderCallouts(); } catch (e) { S.jsErr = 'callouts: ' + e.message; }
+  try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + S.activeScreen + ': ' + e.message; }
+  if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
+};
 window.sphereSubmitThreadAnswer = (id) => {
   const inp = $('thanswer');
   const text = inp ? inp.value.trim() : '';
