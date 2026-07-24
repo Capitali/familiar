@@ -92,7 +92,7 @@ fn set_mode(_path: &Path, _mode: &str) -> io::Result<()> {
 
 /// FNV-1a — small, deterministic, dependency-free (same construction the kernel's
 /// loop detector uses for stable ids).
-fn fnv1a(bytes: &[u8]) -> u64 {
+pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
         h ^= b as u64;

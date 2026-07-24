@@ -15,7 +15,9 @@
 //! lexicographically, never weights in a composite score.
 #![forbid(unsafe_code)]
 
+pub mod campaign;
 pub mod evaluator;
+pub mod evidence;
 pub mod gate;
 pub mod harness;
 pub mod report;

@@ -14,7 +14,7 @@
 //! B/D fall back to the deterministic template and the report says so.
 
 use familiar_scenario::harness::{self, Control, RunConfig};
-use familiar_scenario::{scenario, validate};
+use familiar_scenario::{campaign, evidence, scenario, validate};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -23,6 +23,8 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("run") => run(&args[1..], false),
         Some("matrix") => run(&args[1..], true),
+        Some("campaign") => campaign_cmd(&args[1..]),
+        Some("report") => report_cmd(&args[1..]),
         Some("validate") => validate_cmd(args.get(1).map(String::as_str)),
         Some("list") => list(args.get(1).map(String::as_str)),
         _ => {
@@ -31,10 +33,84 @@ fn main() -> ExitCode {
                  [--replicate N] [--lab DIR] [--llm-adapter PATH] [--llm-required] \
                  [--llm-patience S] [--llm-backoff S] [--adapter-timeout S]\n       \
                  familiar-lab matrix <fixture.json> [same flags]\n       \
+                 familiar-lab campaign <plan.json> [--resume] [--force]\n       \
+                 familiar-lab report <dir> [--md PATH] [--json PATH]\n       \
                  familiar-lab validate <fixture.json|DIR>\n       \
                  familiar-lab list [DIR]"
             );
             ExitCode::from(2)
+        }
+    }
+}
+
+fn campaign_cmd(args: &[String]) -> ExitCode {
+    let Some(plan_path) = args.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("familiar-lab: a campaign plan (JSON) is required");
+        return ExitCode::from(2);
+    };
+    let plan = match campaign::load_plan(Path::new(plan_path)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("familiar-lab: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let resume = args.iter().any(|a| a == "--resume");
+    let force = args.iter().any(|a| a == "--force");
+    match campaign::run(&plan, resume, force) {
+        Ok(outcome) => {
+            println!(
+                "campaign {:?}: {} cells run, {} skipped, {} failed (state in {})",
+                outcome.halt,
+                outcome.cells_run,
+                outcome.cells_skipped,
+                outcome.cells_failed,
+                plan.out.display()
+            );
+            match outcome.halt {
+                campaign::Halt::Complete => ExitCode::SUCCESS,
+                // Interrupted-but-resumable is not a failure, but it is not done.
+                _ => ExitCode::from(3),
+            }
+        }
+        Err(e) => {
+            eprintln!("familiar-lab: campaign: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn report_cmd(args: &[String]) -> ExitCode {
+    let Some(dir) = args.first().filter(|a| !a.starts_with("--")) else {
+        eprintln!("familiar-lab: a directory of reports is required");
+        return ExitCode::from(2);
+    };
+    match evidence::Evidence::collect(Path::new(dir)) {
+        Ok(ev) if ev.scenarios.is_empty() => {
+            eprintln!("no report.json files under {dir}");
+            ExitCode::FAILURE
+        }
+        Ok(ev) => {
+            print!("{}", ev.table());
+            if let Some(md) = flag(args, "--md") {
+                if let Err(e) = std::fs::write(&md, ev.markdown()) {
+                    eprintln!("familiar-lab: writing {md}: {e}");
+                    return ExitCode::FAILURE;
+                }
+                println!("markdown evidence written to {md}");
+            }
+            if let Some(json) = flag(args, "--json") {
+                if let Err(e) = ev.save(Path::new(&json)) {
+                    eprintln!("familiar-lab: writing {json}: {e}");
+                    return ExitCode::FAILURE;
+                }
+                println!("json evidence written to {json}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("familiar-lab: report: {e}");
+            ExitCode::FAILURE
         }
     }
 }
