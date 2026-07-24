@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The periphery's LAN-discovery timer. Network discovery is no longer a reflex of the core's
+  metabolism (it flooded the theory pipeline with trivial recurrence); the shell drives it on
+  its own cadence instead. This periodic agent invokes `familiar discover` — a one-shot,
+  allow_network-gated survey (devices + reach) whose findings flow back through the observe seam
+  to seed the roster and the map frontier. If the network gate is shut, discover simply refuses
+  and records nothing, so this timer is safe to keep loaded regardless of the boundary state.
+
+  Install (confirm-gated, same as the daemon): copy to ~/Library/LaunchAgents/ and
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.river.familiar.discover.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.river.familiar.discover</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/ian/Library/Application Support/Familiar/bin/familiar</string>
+    <string>discover</string>
+    <string>--data-dir</string>
+    <string>/Users/ian/Library/Application Support/Familiar/data</string>
+  </array>
+  <!-- Every 15 minutes — the cadence the old every-15-ticks core sweep worked out to at the
+       60s active interval, now owned by the periphery rather than the metabolism. -->
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key><string>/Users/ian/Library/Application Support/Familiar/data/discover.log</string>
+  <key>StandardErrorPath</key><string>/Users/ian/Library/Application Support/Familiar/data/discover.log</string>
+</dict>
+</plist>
