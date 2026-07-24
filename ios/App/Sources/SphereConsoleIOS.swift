@@ -51,6 +51,7 @@ struct SphereConsoleIOS: View {
             }
             bridge.onUnenroll = { [weak model] in model?.unenroll() }
             bridge.onAnswerThread = { [weak model] id, text in model?.answerThread(id, text) }
+            bridge.onInvite = { [weak model] in model?.addressPayload }
             bridge.pushDevice(model.deviceStateJSON())
         }
         .onReceive(model.$worldviewJSON) { json in
@@ -107,6 +108,9 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onConsent: ((String, Bool) -> Void)?
     var onAnswerThread: ((String, String) -> Void)?
     var onUnenroll: (() -> Void)?
+    /// This member's join payload (an address, never a secret) — any enrolled
+    /// member is a scan-to-join point, so the console renders it as the QR.
+    var onInvite: (() -> String?)?
     private var projectTimer: Timer?
     private var nodes: [[String: Any]] = []
 
@@ -150,6 +154,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             a.coordinate = CLLocationCoordinate2D(latitude: n["lat"] as? Double ?? 0,
                                                   longitude: n["lon"] as? Double ?? 0)
             a.title = n["label"] as? String
+            a.subtitle = n["sublabel"] as? String
             a.colorHex = n["color"] as? String ?? "#3ddc97"
             a.frontier = n["frontier"] as? Bool ?? false
             a.isSelf = n["self"] as? Bool ?? false
@@ -166,7 +171,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
         v.markerTintColor = UIColor(hexString: node.colorHex)
         v.displayPriority = node.frontier ? .defaultLow : .required
         v.alpha = node.frontier ? 0.45 : 1.0
-        v.titleVisibility = node.frontier ? .hidden : .visible
+        v.titleVisibility = .visible
+        v.subtitleVisibility = .adaptive
         return v
     }
 
@@ -253,6 +259,14 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "consent":
                 if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
+            case "invite":
+                if let payload = self.onInvite?(),
+                   let quoted = (try? JSONEncoder().encode(payload))
+                       .flatMap({ String(data: $0, encoding: .utf8) }) {
+                    self.web?.evaluateJavaScript(
+                        "window.sphereInvite && window.sphereInvite(\(quoted))",
+                        completionHandler: nil)
+                }
             case "unenroll":
                 self.onUnenroll?()
             case "gate":

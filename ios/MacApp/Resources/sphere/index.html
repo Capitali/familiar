@@ -134,7 +134,11 @@ try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catc
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const ago = (secs) => { const s = Math.max(0, secs|0); const d = s/86400|0, h = s%86400/3600|0, m = s%3600/60|0; return d? d+'d '+h+'h' : h? h+'h '+m+'m' : m? m+'m' : s+'s'; };
+// Durations ("4h 12m") — for spans like uptime and time-online.
+const dur = (secs) => { const s = Math.max(0, secs|0); const d = s/86400|0, h = s%86400/3600|0, m = s%3600/60|0; return d? d+'d '+h+'h' : h? h+'h '+m+'m' : m? m+'m' : s+'s'; };
+// Points in time — the standardized console format: YY/MM/DD-HH:MMUTC.
+const utc = (ts) => { if (!(ts > 0)) return '—'; const d = new Date(ts*1000); const p = (n) => String(n).padStart(2,'0');
+  return String(d.getUTCFullYear()%100).padStart(2,'0') + '/' + p(d.getUTCMonth()+1) + '/' + p(d.getUTCDate()) + '-' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + 'UTC'; };
 const dstr = (ts) => ts>0 ? new Date(ts*1000).toISOString().slice(0,10) : '—';
 const nowS = () => Date.now()/1000|0;
 const hash32 = (str) => { let h = 2166136261>>>0; for (const c of str) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h>>>0; };
@@ -163,9 +167,9 @@ function peers() {
       m, name: m.label, lat, lon, located, hasAnchor: !!anchor, status: st,
       color: statusColor(st, m.kind), local: m.kind === 'self_node',
       kindWord: { self_node: 'SELF', gossip_peer: 'PEER', device_peer: 'DEVICE', device_agent: 'AGENT' }[m.kind] || 'NODE',
-      seen: st === 'online' ? 'now' : ago(nowS() - m.last_seen) + ' ago',
-      session: m.session_start > 0 ? ago(nowS() - m.session_start) : '—',
-      total: m.total_online_secs > 0 ? ago(m.total_online_secs) : '—',
+      seen: st === 'online' ? 'now' : utc(m.last_seen),
+      session: m.session_start > 0 ? dur(nowS() - m.session_start) : '—',
+      total: m.total_online_secs > 0 ? dur(m.total_online_secs) : '—',
       os: (m.os_version || m.os || '?') + (m.familiar_version ? ' · v' + m.familiar_version : ''),
     };
   });
@@ -350,7 +354,7 @@ function refreshScreen() {
       <div style="display:flex;align-items:flex-start;gap:14px;padding:13px 16px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid rgba(120,190,255,0.12);margin-bottom:9px;">
         <span style="width:8px;height:8px;border-radius:50%;background:${wkColor[kk]};box-shadow:0 0 9px ${wkColor[kk]};flex-shrink:0;margin-top:6px;"></span>
         <div style="flex:1;"><div style="font-size:clamp(13px,1.5vw,15px);line-height:1.4;color:rgba(232,240,252,0.9);">${esc(o.actor)} ${esc(o.action)} ${esc(o.object)}</div></div>
-        <span class="m" style="font-size:9px;color:rgba(150,180,255,0.5);flex-shrink:0;">${ago(nowS() - o.ts)}</span>
+        <span class="m" style="font-size:9px;color:rgba(150,180,255,0.5);flex-shrink:0;">${utc(o.ts)}</span>
       </div>`; }).join('') + `</div>`;
 
   } else if (k === 'signals') {
@@ -375,7 +379,7 @@ function refreshScreen() {
     const stats = [
       { val:String(P.length), color:'#e4f2ff' }, { val:String(on), color:'#8ef0c6' },
       { val:String(v.observation_count ?? 0), color:'#aee7ff' },
-      { val:String(v.tick ?? 0), color:'#9cc0ff' }, { val:ago(v.uptime_secs ?? 0), color:'#bcd2ff' },
+      { val:String(v.tick ?? 0), color:'#9cc0ff' }, { val:dur(v.uptime_secs ?? 0), color:'#bcd2ff' },
     ];
     const labels = ['NODES','ONLINE','OBS','TICK','UPTIME'];
     el.innerHTML = `<div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:22px;">` + stats.map((n, i) => `
@@ -458,7 +462,7 @@ function refreshScreen() {
         ${gateGlyph(on)}
         <span class="m" style="font-size:9px;letter-spacing:0.14em;color:rgba(200,216,248,0.6);">${name}</span>
       </button>`).join('') + `</div>
-      <div class="m" style="margin-top:18px;font-size:10px;color:rgba(150,180,255,0.5);">${ago(v.uptime_secs ?? 0)} · ${v.tick ?? 0}</div>`;
+      <div class="m" style="margin-top:18px;font-size:10px;color:rgba(150,180,255,0.5);">${dur(v.uptime_secs ?? 0)} · ${v.tick ?? 0}</div>`;
   }
 }
 
@@ -638,8 +642,8 @@ window.sphereDiveFrontier = (i) => {
 };
 function collectNodes() {
   const P = peers(), F = frontierNodes();
-  return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, color: p.color, frontier: false, self: p.local }))
-    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, color: FRONTIER_COLOR, frontier: true, self: false })));
+  return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, sublabel: p.m.addr || '', color: p.color, frontier: false, self: p.local }))
+    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })));
 }
 function handoff(p) {
   S.mode = 'street'; renderChrome();

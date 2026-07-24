@@ -196,6 +196,7 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             a.coordinate = CLLocationCoordinate2D(latitude: n["lat"] as? Double ?? 0,
                                                   longitude: n["lon"] as? Double ?? 0)
             a.title = n["label"] as? String
+            a.subtitle = n["sublabel"] as? String
             a.colorHex = n["color"] as? String ?? "#3ddc97"
             a.frontier = n["frontier"] as? Bool ?? false
             a.isSelf = n["self"] as? Bool ?? false
@@ -212,7 +213,8 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
         v.markerTintColor = NSColor(hex: node.colorHex)
         v.displayPriority = node.frontier ? .defaultLow : .required
         v.alphaValue = node.frontier ? 0.45 : 1.0
-        v.titleVisibility = node.frontier ? .hidden : .visible
+        v.titleVisibility = .visible
+        v.subtitleVisibility = .adaptive
         return v
     }
 
