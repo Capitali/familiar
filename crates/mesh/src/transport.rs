@@ -1241,6 +1241,13 @@ fn push_tool(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     if sha256_hex(&script_body) != push.manifest.script_sha256 {
         return text(StatusCode::BAD_REQUEST, "hash mismatch");
     }
+    // Refuse a pushed tool that reaches the network: it was authored against the pusher's LAN and
+    // has no honest meaning here, and installing a foreign scan/probe is exactly the intrusion the
+    // outbound filter (`push_missing_tools`) already declines to spread. Defense in depth — a peer
+    // on an older build, or a hostile one, doesn't get to plant one on us.
+    if familiar_kernel::review::reaches_network(&String::from_utf8_lossy(&script_body)) {
+        return text(StatusCode::FORBIDDEN, "network-reaching tools are not federated");
+    }
     if known_tool_shas(dir).contains(&push.manifest.script_sha256) {
         return text(StatusCode::OK, "already known");
     }
@@ -1500,6 +1507,13 @@ async fn push_missing_tools(dir: &Path, addr: &str, peer_known: &std::collection
         let Ok(body) = std::fs::read(&t.script_path) else {
             continue;
         };
+        // A tool that reaches the network is authored against *this* host's LAN — its target IPs,
+        // its router, its neighbours. Replicating it to another peer plants a scan/probe that is
+        // meaningless there at best and intrusive on that peer's network at worst. Keep such tools
+        // local; only portable tools (local computation, text/host introspection) federate.
+        if familiar_kernel::review::reaches_network(&String::from_utf8_lossy(&body)) {
+            continue;
+        }
         let sha = sha256_hex(&body);
         if peer_known.contains(&sha) {
             continue;
@@ -2205,6 +2219,27 @@ mod tests {
         // Pushing the exact same content again is a harmless no-op, not a duplicate.
         assert_eq!(body_status(&push_tool(&dir, &body)), StatusCode::OK);
         assert_eq!(familiar_kernel::tool::load(&dir).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn push_tool_refuses_a_network_reaching_tool() {
+        let dir = fresh_dir("push_tool_net");
+        // A LAN scan authored against the pusher's network — hash-valid, share_tools on, but it
+        // reaches the network, so it must not be federated onto us.
+        let script = b"#!/bin/sh\nnmap -sn 192.168.1.0/24\n";
+        let sha = sha256_hex(script);
+        let manifest = serde_json::json!({
+            "tool_id": "t-scan", "name": "lan_scan", "purpose": "sweep the lan",
+            "keywords": ["scan"], "script_sha256": sha, "uses": 1, "last_exit_ok": true,
+        });
+        let payload = serde_json::json!({
+            "manifest": manifest,
+            "body_hex": crate::hex_encode(script),
+            "from_node_id": "peer-node-id",
+        });
+        let body = serde_json::to_vec(&payload).unwrap();
+        assert_eq!(body_status(&push_tool(&dir, &body)), StatusCode::FORBIDDEN);
+        assert!(familiar_kernel::tool::load(&dir).unwrap().is_empty());
     }
 
     #[test]

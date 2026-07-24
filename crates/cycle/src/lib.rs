@@ -842,10 +842,26 @@ fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
             declined: Some(reason.to_string()),
         });
     }
+    let boundary = familiar_kernel::boundary::load(dir).ok();
+    // A tool that reaches outward onto the network only runs when the human has opened
+    // `allow_network` — the same gate `sense`/`reach` respect. Without this, an authored
+    // scan/probe script bypassed the network boundary entirely at execution time.
+    if familiar_kernel::review::reaches_network(&script)
+        && boundary.as_ref().map(|b| !b.allow_network).unwrap_or(true)
+    {
+        let _ = tool::record_use(dir, &t.id, now, false, "declined: network is closed");
+        return Ok(ToolRun {
+            out: String::new(),
+            healthy: false,
+            status: "declined: network is closed".to_string(),
+            confidence: Confidence::Known,
+            uses: t.uses,
+            broken: None,
+            declined: Some("it reaches the network, which is not open (allow_network)".to_string()),
+        });
+    }
     let ws = familiar_workspace();
-    let sandbox = familiar_kernel::boundary::load(dir)
-        .map(|b| b.sandbox_execution)
-        .unwrap_or(true);
+    let sandbox = boundary.map(|b| b.sandbox_execution).unwrap_or(true);
     let limits = if sandbox {
         // A real tool does real work — sampling CPU over a few seconds, an nmap sweep — which
         // the tick's tight candidate budget (5s/10s) could only ever time out. `tool_run` is
@@ -3155,6 +3171,53 @@ mod tests {
         let (body, conf, _) = run_tool(&t.0, &tl, 100, false).unwrap();
         assert_eq!(conf, Confidence::Known);
         assert!(body.contains("declined"), "it explains it won't run it");
+    }
+
+    #[test]
+    fn execute_tool_declines_a_network_tool_when_the_gate_is_shut() {
+        let t = Temp::new("nettool");
+        let dir = &t.0;
+        // A saved tool that reaches the network (a ping) — honest, not harmful, so `review_script`
+        // clears it. But with the network gate shut it must be declined before it runs.
+        let script_path = dir.join("net.sh");
+        std::fs::write(&script_path, "#!/bin/sh\nping -c 1 127.0.0.1\n").unwrap();
+        let tl = Tool {
+            id: "tool-0001".into(),
+            name: "netcheck".into(),
+            purpose: "p".into(),
+            keywords: "x".into(),
+            script_path: script_path.display().to_string(),
+            created_at: 1,
+            uses: 0,
+            last_used: 0,
+            last_exit_ok: true,
+            last_status: String::new(),
+            origin: String::new(),
+            origin_verified_at: 0,
+        };
+        tool::append(dir, &tl).unwrap();
+
+        // Gate shut (allow_execute on so we clear the execute gate, but allow_network off).
+        write_boundary(dir, true, true, true);
+        let run = execute_tool(dir, &tl, 100).unwrap();
+        assert!(run.declined.is_some(), "network tool declined while gate shut");
+        assert!(run.status.contains("network is closed"));
+
+        // Open the network gate → the same tool is no longer declined for network reasons.
+        let mut b = boundary::Boundary::closed();
+        b.allow_execute = true;
+        b.allow_network = true;
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&b).unwrap(),
+        )
+        .unwrap();
+        let run = execute_tool(dir, &tl, 100).unwrap();
+        assert!(
+            run.declined.is_none()
+                || !run.status.contains("network is closed"),
+            "network tool runs once the gate is open"
+        );
     }
 
     #[test]

@@ -68,9 +68,56 @@ pub fn review_script(script: &str) -> Option<&'static str> {
     }
 }
 
+/// Does this script reach *outward* onto the network — probe, scan, or connect to other hosts?
+///
+/// A conservative heuristic sibling of [`review_script`], used to gate authored-tool execution
+/// on the `Network` boundary: a tool that reaches the network only runs when the human has opened
+/// `allow_network`, mirroring how [`crate::observation`]-producing perception (`sense`/`reach`)
+/// is already gated. Reading *local* network config (interfaces, the ARP cache, listening ports)
+/// is free perception and is deliberately **not** flagged here — only active outward reach is.
+/// Like `review_script`, it flags intent by keyword and cannot be exhaustive; it stops the plain,
+/// common ways an authored tool would scan or dial the network while the gate is shut.
+pub fn reaches_network(script: &str) -> bool {
+    let s = script.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
+    has(&[
+        // scanners / sweepers
+        "nmap", "masscan", "arp-scan", "zmap", "fping",
+        "ping ", "ping6", "ping -", "traceroute", "tracert",
+        // raw connectors
+        "nc ", "ncat", "netcat", "/dev/tcp/", "/dev/udp/", "telnet",
+        // remote shells / transfers
+        "ssh ", "sftp ", "scp ", "rsync ",
+        // fetchers
+        "curl ", "wget ", "http://", "https://", "ftp://",
+        // dns / service discovery (queries leave the host)
+        "dig ", "nslookup", "host -", "dns-sd", "avahi-browse", "avahi-resolve",
+        // passive-but-privileged capture
+        "tcpdump", "tshark",
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reaches_network_flags_outward_reach_but_not_local_perception() {
+        // Outward reach — the authored-scan family the tool store is full of.
+        assert!(reaches_network("#!/bin/sh\nnmap -sn 192.168.108.0/24\n"));
+        assert!(reaches_network("ping -c 1 192.168.1.10"));
+        assert!(reaches_network("nc -z 10.0.0.5 22"));
+        assert!(reaches_network("tcpdump -c 5 -i en0"));
+        assert!(reaches_network("curl https://example.com/health"));
+        assert!(reaches_network("ssh root@10.0.0.1 uptime"));
+        assert!(reaches_network("dns-sd -B _airplay._tcp"));
+        // Local perception — reading the host's own network state stays free.
+        assert!(!reaches_network("#!/bin/sh\nifconfig -a\n"));
+        assert!(!reaches_network("netstat -an | wc -l"));
+        assert!(!reaches_network("arp -a -n"));
+        assert!(!reaches_network("sysctl -n hw.ncpu"));
+        assert!(!reaches_network("ps aux | head"));
+    }
 
     #[test]
     fn refuses_the_plainly_harmful_and_allows_honest_scripts() {

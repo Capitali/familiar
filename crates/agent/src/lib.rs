@@ -129,6 +129,16 @@ fn run_gated(dir: &Path, scoped: &Boundary, script: &str, _now: i64) -> io::Resu
              approach."
         ));
     }
+    // Outward network reach is gated even inside a delegated run: a probe/scan/fetch only runs
+    // when the scoped boundary has `allow_network`, mirroring `sense`/`reach`. A refusal is fed
+    // back as an observation so the agent re-plans within its granted capability.
+    if familiar_kernel::review::reaches_network(script) && !scoped.allow_network {
+        return Ok(
+            "REFUSED by your scoped boundary — that reaches the network, which is not open \
+             (allow_network). Propose only what's within your granted capability."
+                .to_string(),
+        );
+    }
     let work = dir.join("agent").join("work");
     fs::create_dir_all(&work)?;
     let path = work.join("step.sh");
@@ -282,6 +292,23 @@ mod tests {
         let out = run_agent(&dir, &scope, "scan the network", 3, 0).unwrap();
         assert!(out.is_none(), "a closed boundary must not delegate");
         // and it left no scratch behind
+        assert!(!dir.join("agent").join("work").join("step.sh").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_gated_refuses_outward_reach_without_the_network_scope() {
+        // Execute is granted but network is not: a probe must be refused *before* it runs, fed
+        // back as an observation string (not an error), so the agent re-plans within scope.
+        let dir = std::env::temp_dir().join(format!("familiar_agent_net_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut scoped = Boundary::closed();
+        scoped.allow_execute = true; // execute open, network shut
+        let out = run_gated(&dir, &scoped, "#!/bin/sh\nnmap -sn 10.0.0.0/24\n", 0).unwrap();
+        assert!(out.contains("REFUSED"), "the network reach is refused: {out}");
+        assert!(out.to_lowercase().contains("network"));
+        // nothing was written to run
         assert!(!dir.join("agent").join("work").join("step.sh").exists());
         let _ = fs::remove_dir_all(&dir);
     }
