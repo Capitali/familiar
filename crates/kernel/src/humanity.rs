@@ -77,8 +77,20 @@ mod tests {
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
 
-        let a = record(&p, "The person works in long focused silences — quiet is not absence.", "motion:still", 100).unwrap();
-        let b = record(&p, "They return to the same question across days — it matters, unresolved.", "asks:status", 200).unwrap();
+        let a = record(
+            &p,
+            "The person works in long focused silences — quiet is not absence.",
+            "motion:still",
+            100,
+        )
+        .unwrap();
+        let b = record(
+            &p,
+            "They return to the same question across days — it matters, unresolved.",
+            "asks:status",
+            200,
+        )
+        .unwrap();
         assert_eq!(a.id, "humanity-0001");
         assert_eq!(b.id, "humanity-0002");
 

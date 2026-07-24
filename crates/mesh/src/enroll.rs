@@ -251,7 +251,10 @@ pub fn request_join(
         port,
         "POST",
         "/mesh/enroll-request",
-        &[("X-Familiar-Sig", &sig), ("Content-Type", "application/json")],
+        &[
+            ("X-Familiar-Sig", &sig),
+            ("Content-Type", "application/json"),
+        ],
         &raw,
     )?;
     match status {
@@ -261,7 +264,9 @@ pub fn request_join(
             Ok(JoinOutcome::Admitted(Box::new(grant)))
         }
         202 => Ok(JoinOutcome::Pending),
-        403 => Err(Error::Untrusted(String::from_utf8_lossy(&body).into_owned())),
+        403 => Err(Error::Untrusted(
+            String::from_utf8_lossy(&body).into_owned(),
+        )),
         _ => Err(Error::Malformed(format!("enroll-request: HTTP {status}"))),
     }
 }
@@ -269,7 +274,14 @@ pub fn request_join(
 /// Poll a familiar for the decision on our request. Returns the grant (persisted) once approved,
 /// `None` while still pending; `Untrusted` if the request was declined/removed.
 pub fn poll_join(dir: &Path, host: &str, port: u16, node_id: &str) -> Result<Option<Grant>> {
-    let (status, body) = http(host, port, "GET", &format!("/mesh/enroll-status/{node_id}"), &[], &[])?;
+    let (status, body) = http(
+        host,
+        port,
+        "GET",
+        &format!("/mesh/enroll-status/{node_id}"),
+        &[],
+        &[],
+    )?;
     match status {
         200 => {
             let grant: Grant = serde_json::from_slice(&body)?;
@@ -310,7 +322,8 @@ fn http(
         .map_err(|e| Error::Malformed(format!("resolve {host}:{port}: {e}")))?
         .next()
         .ok_or_else(|| Error::Malformed(format!("no address for {host}:{port}")))?;
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(Error::Io)?;
+    let mut stream =
+        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(Error::Io)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
 
@@ -351,8 +364,12 @@ fn mint_grant(
     node: &NodeIdentity,
     now: i64,
 ) -> Result<Grant> {
-    let membership =
-        cred.mint_membership(&node.node_id, &node.pubkey, now, group::DEFAULT_CERT_TTL_SECS)?;
+    let membership = cred.mint_membership(
+        &node.node_id,
+        &node.pubkey,
+        now,
+        group::DEFAULT_CERT_TTL_SECS,
+    )?;
     let grant = Grant {
         membership,
         group_id: cred.group_id.clone(),
@@ -391,7 +408,10 @@ fn load_grant(dir: &Path, node_id: &str) -> Result<Option<Grant>> {
 fn write_json<T: Serialize>(dir: &Path, subdir: &str, node_id: &str, v: &T) -> Result<()> {
     let d = dir.join(subdir);
     std::fs::create_dir_all(&d)?;
-    std::fs::write(d.join(format!("{node_id}.json")), serde_json::to_vec_pretty(v)?)?;
+    std::fs::write(
+        d.join(format!("{node_id}.json")),
+        serde_json::to_vec_pretty(v)?,
+    )?;
     Ok(())
 }
 
@@ -455,7 +475,10 @@ mod tests {
             Submitted::Pending(p) => assert_eq!(p.node.node_id, joiner.node_id()),
             _ => panic!("expected pending"),
         }
-        assert!(matches!(enroll_status(&host, &joiner.node_id()).unwrap(), StatusOutcome::Pending));
+        assert!(matches!(
+            enroll_status(&host, &joiner.node_id()).unwrap(),
+            StatusOutcome::Pending
+        ));
         assert_eq!(list_pending(&host).unwrap().len(), 1);
 
         // Human approves → a grant whose cert verifies under the group key.
@@ -467,7 +490,10 @@ mod tests {
         assert!(list_pending(&host).unwrap().is_empty());
 
         // The joiner can now poll and receive the grant.
-        assert!(matches!(enroll_status(&host, &joiner.node_id()).unwrap(), StatusOutcome::Granted(_)));
+        assert!(matches!(
+            enroll_status(&host, &joiner.node_id()).unwrap(),
+            StatusOutcome::Granted(_)
+        ));
     }
 
     #[test]
@@ -482,7 +508,10 @@ mod tests {
         // After the window closes, a new joiner pends again.
         let other = NodeKey::load_or_mint(&fresh("invite_other"), "phone").unwrap();
         let (raw2, sig2) = signed_request(&other, NOW + 400, "n2");
-        assert!(matches!(submit_request(&host, &raw2, &sig2, NOW + 400).unwrap(), Submitted::Pending(_)));
+        assert!(matches!(
+            submit_request(&host, &raw2, &sig2, NOW + 400).unwrap(),
+            Submitted::Pending(_)
+        ));
     }
 
     #[test]
@@ -491,7 +520,10 @@ mod tests {
         let (raw, _good) = signed_request(&joiner, NOW, "n1");
         // Signature over different bytes → rejected.
         let wrong = joiner.sign(b"not the request");
-        assert!(matches!(submit_request(&host, &raw, &wrong, NOW), Err(Error::Untrusted(_))));
+        assert!(matches!(
+            submit_request(&host, &raw, &wrong, NOW),
+            Err(Error::Untrusted(_))
+        ));
     }
 
     #[test]
@@ -501,6 +533,9 @@ mod tests {
         submit_request(&host, &raw, &sig, NOW).unwrap();
         assert!(deny(&host, &joiner.node_id()).unwrap());
         assert!(!deny(&host, &joiner.node_id()).unwrap()); // already gone
-        assert!(matches!(enroll_status(&host, &joiner.node_id()).unwrap(), StatusOutcome::Unknown));
+        assert!(matches!(
+            enroll_status(&host, &joiner.node_id()).unwrap(),
+            StatusOutcome::Unknown
+        ));
     }
 }

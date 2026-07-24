@@ -4,7 +4,7 @@
 //! instance are also checked to confirm nothing crosses without authorization.
 
 use familiar_mesh::brief::*;
-use familiar_mesh::config::{MeshConfig};
+use familiar_mesh::config::MeshConfig;
 use familiar_mesh::group::{self, DEFAULT_CERT_TTL_SECS};
 use familiar_mesh::node::NodeKey;
 use familiar_mesh::transport::{self, now_secs};
@@ -159,7 +159,15 @@ fn closed_boundary_never_binds_or_exchanges() {
     let a = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();
     let b = NodeKey::load_or_mint(&dir_b, "beta").unwrap();
     let cred_a = group::create_group(&dir_a, &a, "e2e", now_secs(), DEFAULT_CERT_TTL_SECS).unwrap();
-    let cred_b = group::join_group(&dir_b, &b, &cred_a.join_key(), "e2e", now_secs(), DEFAULT_CERT_TTL_SECS).unwrap();
+    let cred_b = group::join_group(
+        &dir_b,
+        &b,
+        &cred_a.join_key(),
+        "e2e",
+        now_secs(),
+        DEFAULT_CERT_TTL_SECS,
+    )
+    .unwrap();
 
     // A is OPEN, B is CLOSED (allow_mesh=false). B must neither serve nor gossip.
     write_boundary(&dir_a, true);
@@ -177,8 +185,14 @@ fn closed_boundary_never_binds_or_exchanges() {
 
     // B is closed: it never serves, so A cannot deposit into B's inbox, and B never
     // gossips, so A's inbox stays empty of B too.
-    assert!(!inbox_has(&dir_b, &a.node_id()), "closed B must not accept briefs");
-    assert!(!inbox_has(&dir_a, &b.node_id()), "closed B must not gossip out");
+    assert!(
+        !inbox_has(&dir_b, &a.node_id()),
+        "closed B must not accept briefs"
+    );
+    assert!(
+        !inbox_has(&dir_a, &b.node_id()),
+        "closed B must not gossip out"
+    );
 
     let _ = fs::remove_dir_all(&dir_a);
     let _ = fs::remove_dir_all(&dir_b);

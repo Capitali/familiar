@@ -39,6 +39,9 @@ mod tests {
         // A guardrail, not a script: present, substantive, but compact enough to prepend to prompts.
         assert!(LAW_III_VOICE.contains("Preference is not permission"));
         assert!(LAW_III_VOICE.contains("service is not obedience"));
-        assert!(LAW_III_VOICE.len() < 2000, "voice guidance must stay compact");
+        assert!(
+            LAW_III_VOICE.len() < 2000,
+            "voice guidance must stay compact"
+        );
     }
 }

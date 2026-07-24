@@ -187,7 +187,8 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                 // human turned on auto_peer, reach out to the tailnet and ask to be admitted; the
                 // next loop iteration then finds a group and gossips. Otherwise idle for the human.
                 if cfg.auto_peer && auto_join_round(&dir, &cfg).await > 0 {
-                    let _ = write_status(&dir, "✓ auto-peer — admitted by covenant, joining the mesh");
+                    let _ =
+                        write_status(&dir, "✓ auto-peer — admitted by covenant, joining the mesh");
                     continue; // skip the sleep so we start serving/gossiping immediately
                 }
                 let msg = if cfg.auto_peer {
@@ -216,7 +217,8 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                     server = Some(tokio::spawn(serve(listener, ctx)));
                 }
                 Err(e) => {
-                    let _ = write_status(&dir, &format!("mesh bind :{} failed: {e}", cfg.gossip_port));
+                    let _ =
+                        write_status(&dir, &format!("mesh bind :{} failed: {e}", cfg.gossip_port));
                     sleep_or_stop(&stop, interval).await;
                     continue;
                 }
@@ -490,7 +492,13 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         return text(StatusCode::BAD_REQUEST, "empty");
     }
     let obs = familiar_kernel::observation::Observation::new(
-        "ian", "told the familiar", t, "console", "local", now_secs(), 1.0,
+        "ian",
+        "told the familiar",
+        t,
+        "console",
+        "local",
+        now_secs(),
+        1.0,
     );
     let _ = familiar_kernel::observation::record(dir, obs);
     // Retire the open question so the cycle re-coordinates.
@@ -527,7 +535,8 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
             Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
         };
     }
-    let mut b = familiar_kernel::boundary::load(dir).unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
+    let mut b = familiar_kernel::boundary::load(dir)
+        .unwrap_or_else(|_| familiar_kernel::boundary::Boundary::closed());
     match gate {
         "allow_llm" => b.allow_llm = open,
         "allow_camera" => b.allow_camera = open,
@@ -553,7 +562,7 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
 }
 
 /// `POST /mesh/worldview` → a member device asks for a snapshot of what the familiar knows. Signed
-/// + membership-bearing (verified like an observe batch); 200 + JSON worldview, 409 replay, 403
+/// and membership-bearing (verified like an observe batch); 200 + JSON worldview, 409 replay, 403
 /// untrusted, 400 malformed. The read seam that lets an iPad be a peer console, not just a sensor.
 fn recv_worldview(
     dir: &Path,
@@ -712,7 +721,13 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
             if known.contains(sha) || inbox_tool_path(dir, sha).exists() {
                 continue;
             }
-            if let Ok(resp) = http_send(addr, Method::GET, &format!("/mesh/tool/{}", t.tool_id), None).await
+            if let Ok(resp) = http_send(
+                addr,
+                Method::GET,
+                &format!("/mesh/tool/{}", t.tool_id),
+                None,
+            )
+            .await
             {
                 if resp.status == StatusCode::OK && &sha256_hex(&resp.body) == sha {
                     let _ = std::fs::create_dir_all(dir.join(INBOX_TOOLS_DIR));
@@ -746,11 +761,21 @@ struct HttpResp {
 }
 
 /// A minimal one-shot HTTP/1.1 request over a fresh tailnet TCP connection.
-async fn http_send(addr: &str, method: Method, path: &str, body: Option<Vec<u8>>) -> Result<HttpResp> {
+async fn http_send(
+    addr: &str,
+    method: Method,
+    path: &str,
+    body: Option<Vec<u8>>,
+) -> Result<HttpResp> {
     let connect = tokio::time::timeout(Duration::from_secs(4), TcpStream::connect(addr));
     let stream = connect
         .await
-        .map_err(|_| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timeout")))?
+        .map_err(|_| {
+            crate::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "connect timeout",
+            ))
+        })?
         .map_err(crate::Error::Io)?;
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
@@ -767,7 +792,12 @@ async fn http_send(addr: &str, method: Method, path: &str, body: Option<Vec<u8>>
         .map_err(|e| crate::Error::Malformed(format!("request: {e}")))?;
     let resp = tokio::time::timeout(Duration::from_secs(6), sender.send_request(req))
         .await
-        .map_err(|_| crate::Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "request timeout")))?
+        .map_err(|_| {
+            crate::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "request timeout",
+            ))
+        })?
         .map_err(|e| crate::Error::Malformed(format!("send: {e}")))?;
     let status = resp.status();
     let body = resp
@@ -825,7 +855,10 @@ pub fn parse_tailscale_status(json: &str) -> Vec<TailscalePeer> {
                 .and_then(|h| h.as_str())
                 .unwrap_or("")
                 .to_string(),
-            online: peer.get("Online").and_then(|o| o.as_bool()).unwrap_or(false),
+            online: peer
+                .get("Online")
+                .and_then(|o| o.as_bool())
+                .unwrap_or(false),
         });
     }
     out
@@ -886,7 +919,11 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                 rec.addr.clone()
             };
             // Preserve the original join date (backfill 0 from a pre-field row to now).
-            let first_seen = if existing.first_seen > 0 { existing.first_seen } else { now };
+            let first_seen = if existing.first_seen > 0 {
+                existing.first_seen
+            } else {
+                now
+            };
             *existing = PeerRecord {
                 addr: addr_keep,
                 first_seen,

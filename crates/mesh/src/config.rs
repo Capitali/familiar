@@ -143,7 +143,10 @@ mod tests {
         let c = load(&dir).unwrap();
         assert_eq!(c.gossip_interval_secs, 30); // default filled
         assert!(c.identity_opted_in("betty", "river"));
-        assert!(!c.identity_opted_in("betty", "other"), "opt-in is per-group");
+        assert!(
+            !c.identity_opted_in("betty", "other"),
+            "opt-in is per-group"
+        );
         assert!(!c.identity_opted_in("ian", "river"), "opt-in is per-handle");
         let _ = fs::remove_dir_all(&dir);
     }

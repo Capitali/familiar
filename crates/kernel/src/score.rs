@@ -214,7 +214,10 @@ mod tests {
         let th = theory("thread-1", "offer a morning digest", "pursued");
         let (c, tr) = spawned("thread-1", "candidate-1", "pass", 0.90);
         // pass at 0.90, low rigor → the candidate promotes → the theory paid off.
-        assert_eq!(theory_outcome(&th, &[c.clone()], &[tr.clone()], 0.0), TheoryOutcome::Promoted);
+        assert_eq!(
+            theory_outcome(&th, &[c.clone()], &[tr.clone()], 0.0),
+            TheoryOutcome::Promoted
+        );
         // A theory never acted on (no candidate) is pending.
         assert_eq!(theory_outcome(&th, &[], &[], 0.0), TheoryOutcome::Pending);
     }
@@ -242,9 +245,24 @@ mod tests {
         let threads = vec![past];
         let cands = vec![c];
         let trials = vec![tr];
-        let repeat = score_theory("poll the battery every second", &threads, &cands, &trials, 0.0);
-        let fresh = score_theory("offer a gentle morning digest", &threads, &cands, &trials, 0.0);
-        assert!(repeat < fresh, "repeating a discarded direction must score below a fresh one");
+        let repeat = score_theory(
+            "poll the battery every second",
+            &threads,
+            &cands,
+            &trials,
+            0.0,
+        );
+        let fresh = score_theory(
+            "offer a gentle morning digest",
+            &threads,
+            &cands,
+            &trials,
+            0.0,
+        );
+        assert!(
+            repeat < fresh,
+            "repeating a discarded direction must score below a fresh one"
+        );
         assert!(repeat < 0.5);
     }
 }

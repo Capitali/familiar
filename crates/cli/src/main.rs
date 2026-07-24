@@ -256,7 +256,10 @@ fn cmd_goal(args: &[String]) -> ExitCode {
                         .collect()
                 })
                 .unwrap_or_default();
-            let seq = familiar_kernel::goal::load(&dir).map(|g| g.len()).unwrap_or(0) + 1;
+            let seq = familiar_kernel::goal::load(&dir)
+                .map(|g| g.len())
+                .unwrap_or(0)
+                + 1;
             let id = format!("goal-{seq:04}");
             let g = familiar_kernel::goal::Goal::seed(&id, desc, needs, "ian", now_secs());
             match familiar_kernel::goal::append(&dir, &g) {
@@ -324,7 +327,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
     match args.first().map(String::as_str) {
         Some("create-group") => {
-            let label = f.get("label").cloned().unwrap_or_else(|| "familiar-group".to_string());
+            let label = f
+                .get("label")
+                .cloned()
+                .unwrap_or_else(|| "familiar-group".to_string());
             let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &machine_label()) {
                 Ok(n) => n,
                 Err(e) => {
@@ -341,7 +347,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             ) {
                 Ok(cred) => {
                     open_mesh_gate(&dir);
-                    println!("✓ group “{label}” created · id {}", short_id(&cred.group_id));
+                    println!(
+                        "✓ group “{label}” created · id {}",
+                        short_id(&cred.group_id)
+                    );
                     println!("join key (the group secret — share only on a trusted channel):");
                     println!("{}", cred.join_key());
                     ExitCode::SUCCESS
@@ -382,11 +391,16 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             ) {
                 Ok(familiar_mesh::enroll::JoinOutcome::Admitted(g)) => {
                     open_mesh_gate(&dir);
-                    println!("✓ admitted to “{}” by covenant — enrolled (no secret held)", g.group_label);
+                    println!(
+                        "✓ admitted to “{}” by covenant — enrolled (no secret held)",
+                        g.group_label
+                    );
                     ExitCode::SUCCESS
                 }
                 Ok(familiar_mesh::enroll::JoinOutcome::Pending) => {
-                    println!("… request pending — waiting for the familiar to accept (up to 5 min)");
+                    println!(
+                        "… request pending — waiting for the familiar to accept (up to 5 min)"
+                    );
                     let mut waited = 0;
                     loop {
                         std::thread::sleep(std::time::Duration::from_secs(3));
@@ -394,12 +408,17 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         match familiar_mesh::enroll::poll_join(&dir, host, port, &node.node_id()) {
                             Ok(Some(g)) => {
                                 open_mesh_gate(&dir);
-                                println!("✓ admitted to “{}” by covenant — enrolled", g.group_label);
+                                println!(
+                                    "✓ admitted to “{}” by covenant — enrolled",
+                                    g.group_label
+                                );
                                 return ExitCode::SUCCESS;
                             }
                             Ok(None) if waited < 300 => continue,
                             Ok(None) => {
-                                eprintln!("mesh: no decision after 5 min — run again to keep waiting");
+                                eprintln!(
+                                    "mesh: no decision after 5 min — run again to keep waiting"
+                                );
                                 return ExitCode::FAILURE;
                             }
                             Err(e) => {
@@ -420,7 +439,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 eprintln!("mesh: usage: familiar mesh join --key <join-key> [--label L]");
                 return ExitCode::FAILURE;
             };
-            let label = f.get("label").cloned().unwrap_or_else(|| "familiar-group".to_string());
+            let label = f
+                .get("label")
+                .cloned()
+                .unwrap_or_else(|| "familiar-group".to_string());
             let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &machine_label()) {
                 Ok(n) => n,
                 Err(e) => {
@@ -484,7 +506,11 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             let port = f
                 .get("port")
                 .and_then(|p| p.parse::<u16>().ok())
-                .unwrap_or_else(|| familiar_mesh::config::load(&dir).map(|c| c.gossip_port).unwrap_or(47_100));
+                .unwrap_or_else(|| {
+                    familiar_mesh::config::load(&dir)
+                        .map(|c| c.gossip_port)
+                        .unwrap_or(47_100)
+                });
             let host = f.get("host").cloned().unwrap_or_else(tailnet_ip_or_hint);
             // Compact JSON — the phone parses this after scanning or pasting.
             let payload = serde_json::json!({
@@ -532,7 +558,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             cfg.static_peers.push(addr.clone());
             match write_mesh_config(&dir, &cfg) {
                 Ok(()) => {
-                    println!("✓ static peer added: {addr} (gossip port {})", cfg.gossip_port);
+                    println!(
+                        "✓ static peer added: {addr} (gossip port {})",
+                        cfg.gossip_port
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -714,7 +743,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                             short_id(&p.node.node_id),
                             (now - p.received_at).max(0)
                         );
-                        println!("    attests (v{}): {}", p.attestation.laws_version, p.attestation.statement);
+                        println!(
+                            "    attests (v{}): {}",
+                            p.attestation.laws_version, p.attestation.statement
+                        );
                         println!("    approve: familiar mesh approve {}", p.node.node_id);
                     }
                     ExitCode::SUCCESS
@@ -868,13 +900,17 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 .iter()
                 .any(|o| o.handle == *handle && o.group == cred.group_id)
             {
-                println!("already opted in: {handle} → group {}", short_id(&cred.group_id));
+                println!(
+                    "already opted in: {handle} → group {}",
+                    short_id(&cred.group_id)
+                );
                 return ExitCode::SUCCESS;
             }
-            cfg.identity_optin.push(familiar_mesh::config::IdentityOptin {
-                handle: handle.clone(),
-                group: cred.group_id.clone(),
-            });
+            cfg.identity_optin
+                .push(familiar_mesh::config::IdentityOptin {
+                    handle: handle.clone(),
+                    group: cred.group_id.clone(),
+                });
             match write_mesh_config(&dir, &cfg) {
                 Ok(()) => {
                     println!("✓ opted in: {handle} → group {}", short_id(&cred.group_id));
@@ -933,7 +969,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             if invite_left > 0 {
                 println!("invite  open — auto-admitting for {}s", invite_left);
             }
-            if let Ok(s) = std::fs::read_to_string(dir.join(familiar_mesh::transport::STATUS_FILE)) {
+            if let Ok(s) = std::fs::read_to_string(dir.join(familiar_mesh::transport::STATUS_FILE))
+            {
                 println!("last    {}", s.trim());
             }
             match std::fs::read_to_string(dir.join(familiar_mesh::transport::PEERS_FILE))
@@ -1287,7 +1324,10 @@ fn cmd_reach(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
     let now = now_secs();
-    let timeout: u64 = f.get("timeout-ms").and_then(|s| s.parse().ok()).unwrap_or(300);
+    let timeout: u64 = f
+        .get("timeout-ms")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300);
 
     let b = match boundary::load(&dir) {
         Ok(b) => b,
@@ -1328,7 +1368,11 @@ fn cmd_reach(args: &[String]) -> ExitCode {
         }
         println!("\n{} ({}):", class.label(), group.len());
         for r in group {
-            let svc = if r.open.is_empty() { "—".to_string() } else { r.open.join(", ") };
+            let svc = if r.open.is_empty() {
+                "—".to_string()
+            } else {
+                r.open.join(", ")
+            };
             println!("  · {:<22} {:<15} {}", r.label, r.ip, svc);
         }
     }
@@ -1355,7 +1399,9 @@ fn cmd_reach_install(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
     let Some(ip) = args.first().filter(|a| !a.starts_with("--")) else {
-        eprintln!("reach: usage: familiar mesh reach install <ip> --user U --familiar-host H --authorize");
+        eprintln!(
+            "reach: usage: familiar mesh reach install <ip> --user U --familiar-host H --authorize"
+        );
         return ExitCode::FAILURE;
     };
     if !f.contains_key("authorize") {
@@ -1370,7 +1416,10 @@ fn cmd_reach_install(args: &[String]) -> ExitCode {
         Ok(b) => {
             let v = guard::evaluate(&Action::new(ActionKind::Network, "reach-install"), &b);
             if v.decision != Decision::Allow {
-                eprintln!("reach install: network is outside the boundary — open `allow_network`.\n  {}", v.rationale);
+                eprintln!(
+                    "reach install: network is outside the boundary — open `allow_network`.\n  {}",
+                    v.rationale
+                );
                 return ExitCode::FAILURE;
             }
         }
@@ -1380,9 +1429,18 @@ fn cmd_reach_install(args: &[String]) -> ExitCode {
         }
     }
 
-    let user = f.get("user").cloned().unwrap_or_else(|| "familiar".to_string());
-    let ssh_port = f.get("ssh-port").cloned().unwrap_or_else(|| "22".to_string());
-    let fam_port = f.get("familiar-port").cloned().unwrap_or_else(|| "47100".to_string());
+    let user = f
+        .get("user")
+        .cloned()
+        .unwrap_or_else(|| "familiar".to_string());
+    let ssh_port = f
+        .get("ssh-port")
+        .cloned()
+        .unwrap_or_else(|| "22".to_string());
+    let fam_port = f
+        .get("familiar-port")
+        .cloned()
+        .unwrap_or_else(|| "47100".to_string());
     let Some(fam_host) = f.get("familiar-host") else {
         eprintln!("reach install: --familiar-host <addr> is required (how the target reaches THIS familiar)");
         return ExitCode::FAILURE;
@@ -1411,10 +1469,14 @@ fn cmd_reach_install(args: &[String]) -> ExitCode {
     println!("· {user}@{ip}: {remote_cmd}");
     let status = std::process::Command::new("ssh")
         .args([
-            "-o", "ConnectTimeout=8",
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-p", &ssh_port,
+            "-o",
+            "ConnectTimeout=8",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-p",
+            &ssh_port,
             &format!("{user}@{ip}"),
             &remote_cmd,
         ])
@@ -1653,7 +1715,7 @@ fn cmd_run(args: &[String]) -> ExitCode {
             // Every REACH_EVERY ticks (and on the first), if the network gate is open, sweep the
             // LAN for reachable devices. These `can-reach` observations are the mesh's *frontier* —
             // interfaces the familiar can see but hasn't enrolled — drawn as faded branches on the map.
-            if n == 1 || n % REACH_EVERY == 0 {
+            if n == 1 || n.is_multiple_of(REACH_EVERY) {
                 let seeded = reach_sweep(&dir);
                 if seeded > 0 {
                     println!("  reach: swept the frontier, {seeded} device(s) assessed");
