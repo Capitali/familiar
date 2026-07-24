@@ -2136,11 +2136,12 @@ pub fn tick(
     // daemon at all, regardless of the gate — camera work lives only in GUI-session
     // processes now (SPEC.md R3). The familiar only learns that an eye is available.
     perceived.extend(vision::discover(now));
-    // Discover the devices sharing this network — perception, like discovering a camera
-    // (knowing a phone/watch is present is not reaching into it). The local ARP read is
-    // always permitted; enriching from the router's DHCP lease table is outward reach, so it
-    // only happens when connectivity is allowed and the human has pointed devices.json at it.
-    perceived.extend(sense::devices(dir, now, allow_connectivity));
+    // Network *discovery* of other hosts (the ARP/DHCP device survey, the reach sweep) is no
+    // longer driven autonomously from the core tick — it's a peripheral capability now, invoked
+    // on the shell's cadence (`familiar discover`) and fed back through the observe seam. The
+    // core keeps only local self-perception (census/interfaces/connectivity); it doesn't go out
+    // and scan the network on its own, so it stops flooding its own loop/theory pipeline with
+    // trivial "still see the same devices" recurrence. See SPEC / periphery-discovery notes.
     if allow_connectivity {
         perceived.push(sense::connectivity(now));
     }

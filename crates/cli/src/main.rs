@@ -34,6 +34,8 @@ commands:
   sense          perceive the host (environment, interfaces, capabilities)
   reach          assess what the familiar could extend into — discover devices and
                  classify each (agent-capable / protocol-controllable / observable)
+  discover       periphery-invoked LAN survey: discover devices + assess reach in one
+                 pass, recording the observations that seed the roster and the frontier
   tick           run one cycle of the metabolism (sense → detect → muse → act → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
                  (unbounded; Ctrl-C to stop). Adaptive cadence: --interval S is the
@@ -89,6 +91,7 @@ fn main() -> ExitCode {
         Some("theories") => cmd_theories(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
+        Some("discover") => cmd_discover(rest),
         Some("tick") => cmd_tick(rest),
         Some("run") => cmd_run(rest),
         Some("daemon") => cmd_daemon(rest),
@@ -1779,21 +1782,57 @@ fn cmd_tick(args: &[String]) -> ExitCode {
 
 /// How often (in ticks) the daemon sweeps the LAN for reachable devices — the frontier the mesh map
 /// draws as faded branches. Network probing is heavier than a tick, so it runs sparsely.
-const REACH_EVERY: usize = 15;
-
-/// Sweep the LAN for reachable devices and record the `can-reach` frontier observations, but only if
-/// the network gate is open. Returns how many devices were assessed (0 if the gate is shut or nothing
-/// answered). Short per-port timeout so it doesn't stall the tick loop.
-fn reach_sweep(dir: &std::path::Path) -> usize {
-    let Ok(b) = boundary::load(dir) else { return 0 };
-    if !b.allow_network {
-        return 0;
+/// `familiar discover` — the periphery's one-shot network survey: discover the devices sharing this
+/// LAN (ARP + optional DHCP leases) and assess their reach (bounded port probe), recording the
+/// `device:*` and `can-reach device:*` observations that populate the roster and the map's frontier.
+///
+/// This is the seam that replaces the core's old autonomous sweep: the shell (a launchd timer, the
+/// GUI app, a native survey) decides *when* to look, invokes this, and the findings flow back in as
+/// observations — so discovery is a peripheral, consent-gated act, not a metabolic reflex flooding
+/// the theory pipeline. Gated on `allow_network`: nothing reaches outward without the human's gate.
+fn cmd_discover(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let now = now_secs();
+    let timeout: u64 = f
+        .get("timeout-ms")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300);
+    let b = match boundary::load(&dir) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("discover: boundary policy error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let verdict = guard::evaluate(&Action::new(ActionKind::Network, "discover"), &b);
+    if verdict.decision != Decision::Allow {
+        eprintln!(
+            "discover: the network is outside the boundary — open `allow_network` to let the \
+             periphery survey the LAN.\n  {}",
+            verdict.rationale
+        );
+        return ExitCode::FAILURE;
     }
-    let (reaches, obs) = familiar_reach::scan(dir, now_secs(), true, 250);
+    let mut recorded = 0;
+    // Device survey (who is present) …
+    for o in familiar_sense::devices(&dir, now, b.allow_network) {
+        if observation::record(&dir, o).is_ok() {
+            recorded += 1;
+        }
+    }
+    // … then reach assessment (what we could do with them) — seeds the frontier.
+    let (reaches, obs) = familiar_reach::scan(&dir, now, b.allow_network, timeout);
     for o in obs {
-        let _ = observation::record(dir, o);
+        if observation::record(&dir, o).is_ok() {
+            recorded += 1;
+        }
     }
-    reaches.len()
+    println!(
+        "discover: {} device(s) assessed, {recorded} observation(s) recorded.",
+        reaches.len()
+    );
+    ExitCode::SUCCESS
 }
 
 fn cmd_run(args: &[String]) -> ExitCode {
@@ -1854,15 +1893,10 @@ fn cmd_run(args: &[String]) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            // Every REACH_EVERY ticks (and on the first), if the network gate is open, sweep the
-            // LAN for reachable devices. These `can-reach` observations are the mesh's *frontier* —
-            // interfaces the familiar can see but hasn't enrolled — drawn as faded branches on the map.
-            if n == 1 || n.is_multiple_of(REACH_EVERY) {
-                let seeded = reach_sweep(&dir);
-                if seeded > 0 {
-                    println!("  reach: swept the frontier, {seeded} device(s) assessed");
-                }
-            }
+            // The LAN reach-sweep that seeds the frontier is no longer driven from the core's own
+            // metabolism — it's a peripheral capability now, invoked on the shell's cadence via
+            // `familiar discover` (macOS launchd timer / GUI app) or a native survey POSTing to the
+            // observe seam. The core no longer goes out and scans the network on every Nth tick.
             if !fixed {
                 // Multiplicative back-off while quiet; snap back to the floor on any
                 // change. The world moving (or our own work) buys closer attention.
