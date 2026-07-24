@@ -1,24 +1,45 @@
-# Familiar Agent (iOS)
+# The Familiar's consoles & device agents (Swift)
 
-A lightweight **mesh sensor agent** for the [familiar](../familiar). It enrolls into the familiar's
-mesh with a scanned/pasted join key, then pushes **derived observations** (never raw data) to the
-familiar's `POST /mesh/observe` endpoint, signed with the same ed25519 trust the mesh uses.
-
-Phase 1 (this scaffold): iPhone, **location (home/away)** + **motion (walking/driving/still)**.
-Later phases add HealthKit, Apple Watch, audio/imagery, and a voice + iconographic UI. See the plan:
-`~/.claude/plans/tingly-foraging-quail.md`.
+Everything human-facing lives here: the **FamiliarMac** sphere console, the
+**iPhone/iPad agent** (which hosts the same sphere console), and the **watch app**.
+Devices enroll into the familiar's mesh by scanning a QR, then push **derived
+observations** (never raw data) to `POST /mesh/observe`, signed with the same
+ed25519 trust the mesh uses.
 
 ## Layout
 
-- `FamiliarMesh/` — a Swift package (macOS + iOS + watchOS) with the crypto + wire logic:
-  CryptoKit ed25519 keypair, membership-cert minting (byte-matched to the Rust `CertBody`
-  canonicalization), the `/mesh/observe` client. **Unit-tested on macOS** — no device needed.
-- `App/` — the SwiftUI app: enroll / consent / status + the `SensingCoordinator` (CoreLocation +
-  CoreMotion → derived `ObsRecord`s).
-- `project.yml` — the [XcodeGen](https://github.com/yonaskolb/XcodeGen) spec. The `.xcodeproj` is
-  generated, not hand-maintained (and git-ignored).
+- `MacApp/` — **FamiliarMac**, the macOS sphere console: a WKWebView hosting the
+  shared web bundle (`MacApp/Resources/sphere/index.html` — satellite globe,
+  hologram screens, the invite QR on the Device screen) over a native MKMapView
+  street layer. Talks to the local daemon on the loopback seam (`:47101`).
+- `App/` — the SwiftUI iPhone/iPad agent: enroll (scan/paste), consent switches,
+  sensing (CoreLocation + CoreMotion + optional voice/face), and the same sphere
+  console rendered from the shared web bundle (worldview read over the mesh).
+- `Watch/` — the watchOS companion (enrols via the paired phone's identity).
+- `FamiliarMesh/` — a Swift package (macOS + iOS + watchOS) with the crypto +
+  wire logic: CryptoKit ed25519, membership-cert minting (byte-matched to the
+  Rust `CertBody` canonicalization), the `/mesh/observe` client.
+  **Unit-tested on macOS** — no device needed.
+- `project.yml` — the [XcodeGen](https://github.com/yonaskolb/XcodeGen) spec.
+  The `.xcodeproj` is generated, not hand-maintained (and git-ignored).
 
-## Build & test
+## Install FamiliarMac (the macOS console)
+
+```sh
+brew install xcodegen         # once
+cd ios && xcodegen            # generates FamiliarAgent.xcodeproj
+xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac \
+  -configuration Release build
+# then copy the built app into place, e.g.:
+#   cp -R build/Release/FamiliarMac.app /Applications/   (or drag from Xcode's Products)
+open /Applications/FamiliarMac.app
+```
+
+The console expects the daemon running on the same Mac (`familiar daemon install`
+— see the [root README](../README.md#install--run)). The Device screen renders the
+**invite QR** new devices scan to join.
+
+## Build & test (agents)
 
 ```sh
 # crypto/wire unit tests + Rust conformance (headless, no device):
@@ -33,18 +54,19 @@ xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent \
 # to run on your device: open FamiliarAgent.xcodeproj, pick your device, Run.
 ```
 
-Provisioning: team **8GHXL328AR**, bundle **io.river.familiar.ios**, automatic signing (set in
-`project.yml`). Phase 1 needs only Location (Always) + Motion — no special capabilities. HealthKit
-(Phase 2) will add the HealthKit capability + entitlement.
+Provisioning: team **8GHXL328AR**, bundle **io.river.familiar.ios**, automatic
+signing (set in `project.yml`). TestFlight uploads: `tools/testflight.sh`
+(bump `CURRENT_PROJECT_VERSION` first — see [TESTFLIGHT.md](TESTFLIGHT.md)).
 
 ## Enroll a device
 
-1. On the familiar host: `familiar mesh accept-observations on` (default on), then `familiar mesh qr`
-   (prints the enrollment payload; renders a scannable QR if `qrencode` is installed).
-2. In the app, paste the payload and tap **Enroll**. The device mints its membership cert locally
-   from the group secret; nothing is sent until you toggle a sensor on.
-3. Walk around → `phone at location:away`, `phone motion:walking` appear in the familiar's
-   observations, tagged `source=mesh:<device-node-id>`.
+1. Open the FamiliarMac console's **Device** screen (or any enrolled member's
+   "Show join QR") — it renders the enrollment QR. Headless alternative:
+   `familiar mesh qr` on the host.
+2. In the app, scan the QR (or paste the payload) and tap **Request**. You accept
+   the device on the familiar itself; nothing is sent until you toggle a sensor on.
+3. Walk around → `phone at location:away`, `phone motion:walking` appear in the
+   familiar's observations, tagged `source=mesh:<device-node-id>`.
 4. Lost device? Revoke it by `node_id` in the familiar's `mesh/revoked.json`.
 
 ## The wire contract (what FamiliarMesh implements)

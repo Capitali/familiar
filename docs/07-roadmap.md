@@ -52,10 +52,10 @@ assertion alone.
   capture (`allow_camera`, fail-closed) via the bundled `familiar-eye` AVFoundation helper;
   the daemon refreshes a latest frame on a rate limit and records that it watched.
   *Validated by real-world operation* (a frame captured and observed on a live host).
-- **The macOS installer** — a signed, **notarized** `Familiar.app` + `.pkg` that installs the
-  app and the launchd agents (daemon KeepAlive + the breathing menu-bar marble at login).
-  *Validated by real-world operation* (notarized, stapled, `spctl`-accepted). See
-  [`../packaging/README.md`](../packaging/README.md).
+- **The macOS install** — `familiar daemon install` (launchd `io.river.familiar`,
+  stable bin dir) plus the FamiliarMac console app built from [`../ios/`](../ios/).
+  *Validated by real-world operation* (running on the reference host). The earlier
+  notarized `.pkg`/marble installer was retired 2026-07-24 with the egui-era consoles.
 - **SQLite store** — the append/load/update API now runs on embedded SQLite (`rusqlite`,
   `bundled`); `db export`/`import` for auditability + legacy migration. *Validated by unit tests.*
 - **The agentic seam (`crates/agent`)** — a boundary-mediated, multi-step loop: the agent proposes

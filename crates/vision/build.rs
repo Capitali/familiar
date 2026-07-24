@@ -20,7 +20,7 @@ fn main() {
 
     // OUT_DIR is .../target/<profile>/build/<pkg>-<hash>/out; the binaries land three
     // ancestors up, in .../target/<profile>. Put familiar-eye there so it's a sibling of
-    // `familiar`/`glass`/`marble` and resolves the same way at runtime.
+    // `familiar` and resolves the same way at runtime.
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let Some(bin_dir) = out_dir.ancestors().nth(3) else {
         return;
@@ -33,9 +33,7 @@ fn main() {
         .map(|o| o.status.success())
         .unwrap_or(false);
     if !swiftc_ok {
-        println!(
-            "cargo:warning=swiftc not found — camera capture helper (familiar-eye) not built"
-        );
+        println!("cargo:warning=swiftc not found — camera capture helper (familiar-eye) not built");
         return;
     }
 

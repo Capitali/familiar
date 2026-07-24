@@ -1,6 +1,6 @@
-// make-appicon.swift — render the app icon: the glassy blue marble on an opaque navy field.
+// make-appicon.swift — render the app icon: the glassy blue sphere on an opaque navy field.
 // App Store icons must be fully opaque (no alpha), and iOS applies the rounded-rect mask itself,
-// so this fills the whole square. Mirrors the Rust marble_icon() / packaging/make-icon.swift palette.
+// so this fills the whole square.
 //
 // Usage: swift tools/make-appicon.swift <output.png> [size]
 

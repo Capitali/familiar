@@ -6,6 +6,47 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-07-24 — Console polish + retiring the marble era
+
+### What changed
+
+- **Standardized timestamps** (sphere console, shared bundle): points in time
+  render as `YY/MM/DD-HH:MMUTC` (`utc()`); true durations (uptime, session,
+  total-online) stay durations (`ago()` renamed `dur()`). No more "4m ago".
+- **Invite QR on the iOS/iPad console**: the bridge gained an `invite` case —
+  the device answers with its own join payload (`AppModel.addressPayload`; an
+  address, never a secret), since the Mac's loopback `/local/invite` seam is
+  unreachable from a device. Any enrolled member is a scan-to-join point.
+- **Frontier labels on the street map**: discovered-but-unenrolled markers kept
+  their dimmed look but were `titleVisibility = .hidden` — now the name shows,
+  with `ip · reach` as an adaptive subtitle (new `sublabel` field through
+  `collectNodes()` and both hosts' `setNodes`).
+- **The marble era is retired**: `packaging/` (the `.pkg` pipeline around the
+  removed `marble`/`glass` binaries and the dead `io.river.familiar.marble`
+  launchd agent) and `archive/` (the egui-era crates) are deleted — git history
+  keeps them. Marble references scrubbed from crate comments, docs, and the
+  Swift sources (`Marble` view → `BreathingSphere`; icon assets renamed
+  `sphere-1024.png`). The NASA `earth-blue-marble.jpg` globe texture keeps its
+  upstream name.
+- **Install docs rewritten for reality**: the root README's macOS story is now
+  daemon (`familiar daemon install`) + FamiliarMac console (xcodegen/xcodebuild)
+  + gates, replacing the retired `.pkg`/Glass-first quickstart
+  (`cargo run -p familiar-glass` no longer existed). `ios/README.md` describes
+  the actual layout (MacApp / App / Watch / FamiliarMesh) with a concrete
+  FamiliarMac build+install section.
+
+### Checks run
+
+- Rust green bar (fmt, clippy -D warnings, test) — comment-only changes.
+- `xcodegen` + `xcodebuild` (FamiliarMac Release; FamiliarAgent simulator);
+  `swift test` in FamiliarMesh.
+- `grep -rni marble` → only the NASA texture URL and historical log entries.
+
+### Next
+
+Fleet devices see the console changes at the next TestFlight build; the Mac
+console picks them up on rebuild/reinstall of FamiliarMac.app.
+
 ## 2026-07-11 — Storage, the agentic seam, the mesh, and reach
 
 A large arc: the store moved to SQLite, the familiar gained a multi-step agentic seam, the mesh

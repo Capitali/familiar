@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The enroll flow's design pieces — the palette, the breathing marble, and the glass panel —
+// The enroll flow's design pieces — the palette, the breathing sphere, and the glass panel —
 // kept from the retired GlassConsole (the sphere took over everything post-enrollment).
 
 enum Fam {
@@ -40,8 +40,8 @@ extension Color {
     }
 }
 
-/// The breathing marble — the familiar's face on the join screen.
-struct Marble: View {
+/// The breathing sphere — the familiar's face on the join screen.
+struct BreathingSphere: View {
     var size: CGFloat
     @State private var breathe = false
     var body: some View {

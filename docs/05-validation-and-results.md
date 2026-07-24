@@ -65,8 +65,7 @@ claim is **not yet validated**, that is stated, with the limitation that tracks 
 
 | Claim | Status | Evidence |
 |---|---|---|
-| The Glass shows the Three Laws live and carries the interaction channel | Validated by real-world operation | runs as the primary interface; verified live (no automated GUI tests — see *not yet validated*) |
-| The marble (menu-bar) opens the Glass, controls the daemon, dims when it sleeps | Validated by real-world operation | verified live; macOS-gated, no unit tests |
+| The FamiliarMac sphere console shows the worldview live and carries the interaction channel | Validated by real-world operation | runs as the primary interface; verified live (no automated GUI tests — see *not yet validated*) |
 | Daemon control + launchd (start at login, stable install path) | Validated by real-world operation | running under `io.river.familiar`; verified live |
 
 ### Not yet validated (explicit markers)
@@ -83,7 +82,7 @@ claim is **not yet validated**, that is stated, with the limitation that tracks 
 
 The test suite is the executable specification: **77 tests across the workspace**, all
 passing — kernel 62, cycle 7, sense 4, exec 3, llm 1 (the CLI, the Glass, and the
-marble carry no unit tests; they are validated by real-world operation). The invariants
+consoles carry no unit tests; they are validated by real-world operation). The invariants
 are encoded as tests (the adaptive promotion bar `0.70 + 0.25·rigor`, pattern
 suppression `neg > pos`, the Weismann barrier, the regression guard, and the guard's
 five-category authorization model). Run: `cargo test`.
@@ -152,6 +151,6 @@ drift apart:
   *rendered*); its accuracy as a service proxy is not yet meaningful —
   [../validation/accuracy-metrics.md](../validation/accuracy-metrics.md) and
   [06-limitations.md](06-limitations.md).
-- **No automated GUI tests** for the Glass or the marble; they are validated by
+- **No automated GUI tests** for the consoles; they are validated by
   real-world operation only.
 - Known failures and gaps: [../validation/known-failures.md](../validation/known-failures.md).

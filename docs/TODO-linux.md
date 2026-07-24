@@ -11,16 +11,10 @@ connect, and run the familiar with the same ease as a Mac tester.
 
 These are deliberately cross-platform already, so Linux is a fill-in, not a rewrite:
 
-- **`open_url`** (`crates/glass/src/main.rs`) — `open` on macOS, `xdg-open` elsewhere.
-- **`speak`** (`crates/glass/src/main.rs`) — `say` on macOS; tries `spd-say` → `espeak-ng`
-  → `espeak` on Linux; silent no-op if none installed.
 - **`author_tool` prompt** (`crates/cycle/src/lib.rs`) — branches by `std::env::consts::OS`:
   on Linux it tells the model to use `/proc`, `free`, `df`, `ip addr`, `nproc`, `vcgencmd`
   and to avoid macOS-only `sysctl`/`vm_stat`/`top -l 1`. This is what makes the run-code
   feature behave on a Pi.
-- **`marble`** (`crates/marble/`) — Cocoa deps are target-gated in `Cargo.toml`; off-mac it
-  compiles to a stub `main`. The menu-bar presence is macOS-only by design; Linux uses the
-  Glass / CLI directly.
 - **`exec`** (`crates/exec/src/lib.rs`) — runs scripts via POSIX `sh -c` with `ulimit -t` +
   a wall-clock timeout. Already portable.
 - **`sense`** (`crates/sense/src/lib.rs`) — already has Linux fallbacks for memory

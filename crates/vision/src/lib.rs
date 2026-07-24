@@ -126,9 +126,8 @@ pub fn capture_frame(_dest: &Path, _camera: Option<&str>) -> bool {
 }
 
 /// The `familiar-eye` capture helper that lives next to the running binary: the build puts
-/// it in the cargo target dir, `marble install` copies it to the stable bin dir, and the app
-/// bundles it in `Contents/MacOS`. Resolving it as a sibling means it follows the binary
-/// wherever it runs.
+/// it in the cargo target dir and `familiar daemon install` copies it to the stable bin
+/// dir. Resolving it as a sibling means it follows the binary wherever it runs.
 #[cfg(target_os = "macos")]
 fn eye_helper() -> std::path::PathBuf {
     std::env::current_exe()

@@ -11,7 +11,7 @@ const PIDFILE: &str = "daemon.pid";
 const LOGFILE: &str = "daemon.log";
 const LAUNCHD_LABEL: &str = "io.river.familiar";
 /// A durable home for the installed binary, outside the build tree (which `cargo clean`
-/// wipes). Kept in step with the marble's stable path so both login items agree.
+/// wipes) — the same stable bin dir the FamiliarMac console expects.
 const STABLE_SUBDIR: &str = "Library/Application Support/Familiar/bin";
 
 fn pidfile(dir: &Path) -> PathBuf {

@@ -52,7 +52,7 @@ struct EnrollView: View {
             Fam.bg.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 22) {
-                    Marble(size: 96).padding(.top, 40)
+                    BreathingSphere(size: 96).padding(.top, 40)
                     Text("FAMILIAR").font(.system(size: 17, weight: .semibold)).tracking(3)
                     Text("Join a familiar")
                         .font(.system(size: 26, weight: .semibold)).foregroundStyle(Fam.ink)

@@ -43,58 +43,53 @@ be narrowed — has its own standout page: [`docs/HUMANITY.md`](docs/HUMANITY.md
 
 ## Install & run
 
-### macOS — the installer (recommended)
-
-The familiar ships as a signed, **notarized** macOS installer that sets everything up to run
-at boot: **`Familiar-<version>.pkg`**. Double-click it; it installs `Familiar.app` to
-`/Applications` and configures two per-user login agents —
-
-- the **daemon** (`io.river.familiar.daemon`, KeepAlive) — the always-on metabolism, and
-- the **marble** (`io.river.familiar.marble`, RunAtLoad) — the glassy blue marble in the
-  menu bar that **breathes** while the familiar is alive and is your way into the Glass.
-
-Data lives per-user in `~/Library/Application Support/Familiar/`. The first time the familiar
-watches through the camera (only when you open the `allow_camera` gate) macOS asks for camera
-permission — granted to `Familiar.app` itself. To build the `.pkg` (or notarize a release),
-see [`packaging/README.md`](packaging/README.md).
-
-### Build from source
-
-macOS is the primary target; a Linux **desktop** also works (a headless Raspberry Pi is on the
-roadmap — see [docs/TODO-linux.md](docs/TODO-linux.md)).
+macOS is the primary target; a Linux **desktop** also runs the daemon + CLI (a headless
+Raspberry Pi is on the roadmap — see [docs/TODO-linux.md](docs/TODO-linux.md)). The macOS
+install is two pieces: the **daemon** (Rust, launchd) and the **FamiliarMac console**
+(Swift, the sphere).
 
 **Prerequisites**
 
 - A Rust toolchain — [`rustup`](https://rustup.rs).
-- `python3` on `PATH` — the LLM adapter (a small reference script the app installs for you)
+- `python3` on `PATH` — the LLM adapter (a small reference script, `llm/call_llm.sh`)
   uses it to call the model provider. Already present on most macs and Linux desktops.
-- *(macOS, optional)* the Xcode command-line tools (`swiftc`) — only needed to build the
-  `familiar-eye` camera helper and the app icon; the core builds with Rust alone.
+- *(macOS, for the console + eye)* Xcode with the command-line tools, and
+  [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
-**Quickstart**
+**1 — the daemon (the metabolism)**
 
 ```sh
 git clone https://github.com/Capitali/familiar && cd familiar
-cargo build                  # first build pulls dependencies; takes a few minutes
-cargo run -p familiar-glass  # opens the Glass — the primary interface
+cargo build --release                       # first build pulls dependencies
+cargo run -p familiar-cli -- daemon install # → launchd agent io.river.familiar
+cargo run -p familiar-cli -- daemon status
 ```
 
-Then, in the Glass window:
+`daemon install` copies `familiar` (and the `familiar-eye` camera helper) to the stable
+bin dir `~/Library/Application Support/Familiar/bin/` — outside the build tree, so
+`cargo clean` can't kill the login item — and starts it at boot. Data lives per-user in
+`~/Library/Application Support/Familiar/data/`.
 
-1. **Introduce yourself.** On first launch the familiar asks your name (it keeps it; it
-   does not assume one). Type it, confirm, and it greets you.
-2. **Give it a mind.** In the **🔌 Connect** panel, click **Get a key →** (Google Gemini is
-   the place to start — one key is enough; Cerebras is optional failover), paste the key,
-   press **Connect**, then **Test connection**. This installs the adapter, stores the key
-   locally (`familiar_data/llm/key.env`, never committed), and opens only the `allow_llm` gate.
-3. **Start the metabolism.** Click **▶ Start** in the header (or run the daemon, below). The
-   familiar begins to sense, theorize, and serve.
-4. **Use it.** Answer — or **Dismiss** — the familiar's questions (it begins with
-   *"What do you need most today?"*); ask it anything in **Ask the familiar**; the eye/voice
-   gates and text size (**A− / A+**) live in the header and Settings.
+**2 — the console (the sphere)**
 
-Data lives in `./familiar_data/` (the boundary, the workspace, observations, the tool and
-identity registries). Delete it to start clean.
+```sh
+cd ios && xcodegen                          # generates FamiliarAgent.xcodeproj
+xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac -configuration Release build
+# copy the built FamiliarMac.app to /Applications and launch it
+```
+
+The console renders the mesh worldview — the satellite globe, the roster, theories,
+signals, the device screen with the **invite QR** that other devices scan to join. See
+[`ios/README.md`](ios/README.md) for the iPhone/iPad/watch agents and TestFlight.
+
+**3 — give it a mind**
+
+The LLM seam is boundary-gated and default-closed. Install the adapter and open the gate:
+copy `llm/call_llm.sh` to `~/Library/Application Support/Familiar/data/llm/`, put your
+provider key (or `SUBSTRATE_LLM_PROVIDER=ollama` for a local model) in a `key.env` beside
+it, and set `"allow_llm": true` in the boundary (`familiar boundary` shows it). Every
+outward capability — network, LLM, executing generated code, the camera — is a separate
+gate only a human opens.
 
 **The CLI (scripting / headless):**
 
@@ -119,14 +114,13 @@ capacities — the comfortable-replacement alarm). The metabolism breathes:
 **sense → detect → interpret (the familiar forms its own questions + theories) →
 generate (LLM-drafted hypotheses) → test (sandboxed execution) → score → select →
 inherit**, under the human-owned boundary it can never widen. It runs as a daemon
-(installable under launchd), and the Glass carries the interaction channel —
-the familiar asks ("What do you need most today?"), the human answers.
+(installable under launchd), and the FamiliarMac sphere console carries the interaction
+channel — the familiar asks ("What do you need most today?"), the human answers — with
+iPhone/iPad/watch agents enrolled into the same mesh by QR.
 
 It now also **watches**: with the `allow_camera` gate open, the daemon captures still
-frames through its eye (a bundled AVFoundation helper) and records that it saw. And it
-**ships**: a signed, notarized macOS installer (`Familiar.app` + the breathing menu-bar
-marble) that sets the whole thing up to run at boot — see [Install & run](#install--run)
-and [`packaging/README.md`](packaging/README.md).
+frames through its eye (a bundled AVFoundation helper) and records that it saw. See
+[Install & run](#install--run).
 
 Outward reach (network, LLM, executing generated code, **watching through the camera**) is
 each a separate gate only a human opens. See [CHANGELOG.md](CHANGELOG.md) and

@@ -67,15 +67,14 @@ crates/
                                     interpret → generate → test → score → select → measure)
   cli/      familiar-cli (bin: `familiar`) — the shell + daemon control (start/stop/
                                     reload/install via pidfile + launchd: src/daemon.rs)
-  glass/    familiar-glass (bin: `glass`) — the GUI (primary human interface; egui/eframe;
-                daemon control bar + the interaction channel + the mesh wizard/accept card;
-                writes only the observer's input; GUI deps isolated). See ADR-0006.
-  marble/   marble (bin: `marble`) — the macOS menu-bar accessory that opens the Glass.
 ```
 
-A separate iOS/watchOS project (`~/Development/familiar-ios`, Swift/SwiftUI) provides lightweight
-**device agents** — they enrol by the covenant handshake and push derived observations to a
-familiar's `/mesh/observe`. See [mesh.md](mesh.md).
+The human interfaces are Swift/SwiftUI, in [`../ios/`](../ios/): the FamiliarMac
+sphere console (ADR-0008) and the iPhone/iPad/watch **device agents** — they enrol
+by the covenant handshake and push derived observations to a familiar's
+`/mesh/observe`, and the capable ones host the same sphere console. See
+[mesh.md](mesh.md) and [`../ios/README.md`](../ios/README.md). The egui-era Glass
+(ADR-0006) and menu-bar marble were retired 2026-07-24 — git history keeps them.
 
 ## Interfaces
 

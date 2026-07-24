@@ -13,7 +13,7 @@ the store change makes updates indexed and lets the daemon and the Glass share t
   `json_extract(data,'$.id')`. `data` is the same serde JSON the record always serialized to —
   no schema migration, no hand-mapped columns.
 - **The public API is unchanged.** `store::append` / `load` / `rewrite` keep their signatures, so
-  every consumer (cycle, glass, marble, sense) is untouched. Insertion order is preserved via
+  every consumer (cycle, the consoles, sense) is untouched. Insertion order is preserved via
   `seq`.
 - **Indexed updates.** `store::load_by_id` / `update_by_id` do a single `… WHERE
   json_extract(data,'$.id')=?` — O(log n), not load-all + rewrite-all. The update-heavy paths

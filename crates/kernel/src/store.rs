@@ -42,8 +42,8 @@ pub fn data_dir(override_dir: Option<&str>) -> PathBuf {
 /// The per-user data directory of the installed app:
 /// `~/Library/Application Support/Familiar/data`.
 ///
-/// This is the fallback the **GUI apps** (the Glass, the marble) use when launched without
-/// an explicit `--data-dir`. Finder- and launchd-launched apps run with the working
+/// This is the fallback GUI-launched processes (the FamiliarMac console's helpers)
+/// use when launched without an explicit `--data-dir`. Finder- and launchd-launched apps run with the working
 /// directory set to `/`, where the relative [`DEFAULT_DATA_DIR`] would resolve under the
 /// read-only system volume and every write would fail with `EROFS`. This absolute path is
 /// the same one the launchd agents pass explicitly, so all launch paths agree. Falls back to
@@ -159,9 +159,7 @@ pub fn load<T: DeserializeOwned>(dir: &Path, file: &str) -> io::Result<Vec<T>> {
     let mut stmt = c
         .prepare(&format!("SELECT data FROM {table} ORDER BY seq"))
         .map_err(se)?;
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(se)?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(se)?;
     let mut out = Vec::new();
     for row in rows {
         let data = row.map_err(se)?;
@@ -179,7 +177,8 @@ pub fn rewrite<T: Serialize>(dir: &Path, file: &str, records: &[T]) -> io::Resul
     let c = arc.lock().unwrap();
     ensure(&c, &table, dir, file)?;
     let tx = c.unchecked_transaction().map_err(se)?;
-    tx.execute(&format!("DELETE FROM {table}"), []).map_err(se)?;
+    tx.execute(&format!("DELETE FROM {table}"), [])
+        .map_err(se)?;
     {
         let mut ins = tx
             .prepare(&format!("INSERT INTO {table}(data) VALUES(?1)"))
@@ -195,11 +194,7 @@ pub fn rewrite<T: Serialize>(dir: &Path, file: &str, records: &[T]) -> io::Resul
 
 /// Load the single record whose JSON `id` field equals `id`, if any — an indexed lookup, not
 /// a full scan. The record type must serialize an `"id"` field.
-pub fn load_by_id<T: DeserializeOwned>(
-    dir: &Path,
-    file: &str,
-    id: &str,
-) -> io::Result<Option<T>> {
+pub fn load_by_id<T: DeserializeOwned>(dir: &Path, file: &str, id: &str) -> io::Result<Option<T>> {
     let table = table_of(file);
     let arc = conn(dir)?;
     let c = arc.lock().unwrap();
@@ -304,7 +299,8 @@ mod tests {
     struct TempDir(PathBuf);
     impl TempDir {
         fn new(tag: &str) -> Self {
-            let p = std::env::temp_dir().join(format!("substrate_store_test_{tag}_{}", std::process::id()));
+            let p = std::env::temp_dir()
+                .join(format!("substrate_store_test_{tag}_{}", std::process::id()));
             let _ = fs::remove_dir_all(&p);
             TempDir(p)
         }
@@ -398,7 +394,10 @@ mod tests {
         // and the targeted lookup finds it
         let one: Option<Rec> = load_by_id(d.path(), "recs.jsonl", "2").unwrap();
         assert_eq!(one, Some(rec("2", "BETA")));
-        assert_eq!(load_by_id::<Rec>(d.path(), "recs.jsonl", "9").unwrap(), None);
+        assert_eq!(
+            load_by_id::<Rec>(d.path(), "recs.jsonl", "9").unwrap(),
+            None
+        );
     }
 
     #[test]

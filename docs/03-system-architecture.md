@@ -60,9 +60,13 @@ crates/
   exec/     familiar-exec (lib) — the sandboxed runner                   [unit]
   llm/      familiar-llm (lib) — the LLM seam (boundary-gated)           [unit/live]
   cli/      familiar-cli (bin: `familiar`) — the thin shell             [live]
-  glass/    familiar-glass (bin) — the Glass (egui GUI, primary UI)      [live]
-  marble/   familiar-marble (bin) — the menu-bar presence (macOS)        [live]
 ```
+
+The human interfaces live outside the Rust workspace, in [`../ios/`](../ios/):
+the **FamiliarMac** sphere console, the iPhone/iPad device agents (which host the
+same console), and the watch app. See [`../ios/README.md`](../ios/README.md).
+The retired egui-era consoles (the Glass, the menu-bar marble) were removed
+2026-07-24; git history keeps them.
 
 The eye is split like the boundary asks: **discovery** (which cameras exist) is always
 permitted, but **watching** (capturing a frame) is gated by `allow_camera`, fail-closed, and
@@ -70,13 +74,13 @@ runs only in the daemon's gated tick. Capture shells out to `familiar-eye`, a ti
 Swift/AVFoundation helper, so no heavy camera crate enters the trust surface and — packaged —
 the macOS camera grant attaches to `Familiar.app` rather than to a terminal.
 
-## Packaging (macOS)
+## Install (macOS)
 
-`packaging/` turns the four binaries (`marble`, `glass`, `familiar`, `familiar-eye`) into a
-signed, **notarized** `Familiar.app` and a `.pkg` installer that sets up the launchd agents
-(daemon + marble) at boot. The marble is the bundle's entry point and accessory face; the
-Glass is the window onto the familiar; `familiar-eye` is the eye. See
-[`../packaging/README.md`](../packaging/README.md).
+Two pieces: the **daemon** (`familiar daemon install` — copies the binary and
+`familiar-eye` to the stable bin dir under `~/Library/Application Support/Familiar/`
+and writes the `io.river.familiar` launchd agent), and the **FamiliarMac console**
+(generated with XcodeGen from [`../ios/project.yml`](../ios/project.yml), built to
+`/Applications/FamiliarMac.app`). See [`../ios/README.md`](../ios/README.md).
 
 ## The cycle (the metabolism)
 
