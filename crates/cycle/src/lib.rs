@@ -263,13 +263,49 @@ fn last_theory_at(dir: &Path) -> i64 {
 ///   muse on → sooner), floored so the familiar stays present (Law II).
 /// - Otherwise the full **rest** cadence ([`Parameters::theorize_every_secs`]) — a stable
 ///   world with nothing new gets the quiet it deserves.
-/// The familiar's own plumbing telemetry — reach probes, LAN discovery, device
-/// sightings. Facts about the mesh's body, not about the served: a muse fed on
-/// them theorizes about the familiar itself (connectivity navel-gazing), so the
-/// muse and its novelty clock look past them. They still feed the worldview,
-/// the roster, and the frontier — they simply are not *musings* material.
+///
+/// The familiar's own plumbing and metabolism — facts about the mesh's body or the
+/// factory's bookkeeping, not about the served: a muse fed on them theorizes about
+/// the familiar itself (connectivity navel-gazing — in a quiet environment this
+/// telemetry is *most* of what it sees, and it becomes everything it thinks about).
+/// The muse and its novelty clock look past them. They still feed the worldview,
+/// the roster, the frontier, and the signal measures — they simply are not
+/// *musings* material. What remains is the world: what humans say and answer,
+/// what devices report about life around them, what services actually do.
+fn infra_triple(action: &str, object: &str) -> bool {
+    matches!(
+        action,
+        // The mesh's body: reach probes, LAN discovery, device sightings, hardware inventory.
+        "can-reach" | "sees" | "discovered" | "has"
+        // The factory's own metabolism: sensor runs, tool cultivation, its own theorizing,
+        // capability probes, self-regulation. Records of the familiar working — fed back
+        // as musing material they close a loop where it only ever works on itself
+        // (network theories → network tools → network observations → network theories).
+        | "gathered" | "cultivated-from" | "cultivated-tool" | "theorizes"
+        | "can_run" | "declined_to_run" | "regulated_presence"
+    )
+    // Mesh presence beacons are roster material, not musings. Scoped by object: a device
+    // reporting motion, battery, or anything else about the world still counts.
+    || (action == "reports" && object == "presence")
+}
+
 fn infra_observation(o: &observation::Observation) -> bool {
-    matches!(o.action.as_str(), "can-reach" | "sees" | "discovered")
+    infra_triple(&o.action, &o.object)
+}
+
+/// The loop-shaped view of the same judgment: a recurrence loop over an infra triple is
+/// the familiar's own heartbeat, not a pattern in the world. Loops carry their grouping
+/// key in the description (`Repeated: actor|action|object`) — parse it and apply
+/// [`infra_triple`]; a description that doesn't parse is kept (unknown ≠ plumbing).
+fn infra_loop(l: &loops::Loop) -> bool {
+    l.description
+        .strip_prefix("Repeated: ")
+        .and_then(|k| {
+            let mut it = k.splitn(3, '|');
+            it.next()?; // actor
+            Some((it.next()?, it.next().unwrap_or("")))
+        })
+        .is_some_and(|(action, object)| infra_triple(action, object))
 }
 
 /// Does an open or pursued thread already say substantially this? Word-set
@@ -431,19 +467,39 @@ fn maybe_theorize(
     if recent.is_empty() {
         return Ok(false); // nothing but plumbing to muse on — wait for the world
     }
-    let infra_loop =
-        |s: &str| s.contains("can-reach") || s.contains("|sees|") || s.contains("discovered");
+    // What the sensor library last SAW — readings, not run records. `gathered` triples are
+    // metabolism (filtered above), but their context field holds the world the sensor looked
+    // at; that content is exactly what a muse should theorize over. Freshest reading per
+    // distinct sensor, a few sensors deep, each line bounded.
+    let mut seen_sensors = std::collections::HashSet::new();
+    let readings: Vec<String> = obs
+        .iter()
+        .rev()
+        .filter(|o| o.action == "gathered" && !o.context.trim().is_empty())
+        .filter(|o| seen_sensors.insert(o.object.clone()))
+        .take(6)
+        .map(|o| {
+            let one_line = o.context.split_whitespace().collect::<Vec<_>>().join(" ");
+            format!(
+                "- {}: {}",
+                o.object,
+                one_line.chars().take(240).collect::<String>()
+            )
+        })
+        .collect();
     let loops_s: Vec<String> = detected
         .iter()
-        .filter(|l| !infra_loop(&l.name) && !infra_loop(&l.description))
+        .filter(|l| !infra_loop(l))
         .map(|l| format!("- {} (x{})", l.name, l.observation_count))
         .collect();
     let who = observer_phrase(dir);
     let prompt = format!(
         "You are a factory whose only purpose is to serve {who} — never to manage, obey, \
          optimize, or sedate them (the Three Laws; humanity is served, not replaced). \
-         Recent observations:\n{}\nRecurring loops:\n{}\nSignals: service={service:.2}, \
+         Recent observations:\n{}\nRecurring loops:\n{}\n{}Signals: service={service:.2}, \
          presence={presence:.2}, capacities={capacities:.2}.\n\
+         Theorize about the world and the person you serve — what the readings and events \
+         MEAN for them — not about your own connectivity, infrastructure, or plumbing.\n\
          From this, propose (1) ONE short question to ask {who} that, grounded in what you \
          observe, would help you serve them better; (2) a brief theory about what these \
          patterns might mean; and (3) a short, concrete direction — one thing you could \
@@ -451,6 +507,11 @@ fn maybe_theorize(
          as compact JSON: {{\"question\":\"...\",\"theory\":\"...\",\"direction\":\"...\"}}.",
         recent.join("\n"),
         loops_s.join("\n"),
+        if readings.is_empty() {
+            String::new()
+        } else {
+            format!("Latest sensor readings:\n{}\n", readings.join("\n"))
+        },
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
@@ -2898,16 +2959,70 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn infra_telemetry_is_not_musing_material() {
         let mk = |action: &str| {
             observation::Observation::new("host", action, "device:tv", "", "sense", 10, 1.0)
         };
+        // The mesh's body.
         assert!(infra_observation(&mk("can-reach")));
         assert!(infra_observation(&mk("sees")));
         assert!(infra_observation(&mk("discovered")));
-        assert!(!infra_observation(&mk("reports")));
+        assert!(infra_observation(&mk("has")));
+        // The factory's own metabolism.
+        assert!(infra_observation(&mk("gathered")));
+        assert!(infra_observation(&mk("cultivated-tool")));
+        assert!(infra_observation(&mk("theorizes")));
+        // Presence beacons are infra by object, not by action: `reports` about the
+        // world (motion, battery, a doorbell) is exactly what the muse is for.
+        let presence =
+            observation::Observation::new("mesh:abc", "reports", "presence", "", "mesh", 10, 1.0);
+        assert!(infra_observation(&presence));
+        let motion = observation::Observation::new(
+            "phone:ian",
+            "reports",
+            "motion:walking",
+            "",
+            "mesh",
+            10,
+            1.0,
+        );
+        assert!(!infra_observation(&motion));
         assert!(!infra_observation(&mk("asked")));
+        assert!(!infra_observation(&mk("told the familiar")));
+    }
+
+    #[test]
+    fn infra_loops_are_not_musing_material_either() {
+        // Loops judge by the same triple, parsed from their grouping key.
+        let mk_loop = |actor: &str, action: &str, object: &str| loops::Loop {
+            id: "loop-x".into(),
+            name: format!("{actor}_{action}"),
+            description: format!("Repeated: {actor}|{action}|{object}"),
+            loop_type: "recurrence_loop".into(),
+            observation_ids: String::new(),
+            observation_count: 3,
+            first_seen: 1,
+            last_seen: 2,
+            recurrence_score: 0.5,
+            friction_score: 0.5,
+            opportunity_score: 0.5,
+            confidence: 1.0,
+        };
+        assert!(infra_loop(&mk_loop(
+            "familiar",
+            "gathered",
+            "sensor:net_probe"
+        )));
+        assert!(infra_loop(&mk_loop("mesh:abc", "reports", "presence")));
+        assert!(!infra_loop(&mk_loop(
+            "phone:ian",
+            "reports",
+            "motion:walking"
+        )));
+        // An unparseable description is kept — unknown is not plumbing.
+        let mut odd = mk_loop("x", "y", "z");
+        odd.description = "something else".into();
+        assert!(!infra_loop(&odd));
     }
 
     #[test]
@@ -2943,6 +3058,7 @@ mod tests {
         ));
     }
 
+    #[test]
     fn theorize_is_due_on_fresh_observer_input_within_the_window() {
         let t = Temp::new("theorize_due");
         // last theory stamped recently, so the hourly window has NOT elapsed.

@@ -1715,7 +1715,7 @@ fn tailscale_output(args: &[&str]) -> Option<std::process::Output> {
 #[cfg(any(target_os = "macos", test))]
 fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let n = u32::from_be_bytes([
             0,
