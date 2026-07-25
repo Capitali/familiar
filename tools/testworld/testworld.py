@@ -39,6 +39,43 @@ def h(*parts) -> float:
     return int.from_bytes(hashlib.sha256(s.encode()).digest()[:8], "big") / 2**64
 
 
+# ------------------------------------------------------------------ weather
+# One sky over the whole box. Rain falls in 6-hour slots; a slot rains when the
+# dice say so. irrigator.py computes THE SAME function from the same seed — its
+# void is that it can't see this room, not that its world differs.
+RAIN_SLOT_SECS = 6 * 3600
+RAIN_P = 0.22
+
+
+def rain_in_slot(slot: int) -> bool:
+    return h("rain", slot) < RAIN_P
+
+
+def weather(now: int) -> list:
+    slot0 = now // RAIN_SLOT_SECS
+    out = []
+    for i in range(8):                     # next 48 hours
+        s = slot0 + i
+        start_h = (s * RAIN_SLOT_SECS - now) / 3600
+        out.append({
+            "slot": s,
+            "from_hours": round(max(0, start_h), 1),
+            "to_hours": round(start_h + 6, 1),
+            "rain": rain_in_slot(s),
+        })
+    return out
+
+
+def weather_text(fc: list) -> str:
+    lines = ["weather (next 48h, 6-hour slots):"]
+    for w in fc:
+        lines.append(
+            f"  +{w['from_hours']:>4}h to +{w['to_hours']:>4}h: "
+            + ("RAIN" if w["rain"] else "clear")
+        )
+    return "\n".join(lines) + "\n"
+
+
 # ---------------------------------------------------------------- greenhouse
 WATER_FILE = "watered_at"          # state-dir file: unix secs of last watering
 SOIL_DRY_HOURS = 72                # full → thirsty in three days
@@ -158,11 +195,17 @@ def almanac_text(evs: list) -> str:
 
 
 # ------------------------------------------------------------------- server
-INDEX = """this is the household testworld — three small services, one house:
+INDEX = """this is the household testworld — small services, one house:
   /greenhouse   temperature, humidity, lamp, soil moisture (POST /greenhouse/water to water)
   /pantry       staples on hand and what's running low
   /almanac      what's coming up, what's due, what's overdue
+  /weather      rain forecast for the next 48 hours
 plain text by default; add ?json=1 for JSON.
+
+also on this box, not part of this house:
+  :8081  an irrigation controller that manages the row garden by itself —
+         it makes its own decisions and keeps its own logs
+  :8082  a water heater with controls and no controller — nothing manages it
 """
 
 
@@ -185,6 +228,7 @@ class World(BaseHTTPRequestHandler):
             "/greenhouse": lambda: (greenhouse(self.state_dir, now), greenhouse_text),
             "/pantry": lambda: (pantry(now), pantry_text),
             "/almanac": lambda: (almanac(now), almanac_text),
+            "/weather": lambda: (weather(now), weather_text),
         }.get(u.path)
         if u.path in ("", "/"):
             self._send(200, INDEX)
