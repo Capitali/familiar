@@ -16,8 +16,10 @@ without any infrastructure at all.
 
    POSTs `observations.jsonl` (greenhouse readings, pantry lows, almanac
    events, things Ian said) to the loopback observe seam (`:47101
-   /local/observe`). Fresh observer input muses on the next tick — you can
-   watch what theories the material produces and tune the JSONL directly.
+   /local/observe`). The seam records with source `local`, so seeding
+   rides the muse's **novelty** path: twenty fresh observations shrink the
+   wait to its floor (~5 minutes from the last theory). Watch what
+   theories the material produces and tune the JSONL directly.
 
 2. **Live services on the LAN (the real loop).** `testworld.py` serves a
    household on one HTTP port:

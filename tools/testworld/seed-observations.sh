@@ -29,4 +29,5 @@ while IFS= read -r line; do
 done < "$FILE"
 
 echo "✓ seeded $n observation(s) into $URL"
-echo "  the muse picks them up on its next due tick (fresh observer input muses next tick)"
+echo "  the seam records with source 'local', so these count as NOVELTY: the muse's wait"
+echo "  shrinks toward its floor (~5 min from the last theory), it does not fire next tick"
