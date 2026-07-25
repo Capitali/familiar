@@ -333,7 +333,15 @@ pub(crate) fn read_worldview(
     // fresh gossip peers (any member node serves the same verified read seam — the
     // worldview is gossip-replicated). A device that loses this node fails over to a
     // sibling.
-    let mut hosts = crate::config::load(dir).unwrap_or_default().advertise_hosts;
+    let cfg = crate::config::load(dir).unwrap_or_default();
+    let mut hosts = cfg.advertise_hosts.clone();
+    // The rendezvous/lighthouse address is a public failover candidate — a device off-LAN keeps
+    // it when tailnet and LAN addresses go unreachable (ADR-0012).
+    for h in &cfg.rendezvous_hosts {
+        if !hosts.contains(h) {
+            hosts.push(h.clone());
+        }
+    }
     for h in crate::transport::reachable_hosts() {
         if !hosts.contains(&h) {
             hosts.push(h);

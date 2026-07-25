@@ -88,6 +88,12 @@ pub struct MeshConfig {
     /// devices survive an IP change. Interface-derived addresses still follow; empty for
     /// almost every node.
     pub advertise_hosts: Vec<String>,
+    /// Rendezvous addresses (ADR-0012) — public meeting points (the lighthouse) this node
+    /// **registers with** so a new device can discover the mesh without a QR, and which it
+    /// **advertises as failover hosts** so an enrolled device off-LAN keeps a reachable
+    /// candidate. A meeting address, never a secret; empty on a node that knows no lighthouse.
+    #[serde(default)]
+    pub rendezvous_hosts: Vec<String>,
 }
 
 impl Default for MeshConfig {
@@ -108,6 +114,7 @@ impl Default for MeshConfig {
             lan_discovery: true,
             lan_port: 47_101,
             advertise_hosts: Vec::new(),
+            rendezvous_hosts: Vec::new(),
         }
     }
 }

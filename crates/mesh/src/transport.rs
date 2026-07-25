@@ -749,6 +749,22 @@ async fn handle(
             let relayed = req.headers().contains_key("x-familiar-relayed");
             enroll_status_or_relay(&dir, node_id, relayed).await
         }
+        // Rendezvous (ADR-0012): a familiar registers its mesh here; a fresh device reads the
+        // directory to find a door. The directory holds no secret and admits no one.
+        (Method::POST, "/mesh/rendezvous-register") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_rendezvous_register(&dir, &bytes, &sig)
+        }
+        (Method::GET, "/mesh/rendezvous") => rendezvous_directory(&dir),
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
             serve_tool(&dir, id)
@@ -1182,6 +1198,38 @@ fn recv_enroll_request(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Byt
         },
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad enroll request"),
+    }
+}
+
+/// `POST /mesh/rendezvous-register` → a familiar lists its mesh in the directory (ADR-0012). The
+/// registering node signs the raw body (`X-Familiar-Sig`); the entry is kept only if that signature
+/// and the membership are self-consistent. 200 + the stored Entry; 403 untrusted; 400 malformed.
+/// Listing a door admits no one — the group secret never touches this path.
+fn recv_rendezvous_register(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let reg: crate::rendezvous::Registration = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad registration"),
+    };
+    if reg.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    match crate::rendezvous::register(dir, &reg, now_secs()) {
+        Ok(entry) => match serde_json::to_vec(&entry) {
+            Ok(b) => text(StatusCode::OK, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "entry encode"),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "registration rejected"),
+    }
+}
+
+/// `GET /mesh/rendezvous` → the live directory of meshes registered here, for a device to discover
+/// a door. Labels and addresses only — no secret, no raw group id (ADR-0012).
+fn rendezvous_directory(dir: &Path) -> Response<Full<Bytes>> {
+    let entries = crate::rendezvous::directory(dir, now_secs());
+    match serde_json::to_vec(&entries) {
+        Ok(b) => text(StatusCode::OK, b),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "directory encode"),
     }
 }
 

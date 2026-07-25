@@ -283,6 +283,36 @@ pub fn verify_membership(
         .map_err(|_| Error::Untrusted("membership: group signature did not verify".into()))
 }
 
+/// Verify a membership is **internally consistent** against a caller-supplied group public key,
+/// without the verifier holding that key itself. Checks the cert signature under the provided
+/// pubkey, the node_id ↔ node_pubkey fingerprint binding, and expiry. This proves the membership
+/// is *well-formed* — not that its group pre-exists or that the verifier vouches for it. Used by
+/// the rendezvous directory (ADR-0012), which lists doors it does not stand behind: a lighthouse
+/// hosts meetings for meshes it is not a member of, so it cannot check against a known group key.
+pub fn verify_membership_consistent(
+    m: &Membership,
+    group_pubkey_hex: &str,
+    now: i64,
+) -> Result<()> {
+    if now >= m.expiry {
+        return Err(Error::Untrusted("membership: expired".into()));
+    }
+    let pk = exactly_32(&hex_decode(&m.node_pubkey)?, "cert node pubkey")?;
+    if fingerprint(&pk) != m.node_id {
+        return Err(Error::Untrusted(
+            "membership: node_id ≠ pubkey fingerprint".into(),
+        ));
+    }
+    let gk_bytes = exactly_32(&hex_decode(group_pubkey_hex)?, "group pubkey")?;
+    let group_key = VerifyingKey::from_bytes(&gk_bytes)
+        .map_err(|_| Error::Untrusted("membership: bad group pubkey".into()))?;
+    let sig_bytes = crate::node::exactly_64(&hex_decode(&m.cert)?, "cert")?;
+    let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+    group_key
+        .verify(&m.body_bytes()?, &sig)
+        .map_err(|_| Error::Untrusted("membership: group signature did not verify".into()))
+}
+
 /// Load the group credential, if this node has enrolled.
 pub fn load(dir: &Path) -> Result<Option<GroupCredential>> {
     let path = dir.join(GROUP_FILE);

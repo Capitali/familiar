@@ -624,6 +624,16 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             // LAN). An explicit `--host` goes to the front. `host` stays as the single best
             // candidate so v1 clients keep working; new clients read `hosts` and fail over.
             let mut hosts = reachable_hosts();
+            // Carry the rendezvous/lighthouse address too, so a device that enrolls by QR/paste
+            // still learns the public failover candidate (ADR-0012).
+            for h in familiar_mesh::config::load(&dir)
+                .unwrap_or_default()
+                .rendezvous_hosts
+            {
+                if !hosts.contains(&h) {
+                    hosts.push(h);
+                }
+            }
             if let Some(h) = f.get("host") {
                 hosts.retain(|x| x != h);
                 hosts.insert(0, h.clone());
