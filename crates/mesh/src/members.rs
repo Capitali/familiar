@@ -91,6 +91,18 @@ pub struct Member {
     /// The human that node serves, when shared/derivable ("ian"). Empty when none/unknown.
     #[serde(default)]
     pub human: String,
+    /// The human **currently present** at this device — distinct from `human` (whom it serves):
+    /// who the evidence says is actually there now. Empty = unknown (no recent presence evidence).
+    #[serde(default)]
+    pub present_human: String,
+    /// When that presence was first established in the current unbroken run (unix secs). 0 = unknown.
+    #[serde(default)]
+    pub present_since: i64,
+    /// How presence was established — "face" (recognized), "motion" (carried device biometrics),
+    /// "dialogue" (the human spoke to the familiar), "activity" (the device is reporting at all).
+    /// Empty = unknown. Strongest evidence wins when several are fresh.
+    #[serde(default)]
+    pub present_via: String,
     /// Where the node is (decimal degrees) — self from `transport::self_geo`, peers from their
     /// briefs, devices from the GPS they report on worldview reads. 0/0 = unknown, and the map
     /// says so rather than inventing a place.
@@ -169,6 +181,102 @@ fn device_reports(
     latest
 }
 
+/// A human is present only if the evidence is fresher than this. Past it, presence is
+/// **unknown** — the roster says so rather than showing a stale name (a phone left on a
+/// counter is not its owner standing there).
+const PRESENCE_WINDOW_SECS: i64 = 30 * 60;
+
+/// The presence a single observation attests, if any: `(strength, via, human)`. Higher
+/// strength wins when several are fresh — a recognized face outranks a mere device beacon.
+/// `human` is empty when the evidence shows *someone* is there but not *who* (a bare
+/// dialogue turn, an unnamespaced report).
+fn presence_evidence(
+    o: &familiar_kernel::observation::Observation,
+) -> Option<(u8, &'static str, String)> {
+    let ns_human = || {
+        o.actor
+            .split_once(':')
+            .map(|(_, h)| h.to_string())
+            .unwrap_or_default()
+    };
+    // 1. A recognized face names the human directly — the strongest evidence.
+    if o.action == "recognized" {
+        if let Some(name) = o.object.strip_prefix("face:") {
+            return Some((4, "face", name.to_string()));
+        }
+    }
+    // 2. The human spoke to the familiar (a dialogue turn / an answered thread).
+    if o.source == "observer" || o.action == "answered" || o.action == "told the familiar" {
+        // A human actor names them; the observer channel may not, and that's honest.
+        let who = if o.actor.contains(':') {
+            ns_human()
+        } else {
+            o.actor.clone()
+        };
+        let who = if who == "observer" {
+            String::new()
+        } else {
+            who
+        };
+        return Some((3, "dialogue", who));
+    }
+    // 3. A carried personal device sensing its owner (motion, heartbeat, sleep) — but the
+    //    bare `presence` beacon is only that the device is *active*, the weakest tier.
+    if familiar_kernel::service::is_personal_device_report(o) {
+        if o.action == "reports" && o.object == "presence" {
+            return Some((1, "activity", ns_human()));
+        }
+        return Some((2, "motion", ns_human()));
+    }
+    None
+}
+
+/// Who is present at a node now, since when, and how — from the node's own observation
+/// stream (`belongs` selects them). Returns empty/0 when no evidence is inside the window.
+/// `since` walks back through an unbroken run (gaps ≤ the window) of same-human evidence.
+fn derive_presence(
+    obs: &[familiar_kernel::observation::Observation],
+    now: i64,
+    belongs: impl Fn(&familiar_kernel::observation::Observation) -> bool,
+) -> (String, i64, String) {
+    // Freshest presence evidence for this node, strongest tier breaking ties.
+    let mut best: Option<(i64, u8, &'static str, String)> = None;
+    for o in obs.iter().filter(|o| belongs(o)) {
+        if now - o.ts > PRESENCE_WINDOW_SECS {
+            continue;
+        }
+        if let Some((strength, via, human)) = presence_evidence(o) {
+            // Strongest establishment wins, freshness breaks ties: a face recognized 20
+            // minutes ago says more about *who is here* than a beacon ping one minute ago.
+            let better = match &best {
+                None => true,
+                Some((ts, s, _, _)) => strength > *s || (strength == *s && o.ts > *ts),
+            };
+            if better {
+                best = Some((o.ts, strength, via, human));
+            }
+        }
+    }
+    let Some((_, _, via, human)) = best else {
+        return (String::new(), 0, String::new()); // unknown
+    };
+    // How long: the earliest fresh evidence of the same human — since the freshness filter
+    // already bounds everything to one window of now, that is the start of the present run.
+    // Same human is matched case-insensitively (a recognized `face:Ian` and a `phone:ian`
+    // report are the same person); an anonymous turn (empty human) joins any run.
+    let since = obs
+        .iter()
+        .filter(|o| belongs(o) && now - o.ts <= PRESENCE_WINDOW_SECS)
+        .filter_map(|o| {
+            presence_evidence(o).and_then(|(_, _, h)| {
+                (human.is_empty() || h.is_empty() || h.eq_ignore_ascii_case(&human)).then_some(o.ts)
+            })
+        })
+        .min()
+        .unwrap_or(now);
+    (human, since, via.to_string())
+}
+
 /// OS family from a device actor namespace (`ipad:ian` → "iPadOS"). Empty if not a known device.
 pub fn os_from_actor(actor: &str) -> String {
     let ns = actor.split(':').next().unwrap_or("");
@@ -210,6 +318,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             .unwrap_or(false);
         let cfg = crate::config::load(dir).unwrap_or_default();
         let (self_lat, self_lon) = transport::self_geo(dir).unwrap_or((0.0, 0.0));
+        // Presence at the host itself: face recognitions and dialogue land here as
+        // non-mesh observations (host/observer sources), so select the local stream.
+        let (sp_human, sp_since, sp_via) = derive_presence(&obs, now, |o| {
+            !o.source.starts_with("mesh:") && !is_device_actor(&o.actor)
+        });
         out.push(Member {
             node_id: cred.membership.node_id.clone(),
             label,
@@ -233,6 +346,9 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: 0,
             interactive: !cfg.headless,
             human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+            present_human: sp_human,
+            present_since: sp_since,
+            present_via: sp_via,
             lat: self_lat,
             lon: self_lon,
         });
@@ -336,6 +452,14 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         } else {
             0
         };
+        // Presence, only for devices (a gossip peer reports its own). Evidence from this
+        // device arrives tagged `mesh:<node_id>` in our store.
+        let dev_presence = if is_device {
+            let src = format!("mesh:{}", p.node_id);
+            derive_presence(&obs, now, |o| o.source == src)
+        } else {
+            (String::new(), 0, String::new())
+        };
         out.push(Member {
             node_id: p.node_id.clone(),
             label,
@@ -363,6 +487,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: p.total_online_secs + live,
             interactive: p.interactive || is_device,
             human,
+            // A gossip peer's presence is its own to know and report; here we derive it only for
+            // devices whose observations flow through this node's store (source `mesh:<node>`).
+            present_human: dev_presence.0.clone(),
+            present_since: dev_presence.1,
+            present_via: dev_presence.2.clone(),
             lat: p.lat,
             lon: p.lon,
         });
@@ -384,6 +513,8 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             _ => "observed device",
         }
         .to_string();
+        let src = format!("mesh:{node}");
+        let agent_presence = derive_presence(&obs, now, |o| o.source == src);
         out.push(Member {
             node_id: node.clone(),
             label: actor.clone(),
@@ -412,6 +543,9 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
                 .split_once(':')
                 .map(|(_, h)| h.to_string())
                 .unwrap_or_default(),
+            present_human: agent_presence.0,
+            present_since: agent_presence.1,
+            present_via: agent_presence.2,
             lat: 0.0,
             lon: 0.0,
         });
@@ -453,6 +587,65 @@ mod tests {
         assert_eq!(os_from_actor("phone:ian"), "iOS");
         assert_eq!(os_from_actor("watch:ian"), "watchOS");
         assert_eq!(os_from_actor("client"), "");
+    }
+
+    #[test]
+    fn presence_is_derived_by_strength_freshness_and_run_length() {
+        let src = "mesh:dev1";
+        let mk = |actor: &str, action: &str, object: &str, ts: i64| {
+            Observation::new(actor, action, object, "", src, ts, 0.9)
+        };
+        // A run of motion reports, then a fresher recognized face: face wins (stronger),
+        // names the human, and `since` reaches back through the unbroken run.
+        let obs = vec![
+            mk("phone:ian", "reports", "motion:walking", NOW - 20 * 60),
+            mk("phone:ian", "reports", "motion:still", NOW - 12 * 60),
+            mk("phone:ian", "reports", "presence", NOW - 5 * 60),
+            mk("host", "recognized", "face:Ian", NOW - 60),
+        ];
+        let (who, since, via) = derive_presence(&obs, NOW, |o| o.source == src);
+        assert_eq!(who, "Ian");
+        assert_eq!(via, "face");
+        assert_eq!(
+            since,
+            NOW - 20 * 60,
+            "run reaches back to the first fresh turn"
+        );
+
+        // Nothing fresh → unknown, honestly.
+        let stale = vec![mk("phone:ian", "reports", "motion:walking", NOW - 60 * 60)];
+        let (who, since, via) = derive_presence(&stale, NOW, |o| o.source == src);
+        assert!(who.is_empty() && via.is_empty() && since == 0);
+
+        // Evidence older than the window is not counted toward the run — `since` is the
+        // earliest evidence still inside it.
+        let mixed = vec![
+            mk("phone:ian", "reports", "motion:walking", NOW - 50 * 60), // stale, ignored
+            mk("phone:ian", "reports", "motion:still", NOW - 10 * 60),
+            mk("phone:ian", "reports", "presence", NOW - 3 * 60),
+        ];
+        let (_, since, via) = derive_presence(&mixed, NOW, |o| o.source == src);
+        assert_eq!(via, "motion");
+        assert_eq!(
+            since,
+            NOW - 10 * 60,
+            "the stale turn outside the window does not count"
+        );
+
+        // Dialogue names the speaker; the observer channel may not, and that's honest.
+        let named = vec![mk("ian", "answered", "thread:1", NOW - 60)];
+        assert_eq!(derive_presence(&named, NOW, |o| o.source == src).0, "ian");
+        let anon = vec![Observation::new(
+            "observer",
+            "answered",
+            "thread:1",
+            "",
+            "observer",
+            NOW - 60,
+            0.9,
+        )];
+        let (who, _, via) = derive_presence(&anon, NOW, |_| true);
+        assert!(who.is_empty() && via == "dialogue");
     }
 
     #[test]

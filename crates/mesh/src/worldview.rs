@@ -799,6 +799,9 @@ mod tests {
             total_online_secs: 0,
             interactive: false,
             human: String::new(),
+            present_human: String::new(),
+            present_since: 0,
+            present_via: String::new(),
             lat: 0.0,
             lon: 0.0,
         }

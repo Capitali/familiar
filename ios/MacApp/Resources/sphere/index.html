@@ -187,8 +187,19 @@ function peers() {
       session: m.session_start > 0 ? dur(nowS() - m.session_start) : '—',
       total: m.total_online_secs > 0 ? dur(m.total_online_secs) : '—',
       os: (m.os_version || m.os || '?') + (m.familiar_version ? ' · v' + m.familiar_version : ''),
+      present: presentLine(m),
     };
   });
+}
+
+// Who is present at a node now, for how long, and how established — or 'unknown' when no
+// evidence is fresh. present_human/via/since are set by members::derive_presence.
+function presentLine(m) {
+  if (!m.present_human && !m.present_via) return { text: 'unknown', known: false };
+  const who = m.present_human || 'someone';
+  const how = m.present_via ? ' · ' + m.present_via : '';
+  const forr = m.present_since > 0 ? ' ' + dur(nowS() - m.present_since) : '';
+  return { text: who + forr + how, known: true };
 }
 
 // The frontier: discovered-but-not-yet-contributing devices/services/paths. Smaller, faded,
@@ -291,7 +302,8 @@ function refreshScreen() {
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
-        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:13px;">${dstr(p.m.first_seen)}${p.m.human?' · '+esc(p.m.human):''}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'}</div>
+        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:9px;">${dstr(p.m.first_seen)}${p.m.human?' · serves '+esc(p.m.human):''}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'}</div>
+        <div class="m" style="font-size:9.5px;margin-bottom:13px;display:flex;align-items:center;gap:6px;color:${p.present.known?'rgba(174,231,255,0.82)':'rgba(150,170,200,0.45)'};"><span style="width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${p.present.known?'#aee7ff':'rgba(140,160,190,0.4)'};${p.present.known?'box-shadow:0 0 7px #aee7ff;':''}"></span><span style="letter-spacing:0.1em;font-size:7px;color:rgba(150,180,255,0.55);">PRESENT</span> ${esc(p.present.text)}</div>
         <div style="display:grid;grid-template-columns:minmax(84px,auto) auto auto;justify-content:start;gap:18px;align-items:end;margin-bottom:12px;">
           <div>${seenCell(p, 26, 16)}<div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SEEN</div></div>
           <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#aee7ff;">${esc(p.session)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SESSION</div></div>
@@ -322,7 +334,8 @@ function refreshScreen() {
       </div>
       ${row('SYSTEM', p.os)}
       ${row('JOINED', dstr(m.first_seen))}
-      ${row('HUMAN', (m.human || '') + (m.interactive ? ' · interactive' : ''))}
+      ${row('PRESENT', p.present.text)}
+      ${row('SERVES', (m.human || '') + (m.interactive ? ' · interactive' : ''))}
       ${row('POSITION', p.located ? p.lat.toFixed(4)+'°, '+p.lon.toFixed(4)+'°' : p.hasAnchor ? '≈ near mesh' : '—')}
       ${row('ADDRESS', m.addr)}
       ${row('OFFERS', (m.tools||0) + ' tools · ' + (m.patterns||0) + ' patterns')}

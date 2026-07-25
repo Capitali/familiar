@@ -781,8 +781,30 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 } else {
                     m.human.clone()
                 };
+                // Present: who is actually there now, for how long, and how we know — or
+                // plainly "unknown" when no evidence is fresh. Distinct from "serves".
+                let present = if m.present_human.is_empty() && m.present_via.is_empty() {
+                    "unknown".to_string()
+                } else {
+                    let who = if m.present_human.is_empty() {
+                        "someone".to_string()
+                    } else {
+                        m.present_human.clone()
+                    };
+                    let how = if m.present_via.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" via {}", m.present_via)
+                    };
+                    let howlong = if m.present_since > 0 {
+                        format!(" for {}", dur(now - m.present_since))
+                    } else {
+                        String::new()
+                    };
+                    format!("{who}{howlong}{how}")
+                };
                 println!(
-                    "{} “{}” [{}]\n  status    {}{}\n  joined    first {} · session {} · total online {}\n  platform  {} {} · familiar v{}\n  human     interactive {} · serves {}\n  offers    {} tool(s), {} pattern(s) · trust {} · addr {}",
+                    "{} “{}” [{}]\n  status    {}{}\n  present   {}\n  joined    first {} · session {} · total online {}\n  platform  {} {} · familiar v{}\n  human     interactive {} · serves {}\n  offers    {} tool(s), {} pattern(s) · trust {} · addr {}",
                     match m.kind {
                         familiar_mesh::members::MemberKind::SelfNode => "self  ",
                         familiar_mesh::members::MemberKind::GossipPeer => "peer  ",
@@ -797,6 +819,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     } else {
                         format!(" (last seen {} ago)", dur(now - m.last_seen))
                     },
+                    present,
                     date(m.first_seen),
                     if m.session_start > 0 {
                         date(m.session_start)
