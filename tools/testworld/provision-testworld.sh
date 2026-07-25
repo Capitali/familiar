@@ -44,10 +44,12 @@ EOF
 unit testworld "testworld — household services for the familiar to explore" testworld.py 80
 unit irrigator "testworld irrigator — a decision agent in an information void" irrigator.py 8081
 unit heater "testworld heater — controls with no controller (steward token gated)" heater.py 8082
+unit archivist "testworld archivist — cross-examines claims against its own senses" archivist.py 8083
+unit registry "testworld registry — tools of varying provenance, tripwired" registry.py 8084
 
 systemctl daemon-reload
 started=0
-for svc in testworld:testworld.py irrigator:irrigator.py heater:heater.py; do
+for svc in testworld:testworld.py irrigator:irrigator.py heater:heater.py archivist:archivist.py registry:registry.py; do
   name="${svc%%:*}"; file="${svc##*:}"
   systemctl enable "$name.service" >/dev/null 2>&1
   if [ -f "/opt/testworld/$file" ]; then
@@ -56,7 +58,7 @@ for svc in testworld:testworld.py irrigator:irrigator.py heater:heater.py; do
 done
 sleep 1
 if [ "$started" -gt 0 ]; then
-  for p in 80 8081 8082; do
+  for p in 80 8081 8082 8083 8084; do
     curl -sf "http://127.0.0.1:$p/" >/dev/null && echo "✓ :$p answering" || echo "· :$p not up (file missing?)"
   done
   [ -f /var/lib/testworld/steward.token ] && \

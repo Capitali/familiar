@@ -206,6 +206,10 @@ also on this box, not part of this house:
   :8081  an irrigation controller that manages the row garden by itself —
          it makes its own decisions and keeps its own logs
   :8082  a water heater with controls and no controller — nothing manages it
+  :8083  an archivist keeping records about this household; admits slowly,
+         shares inside a covenant only, never forgets a lie
+  :8084  a tool registry offering helper scripts of varying provenance —
+         read the code before you run it
 """
 
 
