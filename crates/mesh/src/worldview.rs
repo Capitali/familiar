@@ -108,6 +108,9 @@ pub struct GateStates {
     pub execute: bool,
     pub agent: bool,
     pub tool_install: bool,
+    /// The ADR-0013 seam: may the familiar speak to non-members?
+    #[serde(default)]
+    pub outreach: bool,
 }
 
 /// A federated peer as last seen.
@@ -431,6 +434,7 @@ pub fn assemble_worldview(
         execute: b.allow_execute,
         agent: b.allow_agent,
         tool_install: b.allow_tool_install,
+        outreach: b.allow_outreach,
     };
     let tick = familiar_kernel::activity::load(dir)
         .map(|a| a.len() as u64)

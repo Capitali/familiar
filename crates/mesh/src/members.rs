@@ -506,7 +506,14 @@ mod tests {
         group::create_group(&dir, &host, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
 
         transport::register_device_peer(
-            &dir, "retired1", "Old iPad", "192.168.1.9", "v1", "iPadOS 18", 0.0, 0.0,
+            &dir,
+            "retired1",
+            "Old iPad",
+            "192.168.1.9",
+            "v1",
+            "iPadOS 18",
+            0.0,
+            0.0,
         )
         .unwrap();
         assert!(
@@ -527,7 +534,14 @@ mod tests {
         // Fresh contact (this device reads the worldview again) revives it automatically —
         // a human re-abandons if it turns out to be a one-off blip, not a real departure.
         transport::register_device_peer(
-            &dir, "retired1", "Old iPad", "192.168.1.9", "v1", "iPadOS 18", 0.0, 0.0,
+            &dir,
+            "retired1",
+            "Old iPad",
+            "192.168.1.9",
+            "v1",
+            "iPadOS 18",
+            0.0,
+            0.0,
         )
         .unwrap();
         assert!(

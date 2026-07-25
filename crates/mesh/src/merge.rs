@@ -1496,7 +1496,10 @@ mod tests {
         );
 
         let brief: MeshBrief = serde_json::from_str(&raw).unwrap();
-        let identities = brief.body.identities.expect("betty was opted in and should be shared");
+        let identities = brief
+            .body
+            .identities
+            .expect("betty was opted in and should be shared");
         assert_eq!(identities.entries.len(), 1);
         assert_eq!(identities.entries[0].handle, "betty");
         // IdentityShare structurally has no field to carry it — this is a compile-time

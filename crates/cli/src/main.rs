@@ -62,6 +62,12 @@ commands:
                  | `mesh accept-observations <on|off>` (device agents) | `mesh qr` (enroll a device)
                  | `mesh pending`/`approve <id>`/`deny <id>` (covenant handshake) | `mesh invite`
                  | `mesh optin <handle>` (per-human, per-group consent) | `mesh status`
+  outreach       speak to NON-members — the ADR-0013 seam (gated by allow_outreach;
+                 every claim citation-checked, every utterance ledgered):
+                 `outreach tend <host:port> [--house <host:port>]` (one honest round)
+                 | `outreach status` | `outreach proposals`
+                 | `outreach approve <id>` (the human's yes — the ONLY way a covenant sends)
+                 | `outreach block <host>`
 
 options:
   --data-dir <dir>   data directory (default: familiar_data)
@@ -103,6 +109,7 @@ fn main() -> ExitCode {
         Some("db") => cmd_db(rest),
         Some("agent") => cmd_agent(rest),
         Some("mesh") => cmd_mesh(rest),
+        Some("outreach") => cmd_outreach(rest),
         Some("goal") => cmd_goal(rest),
         Some(cmd) => {
             eprintln!("familiar: unknown command '{cmd}'\n\n{USAGE}");
@@ -244,6 +251,102 @@ fn cmd_agent(args: &[String]) -> ExitCode {
 /// mesh; the node whose capabilities satisfy its `needs` claims it and drives it through the agentic
 /// loop, and progress/ownership travel back to every node. High-consequence goals (deploy) are
 /// claimed but parked for a human. This is the human's instrument for pointing the mesh at work.
+/// `familiar outreach …` — the ADR-0013 seam. Every path here is either perception,
+/// an audited utterance (tend), or the human's own yes (approve).
+fn cmd_outreach(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        None | Some("status") => {
+            println!("{}", familiar_mesh::outreach::status(&dir));
+            ExitCode::SUCCESS
+        }
+        Some("tend") => {
+            let Some(counterparty) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("outreach: tend <host:port> [--house <host:port>]");
+                return ExitCode::FAILURE;
+            };
+            let host = counterparty.split(':').next().unwrap_or(counterparty);
+            let default_house = format!("{host}:80");
+            let house = f.get("house").cloned().unwrap_or(default_house);
+            match familiar_mesh::outreach::tend(&dir, counterparty, &house) {
+                Ok(report) => {
+                    println!("{report}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("outreach: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("proposals") => {
+            let ps = familiar_mesh::outreach::load_proposals(&dir);
+            if ps.is_empty() {
+                println!("(no proposals — trust is earned before terms are drafted)");
+            }
+            for p in ps {
+                println!(
+                    "{} [{}] {} — {}\n  laws:  {}\n  offer: {}{}",
+                    p.id,
+                    p.status,
+                    p.counterparty,
+                    p.evidence,
+                    p.laws,
+                    p.offer,
+                    if p.response.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n  reply: {}", p.response)
+                    }
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Some("approve") => {
+            let Some(id) = args.get(1) else {
+                eprintln!("outreach: approve <proposal-id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::outreach::approve(&dir, id) {
+                Ok(out) => {
+                    println!("✓ {out}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("outreach: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("block") => {
+            let Some(host) = args.get(1) else {
+                eprintln!("outreach: block <host>");
+                return ExitCode::FAILURE;
+            };
+            let path = dir.join(familiar_mesh::outreach::BLOCKLIST_FILE);
+            let _ = std::fs::create_dir_all(dir.join("outreach"));
+            let mut cur = std::fs::read_to_string(&path).unwrap_or_default();
+            if !cur.lines().any(|l| l.trim() == host.as_str()) {
+                cur.push_str(host);
+                cur.push('\n');
+                if std::fs::write(&path, cur).is_err() {
+                    eprintln!("outreach: could not write the blocklist");
+                    return ExitCode::FAILURE;
+                }
+            }
+            println!("✓ {host} blocked — the familiar will not contact it");
+            ExitCode::SUCCESS
+        }
+        Some(other) => {
+            eprintln!(
+                "outreach: unknown subcommand '{other}' (status|tend|proposals|approve|block)"
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn cmd_goal(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));

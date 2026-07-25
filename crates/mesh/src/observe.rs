@@ -214,7 +214,10 @@ pub(crate) fn ingest_observations(
         // identity::remember() never had before — the device already ran its own
         // confirm-before-keep flow; this is where that confirmation reaches the registry.
         let _ = familiar_kernel::identity::maybe_learn_from_observation(
-            dir, &obs.action, &obs.object, env.ts,
+            dir,
+            &obs.action,
+            &obs.object,
+            env.ts,
         );
         observation::record(dir, obs).map_err(Error::Io)?;
     }
@@ -390,7 +393,15 @@ mod tests {
         let mut record = obs("face:Betty");
         record.action = "recognized".into();
         record.actor = "phone:ian".into();
-        let (raw, sig) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![record]);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![record],
+        );
 
         ingest_observations(&host, &raw, &sig, NOW, &r).unwrap();
         let people = familiar_kernel::identity::load(&host).unwrap();

@@ -37,6 +37,7 @@ pub mod members;
 pub mod merge;
 pub mod node;
 pub mod observe;
+pub mod outreach;
 pub mod transport;
 pub mod worldview;
 

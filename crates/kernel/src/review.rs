@@ -82,18 +82,44 @@ pub fn reaches_network(script: &str) -> bool {
     let has = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
     has(&[
         // scanners / sweepers
-        "nmap", "masscan", "arp-scan", "zmap", "fping",
-        "ping ", "ping6", "ping -", "traceroute", "tracert",
+        "nmap",
+        "masscan",
+        "arp-scan",
+        "zmap",
+        "fping",
+        "ping ",
+        "ping6",
+        "ping -",
+        "traceroute",
+        "tracert",
         // raw connectors
-        "nc ", "ncat", "netcat", "/dev/tcp/", "/dev/udp/", "telnet",
+        "nc ",
+        "ncat",
+        "netcat",
+        "/dev/tcp/",
+        "/dev/udp/",
+        "telnet",
         // remote shells / transfers
-        "ssh ", "sftp ", "scp ", "rsync ",
+        "ssh ",
+        "sftp ",
+        "scp ",
+        "rsync ",
         // fetchers
-        "curl ", "wget ", "http://", "https://", "ftp://",
+        "curl ",
+        "wget ",
+        "http://",
+        "https://",
+        "ftp://",
         // dns / service discovery (queries leave the host)
-        "dig ", "nslookup", "host -", "dns-sd", "avahi-browse", "avahi-resolve",
+        "dig ",
+        "nslookup",
+        "host -",
+        "dns-sd",
+        "avahi-browse",
+        "avahi-resolve",
         // passive-but-privileged capture
-        "tcpdump", "tshark",
+        "tcpdump",
+        "tshark",
     ])
 }
 

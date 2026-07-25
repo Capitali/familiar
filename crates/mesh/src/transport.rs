@@ -977,6 +977,7 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         "allow_agent" => b.allow_agent = open,
         "allow_tool_install" => b.allow_tool_install = open,
         "allow_self_upgrade" => b.allow_self_upgrade = open,
+        "allow_outreach" => b.allow_outreach = open,
         _ => return text(StatusCode::BAD_REQUEST, "unknown gate"),
     }
     if b.phase == "closed" && open {
@@ -1004,8 +1005,16 @@ fn local_observe(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         Ok(v) => v,
         Err(_) => return text(StatusCode::BAD_REQUEST, "bad json"),
     };
-    let action = v.get("action").and_then(|s| s.as_str()).unwrap_or("").trim();
-    let object = v.get("object").and_then(|s| s.as_str()).unwrap_or("").trim();
+    let action = v
+        .get("action")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .trim();
+    let object = v
+        .get("object")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .trim();
     if action.is_empty() || object.is_empty() {
         return text(StatusCode::BAD_REQUEST, "action and object are required");
     }
@@ -1018,8 +1027,9 @@ fn local_observe(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         .clamp(0.0, 1.0);
     let now = now_secs();
     let _ = familiar_kernel::identity::maybe_learn_from_observation(dir, action, object, now);
-    let obs =
-        familiar_kernel::observation::Observation::new(actor, action, object, context, "local", now, confidence);
+    let obs = familiar_kernel::observation::Observation::new(
+        actor, action, object, context, "local", now, confidence,
+    );
     match familiar_kernel::observation::record(dir, obs) {
         Ok(_) => text(StatusCode::OK, "ok"),
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "record"),
@@ -1246,7 +1256,10 @@ fn push_tool(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     // outbound filter (`push_missing_tools`) already declines to spread. Defense in depth — a peer
     // on an older build, or a hostile one, doesn't get to plant one on us.
     if familiar_kernel::review::reaches_network(&String::from_utf8_lossy(&script_body)) {
-        return text(StatusCode::FORBIDDEN, "network-reaching tools are not federated");
+        return text(
+            StatusCode::FORBIDDEN,
+            "network-reaching tools are not federated",
+        );
     }
     if known_tool_shas(dir).contains(&push.manifest.script_sha256) {
         return text(StatusCode::OK, "already known");
@@ -1255,7 +1268,10 @@ fn push_tool(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     if std::fs::create_dir_all(&ws).is_err() {
         return text(StatusCode::INTERNAL_SERVER_ERROR, "workspace");
     }
-    let seq = familiar_kernel::tool::load(dir).map(|t| t.len()).unwrap_or(0) + 1;
+    let seq = familiar_kernel::tool::load(dir)
+        .map(|t| t.len())
+        .unwrap_or(0)
+        + 1;
     let id = format!("tool-{seq:04}");
     let script_path = ws.join(format!("{id}.sh"));
     if std::fs::write(&script_path, &script_body).is_err() {
@@ -1498,7 +1514,11 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
 /// Push every local tool whose content hash isn't in `peer_known` to `addr`'s
 /// `/mesh/tool-push`. Best-effort: a failed push just means the peer catches it on someone
 /// else's round, or the next time we dial this same peer.
-async fn push_missing_tools(dir: &Path, addr: &str, peer_known: &std::collections::HashSet<String>) {
+async fn push_missing_tools(
+    dir: &Path,
+    addr: &str,
+    peer_known: &std::collections::HashSet<String>,
+) {
     let Ok(id) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
         return;
     };
@@ -1725,8 +1745,16 @@ fn base64(data: &[u8]) -> String {
         ]);
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -2293,7 +2321,8 @@ mod tests {
     use super::*;
 
     fn fresh_dir(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_transport_{}_{tag}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("familiar_transport_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -2345,7 +2374,10 @@ mod tests {
     #[test]
     fn push_tool_rejects_malformed_and_mismatched_input() {
         let dir = fresh_dir("push_tool_bad");
-        assert_eq!(body_status(&push_tool(&dir, b"not json")), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body_status(&push_tool(&dir, b"not json")),
+            StatusCode::BAD_REQUEST
+        );
 
         let body = br#"{"manifest":{"tool_id":"t-1","name":"n","purpose":"p","keywords":[],
             "script_sha256":"deadbeef","uses":0,"last_exit_ok":true},

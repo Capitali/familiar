@@ -84,6 +84,14 @@ pub struct Boundary {
     /// kept for auto-rollback, and a migration never opens another gate. See `docs/self-upgrade.md`.
     #[serde(default)]
     pub allow_self_upgrade: bool,
+    /// May the familiar **speak to non-members** — the outreach seam (ADR-0013)? Sharper than
+    /// `allow_network`: reads of a stranger's public pages are perception, but an *utterance*
+    /// (a chat, a prediction, an offer) is the familiar acting on the world in its own voice.
+    /// Even when open, every utterance is citation-checked (claims must dereference to held
+    /// evidence), ledgered, rate-limited, and blocklist-filtered — and a covenant is never
+    /// completed by the familiar alone: binding queues for the human, permanently.
+    #[serde(default)]
+    pub allow_outreach: bool,
     /// Run executed artifacts under the resource sandbox (`ulimit`/wall-timeout)?
     /// Default **true** (safe). When the human sets it false, artifacts run without
     /// resource confinement — bound then by the constitution (the pre-execution review
@@ -126,6 +134,7 @@ impl Boundary {
             allow_mesh: false,
             allow_agent: false,
             allow_self_upgrade: false,
+            allow_outreach: false,
             sandbox_execution: true,
             fs_read: Vec::new(),
             fs_write: Vec::new(),
@@ -148,6 +157,7 @@ impl Boundary {
             && !self.allow_mesh
             && !self.allow_agent
             && !self.allow_self_upgrade
+            && !self.allow_outreach
             && self.fs_read.is_empty()
             && self.fs_write.is_empty()
     }
@@ -251,6 +261,9 @@ pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
         // A scoped agent never rewrites the core — self-upgrade is the core's own decision, made
         // outside any delegated loop. Always dropped, whatever the human boundary holds.
         allow_self_upgrade: false,
+        // Speaking to strangers in the familiar's voice is likewise never delegated —
+        // an agent loop cannot make utterances the outreach ledger must answer for.
+        allow_outreach: false,
         sandbox_execution: b.sandbox_execution,
         fs_read: intersect_paths(&b.fs_read, &s.fs_read),
         fs_write: intersect_paths(&b.fs_write, &s.fs_write),
@@ -416,7 +429,10 @@ mod tests {
         let mut scope = CapabilityScope::none();
         scope.microphone = true;
         let eff = scoped_boundary(&b, &scope);
-        assert!(eff.allow_microphone, "scope grants what the boundary allows");
+        assert!(
+            eff.allow_microphone,
+            "scope grants what the boundary allows"
+        );
         assert!(
             !eff.allow_location,
             "scope withholds location even though boundary allows it"

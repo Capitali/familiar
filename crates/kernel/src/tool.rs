@@ -250,7 +250,10 @@ mod tests {
         append(dir, &st).unwrap();
 
         let removed = prune_network(dir).unwrap();
-        assert_eq!(removed, vec![("tool-0002".to_string(), "lan_scan".to_string())]);
+        assert_eq!(
+            removed,
+            vec![("tool-0002".to_string(), "lan_scan".to_string())]
+        );
         // store now holds only the local tool; the scan's script file is gone.
         let left = load(dir).unwrap();
         assert_eq!(left.len(), 1);

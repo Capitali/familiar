@@ -472,7 +472,7 @@ function refreshScreen() {
 
   } else if (k === 'controls') {
     const g = v.gates || {};
-    const rows = [ ['llm','allow_llm',g.llm], ['camera','allow_camera',g.camera], ['network','allow_network',g.network], ['mesh','allow_mesh',g.mesh], ['execute','allow_execute',g.execute], ['agent','allow_agent',g.agent], ['tools','allow_tool_install',g.tool_install] ];
+    const rows = [ ['llm','allow_llm',g.llm], ['camera','allow_camera',g.camera], ['network','allow_network',g.network], ['mesh','allow_mesh',g.mesh], ['execute','allow_execute',g.execute], ['agent','allow_agent',g.agent], ['tools','allow_tool_install',g.tool_install], ['outreach','allow_outreach',g.outreach] ];
     el.innerHTML = `<div style="max-width:720px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">` + rows.map(([name, key, on]) => `
       <button onclick="sphereGate('${key}', ${on ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${on?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
         ${gateGlyph(on)}

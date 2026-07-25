@@ -117,7 +117,11 @@ pub fn remember(dir: &Path, name: &str, now: i64) -> io::Result<Identity> {
 /// calling this again with a new signature simply replaces the old one, never appends. `None`
 /// clears the link entirely. No-op (returns `Ok(None)`) if the handle isn't known — recognition
 /// links an *existing* identity, it never mints one.
-pub fn link_face(dir: &Path, handle: &str, signature: Option<Vec<f32>>) -> io::Result<Option<Identity>> {
+pub fn link_face(
+    dir: &Path,
+    handle: &str,
+    signature: Option<Vec<f32>>,
+) -> io::Result<Option<Identity>> {
     let mut people = load(dir)?;
     let Some(existing) = people.iter_mut().find(|p| p.handle == handle) else {
         return Ok(None);
@@ -212,13 +216,17 @@ mod tests {
     fn unrelated_observations_are_a_no_op() {
         let t = Temp::new("learn_no_op");
         // Wrong action.
-        assert!(maybe_learn_from_observation(&t.0, "reports", "face:Betty", 100)
-            .unwrap()
-            .is_none());
+        assert!(
+            maybe_learn_from_observation(&t.0, "reports", "face:Betty", 100)
+                .unwrap()
+                .is_none()
+        );
         // Wrong object shape.
-        assert!(maybe_learn_from_observation(&t.0, "recognized", "location:home", 100)
-            .unwrap()
-            .is_none());
+        assert!(
+            maybe_learn_from_observation(&t.0, "recognized", "location:home", 100)
+                .unwrap()
+                .is_none()
+        );
         assert!(load(&t.0).unwrap().is_empty());
         assert!(current(&t.0).is_none());
     }
@@ -250,9 +258,14 @@ mod tests {
     fn face_signature_defaults_none_and_round_trips_through_storage() {
         let t = Temp::new("face_default");
         let a = remember(&t.0, "Ada", 100).unwrap();
-        assert!(a.face_signature.is_none(), "a plain remember() links no face");
+        assert!(
+            a.face_signature.is_none(),
+            "a plain remember() links no face"
+        );
 
-        let linked = link_face(&t.0, "ada", Some(vec![0.1, 0.2, 0.3])).unwrap().unwrap();
+        let linked = link_face(&t.0, "ada", Some(vec![0.1, 0.2, 0.3]))
+            .unwrap()
+            .unwrap();
         assert_eq!(linked.face_signature, Some(vec![0.1, 0.2, 0.3]));
         // persisted, not just in-memory
         let reloaded = find(&load(&t.0).unwrap(), "ada").cloned().unwrap();
@@ -265,7 +278,9 @@ mod tests {
         remember(&t.0, "Ada", 100).unwrap();
         link_face(&t.0, "ada", Some(vec![1.0, 0.0])).unwrap();
         // a correction replaces, it doesn't append or require clearing first
-        let corrected = link_face(&t.0, "ada", Some(vec![0.0, 1.0])).unwrap().unwrap();
+        let corrected = link_face(&t.0, "ada", Some(vec![0.0, 1.0]))
+            .unwrap()
+            .unwrap();
         assert_eq!(corrected.face_signature, Some(vec![0.0, 1.0]));
         // and can be cleared entirely
         let cleared = link_face(&t.0, "ada", None).unwrap().unwrap();

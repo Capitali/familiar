@@ -349,6 +349,7 @@ mod tests {
             allow_mesh: false,
             allow_agent: false,
             allow_self_upgrade: false,
+            allow_outreach: false,
             sandbox_execution: true,
             fs_read: vec!["/Users/ian/".into()],
             fs_write: vec!["/Users/ian/Development/familiar/familiar_data/".into()],
@@ -471,7 +472,11 @@ mod tests {
             (ActionKind::FaceRecognition, "face-match"),
         ] {
             let v = evaluate(&Action::new(kind, target), &open_llm());
-            assert_eq!(v.decision, Decision::Refuse, "{kind:?} should be refused when closed");
+            assert_eq!(
+                v.decision,
+                Decision::Refuse,
+                "{kind:?} should be refused when closed"
+            );
             assert_eq!(v.reason, Reason::ViolatesConstitutionalBoundary);
         }
 
