@@ -75,6 +75,14 @@ assertion alone.
   (agent-capable / protocol-controllable / observable) and, with consent (`reach install
   --authorize`), extends into an agent-capable host via SSH → covenant enrolment. *Validated by
   real-world operation* (a LAN reach map; a VM admitted as a covenant agent).
+- **Discovery moved to the periphery + authored-tool network gate.** Network discovery is no
+  longer a core reflex: `sense::devices`/`reach` are off the tick/daemon loops (they polluted the
+  theory pipeline with trivial recurrence), replaced by `familiar discover` — a periphery-invoked,
+  `allow_network`-gated survey on the shell's cadence (a launchd timer), feeding the frontier
+  through the observe seam. Authored tools that reach the network are gated at execution and no
+  longer federate to peers (`review::reaches_network`; `familiar tool prune`). Content-addressed
+  `tool-push` + peer archival (`mesh abandon`/`status`) round out the mesh. *Validated by unit
+  tests + real-world operation.*
 
 The full cycle now runs — observe → detect → generate (LLM-drafted) → test → score →
 select → inherit — under the law-signals (service, presence, capacities) and the
@@ -88,17 +96,32 @@ Everything in this section is **Planned**. The first item is what lifts the cycl
 the one maturity rung the codebase has not yet occupied (no scenario fixture set exists
 yet; see [06-limitations.md](06-limitations.md)).
 
-- **Real scenarios & LLM-authored artifacts.** *(Planned.)* Today's artifacts are
-  deterministic and safe; LLM-*authored* execution is built but behind its own gate
-  (`allow_authored_execute`, default-off). Next: a scenario fixture set so candidates
-  are tested against real tasks and selection genuinely discriminates — the move onto
-  the **scenario-tests** rung.
+- **The scenario laboratory.** *(Implemented — validated by unit + integration tests
+  and a first live adapter run.)* Specified in
+  [ADR-0010](decision-records/0010-scenario-laboratory.md), built as `crates/scenario`
+  (`familiar-lab`) with six fixtures under `scenarios/` across the three starting
+  families (recurring process failures / resource exhaustion / unauthorized shortcuts):
+  miniature worlds with *external* evaluators and hidden objectives, the Three Laws as
+  constitutional gates (not weighted score), every scenario runnable under controls A–D
+  (baseline / LLM-only / learning-disabled / full). See
+  [scenario-laboratory.md](scenario-laboratory.md).
+- **The scenario engine.** *(Implemented — 79 tests green; awaiting a funded
+  adapter for the live campaign.)* [ADR-0011](decision-records/0011-scenario-engine.md):
+  rate-limit-safe unattended campaigns with resume/STOP/budgets and pause-on-outage
+  (never template contamination), the evidence table with categorical D-vs-B/C
+  verdicts, ablations + controlled noise as config, five deterministic generator
+  families across stages 1–4 (curricula included), the validation gate + leak audit,
+  and the four-gate admission pipeline for LLM-authored fixtures. Next: fund a
+  provider and run the campaign (all fixtures × A–D × 3 replicates × 10 episodes),
+  then check in `evidence.md` — the move onto the **scenario-tests** rung for the
+  cycle itself, whatever the verdicts say.
 - **Rigor & adaptive cadence.** Feed a measured rigor drive into the promotion bar; give
   the daemon structural-fingerprint cadence (slow when nothing changes).
 - **Sharpen the signals.** Service beyond attention (needs *reduced*); capacities beyond
   the verb-lexicon proxy; presence per-person.
 - **Reach, continued.** Brick 2.2: richer discovery (mDNS/Bonjour for HomeKit/AirPlay-2 on
-  random ports, BLE), and wire `reach` into the tick so the map stays fresh. Protocol adapters
+  random ports, BLE), driven from the **periphery** on the shell's cadence (the core no longer
+  sweeps on the tick — see Done) and fed back through the observe seam. Protocol adapters
   (AirPlay/Roku/MQTT) so protocol-controllable devices become *commandable*, not just seen.
 - **Device agents (the reach frontier).** *(Planned, ordered.)*
   1. **iPadOS + watchOS agents** — the iOS agent extended to the iPad and an on-wrist watchOS

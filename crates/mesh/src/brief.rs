@@ -22,6 +22,24 @@ use serde::{Deserialize, Serialize};
 /// Wire/brief format version — bump on incompatible changes to the signed body.
 pub const BRIEF_VERSION: u32 = 5;
 
+/// `skip_serializing_if` helper: verifiers re-serialize the body ([`BriefBody::signing_bytes`]),
+/// so a field an older peer doesn't know about breaks every signature it checks. Omitting the
+/// zero default keeps briefs byte-identical to pre-`build_version` builds in both directions.
+fn u64_zero(v: &u64) -> bool {
+    *v == 0
+}
+
+/// Same as [`u64_zero`], for the i64 lifecycle timestamps.
+fn u64_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+
+/// Same as [`u64_zero`], for the geolocation degrees (0.0 = unknown, never a real fix here).
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn f64_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
 /// Presence: how busy this node is and when it last served — **counts, never names**.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Presence {
@@ -45,7 +63,7 @@ pub struct ToolManifest {
 }
 
 /// Host capability summary + the tool manifest offered to peers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Capability {
     pub os: String,
     pub arch: String,
@@ -69,8 +87,28 @@ pub struct Capability {
     /// Distinct from `familiar_version` (the static crate version): this is the monotonic counter
     /// self-upgrade compares, so a node can see a peer is running a newer blessed release. 0 on
     /// briefs that predate it / unstamped builds.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "u64_zero")]
     pub build_version: u64,
+    /// Where this node is (decimal degrees), when it knows — from a device's GPS, an explicit
+    /// `mesh/geo.json`, or IP geolocation. 0/0 = unknown; skip-when-zero keeps pre-field briefs
+    /// byte-identical for verifiers that re-serialize.
+    #[serde(default, skip_serializing_if = "f64_zero")]
+    pub lat: f64,
+    #[serde(default, skip_serializing_if = "f64_zero")]
+    pub lon: f64,
+    /// This node has an interactive human at its console (`!headless`). Skip-when-false so
+    /// briefs from headless nodes stay byte-identical for pre-field verifiers.
+    #[serde(default, skip_serializing_if = "bool_false")]
+    pub interactive: bool,
+    /// The human handle this node serves — shared only when that handle is opted into the
+    /// group (`identity_optin`), the same consent gate as identity shares. Empty otherwise.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub human: String,
+}
+
+/// `skip_serializing_if` helper for the `interactive` flag (see [`u64_zero`]).
+fn bool_false(b: &bool) -> bool {
+    !*b
 }
 
 /// An abstract pattern offered for merge — never raw private data, a distilled regularity.
@@ -148,6 +186,17 @@ pub struct GoalShare {
     pub notes: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Lifecycle dates (mirrors `goal::Goal`) — every status carries the date it was entered.
+    /// All skip-when-zero so briefs stay byte-identical for verifiers built before these fields
+    /// (they re-serialize the signed body; an unknown field would break every signature).
+    #[serde(default, skip_serializing_if = "u64_zero_i64")]
+    pub status_at: i64,
+    #[serde(default, skip_serializing_if = "u64_zero_i64")]
+    pub last_worked_at: i64,
+    #[serde(default, skip_serializing_if = "u64_zero_i64")]
+    pub completed_at: i64,
+    #[serde(default, skip_serializing_if = "u64_zero_i64")]
+    pub ended_at: i64,
 }
 
 /// A single opted-in human, shared only under explicit per-handle/per-group consent.
@@ -206,7 +255,7 @@ pub struct ConsentedIdentityPayload {
 /// The signed body of a brief. Field order is fixed (serde derive, no maps) so the bytes
 /// are deterministic across nodes and runs — that determinism is what makes the signature
 /// verifiable elsewhere.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BriefBody {
     pub version: u32,
     pub node: NodeIdentity,
@@ -238,7 +287,7 @@ impl BriefBody {
 }
 
 /// A signed brief: the body plus the node's signature over `body.signing_bytes()`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MeshBrief {
     pub body: BriefBody,
     /// ed25519 signature (hex, 64 bytes) by the node key over the canonical body.
@@ -307,6 +356,8 @@ mod tests {
                 env_summary: "wildhorse".into(),
                 familiar_version: "0.1.0".into(),
                 os_version: String::new(),
+                interactive: false,
+                human: String::new(),
                 tools: vec![ToolManifest {
                     tool_id: "t1".into(),
                     name: "ping".into(),
@@ -318,6 +369,8 @@ mod tests {
                 }],
                 capabilities: Vec::new(),
                 build_version: 0,
+                lat: 0.0,
+                lon: 0.0,
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {

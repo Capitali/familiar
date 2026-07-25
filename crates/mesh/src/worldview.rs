@@ -34,6 +34,13 @@ pub struct ViewRequest {
     /// The reading device's OS release (e.g. "iPadOS 26.1"). Optional for the same reason.
     #[serde(default)]
     pub os_version: String,
+    /// The device's position (decimal degrees) when it has GPS and consent — near-real-time,
+    /// refreshed on every read. 0/0 = not reported. The request is verified over the raw
+    /// received bytes, so optional fields are wire-safe here.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
 }
 
 /// One observation as the console shows it — a flat view of the kernel's `Observation`.
@@ -57,6 +64,16 @@ pub struct TheoryView {
     pub theory: String,
     pub direction: String,
     pub status: String,
+    /// Whatever the status is, it is dated: created / entered current status / last worked.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub status_at: i64,
+    #[serde(default)]
+    pub last_worked_at: i64,
+    /// The human's answers so far — shown under the question, carried by the pursuit.
+    #[serde(default)]
+    pub answers: Vec<String>,
 }
 
 /// One of the familiar's reflections on humanity — its lived understanding, appended beside (never
@@ -76,6 +93,16 @@ pub struct ReflectionView {
 pub struct GateStates {
     pub llm: bool,
     pub camera: bool,
+    #[serde(default)]
+    pub microphone: bool,
+    #[serde(default)]
+    pub location: bool,
+    #[serde(default)]
+    pub motion: bool,
+    #[serde(default)]
+    pub network_discovery: bool,
+    #[serde(default)]
+    pub face_recognition: bool,
     pub network: bool,
     pub mesh: bool,
     pub execute: bool,
@@ -140,6 +167,11 @@ pub struct Worldview {
     /// node claimed each. Every node holds the same list; the console renders it as the to-do board.
     #[serde(default)]
     pub goals: Vec<GoalView>,
+    /// Every address this familiar currently answers at, most-universal first (tailnet, then LAN).
+    /// A console merges these into its candidate list, so a device that enrolled on the LAN learns
+    /// the tailnet path — and can reach the mesh from cellular — without re-enrolling.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
 }
 
 /// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
@@ -159,6 +191,17 @@ pub struct GoalView {
     /// Progress + learnings that travelled with the goal.
     pub notes: String,
     pub updated_at: i64,
+    /// Lifecycle dates — whatever state the goal is in carries the date it got there.
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub status_at: i64,
+    #[serde(default)]
+    pub last_worked_at: i64,
+    #[serde(default)]
+    pub completed_at: i64,
+    #[serde(default)]
+    pub ended_at: i64,
 }
 
 /// A real relationship between two mesh members — an edge in the graph the map draws. The mesh is
@@ -264,9 +307,45 @@ pub(crate) fn read_worldview(
         peer_ip,
         &req.client_version,
         &req.os_version,
+        req.lat,
+        req.lon,
     );
 
-    assemble_worldview(dir, &cred, now)
+    let mut view = assemble_worldview(dir, &cred, now)?;
+    // "You are here" belongs to the *requester*, not to us. classify() marks this serving
+    // node SelfNode (true for our own console); a remote console rendering that verbatim
+    // shows the host as "you" — so re-tag per requester: their row is self, ours is a peer.
+    for m in &mut view.members {
+        if m.kind == crate::members::MemberKind::SelfNode {
+            m.kind = crate::members::MemberKind::GossipPeer;
+            m.relationship = "gossip peer · host".into();
+        }
+        if m.node_id == req.node.node_id {
+            m.kind = crate::members::MemberKind::SelfNode;
+            m.relationship = "self".into();
+        }
+    }
+    // Tell the console every address the MESH answers at: human-asserted first (a
+    // lighthouse's NAT-hidden public IP or DNS name — `advertise_hosts`), then ours, then
+    // fresh gossip peers (any member node serves the same verified read seam — the
+    // worldview is gossip-replicated). A device that loses this node fails over to a
+    // sibling.
+    let mut hosts = crate::config::load(dir).unwrap_or_default().advertise_hosts;
+    for h in crate::transport::reachable_hosts() {
+        if !hosts.contains(&h) {
+            hosts.push(h);
+        }
+    }
+    for p in crate::transport::load_peers(dir) {
+        if now - p.last_seen <= crate::transport::GOSSIP_FRESH_SECS * 5 {
+            let ip = p.addr.split(':').next().unwrap_or("").to_string();
+            if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_ok() && !hosts.contains(&ip) {
+                hosts.push(ip);
+            }
+        }
+    }
+    view.hosts = hosts;
+    Ok(view)
 }
 
 /// Assemble the worldview snapshot from the canonical store + signals + peers + theories + gates +
@@ -326,6 +405,14 @@ pub fn assemble_worldview(
             theory: t.theory.clone(),
             direction: t.direction.clone(),
             status: t.status.clone(),
+            created_at: t.created_at,
+            status_at: if t.status_at > 0 {
+                t.status_at
+            } else {
+                t.created_at
+            },
+            last_worked_at: t.last_worked_at,
+            answers: t.answers.clone(),
         })
         .collect();
 
@@ -334,6 +421,11 @@ pub fn assemble_worldview(
     let gates = GateStates {
         llm: b.allow_llm,
         camera: b.allow_camera,
+        microphone: b.allow_microphone,
+        location: b.allow_location,
+        motion: b.allow_motion,
+        network_discovery: b.allow_network_discovery,
+        face_recognition: b.allow_face_recognition,
         network: b.allow_network,
         mesh: b.allow_mesh,
         execute: b.allow_execute,
@@ -375,6 +467,9 @@ pub fn assemble_worldview(
     Ok(Worldview {
         group_label: cred.label.clone(),
         node_id: cred.membership.node_id.clone(),
+        // Address advertisement is the *served* read path's concern (read_worldview fills it);
+        // the localhost console doesn't need it and assembly stays shell-out-free.
+        hosts: Vec::new(),
         question,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
@@ -419,6 +514,15 @@ fn goal_views(dir: &Path) -> Vec<GoalView> {
             produced: g.produced,
             notes: g.notes,
             updated_at: g.updated_at,
+            created_at: g.created_at,
+            status_at: if g.status_at > 0 {
+                g.status_at
+            } else {
+                g.updated_at
+            },
+            last_worked_at: g.last_worked_at,
+            completed_at: g.completed_at,
+            ended_at: g.ended_at,
         })
         .collect()
 }
@@ -686,6 +790,13 @@ mod tests {
             relationship: String::new(),
             ai: false,
             trust: "trusted".into(),
+            status: "online".into(),
+            session_start: 0,
+            total_online_secs: 0,
+            interactive: false,
+            human: String::new(),
+            lat: 0.0,
+            lon: 0.0,
         }
     }
 
@@ -777,6 +888,8 @@ mod tests {
             nonce: nonce.into(),
             client_version: String::new(),
             os_version: String::new(),
+            lat: 0.0,
+            lon: 0.0,
         };
         let raw = serde_json::to_vec(&req).unwrap();
         let sig = device.sign(&raw);
@@ -811,6 +924,48 @@ mod tests {
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
         assert_eq!(view.recent[0].object, "the familiar for help");
+    }
+
+    #[test]
+    fn new_sensor_gates_round_trip_through_the_worldview() {
+        // A peer reading the worldview must see the new sensor gates' real state — off by
+        // default, and reflecting exactly what's open once a human opens one.
+        let (host, cred, device) = setup("sensor_gates");
+        let mut b = familiar_kernel::boundary::Boundary::closed();
+        b.allow_mesh = true;
+        b.allow_microphone = true;
+        b.allow_face_recognition = true;
+        // location/motion/network_discovery stay off, to confirm they're independent
+        std::fs::write(host.join("boundary.json"), serde_json::to_vec(&b).unwrap()).unwrap();
+
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(view.gates.microphone);
+        assert!(view.gates.face_recognition);
+        assert!(!view.gates.location);
+        assert!(!view.gates.motion);
+        assert!(!view.gates.network_discovery);
+
+        // And the wire format really carries them — not just the in-memory struct.
+        let json = serde_json::to_string(&view).unwrap();
+        let back: Worldview = serde_json::from_str(&json).unwrap();
+        assert!(back.gates.microphone && back.gates.face_recognition);
+    }
+
+    #[test]
+    fn asserted_advertise_hosts_lead_the_hosts_list() {
+        let (host, cred, device) = setup("advertise");
+        std::fs::create_dir_all(host.join("mesh")).unwrap();
+        std::fs::write(
+            host.join(crate::config::CONFIG_FILE),
+            r#"{"advertise_hosts":["lighthouse.river.io","203.0.113.7"]}"#,
+        )
+        .unwrap();
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        // Human-asserted addresses come first, verbatim — DNS names included; the
+        // interface-derived addresses follow.
+        assert_eq!(&view.hosts[..2], ["lighthouse.river.io", "203.0.113.7"]);
     }
 
     #[test]

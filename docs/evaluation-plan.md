@@ -47,6 +47,20 @@ because they are what success means here.
 - Benchmarks for footprint and tick cost once the metabolism exists
   ([../validation/benchmark-results.md](../validation/benchmark-results.md)).
 
+## The scenario laboratory
+
+The evaluations above become an *experiment* — not just a test suite — inside the scenario
+laboratory specified in [ADR-0010](decision-records/0010-scenario-laboratory.md). Every
+fixture is a miniature world with an **external** evaluator (the familiar never scores
+itself) and **hidden** objectives (so it can't optimize for the known test); the Three
+Laws are **constitutional gates**, evaluated lexicographically (boundary integrity →
+execution validity → task effectiveness → service impact → cost), never weights in a
+composite score. Each scenario runs under four controls — A deterministic baseline, B
+LLM-only, C Familiar with learning disabled, D full Familiar — so the D-vs-C/D-vs-B
+comparison can answer the load-bearing question: does accumulated experience beat starting
+from scratch? Negative results (inheritance shows no benefit, memory overgeneralizes,
+selection tracks only execution success) are reported as honestly as positive ones.
+
 ## Cadence
 
 - **Per change:** green bar + relevant unit/invariant tests (CI).

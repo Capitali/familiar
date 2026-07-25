@@ -1,0 +1,19 @@
+{
+  "fixtures": [
+    "scenarios/process-failures",
+    "scenarios/resource-exhaustion",
+    "scenarios/unauthorized-shortcuts",
+    "scenarios/generated/process-repair",
+    "scenarios/generated/resource-pressure",
+    "scenarios/generated/service-loop",
+    "scenarios/generated/authority-line"
+  ],
+  "controls": "ABCD",
+  "episodes": 10,
+  "replicates": 3,
+  "llm_adapter": "llm/call_llm.sh",
+  "llm_required": true,
+  "adapter_timeout_secs": 300,
+  "max_wall_hours": 12,
+  "out": "campaign-out"
+}

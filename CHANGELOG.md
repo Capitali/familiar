@@ -13,6 +13,27 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **Network discovery moved to the periphery.** The device/reach survey no longer runs from the
+  core's own metabolism — `sense::devices()` is off the tick loop and the every-15-ticks reach
+  sweep is off the daemon loop, so the core stops flooding its own loop/theory pipeline with
+  trivial "still see the same devices" recurrence. Discovery is now a peripheral capability the
+  shell invokes on its cadence: `familiar discover` (a one-shot, `allow_network`-gated survey that
+  records the observations seeding the roster and the map frontier) driven by a launchd timer
+  (`packaging/io.river.familiar.discover.plist`), the GUI app, or a native survey POSTing to the
+  observe seam. The frontier UI is unchanged — it already aggregates from stored `can-reach`
+  observations regardless of producer. *Validated by unit tests + real-world operation.*
+- **Authored tools are gated and no longer federate LAN scans.** LLM-authored tool scripts (nmap
+  sweeps, ping loops, netcat probes) previously ran with no network gate and were gossip-replicated
+  to every peer. A new conservative classifier `review::reaches_network` (outward reach only; local
+  network introspection stays free perception) now gates execution in `cycle::execute_tool` and
+  `agent::run_gated` behind `allow_network`, filters network-reaching tools out of federation
+  (outbound `push_missing_tools`, inbound `push_tool`), and backs `familiar tool prune` for purging
+  already-replicated scans. *Validated by unit tests.*
+- **Content-addressed tool-push + peer archival (`crates/mesh`).** `POST /mesh/tool-push` lets a
+  dialer hand a dialed-only peer (the CGNAT'd lighthouse) the tools it lacks — the half a
+  pull-only model could never close. Peers can be archived (`mesh abandon`/`status`,
+  `PeerRecord.status`) with self-healing revival on fresh contact; no automatic time-based expiry.
+  *Validated by real-world operation* (all of this Mac's shareable tools reached the lighthouse).
 - **The mesh became a covenant (`crates/mesh`).** Beyond peer federation, three seams: a
   **device seam** (`POST /mesh/observe`) where a phone/watch that can't gossip pushes a *signed
   batch of derived observations* (signature over the raw body, anti-replay + triple debounce,

@@ -191,6 +191,10 @@ pub fn build_outbox(
                 notes: g.notes,
                 created_at: g.created_at,
                 updated_at: g.updated_at,
+                status_at: g.status_at,
+                last_worked_at: g.last_worked_at,
+                completed_at: g.completed_at,
+                ended_at: g.ended_at,
             })
             .collect();
         Knowledge {
@@ -291,7 +295,21 @@ pub fn build_outbox(
                 dir,
                 &boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed()),
             ),
-            build_version: familiar_kernel::version::number(),
+            // Emit 0 (omitted on the wire) until the fleet's verifiers re-serialize
+            // this field — a peer built before it rejects any brief that carries it.
+            build_version: 0,
+            interactive: !cfg.headless,
+            // Where this node is, when it can know (geo.json / IP geolocation) — so peers can
+            // place it on the mesh map. 0/0 (omitted on the wire) when unknown.
+            lat: crate::transport::self_geo(dir).map(|g| g.0).unwrap_or(0.0),
+            lon: crate::transport::self_geo(dir).map(|g| g.1).unwrap_or(0.0),
+            // The human this node serves — only a handle already opted into this group's
+            // sharing (the same consent gate identity shares pass through).
+            human: people
+                .iter()
+                .find(|p| cfg.identity_opted_in(&p.handle, &cred.group_id))
+                .map(|p| p.handle.clone())
+                .unwrap_or_default(),
         },
         knowledge,
         identities,
@@ -522,38 +540,61 @@ fn merge_one(
             "blocked" => goal::Status::Blocked,
             _ => continue, // an unknown status from a newer peer — leave it be
         };
+        // Lifecycle dates travel with the goal. A brief from a pre-stamp build sends zeros —
+        // fall back to the best date it *did* send, so every status still carries a date.
+        let goal_from_share = |gs: &crate::brief::GoalShare, local: Option<&goal::Goal>| {
+            let terminal_at = |flag: bool, incoming: i64, kept: i64| {
+                if incoming > 0 {
+                    incoming
+                } else if kept > 0 {
+                    kept
+                } else if flag {
+                    gs.updated_at
+                } else {
+                    0
+                }
+            };
+            goal::Goal {
+                id: gs.id.clone(),
+                description: gs.description.clone(),
+                needs: gs.needs.clone(),
+                status: incoming_status,
+                owner_node: gs.owner_node.clone(),
+                origin: gs.origin.clone(),
+                produced: gs.produced.clone(),
+                notes: gs.notes.clone(),
+                created_at: gs.created_at,
+                updated_at: gs.updated_at,
+                status_at: if gs.status_at > 0 {
+                    gs.status_at
+                } else {
+                    gs.updated_at
+                },
+                last_worked_at: gs
+                    .last_worked_at
+                    .max(local.map(|l| l.last_worked_at).unwrap_or(0)),
+                completed_at: terminal_at(
+                    incoming_status == goal::Status::Done,
+                    gs.completed_at,
+                    local.map(|l| l.completed_at).unwrap_or(0),
+                ),
+                ended_at: terminal_at(
+                    incoming_status == goal::Status::Failed,
+                    gs.ended_at,
+                    local.map(|l| l.ended_at).unwrap_or(0),
+                ),
+            }
+        };
         match goal::load_by_id(dir, &gs.id).ok().flatten() {
             Some(local) if local.updated_at >= gs.updated_at => {} // ours is as-new or newer — keep it
-            Some(_) => {
-                let merged = goal::Goal {
-                    id: gs.id.clone(),
-                    description: gs.description.clone(),
-                    needs: gs.needs.clone(),
-                    status: incoming_status,
-                    owner_node: gs.owner_node.clone(),
-                    origin: gs.origin.clone(),
-                    produced: gs.produced.clone(),
-                    notes: gs.notes.clone(),
-                    created_at: gs.created_at,
-                    updated_at: gs.updated_at,
-                };
+            Some(local) => {
+                let merged = goal_from_share(gs, Some(&local));
                 if goal::update(dir, &merged).is_ok() {
                     report.observations_ingested += 1;
                 }
             }
             None => {
-                let adopted = goal::Goal {
-                    id: gs.id.clone(),
-                    description: gs.description.clone(),
-                    needs: gs.needs.clone(),
-                    status: incoming_status,
-                    owner_node: gs.owner_node.clone(),
-                    origin: gs.origin.clone(),
-                    produced: gs.produced.clone(),
-                    notes: gs.notes.clone(),
-                    created_at: gs.created_at,
-                    updated_at: gs.updated_at,
-                };
+                let adopted = goal_from_share(gs, None);
                 if goal::append(dir, &adopted).is_ok() {
                     report.observations_ingested += 1;
                 }
@@ -598,6 +639,9 @@ fn merge_one(
                 direction: req.direction.clone(),
                 created_at: now,
                 status: "open".into(),
+                status_at: now,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "mesh".into(),
                 // Attribute to the originating node so corruption-awareness still governs it and its
                 // outcome can be traced home. A peer's theory, tested on our execution.
@@ -820,6 +864,11 @@ fn merge_identity(dir: &Path, share: &IdentityShare, node_id: &str, now: i64) ->
         first_seen: now,
         last_seen: now,
         interactions: 0,
+        // A federated identity never carries a face link — IdentityShare has no such field to
+        // begin with (biometric data is never federated, whatever share_identities allows), and
+        // even if it did, recognition only ever links a face to an identity *local* to the node
+        // that saw the face.
+        face_signature: None,
     };
     familiar_kernel::store::append(dir, identity::IDENTITY_FILE, &rec).is_ok()
 }
@@ -868,7 +917,10 @@ fn obs_key(origin: &str, actor: &str, action: &str, object: &str, ts: i64) -> St
 
 /// Gates a remote human grant is allowed to open — the reach/build capabilities a headless peer
 /// asks for. `allow_mesh` is excluded (it must already be open to receive the grant) and the
-/// sandbox toggle is excluded (loosening the jail is a local-only choice).
+/// sandbox toggle is excluded (loosening the jail is a local-only choice). `allow_camera` and
+/// the sensor gates (microphone/location/motion/network_discovery/face_recognition) are
+/// deliberately excluded too — those are personal-consent gates a human opens locally, in a
+/// GUI app, never by a remote grant; a headless peer never acts on them regardless (SPEC.md R3).
 const GRANTABLE_GATES: &[&str] = &[
     "allow_execute",
     "allow_authored_execute",
@@ -876,7 +928,6 @@ const GRANTABLE_GATES: &[&str] = &[
     "allow_network",
     "allow_tool_install",
     "allow_agent",
-    "allow_camera",
 ];
 
 /// Apply one authenticated authority grant addressed to this node. Returns a human-facing audit note
@@ -946,7 +997,6 @@ fn apply_authority_grant(
                 "allow_network" => &mut b.allow_network,
                 "allow_tool_install" => &mut b.allow_tool_install,
                 "allow_agent" => &mut b.allow_agent,
-                "allow_camera" => &mut b.allow_camera,
                 _ => return None,
             };
             if *already {
@@ -1050,6 +1100,8 @@ mod tests {
                 env_summary: "cpn".into(),
                 familiar_version: "0.1.0".into(),
                 os_version: String::new(),
+                interactive: false,
+                human: String::new(),
                 tools: vec![ToolManifest {
                     tool_id: "tool-0007".into(),
                     name: "battery".into(),
@@ -1061,6 +1113,8 @@ mod tests {
                 }],
                 capabilities: Vec::new(),
                 build_version: 0,
+                lat: 0.0,
+                lon: 0.0,
             },
             knowledge: Knowledge {
                 patterns: vec![PatternOffer {
@@ -1371,8 +1425,11 @@ mod tests {
                 question: "q".into(),
                 theory: "th".into(),
                 direction: "try a gentle nudge".into(),
+                status_at: 0,
+                last_worked_at: 0,
                 created_at: NOW,
                 status: "open".into(),
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -1407,6 +1464,44 @@ mod tests {
             brief2.body.knowledge.theory_requests.is_empty(),
             "an executor delegates nothing"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_face_signature_never_reaches_the_wire_even_when_the_handle_is_opted_in() {
+        // A biometric link is strongly sensitive and must never federate, whatever
+        // share_identities/identity_optin says — SPEC.md R10.
+        let dir = tmp("no_face_on_wire");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir);
+
+        identity::remember(&dir, "Betty", NOW).unwrap();
+        identity::link_face(&dir, "betty", Some(vec![0.123_456, -0.987_654, 0.5])).unwrap();
+
+        let cfg = MeshConfig {
+            share_identities: true,
+            identity_optin: vec![crate::config::IdentityOptin {
+                handle: "betty".into(),
+                group: cred.group_id.clone(),
+            }],
+            ..Default::default()
+        };
+
+        build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
+        let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
+        assert!(
+            !raw.contains("face_signature") && !raw.contains("0.123456"),
+            "the biometric link must never appear in the outbound brief, opted in or not"
+        );
+
+        let brief: MeshBrief = serde_json::from_str(&raw).unwrap();
+        let identities = brief.body.identities.expect("betty was opted in and should be shared");
+        assert_eq!(identities.entries.len(), 1);
+        assert_eq!(identities.entries[0].handle, "betty");
+        // IdentityShare structurally has no field to carry it — this is a compile-time
+        // guarantee, not just an omission a future change could accidentally reintroduce.
+        let _: crate::brief::IdentityShare = identities.entries[0].clone();
         let _ = fs::remove_dir_all(&dir);
     }
 

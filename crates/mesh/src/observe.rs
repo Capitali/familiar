@@ -205,6 +205,17 @@ pub(crate) fn ingest_observations(
             env.ts,
             o.confidence.clamp(0.0, 1.0),
         );
+        // A device's answer aimed at a thread ("thread:<id>" context) attaches as that
+        // thread's evidence — the same non-dead-end path as a local console answer.
+        if let Some(thread_id) = obs.context.strip_prefix("thread:") {
+            let _ = familiar_kernel::thread::add_answer(dir, thread_id, &obs.object, env.ts);
+        }
+        // A confirmed face recognition ("recognized face:<name>") is the production trigger
+        // identity::remember() never had before — the device already ran its own
+        // confirm-before-keep flow; this is where that confirmation reaches the registry.
+        let _ = familiar_kernel::identity::maybe_learn_from_observation(
+            dir, &obs.action, &obs.object, env.ts,
+        );
         observation::record(dir, obs).map_err(Error::Io)?;
     }
     Ok(keep.len())
@@ -371,6 +382,27 @@ mod tests {
     }
 
     #[test]
+    fn a_recognized_face_observation_reaches_the_identity_registry() {
+        // The gap this closes: a device's confirm-before-keep flow used to only update its own
+        // on-device cache. Ingesting the observation it emits must now also learn the identity.
+        let (host, cred, device) = setup("identity");
+        let r = ring();
+        let mut record = obs("face:Betty");
+        record.action = "recognized".into();
+        record.actor = "phone:ian".into();
+        let (raw, sig) = signed(&cred, &device, NOW, "n1", NOW, DEFAULT_CERT_TTL_SECS, vec![record]);
+
+        ingest_observations(&host, &raw, &sig, NOW, &r).unwrap();
+        let people = familiar_kernel::identity::load(&host).unwrap();
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].handle, "betty");
+        assert_eq!(
+            familiar_kernel::identity::current(&host).as_deref(),
+            Some("betty")
+        );
+    }
+
+    #[test]
     fn a_bad_signature_is_untrusted() {
         let (host, cred, device) = setup("badsig");
         let (raw, _good) = signed(
@@ -482,8 +514,10 @@ mod tests {
 
         // Gate back on, but device ingestion switched off in config.
         open_gate(&host, true);
-        let mut cfg = crate::config::MeshConfig::default();
-        cfg.accept_observations = false;
+        let cfg = crate::config::MeshConfig {
+            accept_observations: false,
+            ..Default::default()
+        };
         std::fs::write(
             host.join("mesh/config.json"),
             serde_json::to_vec(&cfg).unwrap(),

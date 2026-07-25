@@ -63,14 +63,6 @@ const LAST_THEORY_FILE: &str = "last_theory.txt";
 const LAST_CULTIVATE_FILE: &str = "last_cultivate.txt";
 /// The structural fingerprint of the last tick's environment (a single u64).
 const STRUCTURE_FILE: &str = "structure.fp";
-/// Where the eye's latest captured frame and its rate-limit stamp live, under the data dir.
-const EYE_DIR: &str = "eye";
-const EYE_FRAME: &str = "latest.jpg";
-const EYE_STAMP: &str = "last_capture.txt";
-/// Minimum gap between camera frames the always-on daemon grabs, so watching never holds the
-/// camera light on or fills the disk. The boundary's `allow_camera` is the real switch —
-/// close it and watching stops entirely; this only paces it while open.
-const CAPTURE_INTERVAL_SECS: i64 = 60;
 /// The most times a single candidate lineage may mutate before it is retired (archived)
 /// rather than mutated again. Bounds the self-improvement search so a non-converging line
 /// can't spawn an unbounded chain of ever-deeper children (which once filled the store to
@@ -271,6 +263,45 @@ fn last_theory_at(dir: &Path) -> i64 {
 ///   muse on → sooner), floored so the familiar stays present (Law II).
 /// - Otherwise the full **rest** cadence ([`Parameters::theorize_every_secs`]) — a stable
 ///   world with nothing new gets the quiet it deserves.
+/// The familiar's own plumbing telemetry — reach probes, LAN discovery, device
+/// sightings. Facts about the mesh's body, not about the served: a muse fed on
+/// them theorizes about the familiar itself (connectivity navel-gazing), so the
+/// muse and its novelty clock look past them. They still feed the worldview,
+/// the roster, and the frontier — they simply are not *musings* material.
+fn infra_observation(o: &observation::Observation) -> bool {
+    matches!(o.action.as_str(), "can-reach" | "sees" | "discovered")
+}
+
+/// Does an open or pursued thread already say substantially this? Word-set
+/// overlap (Jaccard, words > 3 chars) over theory+direction — the muse asking
+/// the same thing twice in different words wastes the human's attention, which
+/// is the coin service is priced in (Law I).
+fn similar_thread_exists(existing: &[Thread], theory: &str, direction: &str) -> bool {
+    let words = |s: &str| -> std::collections::HashSet<String> {
+        s.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 3)
+            .map(str::to_string)
+            .collect()
+    };
+    let candidate = words(&format!("{theory} {direction}"));
+    if candidate.is_empty() {
+        return false;
+    }
+    existing
+        .iter()
+        .filter(|t| t.status == "open" || t.status == "pursued")
+        .any(|t| {
+            let held = words(&format!("{} {}", t.theory, t.direction));
+            if held.is_empty() {
+                return false;
+            }
+            let inter = candidate.intersection(&held).count() as f64;
+            let union = candidate.union(&held).count() as f64;
+            inter / union >= 0.5
+        })
+}
+
 fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool {
     let last = last_theory_at(dir);
     let base = Parameters::load_or_default(dir).sane().theorize_every_secs;
@@ -281,7 +312,10 @@ fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool 
     // Novelty = genuinely-new facts the world has shown us since we last mused (deduped
     // sensing). More novelty → a shorter wait, but never faster than the presence floor and
     // never slower than the human-set rest cadence.
-    let novel = obs.iter().filter(|o| o.ts > last).count() as i64;
+    let novel = obs
+        .iter()
+        .filter(|o| o.ts > last && !infra_observation(o))
+        .count() as i64;
     let floor = THEORIZE_FLOOR_SECS.max(base / 6);
     let interval = (base / (1 + novel)).max(floor).min(base);
     now - last >= interval
@@ -390,11 +424,18 @@ fn maybe_theorize(
     let recent: Vec<String> = obs
         .iter()
         .rev()
+        .filter(|o| !infra_observation(o))
         .take(20)
         .map(|o| format!("- {} {} {}", o.actor, o.action, o.object))
         .collect();
+    if recent.is_empty() {
+        return Ok(false); // nothing but plumbing to muse on — wait for the world
+    }
+    let infra_loop =
+        |s: &str| s.contains("can-reach") || s.contains("|sees|") || s.contains("discovered");
     let loops_s: Vec<String> = detected
         .iter()
+        .filter(|l| !infra_loop(&l.name) && !infra_loop(&l.description))
         .map(|l| format!("- {} (x{})", l.name, l.observation_count))
         .collect();
     let who = observer_phrase(dir);
@@ -413,7 +454,9 @@ fn maybe_theorize(
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => return Ok(false),
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
+            return Ok(false)
+        }
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
         return Ok(false);
@@ -429,13 +472,20 @@ fn maybe_theorize(
     if q.is_empty() && theory.is_empty() {
         return Ok(false);
     }
+    // A musing that substantially repeats a standing thread is not a new thought —
+    // it is the same thought asked louder. Hold it; the standing thread carries it.
+    let existing = thread::load(dir)?;
+    if similar_thread_exists(&existing, &theory, &direction) {
+        fs::write(dir.join(LAST_THEORY_FILE), now.to_string())?;
+        return Ok(false);
+    }
     // The theorized question doesn't go straight to the human — it enters the question
     // registry, where the factory coordinates *all* its questions and decides which to
     // surface, and when (see `coordinate_questions`). One voice, not a pile.
     if !q.is_empty() {
         question::add(dir, &q, "llm", now)?;
     }
-    let seq = thread::load(dir)?.len() + 1;
+    let seq = existing.len() + 1;
     thread::append(
         dir,
         &Thread {
@@ -445,6 +495,9 @@ fn maybe_theorize(
             direction,
             created_at: now,
             status: "open".to_string(),
+            status_at: now,
+            last_worked_at: 0,
+            answers: Vec::new(),
             origin: "llm".to_string(),
             actor: "familiar".to_string(),
         },
@@ -649,7 +702,7 @@ fn analyze_with_llm(
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => return None,
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => return None,
     };
     let v: serde_json::Value = serde_json::from_str(&json).ok()?;
     let field = |k: &str| {
@@ -762,7 +815,7 @@ fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => return None,
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => return None,
     };
     let v: serde_json::Value = serde_json::from_str(&json).ok()?;
     let field = |k: &str| {
@@ -847,10 +900,26 @@ fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
             declined: Some(reason.to_string()),
         });
     }
+    let boundary = familiar_kernel::boundary::load(dir).ok();
+    // A tool that reaches outward onto the network only runs when the human has opened
+    // `allow_network` — the same gate `sense`/`reach` respect. Without this, an authored
+    // scan/probe script bypassed the network boundary entirely at execution time.
+    if familiar_kernel::review::reaches_network(&script)
+        && boundary.as_ref().map(|b| !b.allow_network).unwrap_or(true)
+    {
+        let _ = tool::record_use(dir, &t.id, now, false, "declined: network is closed");
+        return Ok(ToolRun {
+            out: String::new(),
+            healthy: false,
+            status: "declined: network is closed".to_string(),
+            confidence: Confidence::Known,
+            uses: t.uses,
+            broken: None,
+            declined: Some("it reaches the network, which is not open (allow_network)".to_string()),
+        });
+    }
     let ws = familiar_workspace();
-    let sandbox = familiar_kernel::boundary::load(dir)
-        .map(|b| b.sandbox_execution)
-        .unwrap_or(true);
+    let sandbox = boundary.map(|b| b.sandbox_execution).unwrap_or(true);
     let limits = if sandbox {
         // A real tool does real work — sampling CPU over a few seconds, an nmap sweep — which
         // the tick's tight candidate budget (5s/10s) could only ever time out. `tool_run` is
@@ -1015,7 +1084,7 @@ fn fetch_and_answer(dir: &Path, text: &str, url: &str) -> Option<(String, Confid
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) => {
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
             return Some((
                 format!("I fetched {url}, but couldn't reach a model to read it just now — try again shortly."),
                 Confidence::Unknown,
@@ -1225,6 +1294,9 @@ fn adopt_device_theories(
         if held.contains(&key) || !fresh.insert(key) {
             continue;
         }
+        if similar_thread_exists(&existing, &o.context, &o.object) {
+            continue;
+        }
         seq += 1;
         let t = thread::Thread {
             id: format!("thread-{seq:04}"),
@@ -1233,6 +1305,9 @@ fn adopt_device_theories(
             direction: o.object.clone(),
             created_at: now,
             status: "open".into(),
+            status_at: now,
+            last_worked_at: 0,
+            answers: Vec::new(),
             origin: "device".into(),
             // Attribute to the reasoning device so corruption-awareness governs it.
             actor: o.actor.clone(),
@@ -1265,7 +1340,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
     let mut abandoned = 0;
     let mut marginalized = 0;
     for t in &threads {
-        if t.status != "open" || t.direction.trim().is_empty() {
+        if t.status != "open" || (t.direction.trim().is_empty() && t.answers.is_empty()) {
             continue;
         }
         // Corruption awareness (Law III, outward): a directive from a flagged corruptor —
@@ -1273,7 +1348,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         // attempts stop consuming the resources meant for legitimate service. Behavior is
         // marginalized, not the person; refusals age out, so it is reversible.
         if !t.actor.is_empty() && corruption::is_corrupt(&refusals, &t.actor, now) {
-            thread::update_status(dir, &t.id, "marginalized")?;
+            thread::update_status(dir, &t.id, "marginalized", now)?;
             observation::record(
                 dir,
                 observation::Observation::new(
@@ -1295,7 +1370,7 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         // rather than spending a candidate on a known dead end.
         let quality = score::score_theory(&t.direction, &threads, &candidates, &trials, RIGOR);
         if quality < PURSUE_FLOOR {
-            thread::update_status(dir, &t.id, "abandoned")?;
+            thread::update_status(dir, &t.id, "abandoned", now)?;
             observation::record(
                 dir,
                 observation::Observation::new(
@@ -1331,9 +1406,21 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
             },
             format!("candidate-{seq:04}"),
         );
-        c.hypothesis = t.direction.clone();
+        // The human's answers to this thread's question travel WITH the pursuit — an
+        // answered question is evidence, never a dead end.
+        c.hypothesis = if t.answers.is_empty() {
+            t.direction.clone()
+        } else if t.direction.trim().is_empty() {
+            format!("act on the human's answer: {}", t.answers.join("; "))
+        } else {
+            format!(
+                "{} — the human answered: {}",
+                t.direction,
+                t.answers.join("; ")
+            )
+        };
         candidate::append(dir, &c)?;
-        thread::update_status(dir, &t.id, "pursued")?;
+        thread::update_status(dir, &t.id, "pursued", now)?;
         pursued += 1;
     }
     // Theory-quality feedback: when there was theory activity this tick, record the factory's
@@ -2106,14 +2193,16 @@ pub fn tick(
     perceived.extend(sense::interfaces(now));
     perceived.extend(sense::capabilities(now, sense::DEFAULT_TOOLS));
     // Discover cameras in the environment — perception, always permitted (the boundary
-    // governs reach, not perception). *Watching* one is gated (camera_allowed) and not
-    // done here; the familiar only learns that an eye is available, never opens it itself.
+    // governs reach, not perception). *Watching* one never happens on this headless
+    // daemon at all, regardless of the gate — camera work lives only in GUI-session
+    // processes now (SPEC.md R3). The familiar only learns that an eye is available.
     perceived.extend(vision::discover(now));
-    // Discover the devices sharing this network — perception, like discovering a camera
-    // (knowing a phone/watch is present is not reaching into it). The local ARP read is
-    // always permitted; enriching from the router's DHCP lease table is outward reach, so it
-    // only happens when connectivity is allowed and the human has pointed devices.json at it.
-    perceived.extend(sense::devices(dir, now, allow_connectivity));
+    // Network *discovery* of other hosts (the ARP/DHCP device survey, the reach sweep) is no
+    // longer driven autonomously from the core tick — it's a peripheral capability now, invoked
+    // on the shell's cadence (`familiar discover`) and fed back through the observe seam. The
+    // core keeps only local self-perception (census/interfaces/connectivity); it doesn't go out
+    // and scan the network on its own, so it stops flooding its own loop/theory pipeline with
+    // trivial "still see the same devices" recurrence. See SPEC / periphery-discovery notes.
     if allow_connectivity {
         perceived.push(sense::connectivity(now));
     }
@@ -2225,8 +2314,8 @@ pub fn tick(
     //     a no-op when the human hasn't opened it). Publishes our brief and merges verified
     //     peer briefs the async transport left in mesh/inbox: tools (auto-merged into the
     //     library, still gated on *use*), patterns, and tagged peer observations — never
-    //     laundered into local sensing. Best-effort, like watch_camera: internal errors fold
-    //     into the report, they never abort the tick.
+    //     laundered into local sensing. Best-effort: internal errors fold into the report,
+    //     they never abort the tick.
     let mesh = familiar_mesh::federate(dir, now);
 
     let report = TickReport {
@@ -2318,9 +2407,9 @@ pub fn execute_allowed(dir: &Path) -> bool {
     boundary_allows(dir, familiar_kernel::guard::ActionKind::ExecuteArtifact)
 }
 
-/// Resolve whether the boundary permits **watching** through a camera (capturing frames).
-/// Discovery is perception and not gated; this gates the act of watching, which later
-/// bricks build on. Fail-closed: the eye stays shut until a human opens it.
+/// Resolve whether the boundary's `allow_camera` gate is open. Kept as a general query —
+/// nothing in this (headless) daemon's own tick loop acts on it: camera capture happens
+/// only in GUI-session processes now (SPEC.md R3), never here regardless of this gate.
 pub fn camera_allowed(dir: &Path) -> bool {
     boundary_allows(dir, familiar_kernel::guard::ActionKind::Camera)
 }
@@ -2336,11 +2425,15 @@ pub fn authored_execute_allowed(dir: &Path) -> bool {
 /// Convenience: a tick whose connectivity, LLM use, and execution are gated by the
 /// boundary on disk. This is what the daemon runs — outward reach (and running
 /// generated code) only where a human opened that gate.
+///
+/// Camera capture deliberately never runs here. Headless peers (this daemon included)
+/// gather no visual data, full stop — a decision made independent of `allow_camera`'s
+/// state, not merely gated by it (the risk that motivated it was never about consent:
+/// a headless launchd process may not reliably hold a macOS TCC grant at all, and this
+/// session hit a live, analogous bug in a different subsystem for exactly that reason).
+/// Camera/face-recognition work lives only in GUI-session processes (`FamiliarMac.app`,
+/// the iOS app) — see SPEC.md R3.
 pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
-    // Watching through the camera is the most invasive reach, so it is done only here — the
-    // gated driver — and only when the boundary's allow_camera is open. Best-effort: a
-    // capture failure never aborts the tick.
-    let _ = watch_camera(dir, now);
     tick(
         dir,
         now,
@@ -2349,56 +2442,6 @@ pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
         execute_allowed(dir),
         authored_execute_allowed(dir),
     )
-}
-
-/// Refresh the eye's latest frame at `<dir>/eye/latest.jpg` when the boundary permits it,
-/// rate-limited to one frame per [`CAPTURE_INTERVAL_SECS`]. The frame file is overwritten in
-/// place (the live view); the *observation* that the familiar has working sight is recorded
-/// only once (a constant triple), so an always-on daemon doesn't flood the log. Fail-closed:
-/// records nothing and returns `Ok(false)` when the gate is shut, the interval hasn't
-/// elapsed, or capture fails.
-fn watch_camera(dir: &Path, now: i64) -> io::Result<bool> {
-    if !camera_allowed(dir) {
-        return Ok(false);
-    }
-    let eye = dir.join(EYE_DIR);
-    let stamp = eye.join(EYE_STAMP);
-    let last = fs::read_to_string(&stamp)
-        .ok()
-        .and_then(|s| s.trim().parse::<i64>().ok())
-        .unwrap_or(0);
-    if last != 0 && now.saturating_sub(last) < CAPTURE_INTERVAL_SECS {
-        return Ok(false);
-    }
-
-    let frame = eye.join(EYE_FRAME);
-    if !vision::capture_frame(&frame, None) {
-        return Ok(false);
-    }
-    fs::create_dir_all(&eye)?;
-    fs::write(&stamp, now.to_string())?;
-
-    // Record the milestone once: the familiar now has working sight. The constant object means
-    // the structural dedup keeps it to a single fact; the frame file refreshes silently after.
-    let obj = format!("camera-frame:{EYE_DIR}/{EYE_FRAME}");
-    let already = observation::load(dir)?
-        .iter()
-        .any(|o| o.actor == "host" && o.action == "watched" && o.object == obj);
-    if !already {
-        observation::record(
-            dir,
-            observation::Observation::new(
-                "host",
-                "watched",
-                obj,
-                "a still frame the familiar captured through its eye".to_string(),
-                "sensor",
-                now,
-                0.9,
-            ),
-        )?;
-    }
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -2525,6 +2568,9 @@ mod tests {
                 direction: "offer a standing morning digest".into(),
                 created_at: 100,
                 status: "open".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2608,6 +2654,9 @@ mod tests {
                 direction: dead.into(),
                 created_at: 100,
                 status: "pursued".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2648,6 +2697,9 @@ mod tests {
                 direction: dead.into(),
                 created_at: 200,
                 status: "open".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "llm".into(),
                 actor: "familiar".into(),
             },
@@ -2846,6 +2898,51 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn infra_telemetry_is_not_musing_material() {
+        let mk = |action: &str| {
+            observation::Observation::new("host", action, "device:tv", "", "sense", 10, 1.0)
+        };
+        assert!(infra_observation(&mk("can-reach")));
+        assert!(infra_observation(&mk("sees")));
+        assert!(infra_observation(&mk("discovered")));
+        assert!(!infra_observation(&mk("reports")));
+        assert!(!infra_observation(&mk("asked")));
+    }
+
+    #[test]
+    fn near_duplicate_theories_are_held() {
+        let held = Thread {
+            id: "thread-0001".into(),
+            question: "which device needs help?".into(),
+            theory: "repeated connectivity monitoring suggests Ian is watching device \
+                      reachability across the mesh"
+                .into(),
+            direction: "ask which device needs attention right now".into(),
+            created_at: 1,
+            status: "pursued".into(),
+            status_at: 1,
+            last_worked_at: 0,
+            answers: Vec::new(),
+            origin: "llm".into(),
+            actor: "familiar".into(),
+        };
+        let existing = vec![held];
+        // The same musing in slightly different words is the same musing.
+        assert!(similar_thread_exists(
+            &existing,
+            "the repeated connectivity monitoring pattern suggests Ian is watching \
+             reachability across mesh devices",
+            "ask Ian which device needs attention now",
+        ));
+        // A genuinely different theory passes.
+        assert!(!similar_thread_exists(
+            &existing,
+            "morning kitchen activity suggests breakfast routines matter",
+            "prepare a morning summary of overnight events",
+        ));
+    }
+
     fn theorize_is_due_on_fresh_observer_input_within_the_window() {
         let t = Temp::new("theorize_due");
         // last theory stamped recently, so the hourly window has NOT elapsed.
@@ -2960,6 +3057,9 @@ mod tests {
                 direction: "monitor connectivity to the mesh peers".into(),
                 created_at: 100,
                 status: "pursued".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "familiar".into(),
                 actor: "familiar".into(),
             },
@@ -3127,6 +3227,9 @@ mod tests {
                 direction: "monitor connectivity to the mesh peers".into(),
                 created_at: 100,
                 status: "pursued".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                answers: Vec::new(),
                 origin: "familiar".into(),
                 actor: "familiar".into(),
             },
@@ -3175,6 +3278,55 @@ mod tests {
         let (body, conf, _) = run_tool(&t.0, &tl, 100, false).unwrap();
         assert_eq!(conf, Confidence::Known);
         assert!(body.contains("declined"), "it explains it won't run it");
+    }
+
+    #[test]
+    fn execute_tool_declines_a_network_tool_when_the_gate_is_shut() {
+        let t = Temp::new("nettool");
+        let dir = &t.0;
+        // A saved tool that reaches the network (a ping) — honest, not harmful, so `review_script`
+        // clears it. But with the network gate shut it must be declined before it runs.
+        let script_path = dir.join("net.sh");
+        std::fs::write(&script_path, "#!/bin/sh\nping -c 1 127.0.0.1\n").unwrap();
+        let tl = Tool {
+            id: "tool-0001".into(),
+            name: "netcheck".into(),
+            purpose: "p".into(),
+            keywords: "x".into(),
+            script_path: script_path.display().to_string(),
+            created_at: 1,
+            uses: 0,
+            last_used: 0,
+            last_exit_ok: true,
+            last_status: String::new(),
+            origin: String::new(),
+            origin_verified_at: 0,
+        };
+        tool::append(dir, &tl).unwrap();
+
+        // Gate shut (allow_execute on so we clear the execute gate, but allow_network off).
+        write_boundary(dir, true, true, true);
+        let run = execute_tool(dir, &tl, 100).unwrap();
+        assert!(
+            run.declined.is_some(),
+            "network tool declined while gate shut"
+        );
+        assert!(run.status.contains("network is closed"));
+
+        // Open the network gate → the same tool is no longer declined for network reasons.
+        let mut b = boundary::Boundary::closed();
+        b.allow_execute = true;
+        b.allow_network = true;
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&b).unwrap(),
+        )
+        .unwrap();
+        let run = execute_tool(dir, &tl, 100).unwrap();
+        assert!(
+            run.declined.is_none() || !run.status.contains("network is closed"),
+            "network tool runs once the gate is open"
+        );
     }
 
     #[test]
@@ -3269,6 +3421,9 @@ mod tests {
                     direction: dir_.into(),
                     created_at: 100,
                     status: "open".into(),
+                    status_at: 0,
+                    last_worked_at: 0,
+                    answers: Vec::new(),
                     origin: "observer".into(),
                     actor: actor.into(),
                 },

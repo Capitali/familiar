@@ -91,17 +91,30 @@ impl NodeKey {
                 .unwrap_or_else(|| label.to_string());
             return Ok(NodeKey { signing, label });
         }
-        // Mint.
+        // Mint. A generic/empty label becomes the hostname — a node is named by its host
+        // (FamTalker01, wildhorse, …), so a fleet's roster never reads "familiar" seven times.
+        let label = match label {
+            "" | "familiar" => hostname().unwrap_or_else(|| label.to_string()),
+            other => other.to_string(),
+        };
         let secret: [u8; 32] = os_random()?;
         let signing = SigningKey::from_bytes(&secret);
-        let node = NodeKey {
-            signing,
-            label: label.to_string(),
-        };
+        let node = NodeKey { signing, label };
         write_private(&key_path, &hex_encode(&secret))?;
         crate::group::write_json_public(&dir.join(NODE_FILE), &node.identity())?;
         Ok(node)
     }
+}
+
+/// The host's short name (`uname -n`, first dot-segment), or `None` when unavailable.
+fn hostname() -> Option<String> {
+    let out = std::process::Command::new("uname")
+        .arg("-n")
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let short = name.split('.').next().unwrap_or("").to_string();
+    (!short.is_empty()).then_some(short)
 }
 
 /// The short fingerprint of a 32-byte public key: first 8 bytes of its SHA-256, hex.

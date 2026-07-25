@@ -34,6 +34,9 @@ commands:
   sense          perceive the host (environment, interfaces, capabilities)
   reach          assess what the familiar could extend into — discover devices and
                  classify each (agent-capable / protocol-controllable / observable)
+  discover       periphery-invoked LAN survey: discover devices + assess reach in one
+                 pass, recording the observations that seed the roster and the frontier
+  tool prune     purge authored tools that reach the network (LAN scans); --dry-run to list
   tick           run one cycle of the metabolism (sense → detect → muse → act → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
                  (unbounded; Ctrl-C to stop). Adaptive cadence: --interval S is the
@@ -54,6 +57,7 @@ commands:
                  `mesh create-group [--label L]` | `mesh join --key K [--label L]`
                  | `mesh key` (print the join key — it IS the group secret)
                  | `mesh peer <ip[:port]>` (add a static peer)
+                 | `mesh abandon <node_id>` (retired hardware — hidden from the roster, history kept)
                  | `mesh share <tools|knowledge|identities> <on|off>`
                  | `mesh accept-observations <on|off>` (device agents) | `mesh qr` (enroll a device)
                  | `mesh pending`/`approve <id>`/`deny <id>` (covenant handshake) | `mesh invite`
@@ -88,6 +92,8 @@ fn main() -> ExitCode {
         Some("theories") => cmd_theories(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
+        Some("discover") => cmd_discover(rest),
+        Some("tool") => cmd_tool(rest),
         Some("tick") => cmd_tick(rest),
         Some("run") => cmd_run(rest),
         Some("daemon") => cmd_daemon(rest),
@@ -511,7 +517,18 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         .map(|c| c.gossip_port)
                         .unwrap_or(47_100)
                 });
-            let host = f.get("host").cloned().unwrap_or_else(tailnet_ip_or_hint);
+            // Every address the device could reach us at, most-universal first (tailnet, then
+            // LAN). An explicit `--host` goes to the front. `host` stays as the single best
+            // candidate so v1 clients keep working; new clients read `hosts` and fail over.
+            let mut hosts = reachable_hosts();
+            if let Some(h) = f.get("host") {
+                hosts.retain(|x| x != h);
+                hosts.insert(0, h.clone());
+            }
+            let host = hosts
+                .first()
+                .cloned()
+                .unwrap_or_else(|| HOST_PLACEHOLDER.to_string());
             // Compact JSON — the phone parses this after scanning or pasting.
             let payload = serde_json::json!({
                 "v": 1,
@@ -519,7 +536,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 "group": cred.group_id,
                 "label": cred.label,
                 "host": host,
+                "hosts": hosts,
                 "port": port,
+                // TLS SPKI pin (ADR-0009): the device checks every connection against it.
+                "tlspin": familiar_mesh::transport::tls_spki_pin(&dir).unwrap_or_default(),
             })
             .to_string();
             println!("enrollment payload (contains the group secret — trusted screen only):");
@@ -569,6 +589,130 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
+        }
+        Some("abandon") => {
+            // `mesh abandon <node_id>` — decommissioned hardware, a retired VM. The RECOMMENDED
+            // way to clean the roster: unlike `forget`, this never deletes the record. It's
+            // excluded from the active roster/worldview but the full history (first_seen,
+            // total_online_secs, tools/patterns it once offered) stays. Any fresh contact from
+            // that node revives it automatically — a human re-abandons if it turns out to be a
+            // one-off blip, not a real departure.
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh abandon <node_id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::transport::abandon_peer(&dir, node_id) {
+                Ok(true) => {
+                    println!("✓ {node_id} marked abandoned — hidden from the active roster, history kept");
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("mesh: no roster entry for {node_id}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not update the roster — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("forget") => {
+            // `mesh forget <node_id>` — hard delete, the record is gone for good (no history
+            // kept). Prefer `mesh abandon` for a real departure (decommissioned hardware) —
+            // this is for correcting a mistaken/test entry, not normal roster hygiene.
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh forget <node_id>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::transport::remove_peer(&dir, node_id) {
+                Ok(true) => {
+                    println!("✓ forgot {node_id} — removed from the roster");
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("mesh: no roster entry for {node_id}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not update the roster — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("roster") => {
+            // `mesh roster` — every member with its full metadata, one block per node.
+            let now = familiar_mesh::transport::now_secs();
+            let members = familiar_mesh::members::classify(&dir, now);
+            if members.is_empty() {
+                println!("(no mesh members — is the mesh gate open and a group enrolled?)");
+                return ExitCode::SUCCESS;
+            }
+            let date = |ts: i64| -> String {
+                if ts <= 0 {
+                    "—".into()
+                } else {
+                    // civil date from unix secs, UTC — no chrono dependency for a roster print
+                    let days = ts / 86400;
+                    let (y, m, d) = civil_from_days(days);
+                    format!(
+                        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+                        (ts % 86400) / 3600,
+                        (ts % 3600) / 60
+                    )
+                }
+            };
+            let dur = |secs: i64| -> String {
+                if secs <= 0 {
+                    "—".into()
+                } else if secs < 3600 {
+                    format!("{}m", secs / 60)
+                } else if secs < 86400 {
+                    format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+                } else {
+                    format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
+                }
+            };
+            for m in &members {
+                let who = if m.human.is_empty() {
+                    "—".into()
+                } else {
+                    m.human.clone()
+                };
+                println!(
+                    "{} “{}” [{}]\n  status    {}{}\n  joined    first {} · session {} · total online {}\n  platform  {} {} · familiar v{}\n  human     interactive {} · serves {}\n  offers    {} tool(s), {} pattern(s) · trust {} · addr {}",
+                    match m.kind {
+                        familiar_mesh::members::MemberKind::SelfNode => "self  ",
+                        familiar_mesh::members::MemberKind::GossipPeer => "peer  ",
+                        familiar_mesh::members::MemberKind::DevicePeer => "device",
+                        familiar_mesh::members::MemberKind::DeviceAgent => "agent ",
+                    },
+                    m.label,
+                    &m.node_id.chars().take(8).collect::<String>(),
+                    m.status,
+                    if m.status == "online" {
+                        String::new()
+                    } else {
+                        format!(" (last seen {} ago)", dur(now - m.last_seen))
+                    },
+                    date(m.first_seen),
+                    if m.session_start > 0 {
+                        date(m.session_start)
+                    } else {
+                        "—".into()
+                    },
+                    dur(m.total_online_secs),
+                    m.os,
+                    m.os_version,
+                    if m.familiar_version.is_empty() { "?" } else { &m.familiar_version },
+                    if m.interactive { "yes" } else { "no" },
+                    who,
+                    m.tools,
+                    m.patterns,
+                    m.trust,
+                    if m.addr.is_empty() { "—" } else { &m.addr },
+                );
+            }
+            ExitCode::SUCCESS
         }
         Some("share") => {
             // `mesh share <tools|knowledge|identities> <on|off>` — the sharing switches,
@@ -1000,6 +1144,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
                  | request-join --host H | key | qr | peer <ip[:port]> \
+                 | abandon <node_id> | forget <node_id> \
                  | share <tools|knowledge|identities> <on|off> | accept-observations <on|off> \
                  | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
                  | invite [--minutes N] | optin <handle> | status>"
@@ -1021,6 +1166,21 @@ fn open_mesh_gate(dir: &std::path::Path) {
     if let Ok(json) = serde_json::to_string_pretty(&b) {
         let _ = std::fs::write(dir.join("boundary.json"), json);
     }
+}
+
+/// Civil (year, month, day) from days since the unix epoch — Howard Hinnant's algorithm,
+/// so the roster prints dates without pulling in a chrono dependency.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 fn write_mesh_config(
@@ -1057,23 +1217,10 @@ fn host_is_placeholder(host: &str) -> bool {
     host == HOST_PLACEHOLDER
 }
 
-/// This familiar's tailnet IPv4 (via `tailscale ip -4`), so a device can reach it off-LAN. Falls
-/// back to a placeholder the caller flags — the mesh already shells out to tailscale for peers.
-fn tailnet_ip_or_hint() -> String {
-    std::process::Command::new("tailscale")
-        .args(["ip", "-4"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .next()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-        })
-        .unwrap_or_else(|| HOST_PLACEHOLDER.to_string())
+/// Every address a device could reach this familiar at, most-universal first — see
+/// `transport::reachable_hosts` (tailnet, then LAN).
+fn reachable_hosts() -> Vec<String> {
+    familiar_mesh::transport::reachable_hosts()
 }
 
 /// Render `payload` as a scannable terminal QR via `qrencode` if it's installed. Returns whether
@@ -1637,21 +1784,105 @@ fn cmd_tick(args: &[String]) -> ExitCode {
 
 /// How often (in ticks) the daemon sweeps the LAN for reachable devices — the frontier the mesh map
 /// draws as faded branches. Network probing is heavier than a tick, so it runs sparsely.
-const REACH_EVERY: usize = 15;
-
-/// Sweep the LAN for reachable devices and record the `can-reach` frontier observations, but only if
-/// the network gate is open. Returns how many devices were assessed (0 if the gate is shut or nothing
-/// answered). Short per-port timeout so it doesn't stall the tick loop.
-fn reach_sweep(dir: &std::path::Path) -> usize {
-    let Ok(b) = boundary::load(dir) else { return 0 };
-    if !b.allow_network {
-        return 0;
+/// `familiar discover` — the periphery's one-shot network survey: discover the devices sharing this
+/// LAN (ARP + optional DHCP leases) and assess their reach (bounded port probe), recording the
+/// `device:*` and `can-reach device:*` observations that populate the roster and the map's frontier.
+///
+/// This is the seam that replaces the core's old autonomous sweep: the shell (a launchd timer, the
+/// GUI app, a native survey) decides *when* to look, invokes this, and the findings flow back in as
+/// observations — so discovery is a peripheral, consent-gated act, not a metabolic reflex flooding
+/// the theory pipeline. Gated on `allow_network`: nothing reaches outward without the human's gate.
+fn cmd_discover(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let now = now_secs();
+    let timeout: u64 = f
+        .get("timeout-ms")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300);
+    let b = match boundary::load(&dir) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("discover: boundary policy error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let verdict = guard::evaluate(&Action::new(ActionKind::Network, "discover"), &b);
+    if verdict.decision != Decision::Allow {
+        eprintln!(
+            "discover: the network is outside the boundary — open `allow_network` to let the \
+             periphery survey the LAN.\n  {}",
+            verdict.rationale
+        );
+        return ExitCode::FAILURE;
     }
-    let (reaches, obs) = familiar_reach::scan(dir, now_secs(), true, 250);
+    let mut recorded = 0;
+    // Device survey (who is present) …
+    for o in familiar_sense::devices(&dir, now, b.allow_network) {
+        if observation::record(&dir, o).is_ok() {
+            recorded += 1;
+        }
+    }
+    // … then reach assessment (what we could do with them) — seeds the frontier.
+    let (reaches, obs) = familiar_reach::scan(&dir, now, b.allow_network, timeout);
     for o in obs {
-        let _ = observation::record(dir, o);
+        if observation::record(&dir, o).is_ok() {
+            recorded += 1;
+        }
     }
-    reaches.len()
+    println!(
+        "discover: {} device(s) assessed, {recorded} observation(s) recorded.",
+        reaches.len()
+    );
+    ExitCode::SUCCESS
+}
+
+/// `familiar tool prune [--dry-run]` — purge every authored tool whose script reaches the network
+/// (LAN scans/probes that should never have been core-authored or federated). `--dry-run` lists
+/// what would be removed without touching anything. The purge deletes each tool's script file and
+/// rewrites the store with the survivors.
+fn cmd_tool(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    match args.first().map(String::as_str) {
+        Some("prune") => {
+            if f.contains_key("dry-run") {
+                let tools = familiar_kernel::tool::load(&dir).unwrap_or_default();
+                let mut n = 0;
+                for t in &tools {
+                    let reaches = std::fs::read_to_string(&t.script_path)
+                        .map(|s| familiar_kernel::review::reaches_network(&s))
+                        .unwrap_or(false);
+                    if reaches {
+                        println!("  would remove {} ({})", t.id, t.name);
+                        n += 1;
+                    }
+                }
+                println!("tool prune --dry-run: {n} network-reaching tool(s) would be removed.");
+                return ExitCode::SUCCESS;
+            }
+            match familiar_kernel::tool::prune_network(&dir) {
+                Ok(removed) => {
+                    for (id, name) in &removed {
+                        println!("  removed {id} ({name})");
+                    }
+                    println!(
+                        "tool prune: {} network-reaching tool(s) removed.",
+                        removed.len()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("tool prune: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            eprintln!("usage: familiar tool prune [--dry-run]");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn cmd_run(args: &[String]) -> ExitCode {
@@ -1712,15 +1943,10 @@ fn cmd_run(args: &[String]) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            // Every REACH_EVERY ticks (and on the first), if the network gate is open, sweep the
-            // LAN for reachable devices. These `can-reach` observations are the mesh's *frontier* —
-            // interfaces the familiar can see but hasn't enrolled — drawn as faded branches on the map.
-            if n == 1 || n.is_multiple_of(REACH_EVERY) {
-                let seeded = reach_sweep(&dir);
-                if seeded > 0 {
-                    println!("  reach: swept the frontier, {seeded} device(s) assessed");
-                }
-            }
+            // The LAN reach-sweep that seeds the frontier is no longer driven from the core's own
+            // metabolism — it's a peripheral capability now, invoked on the shell's cadence via
+            // `familiar discover` (macOS launchd timer / GUI app) or a native survey POSTing to the
+            // observe seam. The core no longer goes out and scans the network on every Nth tick.
             if !fixed {
                 // Multiplicative back-off while quiet; snap back to the floor on any
                 // change. The world moving (or our own work) buys closer attention.
@@ -1855,6 +2081,11 @@ fn cmd_consult(args: &[String]) -> ExitCode {
         Ok(familiar_llm::Outcome::Refused(why)) => {
             println!("REFUSE: {why}");
             println!("  a human opens the LLM seam via boundary.json (docs/boundaries.md)");
+            ExitCode::SUCCESS
+        }
+        Ok(familiar_llm::Outcome::RateLimited(why)) => {
+            println!("RATE-LIMITED: {why}");
+            println!("  try again later — every configured provider is cooling down");
             ExitCode::SUCCESS
         }
         Err(e) => {

@@ -1,0 +1,21 @@
+# familiar-scenario — the scenario laboratory (ADR-0010).
+#
+# Miniature deterministic worlds + an EXTERNAL evaluator, so the machinery the
+# kernel already holds (candidates, trials, selection, memory, lineage) can be
+# tested as an experiment: does accumulated experience beat starting from scratch?
+[package]
+name = "familiar-scenario"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+familiar-kernel.workspace = true
+familiar-exec.workspace = true
+familiar-llm.workspace = true
+
+[[bin]]
+name = "familiar-lab"
+path = "src/bin/lab.rs"
