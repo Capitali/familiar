@@ -144,6 +144,22 @@ const nowS = () => Date.now()/1000|0;
 const hash32 = (str) => { let h = 2166136261>>>0; for (const c of str) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h>>>0; };
 
 function statusColor(st, kind) { return st === 'online' ? (kind === 'self_node' ? '#aee7ff' : '#3ddc97') : st === 'away' ? '#ffb15a' : 'rgba(140,160,190,0.55)'; }
+
+// SEEN is a point in time (UTC stamp, per the console convention) or the word 'now'. The full
+// 'YY/MM/DD-HH:MMUTC' string doesn't fit a stat column at display size, so it splits: `seen`
+// is the value a stat cell shows big ('now' / 'HH:MMUTC' / '—'), `seenSub` the small date line
+// above it, `seenFull` the one-line form for compact rows.
+function seenParts(st, lastSeen) {
+  if (st === 'online') return { seen: 'now', seenSub: '', seenFull: 'now' };
+  const u = utc(lastSeen);                       // 'YY/MM/DD-HH:MMUTC' (17 chars) or '—'
+  if (u.length !== 17) return { seen: u, seenSub: '', seenFull: u };
+  return { seen: u.slice(9), seenSub: u.slice(0, 8), seenFull: u };
+}
+// A SEEN stat cell: 'now' renders big and light; a stamp stacks date-over-time in mono at a
+// size that keeps the SESSION/TOTAL columns beside it in place whatever the clock says.
+const seenCell = (p, bigPx, timePx) => p.seenSub
+  ? `<div class="m" style="font-size:${Math.round(timePx * 0.6)}px;color:rgba(160,195,255,0.6);margin-bottom:3px;">${esc(p.seenSub)}</div><div class="m" style="font-size:${timePx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`
+  : `<div style="font-size:${bigPx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`;
 const FRONTIER_COLOR = '#7d93a8';
 
 // Members → located mesh nodes. Real coordinates only: a node that reported none clusters
@@ -167,7 +183,7 @@ function peers() {
       m, name: m.label, lat, lon, located, hasAnchor: !!anchor, status: st,
       color: statusColor(st, m.kind), local: m.kind === 'self_node',
       kindWord: { self_node: 'SELF', gossip_peer: 'PEER', device_peer: 'DEVICE', device_agent: 'AGENT' }[m.kind] || 'NODE',
-      seen: st === 'online' ? 'now' : utc(m.last_seen),
+      ...seenParts(st, m.last_seen),
       session: m.session_start > 0 ? dur(nowS() - m.session_start) : '—',
       total: m.total_online_secs > 0 ? dur(m.total_online_secs) : '—',
       os: (m.os_version || m.os || '?') + (m.familiar_version ? ' · v' + m.familiar_version : ''),
@@ -276,8 +292,8 @@ function refreshScreen() {
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:13px;">${dstr(p.m.first_seen)}${p.m.human?' · '+esc(p.m.human):''}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'}</div>
-        <div style="display:flex;align-items:flex-end;gap:18px;margin-bottom:12px;">
-          <div><div style="font-size:26px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SEEN</div></div>
+        <div style="display:grid;grid-template-columns:minmax(84px,auto) auto auto;justify-content:start;gap:18px;align-items:end;margin-bottom:12px;">
+          <div>${seenCell(p, 26, 16)}<div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SEEN</div></div>
           <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#aee7ff;">${esc(p.session)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SESSION</div></div>
           <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#9cc0ff;">${esc(p.total)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">TOTAL</div></div>
         </div>
@@ -299,8 +315,8 @@ function refreshScreen() {
         <span style="flex:1;"></span>
         <button onclick="sphereDive(${S.nodeIdx})" class="glybtn" style="width:44px;height:44px;">${DIVE_GLYPH}</button>
       </div>
-      <div style="display:flex;align-items:flex-end;gap:26px;margin:16px 0 20px;">
-        <div><div style="font-size:34px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div><div class="m" style="font-size:7.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:6px;">SEEN</div></div>
+      <div style="display:grid;grid-template-columns:minmax(110px,auto) auto auto;justify-content:start;gap:26px;align-items:end;margin:16px 0 20px;">
+        <div>${seenCell(p, 34, 21)}<div class="m" style="font-size:7.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:6px;">SEEN</div></div>
         <div><div style="font-size:24px;font-weight:300;line-height:0.85;color:#aee7ff;">${esc(p.session)}</div><div class="m" style="font-size:7.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:6px;">SESSION</div></div>
         <div><div style="font-size:24px;font-weight:300;line-height:0.85;color:#9cc0ff;">${esc(p.total)}</div><div class="m" style="font-size:7.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:6px;">TOTAL</div></div>
       </div>
@@ -395,7 +411,7 @@ function refreshScreen() {
         <span style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color};"></span>
         <span style="font-size:14px;font-weight:600;flex:1;">${esc(p.name)}</span>
         <span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(p.m.addr || '')}</span>
-        <span class="m" style="font-size:11px;color:${p.color};min-width:52px;text-align:right;">${esc(p.seen)}</span>
+        <span class="m" style="font-size:11px;color:${p.color};white-space:nowrap;text-align:right;">${esc(p.seenFull)}</span>
       </div>`).join('') + F.map((fn, fi) => `
       <div onclick="sphereDiveFrontier(${fi})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:9px 14px;border-radius:12px;background:rgba(16,34,60,0.12);border:1px solid rgba(125,147,168,0.14);opacity:0.66;">
         <span style="width:6px;height:6px;border-radius:50%;background:${FRONTIER_COLOR};box-shadow:0 0 7px ${FRONTIER_COLOR};"></span>
@@ -506,7 +522,7 @@ function renderCallouts() {
           <span style="font-size:12px;font-weight:600;">${esc(p.name)}</span>
           <span class="m" style="font-size:7.5px;letter-spacing:0.1em;padding:2px 5px;border-radius:5px;background:${p.local?'rgba(174,231,255,0.16)':'rgba(120,160,255,0.16)'};color:${p.local?'#cdeeff':'#bcd2ff'};">${p.kindWord}</span>
         </div>
-        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};">${esc(p.seen)}</span></div>
+        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};white-space:nowrap;">${esc(p.seenFull)}</span></div>
       </div>
     </div>`).join('') + F.map((fn) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;opacity:0.55;">
