@@ -933,8 +933,17 @@ fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
     let Some(cred) = group::load(dir).ok().flatten() else {
         return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
     };
-    let port = config::load(dir).map(|c| c.gossip_port).unwrap_or(47_100);
-    let hosts = reachable_hosts();
+    let cfg = config::load(dir).unwrap_or_default();
+    let port = cfg.gossip_port;
+    // Every address the mesh answers at: reachable (tailnet, LAN) first, then the
+    // rendezvous/lighthouse public address so a device off-LAN keeps a failover candidate
+    // (ADR-0012). Same set `mesh qr` carries — the two invite paths must not disagree.
+    let mut hosts = reachable_hosts();
+    for h in &cfg.rendezvous_hosts {
+        if !hosts.contains(h) {
+            hosts.push(h.clone());
+        }
+    }
     let payload = serde_json::json!({
         "v": 1,
         "secret": cred.join_key(),
