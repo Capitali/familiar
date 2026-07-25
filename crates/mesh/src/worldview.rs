@@ -175,6 +175,11 @@ pub struct Worldview {
     /// the tailnet path — and can reach the mesh from cellular — without re-enrolling.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<String>,
+    /// Every TLS pin a device may meet across those hosts (this node's + siblings' it vouches for).
+    /// A device adopts the set and accepts any member's cert, so failover to a reachable sibling
+    /// (the lighthouse) works — pinned to the group, not one node (ADR-0012).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pins: Vec<String>,
 }
 
 /// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
@@ -356,6 +361,7 @@ pub(crate) fn read_worldview(
         }
     }
     view.hosts = hosts;
+    view.pins = crate::transport::advertised_pins(dir);
     Ok(view)
 }
 
@@ -482,6 +488,7 @@ pub fn assemble_worldview(
         // Address advertisement is the *served* read path's concern (read_worldview fills it);
         // the localhost console doesn't need it and assembly stays shell-out-free.
         hosts: Vec::new(),
+        pins: Vec::new(),
         question,
         presence: presence.measure,
         withdrawn: presence.withdrawn,

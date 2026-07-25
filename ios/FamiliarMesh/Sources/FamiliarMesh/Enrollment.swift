@@ -17,9 +17,13 @@ public struct EnrollmentPayload: Codable, Equatable {
     /// SHA-256 of the familiar's TLS SubjectPublicKeyInfo — the device pins every mesh
     /// connection to it (ADR-0009). Absent on older payloads (encryption-only then).
     public var tlspin: String?
+    /// The group's trusted TLS pins (this node's + siblings' it vouches for). The device accepts
+    /// any, so failover to a reachable member (the lighthouse) passes the pin check (ADR-0012).
+    public var pins: [String]?
 
     public init(v: Int = 1, label: String, host: String, port: Int, hosts: [String]? = nil,
-                group: String? = nil, secret: String? = nil, tlspin: String? = nil) {
+                group: String? = nil, secret: String? = nil, tlspin: String? = nil,
+                pins: [String]? = nil) {
         self.v = v
         self.label = label
         self.host = host
@@ -28,6 +32,7 @@ public struct EnrollmentPayload: Codable, Equatable {
         self.group = group
         self.secret = secret
         self.tlspin = tlspin
+        self.pins = pins
     }
 
     /// The addresses to try, in order — `hosts` when present, else just `host`. The device should

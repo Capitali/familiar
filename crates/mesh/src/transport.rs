@@ -527,6 +527,23 @@ pub fn tls_spki_pin(dir: &Path) -> Result<String> {
     )))
 }
 
+/// Every TLS pin a device may legitimately meet in this group: this node's own, plus the
+/// pins of sibling members it might fail over to (`advertise_pins` — the lighthouse, peers).
+/// A device adopts this set and accepts a cert whose SPKI is any of them, so it can reach the
+/// mesh through whichever member is reachable — pinned to the GROUP, not to one node (ADR-0012).
+pub fn advertised_pins(dir: &Path) -> Vec<String> {
+    let mut pins = Vec::new();
+    if let Ok(p) = tls_spki_pin(dir) {
+        pins.push(p);
+    }
+    for p in config::load(dir).unwrap_or_default().advertise_pins {
+        if !p.is_empty() && !pins.contains(&p) {
+            pins.push(p);
+        }
+    }
+    pins
+}
+
 /// The server's TLS acceptor: a self-signed cert over the persistent key. The cert is
 /// re-minted each boot (cheap); the KEY persists, so the SPKI pin never changes.
 fn tls_acceptor(dir: &Path) -> Result<tokio_rustls::TlsAcceptor> {
@@ -953,6 +970,9 @@ fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
         "hosts": hosts,
         "port": port,
         "tlspin": tls_spki_pin(dir).unwrap_or_default(),
+        // Every pin a device may meet across the group's hosts — so a failover target's cert
+        // is accepted (ADR-0012). `tlspin` stays for v1 clients that pin a single node.
+        "pins": advertised_pins(dir),
     });
     text(StatusCode::OK, payload.to_string())
 }

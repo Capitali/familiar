@@ -45,9 +45,17 @@ final class AppModel: ObservableObject {
         didSet { MeshTLS.pin = tlsPin }
     }
 
+    /// The group's trusted TLS pin set — the enrolling node's plus every sibling it vouches for
+    /// (the lighthouse, peers). A device accepts any of these, so failover to a reachable member
+    /// doesn't hit a pin mismatch (ADR-0012). Learned from worldview reads; persisted.
+    var tlsPins: [String] = [] {
+        didSet { MeshTLS.trust(tlsPins) }
+    }
+
     private func saveEnrollment() {
         var d: [String: Any] = ["host": host, "hosts": hosts, "port": enrollPort, "label": groupLabel]
         if let pin = tlsPin { d["tlspin"] = pin }
+        if !tlsPins.isEmpty { d["pins"] = tlsPins }
         if let data = try? JSONSerialization.data(withJSONObject: d) { KeychainStore.save(data, account: enrollAccount) }
     }
     private func loadEnrollment() -> (host: String, hosts: [String], port: Int, label: String)? {
@@ -57,6 +65,7 @@ final class AppModel: ObservableObject {
            let h = d["host"] as? String, !h.isEmpty {
             let list = (d["hosts"] as? [String] ?? []).filter { !$0.isEmpty }
             tlsPin = d["tlspin"] as? String
+            tlsPins = (d["pins"] as? [String] ?? []).filter { !$0.isEmpty }
             return (h, list.isEmpty ? [h] : list, (d["port"] as? Int) ?? 47100, (d["label"] as? String) ?? "")
         }
         if let h = defaults.string(forKey: "enroll.host"), !h.isEmpty {
@@ -101,6 +110,16 @@ final class AppModel: ObservableObject {
         hosts.append(contentsOf: fresh)
         saveEnrollment()
         note("learned address\(fresh.count > 1 ? "es" : ""): \(fresh.joined(separator: ", "))")
+    }
+
+    /// The familiar told us the group's trusted TLS pins — adopt any we don't hold, so a later
+    /// failover to a sibling (the lighthouse) passes the pin check (ADR-0012). This is how a
+    /// device that pinned one node on the LAN comes to accept the lighthouse's cert on cellular.
+    private func learnPins(_ advertised: [String]?) {
+        let fresh = (advertised ?? []).filter { !$0.isEmpty && !tlsPins.contains($0) }
+        guard !fresh.isEmpty else { return }
+        tlsPins.append(contentsOf: fresh)   // didSet trusts them in MeshTLS
+        saveEnrollment()
     }
 
     /// The current host went quiet — rotate to the next candidate. Returns the new preference,
@@ -252,6 +271,7 @@ final class AppModel: ObservableObject {
         enrollPort = p.port
         groupLabel = p.label
         tlsPin = p.tlspin
+        tlsPins = p.pins ?? (p.tlspin.map { [$0] } ?? [])   // seed the group's pin set
         saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
         note("requesting to join “\(p.label)” — accepting the Three Laws…")
@@ -381,6 +401,7 @@ final class AppModel: ObservableObject {
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
                 promoteHost(host)
+                learnPins(view.pins)     // trust the group's pins before learning new hosts
                 learnHosts(view.hosts)
                 return
             } catch {

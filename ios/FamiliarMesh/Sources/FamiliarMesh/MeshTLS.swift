@@ -4,13 +4,32 @@ import Security
 
 // Transport security for the mesh (ADR-0009 Phase 1): every node serves TLS with a
 // self-signed certificate over a persistent P-256 key. Authenticity still comes from the
-// covenant signatures on the payloads — TLS adds confidentiality on any path. When the
-// enrollment payload carried a `tlspin` (SHA-256 of the node's TLS SubjectPublicKeyInfo),
-// connections to the mesh are PINNED to it; without a pin (older enrollments) any
-// self-signed cert is accepted, which still ends passive observation.
+// covenant signatures on the payloads — TLS adds confidentiality on any path.
+//
+// A connection is accepted when the server cert's SPKI SHA-256 is one of the pins the device
+// trusts. That set is the GROUP's node keys, not one node (ADR-0012): a device pins its
+// enrolling familiar AND every sibling that familiar vouches for (the lighthouse, peers), so
+// it can fail over to whichever member it can reach — the enrolling node on the LAN, the
+// lighthouse on cellular — without a pin mismatch. With no pins at all (older enrollments)
+// any self-signed cert is accepted, which still ends passive observation.
 public enum MeshTLS {
-    /// The pinned SPKI SHA-256 (hex) from enrollment, if the payload carried one.
-    public static var pin: String?
+    /// The set of trusted SPKI SHA-256 pins (hex): the enrolling node's plus every sibling's
+    /// the mesh advertised. A cert is accepted iff its SPKI is in here (empty ⇒ accept any).
+    public static var pins: Set<String> = []
+
+    /// Back-compat: the single-pin accessor older code sets. Writing it seeds the set; reading
+    /// returns any member (the set is what the delegate checks).
+    public static var pin: String? {
+        get { pins.first }
+        set {
+            if let p = newValue, !p.isEmpty { pins.insert(p) }
+        }
+    }
+
+    /// Adopt additional trusted pins (from a worldview read that advertised the group's set).
+    public static func trust(_ more: [String]) {
+        for p in more where !p.isEmpty { pins.insert(p) }
+    }
 
     /// The URLSession every mesh client uses.
     public static let session: URLSession = {
@@ -42,16 +61,16 @@ public enum MeshTLS {
                   let trust = challenge.protectionSpace.serverTrust
             else { return completionHandler(.performDefaultHandling, nil) }
 
-            if let want = MeshTLS.pin, !want.isEmpty {
+            if !MeshTLS.pins.isEmpty {
                 guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
                       let leaf = chain.first,
                       let key = SecCertificateCopyKey(leaf),
                       let got = MeshTLS.spkiHex(for: key),
-                      got == want
+                      MeshTLS.pins.contains(got)
                 else { return completionHandler(.cancelAuthenticationChallenge, nil) }
             }
-            // Pin matched (or no pin yet): accept the self-signed cert. The covenant
-            // signatures on every payload remain the authenticity floor either way.
+            // SPKI is a trusted group pin (or no pins yet): accept the self-signed cert. The
+            // covenant signatures on every payload remain the authenticity floor either way.
             completionHandler(.useCredential, URLCredential(trust: trust))
         }
     }

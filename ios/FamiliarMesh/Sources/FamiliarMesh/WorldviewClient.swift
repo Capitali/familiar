@@ -180,6 +180,9 @@ public struct Worldview: Codable, Equatable {
     /// Every address the familiar answers at, most-universal first (tailnet, then LAN). The model
     /// merges these into its candidate host list so a LAN-enrolled device learns the tailnet path.
     public var hosts: [String]?
+    /// Every TLS pin trusted across those hosts (the group's node keys). The model adopts these so
+    /// failover to a sibling (the lighthouse) passes the pin check (ADR-0012).
+    public var pins: [String]?
 }
 
 /// The signed read request — mirrors the Rust `worldview::ViewRequest` (an observe envelope minus

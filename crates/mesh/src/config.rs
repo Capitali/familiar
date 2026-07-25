@@ -94,6 +94,13 @@ pub struct MeshConfig {
     /// candidate. A meeting address, never a secret; empty on a node that knows no lighthouse.
     #[serde(default)]
     pub rendezvous_hosts: Vec<String>,
+    /// Additional TLS SPKI pins (hex) this node vouches for — the pins of other group members a
+    /// device might fail over to (the lighthouse, sibling peers). Advertised alongside this node's
+    /// own pin so a device pins to the GROUP's set of node keys, not one node, and can accept a
+    /// failover target's cert (ADR-0012). A member's TLS key is not a secret; advertising it admits
+    /// no one. Empty until a human (or, later, gossip) supplies a sibling's pin.
+    #[serde(default)]
+    pub advertise_pins: Vec<String>,
 }
 
 impl Default for MeshConfig {
@@ -115,6 +122,7 @@ impl Default for MeshConfig {
             lan_port: 47_101,
             advertise_hosts: Vec::new(),
             rendezvous_hosts: Vec::new(),
+            advertise_pins: Vec::new(),
         }
     }
 }
