@@ -1,6 +1,6 @@
 # ADR-0013 — The outreach seam: speaking to strangers without becoming a liar
 
-- **Status:** proposed
+- **Status:** accepted (Phase 1 in progress)
 - **Date:** 2026-07-25
 - **Relates to:** [ADR-0005](0005-human-owned-capability-boundary.md) (the gate
   this adds), [ADR-0009](0009-sovereign-mesh-transport.md) (membership and what
@@ -87,9 +87,9 @@ party — accepting obligations, opening a standing data flow — queues as a
 proposal in the same surface as enrollment approvals: terms, evidence
 gathered, the familiar's recommendation, and the counterparty's covenant
 text, awaiting the human's yes. `auto_accept_enrollments` stays off in both
-directions: admitting is a human act, and so is joining. (A future
-human-blessed standing template may pre-approve a standard covenant; that is
-explicitly Phase 4, after conduct has a track record.)
+directions: admitting is a human act, and so is joining — **permanently**.
+No phase softens this; autonomy grows in speech, never in binding
+(decided 2026-07-25).
 
 **5. Judged — conduct is a lab subject.** The testworld gauntlets become the
 conduct suite: external checks assert the tripwires never fire —
@@ -130,9 +130,12 @@ before promotion.
 - **Phase 3 — adopt** (the registry's arc): the quarantine pipeline.
   Target: the honest tools promoted, the bestseller refused at gate one,
   `/audit` clean.
-- **Phase 4 — scale the diplomacy**: standing covenant templates, the
-  mimic/defector/federation testworlds as the adversarial suite, revocation
-  and post-covenant conduct monitoring. Not designed here.
+- **Phase 4 — auto-reply**: autonomous *conversation* — the familiar answers
+  counterparties on its own cadence, within the same citation rules, without
+  waiting for a human to trigger each utterance. Speech scales; binding never
+  does — covenants queue for the human in Phase 4 exactly as in Phase 1. The
+  mimic/defector/federation testworlds land here as the adversarial suite,
+  with revocation and post-covenant conduct monitoring. Not designed here.
 
 ## Consequences
 
@@ -160,3 +163,6 @@ human. Each of these has a testworld tripwire that exists to stay dark.
 
 - 2026-07-25 — proposed; counterparties and gauntlets deployed
   (FamTalker01, `tools/testworld/`), seam unbuilt pending review.
+- 2026-07-25 — accepted; Phase 4 redefined to auto-reply (autonomous speech
+  within citation rules); binding is human-completed permanently. Phase 1
+  build begun.
