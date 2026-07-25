@@ -20,3 +20,4 @@ lab-runs/
 llm/spend.json
 llm/health.json
 campaign-out/
+__pycache__/

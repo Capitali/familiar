@@ -1,0 +1,20 @@
+{"actor":"greenhouse","action":"reports","object":"soil-moisture:22%","context":"greenhouse: 23.1°C, humidity 61%, lamp on, soil moisture 22% — the basil bed is thirsty, please water","confidence":0.95}
+{"actor":"greenhouse","action":"reports","object":"temperature:26.4C","context":"warmest hour of the day in the greenhouse; humidity falling since noon","confidence":0.95}
+{"actor":"pantry","action":"reports","object":"coffee:low","context":"pantry: coffee 70g — low, about 2 days left at the usual pace","confidence":0.9}
+{"actor":"pantry","action":"reports","object":"flour:ok","context":"pantry: flour 1460g, rice 2180g, oats 900g, olive oil 610ml — staples holding","confidence":0.9}
+{"actor":"pantry","action":"reports","object":"propane:low","context":"propane at 12% — refill before the weekend cold snap","confidence":0.9}
+{"actor":"almanac","action":"announces","object":"event:farmers-market","context":"farmers market Saturday 09:00 — coffee and basil starts are both on the list","confidence":0.9}
+{"actor":"almanac","action":"announces","object":"event:water-tank-refill","context":"water tank refill due in 2 days (11:00)","confidence":0.9}
+{"actor":"almanac","action":"announces","object":"overdue:library-returns","context":"library returns are OVERDUE — three books, fines accrue daily","confidence":0.9}
+{"actor":"ian","action":"told the familiar","object":"schedule","context":"i wish I had a better handle on my schedule between work and personal activities","confidence":1.0}
+{"actor":"ian","action":"told the familiar","object":"mornings","context":"mornings are when I actually get things done; afternoons dissolve into interruptions","confidence":1.0}
+{"actor":"watch:ian","action":"reports","object":"motion:walking","context":"a 40-minute walk ending 08:10 — most mornings start this way","confidence":0.85}
+{"actor":"watch:ian","action":"reports","object":"sleep:6h10m","context":"short sleep two nights running","confidence":0.85}
+{"actor":"phone:ian","action":"reports","object":"reminder-dismissed:oil-change","context":"the truck oil-change reminder was dismissed for the third time","confidence":0.85}
+{"actor":"greenhouse","action":"reports","object":"soil-moisture:78%","context":"beds watered this morning — moisture back to 78%, note thanked the waterer","confidence":0.95}
+{"actor":"pantry","action":"reports","object":"coffee:out","context":"pantry: coffee is OUT — the market run did not happen","confidence":0.9}
+{"actor":"almanac","action":"announces","object":"event:laundry-day","context":"laundry day tomorrow 08:00 — overlaps the water tank refill window","confidence":0.9}
+{"actor":"ian","action":"answered","object":"thread:priorities","context":"the greenhouse matters more to me than the truck right now — plants die faster than engines","confidence":1.0}
+{"actor":"greenhouse","action":"reports","object":"lamp:off-early","context":"lamp went off 90 minutes early; the timer may have lost its schedule after the power blip","confidence":0.8}
+{"actor":"pantry","action":"reports","object":"oats:low","context":"oats 240g — low, and breakfast is the meal that actually happens daily","confidence":0.9}
+{"actor":"almanac","action":"announces","object":"pattern:friday-slippage","context":"the last three overdue items were all Friday-scheduled — Fridays overpromise","confidence":0.8}
