@@ -520,12 +520,9 @@ fn maybe_reply(
         );
         match familiar_llm::consult(dir, &prompt) {
             Ok(familiar_llm::Outcome::Response(r)) => {
-                let r = r.trim().trim_matches('"').trim().to_string();
-                if r.is_empty() {
-                    templated_reply(said, now)
-                } else {
-                    r.chars().take(400).collect()
-                }
+                looks_like_prose(&r)
+                    .map(|p| p.chars().take(400).collect())
+                    .unwrap_or_else(|| templated_reply(said, now))
             }
             // No mind available right now — a plain acknowledgment still closes the loop.
             _ => templated_reply(said, now),
@@ -541,6 +538,27 @@ fn maybe_reply(
         ),
     )?;
     Ok(true)
+}
+
+/// Is an LLM response a usable prose reply — or JSON/markup/garbage a small model coughed up?
+/// Guards the dialogue from artifacts like `{"type":"object"}` (a coder model ignoring "plain
+/// text"): returns the cleaned prose, or None to fall back to a templated acknowledgment.
+fn looks_like_prose(raw: &str) -> Option<String> {
+    let s = raw.trim().trim_matches('"').trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Structured output, not conversation: JSON/array/tag/fenced code.
+    if s.starts_with(['{', '[', '<', '`']) {
+        return None;
+    }
+    // Must read like a sentence: some words, and mostly letters/spaces (not a blob of symbols).
+    let words = s.split_whitespace().count();
+    let letters = s.chars().filter(|c| c.is_alphabetic() || c.is_whitespace()).count();
+    if words < 2 || letters * 5 < s.chars().count() * 4 {
+        return None;
+    }
+    Some(s.to_string())
 }
 
 /// A brief, honest acknowledgment when no LLM is available — varied so it doesn't read as a
@@ -3175,6 +3193,19 @@ mod tests {
             1.0,
         );
         assert_eq!(utterance_text(&threaded), "the basil matters more");
+    }
+
+    #[test]
+    fn prose_guard_rejects_json_and_keeps_sentences() {
+        assert!(looks_like_prose("{\n  \"type\": \"object\"\n}").is_none());
+        assert!(looks_like_prose("[1,2,3]").is_none());
+        assert!(looks_like_prose("`code`").is_none());
+        assert!(looks_like_prose("").is_none());
+        assert!(looks_like_prose(":::").is_none());
+        assert_eq!(
+            looks_like_prose("\"Understood — the greenhouse comes first.\"").as_deref(),
+            Some("Understood — the greenhouse comes first.")
+        );
     }
 
     #[test]
