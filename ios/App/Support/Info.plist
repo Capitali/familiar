@@ -20,6 +20,17 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Mesh transport is TLS to self-signed peers, and authenticity comes from SPKI PINNING
+	     (MeshTLS), not from a CA chain. Default ATS lets the pinning delegate accept a self-signed
+	     cert on a LOCAL IP but blocks it on tailnet/public IPs before the delegate runs — so a
+	     device could reach the mesh over the LAN but never off-LAN (the lighthouse). Disable ATS's
+	     CA requirement; the pin is the stronger, node-specific check ATS's generic trust can't be.
+	     No plaintext is allowed by this — every mesh connection is still TLS + covenant-signed. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_familiar-mesh._tcp</string>
