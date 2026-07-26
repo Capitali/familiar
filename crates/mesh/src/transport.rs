@@ -554,6 +554,14 @@ fn tls_acceptor(dir: &Path) -> Result<tokio_rustls::TlsAcceptor> {
     params
         .distinguished_name
         .push(rcgen::DnType::CommonName, "familiar-mesh");
+    // Explicit, sanely-encoded validity. rcgen's defaults (1975 … 4096) encode the far-future
+    // year in a way iOS misreads as 1996 — an *expired* cert — and iOS enforces validity strictly
+    // on public IPs (the lighthouse) even when a custom pin delegate would otherwise accept it, so
+    // device reads over cellular failed with an opaque TLS error. Keep both bounds below 2050 so
+    // they serialize as unambiguous 2-digit UTCTime that every stack parses identically. The key
+    // persists across re-mints, so the SPKI pin devices hold is unchanged.
+    params.not_before = rcgen::date_time_ymd(2020, 1, 1);
+    params.not_after = rcgen::date_time_ymd(2049, 12, 31);
     let cert = params
         .self_signed(&kp)
         .map_err(|e| crate::Error::Malformed(format!("tls cert: {e}")))?;
