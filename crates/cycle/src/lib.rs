@@ -439,6 +439,125 @@ fn observer_phrase(dir: &Path) -> String {
         .unwrap_or_else(|| "the person I serve".to_string())
 }
 
+/// How recently the human must have spoken for the familiar to still reply conversationally —
+/// past this the moment has gone and a stale "reply" would read as a non-sequitur.
+const REPLY_WINDOW_SECS: i64 = 20 * 60;
+
+/// The text a human utterance actually carries. Most record the words in `object`
+/// (`told the familiar`/console answers, iOS thread answers); a few older/seeded `answered`
+/// rows put a `thread:<id>` ref in `object` and the words in `context`. Prefer the words.
+fn utterance_text(o: &observation::Observation) -> &str {
+    if o.object.starts_with("thread:") && !o.context.trim().is_empty() {
+        o.context.trim()
+    } else {
+        o.object.trim()
+    }
+}
+
+/// A human utterance in the dialogue — something a person said to the familiar, from any
+/// console (Mac `/local/answer`, an iOS device's signed answer). Not the familiar's own
+/// records, not mesh gossip.
+fn is_human_utterance(o: &observation::Observation) -> bool {
+    (o.action == "told the familiar" || o.action == "answered")
+        && o.actor != "familiar"
+        && !o.actor.starts_with("mesh")
+}
+
+/// **The dialogue becomes two-sided.** The muse only ever poses the *next* question; without
+/// this, a human who answers gets no acknowledgment and the console reads as a one-way
+/// question feed (the reported "not a chat interface"). When the human's latest utterance is
+/// newer than the familiar's latest reply, the familiar answers it — grounded in what was said
+/// (LLM when `allow_llm`), else a brief honest acknowledgment. Recorded as
+/// `familiar / replied / <text> / console`, which every console renders as a familiar turn, so
+/// the flow reads: human speaks → familiar replies → (the muse's next question follows). All
+/// clients are covered: each console's answer lands as an observation this step sees.
+fn maybe_reply(
+    dir: &Path,
+    now: i64,
+    obs: &[observation::Observation],
+    allow_llm: bool,
+) -> io::Result<bool> {
+    // The freshest human utterance, and whether we've already answered it.
+    let Some(human_ts) = obs
+        .iter()
+        .filter(|o| is_human_utterance(o))
+        .map(|o| o.ts)
+        .max()
+    else {
+        return Ok(false);
+    };
+    if now - human_ts > REPLY_WINDOW_SECS {
+        return Ok(false); // the moment has passed
+    }
+    let last_reply = obs
+        .iter()
+        .filter(|o| o.actor == "familiar" && o.action == "replied")
+        .map(|o| o.ts)
+        .max()
+        .unwrap_or(0);
+    if last_reply >= human_ts {
+        return Ok(false); // already replied to the latest thing said
+    }
+    let Some(msg) = obs
+        .iter()
+        .rfind(|o| is_human_utterance(o) && o.ts == human_ts)
+    else {
+        return Ok(false);
+    };
+    let said = utterance_text(msg);
+    if said.is_empty() {
+        return Ok(false);
+    }
+
+    let who = observer_phrase(dir);
+    let reply = if allow_llm {
+        let prompt = format!(
+            "You are a factory whose only purpose is to serve {who} (the Three Laws; humanity is \
+             served, never managed or replaced). {who} just said to you:\n\"{said}\"\n\
+             Reply directly, warmly, and briefly — ONE or two sentences that acknowledge what they \
+             said and, where it fits, what you'll do with it. Do NOT ask a question (that comes \
+             separately). Reply as plain text only, no quotes, no JSON.",
+        );
+        match familiar_llm::consult(dir, &prompt) {
+            Ok(familiar_llm::Outcome::Response(r)) => {
+                let r = r.trim().trim_matches('"').trim().to_string();
+                if r.is_empty() {
+                    templated_reply(said, now)
+                } else {
+                    r.chars().take(400).collect()
+                }
+            }
+            // No mind available right now — a plain acknowledgment still closes the loop.
+            _ => templated_reply(said, now),
+        }
+    } else {
+        templated_reply(said, now)
+    };
+
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar", "replied", reply, "console", "familiar", now, 1.0,
+        ),
+    )?;
+    Ok(true)
+}
+
+/// A brief, honest acknowledgment when no LLM is available — varied so it doesn't read as a
+/// canned bot, and never pretending to more than "I heard you, and I'll carry it."
+fn templated_reply(said: &str, now: i64) -> String {
+    const ACKS: &[&str] = &[
+        "I hear you — I'll carry that into what I work on next.",
+        "Understood. I'll weigh that as I go.",
+        "Noted, and taken to heart. I'll act on it where I can.",
+        "Thank you for telling me — it changes what I'll attend to.",
+        "Got it. I'll hold that and let it guide me.",
+    ];
+    // Deterministic pick keyed on the utterance + tick, so it varies without randomness.
+    let idx = (fnv1a(said).wrapping_add(now as u64) as usize) % ACKS.len();
+    ACKS[idx].to_string()
+}
+
 /// The factory thinks out loud: grounded in what it has observed, it (LLM-)forms a
 /// **question** to ask the human (written to `question.txt` for the interaction
 /// channel) and a **theory** about the patterns (recorded as a thread). Gated by the
@@ -2335,6 +2454,11 @@ pub fn tick(
     //    justify under the Three Laws.
     let reverted = review_parameters(dir, now)?;
 
+    // 6b. Converse — answer what the human just said, so the dialogue is two-sided and not a
+    //     one-way question feed. Runs every tick (ungated by the theorize cadence) so a reply
+    //     lands promptly; it only speaks when there's a fresh, unanswered human utterance.
+    let _replied = maybe_reply(dir, now, &obs, allow_llm)?;
+
     // 7. Interpret — the factory forms a question + theory (gated, rate-limited).
     let theorized = maybe_theorize(dir, now, &obs, &detected, allow_llm)?;
 
@@ -2989,6 +3113,68 @@ mod tests {
         assert!(!infra_observation(&motion));
         assert!(!infra_observation(&mk("asked")));
         assert!(!infra_observation(&mk("told the familiar")));
+    }
+
+    #[test]
+    fn the_familiar_replies_to_the_latest_human_utterance_once() {
+        let t = Temp::new("maybe_reply");
+        let dir = &t.0;
+        let now = 1_000_000;
+        // Nothing said → nothing to reply to.
+        assert!(!maybe_reply(dir, now, &[], false).unwrap());
+
+        // A human speaks (no LLM) → a templated reply is recorded, from the familiar.
+        let said = observation::Observation::new(
+            "ian",
+            "told the familiar",
+            "water the greenhouse first",
+            "console",
+            "local",
+            now,
+            1.0,
+        );
+        observation::record(dir, said).unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, now + 1, &obs, false).unwrap());
+        let after = observation::load(dir).unwrap();
+        let replies: Vec<_> = after
+            .iter()
+            .filter(|o| o.actor == "familiar" && o.action == "replied")
+            .collect();
+        assert_eq!(replies.len(), 1, "exactly one reply to the utterance");
+        assert!(!replies[0].object.trim().is_empty());
+
+        // Idempotent: already replied to the latest → no second reply.
+        assert!(!maybe_reply(dir, now + 2, &after, false).unwrap());
+
+        // A stale utterance (older than the window) gets no reply.
+        let stale = vec![observation::Observation::new(
+            "ian",
+            "answered",
+            "old thing",
+            "console",
+            "local",
+            now - REPLY_WINDOW_SECS - 10,
+            1.0,
+        )];
+        let t2 = Temp::new("maybe_reply_stale");
+        for o in &stale {
+            observation::record(&t2.0, o.clone()).unwrap();
+        }
+        let obs2 = observation::load(&t2.0).unwrap();
+        assert!(!maybe_reply(&t2.0, now, &obs2, false).unwrap());
+
+        // utterance_text prefers words over a thread ref.
+        let threaded = observation::Observation::new(
+            "ian",
+            "answered",
+            "thread:t-1",
+            "the basil matters more",
+            "local",
+            now,
+            1.0,
+        );
+        assert_eq!(utterance_text(&threaded), "the basil matters more");
     }
 
     #[test]

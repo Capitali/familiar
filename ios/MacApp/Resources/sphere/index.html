@@ -275,9 +275,12 @@ function refreshScreen() {
     if (!v) { box.innerHTML = ''; return; }
     const msgs = [];
     for (const o of [...(v.recent || [])].reverse()) {
-      if (o.context === 'console' || /told|asked|answered/.test(o.action)) {
+      if (o.context === 'console' || /told|asked|answered|replied/.test(o.action)) {
         const human = o.actor !== 'familiar' && !o.actor.startsWith('mesh');
-        msgs.push({ f: !human, text: o.object });
+        // A human's words live in `object` (or `context` when `object` is a thread ref);
+        // a familiar reply carries its text in `object`.
+        const text = (o.object || '').startsWith('thread:') && o.context ? o.context : o.object;
+        msgs.push({ f: !human, text });
       }
     }
     const q = (v.question || '').trim();

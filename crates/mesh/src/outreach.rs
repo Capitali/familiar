@@ -547,7 +547,7 @@ pub fn status(dir: &Path) -> String {
     parties.dedup();
     for p in parties {
         let n = contacts.iter().filter(|c| c.counterparty == p).count();
-        let last = contacts.iter().filter(|c| c.counterparty == p).next_back();
+        let last = contacts.iter().rfind(|c| c.counterparty == p);
         lines.push(format!(
             "  {p}: {n} utterance(s), last: {}",
             last.map(|c| format!("{} → {} {}", c.act, c.status, c.response))
