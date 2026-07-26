@@ -420,7 +420,9 @@ final class AppModel: ObservableObject {
     func refreshWorldview() async {
         // One read per candidate address at most — the preferred host first, failing over to the
         // others so a device off-LAN (cellular + tailnet) still reads the worldview.
+        var attempts: [String] = []   // per-host diagnostic, surfaced if every candidate fails
         for _ in 0..<max(1, hosts.count) {
+            let tried = host
             guard let session = worldviewSession() else {
                 worldviewError = "no session: grant=\(storedGrant() != nil) host=\(host.isEmpty ? "empty" : host)"
                 return
@@ -438,10 +440,25 @@ final class AppModel: ObservableObject {
                 learnHosts(view.hosts)
                 return
             } catch {
-                worldviewError = "\(error)"
-                if failoverHost() == nil { return }
+                // Compact, legible per-host cause. A ReadError names WHAT failed and — for an HTTP
+                // rejection — the server's status + message, so the reason is on screen, not guessed.
+                let cause: String
+                switch error {
+                case WorldviewClient.ReadError.http(let s, let b):
+                    cause = "h\(s):\(b.prefix(40))"
+                case WorldviewClient.ReadError.transport(let m):
+                    cause = "t:\(m.prefix(30))"
+                case WorldviewClient.ReadError.encoding: cause = "enc"
+                case WorldviewClient.ReadError.decoding: cause = "dec"
+                default: cause = "\((error as NSError).code)"
+                }
+                attempts.append("\(tried)→\(cause)")
+                if failoverHost() == nil { break }
             }
         }
+        // Every candidate failed — surface the full picture so the cause is diagnosable at a glance:
+        // trusted-pin counts (enrolled + baked) and each host's error code.
+        worldviewError = "pins \(MeshTLS.pins.count)+\(MeshTLS.alwaysTrust.count) · " + attempts.joined(separator: " ")
     }
 
     /// This app's build number ("16") — reported to the familiar so it shows in the roster.
