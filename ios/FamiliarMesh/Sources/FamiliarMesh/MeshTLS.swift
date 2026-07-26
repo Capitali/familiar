@@ -13,12 +13,20 @@ import Security
 // lighthouse on cellular — without a pin mismatch. With no pins at all (older enrollments)
 // any self-signed cert is accepted, which still ends passive observation.
 public enum MeshTLS {
-    /// The set of trusted SPKI SHA-256 pins (hex): the enrolling node's plus every sibling's
-    /// the mesh advertised. A cert is accepted iff its SPKI is in here (empty ⇒ accept any).
+    /// Enrolled/learned SPKI SHA-256 pins (hex): the enrolling node's plus siblings' the mesh
+    /// advertised. Their PRESENCE is what enables pinning at all — while empty, any self-signed
+    /// cert is accepted (older pinless enrollments). Once non-empty, a cert is accepted only if
+    /// its SPKI is in `pins` OR in `alwaysTrust`.
     public static var pins: Set<String> = []
 
-    /// Back-compat: the single-pin accessor older code sets. Writing it seeds the set; reading
-    /// returns any member (the set is what the delegate checks).
+    /// Baked, always-accepted pins (the rendezvous/lighthouse, shipped with the app). These are
+    /// accepted whenever pinning is active, but they do NOT by themselves switch a pinless device
+    /// into strict mode — so a legacy pinless enrollment is never flipped into rejecting its own
+    /// node, yet a pinning device can always reach the baked fallback (ADR-0012).
+    public static var alwaysTrust: Set<String> = []
+
+    /// Back-compat: the single-pin accessor older code sets. Writing it seeds the enrolled set;
+    /// reading returns any member.
     public static var pin: String? {
         get { pins.first }
         set {
@@ -26,7 +34,7 @@ public enum MeshTLS {
         }
     }
 
-    /// Adopt additional trusted pins (from a worldview read that advertised the group's set).
+    /// Adopt additional enrolled/learned pins (from a worldview read that advertised the set).
     public static func trust(_ more: [String]) {
         for p in more where !p.isEmpty { pins.insert(p) }
     }
@@ -66,11 +74,11 @@ public enum MeshTLS {
                       let leaf = chain.first,
                       let key = SecCertificateCopyKey(leaf),
                       let got = MeshTLS.spkiHex(for: key),
-                      MeshTLS.pins.contains(got)
+                      MeshTLS.pins.contains(got) || MeshTLS.alwaysTrust.contains(got)
                 else { return completionHandler(.cancelAuthenticationChallenge, nil) }
             }
-            // SPKI is a trusted group pin (or no pins yet): accept the self-signed cert. The
-            // covenant signatures on every payload remain the authenticity floor either way.
+            // SPKI is a trusted group pin / baked fallback (or no pins yet): accept the self-signed
+            // cert. The covenant signatures on every payload remain the authenticity floor either way.
             completionHandler(.useCredential, URLCredential(trust: trust))
         }
     }

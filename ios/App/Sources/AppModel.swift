@@ -48,21 +48,16 @@ final class AppModel: ObservableObject {
     static let rendezvousHost = "134.209.168.50"
     static let rendezvousPin = "46b43ebf7111a6c17e91577397143b834f1bac8598879ab7e5e83fbf91796a6a"
 
-    /// Guarantee the rendezvous host + pin are present — appended after any learned candidates
-    /// (tried last, since the LAN/tailnet paths are faster when they work).
+    /// Guarantee the rendezvous host is a candidate (appended after learned hosts — the LAN/tailnet
+    /// paths are faster when they work). The lighthouse PIN is trusted unconditionally as a baked
+    /// `alwaysTrust` (set once at init), so this never has to touch the enrolled pin set — no risk
+    /// of flipping a pinless device into strict mode, and the fallback works whenever pinning is on.
     private func ensureRendezvous() {
-        // Add the pin only if this device is ALREADY pinning — otherwise a pinless enrollment
-        // (accept-any, which already accepts the lighthouse) would be flipped into rejecting its
-        // own enrolling node on the LAN. When pinning, both nodes' pins must be trusted.
-        let alreadyPinning = tlsPin != nil || !tlsPins.isEmpty
-        if alreadyPinning && !Self.rendezvousPin.isEmpty && !tlsPins.contains(Self.rendezvousPin) {
-            tlsPins.append(Self.rendezvousPin)   // didSet trusts it in MeshTLS
-        }
         if !hosts.contains(Self.rendezvousHost) {
             hosts.append(Self.rendezvousHost)
             if host.isEmpty { host = Self.rendezvousHost }
+            saveEnrollment()
         }
-        saveEnrollment()
     }
 
     /// The familiar's TLS key pin from enrollment (nil on older enrollments).
@@ -187,6 +182,9 @@ final class AppModel: ObservableObject {
     private(set) var face: FaceSensing!
 
     init() {
+        // The lighthouse's cert is always acceptable — a baked fallback pin that lets a device
+        // reach the mesh off-LAN whatever its enrollment carried, without weakening pinning (ADR-0012).
+        if !Self.rendezvousPin.isEmpty { MeshTLS.alwaysTrust.insert(Self.rendezvousPin) }
         // Restore (or mint) the device node key. The label is what the familiar sees as the peer.
         let label = UIDevice.current.name
         if let seed = KeychainStore.load(account: "node.seed"), let n = try? NodeKey(seed: seed, label: label) {
@@ -298,6 +296,7 @@ final class AppModel: ObservableObject {
         groupLabel = p.label
         tlsPin = p.tlspin
         tlsPins = p.pins ?? (p.tlspin.map { [$0] } ?? [])   // seed the group's pin set
+        ensureRendezvous()   // now that we're pinning, trust the lighthouse too (same session)
         saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
         note("requesting to join “\(p.label)” — accepting the Three Laws…")
@@ -358,8 +357,16 @@ final class AppModel: ObservableObject {
     /// member shows this as a QR so a new device can scan it and join the same familiar.
     var addressPayload: String? {
         guard !host.isEmpty else { return nil }
+        // Carry the group's TLS pins too, so a device enrolling from THIS device's invite trusts
+        // every member's cert (the lighthouse included) and can fail over off-LAN (ADR-0012).
+        var pinSet = tlsPins
+        if !Self.rendezvousPin.isEmpty && !pinSet.contains(Self.rendezvousPin) {
+            pinSet.append(Self.rendezvousPin)
+        }
+        let hostList = hosts.contains(Self.rendezvousHost) ? hosts : hosts + [Self.rendezvousHost]
         let p = EnrollmentPayload(label: groupLabel, host: host, port: enrollPort,
-                                  hosts: hosts.isEmpty ? nil : hosts)
+                                  hosts: hostList.isEmpty ? nil : hostList,
+                                  tlspin: tlsPin, pins: pinSet.isEmpty ? nil : pinSet)
         guard let data = try? JSONEncoder().encode(p) else { return nil }
         return String(data: data, encoding: .utf8)
     }
