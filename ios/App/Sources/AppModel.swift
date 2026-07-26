@@ -40,6 +40,31 @@ final class AppModel: ObservableObject {
     // answers instead of pinning to the one that worked at enrollment.
     var hosts: [String] = []
 
+    /// The built-in rendezvous (ADR-0012): the lighthouse's public address and TLS pin, shipped as
+    /// a default so a device off-LAN is never stranded — even a stale enrollment that predates the
+    /// mesh learning about the lighthouse can still reach it on cellular. Learned hosts/pins from
+    /// worldview reads take precedence; this is the floor, always a candidate and always trusted.
+    /// (A device that runs its own mesh can override this in a later settings pass.)
+    static let rendezvousHost = "134.209.168.50"
+    static let rendezvousPin = "46b43ebf7111a6c17e91577397143b834f1bac8598879ab7e5e83fbf91796a6a"
+
+    /// Guarantee the rendezvous host + pin are present — appended after any learned candidates
+    /// (tried last, since the LAN/tailnet paths are faster when they work).
+    private func ensureRendezvous() {
+        // Add the pin only if this device is ALREADY pinning — otherwise a pinless enrollment
+        // (accept-any, which already accepts the lighthouse) would be flipped into rejecting its
+        // own enrolling node on the LAN. When pinning, both nodes' pins must be trusted.
+        let alreadyPinning = tlsPin != nil || !tlsPins.isEmpty
+        if alreadyPinning && !Self.rendezvousPin.isEmpty && !tlsPins.contains(Self.rendezvousPin) {
+            tlsPins.append(Self.rendezvousPin)   // didSet trusts it in MeshTLS
+        }
+        if !hosts.contains(Self.rendezvousHost) {
+            hosts.append(Self.rendezvousHost)
+            if host.isEmpty { host = Self.rendezvousHost }
+        }
+        saveEnrollment()
+    }
+
     /// The familiar's TLS key pin from enrollment (nil on older enrollments).
     var tlsPin: String? {
         didSet { MeshTLS.pin = tlsPin }
@@ -175,6 +200,7 @@ final class AppModel: ObservableObject {
             host = e.host; hosts = e.hosts; enrollPort = e.port; groupLabel = e.label
             sanitizeHosts()
         }
+        ensureRendezvous()   // the public failover is always a candidate — never strand off-LAN
         enrolled = storedGrant() != nil && !host.isEmpty
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
