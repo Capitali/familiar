@@ -65,6 +65,7 @@ targets:
     platform: macOS
     sources:
       - MacApp/Sources
+      - MacApp/Assets.xcassets
       # The Metal Sphere web console — kept as a folder reference so the page loads from
       # the "sphere/" subdirectory at runtime (Bundle …/Resources/sphere/index.html).
       - path: MacApp/Resources/sphere
@@ -77,6 +78,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "31"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: MacApp/Support/Familiar.entitlements
         CODE_SIGN_STYLE: Automatic
     dependencies:

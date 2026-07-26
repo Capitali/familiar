@@ -368,6 +368,8 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
         // One concurrent gossip round, then report the count of peers we're actually federating
         // with — fresh entries in peers.json in EITHER direction, not just this round's reach.
         let _ = gossip_round(&dir, &cfg, &cred, lan.addrs(lan_window)).await;
+        // Keep our door listed at the rendezvous so new devices can find us without a QR.
+        register_at_rendezvous(&dir, &cfg, &cred).await;
         let _ = write_status(
             &dir,
             &format!(
@@ -378,6 +380,51 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
         );
 
         sleep_or_stop(&stop, interval).await;
+    }
+}
+
+/// Register this mesh with each configured rendezvous host (the lighthouse) so a fresh device can
+/// discover where to join without a QR (ADR-0012). Advertises the addresses a joiner can reach this
+/// familiar at (`reachable_hosts`) under the group's label, signed by this node's key + membership.
+/// Best-effort and idempotent — refreshed every gossip round; a lapse just lets the entry expire.
+async fn register_at_rendezvous(dir: &Path, cfg: &MeshConfig, cred: &crate::group::GroupCredential) {
+    if cfg.rendezvous_hosts.is_empty() {
+        return;
+    }
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return;
+    };
+    let hosts = reachable_hosts();
+    if hosts.is_empty() {
+        return; // nothing a joiner could reach us at
+    }
+    let now = now_secs();
+    let reg = crate::rendezvous::Registration {
+        membership: cred.membership.clone(),
+        group_pubkey: cred.group_pubkey.clone(),
+        group_label: cred.label.clone(),
+        hosts,
+        port: cfg.gossip_port,
+        nonce: format!("{now:x}{}", node.node_id()),
+        ts: now,
+    };
+    let Ok(raw) = serde_json::to_vec(&reg) else {
+        return;
+    };
+    let sig = node.sign(&raw);
+    for rh in &cfg.rendezvous_hosts {
+        let addr = format!("{}:{}", rh, cfg.gossip_port);
+        let _ = http_send(
+            &addr,
+            Method::POST,
+            "/mesh/rendezvous-register",
+            Some(raw.clone()),
+            &[
+                ("X-Familiar-Sig", &sig),
+                ("Content-Type", "application/json"),
+            ],
+        )
+        .await;
     }
 }
 
