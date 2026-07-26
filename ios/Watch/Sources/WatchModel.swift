@@ -24,6 +24,7 @@ final class WatchModel: NSObject, ObservableObject {
     /// "never asked" from "asked and declined" (a plain bool default can't tell those apart).
     @AppStorage("watch.consent.motion") var motionEnabled = false
     @AppStorage("watch.consent.heart") var heartEnabled = false
+    @AppStorage("watch.consent.location") var locationEnabled = false
     @AppStorage("watch.consent.asked") var consentAsked = false
 
     private let grantAccount = "watch.grant.json"
@@ -100,15 +101,16 @@ final class WatchModel: NSObject, ObservableObject {
         let s = sensing ?? WatchSensing { [weak self] batch in await self?.deliver(batch) }
         s.onHeartRate = { [weak self] bpm in Task { @MainActor in self?.lastHeartRate = bpm } }
         sensing = s
-        s.start(motionOn: motionEnabled, heartOn: heartEnabled)
+        s.start(motionOn: motionEnabled, heartOn: heartEnabled, locationOn: locationEnabled)
         note("sensing armed")
     }
 
     /// The human resolved the first-pair consent prompt — record it (so it never asks again
     /// unless the watch is reset) and start sensing with whatever they chose.
-    func resolveConsent(motion: Bool, heart: Bool) {
+    func resolveConsent(motion: Bool, heart: Bool, location: Bool) {
         motionEnabled = motion
         heartEnabled = heart
+        locationEnabled = location
         consentAsked = true
         needsConsentPrompt = false
         startSensing()
@@ -118,7 +120,10 @@ final class WatchModel: NSObject, ObservableObject {
         guard let g = storedGrant(),
               let host = defaults.string(forKey: "watch.enroll.host"),
               let port = Int(defaults.string(forKey: "watch.enroll.port") ?? ""),
-              let url = URL(string: "http://\(host):\(port)/mesh/observe")
+              // HTTPS — the mesh port is TLS (ADR-0009). This was http, so the watch enrolled but
+              // every observation silently failed: it never reached the roster. MeshTLS handles the
+              // self-signed cert (accept-any without a pin; the covenant signature is the authenticity floor).
+              let url = URL(string: "https://\(host):\(port)/mesh/observe")
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }

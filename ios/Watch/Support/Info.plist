@@ -32,5 +32,15 @@
 	<string>The familiar only reads your heart-rate trend; it never writes to Health.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>The familiar notes coarse activity (walking, still) — never raw motion data.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>The watch shares a coarse position (rounded to ~100m) so the familiar knows where you are on the mesh — never a precise fix.</string>
+	<!-- Mesh transport is TLS to self-signed peers, pinned/covenant-signed at the app layer — see
+	     the iPhone app's Info.plist. Default ATS blocks the self-signed cert on non-local IPs, so
+	     the watch could reach the familiar over the LAN but never off it. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

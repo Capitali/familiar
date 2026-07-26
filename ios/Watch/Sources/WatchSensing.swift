@@ -1,26 +1,41 @@
 import Foundation
 import HealthKit
 import CoreMotion
+import CoreLocation
 import FamiliarMesh
 
-/// Turns the watch's on-wrist signals into *derived* observations — coarse activity and a bucketed
-/// heart rate (elevated / normal) — and hands batches to a delivery closure. Nothing raw leaves the
-/// wrist: no bpm stream, no motion vectors — only `motion:<activity>` and `heart_rate:<bucket>`.
-final class WatchSensing {
+/// Turns the watch's on-wrist signals into *derived* observations — coarse activity, a bucketed
+/// heart rate (elevated / normal), and the wearer's position — and hands batches to a delivery
+/// closure. Nothing raw beyond a coarse fix leaves the wrist: no bpm stream, no motion vectors —
+/// only `motion:<activity>`, `heart_rate:<bucket>`, and a rounded `location`. The watch is the
+/// wearer, so its fix is the wearer's presence in the world (the mesh map + geo, ADR-0008 geo).
+final class WatchSensing: NSObject, CLLocationManagerDelegate {
     private let health = HKHealthStore()
     private let motion = CMMotionActivityManager()
+    private let locator = CLLocationManager()
     private let deliver: ([ObsRecord]) async -> Void
 
     private var lastActivity: String?
     private var lastHRBucket: String?
+    private var lastFix: (lat: Double, lon: Double)?
     /// Called with the raw bpm for the on-watch display only (never sent).
     var onHeartRate: ((Int) -> Void)?
+    /// The freshest coarse fix (lat, lon) for the mesh geo — read by the model on each observe push.
+    private(set) var coordinate: (lat: Double, lon: Double)?
 
     init(deliver: @escaping ([ObsRecord]) async -> Void) {
         self.deliver = deliver
+        super.init()
+        locator.delegate = self
     }
 
-    func start(motionOn: Bool, heartOn: Bool) {
+    func start(motionOn: Bool, heartOn: Bool, locationOn: Bool = false) {
+        if locationOn {
+            locator.requestWhenInUseAuthorization()
+            locator.desiredAccuracy = kCLLocationAccuracyHundredMeters   // coarse; the wrist isn't a survey tool
+            locator.distanceFilter = 100                                  // only meaningful moves
+            locator.startUpdatingLocation()
+        }
         if motionOn, CMMotionActivityManager.isActivityAvailable() {
             motion.startActivityUpdates(to: .main) { [weak self] activity in
                 guard let self, let a = activity else { return }
@@ -66,6 +81,21 @@ final class WatchSensing {
             Task { await self.deliver([obs]) }
         }
         health.execute(q)
+    }
+
+    // A coarse fix — rounded to ~100m (3 decimals) so it locates the wearer for the mesh map and
+    // geo without pinpointing them. Emitted only on a meaningful move (distanceFilter) and dedup'd.
+    func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
+        guard let l = locs.last else { return }
+        let lat = (l.coordinate.latitude * 1000).rounded() / 1000
+        let lon = (l.coordinate.longitude * 1000).rounded() / 1000
+        coordinate = (lat, lon)
+        if let f = lastFix, abs(f.lat - lat) < 0.0005, abs(f.lon - lon) < 0.0005 { return }
+        lastFix = (lat, lon)
+        let obs = ObsRecord(actor: "watch:ian", action: "reports",
+                            object: "location:\(lat),\(lon)",
+                            context: "accuracy=coarse", confidence: 0.85)
+        Task { await self.deliver([obs]) }
     }
 
     private static func activityLabel(_ a: CMMotionActivity) -> String {

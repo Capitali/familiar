@@ -47,15 +47,21 @@ struct WatchConsentView: View {
     @ObservedObject var model: WatchModel
     @State private var motion = false
     @State private var heart = false
+    @State private var location = false
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text("Share from this watch?").font(.headline).multilineTextAlignment(.center)
-            Toggle("Motion", isOn: $motion).font(.caption)
-            Toggle("Heart rate", isOn: $heart).font(.caption)
-            Button("Continue") { model.resolveConsent(motion: motion, heart: heart) }
+        ScrollView {
+            VStack(spacing: 6) {
+                Text("Share from this watch?").font(.headline).multilineTextAlignment(.center)
+                Toggle("Motion", isOn: $motion).font(.caption)
+                Toggle("Heart rate", isOn: $heart).font(.caption)
+                Toggle("Location", isOn: $location).font(.caption)
+                Button("Continue") {
+                    model.resolveConsent(motion: motion, heart: heart, location: location)
+                }
                 .font(.caption2)
+            }
+            .padding(4)
         }
-        .padding(4)
     }
 }
