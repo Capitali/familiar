@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store</string>
+	<key>teamID</key>
+	<string>8GHXL328AR</string>
+	<!-- Automatic signing for the Mac app: it's fresh (no manually-created profile yet), so let
+	     xcodebuild + -allowProvisioningUpdates mint the Mac App Distribution cert + App Store
+	     profile for io.river.familiar.mac headlessly, using the ASC API key. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>

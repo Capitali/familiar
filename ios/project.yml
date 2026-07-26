@@ -76,6 +76,8 @@ targets:
         INFOPLIST_FILE: MacApp/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "31"
+        CODE_SIGN_ENTITLEMENTS: MacApp/Support/Familiar.entitlements
         CODE_SIGN_STYLE: Automatic
     dependencies:
       - package: FamiliarMesh

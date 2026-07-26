@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Store / TestFlight distribution requires the App Sandbox. FamiliarMac is a pure
+	     client: it reads the local familiar over loopback (GET 127.0.0.1:47101/local/worldview)
+	     and relays human acts back. network.client covers outgoing connections, loopback
+	     included; no server, no file access, no other capability is needed. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>
