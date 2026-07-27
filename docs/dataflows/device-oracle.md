@@ -6,7 +6,7 @@ pay for that inference; the consult seam lets the familiar ask it a question and
 structured answer back — nothing leaves the device except the answer.
 
 Related: [ADR-0014](../decision-records/0014-device-oracle.md) (design of record).
-Status: **designed; build in progress.**
+Status: **shipped + validated** (smoke test: a device answered a queued consult via Apple Intelligence).
 
 ```mermaid
 sequenceDiagram

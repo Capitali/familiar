@@ -1,6 +1,6 @@
 # ADR-0014 — The device oracle: Apple Intelligence as the mesh's paid-for mind
 
-- **Status:** proposed (design complete, build not begun — next session)
+- **Status:** accepted (implemented + validated — a device answered a queued consult via Apple Intelligence, 2026-07-27)
 - **Date:** 2026-07-25
 - **Relates to:** [ADR-0009](0009-sovereign-mesh-transport.md) (the signed device
   seams this extends), [ADR-0011](0011-scenario-engine.md) (the laboratory that
