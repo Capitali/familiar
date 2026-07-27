@@ -285,6 +285,7 @@ final class AppModel: ObservableObject {
             "hosts": hosts,
             "attempts": attemptLog,
             "servedHuman": servedHuman,
+            "oracle": ConsultRunner.state,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "faceRecognition": faceRecognitionEnabled,
@@ -508,6 +509,26 @@ final class AppModel: ObservableObject {
     }
 
     private var lastTailnetProbe: Date?
+    private var servicingConsults = false
+
+    /// Device oracle (ADR-0014): pull the prompts the familiar has queued for this device, answer
+    /// each with the on-device model, and push the answers back. Only devices with Apple Intelligence
+    /// serve consults; others skip silently and the familiar's provider chain rolls on. Serialized so
+    /// a slow generation never overlaps the next read cycle. Pulls from the host we just read from —
+    /// the muse queues on the home hub, so an on-network device picks them up.
+    func serviceConsults(host readHost: String) async {
+        guard ConsultRunner.available, !servicingConsults else { return }
+        guard let g = storedGrant(), !readHost.isEmpty else { return }
+        servicingConsults = true
+        defer { servicingConsults = false }
+        let client = ConsultClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey,
+                                   host: readHost, port: enrollPort)
+        for p in await client.pull() {
+            if let answer = await ConsultRunner.answer(p.prompt) {
+                await client.push(id: p.id, json: answer)
+            }
+        }
+    }
 
     /// Prefer Tailscale for data once it's confirmed working (ADR-0017 Phase C). Only after a
     /// non-Tailscale connection is established (the caller just read from one): probe a known tailnet
@@ -619,6 +640,7 @@ final class AppModel: ObservableObject {
                 // tailnet, and if it answers, prefer Tailscale for data. On tailnet already, a failed
                 // read above would have failed us over to a non-Tailscale path (the fallback).
                 if !Self.isTailnet(readHost) { await maybeProbeTailnet() }
+                Task { await self.serviceConsults(host: readHost) }
                 return
             } catch {
                 // Compact, legible per-host cause. A ReadError names WHAT failed and — for an HTTP
