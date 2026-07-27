@@ -47,9 +47,14 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-consult}"
 
+# A caller's explicit provider choice wins over key.env — capture it before sourcing so a hard-set
+# `export SUBSTRATE_LLM_PROVIDER=…` in key.env can't clobber `SUBSTRATE_LLM_PROVIDER=apple <cmd>`
+# (the device-oracle path, a lab campaign pinning one provider, etc.).
+_CALLER_PROVIDER="${SUBSTRATE_LLM_PROVIDER:-}"
 if [ -f "$SCRIPT_DIR/key.env" ]; then
     . "$SCRIPT_DIR/key.env"
 fi
+[ -n "$_CALLER_PROVIDER" ] && SUBSTRATE_LLM_PROVIDER="$_CALLER_PROVIDER"
 
 if [ "$MODE" = "consult" ] && [ ! -f "$SCRIPT_DIR/prompt.txt" ]; then
     echo "error: prompt.txt not found at $SCRIPT_DIR/prompt.txt" >&2
