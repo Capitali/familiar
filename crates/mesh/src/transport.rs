@@ -126,6 +126,10 @@ pub struct PeerRecord {
     /// re-abandons if it turns out to be a one-off.
     #[serde(default)]
     pub status: String,
+    /// How this member is reaching the mesh — "local" | "lighthouse" | "tailscale" — as it reported
+    /// in its status heartbeat (ADR-0017). Empty when unknown. Surfaced as a roster badge.
+    #[serde(default)]
+    pub connectivity: String,
 }
 
 /// A gossip peer beacons every ~30s — two missed rounds plus slack and it's no longer "online".
@@ -524,6 +528,12 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
             if st.updated_at > p.last_seen {
                 p.last_seen = st.updated_at;
                 p.status = String::new();
+                changed = true;
+            }
+            // Adopt the member's self-reported connectivity mode (ADR-0017 Phase B) — how it says it
+            // is reaching the mesh, for the roster badge. Only a member reports its own mode.
+            if !st.connectivity.is_empty() && st.connectivity != p.connectivity {
+                p.connectivity = st.connectivity.clone();
                 changed = true;
             }
         }
@@ -1483,7 +1493,7 @@ fn status_directory_response(dir: &Path) -> Response<Full<Bytes>> {
             present_human: p.human.clone(),
             present_via: String::new(),
             present_since: 0,
-            connectivity: String::new(),
+            connectivity: p.connectivity.clone(),
             tailnet_addr: String::new(),
             tailnet_up: false,
             updated_at: p.last_seen,
@@ -2388,6 +2398,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         lon: brief.body.capability.lon,
         geo_device: false,
         status: String::new(),
+        connectivity: String::new(),
     };
     match peers.iter_mut().find(|p| p.node_id == rec.node_id) {
         Some(existing) => {
@@ -2543,6 +2554,7 @@ pub(crate) fn register_device_peer(
             lon,
             geo_device: lat != 0.0 || lon != 0.0,
             status: String::new(),
+            connectivity: String::new(),
         }),
     }
     if let Some(parent) = path.parent() {
@@ -2788,6 +2800,7 @@ mod tests {
             lon: 0.0,
             geo_device: false,
             status: String::new(),
+            connectivity: String::new(),
         }];
         std::fs::create_dir_all(dir.join(PEERS_FILE).parent().unwrap()).unwrap();
         std::fs::write(

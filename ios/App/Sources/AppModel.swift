@@ -507,6 +507,30 @@ final class AppModel: ObservableObject {
         note("unenrolled — nothing is sent")
     }
 
+    /// Heartbeat this device's status to the lighthouse (ADR-0017) — status flows through the always-
+    /// on hub so the mesh sees this device whatever path it's on. The connectivity mode is classified
+    /// from the host it actually read its worldview from just now.
+    func heartbeatStatus(readHost: String) async {
+        guard let g = storedGrant() else { return }
+        let status = StatusClient.Member(
+            node_id: node.nodeId,
+            actor: DeviceActor.current,
+            label: UIDevice.current.name,
+            present_human: servedHuman,
+            connectivity: Self.connectivityMode(readHost)
+        )
+        let client = StatusClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
+        _ = try? await client.send(status, host: Self.rendezvousHost, port: enrollPort)
+    }
+
+    /// Classify a worldview-read host into a connectivity mode for the roster badge (ADR-0017):
+    /// the always-on lighthouse, a Tailscale (100.64/10) path, or a local/LAN path.
+    static func connectivityMode(_ host: String) -> String {
+        if host == rendezvousHost { return "lighthouse" }
+        if isTailnet(host) { return "tailscale" }
+        return "local"
+    }
+
     /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
     func makeSession() -> ObservationClient.Session? {
         guard let g = storedGrant(), !host.isEmpty,
@@ -561,6 +585,8 @@ final class AppModel: ObservableObject {
                 promoteHost(host)
                 learnPins(view.pins)     // trust the group's pins before learning new hosts
                 learnHosts(view.hosts)
+                let readHost = host
+                Task { await self.heartbeatStatus(readHost: readHost) }
                 return
             } catch {
                 // Compact, legible per-host cause. A ReadError names WHAT failed and — for an HTTP

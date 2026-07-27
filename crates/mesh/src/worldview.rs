@@ -820,6 +820,7 @@ mod tests {
             lat: 0.0,
             lon: 0.0,
             attached: Vec::new(),
+            connectivity: String::new(),
         }
     }
 

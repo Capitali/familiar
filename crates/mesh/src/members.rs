@@ -115,6 +115,10 @@ pub struct Member {
     /// with its companions without walking the edge graph. Empty for devices with nothing attached.
     #[serde(default)]
     pub attached: Vec<String>,
+    /// How this member is reaching the mesh — "local" | "lighthouse" | "tailscale" — from its status
+    /// heartbeat (ADR-0017). Empty when unknown. Rendered as a connectivity badge on the roster.
+    #[serde(default)]
+    pub connectivity: String,
 }
 
 /// Liveness thresholds, per member kind: a gossip peer beacons every ~30s, so two missed
@@ -357,6 +361,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             lat: self_lat,
             lon: self_lon,
             attached: Vec::new(),
+            connectivity: "local".into(),
         });
     }
 
@@ -501,6 +506,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             lat: p.lat,
             lon: p.lon,
             attached: Vec::new(),
+            connectivity: p.connectivity.clone(),
         });
     }
 
@@ -556,6 +562,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             lat: 0.0,
             lon: 0.0,
             attached: Vec::new(),
+            connectivity: String::new(),
         });
     }
 

@@ -245,6 +245,13 @@ const SCREENS = ['conversation','roster','theories','work','signals','network','
 const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device' };
 
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
+// The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
+function connBadge(mode) {
+  if (mode === 'tailscale') return `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(61,220,151,0.14);color:#7ff0c0;">⇄ tailscale</span>`;
+  if (mode === 'lighthouse') return `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(120,170,255,0.14);color:#a9c8ff;">⇢ lighthouse</span>`;
+  if (mode === 'local') return `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(160,180,210,0.1);color:rgba(190,210,240,0.7);">· local</span>`;
+  return '';
+}
 
 function buildScreen() {
   const el = $('scbody');
@@ -313,6 +320,7 @@ function refreshScreen() {
           <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
+          ${connBadge(p.m.connectivity)}
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
         ${p.m.detail ? `<div class="m" style="font-size:10px;color:rgba(174,231,255,0.7);margin-bottom:8px;">${esc(p.m.detail)}</div>` : ''}

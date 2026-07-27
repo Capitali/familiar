@@ -141,6 +141,37 @@ final class WatchModel: NSObject, ObservableObject {
         } catch {
             note("send failed")
         }
+        await heartbeatStatus()
+    }
+
+    private static let lighthouseHost = "134.209.168.50"
+
+    /// Heartbeat the watch's status to the lighthouse (ADR-0017) so it shows on the mesh roster with
+    /// its own row and connectivity, attributed to the same human as its paired phone. Piggybacks on
+    /// the observation send cadence (when the watch is active); best-effort, lighthouse then the host.
+    private func heartbeatStatus() async {
+        guard let g = storedGrant(),
+              let host = defaults.string(forKey: "watch.enroll.host"),
+              let port = Int(defaults.string(forKey: "watch.enroll.port") ?? "")
+        else { return }
+        let human = defaults.string(forKey: "watch.servedHuman") ?? "observer"
+        let status = StatusClient.Member(
+            node_id: node.nodeId,
+            actor: "watch:\(human)",
+            label: "Apple Watch",
+            present_human: human,
+            connectivity: WatchModel.connectivityMode(host)
+        )
+        let client = StatusClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
+        if (try? await client.send(status, host: WatchModel.lighthouseHost, port: port)) != true {
+            _ = try? await client.send(status, host: host, port: port)
+        }
+    }
+
+    private static func connectivityMode(_ host: String) -> String {
+        if host == lighthouseHost { return "lighthouse" }
+        if host.hasPrefix("100.") { return "tailscale" }   // coarse 100.64/10 tailnet check
+        return "local"
     }
 
     private func saveGrant(_ g: Grant) {
