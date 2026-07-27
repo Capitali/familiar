@@ -507,6 +507,34 @@ final class AppModel: ObservableObject {
         note("unenrolled — nothing is sent")
     }
 
+    private var lastTailnetProbe: Date?
+
+    /// Prefer Tailscale for data once it's confirmed working (ADR-0017 Phase C). Only after a
+    /// non-Tailscale connection is established (the caller just read from one): probe a known tailnet
+    /// address, and if it answers, promote it so the next reads take the direct peer-to-peer path.
+    /// Throttled so we don't churn. Fallback is automatic — a failed read on the tailnet host fails
+    /// over to a non-Tailscale candidate (readOrderedCandidates keeps tailnet last), and the reported
+    /// mode reverts with it. So Tailscale being disabled or dropping self-heals to lighthouse/LAN.
+    func maybeProbeTailnet() async {
+        guard !Self.isTailnet(host) else { return }                      // already on Tailscale
+        guard let tailnet = hosts.first(where: { Self.isTailnet($0) }) else { return }  // none known
+        if let last = lastTailnetProbe, Date().timeIntervalSince(last) < 30 { return }
+        lastTailnetProbe = Date()
+        if await Self.probeHello(host: tailnet, port: enrollPort) {
+            promoteHost(tailnet)   // data now flows peer-to-peer over Tailscale; the badge flips
+            note("↔ Tailscale confirmed — data over \(tailnet)")
+        }
+    }
+
+    /// A cheap liveness probe of a candidate path — GET /mesh/hello. True iff it answers 200.
+    static func probeHello(host: String, port: Int) async -> Bool {
+        guard let url = URL(string: "https://\(host):\(port)/mesh/hello") else { return false }
+        var r = URLRequest(url: url)
+        r.timeoutInterval = 4
+        guard let (_, resp) = try? await MeshTLS.session.data(for: r) else { return false }
+        return ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200
+    }
+
     /// Heartbeat this device's status to the lighthouse (ADR-0017) — status flows through the always-
     /// on hub so the mesh sees this device whatever path it's on. The connectivity mode is classified
     /// from the host it actually read its worldview from just now.
@@ -587,6 +615,10 @@ final class AppModel: ObservableObject {
                 learnHosts(view.hosts)
                 let readHost = host
                 Task { await self.heartbeatStatus(readHost: readHost) }
+                // Doctrine (ADR-0017 Phase C): a non-Tailscale path is now established — probe the
+                // tailnet, and if it answers, prefer Tailscale for data. On tailnet already, a failed
+                // read above would have failed us over to a non-Tailscale path (the fallback).
+                if !Self.isTailnet(readHost) { await maybeProbeTailnet() }
                 return
             } catch {
                 // Compact, legible per-host cause. A ReadError names WHAT failed and — for an HTTP
