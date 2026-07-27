@@ -452,7 +452,17 @@ function refreshScreen() {
       // No device push → this console speaks for the node itself (the Mac): identity plus
       // the invitation QR a new device scans to join (the payload holds the group secret —
       // it renders on request only, on this trusted screen).
-      el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:18px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
+      // This node's own sensor controls live here in the Device menu — same place a phone/iPad shows
+      // its consent tiles — so the camera control is consistent everywhere, not a boundary gate on
+      // the Mac and a consent on the others.
+      const selfCam = !!(v.gates && v.gates.camera);
+      el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:14px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;max-width:300px;margin-bottom:22px;">
+          <button onclick="sphereGate('allow_camera', ${selfCam ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${selfCam?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
+            ${gateGlyph(selfCam)}
+            <span class="m" style="font-size:9px;letter-spacing:0.14em;color:rgba(200,216,248,0.6);">camera</span>
+          </button>
+        </div>
         <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
           <button onclick="toApp('invite',{})" class="glybtn" title="invite" style="width:52px;height:52px;border-radius:14px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:24px;height:24px;">
@@ -490,7 +500,11 @@ function refreshScreen() {
 
   } else if (k === 'controls') {
     const g = v.gates || {};
-    const rows = [ ['llm','allow_llm',g.llm], ['camera','allow_camera',g.camera], ['network','allow_network',g.network], ['mesh','allow_mesh',g.mesh], ['execute','allow_execute',g.execute], ['agent','allow_agent',g.agent], ['tools','allow_tool_install',g.tool_install], ['outreach','allow_outreach',g.outreach] ];
+    // Camera is deliberately NOT here — it's a device sensor, shown in the Device menu on every
+    // node (a consent tile on phones/iPad, and the self-node camera tile on the Mac), so it lives
+    // in one consistent place rather than being a boundary gate on some platforms and a consent on
+    // others.
+    const rows = [ ['llm','allow_llm',g.llm], ['network','allow_network',g.network], ['mesh','allow_mesh',g.mesh], ['execute','allow_execute',g.execute], ['agent','allow_agent',g.agent], ['tools','allow_tool_install',g.tool_install], ['outreach','allow_outreach',g.outreach] ];
     el.innerHTML = `<div style="max-width:720px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">` + rows.map(([name, key, on]) => `
       <button onclick="sphereGate('${key}', ${on ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${on?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
         ${gateGlyph(on)}
