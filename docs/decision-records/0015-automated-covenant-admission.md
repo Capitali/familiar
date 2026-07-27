@@ -68,10 +68,19 @@ removes the hang.
   `allow_mesh`.
 - The `Pending`/`approve`/`deny`/`invite` machinery remains for deployments that
   keep the human at the door; it is simply not on the critical path for TheRiver.
-- **Follow-up (not blocking):** make roster review *actionable from the console* —
-  a revoke/severe action in the Glass, and a "newly joined, not yet reviewed"
-  flag — so the post-hoc human control is a tap, not an SSH session. Without this,
-  review depends on the CLI; the policy is sound but the human's half of it is
-  less convenient than it should be.
+- **Follow-up — deferred, sequenced behind facial recognition (Ian, 2026-07-27):**
+  making roster review *actionable* (revoke/sever, a "newly joined, not yet
+  reviewed" flag) is an **administrative action**, and administrative actions must
+  eventually become **authenticated** — the operator proves they are an authorized
+  human before the action takes effect. The authenticator is **facial
+  recognition**; the surface is a **voice/audio interface** ("familiar, remove
+  that node" → face-verify → act). So this does *not* get built as an unauthenticated
+  console tap now. It moves **downstream of the facial-recognition effort** (on the
+  roadmap; see the multi-human identity work) and lands as part of an authenticated
+  admin layer over voice. Until then, review is via the roster and revoke is via the
+  CLI (`mesh abandon`) — deliberately, so no un-authenticated one-tap revoke exists
+  in the shipped console. The automated-admission policy above stands on its own in
+  the meantime; this only concerns the *human-control* half becoming convenient
+  *and* authenticated together, not one before the other.
 - Reversible: `mesh auto-accept off` restores per-join approval instantly (read
   live per request; no restart).
