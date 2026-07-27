@@ -60,9 +60,11 @@ final class AppModel: ObservableObject {
     private func ensureRendezvous() {
         var h = hosts
         if !h.contains(Self.rendezvousHost) { h.append(Self.rendezvousHost) }
-        // The lighthouse is the primary door; a non-Tailscale path is established before the
-        // tailnet is ever tried. Re-sort to that order (lighthouse → other non-Tailscale → tailnet).
-        let ordered = Self.orderedCandidates(h)
+        // Read preference: the home hub first (fresh + local), the lighthouse as fallback, tailnet
+        // last. The enrollment handshake still knocks on the lighthouse first (orderedCandidates);
+        // this only orders the ONGOING worldview reads so an on-network member keeps the home node's
+        // roster current instead of routing every read through the remote lighthouse.
+        let ordered = Self.readOrderedCandidates(h)
         if ordered != hosts {
             hosts = ordered
             if host.isEmpty || !hosts.contains(host) { host = hosts.first ?? Self.rendezvousHost }
@@ -139,6 +141,20 @@ final class AppModel: ObservableObject {
         return lighthouse + nonTail + tail
     }
 
+    /// The ONGOING read preference (distinct from the enrollment door order above): the local home
+    /// node first, the lighthouse second, Tailscale last. A member reads its worldview from the home
+    /// hub when they share a network — lower latency, and it keeps that hub's roster fresh about this
+    /// device (a read updates last_seen there). The lighthouse stays the always-reachable fallback for
+    /// when the home node isn't on the same network; tailnet is still the post-establishment path.
+    static func readOrderedCandidates(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        let valid = raw.filter { isValidHost($0) && seen.insert($0).inserted }
+        let lan = valid.filter { $0 != rendezvousHost && !isTailnet($0) }
+        let lighthouse = valid.filter { $0 == rendezvousHost }
+        let tail = valid.filter { $0 != rendezvousHost && isTailnet($0) }
+        return lan + lighthouse + tail
+    }
+
     /// Drop any invalid candidates (self-heal a poisoned stored list) and keep `host` valid.
     private func sanitizeHosts() {
         let before = hosts
@@ -162,10 +178,12 @@ final class AppModel: ObservableObject {
     private func learnHosts(_ advertised: [String]?) {
         let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
-        // Keep the doctrine even for learned paths: a newly-seen tailnet address sorts behind any
-        // newly-seen non-Tailscale one, so it's never preferred before a non-Tailscale path.
-        let sorted = fresh.filter { !Self.isTailnet($0) } + fresh.filter { Self.isTailnet($0) }
-        hosts.append(contentsOf: sorted)
+        // Learning the home hub's LAN address (advertised in the worldview) lets a running device
+        // switch its reads to it without a relaunch — re-sort to the read preference (home → lighthouse
+        // → tailnet) so the freshest, most-local path wins.
+        hosts.append(contentsOf: fresh)
+        hosts = Self.readOrderedCandidates(hosts)
+        if !hosts.contains(host), let first = hosts.first { host = first }
         saveEnrollment()
         note("learned address\(fresh.count > 1 ? "es" : ""): \(fresh.joined(separator: ", "))")
     }
