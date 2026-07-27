@@ -27,6 +27,7 @@ be narrowed — has its own standout page: [`docs/HUMANITY.md`](docs/HUMANITY.md
 | **Introduction** — the problem | [docs/01-problem-statement.md](docs/01-problem-statement.md) |
 | **Background** — research basis (FAIR, artificial life, the normative vision) | [docs/02-research-basis.md](docs/02-research-basis.md) |
 | **Methods** — architecture | [docs/03-system-architecture.md](docs/03-system-architecture.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **Methods** — dataflows | [docs/dataflows/](docs/dataflows/) (one diagrammed page per part of the app) |
 | **Methods** — methodology | [docs/04-methodology.md](docs/04-methodology.md) |
 | **Results** — validation | [docs/05-validation-and-results.md](docs/05-validation-and-results.md) |
 | **Discussion** — limitations | [docs/06-limitations.md](docs/06-limitations.md) |
