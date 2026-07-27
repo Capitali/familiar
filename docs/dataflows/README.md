@@ -15,11 +15,11 @@ path.**
 | [Gossip & federation](gossip-federation.md) | Peer briefs exchange tools / patterns / observations; the mesh converges | ✅ |
 | [Status & connectivity](status-connectivity.md) | Heartbeat → lighthouse → pull → roster; Tailscale probe / switch / fallback | ✅ |
 | [The cognitive cycle](the-cognitive-cycle.md) | Sense → theorize → test → learn, always inside the boundary | ✅ |
-| The capability boundary | How a capability request is checked against the human-owned gate | ○ planned |
-| Served identity & attribution | Device → present human → attribution + sensitive-personal scoping | ○ planned |
-| Outreach | Speaking to non-members over the covenant seam | ○ planned |
-| Device oracle / consult | The on-device LLM consult pathway | ○ planned |
-| The console (Glass) | UI ↔ daemon: render worldview, send actions / consent | ○ planned |
+| [The capability boundary](capability-boundary.md) | How a capability request is checked against the human-owned gate | ✅ |
+| [Served identity & attribution](served-identity.md) | Device → present human → attribution + sensitive-personal scoping | ✅ |
+| [Outreach](outreach.md) | Speaking to non-members over the covenant seam | ✅ |
+| [Device oracle / consult](device-oracle.md) | The on-device LLM consult pathway (designed; building) | ✅ |
+| [The console (Glass)](the-console.md) | UI ↔ daemon: render worldview, send actions / consent | ✅ |
 
 Each page links to the decision records it implements
 ([`../decision-records/`](../decision-records/)).
