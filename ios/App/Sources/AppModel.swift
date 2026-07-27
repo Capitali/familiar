@@ -285,6 +285,46 @@ final class AppModel: ObservableObject {
 
     /// Request to join from a scanned QR / pasted address payload: attest the Three Laws, ask the
     /// familiar, and wait for its human to approve. The group secret never touches this device.
+    /// The short code the human matches when approving this device on the familiar — the first 6
+    /// of this device's node fingerprint, exactly what `mesh pending` / the console shows. It stands
+    /// in for the QR's proof-of-possession: the code on this screen must equal the one by the pending
+    /// request. Derived, never a secret (ADR-0012).
+    var confirmationCode: String { String(node.nodeId.prefix(6)) }
+
+    /// Whether a rendezvous auto-enroll attempt has run this launch (so the view shows a spinner
+    /// first, then the QR fallback only if discovery turned up nothing).
+    @Published var autoEnrollTried = false
+
+    /// **Auto-enroll (ADR-0012).** On first run, ask the baked rendezvous (the lighthouse) what
+    /// meshes are reachable and start joining the one it finds — no QR needed. The device attests
+    /// the Three Laws and shows its confirmation code; the human approves at the familiar. Falls
+    /// back to the QR/paste path when the rendezvous is unreachable or lists nothing.
+    func autoEnroll() {
+        guard !enrolled, !enrolling, !autoEnrollTried else { return }
+        autoEnrollTried = true
+        let node = self.node
+        Task {
+            let port = enrollPort > 0 ? enrollPort : 47100
+            let doors = (try? await RendezvousClient.directory(host: Self.rendezvousHost, port: port)) ?? []
+            guard let door = doors.first else {
+                note("no familiar found automatically — scan a QR or paste an address")
+                return
+            }
+            // The door's addresses, plus the rendezvous itself as a last-resort candidate.
+            var cand = door.hosts.filter { Self.isValidHost($0) }
+            if !cand.contains(Self.rendezvousHost) { cand.append(Self.rendezvousHost) }
+            hosts = cand
+            host = cand.first ?? ""
+            enrollPort = door.port
+            groupLabel = door.group_label
+            ensureRendezvous()
+            saveEnrollment()
+            enrolling = true
+            note("found “\(door.group_label)” — asking to join (code \(confirmationCode))…")
+            await self.runHandshake(candidates: cand, port: door.port, node: node)
+        }
+    }
+
     func requestJoin(from json: String) {
         guard let p = EnrollmentPayload.parse(json) else {
             note("✗ could not read that address")

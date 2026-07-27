@@ -40,9 +40,11 @@ xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac \
   -archivePath "$ARCHIVE" archive "${AUTH[@]}"
 
 echo "== export (App Store) =="
-# Automatic signing here too (mints the Mac App Distribution cert + profile via the ASC key).
+# Manual signing (MacExportOptions pins Apple Distribution + the 3rd Party Mac Developer Installer
+# cert + the Mac App Store profile). Do NOT pass the auth key here — that re-triggers cloud signing,
+# which fails with a permission error; export reads the locally-installed profile instead.
 xcodebuild -exportArchive -archivePath "$ARCHIVE" \
-  -exportOptionsPlist tools/MacExportOptions.plist -exportPath "$EXPORT" "${AUTH[@]}"
+  -exportOptionsPlist tools/MacExportOptions.plist -exportPath "$EXPORT"
 
 PKG=$(ls "$EXPORT"/*.pkg 2>/dev/null | head -1)
 [ -n "$PKG" ] || { echo "no .pkg produced — export failed"; exit 1; }

@@ -39,14 +39,15 @@ struct RootView: View {
     }
 }
 
-/// Enrollment: paste the address from `familiar mesh qr` and tap Request. The device attests to the
-/// Three Laws and asks to join; you accept it on the familiar (`mesh approve`, or open a window with
-/// `mesh invite`). The group secret never touches this device.
+/// Enrollment (ADR-0012): the device finds the familiar **automatically** via the rendezvous
+/// (the lighthouse) and asks to join, showing a confirmation code the human matches when they
+/// approve it at the familiar. QR/paste stays as an option ("have an invite?") — an offline or
+/// hand-carried path — but is no longer the front door. The group secret never touches this device.
 struct EnrollView: View {
     @EnvironmentObject var model: AppModel
     @State private var pasted = ""
     @State private var scanning = false
-    @State private var showPaste = false
+    @State private var showInvite = false
     var body: some View {
         ZStack {
             Fam.bg.ignoresSafeArea()
@@ -56,35 +57,63 @@ struct EnrollView: View {
                     Text("FAMILIAR").font(.system(size: 17, weight: .semibold)).tracking(3)
                     Text("Join a familiar")
                         .font(.system(size: 26, weight: .semibold)).foregroundStyle(Fam.ink)
-                    Text("Scan the familiar's QR (from a Mac/iPad console or another member), or paste its address. You'll accept this device on the familiar itself.")
-                        .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.55))
-                        .multilineTextAlignment(.center).padding(.horizontal, 28)
 
                     if model.enrolling {
+                        // Auto-enroll (or a manual request) is in flight — show the code to match.
+                        Panel {
+                            VStack(spacing: 12) {
+                                HStack(spacing: 10) {
+                                    ProgressView().tint(Fam.blueSoft)
+                                    Text("Waiting for approval on the familiar…")
+                                        .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.8))
+                                }
+                                Text("CONFIRMATION CODE").font(Fam.mono(9)).tracking(2).foregroundStyle(Fam.monoDim.opacity(0.6))
+                                Text(model.confirmationCode)
+                                    .font(Fam.mono(30)).tracking(4).foregroundStyle(Fam.blueSoft)
+                                Text("Approve this device on your familiar — the code there must match.")
+                                    .font(.system(size: 12)).foregroundStyle(Fam.ink.opacity(0.55))
+                                    .multilineTextAlignment(.center)
+                            }
+                        }.padding(.horizontal, 22)
+                    } else if !model.autoEnrollTried {
                         Panel {
                             HStack(spacing: 10) { ProgressView().tint(Fam.blueSoft)
-                                Text("Waiting for the familiar to accept…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
+                                Text("Looking for your familiar…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
                         }.padding(.horizontal, 22)
                     } else {
-                        Button { scanning = true } label: {
-                            Label("Scan QR to join", systemImage: "qrcode.viewfinder")
+                        // Auto-discovery found nothing — offer to retry or use an invite.
+                        Text("Couldn't find a familiar automatically. Retry, or use an invite from a familiar you can see.")
+                            .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
+                            .multilineTextAlignment(.center).padding(.horizontal, 28)
+                        Button { model.autoEnrollTried = false; model.autoEnroll() } label: {
+                            Label("Try again", systemImage: "arrow.clockwise")
                                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0x0a1330))
                                 .frame(maxWidth: .infinity).padding(.vertical, 15)
                                 .background(RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [Color(hex: 0x8fb4ff), Color(hex: 0x3f7bff)], startPoint: .top, endPoint: .bottom)))
                         }.buttonStyle(.plain).padding(.horizontal, 22)
+                    }
 
-                        Button { withAnimation { showPaste.toggle() } } label: {
-                            Text(showPaste ? "hide paste" : "…or paste the address").font(.system(size: 13)).foregroundStyle(Fam.blueLink)
+                    // QR / paste — always available, but secondary.
+                    if !model.enrolling {
+                        Button { withAnimation { showInvite.toggle() } } label: {
+                            Text(showInvite ? "hide invite options" : "Have an invite? Scan or paste")
+                                .font(.system(size: 13)).foregroundStyle(Fam.blueLink)
                         }.buttonStyle(.plain)
-                        if showPaste {
-                            Panel {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    TextField("{\"v\":1,\"host\":…,\"port\":47100}", text: $pasted, axis: .vertical)
-                                        .textFieldStyle(.plain).font(Fam.mono(12)).lineLimit(2...5)
-                                        .padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25))
-                                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.1), lineWidth: 1)))
-                                    Button("Request to join") { model.requestJoin(from: pasted) }
-                                        .disabled(pasted.isEmpty).foregroundStyle(pasted.isEmpty ? Fam.ink.opacity(0.3) : Fam.blueLink)
+                        if showInvite {
+                            VStack(spacing: 12) {
+                                Button { scanning = true } label: {
+                                    Label("Scan QR", systemImage: "qrcode.viewfinder")
+                                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Fam.blueLink)
+                                }.buttonStyle(.plain)
+                                Panel {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        TextField("{\"v\":1,\"host\":…,\"port\":47100}", text: $pasted, axis: .vertical)
+                                            .textFieldStyle(.plain).font(Fam.mono(12)).lineLimit(2...5)
+                                            .padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25))
+                                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.1), lineWidth: 1)))
+                                        Button("Request to join") { model.requestJoin(from: pasted) }
+                                            .disabled(pasted.isEmpty).foregroundStyle(pasted.isEmpty ? Fam.ink.opacity(0.3) : Fam.blueLink)
+                                    }
                                 }
                             }.padding(.horizontal, 22)
                         }
@@ -109,6 +138,7 @@ struct EnrollView: View {
         }
         .foregroundStyle(Fam.ink)
         .preferredColorScheme(.dark)
+        .onAppear { model.autoEnroll() }   // find the familiar without a QR the moment we land here
         .sheet(isPresented: $scanning) {
             QRScannerView { code in scanning = false; model.requestJoin(from: code) }.ignoresSafeArea()
         }
