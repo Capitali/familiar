@@ -1,6 +1,6 @@
 # ADR-0017 — Federated status & connectivity: status via the lighthouse, data via the best path
 
-- **Status:** accepted (building — Phase A landed)
+- **Status:** accepted (implemented — Phases A/B/C shipped, build 38)
 - **Date:** 2026-07-27
 - **Relates to:** [ADR-0012](0012-lighthouse-rendezvous.md) (the rendezvous directory this extends),
   [ADR-0009](0009-sovereign-mesh-transport.md) (covenant transport), the Tailscale peer enumeration
