@@ -559,7 +559,63 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         });
     }
 
+    out = dedup_devices(out);
     attach_companions(&mut out, &obs);
+    out
+}
+
+/// Collapse repeated identities of the same physical device into one roster row. A device that is
+/// deleted and reinstalled mints a fresh node key (a new `node_id`), and with auto-admit each one
+/// joins — so the same phone/iPad/watch can appear several times in different states, polluting the
+/// roster. They share a device **actor** (`phone:ian`, `ipad:ian`, `watch:ian`), so we group by that
+/// and keep the freshest identity (max `last_seen`), carrying the cumulative online time across the
+/// lineage and preferring a human-friendly label over a raw `namespace:human` one. Non-device members
+/// (the self node, gossip peers — empty or non-device actor) are keyed by `node_id` and never merged.
+fn dedup_devices(members: Vec<Member>) -> Vec<Member> {
+    use std::collections::HashMap;
+    let is_device_ns = |a: &str| {
+        matches!(
+            a.split(':').next().unwrap_or(""),
+            "phone" | "iphone" | "ipad" | "mac" | "watch" | "tv"
+        )
+    };
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, Vec<Member>> = HashMap::new();
+    for m in members {
+        let key = if !m.actor.is_empty() && is_device_ns(&m.actor) {
+            format!("actor:{}", m.actor)
+        } else {
+            format!("id:{}", m.node_id)
+        };
+        if !groups.contains_key(&key) {
+            order.push(key.clone());
+        }
+        groups.entry(key).or_default().push(m);
+    }
+    let mut out = Vec::new();
+    for key in order {
+        let mut g = groups.remove(&key).unwrap();
+        if g.len() == 1 {
+            out.push(g.pop().unwrap());
+            continue;
+        }
+        let total: i64 = g.iter().map(|m| m.total_online_secs).sum();
+        // A friendly label from any identity in the lineage (one that isn't a raw `ns:human`).
+        let nice = g
+            .iter()
+            .map(|m| m.label.clone())
+            .find(|l| !l.is_empty() && !l.contains(':'));
+        // Freshest identity represents the device now.
+        g.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        let mut rep = g.remove(0);
+        rep.total_online_secs = total;
+        if rep.label.contains(':') || rep.label.is_empty() {
+            if let Some(l) = nice {
+                rep.label = l;
+            }
+        }
+        out.push(rep);
+    }
     out
 }
 
@@ -872,5 +928,33 @@ mod tests {
         assert!(d.contains("walking"), "motion in summary: {d}");
         assert!(d.contains("gyro turning"), "gyro in summary: {d}");
         assert!(d.contains("gps 48.6,-93.4"), "gps in summary: {d}");
+    }
+
+    #[test]
+    fn dedup_collapses_reinstalled_device_identities() {
+        let mk = |node: &str, label: &str, actor: &str, kind: &str, last: i64, total: i64| -> Member {
+            serde_json::from_value(serde_json::json!({
+                "node_id": node, "label": label, "kind": kind, "os": "", "actor": actor,
+                "detail": "", "first_seen": 0, "last_seen": last, "online": false,
+                "total_online_secs": total
+            }))
+            .unwrap()
+        };
+        let members = vec![
+            mk("self1", "Wildhorse", "", "self_node", 500, 0), // no device actor — untouched
+            mk("d5c3", "iPhone", "phone:ian", "device_peer", 100, 60), // oldest, nice label
+            mk("7361", "phone:ian", "phone:ian", "device_agent", 200, 30),
+            mk("8e51", "phone:ian", "phone:ian", "device_agent", 400, 10), // freshest
+            mk("ipad1", "iPad", "ipad:ian", "device_peer", 300, 90), // sole iPad — kept as-is
+        ];
+        let out = dedup_devices(members);
+        // Wildhorse + one iPhone + one iPad == 3 rows (the three phone:ian identities collapsed).
+        assert_eq!(out.len(), 3, "three phone identities collapse to one");
+        let phone = out.iter().find(|m| m.actor == "phone:ian").unwrap();
+        assert_eq!(phone.node_id, "8e51", "the freshest identity represents the device");
+        assert_eq!(phone.label, "iPhone", "a friendly label is carried from the lineage");
+        assert_eq!(phone.total_online_secs, 100, "cumulative online time summed across the lineage");
+        assert!(out.iter().any(|m| m.node_id == "self1"), "the self node is never merged");
+        assert!(out.iter().any(|m| m.node_id == "ipad1"), "a sole device is left intact");
     }
 }
