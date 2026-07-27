@@ -12,11 +12,13 @@ import FamiliarMesh
 final class WatchSensing: NSObject, CLLocationManagerDelegate {
     private let health = HKHealthStore()
     private let motion = CMMotionActivityManager()
+    private let deviceMotion = CMMotionManager()
     private let locator = CLLocationManager()
     private let deliver: ([ObsRecord]) async -> Void
 
     private var lastActivity: String?
     private var lastHRBucket: String?
+    private var lastGyroBucket: String?
     private var lastFix: (lat: Double, lon: Double)?
     /// Called with the raw bpm for the on-watch display only (never sent).
     var onHeartRate: ((Int) -> Void)?
@@ -46,6 +48,23 @@ final class WatchSensing: NSObject, CLLocationManagerDelegate {
                                     context: "confidence=\(a.confidence.rawValue)",
                                     confidence: a.confidence == .high ? 0.9 : 0.7)
                 Task { await self.deliver([obs]) }
+            }
+            // Gyroscope: a coarse rotation state (still / turning / spinning) from the rotation-rate
+            // magnitude — same privacy posture as the rest (a bucket, never the raw vector), sampled
+            // at 1 Hz and reported only when the bucket changes. Shares the motion consent.
+            if deviceMotion.isDeviceMotionAvailable {
+                deviceMotion.deviceMotionUpdateInterval = 1.0
+                deviceMotion.startDeviceMotionUpdates(to: .main) { [weak self] dm, _ in
+                    guard let self, let dm else { return }
+                    let r = dm.rotationRate
+                    let mag = (r.x * r.x + r.y * r.y + r.z * r.z).squareRoot()   // rad/s
+                    let bucket = mag > 2.0 ? "spinning" : (mag > 0.5 ? "turning" : "still")
+                    guard bucket != self.lastGyroBucket else { return }
+                    self.lastGyroBucket = bucket
+                    let obs = ObsRecord(actor: "watch:ian", action: "reports", object: "gyro:\(bucket)",
+                                        context: "rate~\(String(format: "%.1f", mag))", confidence: 0.8)
+                    Task { await self.deliver([obs]) }
+                }
             }
         }
         if heartOn, HKHealthStore.isHealthDataAvailable() {

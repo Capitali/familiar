@@ -303,8 +303,10 @@ function refreshScreen() {
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
           <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
+          ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
+        ${p.m.detail ? `<div class="m" style="font-size:10px;color:rgba(174,231,255,0.7);margin-bottom:8px;">${esc(p.m.detail)}</div>` : ''}
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:9px;">${dstr(p.m.first_seen)}${p.m.human?' · serves '+esc(p.m.human):''}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'}</div>
         <div class="m" style="font-size:9.5px;margin-bottom:13px;display:flex;align-items:center;gap:6px;color:${p.present.known?'rgba(174,231,255,0.82)':'rgba(150,170,200,0.45)'};"><span style="width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${p.present.known?'#aee7ff':'rgba(140,160,190,0.4)'};${p.present.known?'box-shadow:0 0 7px #aee7ff;':''}"></span><span style="letter-spacing:0.1em;font-size:7px;color:rgba(150,180,255,0.55);">PRESENT</span> ${esc(p.present.text)}</div>
         <div style="display:grid;grid-template-columns:minmax(84px,auto) auto auto;justify-content:start;gap:18px;align-items:end;margin-bottom:12px;">

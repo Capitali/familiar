@@ -53,9 +53,14 @@ final class AppModel: ObservableObject {
     /// `alwaysTrust` (set once at init), so this never has to touch the enrolled pin set — no risk
     /// of flipping a pinless device into strict mode, and the fallback works whenever pinning is on.
     private func ensureRendezvous() {
-        if !hosts.contains(Self.rendezvousHost) {
-            hosts.append(Self.rendezvousHost)
-            if host.isEmpty { host = Self.rendezvousHost }
+        var h = hosts
+        if !h.contains(Self.rendezvousHost) { h.append(Self.rendezvousHost) }
+        // The lighthouse is the primary door; a non-Tailscale path is established before the
+        // tailnet is ever tried. Re-sort to that order (lighthouse → other non-Tailscale → tailnet).
+        let ordered = Self.orderedCandidates(h)
+        if ordered != hosts {
+            hosts = ordered
+            if host.isEmpty || !hosts.contains(host) { host = hosts.first ?? Self.rendezvousHost }
             saveEnrollment()
         }
     }
@@ -104,6 +109,31 @@ final class AppModel: ObservableObject {
         return URL(string: "http://\(h)/") != nil
     }
 
+    /// A Tailscale (tailnet) address — the 100.64.0.0/10 CGNAT range Tailscale assigns. Per the
+    /// join doctrine (ADR-0012): a device establishes a NON-Tailscale path first; a tailnet path is
+    /// used only afterward, if reachable — so tailnet candidates always sort LAST.
+    static func isTailnet(_ h: String) -> Bool {
+        let bare = h.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
+            .split(separator: ":").first.map(String.init) ?? h
+        let parts = bare.split(separator: ".")
+        guard parts.count == 4, let a = Int(parts[0]), let b = Int(parts[1]) else { return false }
+        return a == 100 && (64...127).contains(b)
+    }
+
+    /// The join/connect candidate order the doctrine wants: the always-on public lighthouse (the
+    /// PRIMARY door) first, then any other non-Tailscale address, then Tailscale addresses LAST.
+    /// Deduped and validity-filtered. `promoteHost` may later move whatever actually answered to the
+    /// front — so a tailnet path is still used once it's proven, just never tried before a
+    /// non-Tailscale one.
+    static func orderedCandidates(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        let valid = raw.filter { isValidHost($0) && seen.insert($0).inserted }
+        let lighthouse = valid.filter { $0 == rendezvousHost }
+        let nonTail = valid.filter { $0 != rendezvousHost && !isTailnet($0) }
+        let tail = valid.filter { $0 != rendezvousHost && isTailnet($0) }
+        return lighthouse + nonTail + tail
+    }
+
     /// Drop any invalid candidates (self-heal a poisoned stored list) and keep `host` valid.
     private func sanitizeHosts() {
         let before = hosts
@@ -127,7 +157,10 @@ final class AppModel: ObservableObject {
     private func learnHosts(_ advertised: [String]?) {
         let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
-        hosts.append(contentsOf: fresh)
+        // Keep the doctrine even for learned paths: a newly-seen tailnet address sorts behind any
+        // newly-seen non-Tailscale one, so it's never preferred before a non-Tailscale path.
+        let sorted = fresh.filter { !Self.isTailnet($0) } + fresh.filter { Self.isTailnet($0) }
+        hosts.append(contentsOf: sorted)
         saveEnrollment()
         note("learned address\(fresh.count > 1 ? "es" : ""): \(fresh.joined(separator: ", "))")
     }
@@ -310,11 +343,11 @@ final class AppModel: ObservableObject {
                 note("no familiar found automatically — scan a QR or paste an address")
                 return
             }
-            // The door's addresses, plus the rendezvous itself as a last-resort candidate.
-            var cand = door.hosts.filter { Self.isValidHost($0) }
-            if !cand.contains(Self.rendezvousHost) { cand.append(Self.rendezvousHost) }
+            // The lighthouse (always-on public door) is knocked on FIRST, then any other
+            // non-Tailscale address the directory named, then tailnet paths last (ADR-0012 doctrine).
+            let cand = Self.orderedCandidates(door.hosts + [Self.rendezvousHost])
             hosts = cand
-            host = cand.first ?? ""
+            host = cand.first ?? Self.rendezvousHost
             enrollPort = door.port
             groupLabel = door.group_label
             // Trust the door's cert the rendezvous vouched for, so the covenant handshake's TLS can

@@ -819,6 +819,7 @@ mod tests {
             present_via: String::new(),
             lat: 0.0,
             lon: 0.0,
+            attached: Vec::new(),
         }
     }
 

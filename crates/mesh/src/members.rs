@@ -110,6 +110,11 @@ pub struct Member {
     pub lat: f64,
     #[serde(default)]
     pub lon: f64,
+    /// Sub-devices attached to this one through the same human — e.g. a phone/iPad that has a
+    /// paired watch reporting to the mesh carries "⌚ watch" here. Lets the roster badge a device
+    /// with its companions without walking the edge graph. Empty for devices with nothing attached.
+    #[serde(default)]
+    pub attached: Vec<String>,
 }
 
 /// Liveness thresholds, per member kind: a gossip peer beacons every ~30s, so two missed
@@ -351,6 +356,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: sp_via,
             lat: self_lat,
             lon: self_lon,
+            attached: Vec::new(),
         });
     }
 
@@ -494,6 +500,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: dev_presence.2.clone(),
             lat: p.lat,
             lon: p.lon,
+            attached: Vec::new(),
         });
     }
 
@@ -548,10 +555,96 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: agent_presence.2,
             lat: 0.0,
             lon: 0.0,
+            attached: Vec::new(),
         });
     }
 
+    attach_companions(&mut out, &obs);
     out
+}
+
+/// A watch reports `watch:<human> reports <signal>:<value>`. Roll the freshest of each signal
+/// (heart / motion / gyro / gps) into one line for the watch's own roster row, and badge the same
+/// human's phone/iPad/Mac with "⌚ watch" — so the roster shows the pairing (and the watch's live
+/// telemetry) without the reader having to walk the mesh edge graph. Pure over the member list +
+/// this node's observation store, so it's directly testable.
+fn attach_companions(out: &mut [Member], obs: &[familiar_kernel::observation::Observation]) {
+    let mut watch_details: Vec<(usize, String)> = Vec::new();
+    let mut humans_with_watch: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (i, m) in out.iter().enumerate() {
+        if m.actor.split(':').next() != Some("watch") {
+            continue;
+        }
+        let human = m.actor.split(':').nth(1).unwrap_or("").to_string();
+        if !human.is_empty() {
+            humans_with_watch.insert(human);
+        }
+        // Freshest value per signal (newest observation first).
+        let src = format!("mesh:{}", m.node_id);
+        let mut recent: Vec<&familiar_kernel::observation::Observation> = obs
+            .iter()
+            .filter(|o| (o.source == src || o.actor == m.actor) && o.action == "reports")
+            .collect();
+        recent.sort_by(|a, b| b.ts.cmp(&a.ts));
+        let (mut heart, mut motion, mut gyro, mut gps) = (None, None, None, None);
+        for o in recent {
+            let obj = o.object.as_str();
+            if heart.is_none() {
+                if let Some(v) = obj.strip_prefix("heart_rate:") {
+                    heart = Some(v.to_string());
+                    continue;
+                }
+            }
+            if motion.is_none() {
+                if let Some(v) = obj.strip_prefix("motion:") {
+                    motion = Some(v.to_string());
+                    continue;
+                }
+            }
+            if gyro.is_none() {
+                if let Some(v) = obj.strip_prefix("gyro:") {
+                    gyro = Some(v.to_string());
+                    continue;
+                }
+            }
+            if gps.is_none() {
+                if let Some(v) = obj.strip_prefix("location:") {
+                    gps = Some(v.to_string());
+                }
+            }
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(h) = heart {
+            parts.push(format!("♥ {h}"));
+        }
+        if let Some(mo) = motion {
+            parts.push(mo);
+        }
+        if let Some(gy) = gyro {
+            parts.push(format!("gyro {gy}"));
+        }
+        if let Some(g) = gps {
+            parts.push(format!("gps {g}"));
+        }
+        if !parts.is_empty() {
+            watch_details.push((i, parts.join(" · ")));
+        }
+    }
+    for (i, detail) in watch_details {
+        out[i].detail = detail;
+    }
+    if !humans_with_watch.is_empty() {
+        for m in out.iter_mut() {
+            let ns = m.actor.split(':').next().unwrap_or("");
+            let human = m.actor.split(':').nth(1).unwrap_or("");
+            if matches!(ns, "phone" | "iphone" | "ipad" | "mac")
+                && humans_with_watch.contains(human)
+                && !m.attached.iter().any(|a| a == "⌚ watch")
+            {
+                m.attached.push("⌚ watch".to_string());
+            }
+        }
+    }
 }
 
 /// A friendlier OS name for the roster ("linux" → "Linux", "macos" → "macOS").
@@ -742,5 +835,42 @@ mod tests {
             "renewed contact revives an abandoned peer"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watch_attaches_to_phone_and_summarizes_its_signals() {
+        let mk = |node: &str, actor: &str, kind: &str, detail: &str| -> Member {
+            serde_json::from_value(serde_json::json!({
+                "node_id": node, "label": actor, "kind": kind, "os": "",
+                "actor": actor, "detail": detail, "first_seen": 0, "last_seen": 0, "online": true
+            }))
+            .unwrap()
+        };
+        let mut out = vec![
+            mk("phone1", "phone:ian", "device_peer", ""),
+            mk("watch1", "watch:ian", "device_agent", "location:1,2"),
+            mk("ipad9", "ipad:kai", "device_peer", ""), // different human — must NOT be badged
+        ];
+        let src = "mesh:watch1";
+        let obs = vec![
+            Observation::new("watch:ian", "reports", "heart_rate:elevated", "", src, 100, 0.9),
+            Observation::new("watch:ian", "reports", "motion:walking", "", src, 101, 0.9),
+            Observation::new("watch:ian", "reports", "gyro:turning", "", src, 102, 0.9),
+            Observation::new("watch:ian", "reports", "location:48.6,-93.4", "", src, 103, 0.9),
+            // A newer heart reading must win over the older one.
+            Observation::new("watch:ian", "reports", "heart_rate:normal", "", src, 104, 0.9),
+        ];
+        attach_companions(&mut out, &obs);
+        assert!(
+            out[0].attached.iter().any(|a| a == "⌚ watch"),
+            "the same human's phone is badged with its watch"
+        );
+        assert!(out[1].attached.is_empty(), "the watch itself carries no badge");
+        assert!(out[2].attached.is_empty(), "a different human's iPad is not badged");
+        let d = &out[1].detail;
+        assert!(d.contains("♥ normal"), "freshest heart wins: {d}");
+        assert!(d.contains("walking"), "motion in summary: {d}");
+        assert!(d.contains("gyro turning"), "gyro in summary: {d}");
+        assert!(d.contains("gps 48.6,-93.4"), "gps in summary: {d}");
     }
 }
