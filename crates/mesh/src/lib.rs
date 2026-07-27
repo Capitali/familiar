@@ -39,6 +39,7 @@ pub mod node;
 pub mod observe;
 pub mod outreach;
 pub mod rendezvous;
+pub mod status;
 pub mod transport;
 pub mod worldview;
 

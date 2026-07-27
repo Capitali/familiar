@@ -370,6 +370,10 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
         let _ = gossip_round(&dir, &cfg, &cred, lan.addrs(lan_window)).await;
         // Keep our door listed at the rendezvous so new devices can find us without a QR.
         register_at_rendezvous(&dir, &cfg, &cred).await;
+        // ADR-0017: heartbeat our own status to the lighthouse, then pull the mesh-wide status it
+        // holds so our roster shows members fresh even when they read from the lighthouse, not us.
+        heartbeat_status(&dir, &cfg, &cred).await;
+        pull_status(&dir, &cfg).await;
         let _ = write_status(
             &dir,
             &format!(
@@ -426,6 +430,108 @@ async fn register_at_rendezvous(dir: &Path, cfg: &MeshConfig, cred: &crate::grou
             ],
         )
         .await;
+    }
+}
+
+/// Heartbeat this node's own status to each rendezvous host (ADR-0017). Best-effort, every gossip
+/// round — the lighthouse holds a live, mesh-wide picture so no member is invisible to another,
+/// whatever path each is on. Phase A reports `connectivity="local"`; the tailnet fields fill in the
+/// Tailscale phases.
+async fn heartbeat_status(dir: &Path, cfg: &MeshConfig, cred: &crate::group::GroupCredential) {
+    if cfg.rendezvous_hosts.is_empty() {
+        return;
+    }
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return;
+    };
+    let now = now_secs();
+    let status = crate::status::MemberStatus {
+        node_id: node.node_id(),
+        group_ref: String::new(), // stamped by the host from the membership
+        actor: String::new(),     // the home familiar isn't a device actor
+        label: String::new(),     // a reader keeps its own label for a node it already knows
+        present_human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+        present_via: String::new(),
+        present_since: 0,
+        connectivity: "local".into(),
+        tailnet_addr: String::new(),
+        tailnet_up: false,
+        updated_at: now,
+    };
+    let report = crate::status::StatusReport {
+        membership: cred.membership.clone(),
+        group_pubkey: cred.group_pubkey.clone(),
+        status,
+        nonce: format!("{now:x}{}", node.node_id()),
+        ts: now,
+    };
+    let Ok(raw) = serde_json::to_vec(&report) else {
+        return;
+    };
+    let sig = node.sign(&raw);
+    for rh in &cfg.rendezvous_hosts {
+        let addr = format!("{}:{}", rh, cfg.gossip_port);
+        let _ = http_send(
+            &addr,
+            Method::POST,
+            "/mesh/status",
+            Some(raw.clone()),
+            &[
+                ("X-Familiar-Sig", &sig),
+                ("Content-Type", "application/json"),
+            ],
+        )
+        .await;
+    }
+}
+
+/// Pull the mesh-wide status directory from a rendezvous host and bump our own peer records forward
+/// to match (ADR-0017). This is what keeps the home node's roster fresh about a device that reads its
+/// worldview from the lighthouse, not from us: the lighthouse saw it seconds ago, so we learn that.
+async fn pull_status(dir: &Path, cfg: &MeshConfig) {
+    if cfg.rendezvous_hosts.is_empty() {
+        return;
+    }
+    let now = now_secs();
+    for rh in &cfg.rendezvous_hosts {
+        let addr = format!("{}:{}", rh, cfg.gossip_port);
+        if let Ok(resp) = http_send(&addr, Method::GET, "/mesh/status", None, &[]).await {
+            if let Ok(list) =
+                serde_json::from_slice::<Vec<crate::status::MemberStatus>>(&resp.body)
+            {
+                apply_status_freshness(dir, &list, now);
+                break; // one authoritative source is enough
+            }
+        }
+    }
+}
+
+/// Bump a known peer's `last_seen` forward when the status directory reports it fresher than we hold
+/// (ADR-0017). Only ever moves last_seen forward — a stale directory row never regresses local truth
+/// — and a fresh heartbeat revives an abandoned peer, mirroring `register_device_peer`.
+fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], _now: i64) {
+    let path = dir.join(PEERS_FILE);
+    let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let mut changed = false;
+    for st in statuses {
+        if st.node_id.is_empty() {
+            continue;
+        }
+        if let Some(p) = peers.iter_mut().find(|p| p.node_id == st.node_id) {
+            if st.updated_at > p.last_seen {
+                p.last_seen = st.updated_at;
+                p.status = String::new();
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        if let Ok(s) = serde_json::to_string(&peers) {
+            let _ = std::fs::write(&path, s);
+        }
     }
 }
 
@@ -838,6 +944,22 @@ async fn handle(
             recv_rendezvous_register(&dir, &bytes, &sig)
         }
         (Method::GET, "/mesh/rendezvous") => rendezvous_directory(&dir),
+        // Status hub (ADR-0017): a member heartbeats its own status here; anyone reads the live
+        // mesh-wide directory. Status only — no secret, admits no one.
+        (Method::POST, "/mesh/status") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_status(&dir, &bytes, &sig)
+        }
+        (Method::GET, "/mesh/status") => status_directory_response(&dir),
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
             serve_tool(&dir, id)
@@ -1315,6 +1437,61 @@ fn rendezvous_directory(dir: &Path) -> Response<Full<Bytes>> {
     match serde_json::to_vec(&entries) {
         Ok(b) => text(StatusCode::OK, b),
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "directory encode"),
+    }
+}
+
+/// `POST /mesh/status` → a member heartbeats its own status (ADR-0017). Signed + membership-bearing;
+/// kept only for the sender's own node. 200 + the stored status; 403 untrusted; 400 malformed.
+fn recv_status(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let report: crate::status::StatusReport = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad status"),
+    };
+    if report.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    match crate::status::record(dir, &report, now_secs()) {
+        Ok(entry) => match serde_json::to_vec(&entry) {
+            Ok(b) => text(StatusCode::OK, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "status encode"),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "status rejected"),
+    }
+}
+
+/// `GET /mesh/status` → the live mesh-wide status directory (ADR-0017): explicit heartbeats, plus
+/// this node's own fresh peers surfaced as status rows (a device that reads our worldview but hasn't
+/// heartbeat yet is still visible to the rest of the mesh — Phase A's fix for the "away" bug). An
+/// explicit heartbeat wins over the inferred row for the same node.
+fn status_directory_response(dir: &Path) -> Response<Full<Bytes>> {
+    let now = now_secs();
+    let mut out = crate::status::directory(dir, now);
+    let seen: std::collections::HashSet<String> = out.iter().map(|s| s.node_id.clone()).collect();
+    for p in load_peers(dir) {
+        if p.status == "abandoned" || seen.contains(&p.node_id) {
+            continue;
+        }
+        if now - p.last_seen > crate::status::STATUS_TTL_SECS {
+            continue;
+        }
+        out.push(crate::status::MemberStatus {
+            node_id: p.node_id.clone(),
+            group_ref: String::new(),
+            actor: String::new(),
+            label: p.label.clone(),
+            present_human: p.human.clone(),
+            present_via: String::new(),
+            present_since: 0,
+            connectivity: String::new(),
+            tailnet_addr: String::new(),
+            tailnet_up: false,
+            updated_at: p.last_seen,
+        });
+    }
+    match serde_json::to_vec(&out) {
+        Ok(b) => text(StatusCode::OK, b),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "status encode"),
     }
 }
 
