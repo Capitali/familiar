@@ -284,12 +284,28 @@ fn infra_triple(action: &str, object: &str) -> bool {
         | "gathered" | "cultivated-from" | "cultivated-tool" | "theorizes"
         | "can_run" | "declined_to_run" | "regulated_presence"
     )
-    // Mesh presence beacons are roster material, not musings. Scoped by object: a device
-    // reporting motion, battery, or anything else about the world still counts.
-    || (action == "reports" && object == "presence")
+    // A personal device reporting its wearer's own body — presence, position, vitals, motion,
+    // biometric — is roster/presence material, not musings. Fed to the muse it fixates on the
+    // person's location and devices ("are you still at 48.5,-93.3? · trying to reach a device?"),
+    // interrogating them instead of serving. These still drive presence + the roster; they simply
+    // aren't a theory subject. A device reporting about the *world* (a service's state, a
+    // discovery, the greenhouse) still counts — that is what a muse should theorize over.
+    || (action == "reports"
+        && (object == "presence"
+            || object.starts_with("location:")
+            || object.starts_with("heart_rate:")
+            || object.starts_with("gyro:")
+            || object.starts_with("motion:")
+            || object.starts_with("face:")))
 }
 
 fn infra_observation(o: &observation::Observation) -> bool {
+    // The factory reporting on ITSELF — its own metabolic metrics (theory_quality, …) — is
+    // bookkeeping. Fed back as musing material it closes the loop where the familiar only ever
+    // thinks about itself ("the repeated 'familiar reports theory_quality' suggests…").
+    if o.actor == "familiar" && o.action == "reports" {
+        return true;
+    }
     infra_triple(&o.action, &o.object)
 }
 
@@ -302,10 +318,12 @@ fn infra_loop(l: &loops::Loop) -> bool {
         .strip_prefix("Repeated: ")
         .and_then(|k| {
             let mut it = k.splitn(3, '|');
-            it.next()?; // actor
-            Some((it.next()?, it.next().unwrap_or("")))
+            let actor = it.next()?;
+            Some((actor, it.next()?, it.next().unwrap_or("")))
         })
-        .is_some_and(|(action, object)| infra_triple(action, object))
+        .is_some_and(|(actor, action, object)| {
+            (actor == "familiar" && action == "reports") || infra_triple(action, object)
+        })
 }
 
 /// Does an open or pursued thread already say substantially this? Word-set
@@ -3114,21 +3132,19 @@ mod tests {
         assert!(infra_observation(&mk("gathered")));
         assert!(infra_observation(&mk("cultivated-tool")));
         assert!(infra_observation(&mk("theorizes")));
-        // Presence beacons are infra by object, not by action: `reports` about the
-        // world (motion, battery, a doorbell) is exactly what the muse is for.
-        let presence =
-            observation::Observation::new("mesh:abc", "reports", "presence", "", "mesh", 10, 1.0);
-        assert!(infra_observation(&presence));
-        let motion = observation::Observation::new(
-            "phone:ian",
-            "reports",
-            "motion:walking",
-            "",
-            "mesh",
-            10,
-            1.0,
-        );
-        assert!(!infra_observation(&motion));
+        // Presence + the wearer's own body (position, vitals, motion, biometric) are roster/
+        // presence material, not musings — else the muse interrogates the person about their
+        // location and devices instead of serving.
+        let infra_report = |object: &str| {
+            observation::Observation::new("watch:ian", "reports", object, "", "mesh", 10, 1.0)
+        };
+        assert!(infra_observation(&infra_report("presence")));
+        assert!(infra_observation(&infra_report("location:48.5,-93.3")));
+        assert!(infra_observation(&infra_report("heart_rate:elevated")));
+        assert!(infra_observation(&infra_report("gyro:turning")));
+        assert!(infra_observation(&infra_report("motion:walking")));
+        // A device reporting about the WORLD is still exactly what the muse is for.
+        assert!(!infra_observation(&infra_report("greenhouse:dry")));
         assert!(!infra_observation(&mk("asked")));
         assert!(!infra_observation(&mk("told the familiar")));
     }
@@ -3231,11 +3247,11 @@ mod tests {
             "sensor:net_probe"
         )));
         assert!(infra_loop(&mk_loop("mesh:abc", "reports", "presence")));
-        assert!(!infra_loop(&mk_loop(
-            "phone:ian",
-            "reports",
-            "motion:walking"
-        )));
+        // The wearer's own body — a recurrence loop over it is presence, not a world pattern.
+        assert!(infra_loop(&mk_loop("watch:ian", "reports", "motion:walking")));
+        assert!(infra_loop(&mk_loop("watch:ian", "reports", "location:48.5,-93.3")));
+        // A recurring pattern in the WORLD is still musings material.
+        assert!(!infra_loop(&mk_loop("home", "reports", "greenhouse:dry")));
         // An unparseable description is kept — unknown is not plumbing.
         let mut odd = mk_loop("x", "y", "z");
         odd.description = "something else".into();
