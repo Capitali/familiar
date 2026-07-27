@@ -56,10 +56,13 @@ final class WatchModel: NSObject, ObservableObject {
     }
 
     /// The paired iPhone handed us the familiar's address → request to join by covenant.
-    private func onAddress(host: String, port: Int, label: String) {
+    private func onAddress(host: String, port: Int, label: String, human: String) {
         defaults.set(host, forKey: "watch.enroll.host")
         defaults.set(String(port), forKey: "watch.enroll.port")
         defaults.set(label, forKey: "watch.enroll.label")
+        // The human the paired phone serves — the watch attributes its reports to the same person
+        // (ADR-0016), so `watch:<handle>` matches `phone:<handle>` rather than a baked "ian".
+        if !human.isEmpty { defaults.set(human, forKey: "watch.servedHuman") }
         groupLabel = label
         guard !enrolled, !enrolling else { return }
         enrolling = true
@@ -100,6 +103,7 @@ final class WatchModel: NSObject, ObservableObject {
         }
         let s = sensing ?? WatchSensing { [weak self] batch in await self?.deliver(batch) }
         s.onHeartRate = { [weak self] bpm in Task { @MainActor in self?.lastHeartRate = bpm } }
+        s.servedHuman = defaults.string(forKey: "watch.servedHuman") ?? "observer"
         sensing = s
         s.start(motionOn: motionEnabled, heartOn: heartEnabled, locationOn: locationEnabled)
         note("sensing armed")
@@ -165,6 +169,7 @@ extension WatchModel: WCSessionDelegate {
     private nonisolated func handleAddress(_ d: [String: Any]) {
         guard let host = d["host"] as? String, let port = d["port"] as? Int else { return }
         let label = d["label"] as? String ?? "familiar"
-        Task { @MainActor in self.onAddress(host: host, port: port, label: label) }
+        let human = d["human"] as? String ?? "observer"
+        Task { @MainActor in self.onAddress(host: host, port: port, label: label, human: human) }
     }
 }

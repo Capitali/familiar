@@ -480,6 +480,11 @@ function refreshScreen() {
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">SERVING</span>
+        <input id="servedHumanInput" value="${esc(d.servedHuman||'observer')}" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
+        <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
+      </div>
       <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h,i)=>(h===d.host?'▸':'')+esc(h)).join(' · ')}</div>
       ${(d.attempts||[]).length ? `<div class="m" style="font-size:9px;color:rgba(150,180,255,0.5);margin-bottom:6px;">${d.attempts.map(esc).join('<br>')}</div>` : ''}
       ${S.jsErr ? `<div class="m" style="font-size:9px;color:rgba(255,160,160,0.8);margin-bottom:6px;">${esc(S.jsErr)}</div>` : ''}
@@ -609,6 +614,8 @@ window.sphereUnenroll = () => {
 };
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
+// Set who this device is serving (ADR-0016) — the handle its reports attribute to.
+window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) toApp('setHuman', { name: v }); };
 window.onerror = (msg, src, line) => {
   // Cross-origin scripts (CDN three.js/qrcode) report opaquely as "Script error." with no
   // detail — that is noise, not diagnosis; only badge errors that carry information.

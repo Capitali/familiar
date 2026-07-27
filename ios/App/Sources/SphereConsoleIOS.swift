@@ -50,6 +50,10 @@ struct SphereConsoleIOS: View {
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
             bridge.onUnenroll = { [weak model] in model?.unenroll() }
+            bridge.onSetHuman = { [weak model] name in
+                model?.setServedHuman(name)
+                model.map { bridge.pushDevice($0.deviceStateJSON()) }
+            }
             bridge.onAnswerThread = { [weak model] id, text in model?.answerThread(id, text) }
             bridge.onInvite = { [weak model] in model?.addressPayload }
             bridge.pushDevice(model.deviceStateJSON())
@@ -108,6 +112,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onConsent: ((String, Bool) -> Void)?
     var onAnswerThread: ((String, String) -> Void)?
     var onUnenroll: (() -> Void)?
+    var onSetHuman: ((String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -259,6 +264,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "consent":
                 if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
+            case "setHuman":
+                if let name = body["name"] as? String, !name.isEmpty { self.onSetHuman?(name) }
             case "invite":
                 if let payload = self.onInvite?(),
                    let quoted = (try? JSONEncoder().encode(payload))

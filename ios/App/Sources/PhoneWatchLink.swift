@@ -26,9 +26,11 @@ final class PhoneWatchLink: NSObject, WCSessionDelegate, ObservableObject {
         }
     }
 
-    /// Remember + deliver the address. Safe to call repeatedly / before the watch is present.
-    func sendAddress(host: String, port: Int, label: String) {
-        latest = ["host": host, "port": port, "label": label]
+    /// Remember + deliver the address (and the human this device serves — ADR-0016 — so the watch
+    /// attributes its reports to the same person as the paired phone). Safe to call repeatedly /
+    /// before the watch is present.
+    func sendAddress(host: String, port: Int, label: String, human: String) {
+        latest = ["host": host, "port": port, "label": label, "human": human]
         flush()
     }
 

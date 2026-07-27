@@ -132,6 +132,9 @@ pub fn build_outbox(
             let self_node = &id.node_id;
             obs.iter()
                 .rev()
+                // A person's sensitive-personal signal (health / precise position / biometric) never
+                // leaves this node — a shared worldview is not a shared body (ADR-0016).
+                .filter(|o| !familiar_kernel::service::is_sensitive_personal(o))
                 .take(OBS_SHARE_CAP)
                 .filter_map(|o| {
                     obs_origin(&o.source, self_node).map(|origin| ObsShare {
@@ -1505,6 +1508,37 @@ mod tests {
         // IdentityShare structurally has no field to carry it — this is a compile-time
         // guarantee, not just an omission a future change could accidentally reintroduce.
         let _: crate::brief::IdentityShare = identities.entries[0].clone();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sensitive_personal_signals_never_reach_the_wire() {
+        // A shared worldview is not a shared body (ADR-0016): a person's health / precise position /
+        // biometric never federates, while ordinary activity (a discovery) still does.
+        let dir = tmp("no_health_on_wire");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir);
+        let rec = |actor: &str, object: &str, src: &str| {
+            observation::record(
+                &dir,
+                observation::Observation::new(actor, "reports", object, "", src, NOW, 0.9),
+            )
+            .unwrap();
+        };
+        rec("watch:betty", "heart_rate:elevated", "mesh:watchnode");
+        rec("watch:betty", "location:48.601,-93.411", "mesh:watchnode");
+        rec("watch:betty", "gyro:turning", "mesh:watchnode");
+        // Ordinary, non-sensitive activity from the same person's device — this SHOULD federate.
+        rec("phone:betty", "service:mqtt", "mesh:phonenode");
+
+        let cfg = MeshConfig::default();
+        build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
+        let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
+        assert!(!raw.contains("heart_rate:elevated"), "health must not federate");
+        assert!(!raw.contains("48.601"), "precise location must not federate");
+        assert!(!raw.contains("gyro:turning"), "biometric motion must not federate");
+        assert!(raw.contains("service:mqtt"), "ordinary activity still federates");
         let _ = fs::remove_dir_all(&dir);
     }
 

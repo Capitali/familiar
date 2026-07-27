@@ -16,6 +16,11 @@ final class WatchSensing: NSObject, CLLocationManagerDelegate {
     private let locator = CLLocationManager()
     private let deliver: ([ObsRecord]) async -> Void
 
+    /// Who this watch is serving — the paired phone's served human (ADR-0016). Reports are tagged
+    /// `watch:<servedHuman>` so they attribute to the same person as `phone:<servedHuman>`, not a
+    /// baked "ian". Set by WatchModel from the phone hand-off before `start`.
+    var servedHuman = "observer"
+
     private var lastActivity: String?
     private var lastHRBucket: String?
     private var lastGyroBucket: String?
@@ -44,7 +49,7 @@ final class WatchSensing: NSObject, CLLocationManagerDelegate {
                 let label = Self.activityLabel(a)
                 guard label != "unknown", a.confidence != .low, label != self.lastActivity else { return }
                 self.lastActivity = label
-                let obs = ObsRecord(actor: "watch:ian", action: "reports", object: "motion:\(label)",
+                let obs = ObsRecord(actor: "watch:\(servedHuman)", action: "reports", object: "motion:\(label)",
                                     context: "confidence=\(a.confidence.rawValue)",
                                     confidence: a.confidence == .high ? 0.9 : 0.7)
                 Task { await self.deliver([obs]) }
@@ -61,7 +66,7 @@ final class WatchSensing: NSObject, CLLocationManagerDelegate {
                     let bucket = mag > 2.0 ? "spinning" : (mag > 0.5 ? "turning" : "still")
                     guard bucket != self.lastGyroBucket else { return }
                     self.lastGyroBucket = bucket
-                    let obs = ObsRecord(actor: "watch:ian", action: "reports", object: "gyro:\(bucket)",
+                    let obs = ObsRecord(actor: "watch:\(servedHuman)", action: "reports", object: "gyro:\(bucket)",
                                         context: "rate~\(String(format: "%.1f", mag))", confidence: 0.8)
                     Task { await self.deliver([obs]) }
                 }
@@ -95,7 +100,7 @@ final class WatchSensing: NSObject, CLLocationManagerDelegate {
             let bucket = bpm > 100 ? "elevated" : (bpm < 50 ? "low" : "normal")
             guard bucket != self.lastHRBucket else { return }
             self.lastHRBucket = bucket
-            let obs = ObsRecord(actor: "watch:ian", action: "reports", object: "heart_rate:\(bucket)",
+            let obs = ObsRecord(actor: "watch:\(servedHuman)", action: "reports", object: "heart_rate:\(bucket)",
                                 context: "bpm~\(bpm)", confidence: 0.9)
             Task { await self.deliver([obs]) }
         }
@@ -111,7 +116,7 @@ final class WatchSensing: NSObject, CLLocationManagerDelegate {
         coordinate = (lat, lon)
         if let f = lastFix, abs(f.lat - lat) < 0.0005, abs(f.lon - lon) < 0.0005 { return }
         lastFix = (lat, lon)
-        let obs = ObsRecord(actor: "watch:ian", action: "reports",
+        let obs = ObsRecord(actor: "watch:\(servedHuman)", action: "reports",
                             object: "location:\(lat),\(lon)",
                             context: "accuracy=coarse", confidence: 0.85)
         Task { await self.deliver([obs]) }

@@ -370,7 +370,9 @@ fn cmd_goal(args: &[String]) -> ExitCode {
                 .unwrap_or(0)
                 + 1;
             let id = format!("goal-{seq:04}");
-            let g = familiar_kernel::goal::Goal::seed(&id, desc, needs, "ian", now_secs());
+            // The originator is whoever the familiar is serving now — not a baked creator (ADR-0016).
+            let who = familiar_kernel::identity::current(&dir).unwrap_or_else(|| "observer".to_string());
+            let g = familiar_kernel::goal::Goal::seed(&id, desc, needs, &who, now_secs());
             match familiar_kernel::goal::append(&dir, &g) {
                 Ok(()) => {
                     println!("✓ seeded {id} — “{}”", g.description);

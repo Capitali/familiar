@@ -3,12 +3,17 @@ import Network
 import UIKit
 import FamiliarMesh
 
-/// The device's actor namespace as the familiar sees it: `phone:ian` on iPhone, `ipad:ian` on iPad.
-/// The observations a device reports are tagged with this so the familiar (and its peers) know which
-/// device on the mesh saw what.
+/// The device's actor namespace as the familiar sees it: `phone:<human>` on iPhone, `ipad:<human>`
+/// on iPad. The observations a device reports are tagged with this so the familiar (and its peers)
+/// know which device — and which human — on the mesh saw what.
+///
+/// The human suffix is NOT baked (ADR-0016): a node serves whoever is present, and a shared device
+/// changes hands. `human` is set from `AppModel.servedHuman`; it defaults to "observer" so a device
+/// never falsely claims a specific person before it has been told who is using it.
 enum DeviceActor {
+    static var human = "observer"
     static var current: String {
-        UIDevice.current.userInterfaceIdiom == .pad ? "ipad:ian" : "phone:ian"
+        (UIDevice.current.userInterfaceIdiom == .pad ? "ipad:" : "phone:") + human
     }
 }
 

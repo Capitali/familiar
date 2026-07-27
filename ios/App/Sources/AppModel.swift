@@ -25,6 +25,11 @@ final class AppModel: ObservableObject {
     @AppStorage("consent.faceRecognition") var faceRecognitionEnabled = false
     @AppStorage("consent.discovery") var discoveryEnabled = false
 
+    /// Who this device is currently serving (ADR-0016) — the human its observations are attributed
+    /// to. A node serves many people and devices are shared, so this is NOT a baked creator: it
+    /// defaults to "observer" and is set by the human (Device menu), later by facial recognition.
+    @AppStorage("identity.servedHuman") var servedHuman = "observer"
+
     private let grantAccount = "grant.json"
     private let enrollAccount = "enroll.info"   // {host,port,label} in the Keychain — survives reinstall
     private let defaults = UserDefaults.standard
@@ -232,6 +237,8 @@ final class AppModel: ObservableObject {
             sanitizeHosts()
         }
         ensureRendezvous()   // the public failover is always a candidate — never strand off-LAN
+        // Attribute this device's reports to the human it serves, not a baked creator (ADR-0016).
+        DeviceActor.human = servedHuman
         enrolled = storedGrant() != nil && !host.isEmpty
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
@@ -259,6 +266,7 @@ final class AppModel: ObservableObject {
             "host": host,
             "hosts": hosts,
             "attempts": attemptLog,
+            "servedHuman": servedHuman,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "faceRecognition": faceRecognitionEnabled,
@@ -285,12 +293,32 @@ final class AppModel: ObservableObject {
         startReasoningIfConsented()
     }
 
+    /// Set who this device is serving (ADR-0016). The name is slugged to a stable handle (matching
+    /// the daemon's `identity::slug`), so this device's reports thereafter tag `phone:<handle>` and
+    /// attribute to the right person — and the paired watch is handed the same handle.
+    func setServedHuman(_ name: String) {
+        let handle = Self.slugHandle(name)
+        guard !handle.isEmpty else { return }
+        servedHuman = handle
+        DeviceActor.human = handle
+        note("serving \(handle)")
+        syncWatch()   // re-hand address + human to the watch
+    }
+
+    /// A lowercase, dash-separated handle from a display name — "Betty Jo" -> "betty-jo". Mirrors
+    /// `familiar_kernel::identity::slug` so the phone and daemon agree on the handle.
+    static func slugHandle(_ name: String) -> String {
+        let mapped = name.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        let collapsed = String(mapped).split(separator: "-").joined(separator: "-")
+        return collapsed
+    }
+
     /// The human answered a specific theory's question — the answer attaches to that
     /// thread on the familiar (context "thread:<id>") and travels with its pursuit.
     func answerThread(_ id: String, _ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        emit(ObsRecord(actor: "ian", action: "answered", object: t, context: "thread:\(id)", confidence: 1.0))
+        emit(ObsRecord(actor: servedHuman, action: "answered", object: t, context: "thread:\(id)", confidence: 1.0))
         note("answered theory: \(t)")
     }
 
@@ -304,7 +332,7 @@ final class AppModel: ObservableObject {
     func submitConsoleAnswer() {
         let t = consoleAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        emit(ObsRecord(actor: "ian", action: "told the familiar", object: t, context: "console", confidence: 1.0))
+        emit(ObsRecord(actor: servedHuman, action: "told the familiar", object: t, context: "console", confidence: 1.0))
         note("answered: \(t)")
         consoleAnswer = ""
     }
@@ -404,7 +432,7 @@ final class AppModel: ObservableObject {
                 note("✓ admitted to “\(g.group_label)” — the covenant is in force")
                 // Hand the paired Apple Watch this familiar's address so it can enrol itself by
                 // covenant (address only — the watch mints its own key + gets its own grant).
-                PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label)
+                PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label, human: servedHuman)
                 startFixBaseline()
                 startSensingIfConsented()
                 startDiscoveryIfConsented()
@@ -426,7 +454,7 @@ final class AppModel: ObservableObject {
     func syncWatch() {
         let link = PhoneWatchLink.shared // touch = activate the WCSession
         if enrolled, !host.isEmpty {
-            link.sendAddress(host: host, port: enrollPort, label: groupLabel)
+            link.sendAddress(host: host, port: enrollPort, label: groupLabel, human: servedHuman)
         }
     }
 

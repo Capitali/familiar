@@ -67,6 +67,23 @@ pub fn is_personal_device_report(obs: &Observation) -> bool {
         .any(|p| actor.starts_with(p))
 }
 
+/// Object prefixes that carry a person's **sensitive-personal** signal — health, precise
+/// position, biometric. Under multi-human served identity (ADR-0016) a node serves many people
+/// and the worldview is shared *with per-human attribution*, but a shared worldview is not a
+/// shared body: these are kept node-local, attributed to their human, and NEVER federated to
+/// peers or surfaced as another human's data. (`face:` already never leaves via `IdentityShare`;
+/// this extends the same rule to the health/position a personal device reports.)
+pub const SENSITIVE_PERSONAL_PREFIXES: &[&str] = &["heart_rate:", "location:", "gyro:", "face:"];
+
+/// A person's sensitive-personal observation (health / precise position / biometric) that must not
+/// be federated or shown to other humans (ADR-0016).
+pub fn is_sensitive_personal(obs: &Observation) -> bool {
+    let object = obs.object.to_ascii_lowercase();
+    SENSITIVE_PERSONAL_PREFIXES
+        .iter()
+        .any(|p| object.starts_with(p))
+}
+
 /// The service signal (Law I): to what degree is the factory's attention on the
 /// humans it exists to serve?
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +132,17 @@ mod tests {
 
     fn obs(actor: &str, object: &str) -> Observation {
         Observation::new(actor, "does", object, "", "test", 0, 1.0)
+    }
+
+    #[test]
+    fn sensitive_personal_matches_health_position_biometric() {
+        assert!(is_sensitive_personal(&obs("watch:betty", "heart_rate:elevated")));
+        assert!(is_sensitive_personal(&obs("watch:betty", "location:48.6,-93.4")));
+        assert!(is_sensitive_personal(&obs("watch:betty", "gyro:turning")));
+        assert!(is_sensitive_personal(&obs("phone:ian", "face:ian")));
+        // Ordinary activity is not sensitive — it may federate under a shared worldview.
+        assert!(!is_sensitive_personal(&obs("phone:ian", "motion:walking")));
+        assert!(!is_sensitive_personal(&obs("phone:ian", "service:mqtt")));
     }
 
     #[test]
