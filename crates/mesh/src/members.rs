@@ -700,7 +700,8 @@ fn attach_companions(out: &mut [Member], obs: &[familiar_kernel::observation::Ob
         for m in out.iter_mut() {
             let ns = m.actor.split(':').next().unwrap_or("");
             let human = m.actor.split(':').nth(1).unwrap_or("");
-            if matches!(ns, "phone" | "iphone" | "ipad" | "mac")
+            // An Apple Watch pairs with the iPhone only — never an iPad or Mac. Badge just the phone.
+            if matches!(ns, "phone" | "iphone")
                 && humans_with_watch.contains(human)
                 && !m.attached.iter().any(|a| a == "⌚ watch")
             {
@@ -913,6 +914,7 @@ mod tests {
             mk("phone1", "phone:ian", "device_peer", ""),
             mk("watch1", "watch:ian", "device_agent", "location:1,2"),
             mk("ipad9", "ipad:kai", "device_peer", ""), // different human — must NOT be badged
+            mk("ipadi", "ipad:ian", "device_peer", ""), // SAME human, but a watch pairs with the phone
         ];
         let src = "mesh:watch1";
         let obs = vec![
@@ -930,6 +932,10 @@ mod tests {
         );
         assert!(out[1].attached.is_empty(), "the watch itself carries no badge");
         assert!(out[2].attached.is_empty(), "a different human's iPad is not badged");
+        assert!(
+            out[3].attached.is_empty(),
+            "even the same human's iPad is not badged — a watch pairs with the iPhone, not the iPad"
+        );
         let d = &out[1].detail;
         assert!(d.contains("♥ normal"), "freshest heart wins: {d}");
         assert!(d.contains("walking"), "motion in summary: {d}");
