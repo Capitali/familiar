@@ -2545,6 +2545,10 @@ pub(crate) fn register_device_peer(
     lat: f64,
     lon: f64,
 ) -> Result<()> {
+    // "background" is the iOS BackgroundSync task's internal node label, not a device name — never
+    // let it become the roster label (it would relabel the phone "background" on a background read).
+    // Treated as empty, so the real device name from a foreground read stands.
+    let label = if label == "background" { "" } else { label };
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
         .ok()
