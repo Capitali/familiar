@@ -15,7 +15,14 @@ ed25519 trust the mesh uses.
 - `App/` — the SwiftUI iPhone/iPad agent: enroll (scan/paste), consent switches,
   sensing (CoreLocation + CoreMotion + optional voice/face), and the same sphere
   console rendered from the shared web bundle (worldview read over the mesh).
-- `Watch/` — the watchOS companion (enrols via the paired phone's identity).
+- `Watch/` — the watchOS companion (its own covenant node — heart rate, motion,
+  gyro, GPS → derived observations; enrols via the paired phone's identity). It is
+  **embedded inside the iPhone agent**, not shipped or installed on its own:
+  `project.yml` has the `FamiliarAgent` target embed the `FamiliarWatch` target
+  (`embed: true`). So building/installing the iPhone app carries the watch app with
+  it, iOS registers it as the companion (`WCSession.isWatchAppInstalled` → true, the
+  address hand-off flows), and it rides along through TestFlight. A watch app
+  installed standalone never links to the phone, so this embedding is required.
 - `FamiliarMesh/` — a Swift package (macOS + iOS + watchOS) with the crypto +
   wire logic: CryptoKit ed25519, membership-cert minting (byte-matched to the
   Rust `CertBody` canonicalization), the `/mesh/observe` client.
