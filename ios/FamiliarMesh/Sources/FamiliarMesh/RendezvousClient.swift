@@ -8,6 +8,10 @@ public struct MeshDoor: Codable, Equatable {
     public var group_label: String
     public var hosts: [String]
     public var port: Int
+    /// SPKI pins for the door's TLS certs, vouched for by the (already-trusted) rendezvous. A fresh
+    /// device seeds its trust set from these before the covenant handshake, so first contact with a
+    /// never-seen familiar succeeds without a QR or invite. Optional: older lighthouses omit it.
+    public var pins: [String]?
 }
 
 /// Reads the rendezvous directory from a public meeting node. The device asks "what meshes are

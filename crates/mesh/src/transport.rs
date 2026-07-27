@@ -405,6 +405,7 @@ async fn register_at_rendezvous(dir: &Path, cfg: &MeshConfig, cred: &crate::grou
         group_label: cred.label.clone(),
         hosts,
         port: cfg.gossip_port,
+        pins: advertised_pins(dir),
         nonce: format!("{now:x}{}", node.node_id()),
         ts: now,
     };

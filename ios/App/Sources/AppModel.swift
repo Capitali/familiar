@@ -317,6 +317,10 @@ final class AppModel: ObservableObject {
             host = cand.first ?? ""
             enrollPort = door.port
             groupLabel = door.group_label
+            // Trust the door's cert the rendezvous vouched for, so the covenant handshake's TLS can
+            // complete on first contact with a familiar this device has never met (ADR-0012). Without
+            // this the pin-checked session would reject the door and auto-enroll could never finish.
+            if let p = door.pins, !p.isEmpty { tlsPins = p }
             ensureRendezvous()
             saveEnrollment()
             enrolling = true

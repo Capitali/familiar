@@ -36,6 +36,12 @@ pub struct Registration {
     pub hosts: Vec<String>,
     /// The gossip/enroll port (usually 47100).
     pub port: u16,
+    /// SPKI pins for the door's TLS certs (the familiar's own pin + any `advertise_pins`). A fresh
+    /// device trusts the lighthouse (baked pin) and lets it vouch for the door's pin here, so
+    /// auto-enroll can complete the TLS handshake with no prior contact and no QR (ADR-0012).
+    /// Public by nature — a pin admits no one; it only names which cert not to be fooled by.
+    #[serde(default)]
+    pub pins: Vec<String>,
     /// Signing nonce (replay guard at the transport).
     pub nonce: String,
     pub ts: i64,
@@ -50,6 +56,11 @@ pub struct Entry {
     pub group_label: String,
     pub hosts: Vec<String>,
     pub port: u16,
+    /// SPKI pins for the door's TLS certs, as advertised by the registrant (see `Registration::pins`).
+    /// A joining device seeds its trust set from these before knocking, so the handshake succeeds
+    /// on first contact.
+    #[serde(default)]
+    pub pins: Vec<String>,
     /// When this entry was last refreshed (unix secs) — the directory expires on it.
     pub updated_at: i64,
 }
@@ -130,6 +141,7 @@ pub fn register(dir: &Path, reg: &Registration, now: i64) -> Result<Entry> {
         group_label: reg.group_label.clone(),
         hosts: reg.hosts.clone(),
         port: reg.port,
+        pins: reg.pins.clone(),
         updated_at: now,
     };
     let mut entries: Vec<Entry> = directory(dir, now)
@@ -165,6 +177,7 @@ mod tests {
             group_label: label.to_string(),
             hosts: vec!["100.64.0.5".into(), "lighthouse.river.io".into()],
             port: 47_100,
+            pins: vec!["pin-abc".into()],
             nonce: "n1".into(),
             ts: NOW,
         }
@@ -186,6 +199,9 @@ mod tests {
         let e = register(&lh, &reg, NOW).unwrap();
         assert_eq!(e.group_label, "TheRiver");
         assert_eq!(directory(&lh, NOW).len(), 1);
+        // The door's pins ride along so a fresh joiner can trust its TLS on first contact (ADR-0012).
+        assert_eq!(e.pins, vec!["pin-abc".to_string()]);
+        assert_eq!(directory(&lh, NOW)[0].pins, vec!["pin-abc".to_string()]);
         // A second registration for the same group refreshes, never duplicates.
         let mut reg2 = reg.clone();
         reg2.hosts = vec!["203.0.113.9".into()];
