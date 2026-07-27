@@ -1,5 +1,6 @@
 import Foundation
 import BackgroundTasks
+import UIKit
 import FamiliarMesh
 
 /// Opportunistic background sync (SPEC.md R12) — the honest version of "always-on" on iOS.
@@ -48,8 +49,11 @@ enum BackgroundSync {
     /// same failover walk AppModel.refreshWorldview() does) using whichever enrollment is
     /// already on disk. A no-op, not an error, when the device isn't enrolled.
     private static func syncOnce() async {
+        // Same node key as the foreground app (shared seed), labelled with the real device name —
+        // NOT "background", which would relabel the phone on the roster when a background read lands
+        // more recently than a foreground one.
         guard let seed = KeychainStore.load(account: "node.seed"),
-              let node = try? NodeKey(seed: seed, label: "background"),
+              let node = try? NodeKey(seed: seed, label: UIDevice.current.name),
               let grantData = KeychainStore.load(account: "grant.json"),
               let grant = try? JSONDecoder().decode(Grant.self, from: grantData),
               let enrollData = KeychainStore.load(account: "enroll.info"),
@@ -64,8 +68,10 @@ enum BackgroundSync {
                   let url = WorldviewClient.worldviewURL(host: host, port: port)
             else { continue }
             let session = ObservationClient.Session(node: node, membership: grant.membership, url: url)
+            // Empty build/OS here — a background read shouldn't clobber the real values the
+            // foreground app reported (the daemon only overwrites when these are non-empty).
             if (try? await WorldviewClient(session: session).fetchWithRaw(
-                clientVersion: "background", osVersion: "background", lat: 0, lon: 0
+                clientVersion: "", osVersion: "", lat: 0, lon: 0
             )) != nil {
                 return  // reached one host — the point of this pass (stay a known-live peer)
             }
