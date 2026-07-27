@@ -272,6 +272,13 @@ function refreshScreen() {
   if (S.builtScreen !== S.activeScreen) { buildScreen(); return; }
   const k = S.activeScreen;
 
+  // Don't rebuild the Device screen out from under the SERVING field while it's being typed in —
+  // the poll cycle would otherwise recreate the input and drop focus/selection every second.
+  if (k === 'device') {
+    const inp = document.getElementById('servedHumanInput');
+    if (inp && document.activeElement === inp) return;
+  }
+
   if (k === 'conversation') {
     const box = $('convmsgs'); if (!box) return;
     if (!v) { box.innerHTML = ''; return; }
@@ -458,7 +465,13 @@ function refreshScreen() {
       // its consent tiles — so the camera control is consistent everywhere, not a boundary gate on
       // the Mac and a consent on the others.
       const selfCam = !!(v.gates && v.gates.camera);
+      const selfHuman = ((v.members||[]).find(m => m.kind === 'self_node')||{}).human || 'observer';
       el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:14px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+          <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">SERVING</span>
+          <input id="servedHumanInput" value="${esc(selfHuman)}" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:150px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:13px;padding:7px 10px;"/>
+          <button onclick="window.setServedHuman()" class="glybtn" style="padding:7px 14px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;max-width:300px;margin-bottom:22px;">
           <button onclick="sphereGate('allow_camera', ${selfCam ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${selfCam?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
             ${gateGlyph(selfCam)}

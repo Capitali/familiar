@@ -50,3 +50,27 @@ enum MacBoundary {
         try? data.write(to: url)
     }
 }
+
+/// The human at this Mac naming who the familiar is serving now (ADR-0016). Writes the daemon's
+/// `observer.txt` — the same thing `identity::set_current` does — so the node's own reports and
+/// goal seeds attribute to that person, not a baked creator. Direct-to-disk, human-initiated, the
+/// same trust class as `MacBoundary`.
+enum MacIdentity {
+    private static var observerURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Familiar/data/observer.txt")
+    }
+
+    static func setServing(_ name: String) {
+        let handle = slug(name)
+        guard !handle.isEmpty else { return }
+        try? FileManager.default.createDirectory(at: observerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? handle.data(using: .utf8)?.write(to: observerURL)
+    }
+
+    /// Mirrors `familiar_kernel::identity::slug` — "Betty Jo" -> "betty-jo".
+    static func slug(_ name: String) -> String {
+        let mapped = name.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        return String(mapped).split(separator: "-").joined(separator: "-")
+    }
+}

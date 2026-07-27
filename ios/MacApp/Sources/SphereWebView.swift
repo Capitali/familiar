@@ -314,6 +314,10 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 if let gate = body["gate"] as? String {
                     self.post("local/gate", ["gate": gate, "open": body["open"] as? Bool ?? false])
                 }
+            case "setHuman":
+                // The human at this Mac names who the familiar is serving now (ADR-0016) — writes
+                // the daemon's observer, same direct-to-disk trust class as MacBoundary's gate flips.
+                if let name = body["name"] as? String, !name.isEmpty { MacIdentity.setServing(name) }
             case "street":
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
                 self.surfaceStreet(lat: body["lat"] as? Double ?? 0,
