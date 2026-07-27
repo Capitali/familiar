@@ -970,6 +970,33 @@ async fn handle(
             recv_status(&dir, &bytes, &sig)
         }
         (Method::GET, "/mesh/status") => status_directory_response(&dir),
+        // Device oracle (ADR-0014): a member device pulls pending prompts and pushes back answers.
+        (Method::POST, "/mesh/consult") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_consult_pull(&dir, &bytes, &sig)
+        }
+        (Method::POST, "/mesh/consult-answer") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_consult_answer(&dir, &bytes, &sig)
+        }
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
             serve_tool(&dir, id)
@@ -1502,6 +1529,43 @@ fn status_directory_response(dir: &Path) -> Response<Full<Bytes>> {
     match serde_json::to_vec(&out) {
         Ok(b) => text(StatusCode::OK, b),
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "status encode"),
+    }
+}
+
+/// `POST /mesh/consult` → a member device pulls the prompts waiting for it (ADR-0014). Signed +
+/// membership-bearing. 200 + the pending prompts; 403 untrusted; 400 malformed.
+fn recv_consult_pull(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let pull: crate::consult::ConsultPull = match serde_json::from_slice(bytes) {
+        Ok(p) => p,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad pull"),
+    };
+    if pull.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    match crate::consult::accept_pull(dir, &pull, now_secs()) {
+        Ok(prompts) => match serde_json::to_vec(&prompts) {
+            Ok(b) => text(StatusCode::OK, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "consult encode"),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "consult rejected"),
+    }
+}
+
+/// `POST /mesh/consult-answer` → a member device pushes its answer (ADR-0014). Signed; kept only for
+/// a prompt we actually asked and only from the device that answers for its own node. 200; else 403/400.
+fn recv_consult_answer(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let report: crate::consult::ConsultAnswerReport = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad answer"),
+    };
+    if report.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    match crate::consult::accept_answer(dir, &report, now_secs()) {
+        Ok(()) => text(StatusCode::OK, "recorded"),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "answer rejected"),
     }
 }
 

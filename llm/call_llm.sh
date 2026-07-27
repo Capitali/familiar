@@ -280,9 +280,47 @@ def call_ollama(max_tokens):
         return json.dumps({"script": strip_fences(text)})
 
 
+class DeviceAsleep(Exception):
+    """The apple provider queued a prompt but no member device answered in time. Treated as a
+    rate-limit (exit 2) so the muse retries later and the lab records llm_unavailable, rather
+    than contaminating evidence with a template answer (ADR-0014)."""
+    pass
+
+
+def call_apple(max_tokens):
+    # The device oracle (ADR-0014): queue the prompt for a member device's on-device model
+    # (Apple Intelligence) to answer over the /mesh/consult seam, then poll for the answer file.
+    # Nothing but the answer comes back; a sleeping device is silence, not garbage.
+    import uuid
+    qdir = os.path.join(script_dir, "device-queue")
+    os.makedirs(qdir, exist_ok=True)
+    cid = "c-" + uuid.uuid4().hex[:12]
+    prompt_file = os.path.join(qdir, cid + ".prompt.json")
+    answer_file = os.path.join(qdir, cid + ".answer.json")
+    with open(prompt_file, "w") as f:
+        json.dump({"id": cid, "prompt": prompt_text, "ts": int(time.time())}, f)
+    timeout = int(os.environ.get("APPLE_CONSULT_TIMEOUT", "90"))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(answer_file):
+            with open(answer_file) as f:
+                ans = json.load(f)
+            try:
+                os.remove(answer_file)
+            except Exception:
+                pass
+            return ans.get("json", "")
+        time.sleep(2)
+    try:
+        os.remove(prompt_file)  # don't leave an unanswered prompt lingering
+    except Exception:
+        pass
+    raise DeviceAsleep(f"no device answered within {timeout}s")
+
+
 PROVIDERS = {"claude": call_claude, "anthropic": call_claude,
              "gemini": call_gemini, "cerebras": call_cerebras,
-             "ollama": call_ollama}
+             "ollama": call_ollama, "apple": call_apple}
 
 
 def http_detail(e):
@@ -343,6 +381,12 @@ for name in order:
             print(f"LLM response via {name} ({len(text)} bytes)", file=sys.stderr)
             sys.exit(0)
         answered = True  # probe: keep going to refresh every provider
+    except DeviceAsleep as e:
+        # The apple provider's device didn't answer — a rate-limit, not an error, so the
+        # chain rolls on and (if nothing else answers) exits 2 → the lab pauses cleanly.
+        mark(health, name, "rate_limited", str(e), COOL_RATELIMIT)
+        rate_limited.append(name)
+        errors.append(f"{name}: {e}")
     except BudgetReached as e:
         # The human's own cost boundary — cool until UTC midnight, roll to the next
         # provider. Not an error: the cap holding is the feature.
