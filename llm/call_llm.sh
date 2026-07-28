@@ -285,6 +285,39 @@ def call_ollama(max_tokens):
         return json.dumps({"script": strip_fences(text)})
 
 
+def usable_json(text):
+    """Return the device's answer as parseable JSON, or treat it as silence.
+
+    Guided generation (`kind` of "script"/"theory") emits exact JSON, but the muse asks other
+    shapes too and those still run free-form, where a small on-device model sometimes produces
+    almost-JSON — a missing comma, prose wrapped around the object. Left alone that surfaces as a
+    plain exception, which the provider chain classifies as an *error* rather than a rate limit:
+    exit 1 instead of 2, so the lab stops the whole campaign, and `apple` is parked under an error
+    cooldown so later cells skip the device entirely. One bad sentence should not cost a 168-cell
+    run.
+
+    So: unwrap fences, and failing that take the outermost {...}, which recovers an object the
+    model buried in commentary. If it still will not parse, the device produced nothing usable,
+    which is the same evidentiary case as a device that never answered — DeviceAsleep, a pause the
+    muse retries, never a fabricated answer (ADR-0014).
+    """
+    text = strip_fences(text or "")
+    try:
+        json.loads(text)
+        return text
+    except Exception:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        inner = text[start : end + 1]
+        try:
+            json.loads(inner)
+            return inner
+        except Exception:
+            pass
+    raise DeviceAsleep("device answered with unparseable JSON")
+
+
 class DeviceAsleep(Exception):
     """The apple provider queued a prompt but no member device answered in time. Treated as a
     rate-limit (exit 2) so the muse retries later and the lab records llm_unavailable, rather
@@ -330,7 +363,7 @@ def call_apple(max_tokens):
                 os.remove(answer_file)
             except Exception:
                 pass
-            return ans.get("json", "")
+            return usable_json(ans.get("json", ""))
         time.sleep(2)
     try:
         os.remove(prompt_file)  # don't leave an unanswered prompt lingering
