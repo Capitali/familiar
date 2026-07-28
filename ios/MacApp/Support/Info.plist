@@ -16,6 +16,11 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Same posture as the iOS target: the only cryptography here is CryptoKit (Ed25519 node
+	     identity + signatures) and URLSession/rustls TLS, both exempt. Without this key every
+	     upload lands in "Missing Compliance" and cannot be distributed until answered by hand. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>NSAppTransportSecurity</key>
