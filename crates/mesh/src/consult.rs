@@ -22,6 +22,12 @@ pub struct ConsultPrompt {
     pub id: String,
     pub prompt: String,
     pub ts: i64,
+    /// Which on-device generation strategy the answering device should use (ADR-0014): "script"
+    /// and "theory" select `@Generable` guided generation matching the muse's contract; "" / "free"
+    /// is free-form `respond(to:)`. Optional on the wire (serde default) so older peers and the
+    /// Python adapter that omit it still deserialize — the device just falls back to free-form.
+    #[serde(default)]
+    pub kind: String,
 }
 
 /// The device's answer. `json` is opaque — a structured result the adapter parses, not this seam.
@@ -78,11 +84,12 @@ fn queue(dir: &Path) -> std::path::PathBuf {
 }
 
 /// Queue a prompt for a device to answer. Returns the stored prompt (with its id + timestamp).
-pub fn enqueue(dir: &Path, id: &str, prompt: &str, now: i64) -> Result<ConsultPrompt> {
+pub fn enqueue(dir: &Path, id: &str, prompt: &str, kind: &str, now: i64) -> Result<ConsultPrompt> {
     let p = ConsultPrompt {
         id: id.to_string(),
         prompt: prompt.to_string(),
         ts: now,
+        kind: kind.to_string(),
     };
     std::fs::create_dir_all(queue(dir)).map_err(|e| Error::Malformed(format!("consult: {e}")))?;
     let path = queue(dir).join(format!("{id}.prompt.json"));
@@ -179,7 +186,7 @@ mod tests {
     #[test]
     fn queue_round_trips_and_expires() {
         let dir = tmp("rt");
-        enqueue(&dir, "c1", "what is the weather theory?", NOW).unwrap();
+        enqueue(&dir, "c1", "what is the weather theory?", "", NOW).unwrap();
         assert_eq!(pending(&dir, NOW).len(), 1);
         // An answer for the prompt clears it; a fresh read finds the answer.
         let ans = ConsultAnswer {
@@ -192,7 +199,7 @@ mod tests {
         assert_eq!(pending(&dir, NOW).len(), 0, "answered prompt is cleared");
         assert_eq!(answer_of(&dir, "c1").unwrap().json, "{\"theory\":\"x\"}");
         // Stale prompts expire on the next listing.
-        enqueue(&dir, "c2", "q", NOW).unwrap();
+        enqueue(&dir, "c2", "q", "", NOW).unwrap();
         assert_eq!(pending(&dir, NOW + PROMPT_TTL_SECS + 1).len(), 0);
     }
 
@@ -213,7 +220,7 @@ mod tests {
         let home = tmp("home");
         let node = NodeKey::load_or_mint(&home, "n").unwrap();
         let cred = create_group(&home, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        enqueue(&home, "c9", "q", NOW).unwrap();
+        enqueue(&home, "c9", "q", "", NOW).unwrap();
         // Answer claiming a different node_id than the membership is refused.
         let mut report = ConsultAnswerReport {
             membership: cred.membership.clone(),

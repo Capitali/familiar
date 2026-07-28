@@ -8,6 +8,9 @@ public struct ConsultClient {
         public var id: String
         public var prompt: String
         public var ts: Int64
+        /// Which on-device generation strategy to use (ADR-0014): "script"/"theory" select guided
+        /// generation; absent/"" / "free" is free-form. Optional so older servers that omit it decode.
+        public var kind: String?
     }
     struct Answer: Codable {
         var id: String

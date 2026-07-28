@@ -524,7 +524,7 @@ final class AppModel: ObservableObject {
         let client = ConsultClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey,
                                    host: readHost, port: enrollPort)
         for p in await client.pull() {
-            if let answer = await ConsultRunner.answer(p.prompt) {
+            if let answer = await ConsultRunner.answer(p.prompt, kind: p.kind) {
                 await client.push(id: p.id, json: answer)
             }
         }

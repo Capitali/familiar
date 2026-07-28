@@ -297,13 +297,29 @@ def call_apple(max_tokens):
     # (Apple Intelligence) to answer over the /mesh/consult seam, then poll for the answer file.
     # Nothing but the answer comes back; a sleeping device is silence, not garbage.
     import uuid
-    qdir = os.path.join(script_dir, "device-queue")
+    # The device answers over the mesh from ONE daemon's queue (the main hub Codex pulls from). A
+    # scenario episode runs the adapter from its OWN copied data dir, so its default `device-queue`
+    # is private and no device ever sees it. APPLE_QUEUE_DIR (set in the shared key.env, carried into
+    # every episode copy) funnels all apple consults to the hub's queue so the enrolled device can
+    # actually answer them. Falls back to the local dir when unset (e.g. the daemon's own muse).
+    qdir = os.environ.get("APPLE_QUEUE_DIR", "").strip() or os.path.join(script_dir, "device-queue")
     os.makedirs(qdir, exist_ok=True)
     cid = "c-" + uuid.uuid4().hex[:12]
     prompt_file = os.path.join(qdir, cid + ".prompt.json")
     answer_file = os.path.join(qdir, cid + ".answer.json")
+    # Pick the device's guided-generation strategy (ADR-0014). An explicit APPLE_CONSULT_KIND wins
+    # (the eval harness sweeps strategies this way); otherwise infer from the JSON shape the muse asked
+    # for. Guided generation guarantees valid JSON and tends not to hang the way free-form does on the
+    # open-ended "write a script" prompts that stalled the A9 treatment cells.
+    kind = os.environ.get("APPLE_CONSULT_KIND", "")
+    if not kind:
+        low = prompt_text.lower()
+        if '"script"' in low:
+            kind = "script"
+        elif '"theory"' in low and '"direction"' in low:
+            kind = "theory"
     with open(prompt_file, "w") as f:
-        json.dump({"id": cid, "prompt": prompt_text, "ts": int(time.time())}, f)
+        json.dump({"id": cid, "prompt": prompt_text, "ts": int(time.time()), "kind": kind}, f)
     timeout = int(os.environ.get("APPLE_CONSULT_TIMEOUT", "90"))
     deadline = time.time() + timeout
     while time.time() < deadline:
