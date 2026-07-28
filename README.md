@@ -2,12 +2,30 @@
 
 > A factory whose survival is defined by its service to humanity.
 
-The Familiar is a **telos-first** evolutionary factory: it begins not with a machine
-but with three laws, and derives everything downward from them. This repository is
-organized to be read three ways at once — as a **scientific paper**, a **lab
-notebook**, and a **production engineering package** — following the **FAIR** /
-**FAIR4RS** principles (Findable, Accessible, Interoperable, Reusable) and the
-scientific **IMRaD** structure (Introduction → Methods → Results → Discussion).
+A familiar is an AI companion you host yourself, on the hardware you already own.
+
+It runs as a **mesh**, not an app: a daemon on your Mac, consoles on iPhone, iPad
+and Watch, and a small always-on node so they can find each other from anywhere.
+They share **one worldview** rather than a separate chat window each — what any
+node notices, the mesh knows. It senses what is around it, forms theories about
+what it sees, asks you questions when it is unsure, and remembers which human it
+is serving on a device that many people touch.
+
+You hold the keys. The group is yours to admit people to and yours to abandon;
+the mesh talks to itself over pinned TLS, and its thinking can run on the **Apple
+Intelligence model already on your phone** — so a prompt need never leave your
+hardware at all.
+
+And it is **telos-first**: it begins not with a machine but with three laws, and
+derives everything downward from them. The laws are not a policy layer bolted on
+top of a working system — they are the thing the system is grown from, and it
+cannot rewrite them.
+
+This repository is organized to be read three ways at once — as a **scientific
+paper**, a **lab notebook**, and a **production engineering package** — following
+the **FAIR** / **FAIR4RS** principles (Findable, Accessible, Interoperable,
+Reusable) and the scientific **IMRaD** structure (Introduction → Methods →
+Results → Discussion).
 
 ## The Three Laws
 
