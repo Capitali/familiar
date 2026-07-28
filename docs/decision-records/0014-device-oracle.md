@@ -73,3 +73,49 @@ contamination.
 - 2026-07-25 — proposed; design settled in-session (fleet verified capable:
   iPhone 16 Pro Max + M5 iPad Pro; Xcode 26.5 SDK has FoundationModels), build
   deferred to a fresh session by Ian's call.
+
+## Amendment — the broker (2026-07-28)
+
+Everything above assumed the device and the familiar could reach each other.
+Running the A9 campaign proved they often cannot, and the gap is structural
+rather than incidental.
+
+A device answers consults it pulls from **whatever host it read its worldview
+from**. On the RV network the iPad reads from the lighthouse, while the campaign
+queues on the home hub, so the prompts and the device watch two different queues
+and every treatment cell times out with an awake, willing device sitting idle.
+
+The fix cannot be "the lighthouse pushes to the hub". The home familiar sits
+behind CGNAT and is unreachable from outside, so **every exchange has to be
+hub-initiated** — the same constraint that shaped the status directory in
+ADR-0017, and the reason both designs look like heartbeats rather than
+callbacks.
+
+**Decision.** A familiar may broker another's consults. The hub POSTs
+`/mesh/consult-relay` — signed and membership-bearing like every other write on
+this seam — carrying the prompts it is still waiting on, and receives whatever
+answers have accumulated for it. The broker parks relayed prompts in its **own
+queue**, so the existing `/mesh/consult` pull serves them to devices unchanged:
+no device-side change, no new app build, and a device never learns or cares that
+it is answering on someone else's behalf.
+
+**The list is the protocol.** The hub always sends its complete pending set, not
+a delta. That single choice buys three properties: a dropped round costs
+nothing, because the next resends the same list; a prompt the hub stops listing
+is finished, so its silence retires the work on the broker; and an already
+answered prompt is never re-parked, which is what stops a device answering the
+same question on every round. All three were bugs first, found in an ssh
+stopgap, before they were rules here.
+
+Routing is a `<id>.origin` sidecar, not a field on the prompt: the prompt is
+served verbatim to devices and routing is the broker's business alone, and
+`store_answer` deletes the prompt file exactly when the broker still needs to
+know where the answer goes.
+
+**Cadence is part of the design.** The relay runs on its own loop — ~2s while
+consults are outstanding, backing off when idle — not on the gossip round. A
+consult's cost is dominated by how long a queued prompt waits before anyone
+notices it, and a minute of that on each leg was most of the round trip.
+
+This retires `tools/consult-bridge.sh`, which did the same job over ssh while
+this was unbuilt.

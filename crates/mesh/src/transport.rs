@@ -243,6 +243,8 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
     let mut lan_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut lan_bound: u16 = 0;
     let lan = Arc::new(LanState::default());
+    // The consult relay keeps its own (much tighter) clock — see consult_relay_loop.
+    let mut relay_task: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -251,6 +253,9 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
             }
             if let Some(l) = lan_task.take() {
                 l.abort();
+            }
+            if let Some(r) = relay_task.take() {
+                r.abort();
             }
             return;
         }
@@ -313,6 +318,12 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
                     continue;
                 }
             }
+        }
+
+        // The consult relay (ADR-0014) runs for as long as the mesh gate is open; it re-reads config
+        // and credential itself each pass, so it needs starting only once.
+        if relay_task.is_none() {
+            relay_task = Some(tokio::spawn(consult_relay_loop(dir.clone(), stop.clone())));
         }
 
         // LAN discovery beacons (second discovery path beside the tailnet).
@@ -486,6 +497,106 @@ async fn heartbeat_status(dir: &Path, cfg: &MeshConfig, cred: &crate::group::Gro
             ],
         )
         .await;
+    }
+}
+
+/// How often the relay talks to the broker while consults are outstanding. Deliberately far tighter
+/// than the gossip interval: a consult's cost is dominated by how long a queued prompt sits before
+/// anyone notices it, and a minute of that on each leg is most of the round trip.
+const CONSULT_RELAY_BUSY: Duration = Duration::from_secs(2);
+/// How often it checks back when there is nothing outstanding.
+const CONSULT_RELAY_IDLE: Duration = Duration::from_secs(10);
+
+/// Broker this node's consults through the rendezvous hosts (ADR-0014), on its own clock.
+///
+/// This is what lets a device answer for a familiar it cannot reach. A home node behind CGNAT is
+/// unreachable from the lighthouse, so the lighthouse can never push; the hub therefore drives both
+/// directions from here — it sends the prompts it is waiting on and takes back whatever answers have
+/// accumulated. It runs beside the gossip loop rather than inside it because the gossip interval is a
+/// minute and a consult should not wait that long twice.
+async fn consult_relay_loop(dir: PathBuf, stop: Arc<AtomicBool>) {
+    // True when the broker may still be holding something of ours — so that after the last prompt
+    // clears we make one final call, which is what tells the broker to retire the finished work.
+    let mut outstanding = false;
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
+        let cfg = config::load(&dir).unwrap_or_default();
+        if cfg.rendezvous_hosts.is_empty() || !mesh_allowed(&dir) {
+            sleep_or_stop(&stop, CONSULT_RELAY_IDLE).await;
+            continue;
+        }
+        let Some(cred) = group::load(&dir).ok().flatten() else {
+            sleep_or_stop(&stop, CONSULT_RELAY_IDLE).await;
+            continue;
+        };
+        let prompts = crate::consult::pending(&dir, now_secs());
+        let busy = !prompts.is_empty();
+        if busy || outstanding {
+            relay_consults(&dir, &cfg, &cred, prompts).await;
+            outstanding = busy;
+        }
+        sleep_or_stop(
+            &stop,
+            if busy {
+                CONSULT_RELAY_BUSY
+            } else {
+                CONSULT_RELAY_IDLE
+            },
+        )
+        .await;
+    }
+}
+
+/// One relay exchange with each broker: hand over the prompts we are waiting on, store what comes
+/// back. Best-effort — a failed round changes nothing, because the next one resends the same list.
+async fn relay_consults(
+    dir: &Path,
+    cfg: &MeshConfig,
+    cred: &crate::group::GroupCredential,
+    prompts: Vec<crate::consult::ConsultPrompt>,
+) {
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return;
+    };
+    let now = now_secs();
+    let relay = crate::consult::ConsultRelay {
+        membership: cred.membership.clone(),
+        group_pubkey: cred.group_pubkey.clone(),
+        prompts,
+        nonce: format!("{now:x}{}", node.node_id()),
+        ts: now,
+    };
+    let Ok(raw) = serde_json::to_vec(&relay) else {
+        return;
+    };
+    let sig = node.sign(&raw);
+    for rh in &cfg.rendezvous_hosts {
+        let addr = format!("{}:{}", rh, cfg.gossip_port);
+        let Ok(resp) = http_send(
+            &addr,
+            Method::POST,
+            "/mesh/consult-relay",
+            Some(raw.clone()),
+            &[
+                ("X-Familiar-Sig", &sig),
+                ("Content-Type", "application/json"),
+            ],
+        )
+        .await
+        else {
+            continue;
+        };
+        let Ok(answers) =
+            serde_json::from_slice::<Vec<crate::consult::ConsultAnswer>>(&resp.body)
+        else {
+            continue;
+        };
+        for a in answers {
+            // Clears the local prompt, which is what stops us relaying it again next round.
+            let _ = crate::consult::store_answer(dir, &a);
+        }
     }
 }
 
@@ -996,6 +1107,21 @@ async fn handle(
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
             recv_consult_answer(&dir, &bytes, &sig)
+        }
+        // Broker (ADR-0014): another familiar hands us the consults it is waiting on, so a device
+        // that can only reach *us* can answer them, and collects the answers we hold for it.
+        (Method::POST, "/mesh/consult-relay") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_consult_relay(&dir, &bytes, &sig)
         }
         (Method::GET, p) if p.starts_with("/mesh/tool/") => {
             let id = p.trim_start_matches("/mesh/tool/");
@@ -1566,6 +1692,27 @@ fn recv_consult_answer(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Byt
         Ok(()) => text(StatusCode::OK, "recorded"),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "answer rejected"),
+    }
+}
+
+/// `POST /mesh/consult-relay` → a peer familiar brokers its consults through us (ADR-0014). Signed +
+/// membership-bearing, like every other write on this seam. 200 + the answers we hold for that peer;
+/// 403 untrusted; 400 malformed.
+fn recv_consult_relay(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let relay: crate::consult::ConsultRelay = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad relay"),
+    };
+    if relay.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    match crate::consult::accept_relay(dir, &relay, now_secs()) {
+        Ok(answers) => match serde_json::to_vec(&answers) {
+            Ok(b) => text(StatusCode::OK, b),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "relay encode"),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "relay rejected"),
     }
 }
 

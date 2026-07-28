@@ -58,6 +58,29 @@ pub struct ConsultAnswerReport {
     pub ts: i64,
 }
 
+/// A hub's signed relay to a broker (ADR-0014): "these are the prompts I am still waiting on — hold
+/// them for whichever device reaches you, and hand me back any answers you have."
+///
+/// One message carries both directions because the hub is the only side that can open a connection:
+/// a home familiar behind CGNAT is unreachable from the lighthouse, so the broker can never push. The
+/// prompt list is the *whole* current pending set, not a delta — that makes it self-healing (a lost
+/// round is simply resent) and doubles as the acknowledgement that retires finished work: anything the
+/// hub stops listing, the broker drops.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsultRelay {
+    pub membership: Membership,
+    pub group_pubkey: String,
+    pub prompts: Vec<ConsultPrompt>,
+    pub nonce: String,
+    pub ts: i64,
+}
+
+impl ConsultRelay {
+    pub fn verify_sig(&self, raw: &[u8], sig_hex: &str) -> Result<()> {
+        verify_node_sig(&self.membership, raw, sig_hex)
+    }
+}
+
 fn verify_node_sig(membership: &Membership, raw: &[u8], sig_hex: &str) -> Result<()> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     let pk = crate::exactly_32(&crate::hex_decode(&membership.node_pubkey)?, "node pubkey")?;
@@ -168,6 +191,93 @@ pub fn accept_answer(dir: &Path, report: &ConsultAnswerReport, now: i64) -> Resu
     store_answer(dir, &report.answer)
 }
 
+/// Which member a relayed prompt came from, kept beside it as `<id>.origin`.
+///
+/// A sidecar rather than a field on [`ConsultPrompt`] for two reasons: the prompt is served verbatim
+/// to devices, and routing is nobody's business but the broker's; and [`store_answer`] deletes the
+/// prompt file when the answer lands, so a field there would vanish exactly when the broker still
+/// needs to know where to send the answer.
+fn origin_path(dir: &Path, id: &str) -> std::path::PathBuf {
+    queue(dir).join(format!("{id}.origin"))
+}
+
+fn read_origin(dir: &Path, id: &str) -> Option<String> {
+    std::fs::read_to_string(origin_path(dir, id))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Ids of everything in the queue with the given extension.
+fn ids_with_suffix(dir: &Path, suffix: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(queue(dir)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.strip_suffix(suffix).map(|s| s.to_string())
+        })
+        .collect()
+}
+
+/// Broker a hub's consults (ADR-0014). Verifies the relaying member, parks its pending prompts in
+/// this node's own queue — so the ordinary `/mesh/consult` pull serves them to devices with no
+/// device-side change at all — and returns the answers gathered for that hub.
+///
+/// The hub's list is authoritative for its own prompts, which keeps both sides converging without
+/// any extra bookkeeping:
+///   * a prompt already answered here is **not** re-parked — otherwise the hub, which keeps listing
+///     it until it receives the answer, would have it answered again on every round;
+///   * a prompt the hub no longer lists is finished (answered and stored there, or abandoned), so its
+///     prompt, answer and origin marker are all dropped — the hub's silence *is* the acknowledgement.
+///
+/// Only prompts this broker is holding **for that same origin** are ever touched. The broker's own
+/// local consults carry no origin marker and are invisible to this path.
+pub fn accept_relay(dir: &Path, relay: &ConsultRelay, now: i64) -> Result<Vec<ConsultAnswer>> {
+    group::verify_membership_consistent(&relay.membership, &relay.group_pubkey, now)
+        .map_err(|_| Error::Untrusted("consult: relay membership does not verify".into()))?;
+    let origin = relay.membership.node_id.clone();
+    std::fs::create_dir_all(queue(dir)).map_err(|e| Error::Malformed(format!("consult: {e}")))?;
+
+    let listed: std::collections::HashSet<&str> =
+        relay.prompts.iter().map(|p| p.id.as_str()).collect();
+
+    // Park anything new. An existing prompt file is left exactly as it is: rewriting it would reset
+    // the timestamp the TTL sweep measures, and could swap the body under a device mid-pull.
+    for p in &relay.prompts {
+        if answer_of(dir, &p.id).is_some() {
+            continue; // answered here already, waiting to be collected below
+        }
+        let path = queue(dir).join(format!("{}.prompt.json", p.id));
+        if !path.exists() {
+            let body =
+                serde_json::to_vec(p).map_err(|e| Error::Malformed(format!("consult: {e}")))?;
+            std::fs::write(&path, body).map_err(|e| Error::Malformed(format!("consult: {e}")))?;
+        }
+        let _ = std::fs::write(origin_path(dir, &p.id), &origin);
+    }
+
+    // Hand back this origin's answers, and retire whatever it has stopped asking about.
+    let mut out = Vec::new();
+    for id in ids_with_suffix(dir, ".origin") {
+        if read_origin(dir, &id).as_deref() != Some(origin.as_str()) {
+            continue;
+        }
+        if listed.contains(id.as_str()) {
+            if let Some(a) = answer_of(dir, &id) {
+                out.push(a);
+            }
+        } else {
+            let _ = std::fs::remove_file(queue(dir).join(format!("{id}.prompt.json")));
+            let _ = std::fs::remove_file(queue(dir).join(format!("{id}.answer.json")));
+            let _ = std::fs::remove_file(origin_path(dir, &id));
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +349,106 @@ mod tests {
         report.answer.node_id = node.node_id();
         accept_answer(&home, &report, NOW).unwrap();
         assert_eq!(pending(&home, NOW).len(), 0);
+    }
+
+    /// The whole broker lifecycle, in the order it actually happens across gossip rounds.
+    #[test]
+    fn broker_relays_a_consult_and_returns_the_answer_once() {
+        let hub = tmp("relay_hub");
+        let broker = tmp("relay_broker");
+        let node = NodeKey::load_or_mint(&hub, "n").unwrap();
+        let cred = create_group(&hub, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let relay_of = |prompts: Vec<ConsultPrompt>| ConsultRelay {
+            membership: cred.membership.clone(),
+            group_pubkey: cred.group_pubkey.clone(),
+            prompts,
+            nonce: "n1".into(),
+            ts: NOW,
+        };
+
+        // Round 1 — the hub relays a pending prompt; the broker parks it where its own
+        // /mesh/consult pull will serve it, and has nothing to hand back yet.
+        let p = enqueue(&hub, "c1", "a question", "theory", NOW).unwrap();
+        assert!(accept_relay(&broker, &relay_of(vec![p.clone()]), NOW)
+            .unwrap()
+            .is_empty());
+        assert_eq!(pending(&broker, NOW).len(), 1, "device can now see it");
+
+        // A device pulls from the broker and answers there.
+        let ans = ConsultAnswer {
+            id: "c1".into(),
+            json: "{\"theory\":\"x\"}".into(),
+            node_id: "device".into(),
+            ts: NOW,
+        };
+        store_answer(&broker, &ans).unwrap();
+
+        // Round 2 — the hub still lists c1 (it has not got the answer yet). The broker must NOT
+        // re-park it, or the device would answer the same prompt every round; it returns the answer.
+        let got = accept_relay(&broker, &relay_of(vec![p.clone()]), NOW).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].json, "{\"theory\":\"x\"}");
+        assert_eq!(
+            pending(&broker, NOW).len(),
+            0,
+            "an answered prompt is not offered to devices again"
+        );
+
+        // The hub stores it, which clears its own prompt.
+        store_answer(&hub, &got[0]).unwrap();
+        assert_eq!(pending(&hub, NOW).len(), 0);
+
+        // Round 3 — the hub no longer lists c1. That silence is the acknowledgement: the broker
+        // retires the answer and its origin marker, and stops handing it back.
+        assert!(accept_relay(&broker, &relay_of(vec![]), NOW)
+            .unwrap()
+            .is_empty());
+        assert!(answer_of(&broker, "c1").is_none());
+        assert!(read_origin(&broker, "c1").is_none());
+    }
+
+    #[test]
+    fn broker_abandons_a_prompt_the_hub_gave_up_on() {
+        let hub = tmp("relay_giveup");
+        let broker = tmp("relay_giveup_b");
+        let node = NodeKey::load_or_mint(&hub, "n").unwrap();
+        let cred = create_group(&hub, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let p = enqueue(&hub, "c2", "q", "", NOW).unwrap();
+        let mut relay = ConsultRelay {
+            membership: cred.membership.clone(),
+            group_pubkey: cred.group_pubkey.clone(),
+            prompts: vec![p],
+            nonce: "n".into(),
+            ts: NOW,
+        };
+        accept_relay(&broker, &relay, NOW).unwrap();
+        assert_eq!(pending(&broker, NOW).len(), 1);
+        // The hub timed out and dropped it — the broker must not keep offering it to devices.
+        relay.prompts.clear();
+        accept_relay(&broker, &relay, NOW).unwrap();
+        assert_eq!(pending(&broker, NOW).len(), 0);
+    }
+
+    /// A relay must never disturb consults the broker queued for itself.
+    #[test]
+    fn broker_never_touches_its_own_local_consults() {
+        let broker = tmp("relay_local");
+        let hub = tmp("relay_local_hub");
+        let node = NodeKey::load_or_mint(&hub, "n").unwrap();
+        let cred = create_group(&hub, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        enqueue(&broker, "mine", "the broker's own question", "", NOW).unwrap();
+        let relay = ConsultRelay {
+            membership: cred.membership,
+            group_pubkey: cred.group_pubkey,
+            prompts: vec![],
+            nonce: "n".into(),
+            ts: NOW,
+        };
+        accept_relay(&broker, &relay, NOW).unwrap();
+        assert_eq!(
+            pending(&broker, NOW).len(),
+            1,
+            "a local consult has no origin marker and is not the relay's business"
+        );
     }
 }
