@@ -63,7 +63,9 @@ pub fn now_secs() -> i64 {
 }
 
 /// A peer as last seen — surfaced in Glass, refreshed each successful exchange.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `Default` so a row adopted from the status directory can fill the fields that only a brief or a
+/// worldview read can teach us (tools, arch, geo) without inventing values for them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PeerRecord {
     pub node_id: String,
     pub label: String,
@@ -624,17 +626,57 @@ async fn pull_status(dir: &Path, cfg: &MeshConfig) {
 }
 
 /// Bump a known peer's `last_seen` forward when the status directory reports it fresher than we hold
-/// (ADR-0017). Only ever moves last_seen forward — a stale directory row never regresses local truth
-/// — and a fresh heartbeat revives an abandoned peer, mirroring `register_device_peer`.
-fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], _now: i64) {
+/// (ADR-0017), and **adopt members we have never met**. Only ever moves last_seen forward — a stale
+/// directory row never regresses local truth — and a fresh heartbeat revives an abandoned peer,
+/// mirroring `register_device_peer`.
+///
+/// The adoption half matters as much as the bump. This used to `find()` and silently drop anything
+/// it didn't already hold, which meant a member admitted at the lighthouse — the ONLY minting door
+/// (ADR-0018), so in practice every remote member — never reached any other node's roster. A tester
+/// on the far side of the country could be enrolled, live and heartbeating, and simply not exist as
+/// far as the rest of the mesh was concerned. The lighthouse knew; nobody asked it to say.
+fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], now: i64) {
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    // Only ever adopt rows for OUR mesh, and never adopt ourselves.
+    let our_ref = group::load(dir)
+        .ok()
+        .flatten()
+        .map(|c| crate::rendezvous::group_ref(&c.group_id))
+        .unwrap_or_default();
+    let our_node = node_id_of(dir);
     let mut changed = false;
     for st in statuses {
         if st.node_id.is_empty() {
+            continue;
+        }
+        if peers.iter().all(|p| p.node_id != st.node_id) {
+            // Unknown member. Adopt it if it is demonstrably one of ours: same group_ref, not us.
+            // A row carrying no group_ref is from an older node and is not trusted into the roster.
+            if st.node_id == our_node || our_ref.is_empty() || st.group_ref != our_ref {
+                continue;
+            }
+            peers.push(PeerRecord {
+                node_id: st.node_id.clone(),
+                label: if st.label.is_empty() {
+                    st.node_id.chars().take(8).collect()
+                } else {
+                    st.label.clone()
+                },
+                addr: String::new(),
+                group_id: String::new(),
+                last_seen: st.updated_at,
+                // We are meeting it now; the lighthouse may have known it far longer, but this is
+                // the first moment WE can honestly attest to. `first_seen` is our own record.
+                first_seen: if st.updated_at > 0 { st.updated_at } else { now },
+                human: st.present_human.clone(),
+                connectivity: st.connectivity.clone(),
+                ..Default::default()
+            });
+            changed = true;
             continue;
         }
         if let Some(p) = peers.iter_mut().find(|p| p.node_id == st.node_id) {
@@ -3034,6 +3076,67 @@ mod tests {
 
         // An unknown node id is a no-op, not an error.
         assert!(!abandon_peer(&dir, "nobody").unwrap());
+    }
+
+    #[test]
+    fn the_status_directory_teaches_us_members_we_have_never_met() {
+        // The bug this covers: a member admitted at the lighthouse (the only minting door,
+        // ADR-0018) heartbeats there, we pull the directory — and used to drop every row we did
+        // not already hold. A remote tester was live, enrolled, and invisible to the whole mesh.
+        let dir = fresh_dir("adopt_status");
+        let node = crate::node::NodeKey::load_or_mint(&dir, "familiar").unwrap();
+        let cred =
+            crate::group::create_group(&dir, &node, "TheRiver", 1_785_000_000, 86_400).unwrap();
+        let ours = crate::rendezvous::group_ref(&cred.group_id);
+
+        let mk = |id: &str, gref: &str, label: &str, human: &str, at: i64| {
+            crate::status::MemberStatus {
+                node_id: id.into(),
+                group_ref: gref.into(),
+                actor: String::new(),
+                label: label.into(),
+                present_human: human.into(),
+                present_via: String::new(),
+                present_since: 0,
+                connectivity: "lighthouse".into(),
+                tailnet_addr: String::new(),
+                tailnet_up: false,
+                updated_at: at,
+            }
+        };
+
+        let statuses = vec![
+            mk("remote01", &ours, "Ivan's iPhone", "ivan", 1_785_100_000),
+            // A different mesh entirely — must never be adopted.
+            mk("stranger1", "someoneelsesgroup", "Not ours", "", 1_785_100_000),
+            // A pre-group_ref node — unattributable, so not trusted into the roster.
+            mk("legacy01", "", "Old node", "", 1_785_100_000),
+            // Ourselves — never adopt our own row as a peer.
+            mk(&node.node_id(), &ours, "Wildhorse", "ian", 1_785_100_000),
+        ];
+
+        apply_status_freshness(&dir, &statuses, 1_785_100_000);
+        let peers = load_peers(&dir);
+        let ids: Vec<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
+
+        assert!(ids.contains(&"remote01"), "a live member of OUR mesh must be adopted, got {ids:?}");
+        assert!(!ids.contains(&"stranger1"), "another mesh's member must never be adopted");
+        assert!(!ids.contains(&"legacy01"), "an unattributable row must not be adopted");
+        assert!(!ids.contains(&node.node_id().as_str()), "we must not adopt ourselves");
+
+        let ivan = peers.iter().find(|p| p.node_id == "remote01").unwrap();
+        assert_eq!(ivan.label, "Ivan's iPhone");
+        assert_eq!(ivan.last_seen, 1_785_100_000);
+        assert_eq!(ivan.first_seen, 1_785_100_000, "our own first sighting, not the lighthouse's");
+        assert_eq!(ivan.human, "ivan");
+        assert_eq!(ivan.connectivity, "lighthouse");
+
+        // Idempotent: a second pull must not duplicate the row.
+        apply_status_freshness(&dir, &statuses, 1_785_100_100);
+        assert_eq!(
+            load_peers(&dir).iter().filter(|p| p.node_id == "remote01").count(),
+            1
+        );
     }
 
     #[test]
