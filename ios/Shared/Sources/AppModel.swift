@@ -400,7 +400,7 @@ final class AppModel: ObservableObject {
             let port = enrollPort > 0 ? enrollPort : 47100
             let doors = (try? await RendezvousClient.directory(host: Self.rendezvousHost, port: port)) ?? []
             guard let door = doors.first else {
-                note("no familiar found automatically — scan a QR or paste an address")
+                note("couldn't reach the mesh automatically — use an invite instead")
                 return
             }
             // The lighthouse (always-on public door) is knocked on FIRST, then any other
@@ -424,7 +424,7 @@ final class AppModel: ObservableObject {
 
     func requestJoin(from json: String) {
         guard let p = EnrollmentPayload.parse(json) else {
-            note("✗ could not read that address")
+            note("✗ could not read that invite")
             return
         }
         hosts = p.candidateHosts
@@ -450,7 +450,7 @@ final class AppModel: ObservableObject {
             do {
                 var grant = try await enroller.requestJoin(node: node)     // non-nil if auto-approved
                 promoteHost(host)
-                if grant == nil { note("waiting for the familiar to approve this device…") }
+                if grant == nil { note("waiting for the mesh to admit this device…") }
                 var tries = 0
                 while grant == nil, tries < 150 {                          // ~5 min of polling
                     try await Task.sleep(nanoseconds: 2_000_000_000)
@@ -473,14 +473,14 @@ final class AppModel: ObservableObject {
                 return
             } catch EnrollmentClient.EnrollError.denied {
                 enrolling = false
-                note("✗ the familiar declined this device")
+                note("✗ the mesh declined this device")
                 return
             } catch {
                 lastError = error      // unreachable on this path — try the next address
             }
         }
         enrolling = false
-        note("… couldn't reach the familiar at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
+        note("… couldn't reach the mesh at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
     }
 
     /// Activate the watch link and, if we're enrolled, (re)hand the watch our address — so a watch

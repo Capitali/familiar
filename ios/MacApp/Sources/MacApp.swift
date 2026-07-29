@@ -21,10 +21,19 @@ struct FamiliarMacApp: App {
 
     var body: some Scene {
         WindowGroup {
-            SphereConsole()
-                .environmentObject(bridge)
-                .environmentObject(model)
-                .frame(minWidth: 1040, minHeight: 720)
+            // Same gate as the iOS RootView: the console is for members. An unenrolled Mac gets
+            // the join screen — before this it got the console regardless, with nothing in it and
+            // no door (ADR-0018 made the Mac a peer; it needs a peer's way in).
+            Group {
+                if model.enrolled {
+                    SphereConsole()
+                } else {
+                    MacEnrollView()
+                }
+            }
+            .environmentObject(bridge)
+            .environmentObject(model)
+            .frame(minWidth: 1040, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

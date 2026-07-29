@@ -2,6 +2,10 @@ import SwiftUI
 
 // The enroll flow's design pieces — the palette, the breathing sphere, and the glass panel —
 // kept from the retired GlassConsole (the sphere took over everything post-enrollment).
+//
+// Lives in Shared/ because BOTH shells show a join screen: a Mac is a peer that enrols itself
+// (ADR-0018), so it needs the same language as iOS rather than a second one. Pure SwiftUI, no
+// UIKit/AppKit — that is what makes it shareable, so keep it that way.
 
 enum Fam {
     static let bg = Color(hex: 0x05070d)

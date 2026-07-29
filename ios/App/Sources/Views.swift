@@ -55,7 +55,7 @@ struct EnrollView: View {
                 VStack(spacing: 22) {
                     BreathingSphere(size: 96).padding(.top, 40)
                     Text("FAMILIAR").font(.system(size: 17, weight: .semibold)).tracking(3)
-                    Text("Join a familiar")
+                    Text("Connect to the mesh")
                         .font(.system(size: 26, weight: .semibold)).foregroundStyle(Fam.ink)
 
                     if model.enrolling {
@@ -64,13 +64,13 @@ struct EnrollView: View {
                             VStack(spacing: 12) {
                                 HStack(spacing: 10) {
                                     ProgressView().tint(Fam.blueSoft)
-                                    Text("Waiting for approval on the familiar…")
+                                    Text("Waiting for the mesh to admit this device…")
                                         .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.8))
                                 }
                                 Text("CONFIRMATION CODE").font(Fam.mono(9)).tracking(2).foregroundStyle(Fam.monoDim.opacity(0.6))
                                 Text(model.confirmationCode)
                                     .font(Fam.mono(30)).tracking(4).foregroundStyle(Fam.blueSoft)
-                                Text("Approve this device on your familiar — the code there must match.")
+                                Text("The code shown on the mesh must match this one.")
                                     .font(.system(size: 12)).foregroundStyle(Fam.ink.opacity(0.55))
                                     .multilineTextAlignment(.center)
                             }
@@ -78,11 +78,11 @@ struct EnrollView: View {
                     } else if !model.autoEnrollTried {
                         Panel {
                             HStack(spacing: 10) { ProgressView().tint(Fam.blueSoft)
-                                Text("Looking for your familiar…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
+                                Text("Looking for the mesh…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
                         }.padding(.horizontal, 22)
                     } else {
                         // Auto-discovery found nothing — offer to retry or use an invite.
-                        Text("Couldn't find a familiar automatically. Retry, or use an invite from a familiar you can see.")
+                        Text("Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see.")
                             .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                             .multilineTextAlignment(.center).padding(.horizontal, 28)
                         Button { model.autoEnrollTried = false; model.autoEnroll() } label: {
