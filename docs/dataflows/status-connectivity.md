@@ -12,15 +12,15 @@ Related: [ADR-0017](../decision-records/0017-federated-status-and-connectivity.m
 ```mermaid
 sequenceDiagram
     autonumber
-    participant M as Member (device / hub)
-    participant L as Lighthouse (status authority)
-    participant H as Home hub
+    participant M as Member (any peer)
+    participant L as Lighthouse (status authority · the one permanent fixture)
+    participant P as Any other peer
     M->>L: POST /mesh/status (signed · own node only)<br/>{ online, present_human, connectivity }
     Note over L: keep a per-member directory, 5-min TTL<br/>+ surface its own fresh peers as status rows
-    H->>L: GET /mesh/status
-    L-->>H: live directory
-    Note over H: bump known peers' last_seen forward<br/>adopt each member's reported connectivity
-    Note over H: roster now shows the whole mesh fresh,<br/>with a via-tailscale / via-lighthouse / local badge
+    P->>L: GET /mesh/status
+    L-->>P: live directory
+    Note over P: bump known peers' last_seen forward<br/>adopt each member's reported connectivity
+    Note over P: roster now shows the whole mesh fresh,<br/>with a via-tailscale / via-lighthouse / local badge
 ```
 
 ## Prefer Tailscale when proven — fall back when not

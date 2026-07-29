@@ -42,7 +42,7 @@ needs no callback to the door.
 sequenceDiagram
     autonumber
     participant D as Member device
-    participant N as Any mesh node (home hub · lighthouse · peer)
+    participant N as Any mesh node (lighthouse · peer)
     Note over D,N: covenant-keyed TLS · SPKI-pinned
     D->>N: request + membership cert<br/>body signed (X-Familiar-Sig) · ts + nonce
     Note over N: cert signed by the group key? (a member)<br/>cert's pubkey == the signing node?<br/>signature over the body valid?<br/>ts within window? · nonce unseen? (replay)
@@ -59,7 +59,7 @@ device sends anyone.
 |---|---|
 | **Self-certifying identity** | The device's `node_id` is the fingerprint of its own public key. It can't claim an id it doesn't hold the key for — the name *is* the proof. |
 | **Membership cert** | A signature by the *group key* over `{node_id, node_pubkey, issued, expiry, group_id}`. Carrying it proves the group admitted this node. |
-| **The group key** | Lives only on mint-capable doors (the lighthouse, the home hub). It signs certs; it never travels. A public copy (`group_pubkey`) lets any node verify without holding it. |
+| **The group key** | In service it lives on **the lighthouse alone** — the single minting door ([ADR-0018](../decision-records/0018-lighthouse-single-fixture.md)) — plus a cold offline escrow held by the human, so losing the lighthouse is an outage rather than the end of the group. It signs certs; it never travels. A public copy (`group_pubkey`) lets any node verify without holding it, which is why **every peer can check membership while none can grant it** (`GroupCredential::can_mint()` is `false` on a covenant-joined node). |
 | **The covenant** | To be admitted, a node must attest the Three Laws, signed. Admission is automated policy — the human consents to the *process*, then governs by review, not per-join approval (ADR-0015). |
 | **Covenant-keyed TLS + pinning** | Transport is TLS with a persistent key and a pinned SPKI. A joining device trusts the door's cert because the lighthouse vouches for its pin — first contact, no prior secret. |
 | **Freshness** | Every signed request carries a timestamp window and a one-shot nonce, so a captured request can't be replayed later. |

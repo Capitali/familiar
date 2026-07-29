@@ -11,9 +11,12 @@
   globe dive reaches map altitude; this page never fakes a map.
   Glyphs over words: controls are animated glyphs; text is data.
 -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Everything this page needs is in vendor/ and ships inside the app bundle. It loaded three.js,
+     the earth textures, qrcode and the fonts from unpkg/Google at RUNTIME before: with no
+     network there was no three.js, so the console was a black window rather than a degraded
+     one — and a shipping app had a hard dependency on two third-party CDNs. Re-vendor with
+     tools/vendor-sphere-assets.sh if a version ever needs bumping. -->
+<link href="vendor/fonts/fonts.css" rel="stylesheet">
 <style>
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;background:transparent;overflow:hidden;}
@@ -120,9 +123,9 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script type="importmap">
-{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+{"imports":{"three":"./vendor/three/three.module.js","three/addons/controls/OrbitControls.js":"./vendor/three/OrbitControls.js"}}
 </script>
 <script type="module">
 import * as THREE from 'three';
@@ -688,12 +691,36 @@ const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (
 // crossfade — satellite fading out while REAL Apple Maps fades in, both descending in
 // step; last 25% street map only, zooming to close detail (MapKit finishes the flight).
 const ROTATE_MS = 900, ZOOM_MS = 3200;
+// Where "centred" actually is. The camera ORBITS (autoRotate, and the human can drag), so the
+// point under the camera is `camera.position` normalised — not world +Z. Aiming the target at
+// +Z centred it only in the one case where the camera happened to be sitting there; every other
+// time the globe swung the target off to wherever +Z had drifted to, which is the "spins to a
+// random spot" before the zoom. Recomputed each frame so leftover damping can't re-open the gap.
+//
+// The roll matters too: we hand off to an MKMapCamera with heading 0 (north up), so the sphere
+// has to arrive north-up as well or the satellite and the map sit rotated against each other for
+// the whole crossfade.
+function diveAimQ() {
+  const camDir = G.camera.position.clone().normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(G.diveDir, camDir);
+  const up = G.camera.up.clone();
+  const screenUp = up.sub(camDir.clone().multiplyScalar(up.dot(camDir)));
+  const north = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+  const northProj = north.sub(camDir.clone().multiplyScalar(north.dot(camDir)));
+  // Degenerate when the target IS a pole (north projects to nothing) — leave the roll alone.
+  if (screenUp.lengthSq() > 1e-8 && northProj.lengthSq() > 1e-8) {
+    screenUp.normalize(); northProj.normalize();
+    const ang = Math.atan2(northProj.clone().cross(screenUp).dot(camDir), northProj.dot(screenUp));
+    q.premultiply(new THREE.Quaternion().setFromAxisAngle(camDir, ang));
+  }
+  return q;
+}
 function beginDive(target, dir) {
   S.holoHidden = true; renderChrome();
   if (!G.group) { handoff(target); return; }
   G.diveTarget = target;
+  G.diveDir = dir.clone().normalize();
   G.diveStartQ = G.group.quaternion.clone();
-  G.diveTargetQ = new THREE.Quaternion().setFromUnitVectors(dir.clone(), new THREE.Vector3(0, 0, 1));
   G.diveFromZ = G.camera.position.length();
   G.diveT0 = performance.now();
   G.diving = true;
@@ -740,7 +767,7 @@ function initThree() {
   const geo = new THREE.SphereGeometry(1, 256, 128);
   const mgr = new THREE.LoadingManager();
   const loader = new THREE.TextureLoader(mgr);
-  const base = 'https://unpkg.com/three-globe/example/img/';
+  const base = 'vendor/textures/';
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
   const dayTex = loader.load(base + 'earth-blue-marble.jpg');
   const topoTex = loader.load(base + 'earth-topology.png');
@@ -817,13 +844,14 @@ function initThree() {
     }
     if (G.diving) {
       const el = performance.now() - G.diveT0;
+      const aimQ = diveAimQ();   // re-aimed every frame — see diveAimQ
       if (el < ROTATE_MS) {
-        // Phase 0 — rotate to center the target; no zoom yet.
+        // Phase 0 — rotate the target under the camera; no zoom yet.
         const rp = el / ROTATE_MS;
         const re = rp < 0.5 ? 2*rp*rp : 1 - Math.pow(-2*rp + 2, 2)/2;
-        group.quaternion.copy(G.diveStartQ).slerp(G.diveTargetQ, re);
+        group.quaternion.copy(G.diveStartQ).slerp(aimQ, re);
       } else {
-        group.quaternion.copy(G.diveTargetQ);
+        group.quaternion.copy(aimQ);
         const dp = Math.min(1, (el - ROTATE_MS)/ZOOM_MS);
         const de = dp < 0.5 ? 2*dp*dp : 1 - Math.pow(-2*dp + 2, 2)/2;
         camera.position.setLength(G.diveFromZ + (2.05 - G.diveFromZ)*de);
@@ -837,6 +865,10 @@ function initThree() {
     const breath = 1 + Math.sin(t * (Math.PI*2/6)) * 0.012;
     group.scale.setScalar(breath);
     controls.autoRotate = !G.diving && S.mode === 'globe';
+    // A drag mid-dive fights the choreography (and moves the very camera the aim is computed
+    // against). Declarative rather than a flag to restore, so sphereBackToGlobe re-enables it
+    // for free when S.mode returns to 'globe'.
+    controls.enabled = !G.diving && S.mode === 'globe';
     controls.update();
     renderer.render(scene, camera);
 

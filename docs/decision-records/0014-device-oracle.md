@@ -8,6 +8,13 @@
   better consults make better-cited claims), `docs/agents.md`, the A9 campaign
   (`tools/campaigns/a9.json` — currently starved for a funded provider)
 
+> **Terminology note (2026-07-29).** This record says "home hub" for the node the
+> campaign queued on. That was accurate when written;
+> [ADR-0018](0018-lighthouse-single-fixture.md) has since retired the concept —
+> the lighthouse is the single permanent fixture and everything else is a peer.
+> Read "home hub" below as "the peer the campaign happened to queue on". The
+> CGNAT constraint the record describes is unchanged and still shapes the design.
+
 ## Context
 
 The muse and the laboratory are inference-starved: hosted providers are unfunded

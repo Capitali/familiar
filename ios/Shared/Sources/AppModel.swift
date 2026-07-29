@@ -59,10 +59,11 @@ final class AppModel: ObservableObject {
     private func ensureRendezvous() {
         var h = hosts
         if !h.contains(Self.rendezvousHost) { h.append(Self.rendezvousHost) }
-        // Read preference: the home hub first (fresh + local), the lighthouse as fallback, tailnet
-        // last. The enrollment handshake still knocks on the lighthouse first (orderedCandidates);
-        // this only orders the ONGOING worldview reads so an on-network member keeps the home node's
-        // roster current instead of routing every read through the remote lighthouse.
+        // Read preference: the nearest peer first (fresh + local), the lighthouse as fallback,
+        // tailnet last. The enrollment handshake still knocks on the lighthouse first
+        // (orderedCandidates); this only orders the ONGOING worldview reads so an on-network member
+        // keeps that peer's roster current instead of routing every read through the lighthouse.
+        // Preference is latency, never authority — a nearby peer earns no standing (ADR-0018).
         let ordered = Self.readOrderedCandidates(h)
         if ordered != hosts {
             hosts = ordered
@@ -140,11 +141,11 @@ final class AppModel: ObservableObject {
         return lighthouse + nonTail + tail
     }
 
-    /// The ONGOING read preference (distinct from the enrollment door order above): the local home
-    /// node first, the lighthouse second, Tailscale last. A member reads its worldview from the home
-    /// hub when they share a network — lower latency, and it keeps that hub's roster fresh about this
-    /// device (a read updates last_seen there). The lighthouse stays the always-reachable fallback for
-    /// when the home node isn't on the same network; tailnet is still the post-establishment path.
+    /// The ONGOING read preference (distinct from the enrollment door order above): the nearest
+    /// peer first, the lighthouse second, Tailscale last. A member reads its worldview from a peer
+    /// it shares a network with — lower latency, and it keeps that peer's roster fresh about this
+    /// device (a read updates last_seen there). The lighthouse stays the always-reachable fallback
+    /// for when no peer is on the same network; tailnet is still the post-establishment path.
     static func readOrderedCandidates(_ raw: [String]) -> [String] {
         var seen = Set<String>()
         let valid = raw.filter { isValidHost($0) && seen.insert($0).inserted }
@@ -177,7 +178,7 @@ final class AppModel: ObservableObject {
     private func learnHosts(_ advertised: [String]?) {
         let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
-        // Learning the home hub's LAN address (advertised in the worldview) lets a running device
+        // Learning a peer's LAN address (advertised in the worldview) lets a running device
         // switch its reads to it without a relaunch — re-sort to the read preference (home → lighthouse
         // → tailnet) so the freshest, most-local path wins.
         hosts.append(contentsOf: fresh)
@@ -533,7 +534,7 @@ final class AppModel: ObservableObject {
     /// each with the on-device model, and push the answers back. Only devices with Apple Intelligence
     /// serve consults; others skip silently and the familiar's provider chain rolls on. Serialized so
     /// a slow generation never overlaps the next read cycle. Pulls from the host we just read from —
-    /// the muse queues on the home hub, so an on-network device picks them up.
+    /// the muse queues on whichever peer is serving, so an on-network device picks them up.
     func serviceConsults(host readHost: String) async {
         guard ConsultRunner.available, !servicingConsults else { return }
         guard let g = storedGrant(), !readHost.isEmpty else { return }

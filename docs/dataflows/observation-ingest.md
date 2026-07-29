@@ -13,7 +13,7 @@ sequenceDiagram
     autonumber
     participant S as Sensors (watch / phone)
     participant A as Device agent
-    participant F as Familiar (home hub)
+    participant F as Familiar (whichever peer answers — nearest first, lighthouse as floor)
     Note over S,A: consent-gated — nothing sampled until the human turns it on
     S->>A: raw sample (heart rate, motion, gyro, location)
     Note over A: derive + bucket:<br/>heart_rate:elevated · motion:walking<br/>gyro:turning · location:48.6,-93.4 (~100m)
