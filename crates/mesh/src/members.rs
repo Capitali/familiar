@@ -918,20 +918,50 @@ mod tests {
         ];
         let src = "mesh:watch1";
         let obs = vec![
-            Observation::new("watch:ian", "reports", "heart_rate:elevated", "", src, 100, 0.9),
+            Observation::new(
+                "watch:ian",
+                "reports",
+                "heart_rate:elevated",
+                "",
+                src,
+                100,
+                0.9,
+            ),
             Observation::new("watch:ian", "reports", "motion:walking", "", src, 101, 0.9),
             Observation::new("watch:ian", "reports", "gyro:turning", "", src, 102, 0.9),
-            Observation::new("watch:ian", "reports", "location:48.6,-93.4", "", src, 103, 0.9),
+            Observation::new(
+                "watch:ian",
+                "reports",
+                "location:48.6,-93.4",
+                "",
+                src,
+                103,
+                0.9,
+            ),
             // A newer heart reading must win over the older one.
-            Observation::new("watch:ian", "reports", "heart_rate:normal", "", src, 104, 0.9),
+            Observation::new(
+                "watch:ian",
+                "reports",
+                "heart_rate:normal",
+                "",
+                src,
+                104,
+                0.9,
+            ),
         ];
         attach_companions(&mut out, &obs);
         assert!(
             out[0].attached.iter().any(|a| a == "⌚ watch"),
             "the same human's phone is badged with its watch"
         );
-        assert!(out[1].attached.is_empty(), "the watch itself carries no badge");
-        assert!(out[2].attached.is_empty(), "a different human's iPad is not badged");
+        assert!(
+            out[1].attached.is_empty(),
+            "the watch itself carries no badge"
+        );
+        assert!(
+            out[2].attached.is_empty(),
+            "a different human's iPad is not badged"
+        );
         assert!(
             out[3].attached.is_empty(),
             "even the same human's iPad is not badged — a watch pairs with the iPhone, not the iPad"
@@ -945,29 +975,45 @@ mod tests {
 
     #[test]
     fn dedup_collapses_reinstalled_device_identities() {
-        let mk = |node: &str, label: &str, actor: &str, kind: &str, last: i64, total: i64| -> Member {
-            serde_json::from_value(serde_json::json!({
-                "node_id": node, "label": label, "kind": kind, "os": "", "actor": actor,
-                "detail": "", "first_seen": 0, "last_seen": last, "online": false,
-                "total_online_secs": total
-            }))
-            .unwrap()
-        };
+        let mk =
+            |node: &str, label: &str, actor: &str, kind: &str, last: i64, total: i64| -> Member {
+                serde_json::from_value(serde_json::json!({
+                    "node_id": node, "label": label, "kind": kind, "os": "", "actor": actor,
+                    "detail": "", "first_seen": 0, "last_seen": last, "online": false,
+                    "total_online_secs": total
+                }))
+                .unwrap()
+            };
         let members = vec![
             mk("self1", "Wildhorse", "", "self_node", 500, 0), // no device actor — untouched
             mk("d5c3", "iPhone", "phone:ian", "device_peer", 100, 60), // oldest, nice label
             mk("7361", "phone:ian", "phone:ian", "device_agent", 200, 30),
             mk("8e51", "phone:ian", "phone:ian", "device_agent", 400, 10), // freshest
-            mk("ipad1", "iPad", "ipad:ian", "device_peer", 300, 90), // sole iPad — kept as-is
+            mk("ipad1", "iPad", "ipad:ian", "device_peer", 300, 90),       // sole iPad — kept as-is
         ];
         let out = dedup_devices(members);
         // Wildhorse + one iPhone + one iPad == 3 rows (the three phone:ian identities collapsed).
         assert_eq!(out.len(), 3, "three phone identities collapse to one");
         let phone = out.iter().find(|m| m.actor == "phone:ian").unwrap();
-        assert_eq!(phone.node_id, "8e51", "the freshest identity represents the device");
-        assert_eq!(phone.label, "iPhone", "a friendly label is carried from the lineage");
-        assert_eq!(phone.total_online_secs, 100, "cumulative online time summed across the lineage");
-        assert!(out.iter().any(|m| m.node_id == "self1"), "the self node is never merged");
-        assert!(out.iter().any(|m| m.node_id == "ipad1"), "a sole device is left intact");
+        assert_eq!(
+            phone.node_id, "8e51",
+            "the freshest identity represents the device"
+        );
+        assert_eq!(
+            phone.label, "iPhone",
+            "a friendly label is carried from the lineage"
+        );
+        assert_eq!(
+            phone.total_online_secs, 100,
+            "cumulative online time summed across the lineage"
+        );
+        assert!(
+            out.iter().any(|m| m.node_id == "self1"),
+            "the self node is never merged"
+        );
+        assert!(
+            out.iter().any(|m| m.node_id == "ipad1"),
+            "a sole device is left intact"
+        );
     }
 }

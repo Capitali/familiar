@@ -333,6 +333,13 @@ pub(crate) fn read_worldview(
             m.relationship = "self".into();
         }
     }
+    // Membership decided that this node may READ. Standing decides what it sees. Admission is
+    // automatic (ADR-0015), so "admitted" and "trusted with the household's names" are not the
+    // same fact — an unlisted reader gets the same mesh with none of the identities. Default
+    // deny: full standing is granted by hand in `standing.json`.
+    if crate::standing::standing_of(dir, &req.node.node_id) == crate::standing::Standing::Guest {
+        crate::standing::to_guest_view(&mut view, &req.node.node_id);
+    }
     // Tell the console every address the MESH answers at: human-asserted first (a
     // lighthouse's NAT-hidden public IP or DNS name — `advertise_hosts`), then ours, then
     // fresh gossip peers (any member node serves the same verified read seam — the
@@ -942,12 +949,85 @@ mod tests {
         )
         .unwrap();
 
+        // Reading is membership; SEEING the household is standing (ADR-0015 admits automatically,
+        // so the two are not the same fact). Put this reader on the roll to get the real snapshot.
+        grant_full_standing(&host, &device.node_id());
+
         let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
         let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
         assert_eq!(view.group_label, "river");
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
         assert_eq!(view.recent[0].object, "the familiar for help");
+    }
+
+    /// Put a node on the standing roll, so it reads the household's real worldview.
+    fn grant_full_standing(dir: &std::path::Path, node_id: &str) {
+        let roll = crate::standing::StandingRoll {
+            full: vec![node_id.to_string()],
+            ..Default::default()
+        };
+        std::fs::write(
+            dir.join(crate::standing::STANDING_FILE),
+            serde_json::to_vec(&roll).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_member_not_on_the_standing_roll_reads_a_guest_view() {
+        // The case that matters: an auto-admitted stranger. It is a real member — the read
+        // SUCCEEDS, it is not an error — but it must not learn who lives here.
+        let (host, cred, device) = setup("guest");
+        observation::record(
+            &host,
+            Observation::new(
+                "ian",
+                "asked",
+                "the familiar for help",
+                "at the galley table",
+                "local",
+                NOW,
+                0.9,
+            ),
+        )
+        .unwrap();
+
+        // No standing.json at all — default deny.
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+
+        // The shape is intact and honest…
+        assert_eq!(view.observation_count, 1);
+        assert_eq!(view.recent.len(), 1);
+        assert_eq!(
+            view.recent[0].ts, NOW,
+            "timestamps must survive — Ian asked for this"
+        );
+        assert_eq!(view.recent[0].action, "asked", "the cadence stays legible");
+
+        // …and the people are gone.
+        assert_ne!(view.group_label, "river");
+        assert_ne!(view.recent[0].object, "the familiar for help");
+        assert!(view.recent[0].context.is_empty());
+        assert!(
+            !view.recent[0].actor.contains("ian"),
+            "actor must not name a human, got {:?}",
+            view.recent[0].actor
+        );
+        for m in &view.members {
+            assert!(
+                !m.human.contains("ian"),
+                "member.human leaked: {:?}",
+                m.human
+            );
+            assert!(
+                !m.present_human.contains("ian"),
+                "member.present_human leaked: {:?}",
+                m.present_human
+            );
+            assert!(m.addr.is_empty(), "member.addr leaked: {:?}", m.addr);
+        }
     }
 
     #[test]

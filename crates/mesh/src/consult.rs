@@ -153,7 +153,9 @@ pub fn store_answer(dir: &Path, answer: &ConsultAnswer) -> Result<()> {
     // Refuse an answer for a prompt we never asked (no prompt file for that id).
     let prompt_path = queue(dir).join(format!("{}.prompt.json", answer.id));
     if !prompt_path.exists() {
-        return Err(Error::Untrusted("consult: answer for an unknown prompt".into()));
+        return Err(Error::Untrusted(
+            "consult: answer for an unknown prompt".into(),
+        ));
     }
     let path = queue(dir).join(format!("{}.answer.json", answer.id));
     let body = serde_json::to_vec(answer).map_err(|e| Error::Malformed(format!("consult: {e}")))?;

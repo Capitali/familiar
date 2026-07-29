@@ -406,7 +406,11 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
 /// discover where to join without a QR (ADR-0012). Advertises the addresses a joiner can reach this
 /// familiar at (`reachable_hosts`) under the group's label, signed by this node's key + membership.
 /// Best-effort and idempotent — refreshed every gossip round; a lapse just lets the entry expire.
-async fn register_at_rendezvous(dir: &Path, cfg: &MeshConfig, cred: &crate::group::GroupCredential) {
+async fn register_at_rendezvous(
+    dir: &Path,
+    cfg: &MeshConfig,
+    cred: &crate::group::GroupCredential,
+) {
     if cfg.rendezvous_hosts.is_empty() {
         return;
     }
@@ -588,8 +592,7 @@ async fn relay_consults(
         else {
             continue;
         };
-        let Ok(answers) =
-            serde_json::from_slice::<Vec<crate::consult::ConsultAnswer>>(&resp.body)
+        let Ok(answers) = serde_json::from_slice::<Vec<crate::consult::ConsultAnswer>>(&resp.body)
         else {
             continue;
         };
@@ -611,8 +614,7 @@ async fn pull_status(dir: &Path, cfg: &MeshConfig) {
     for rh in &cfg.rendezvous_hosts {
         let addr = format!("{}:{}", rh, cfg.gossip_port);
         if let Ok(resp) = http_send(&addr, Method::GET, "/mesh/status", None, &[]).await {
-            if let Ok(list) =
-                serde_json::from_slice::<Vec<crate::status::MemberStatus>>(&resp.body)
+            if let Ok(list) = serde_json::from_slice::<Vec<crate::status::MemberStatus>>(&resp.body)
             {
                 apply_status_freshness(dir, &list, now);
                 break; // one authoritative source is enough

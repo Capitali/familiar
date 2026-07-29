@@ -30,6 +30,7 @@
 
 pub mod brief;
 pub mod config;
+pub mod consult;
 pub mod enroll;
 pub mod grants;
 pub mod group;
@@ -38,8 +39,8 @@ pub mod merge;
 pub mod node;
 pub mod observe;
 pub mod outreach;
-pub mod consult;
 pub mod rendezvous;
+pub mod standing;
 pub mod status;
 pub mod transport;
 pub mod worldview;

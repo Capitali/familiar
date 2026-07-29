@@ -1535,10 +1535,22 @@ mod tests {
         let cfg = MeshConfig::default();
         build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
         let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
-        assert!(!raw.contains("heart_rate:elevated"), "health must not federate");
-        assert!(!raw.contains("48.601"), "precise location must not federate");
-        assert!(!raw.contains("gyro:turning"), "biometric motion must not federate");
-        assert!(raw.contains("service:mqtt"), "ordinary activity still federates");
+        assert!(
+            !raw.contains("heart_rate:elevated"),
+            "health must not federate"
+        );
+        assert!(
+            !raw.contains("48.601"),
+            "precise location must not federate"
+        );
+        assert!(
+            !raw.contains("gyro:turning"),
+            "biometric motion must not federate"
+        );
+        assert!(
+            raw.contains("service:mqtt"),
+            "ordinary activity still federates"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
