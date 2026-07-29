@@ -398,9 +398,19 @@ final class AppModel: ObservableObject {
         let node = self.node
         Task {
             let port = enrollPort > 0 ? enrollPort : 47100
-            let doors = (try? await RendezvousClient.directory(host: Self.rendezvousHost, port: port)) ?? []
+            // Same rule as the status heartbeat: name the failure. `try?` here turned an ATS
+            // refusal into "no mesh found", which sent us hunting a directory that was up and
+            // answering the whole time. An empty list and an unreachable lighthouse are
+            // different facts and must read differently.
+            var doors: [MeshDoor] = []
+            do {
+                doors = try await RendezvousClient.directory(host: Self.rendezvousHost, port: port)
+            } catch {
+                note("✗ couldn't reach the lighthouse: \(Self.brief(error))")
+                return
+            }
             guard let door = doors.first else {
-                note("couldn't reach the mesh automatically — use an invite instead")
+                note("the lighthouse lists no reachable mesh — use an invite instead")
                 return
             }
             // The lighthouse (always-on public door) is knocked on FIRST, then any other
@@ -588,7 +598,33 @@ final class AppModel: ObservableObject {
             connectivity: Self.connectivityMode(readHost)
         )
         let client = StatusClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
-        _ = try? await client.send(status, host: Self.rendezvousHost, port: enrollPort)
+        // Do NOT swallow this. `send` reports a rejection as `false` and a transport failure as a
+        // throw, and `_ = try?` discarded both — so a device could be reading the worldview happily
+        // while being invisible to every OTHER device on the mesh, with nothing anywhere saying so.
+        // Logged on CHANGE only, since this runs on every poll tick.
+        do {
+            let ok = try await client.send(status, host: Self.rendezvousHost, port: enrollPort)
+            if ok != (lastStatusOK ?? false) {
+                note(ok ? "↑ status reaching the lighthouse" : "✗ lighthouse rejected this device's status")
+            }
+            lastStatusOK = ok
+        } catch {
+            if lastStatusOK ?? true {
+                note("✗ status heartbeat failed: \(Self.brief(error))")
+            }
+            lastStatusOK = false
+        }
+    }
+
+    /// Whether the last status heartbeat landed — nil until the first attempt. Only used to log
+    /// transitions, so a persistent failure doesn't flood the activity log every 5 seconds.
+    private var lastStatusOK: Bool?
+
+    /// A short, human-legible cause from an arbitrary error — URLError codes are what actually
+    /// show up here (ATS refusal, timeout, no route), and their raw descriptions are long.
+    static func brief(_ error: Error) -> String {
+        if let u = error as? URLError { return "\(u.code.rawValue) \(u.localizedDescription)" }
+        return (error as NSError).localizedDescription
     }
 
     /// Classify a worldview-read host into a connectivity mode for the roster badge (ADR-0017):
