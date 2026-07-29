@@ -37,7 +37,7 @@ final class LocalReasoner: ObservableObject {
 
     func refreshAvailability() {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             switch SystemLanguageModel.default.availability {
             case .available:
                 available = true; status = "on-device intelligence ready"
@@ -57,7 +57,7 @@ final class LocalReasoner: ObservableObject {
     /// Returns nil if the model is unavailable or declines. Called by AppModel, paced.
     func reason(over recent: [ObsView]) async -> (question: String, direction: String)? {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *), available {
+        if #available(iOS 26.0, macOS 26.0, *), available {
             let feed = recent.prefix(24)
                 .map { "\($0.actor) \($0.action) \($0.object)" }
                 .joined(separator: "; ")

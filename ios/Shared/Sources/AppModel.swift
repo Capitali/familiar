@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import UIKit
 import FamiliarMesh
 
 /// The agent's whole state: enrollment (via the covenant handshake), the signing session, consent,
@@ -211,8 +210,13 @@ final class AppModel: ObservableObject {
     }
 
     private(set) var node: NodeKey
+    // Device sensing is platform-shaped: CoreMotion and the Bonjour survey are iOS-only, and the
+    // Mac shell runs its own (MacSensing/MacFaceSensing/MacNetworkDiscovery) and feeds this core
+    // through `emit`. The mesh-peer role below — enrol, read, heartbeat, consult — is shared.
+    #if os(iOS)
     private var coordinator: SensingCoordinator?
     private var discovery: NetworkDiscovery?
+    #endif
 
     // The console's answer field (The Glass home screen). The human speaking to the familiar.
     @Published var consoleAnswer = ""
@@ -234,15 +238,17 @@ final class AppModel: ObservableObject {
 
     // Richer iPad sensors (voice is push-to-talk; face is a toggle). Created after node so their
     // closures can capture a fully-initialised self.
+    #if os(iOS)
     private(set) var voice: VoiceSensing!
     private(set) var face: FaceSensing!
+    #endif
 
     init() {
         // The lighthouse's cert is always acceptable — a baked fallback pin that lets a device
         // reach the mesh off-LAN whatever its enrollment carried, without weakening pinning (ADR-0012).
         if !Self.rendezvousPin.isEmpty { MeshTLS.alwaysTrust.insert(Self.rendezvousPin) }
         // Restore (or mint) the device node key. The label is what the familiar sees as the peer.
-        let label = UIDevice.current.name
+        let label = PlatformDevice.name
         if let seed = KeychainStore.load(account: "node.seed"), let n = try? NodeKey(seed: seed, label: label) {
             node = n
         } else {
@@ -258,8 +264,10 @@ final class AppModel: ObservableObject {
         // Attribute this device's reports to the human it serves, not a baked creator (ADR-0016).
         DeviceActor.human = servedHuman
         enrolled = storedGrant() != nil && !host.isEmpty
+        #if os(iOS)
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
+        #endif
         // Migrate an existing UserDefaults-only enrollment into the Keychain so it stops evaporating.
         if enrolled { saveEnrollment() }
         // Covenant baseline: an enrolled device with GPS provides its position to the mesh.
@@ -269,17 +277,19 @@ final class AppModel: ObservableObject {
     /// Position reporting is part of the covenant — hold a fix whenever enrolled, without
     /// turning on the richer derived sensing (that stays behind its own toggles).
     private func startFixBaseline() {
+        #if os(iOS)
         let coord = coordinator ?? SensingCoordinator { [weak self] batch in
             await self?.deliver(batch)
         }
         coordinator = coord
         coord.startFixBaseline()
+        #endif
     }
 
     /// The sphere's device screen state — consents + identity, as JSON for the web layer.
     func deviceStateJSON() -> String {
         let d: [String: Any] = [
-            "label": UIDevice.current.name,
+            "label": PlatformDevice.name,
             "build": Self.appBuild,
             "host": host,
             "hosts": hosts,
@@ -360,7 +370,9 @@ final class AppModel: ObservableObject {
     /// toggle). Only while enrolled. Recognition is a further, separately-consented layer on top
     /// of plain presence — faceEnabled alone never triggers identity matching.
     func startFaceIfConsented() {
+        #if os(iOS)
         if enrolled, faceEnabled { face.start(recognize: faceRecognitionEnabled) } else { face.stop() }
+        #endif
     }
 
     /// Request to join from a scanned QR / pasted address payload: attest the Three Laws, ask the
@@ -451,7 +463,9 @@ final class AppModel: ObservableObject {
                 note("✓ admitted to “\(g.group_label)” — the covenant is in force")
                 // Hand the paired Apple Watch this familiar's address so it can enrol itself by
                 // covenant (address only — the watch mints its own key + gets its own grant).
+                #if os(iOS)
                 PhoneWatchLink.shared.sendAddress(host: host, port: port, label: g.group_label, human: servedHuman)
+                #endif
                 startFixBaseline()
                 startSensingIfConsented()
                 startDiscoveryIfConsented()
@@ -471,10 +485,12 @@ final class AppModel: ObservableObject {
     /// Activate the watch link and, if we're enrolled, (re)hand the watch our address — so a watch
     /// that connects *after* the phone enrolled still gets linked. Safe to call every launch.
     func syncWatch() {
+        #if os(iOS)
         let link = PhoneWatchLink.shared // touch = activate the WCSession
         if enrolled, !host.isEmpty {
             link.sendAddress(host: host, port: enrollPort, label: groupLabel, human: servedHuman)
         }
+        #endif
     }
 
     /// The address payload this device enrolled with — an *address*, not a secret. An enrolled
@@ -500,10 +516,12 @@ final class AppModel: ObservableObject {
         KeychainStore.delete(account: enrollAccount)
         host = ""
         hosts = []
+        #if os(iOS)
         coordinator?.stop()
         coordinator = nil
         discovery?.stop()
         discovery = nil
+        #endif
         enrolled = false
         note("unenrolled — nothing is sent")
     }
@@ -564,7 +582,7 @@ final class AppModel: ObservableObject {
         let status = StatusClient.Member(
             node_id: node.nodeId,
             actor: DeviceActor.current,
-            label: UIDevice.current.name,
+            label: PlatformDevice.name,
             present_human: servedHuman,
             connectivity: Self.connectivityMode(readHost)
         )
@@ -624,7 +642,13 @@ final class AppModel: ObservableObject {
                 return
             }
             do {
+                #if os(iOS)
                 let fix = coordinator?.lastCoordinate
+                #else
+                // The Mac shell owns its own CoreLocation (MacSensing) and writes position through
+                // `emit`; the worldview read carries no fix of its own here.
+                let fix: (lat: Double, lon: Double)? = nil
+                #endif
                 let (view, raw) = try await WorldviewClient(session: session)
                     .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                                   lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
@@ -667,10 +691,7 @@ final class AppModel: ObservableObject {
     /// This app's build number ("16") — reported to the familiar so it shows in the roster.
     static let appBuild: String = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? ""
     /// This device's OS release ("iPadOS 26.1") — reported to the familiar for the roster.
-    static let osRelease: String = {
-        let d = UIDevice.current
-        return "\(d.systemName) \(d.systemVersion)"
-    }()
+    static let osRelease: String = PlatformDevice.systemDescription
 
     /// The iPad reasons over the familiar's recent observations with on-device Apple Intelligence
     /// (under the Three Laws) and submits a proposed theory to the mesh as a `theorizes` observation,
@@ -701,6 +722,7 @@ final class AppModel: ObservableObject {
     }
 
     func startSensingIfConsented() {
+        #if os(iOS)
         guard enrolled, locationEnabled || motionEnabled else { return }
         let coord = coordinator ?? SensingCoordinator { [weak self] batch in
             await self?.deliver(batch)
@@ -708,21 +730,26 @@ final class AppModel: ObservableObject {
         coordinator = coord
         coord.start(location: locationEnabled, motion: motionEnabled)
         note("sensing armed (location: \(locationEnabled), motion: \(motionEnabled))")
+        #endif
     }
 
     func setHomeToCurrentLocation() {
+        #if os(iOS)
         coordinator?.markHomeAtCurrent()
         note("home region set to current location")
+        #endif
     }
 
     /// Survey the local network by Bonjour and report what's out there — the device's view of the
     /// mesh's surroundings becomes the familiar's (and its peers'). Consent-gated; only while enrolled.
     func startDiscoveryIfConsented() {
+        #if os(iOS)
         guard enrolled, discoveryEnabled else { discovery?.stop(); return }
         let d = discovery ?? NetworkDiscovery { [weak self] batch in await self?.deliver(batch) }
         discovery = d
         d.start()
         note("network discovery armed — surveying \(NetworkDiscovery.serviceTypes.count) service kinds")
+        #endif
     }
 
     // MARK: grant persistence (the cert is public — Keychain just keeps it tidy with the key)

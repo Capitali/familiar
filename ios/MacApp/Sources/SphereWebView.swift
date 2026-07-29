@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import MapKit
 import CoreLocation
+import FamiliarMesh
 
 // The Metal Sphere console (imported from Claude Design "Familiar Metal Sphere.dc.html"):
 // a WKWebView renders the satellite globe + hologram (Resources/sphere/index.html), and the
@@ -84,12 +85,19 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
 
+    init(model: AppModel) {
+        self.model = model
+        super.init()
+    }
+
     weak var web: WKWebView?
     weak var map: MKMapView?
     private var timer: Timer?
     private var projectTimer: Timer?
-    // The daemon's local seams: plain HTTP, loopback-only, one port above the TLS mesh port.
-    private let base = URL(string: "http://127.0.0.1:47101")!
+    // The Mac is a peer, not a console bolted to a local daemon: it enrols itself, reads the
+    // worldview over the mesh and reports its own observations, exactly as the iOS shells do.
+    // `AppModel` is the shared client core (Shared/Sources) that both platforms compile.
+    let model: AppModel
 
     final class NodeAnnotation: MKPointAnnotation {
         var colorHex = "#3ddc97"
@@ -175,12 +183,12 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     }
 
     func poll() async {
-        do {
-            let (data, resp) = try await URLSession.shared.data(from: base.appendingPathComponent("local/worldview"))
-            guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                  let json = String(data: data, encoding: .utf8) else { throw URLError(.badServerResponse) }
+        // The core owns the read (host ordering, TLS pinning, failover, status heartbeat and the
+        // consult service); the console just renders whatever it last saw.
+        await model.refreshWorldview()
+        if let json = model.worldviewJSON {
             web?.evaluateJavaScript("window.sphereUpdate(\(json))", completionHandler: nil)
-        } catch {
+        } else {
             web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown()", completionHandler: nil)
         }
     }
@@ -352,28 +360,64 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
 
     nonisolated func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {}
 
-    /// The enrollment payload for a new device (group secret — trusted screen only): fetch
-    /// from the loopback seam and hand it to the page to render as a QR.
+    /// What this peer can offer a device that wants to join: its *address*, not a secret.
+    ///
+    /// This used to pull a group-secret invite off the local daemon's loopback seam, which only
+    /// worked because the Mac was the node holding the group key. A peer holds no group key — it
+    /// carries a granted membership cert and nothing that could admit anyone — so the honest
+    /// payload is where the mesh can be reached. Admission still happens at a mint-capable door
+    /// (the lighthouse, ADR-0012), which is where it belongs.
     private func fetchInvite() {
         Task { @MainActor in
-            guard let (data, resp) = try? await URLSession.shared.data(from: base.appendingPathComponent("local/invite")),
-                  (resp as? HTTPURLResponse)?.statusCode == 200,
-                  let payload = String(data: data, encoding: .utf8),
+            guard let payload = model.addressPayload,
                   let quoted = (try? JSONEncoder().encode(payload)).flatMap({ String(data: $0, encoding: .utf8) })
             else { return }
             self.web?.evaluateJavaScript("window.sphereInvite(\(quoted))", completionHandler: nil)
         }
     }
 
+    /// The console's acts, in the peer's own voice. What used to be a loopback POST to a daemon
+    /// on this machine is now a signed act by this node against the mesh — an answer to a thread,
+    /// or an observation this Mac made and is reporting like any other member.
     private func post(_ path: String, _ payload: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
-        var req = URLRequest(url: base.appendingPathComponent(path))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = data
-        URLSession.shared.dataTask(with: req) { [weak self] _, _, _ in
-            Task { await self?.poll() }   // reflect the act right away
-        }.resume()
+        switch path {
+        case "local/answer":
+            let text = payload["text"] as? String ?? ""
+            guard !text.isEmpty else { return }
+            if let thread = payload["thread"] as? String {
+                model.answerThread(thread, text)
+            } else {
+                model.consoleAnswer = text
+                model.submitConsoleAnswer()
+            }
+        case "local/observe":
+            model.emit(ObsRecord(
+                actor: payload["actor"] as? String ?? DeviceActor.current,
+                action: payload["action"] as? String ?? "noticed",
+                object: payload["object"] as? String ?? "",
+                context: payload["context"] as? String ?? "",
+                confidence: payload["confidence"] as? Double ?? 0.9))
+        case "local/gate":
+            // The boundary is this machine's own, and stays a local file — a gate governs what
+            // this shell may sense, and is nobody else's to set.
+            if let gate = payload["gate"] as? String {
+                let open = payload["open"] as? Bool ?? false
+                MacBoundary.set { g in
+                    switch gate {
+                    case "allow_camera": g.allow_camera = open
+                    case "allow_microphone": g.allow_microphone = open
+                    case "allow_location": g.allow_location = open
+                    case "allow_motion": g.allow_motion = open
+                    case "allow_network_discovery": g.allow_network_discovery = open
+                    case "allow_face_recognition": g.allow_face_recognition = open
+                    default: break
+                    }
+                }
+            }
+        default:
+            break
+        }
+        Task { await poll() }   // reflect the act right away
     }
 }
 

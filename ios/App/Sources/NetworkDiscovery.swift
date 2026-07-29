@@ -10,13 +10,6 @@ import FamiliarMesh
 /// The human suffix is NOT baked (ADR-0016): a node serves whoever is present, and a shared device
 /// changes hands. `human` is set from `AppModel.servedHuman`; it defaults to "observer" so a device
 /// never falsely claims a specific person before it has been told who is using it.
-enum DeviceActor {
-    static var human = "observer"
-    static var current: String {
-        (UIDevice.current.userInterfaceIdiom == .pad ? "ipad:" : "phone:") + human
-    }
-}
-
 /// Surveys the local network by Bonjour/mDNS and reports what it finds to the familiar as *derived*
 /// observations — "this device saw a thing of kind X advertising as Y". These discoveries flow into
 /// the familiar's worldview and on to its peers, so one device's view of the network becomes shared

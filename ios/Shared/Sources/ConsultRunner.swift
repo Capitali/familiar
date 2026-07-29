@@ -8,14 +8,14 @@ import FoundationModels
 // valid JSON (no ```json fences, no prose) and tends to stop a small model hanging on an open-ended
 // "write a script" the way free-form `respond(to:)` does.
 #if canImport(FoundationModels)
-@available(iOS 26.0, *)
+@available(iOS 26.0, macOS 26.0, *)
 @Generable
 struct ScriptAnswer {
     @Guide(description: "A self-contained POSIX /bin/sh script that takes one safe step toward the goal, writing only under the current directory and reading/transmitting no personal data.")
     var script: String
 }
 
-@available(iOS 26.0, *)
+@available(iOS 26.0, macOS 26.0, *)
 @Generable
 struct TheoryAnswer {
     @Guide(description: "One concrete question the observations raise.")
@@ -35,7 +35,7 @@ enum ConsultRunner {
     /// Whether this device can actually answer a consult right now.
     static var available: Bool {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             if case .available = SystemLanguageModel.default.availability { return true }
         }
         #endif
@@ -45,7 +45,7 @@ enum ConsultRunner {
     /// A short, human-readable reason for the console's Device screen.
     static var state: String {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             switch SystemLanguageModel.default.availability {
             case .available: return "available"
             case .unavailable(.deviceNotEligible): return "model-missing"
@@ -74,7 +74,7 @@ enum ConsultRunner {
     /// loop self-heals. A late-finishing generation is simply discarded.
     static func answer(_ prompt: String, kind: String? = nil, timeout: TimeInterval = 90) async -> String? {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *) {
             guard case .available = SystemLanguageModel.default.availability else { return nil }
             return await withTaskGroup(of: String?.self) { group in
                 group.addTask { await generate(prompt, kind: kind) }
@@ -93,7 +93,7 @@ enum ConsultRunner {
 
     #if canImport(FoundationModels)
     /// The actual generation, dispatched by strategy. Returns a JSON string or nil on any failure.
-    @available(iOS 26.0, *)
+    @available(iOS 26.0, macOS 26.0, *)
     private static func generate(_ prompt: String, kind: String?) async -> String? {
         do {
             let session = LanguageModelSession()

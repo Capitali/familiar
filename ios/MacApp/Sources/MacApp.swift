@@ -7,12 +7,23 @@ import SwiftUI
 
 @main
 struct FamiliarMacApp: App {
-    @StateObject private var bridge = SphereBridge()
+    // The shared client core (Shared/Sources/AppModel.swift) — the same one the iOS shells run.
+    // It enrols this Mac as a peer, reads the worldview over the mesh, heartbeats status and
+    // services consults; the bridge below only renders it.
+    @StateObject private var model: AppModel
+    @StateObject private var bridge: SphereBridge
+
+    init() {
+        let model = AppModel()
+        _model = StateObject(wrappedValue: model)
+        _bridge = StateObject(wrappedValue: SphereBridge(model: model))
+    }
 
     var body: some Scene {
         WindowGroup {
             SphereConsole()
                 .environmentObject(bridge)
+                .environmentObject(model)
                 .frame(minWidth: 1040, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
@@ -28,6 +39,7 @@ struct FamiliarMacApp: App {
         Settings {
             MacConsentSettings()
                 .environmentObject(bridge)
+                .environmentObject(model)
         }
     }
 }
