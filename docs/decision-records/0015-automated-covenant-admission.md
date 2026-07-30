@@ -7,7 +7,9 @@
   primary door — this is what completes it),
   [ADR-0005](0005-human-owned-capability-boundary.md) (which said admission is a
   human act — this ADR revises *when* that act happens), the corruption-awareness
-  trust system (`crates/kernel/src/corruption.rs`)
+  trust system (`crates/kernel/src/corruption.rs`),
+  [ADR-0020](0020-standing-and-the-guest-projection.md) (what an admitted node may
+  **see** — a question this record left implicit, and which ADR-0020 answers)
 
 ## Context
 
