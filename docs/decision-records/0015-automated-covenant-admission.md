@@ -1,6 +1,7 @@
 # ADR-0015 — Automated covenant admission: the process is the consent
 
-- **Status:** accepted (in force on TheRiver)
+- **Status:** accepted (in force on TheRiver) — **amended 2026-07-30** after the policy was
+  exercised by a stranger for the first time; see the amendment at the end.
 - **Date:** 2026-07-27
 - **Relates to:** [ADR-0009](0009-sovereign-mesh-transport.md) (the covenant
   transport), [ADR-0012](0012-lighthouse-rendezvous.md) (the lighthouse as the
@@ -86,3 +87,56 @@ removes the hang.
   *and* authenticated together, not one before the other.
 - Reversible: `mesh auto-accept off` restores per-join approval instantly (read
   live per request; no restart).
+
+---
+
+## Amendment, 2026-07-30 — tested in the wild, and found incomplete rather than wrong
+
+On **2026-07-29** this decision was exercised by a real stranger for the first time. An anonymous
+installer arrived through an unlimited public TestFlight link, launched the app, and was admitted to
+TheRiver. They were a genuine member with a genuine grant, reading real observations about real
+people, and **every component behaved exactly as specified here**.
+
+### What that did and did not test
+
+It did not test the admission *logic*, which was never in question. The joining node was
+self-certifying, signed its enrolment body, and attested the Three Laws — it satisfied every check
+this ADR says is sufficient, because those checks are sufficient *for what they check*. Nothing
+failed.
+
+What it exposed is that this record answered **"may this node join?"** and left
+**"what may a joined node see?"** entirely unstated — so the implicit answer was *everything*.
+Admission and full disclosure were welded together without either being argued for.
+
+That matters because of the specific shape of the safety argument above. The trade was: move the
+human out of the door and into the review loop, because the corruption system watches behaviour
+continuously and can throttle → marginalize → sever. **That defence cannot engage against a member
+whose only act is to read quietly.** Reading is not misbehaviour, produces no signal, and decays no
+trust score. The one thing the post-hoc gate cannot catch is precisely what happened.
+
+### What changed as a result
+
+[ADR-0020](0020-standing-and-the-guest-projection.md) supplies the missing half: membership decides
+whether you may read; **standing** decides what you see, is granted by hand, and is **denied by
+default**. Admission stays automatic. Disclosure no longer rides along with it.
+
+With that, the argument in this record holds as written — but it holds because the thing it was
+implicitly promising (full access on admission) is no longer what admission grants. The decision is
+**amended, not reversed**.
+
+### Two corrections to the text above
+
+- *"every mint-capable door (the lighthouse and wildhorse)"* is now **the lighthouse alone**.
+  [ADR-0018](0018-lighthouse-single-fixture.md) reduced minting to one door; `wildhorse` still holds
+  a secret as of this writing, and removing it is tracked there.
+- *"The human consents once, to the process"* remains true, but the process they consented to has
+  changed shape and is now the more defensible one: automatic admission **plus** default-deny
+  standing. A human who agreed to the former was not thereby agreeing to hand their household's
+  names to anyone who could reach the door.
+
+### The lesson that is not about the door
+
+The vector was **distribution**, not admission. An unlimited public TestFlight link is a standing
+invitation to be admitted, and no door policy compensates for handing out the address. That link is
+now closed. Worth stating plainly because the instinct after an event like this is to tighten the
+gate that did not fail.
