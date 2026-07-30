@@ -132,7 +132,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- state & real data ----------
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false };
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false };
 try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
@@ -145,6 +145,18 @@ const utc = (ts) => { if (!(ts > 0)) return '—'; const d = new Date(ts*1000); 
 const dstr = (ts) => ts>0 ? new Date(ts*1000).toISOString().slice(0,10) : '—';
 const nowS = () => Date.now()/1000|0;
 const hash32 = (str) => { let h = 2166136261>>>0; for (const c of str) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h>>>0; };
+
+// A member the mesh has not heard from in a day belongs to the RECORD, not the live roster.
+// "Not here right now" and "not a member" are different facts, and the roster should only ever
+// answer the first one — a node last seen 25 hours ago sitting between two live ones makes the
+// whole panel untrustworthy. The rest live behind the history button, with their dates intact.
+const STALE_SECS = 24 * 3600;
+const isStale = (p) => {
+  const ls = p.m.last_seen || 0;
+  return p.status !== 'online' && (!ls || nowS() - ls > STALE_SECS);
+};
+// Date AND time for the history table — the whole point of it is when, precisely.
+const dtstr = (ts) => ts > 0 ? new Date(ts*1000).toISOString().slice(0,16).replace('T',' ') + 'UTC' : '—';
 
 function statusColor(st, kind) { return st === 'online' ? (kind === 'self_node' ? '#aee7ff' : '#3ddc97') : st === 'away' ? '#ffb15a' : 'rgba(140,160,190,0.55)'; }
 
@@ -316,7 +328,12 @@ function refreshScreen() {
   const P = peers();
 
   if (k === 'roster') {
-    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">` + P.map((p, i) => `
+    // Carry the ORIGINAL index through the partition — sphereNode/sphereDive index into peers(),
+    // so filtering the grid without keeping `i` would dive to the wrong node.
+    const pairs = P.map((p, i) => [p, i]);
+    const past = pairs.filter(([p]) => isStale(p));
+    const live = pairs.filter(([p]) => !isStale(p));
+    const card = ([p, i]) => `
       <div onclick="sphereNode(${i})" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
@@ -336,7 +353,47 @@ function refreshScreen() {
         </div>
         <div style="height:4px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:13px;"><div style="height:100%;width:${p.status==='online'?100:p.status==='away'?45:8}%;border-radius:5px;background:${p.color};box-shadow:0 0 8px ${p.color};"></div></div>
         <button onclick="event.stopPropagation();sphereDive(${i})" class="glybtn" style="width:100%;height:38px;border-radius:11px;">${DIVE_GLYPH}</button>
-      </div>`).join('') + `</div>`;
+      </div>`;
+
+    // The history button only exists when there IS a history — an empty toggle is furniture.
+    const bar = past.length ? `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <button onclick="sphereRosterHistory()" class="glybtn" style="height:32px;padding:0 14px;border-radius:10px;display:flex;align-items:center;gap:8px;">
+          <span class="m" style="font-size:9px;letter-spacing:0.14em;color:${S.rosterHistory ? '#aee7ff' : 'rgba(160,195,255,0.72)'};">
+            ${S.rosterHistory ? 'LIVE ROSTER' : 'HISTORY · ' + past.length}
+          </span>
+        </button>
+        <span class="m" style="font-size:9px;color:rgba(150,180,255,0.45);">
+          ${S.rosterHistory ? 'members not seen in over 24h' : ''}
+        </span>
+      </div>` : '';
+
+    const table = () => `
+      <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead><tr style="text-align:left;">
+          ${['MEMBER','ROLE','OS · VERSION','LAST SEEN','TOTAL','SERVED','POSITION','VIA'].map(h =>
+            `<th class="m" style="font-size:7.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.5);font-weight:400;padding:0 12px 8px 0;white-space:nowrap;">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>${past.map(([p, i]) => `
+          <tr onclick="sphereNode(${i})" style="cursor:pointer;border-top:1px solid rgba(120,190,255,0.09);">
+            <td style="padding:9px 12px 9px 0;white-space:nowrap;">
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${p.color};margin-right:8px;"></span>${esc(p.name)}
+            </td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(188,210,255,0.75);white-space:nowrap;">${esc(p.kindWord)}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.os || '—')}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(174,231,255,0.8);white-space:nowrap;">${dtstr(p.m.last_seen)}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(156,192,255,0.7);white-space:nowrap;">${esc(p.total)}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.m.human || '—')}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '—'}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.m.connectivity || '—')}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>`;
+
+    el.innerHTML = bar + (S.rosterHistory
+      ? table()
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
+        + live.map(card).join('') + `</div>`);
 
   } else if (k === 'node') {
     const p = P[S.nodeIdx]; if (!p) { window.sphereScreen('roster'); return; }
@@ -601,6 +658,8 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + k + ': ' + e.message; }
   renderChrome(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
+// Toggle the live roster against the record of members not seen in over a day.
+window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
 window.sphereAnswerThread = (id) => { S.answeringThread = id; refreshScreen(); };
 window.sphereToggleOffline = () => {
   S.hideOffline = !S.hideOffline;
