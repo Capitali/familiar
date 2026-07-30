@@ -11,7 +11,9 @@
   act on a different subject), `dataflows/served-identity.md`,
   `crates/kernel/src/identity.rs`, `ios/App/Sources/FaceSensing.swift`,
   [ADR-0022](0022-the-human-dossier.md) (what identification is ultimately *for* —
-  remembering a person well enough to anticipate serving them)
+  remembering a person well enough to anticipate serving them),
+  [ADR-0023](0023-speech-presence-then-identity.md) and
+  [ADR-0024](0024-face-as-an-identity-provider.md) (the providers that feed the ladder)
 
 ## Context
 

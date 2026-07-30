@@ -70,18 +70,23 @@ parallel store.
 
 ### The constraints, which are part of the decision and not follow-up
 
-1. **Patterns, not tape.** The dossier stores *derived* distributions and trends that decay. It is
-   not an archive of everything a person has ever done. This follows the transience principle
-   ([ADR-0018](0018-lighthouse-single-fixture.md)): the familiar should remember the shape of a
-   person's life, not keep a recording of it.
+1. **Patterns, not tape — and the bound is structural, not a convention.** The dossier stores
+   *derived* distributions and trends. A query run over retained raw observations **is not a
+   pattern**; it is tape with a view on top, and calling it a pattern would satisfy the letter of
+   this rule while breaking all of it. The mechanism is **contribution scoring** (below): a pattern
+   is materialised as an accumulation of weighted contributions, so the raw record can age out
+   while the shape it produced survives.
 2. **Node-local, never federated.** ADR-0016 already holds that sensitive-personal data — precise
    position, biometrics, health — is attributed locally and never leaves the node. Presence and
    location *patterns* are at least as sensitive as the readings they are derived from, and inherit
    the same rule. A brief never carries a dossier.
 3. **The subject can read it.** A record kept about someone that they cannot see is surveillance,
    whatever its purpose. Legibility is a requirement, not a feature.
-4. **The subject can delete it.** "Forget this" must actually forget. Not tombstoned, not retained
-   for consistency — gone, and gone from the derived patterns too.
+4. **The subject can remove themselves.** What a person can take back is their *identifiable
+   record and their contributions* — the raw observations, the link between them and a handle, the
+   weight they lend to a pattern. What survives is aggregate structure that no longer identifies
+   anyone. See *Contribution scoring* below: this is a weight set to zero and a raw record dropped,
+   not a promise to unpick arithmetic.
 5. **A guest sees none of it.** [ADR-0020](0020-standing-and-the-guest-projection.md)'s projection
    scrubs it entirely — not pseudonymised, absent.
 6. **Confidence travels** ([ADR-0019](0019-friendly-identification.md)). A pattern inferred from
@@ -95,6 +100,42 @@ Anticipation, and nothing else: knowing that Betty is usually aboard in the even
 for her can wait until she is, rather than going unanswered or to the wrong person. That is the whole
 justification, and any use that does not reduce to *"this let the familiar serve someone better"*
 should be treated as evidence the design has drifted.
+
+## Contribution scoring — the mechanism that makes the rest real
+
+Ian, 2026-07-30: *"deletion isn't the goal, tracking and observing and analytics are the goal.
+Deletion might be a side effect, but not losing the value of the query needs to be maintained even
+if it is depreciated or dismissed."*
+
+That is the resolution to what looked like two separate hard problems.
+
+**Every observation carries a contribution: a weight with which it feeds a pattern.** A pattern is
+maintained as the accumulation of those weighted contributions, not recomputed by scanning history
+on demand.
+
+Four things fall out of that one decision:
+
+- **The bound is structural.** Because the pattern is materialised from contributions rather than
+  queried from records, raw observations can age out without the pattern losing its shape. "Patterns
+  not tape" stops being a discipline nobody enforces and becomes what the store literally does.
+- **History is kept, and it is kept as value rather than as tape.** The familiar is meant to observe
+  and analyse; throwing away what it learned would defeat the purpose. What is retained is the
+  *contribution* — a scored, compact statement of what an observation taught — not the raw event
+  forever.
+- **Dismissal is depreciation, not erasure.** When a human waves something off, or a theory turns
+  out wrong, its contribution is **down-weighted**, not deleted. That preserves the learning: a
+  dismissed suggestion still tells the familiar something, and this is the same instinct
+  [ADR-0015](0015-automated-covenant-admission.md) already encoded when it kept `dismiss_notes`
+  rather than discarding a waved-off question.
+- **Withdrawal is a weight set to zero.** A person removing themselves zeroes their contributions
+  and drops their raw records and their handle-link. Aggregate structure they no longer identify
+  survives; nothing that points at them does.
+
+The honest boundary, stated so it is not discovered later: this **does not** unpick arithmetic. A
+long-settled aggregate that a person contributed to is not reconstructed to remove their influence
+retroactively. What is guaranteed is that nothing identifying them remains, and that they stop
+contributing. If a particular derived quantity cannot honour even that, the answer is to **narrow
+what is derived** rather than to weaken what is promised.
 
 ## Consequences
 
@@ -114,9 +155,9 @@ should be treated as evidence the design has drifted.
 - **"Patterns not tape" is a discipline, not a mechanism yet.** Nothing currently stops a naive
   implementation from just keeping the observations and calling the query a pattern. The bound has
   to be built into the store.
-- **Deletion is genuinely hard.** Derived patterns mix people; removing one person's contribution
-  from a trend is not a row delete. If that turns out to be intractable, the honest answer is to
-  narrow what is derived, not to weaken the promise.
+- **Contribution scoring is now load-bearing in two directions at once** — it is both the bound that
+  keeps patterns from being tape and the mechanism by which a person withdraws. A weak
+  implementation fails quietly in both roles, and the failure looks like ordinary working software.
 - **It cannot federate, which limits it.** A mesh-wide picture of a person would be more useful and
   is exactly what must not exist. Each node knows its own view.
 
@@ -125,5 +166,6 @@ should be treated as evidence the design has drifted.
 - Design the store: what a pattern *is* concretely, its resolution, and how it decays.
 - The subject-facing view: how a person reads their own dossier, and where that lives given it must
   not become front-and-centre UI.
-- Deletion semantics, including the derived-pattern problem above.
+- Contribution scoring concretely: what a weight *is*, how dismissal depreciates it, how it decays,
+  and how withdrawal zeroes it.
 - Only then, implementation.
