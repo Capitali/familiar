@@ -145,12 +145,32 @@ is what lets the mesh answer *"where is Jeff right now, and how sure are we?"*
   expired claim reports nobody rather than the last person seen.
 - **Attribution** follows the live claim, falling back to the persisted served human.
 
-## Follow-on work
+## Amendment, 2026-07-30 — the two gaps are closed
 
-- **A shared device now always asks.** Dropping 1:N search is faithful to this ADR and safer, but it
-  means a shared iPad cannot recognise a returning face on its own. If that proves too much friction,
-  the answer is a *scoped* prior (the few humans this device has seen recently), not a return to
-  searching the whole registry.
+**Rung 2 now checks a scoped, decaying prior.** "Always ask on a shared device" was faithful to this
+ADR and unusable on a galley iPad. Searching the whole registry was never the alternative — that is
+where false links come from. The middle, and the one that fits
+[ADR-0018](0018-lighthouse-single-fixture.md)'s transience principle, is a **bounded set that
+expires**: the bound owner first, then the handful of people this device has actually seen in the
+last fortnight, capped at three. Nobody is permanently "the person at this iPad"; the set reflects
+who has been around and empties itself when they stop coming. Each candidate is still a 1:1 check
+against someone we have a reason to expect — never a search.
+
+A failure to match a *recent* face is deliberately **not** treated as contradicting a binding. It
+means "someone else is here", and conflating the two would demote a perfectly good binding every
+time a guest walked past the camera.
+
+**A device's own claim now wins over the daemon's derivation.** The device is closer to the
+evidence: it holds the binding, ran the 1:1 check, and heard the human answer. `classify()` reads
+the live status directory and prefers a member's own claim, falling back to `derive_presence` for
+clients too old to report one and for gossip peers that are not devices. This is safe because
+`status::record` already enforces that a member may only place its *own* status — a device can only
+ever speak for itself. Derived presence, which states no confidence, is scored by its evidence tier
+(face 0.9, dialogue 0.85, motion 0.6, activity 0.4) so the two sources are comparable rather than
+silently mixed. `Member.present_confidence` carries it, and the guest projection scrubs the
+confidence and provenance along with the name.
+
+## Follow-on work
 - Surface `confidence`/`via` in the roster, so "PRESENT ian" reads with how it was established.
 - Let a human set the device role and owner from the Device screen (today it is defaulted and set by
   answering the prompt).

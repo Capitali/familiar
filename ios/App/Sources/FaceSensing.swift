@@ -81,6 +81,7 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     func confirmIdentity(handle: String) {
         guard let embedding = pendingEmbedding else { return }
         recognizer.learn(handle: handle, embedding: embedding)
+        recognizer.noteSeen(handle)   // so the next sighting has something to verify against
         DispatchQueue.main.async {
             self.needsIdentification = false
             self.proposedHandle = nil
@@ -136,7 +137,14 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     /// so we ask (rung 3) rather than guess — a shared iPad earns its answer from a human.
     private func attemptRecognition(face: VNFaceObservation, pixels: CVPixelBuffer) {
         guard let embedding = recognizer.embedder.embedding(for: pixels, face: face) else { return }
-        guard let prior, !prior.isEmpty else {
+        // The bound owner first, then the few people recently seen here. Bounded and decaying —
+        // still verification against candidates we have a reason to expect, never a search of
+        // everyone this device has ever met.
+        var candidates: [String] = []
+        if let prior, !prior.isEmpty { candidates.append(prior) }
+        for h in recognizer.recentCandidates() where !candidates.contains(h) { candidates.append(h) }
+
+        guard !candidates.isEmpty else {
             DispatchQueue.main.async {
                 self.pendingEmbedding = embedding
                 self.proposedHandle = nil
@@ -144,19 +152,18 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
             }
             return
         }
-        let agrees = recognizer.verify(embedding, against: prior)
+        let matched = candidates.first { recognizer.verify(embedding, against: $0) }
         DispatchQueue.main.async {
             self.pendingEmbedding = embedding
-            if agrees {
-                self.proposedHandle = prior
-                self.needsIdentification = false
-            } else {
-                // Ran and disagreed — a different fact from never having looked. The caller demotes
-                // the binding rather than letting the device overrule the evidence.
-                self.proposedHandle = nil
-                self.needsIdentification = true
+            self.proposedHandle = matched
+            self.needsIdentification = matched == nil
+            // Only report a VERIFICATION when there was a bound prior to verify against. Failing to
+            // match a recently-seen face means "someone else is here", not "the binding was
+            // contradicted" — conflating them would demote a good binding every time a guest walks
+            // past the camera.
+            if let p = self.prior, !p.isEmpty {
+                self.onVerification?(matched == p ? p : nil)
             }
-            self.onVerification?(agrees ? prior : nil)
         }
     }
 }
@@ -198,6 +205,40 @@ final class FaceRecognizer {
         else { return [:] }
         return decoded
     }
+
+    // A shared device has no bound owner, so ADR-0019 rung 2 has nothing to verify against and it
+    // falls to asking. Always asking is friction nobody tolerates on a galley iPad, but searching
+    // the whole registry is what produces false links in the first place. The middle is a SCOPED
+    // prior: the handful of people this device has actually seen lately, which decays. It matches
+    // the transience principle — nobody is permanently "the person at this iPad"; the set just
+    // reflects who has been around, and it empties itself if they stop coming.
+    private let recentKey = "faceRecognizer.recent.v1"
+    private let recentCap = 3
+    private let recentTTL: TimeInterval = 14 * 24 * 3600
+
+    private func recentRaw() -> [String: Double] {
+        (store.dictionary(forKey: recentKey) as? [String: Double]) ?? [:]
+    }
+
+    /// Remember that this human was confirmed here, so the next sighting has something to check.
+    func noteSeen(_ handle: String, at: Date = Date()) {
+        guard !handle.isEmpty else { return }
+        var all = recentRaw()
+        all[handle] = at.timeIntervalSince1970
+        // Keep only the freshest few — a long tail is a registry search wearing a disguise.
+        let kept = all.sorted { $0.value > $1.value }.prefix(recentCap)
+        store.set(Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) }), forKey: recentKey)
+    }
+
+    /// Who is worth checking against on this device, freshest first. Expired entries are dropped.
+    func recentCandidates(now: Date = Date()) -> [String] {
+        recentRaw()
+            .filter { now.timeIntervalSince1970 - $0.value <= recentTTL }
+            .sorted { $0.value > $1.value }
+            .map { $0.key }
+    }
+
+    func forgetRecent() { store.removeObject(forKey: recentKey) }
 
     func learn(handle: String, embedding: [Float]) {
         var all = links()

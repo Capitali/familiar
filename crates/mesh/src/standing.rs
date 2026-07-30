@@ -227,6 +227,9 @@ fn anon_member(m: &mut Member, is_reader: bool, dlat: f64, dlon: f64) {
         } else {
             "someone".into()
         };
+        // The confidence and provenance of a claim about a named person go with the name.
+        m.present_confidence = 0.0;
+        m.present_via = String::new();
     }
     m.detail = String::new();
     m.addr = String::new();

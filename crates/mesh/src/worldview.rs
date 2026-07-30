@@ -851,6 +851,7 @@ mod tests {
             human: String::new(),
             present_human: String::new(),
             present_since: 0,
+            present_confidence: 0.0,
             present_via: String::new(),
             lat: 0.0,
             lon: 0.0,

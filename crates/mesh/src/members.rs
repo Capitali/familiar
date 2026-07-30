@@ -98,6 +98,10 @@ pub struct Member {
     /// When that presence was first established in the current unbroken run (unix secs). 0 = unknown.
     #[serde(default)]
     pub present_since: i64,
+    /// How sure we are the named human is here (ADR-0019). Carried rather than flattened, so a
+    /// device's 0.7 binding is never read as a human's own 1.0 answer.
+    #[serde(default)]
+    pub present_confidence: f64,
     /// How presence was established — "face" (recognized), "motion" (carried device biometrics),
     /// "dialogue" (the human spoke to the familiar), "activity" (the device is reporting at all).
     /// Empty = unknown. Strongest evidence wins when several are fresh.
@@ -303,6 +307,25 @@ pub fn os_from_actor(actor: &str) -> String {
 /// network. The self node comes first, then peers, then agents — each exactly once.
 pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
     let mut out = Vec::new();
+    // A device's OWN presence claim (ADR-0019), if it is heartbeating one. The device is closer to
+    // the evidence than we are — it holds the binding, ran the 1:1 face check, and heard the human
+    // answer — so where it makes a live claim about itself, that claim wins over what we can infer
+    // from its observation stream. `status::record` already enforces that a member may only place
+    // its OWN status, so a device can only ever speak for itself.
+    let claims = crate::status::directory(dir, now);
+    let claim_of = |node_id: &str| -> Option<(String, i64, String, f64)> {
+        claims
+            .iter()
+            .find(|s| s.node_id == node_id && !s.present_human.trim().is_empty())
+            .map(|s| {
+                (
+                    s.present_human.clone(),
+                    s.present_since,
+                    s.present_via.clone(),
+                    s.present_confidence,
+                )
+            })
+    };
 
     // Self — this instance of the familiar. Peers are equals: it is named by its host (like every
     // other peer's brief label), NOT by the group or a privileged "familiar" name. `SelfNode` marks
@@ -355,6 +378,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: 0,
             interactive: !cfg.headless,
             human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+            present_confidence: match sp_via.as_str() {
+                "face" => 0.9,
+                "dialogue" => 0.85,
+                "motion" => 0.6,
+                "activity" => 0.4,
+                _ => 0.0,
+            },
             present_human: sp_human,
             present_since: sp_since,
             present_via: sp_via,
@@ -471,6 +501,24 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         } else {
             (String::new(), 0, String::new())
         };
+        // The device's own claim wins where it makes one; our derivation is the fallback for
+        // clients too old to report a claim, and for gossip peers that are not devices at all.
+        // Derived presence carries no stated confidence, so it is scored by its own evidence tier.
+        let claimed = claim_of(&p.node_id).unwrap_or_else(|| {
+            let conf = match dev_presence.2.as_str() {
+                "face" => 0.9,
+                "dialogue" => 0.85,
+                "motion" => 0.6,
+                "activity" => 0.4,
+                _ => 0.0,
+            };
+            (
+                dev_presence.0.clone(),
+                dev_presence.1,
+                dev_presence.2.clone(),
+                conf,
+            )
+        });
         out.push(Member {
             node_id: p.node_id.clone(),
             label,
@@ -500,9 +548,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             human,
             // A gossip peer's presence is its own to know and report; here we derive it only for
             // devices whose observations flow through this node's store (source `mesh:<node>`).
-            present_human: dev_presence.0.clone(),
-            present_since: dev_presence.1,
-            present_via: dev_presence.2.clone(),
+            present_human: claimed.0,
+            present_since: claimed.1,
+            present_via: claimed.2,
+            present_confidence: claimed.3,
             lat: p.lat,
             lon: p.lon,
             attached: Vec::new(),
@@ -556,6 +605,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
                 .split_once(':')
                 .map(|(_, h)| h.to_string())
                 .unwrap_or_default(),
+            present_confidence: match agent_presence.2.as_str() {
+                "face" => 0.9,
+                "dialogue" => 0.85,
+                "motion" => 0.6,
+                "activity" => 0.4,
+                _ => 0.0,
+            },
             present_human: agent_presence.0,
             present_since: agent_presence.1,
             present_via: agent_presence.2,
