@@ -25,6 +25,13 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     private var lastEmit: Date = .distantPast
     private var recognitionEnabled = false
     let recognizer = FaceRecognizer()
+
+    /// The handle this device expects to see — rung 1 of the ladder (ADR-0019), set by the model
+    /// from the bound owner. Empty/nil on a shared device, which is why such a device asks.
+    var prior: String?
+    /// Called after a 1:1 check: the handle when the face AGREED with the prior, nil when it ran
+    /// and disagreed. Never called when there was no prior to check against.
+    var onVerification: ((String?) -> Void)?
     /// The embedding + face last offered to the confirm/interactive-fallback UI, held so
     /// `FaceIdentifyPrompt`'s confirm/correct actions can link it without recapturing.
     private var pendingEmbedding: [Float]?
@@ -121,20 +128,35 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
 
     /// Only attempts a match on a good, stable capture — never on a fleeting or poorly-lit
     /// frame, so a wrong link isn't proposed from bad input in the first place.
+    ///
+    /// **Verifies a prior; it does not search.** Where `prior` is set (a personal device knows its
+    /// owner — ADR-0019 rung 1) this is a 1:1 question: "this should be Jeff; does the face agree?"
+    /// That is both cheaper and far more reliable than scanning every known face, which across a
+    /// household is exactly where false links come from. With no prior there is nothing to verify,
+    /// so we ask (rung 3) rather than guess — a shared iPad earns its answer from a human.
     private func attemptRecognition(face: VNFaceObservation, pixels: CVPixelBuffer) {
         guard let embedding = recognizer.embedder.embedding(for: pixels, face: face) else { return }
-        if let handle = recognizer.recognize(embedding) {
-            DispatchQueue.main.async {
-                self.pendingEmbedding = embedding
-                self.proposedHandle = handle
-                self.needsIdentification = false
-            }
-        } else {
+        guard let prior, !prior.isEmpty else {
             DispatchQueue.main.async {
                 self.pendingEmbedding = embedding
                 self.proposedHandle = nil
                 self.needsIdentification = true
             }
+            return
+        }
+        let agrees = recognizer.verify(embedding, against: prior)
+        DispatchQueue.main.async {
+            self.pendingEmbedding = embedding
+            if agrees {
+                self.proposedHandle = prior
+                self.needsIdentification = false
+            } else {
+                // Ran and disagreed — a different fact from never having looked. The caller demotes
+                // the binding rather than letting the device overrule the evidence.
+                self.proposedHandle = nil
+                self.needsIdentification = true
+            }
+            self.onVerification?(agrees ? prior : nil)
         }
     }
 }
@@ -187,6 +209,14 @@ final class FaceRecognizer {
         var all = links()
         all.removeValue(forKey: handle)
         if let data = try? JSONEncoder().encode(all) { store.set(data, forKey: key) }
+    }
+
+    /// 1:1 — does this face match the one handle we already expect? The question ADR-0019 wants
+    /// asked. Uses the same conservative threshold as `recognize`, but against a single candidate,
+    /// so there is no field of near-misses for the best of a bad set to win.
+    func verify(_ embedding: [Float], against handle: String) -> Bool {
+        guard let known = links()[handle] else { return false }
+        return cosineSimilarity(embedding, known) >= matchThreshold
     }
 
     func recognize(_ embedding: [Float]) -> String? {

@@ -22,17 +22,25 @@ public struct StatusClient {
         public var tailnet_up: Bool
         public var updated_at: Int64
 
+        /// How the present human was established — "binding" | "face" | "asked" | "inherited"
+        /// (ADR-0019). Empty when nobody is identified.
+        public var present_confidence: Double
+
         public init(
             node_id: String, actor: String, label: String, present_human: String,
-            connectivity: String, tailnet_addr: String = "", tailnet_up: Bool = false
+            connectivity: String, tailnet_addr: String = "", tailnet_up: Bool = false,
+            present_via: String = "", present_since: Int64 = 0, present_confidence: Double = 0
         ) {
             self.node_id = node_id
             self.group_ref = ""
             self.actor = actor
             self.label = label
             self.present_human = present_human
-            self.present_via = ""
-            self.present_since = 0
+            // A presence claim without its provenance and confidence is a guess wearing a fact's
+            // clothes (ADR-0019) — these travel with it or it should not be believed.
+            self.present_via = present_via
+            self.present_since = present_since
+            self.present_confidence = present_confidence
             self.connectivity = connectivity
             self.tailnet_addr = tailnet_addr
             self.tailnet_up = tailnet_up

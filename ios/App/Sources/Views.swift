@@ -193,6 +193,7 @@ struct FaceControl: View {
 /// the interaction as anyone's. When recognition *does* propose a guess, this becomes a
 /// confirm-or-correct prompt instead — a wrong link must always be fixable, never sticky.
 struct FaceIdentifyPrompt: View {
+    @EnvironmentObject var model: AppModel
     @ObservedObject var face: FaceSensing
     @State private var typed = ""
 
@@ -201,7 +202,10 @@ struct FaceIdentifyPrompt: View {
             if let proposed = face.proposedHandle {
                 Text("Is this \(proposed)?").font(.footnote)
                 HStack {
-                    Button("Yes") { face.confirmIdentity(handle: proposed) }
+                    Button("Yes") {
+                        face.confirmIdentity(handle: proposed)
+                        model.confirmPresentHuman(proposed)   // rung 3 → an `asked` claim
+                    }
                     Button("No — someone else") { face.proposedHandle = nil; face.needsIdentification = true }
                         .foregroundStyle(.secondary)
                 }
@@ -213,6 +217,7 @@ struct FaceIdentifyPrompt: View {
                         let name = typed.trimmingCharacters(in: .whitespaces)
                         guard !name.isEmpty else { return }
                         face.confirmIdentity(handle: name)
+                        model.confirmPresentHuman(name)       // rung 3 → an `asked` claim
                         typed = ""
                     }
                 }

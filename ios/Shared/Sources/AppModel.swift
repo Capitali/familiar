@@ -29,6 +29,75 @@ final class AppModel: ObservableObject {
     /// defaults to "observer" and is set by the human (Device menu), later by facial recognition.
     @AppStorage("identity.servedHuman") var servedHuman = "observer"
 
+    // MARK: friendly identification (ADR-0019)
+
+    /// How this device is used — decides whether it has a prior to verify at all. Defaults by
+    /// hardware kind and is a human's to change.
+    @AppStorage("identity.deviceRole") var deviceRoleRaw = DeviceRole.suggested.rawValue
+    /// The bound owner of a personal device. Rung 1 of the ladder, and usually the whole answer
+    /// on a phone — no camera, no model, no prompt.
+    @AppStorage("identity.deviceOwner") var deviceOwner = ""
+
+    var deviceRole: DeviceRole { DeviceRole(rawValue: deviceRoleRaw) ?? .shared }
+
+    /// Who the ladder says is here, with a confidence and an expiry.
+    @Published var presence: PresenceClaim = .unknown
+    /// The human's own answer to the confirm-or-correct prompt — outranks every inference.
+    private var answeredClaim: PresenceClaim?
+    /// A 1:1 face check that CONFIRMED the prior.
+    private var faceClaim: PresenceClaim?
+    /// A 1:1 check ran against the prior and disagreed. Demotes the binding rather than letting
+    /// the device's guess quietly overrule the camera.
+    private var faceContradicted = false
+
+    /// Who this device's reports are attributed to right now: the live claim when there is one,
+    /// otherwise the persisted served human. Identification decides addressing, never access.
+    var attributedHuman: String { presence.isLive ? presence.handle : servedHuman }
+
+    /// Re-run the ladder and republish. Cheap; safe to call on any signal.
+    func refreshPresence() {
+        presence = Identification.resolve(
+            role: deviceRole, owner: deviceOwner,
+            answered: answeredClaim, faceVerified: faceClaim,
+            faceContradicted: faceContradicted
+        )
+        DeviceActor.human = attributedHuman
+    }
+
+    /// The human said who they are. Authoritative, and it also settles the binding on a personal
+    /// device so the next launch starts at rung 1 instead of asking again.
+    func confirmPresentHuman(_ name: String) {
+        let handle = Self.slugHandle(name)
+        guard !handle.isEmpty else { return }
+        answeredClaim = .make(handle: handle, via: .asked)
+        faceContradicted = false
+        if deviceRole == .personal, deviceOwner.isEmpty { deviceOwner = handle }
+        refreshPresence()
+        note("identified \(handle) (asked)")
+    }
+
+    /// A 1:1 face check finished. `handle` non-nil means it agreed with the prior; nil means it
+    /// ran and disagreed — a different fact from never having looked.
+    func faceVerification(confirmed handle: String?) {
+        if let h = handle, !h.isEmpty {
+            faceClaim = .make(handle: h, via: .face)
+            faceContradicted = false
+        } else {
+            faceClaim = nil
+            faceContradicted = true
+        }
+        refreshPresence()
+    }
+
+    /// Bind or unbind this device's owner (a human act — a phone changes hands, a shared iPad
+    /// becomes someone's).
+    func setDeviceBinding(role: DeviceRole, owner: String) {
+        deviceRoleRaw = role.rawValue
+        deviceOwner = role == .personal ? Self.slugHandle(owner) : ""
+        refreshPresence()
+        note("device is \(role.rawValue)\(deviceOwner.isEmpty ? "" : " · \(deviceOwner)")")
+    }
+
     private let grantAccount = "grant.json"
     private let enrollAccount = "enroll.info"   // {host,port,label} in the Keychain — survives reinstall
     private let defaults = UserDefaults.standard
@@ -264,10 +333,19 @@ final class AppModel: ObservableObject {
         ensureRendezvous()   // the public failover is always a candidate — never strand off-LAN
         // Attribute this device's reports to the human it serves, not a baked creator (ADR-0016).
         DeviceActor.human = servedHuman
+        // A personal device that already knows who it serves is already bound — seed rung 1 from
+        // it rather than making the human state the same fact twice. ("observer" is the
+        // *absence* of an answer, so it never becomes a binding.)
+        if deviceRole == .personal, deviceOwner.isEmpty, servedHuman != "observer" {
+            deviceOwner = servedHuman
+        }
+        refreshPresence()
         enrolled = storedGrant() != nil && !host.isEmpty
         #if os(iOS)
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
+        // Rung 2 reports back: agreed with the prior, or ran and disagreed (ADR-0019).
+        face.onVerification = { [weak self] handle in self?.faceVerification(confirmed: handle) }
         #endif
         // Migrate an existing UserDefaults-only enrollment into the Keychain so it stops evaporating.
         if enrolled { saveEnrollment() }
@@ -372,6 +450,9 @@ final class AppModel: ObservableObject {
     /// of plain presence — faceEnabled alone never triggers identity matching.
     func startFaceIfConsented() {
         #if os(iOS)
+        // Hand the sensor the prior to CHECK. A shared device has none, so it asks instead of
+        // searching every known face (ADR-0019 rungs 2–3).
+        face.prior = deviceRole == .personal && !deviceOwner.isEmpty ? deviceOwner : nil
         if enrolled, faceEnabled { face.start(recognize: faceRecognitionEnabled) } else { face.stop() }
         #endif
     }
@@ -590,12 +671,20 @@ final class AppModel: ObservableObject {
     /// from the host it actually read its worldview from just now.
     func heartbeatStatus(readHost: String) async {
         guard let g = storedGrant() else { return }
+        // The presence CLAIM, not the persisted default: what the ladder concluded, how, how sure,
+        // and since when (ADR-0019). An expired claim reports nobody rather than the last person
+        // we saw — "Jeff is here" and "Jeff was here an hour ago" must not arrive as the same fact.
+        let claim = presence
+        let live = claim.isLive
         let status = StatusClient.Member(
             node_id: node.nodeId,
             actor: DeviceActor.current,
             label: PlatformDevice.name,
-            present_human: servedHuman,
-            connectivity: Self.connectivityMode(readHost)
+            present_human: live ? claim.handle : "",
+            connectivity: Self.connectivityMode(readHost),
+            present_via: live ? claim.via.rawValue : "",
+            present_since: live ? Int64(claim.since.timeIntervalSince1970) : 0,
+            present_confidence: live ? claim.confidence : 0
         )
         let client = StatusClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
         // Do NOT swallow this. `send` reports a rejection as `false` and a transport failure as a

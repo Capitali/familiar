@@ -1,6 +1,7 @@
 # ADR-0019 — Friendly identification: knowing who is present, so the familiar can address a person
 
-- **Status:** accepted (design); implementation follows the current submission push
+- **Status:** accepted — the ladder and presence claims are implemented client-side and carried on
+  the wire (2026-07-29). What remains is listed under **Follow-on work**.
 - **Date:** 2026-07-29
 - **Relates to:** [ADR-0016](0016-multi-human-served-identity.md) (served identity
   and per-human attribution — this ADR says *how* the served human is
@@ -126,11 +127,33 @@ is what lets the mesh answer *"where is Jeff right now, and how sure are we?"*
   is not its owner. `via: inherited` exists so that case is visible and can carry a
   shorter expiry.
 
+## What is implemented
+
+- **`DeviceRole`** (`personal(owner)` / `shared`), defaulted by hardware kind — a phone and a watch
+  are personal, an iPad and a Mac are shared — and overridable by a human. A personal device that
+  already knew who it served seeds its binding from that, so nobody states the same fact twice.
+- **The ladder** (`Shared/Sources/Identification.swift`) as a pure, platform-free function: hand it
+  what each rung knows and it returns a claim. 14 cases verified, including the one that matters —
+  a contradicted binding falls to *unknown* rather than asserting the device's guess over the camera.
+- **`PresenceClaim`** with `via`, `confidence`, `since` and `expires`, and per-rung lifetimes: a
+  binding outlives a face sighting (the fact under it is durable), and an inherited claim is the
+  shortest-lived (a watch on the charger is not its owner).
+- **`FaceRecognizer.verify(_:against:)`** — the 1:1 path. `FaceSensing` now checks the prior instead
+  of searching the registry, and reports agreement *or* contradiction as distinct outcomes.
+- **The claim on the wire**: `present_via`, `present_since` and a new `present_confidence` on
+  `MemberStatus`, so a 0.7 binding is never mistaken downstream for a human's own 1.0 answer. An
+  expired claim reports nobody rather than the last person seen.
+- **Attribution** follows the live claim, falling back to the persisted served human.
+
 ## Follow-on work
 
-- Device role + owner in the client model and the roster.
-- `FaceRecognizer.verify(embedding, against: handle)` — the 1:1 path.
-- Presence claims with confidence and expiry, replacing bare `present_human`.
+- **A shared device now always asks.** Dropping 1:N search is faithful to this ADR and safer, but it
+  means a shared iPad cannot recognise a returning face on its own. If that proves too much friction,
+  the answer is a *scoped* prior (the few humans this device has seen recently), not a return to
+  searching the whole registry.
+- Surface `confidence`/`via` in the roster, so "PRESENT ian" reads with how it was established.
+- Let a human set the device role and owner from the Device screen (today it is defaulted and set by
+  answering the prompt).
 - Question/goal routing to a live claim (see the owned-question work).
-- Update `dataflows/served-identity.md`, whose "Who is present?" diagram currently
-  shows face → pick → default as three flat alternatives rather than a ladder.
+- The daemon's own `derive_presence` has no binding tier — it reasons only from observations, so a
+  device's claim and the daemon's derivation can still disagree. Reconciling them is unfinished.

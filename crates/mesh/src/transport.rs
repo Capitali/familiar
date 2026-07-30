@@ -472,8 +472,11 @@ async fn heartbeat_status(dir: &Path, cfg: &MeshConfig, cred: &crate::group::Gro
         actor: String::new(),     // the home familiar isn't a device actor
         label: String::new(),     // a reader keeps its own label for a node it already knows
         present_human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+        // The daemon's own notion of who is here comes from the observation stream, not from a
+        // device's identification ladder (ADR-0019), so it asserts no provenance or confidence.
         present_via: String::new(),
         present_since: 0,
+        present_confidence: 0.0,
         connectivity: "local".into(),
         tailnet_addr: String::new(),
         tailnet_up: false,
@@ -671,7 +674,11 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
                 last_seen: st.updated_at,
                 // We are meeting it now; the lighthouse may have known it far longer, but this is
                 // the first moment WE can honestly attest to. `first_seen` is our own record.
-                first_seen: if st.updated_at > 0 { st.updated_at } else { now },
+                first_seen: if st.updated_at > 0 {
+                    st.updated_at
+                } else {
+                    now
+                },
                 human: st.present_human.clone(),
                 connectivity: st.connectivity.clone(),
                 ..Default::default()
@@ -1688,8 +1695,11 @@ fn status_directory_response(dir: &Path) -> Response<Full<Bytes>> {
             actor: String::new(),
             label: p.label.clone(),
             present_human: p.human.clone(),
+            // Relayed from our peer roster, which records who a node SERVES, not a live claim
+            // about who is at it — so this row carries no provenance and no confidence.
             present_via: String::new(),
             present_since: 0,
+            present_confidence: 0.0,
             connectivity: p.connectivity.clone(),
             tailnet_addr: String::new(),
             tailnet_up: false,
@@ -3089,8 +3099,8 @@ mod tests {
             crate::group::create_group(&dir, &node, "TheRiver", 1_785_000_000, 86_400).unwrap();
         let ours = crate::rendezvous::group_ref(&cred.group_id);
 
-        let mk = |id: &str, gref: &str, label: &str, human: &str, at: i64| {
-            crate::status::MemberStatus {
+        let mk =
+            |id: &str, gref: &str, label: &str, human: &str, at: i64| crate::status::MemberStatus {
                 node_id: id.into(),
                 group_ref: gref.into(),
                 actor: String::new(),
@@ -3098,17 +3108,23 @@ mod tests {
                 present_human: human.into(),
                 present_via: String::new(),
                 present_since: 0,
+                present_confidence: 0.0,
                 connectivity: "lighthouse".into(),
                 tailnet_addr: String::new(),
                 tailnet_up: false,
                 updated_at: at,
-            }
-        };
+            };
 
         let statuses = vec![
             mk("remote01", &ours, "Ivan's iPhone", "ivan", 1_785_100_000),
             // A different mesh entirely — must never be adopted.
-            mk("stranger1", "someoneelsesgroup", "Not ours", "", 1_785_100_000),
+            mk(
+                "stranger1",
+                "someoneelsesgroup",
+                "Not ours",
+                "",
+                1_785_100_000,
+            ),
             // A pre-group_ref node — unattributable, so not trusted into the roster.
             mk("legacy01", "", "Old node", "", 1_785_100_000),
             // Ourselves — never adopt our own row as a peer.
@@ -3119,22 +3135,40 @@ mod tests {
         let peers = load_peers(&dir);
         let ids: Vec<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
 
-        assert!(ids.contains(&"remote01"), "a live member of OUR mesh must be adopted, got {ids:?}");
-        assert!(!ids.contains(&"stranger1"), "another mesh's member must never be adopted");
-        assert!(!ids.contains(&"legacy01"), "an unattributable row must not be adopted");
-        assert!(!ids.contains(&node.node_id().as_str()), "we must not adopt ourselves");
+        assert!(
+            ids.contains(&"remote01"),
+            "a live member of OUR mesh must be adopted, got {ids:?}"
+        );
+        assert!(
+            !ids.contains(&"stranger1"),
+            "another mesh's member must never be adopted"
+        );
+        assert!(
+            !ids.contains(&"legacy01"),
+            "an unattributable row must not be adopted"
+        );
+        assert!(
+            !ids.contains(&node.node_id().as_str()),
+            "we must not adopt ourselves"
+        );
 
         let ivan = peers.iter().find(|p| p.node_id == "remote01").unwrap();
         assert_eq!(ivan.label, "Ivan's iPhone");
         assert_eq!(ivan.last_seen, 1_785_100_000);
-        assert_eq!(ivan.first_seen, 1_785_100_000, "our own first sighting, not the lighthouse's");
+        assert_eq!(
+            ivan.first_seen, 1_785_100_000,
+            "our own first sighting, not the lighthouse's"
+        );
         assert_eq!(ivan.human, "ivan");
         assert_eq!(ivan.connectivity, "lighthouse");
 
         // Idempotent: a second pull must not duplicate the row.
         apply_status_freshness(&dir, &statuses, 1_785_100_100);
         assert_eq!(
-            load_peers(&dir).iter().filter(|p| p.node_id == "remote01").count(),
+            load_peers(&dir)
+                .iter()
+                .filter(|p| p.node_id == "remote01")
+                .count(),
             1
         );
     }
