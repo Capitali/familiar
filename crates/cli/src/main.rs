@@ -1282,6 +1282,88 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        // ---- group-secret escrow (ADR-0018) --------------------------------------------------
+        // The lighthouse is the only minting door, which makes the group secret a single point of
+        // extinction unless it is escrowed. These three commands are the whole procedure; the human
+        // side of it is security/group-secret-escrow.md.
+        Some("escrow-export") => match familiar_mesh::group::export_escrow(&dir, now_secs()) {
+            Ok(escrow) => match serde_json::to_string_pretty(&escrow) {
+                Ok(json) => {
+                    // Straight to stdout so it can be piped into an encryptor and never touch disk
+                    // in the clear. The warning goes to stderr so it does not corrupt the pipe.
+                    eprintln!(
+                        "⚠ this is the group's MINTING AUTHORITY, not a backup. Anyone holding it \
+                         can admit anyone. Encrypt it and keep it offline."
+                    );
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not serialize escrow — {e}");
+                    ExitCode::FAILURE
+                }
+            },
+            Err(e) => {
+                eprintln!("mesh: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("escrow-restore") => {
+            use std::io::Read;
+            let mut buf = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+                eprintln!("mesh: could not read escrow from stdin — {e}");
+                return ExitCode::FAILURE;
+            }
+            let escrow: familiar_mesh::group::GroupEscrow = match serde_json::from_str(&buf) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("mesh: that is not an escrow document — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match familiar_mesh::group::restore_from_escrow(&dir, &escrow) {
+                Ok(cred) => {
+                    println!(
+                        "✓ minting authority restored for “{}” · id {}",
+                        cred.label,
+                        short_id(&cred.group_id)
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: restore refused — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("reduce-to-covenant") => {
+            // Irreversible without the escrow, so it refuses unless the human says the word. The
+            // confirmation is not ceremony: until an escrow exists, a second node holding the
+            // secret IS the group's redundancy, and stripping it makes things worse.
+            if !f.contains_key("yes") {
+                eprintln!(
+                    "mesh: this strips the group secret from this node. It CANNOT be undone \
+                     without an escrow (security/group-secret-escrow.md).\n\
+                     Export and verify an escrow first, then re-run with --yes."
+                );
+                return ExitCode::FAILURE;
+            }
+            match familiar_mesh::group::reduce_to_covenant(&dir) {
+                Ok(cred) => {
+                    println!(
+                        "✓ this node now holds a covenant credential for “{}” — it can prove \
+                         membership and verify peers, and can no longer mint members.",
+                        cred.label
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         _ => {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
@@ -1289,7 +1371,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | abandon <node_id> | forget <node_id> \
                  | share <tools|knowledge|identities> <on|off> | accept-observations <on|off> \
                  | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
-                 | invite [--minutes N] | optin <handle> | status>"
+                 | invite [--minutes N] | optin <handle> | status \
+                 | escrow-export | escrow-restore | reduce-to-covenant --yes>"
             );
             ExitCode::FAILURE
         }

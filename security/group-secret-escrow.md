@@ -86,11 +86,16 @@ Once the escrow exists **and has been verified**, a node that no longer needs to
 holding the secret:
 
 ```sh
-familiar mesh reduce-to-covenant     # strips group_secret; keeps identity + membership
+familiar mesh reduce-to-covenant --yes   # strips group_secret; keeps identity + membership
 ```
 
-This is irreversible without the escrow. Until an escrow exists, a second node holding the secret
-*is* your redundancy — stripping it first makes the group less recoverable, not more.
+`--yes` is required and is not ceremony. This is irreversible without the escrow, and until an
+escrow exists a second node holding the secret *is* your redundancy — stripping it first makes the
+group less recoverable, not more. Without the flag the command refuses and exits non-zero.
+
+Restore refuses, without touching the existing credential, on: an escrow for a different group, a
+secret that does not derive this group's public key, an unrecognised format version, and anything
+that is not an escrow document at all. Verified through the CLI, not just the library.
 
 ## The custodian is transient too
 
@@ -133,7 +138,7 @@ changes.
 |---|---|
 | Mechanism implemented | ✅ `crates/mesh/src/group.rs` |
 | Round trip rehearsed automatically | ✅ two tests, every build |
-| CLI surface (`escrow-export` / `escrow-restore` / `reduce-to-covenant`) | ❌ not yet wired |
+| CLI surface (`escrow-export` / `escrow-restore` / `reduce-to-covenant --yes`) | ✅ wired, procedure walked end to end 2026-07-30 |
 | An escrow actually exported and stored | ❌ **not yet done** |
 | `wildhorse` reduced to a covenant credential | ❌ blocked on the above |
 | Succession plan for the custodian | ❌ owed — see above |
