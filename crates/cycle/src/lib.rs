@@ -48,6 +48,7 @@ use familiar_kernel::presence;
 use familiar_kernel::question;
 use familiar_kernel::request::{self, Answer, Confidence};
 use familiar_kernel::review::review_script;
+use familiar_kernel::routing;
 use familiar_kernel::service;
 use familiar_kernel::thread::{self, Thread};
 use familiar_kernel::tool::{self, Tool};
@@ -409,43 +410,47 @@ fn unmet_needs(dir: &Path) -> usize {
 ///   dismissed, and a dismissal is honored (tracked, rested), never overridden.
 fn coordinate_questions(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Result<()> {
     question::ensure_root(dir, now)?;
-    // Law II: don't ask into an empty room. Presence is judged against the *known* observer
-    // (identity gives us the entity the cold-start word-classifier couldn't) — the served
-    // are present if their own actions have been seen within the withdrawal horizon.
-    if !observer_present(dir, obs, now) {
+    // Law II: don't ask into an empty room. Who is *here* now — not merely who hasn't abandoned us
+    // — comes from the observation stream, which names its actors (familiar_kernel::routing).
+    let present = routing::present_humans(obs, now);
+    if present.is_empty() {
         return Ok(());
     }
-    // A question already on screen and unanswered? Leave it; the human answers in their time.
+    // A question already on screen and unanswered? Leave it; the human answers in their time —
+    // EXCEPT that the person it was addressed to may have walked out. A question left addressed to
+    // an empty chair is the failure mode owners exist to prevent, so re-address it to whoever is
+    // here. The question itself, and its rest/dismissal record, are untouched.
     let active = fs::read_to_string(dir.join(ACTIVE_QUESTION_FILE))
         .ok()
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     if !active.is_empty() {
+        if let Some(q) = question::load(dir)?.iter().find(|q| q.id == active) {
+            if routing::owner_is_absent(&q.owner, &present) {
+                let next_owner = routing::route("", "", &present);
+                if !next_owner.is_empty() && next_owner != q.owner {
+                    question::set_owner(dir, &active, &next_owner)?;
+                }
+            }
+        }
         return Ok(());
     }
     let questions = question::load(dir)?;
     if let Some(q) = question::next(&questions, now, unmet_needs(dir)) {
+        // Address it. `origin_human` is empty for now: the routing rule that prefers the human
+        // whose need a question serves is implemented and tested, but threads record their origin
+        // as a KIND ("observer") rather than a handle, so there is no name here to prefer yet.
+        // Give threads a human origin and this becomes Law I routing with no change here.
+        let owner = routing::route(&q.owner, "", &present);
+        let id = q.id.clone();
         fs::write(dir.join(QUESTION_FILE), &q.text)?;
-        fs::write(dir.join(ACTIVE_QUESTION_FILE), &q.id)?;
-        question::record_asked(dir, &q.id, now)?;
+        fs::write(dir.join(ACTIVE_QUESTION_FILE), &id)?;
+        question::record_asked(dir, &id, now)?;
+        if !owner.is_empty() {
+            question::set_owner(dir, &id, &owner)?;
+        }
     }
     Ok(())
-}
-
-/// Is the known observer present — have their own actions been seen within the withdrawal
-/// horizon? Identity-aware Law II: the cold-start presence signal can't recognise a named
-/// human, but once the familiar knows who it serves it can judge presence by their actual
-/// activity. Unknown observer → not present (the name-ask handles that case).
-fn observer_present(dir: &Path, obs: &[observation::Observation], now: i64) -> bool {
-    let Some(handle) = familiar_kernel::identity::current(dir) else {
-        return false;
-    };
-    obs.iter()
-        .filter(|o| o.actor == handle)
-        .map(|o| o.ts)
-        .max()
-        .map(|last| now - last < presence::WITHDRAWAL_HORIZON_SECS)
-        .unwrap_or(false)
 }
 
 /// How the familiar refers to the person it serves in its own prompts: by name once it has
@@ -537,11 +542,9 @@ fn maybe_reply(
              separately). Reply as plain text only, no quotes, no JSON.",
         );
         match familiar_llm::consult(dir, &prompt) {
-            Ok(familiar_llm::Outcome::Response(r)) => {
-                looks_like_prose(&r)
-                    .map(|p| p.chars().take(400).collect())
-                    .unwrap_or_else(|| templated_reply(said, now))
-            }
+            Ok(familiar_llm::Outcome::Response(r)) => looks_like_prose(&r)
+                .map(|p| p.chars().take(400).collect())
+                .unwrap_or_else(|| templated_reply(said, now)),
             // No mind available right now — a plain acknowledgment still closes the loop.
             _ => templated_reply(said, now),
         }
@@ -572,7 +575,10 @@ fn looks_like_prose(raw: &str) -> Option<String> {
     }
     // Must read like a sentence: some words, and mostly letters/spaces (not a blob of symbols).
     let words = s.split_whitespace().count();
-    let letters = s.chars().filter(|c| c.is_alphabetic() || c.is_whitespace()).count();
+    let letters = s
+        .chars()
+        .filter(|c| c.is_alphabetic() || c.is_whitespace())
+        .count();
     if words < 2 || letters * 5 < s.chars().count() * 4 {
         return None;
     }
@@ -3248,8 +3254,16 @@ mod tests {
         )));
         assert!(infra_loop(&mk_loop("mesh:abc", "reports", "presence")));
         // The wearer's own body — a recurrence loop over it is presence, not a world pattern.
-        assert!(infra_loop(&mk_loop("watch:ian", "reports", "motion:walking")));
-        assert!(infra_loop(&mk_loop("watch:ian", "reports", "location:48.5,-93.3")));
+        assert!(infra_loop(&mk_loop(
+            "watch:ian",
+            "reports",
+            "motion:walking"
+        )));
+        assert!(infra_loop(&mk_loop(
+            "watch:ian",
+            "reports",
+            "location:48.5,-93.3"
+        )));
         // A recurring pattern in the WORLD is still musings material.
         assert!(!infra_loop(&mk_loop("home", "reports", "greenhouse:dry")));
         // An unparseable description is kept — unknown is not plumbing.

@@ -134,6 +134,12 @@ pub struct Worldview {
     /// offers a reply.
     #[serde(default)]
     pub question: String,
+    /// The human the open question is **addressed to** (`familiar_kernel::routing`). Empty means
+    /// unaddressed. A console shows "asking Betty" rather than putting everyone's question in
+    /// front of whoever happens to be holding the device. Ownership is about who is ASKED — the
+    /// answer, once confirmed, is an ordinary public observation.
+    #[serde(default)]
+    pub question_owner: String,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -193,6 +199,10 @@ pub struct GoalView {
     pub status: String,
     /// Short node id of the owner (empty while unclaimed).
     pub owner: String,
+    /// The **human** accountable for it — distinct from `owner`, which is only the machine doing
+    /// the work. Empty when the goal belongs to no one in particular.
+    #[serde(default)]
+    pub owner_human: String,
     pub origin: String,
     /// Tools/artifacts it produced, for the audit trail.
     pub produced: String,
@@ -484,6 +494,18 @@ pub fn assemble_worldview(
         .unwrap_or_default()
         .trim()
         .to_string();
+    // Who it is being asked OF. The text lives in question.txt for the console's sake; the
+    // addressee lives on the question record, so read it back through the active id.
+    let question_owner = std::fs::read_to_string(dir.join("active_question.txt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .and_then(|id| {
+            familiar_kernel::question::load(dir)
+                .ok()
+                .and_then(|qs| qs.into_iter().find(|q| q.id == id).map(|q| q.owner))
+        })
+        .unwrap_or_default();
     let members = crate::members::classify(dir, now);
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
@@ -497,6 +519,7 @@ pub fn assemble_worldview(
         hosts: Vec::new(),
         pins: Vec::new(),
         question,
+        question_owner,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,
@@ -536,6 +559,11 @@ fn goal_views(dir: &Path) -> Vec<GoalView> {
             needs: g.needs,
             status: g.status.as_str().to_string(),
             owner: g.owner_node.chars().take(8).collect(),
+            owner_human: if g.owner_human.is_empty() {
+                familiar_kernel::goal::human_origin(&g.origin)
+            } else {
+                g.owner_human.clone()
+            },
             origin: g.origin,
             produced: g.produced,
             notes: g.notes,
@@ -1015,6 +1043,19 @@ mod tests {
             "actor must not name a human, got {:?}",
             view.recent[0].actor
         );
+        // The routing addressee and a goal's human owner both name a person, so both must go.
+        assert!(
+            view.question_owner.is_empty(),
+            "question_owner names who is being asked and must not reach a guest: {:?}",
+            view.question_owner
+        );
+        for g in &view.goals {
+            assert!(
+                g.owner_human.is_empty(),
+                "goal owner_human leaked to a guest: {:?}",
+                g.owner_human
+            );
+        }
         for m in &view.members {
             assert!(
                 !m.human.contains("ian"),

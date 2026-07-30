@@ -153,6 +153,8 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
     if !view.question.is_empty() {
         view.question = "What should I be paying attention to?".into();
     }
+    // Who the question is addressed to names a person, so it goes with the rest of the names.
+    view.question_owner = String::new();
 
     for m in view.members.iter_mut() {
         let is_reader = m.node_id == reader_node_id;
@@ -185,6 +187,7 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
 
     for g in view.goals.iter_mut() {
         g.description = REDACTED.into();
+        g.owner_human = String::new(); // names a person
         g.needs.clear();
         g.origin = String::new();
         g.produced = String::new();

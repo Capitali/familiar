@@ -154,6 +154,10 @@ is what lets the mesh answer *"where is Jeff right now, and how sure are we?"*
 - Surface `confidence`/`via` in the roster, so "PRESENT ian" reads with how it was established.
 - Let a human set the device role and owner from the Device screen (today it is defaulted and set by
   answering the prompt).
-- Question/goal routing to a live claim (see the owned-question work).
+- ~~Question/goal routing to a live claim~~ — **done.** `familiar_kernel::routing` derives who is
+  present from the observation stream and addresses the open question to them; questions carry an
+  `owner`, goals carry an `owner_human` that federates, and a question whose addressee walks out is
+  re-addressed rather than left facing an empty chair. Ownership governs who is *asked*; a confirmed
+  answer is an ordinary public observation.
 - The daemon's own `derive_presence` has no binding tier — it reasons only from observations, so a
   device's claim and the daemon's derivation can still disagree. Reconciling them is unfinished.

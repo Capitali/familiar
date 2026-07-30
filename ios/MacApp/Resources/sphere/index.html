@@ -315,9 +315,14 @@ function refreshScreen() {
       }
     }
     const q = (v.question || '').trim();
-    if (q) msgs.push({ f: true, text: q, isQ: true });
+    // Who it is addressed to (ADR-0019 routing). A question put to Betty is shown as hers rather
+    // than dropped in front of whoever is holding the device — that difference is the whole point
+    // of giving questions owners. Absent from a guest projection, which names nobody.
+    const qOwner = (v.question_owner || '').trim();
+    if (q) msgs.push({ f: true, text: q, isQ: true, owner: qOwner });
     const html = msgs.slice(-14).map(mm => `
       <div style="align-self:${mm.f?'flex-start':'flex-end'};max-width:78%;padding:14px 17px;border-radius:16px;background:${mm.f?'rgba(20,44,80,0.3)':'rgba(90,170,255,0.12)'};border:1px solid ${mm.isQ?'rgba(174,231,255,0.5)':mm.f?'rgba(120,190,255,0.2)':'rgba(174,231,255,0.28)'};">
+        ${mm.owner ? `<div class="m" style="font-size:8.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.6);margin-bottom:6px;">ASKING ${esc(mm.owner.toUpperCase())}</div>` : ''}
         <div style="font-size:clamp(14px,1.6vw,17px);line-height:1.5;color:rgba(232,240,252,0.92);">${esc(mm.text)}</div>
       </div>`).join('');
     if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }

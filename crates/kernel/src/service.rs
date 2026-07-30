@@ -136,8 +136,14 @@ mod tests {
 
     #[test]
     fn sensitive_personal_matches_health_position_biometric() {
-        assert!(is_sensitive_personal(&obs("watch:betty", "heart_rate:elevated")));
-        assert!(is_sensitive_personal(&obs("watch:betty", "location:48.6,-93.4")));
+        assert!(is_sensitive_personal(&obs(
+            "watch:betty",
+            "heart_rate:elevated"
+        )));
+        assert!(is_sensitive_personal(&obs(
+            "watch:betty",
+            "location:48.6,-93.4"
+        )));
         assert!(is_sensitive_personal(&obs("watch:betty", "gyro:turning")));
         assert!(is_sensitive_personal(&obs("phone:ian", "face:ian")));
         // Ordinary activity is not sensitive — it may federate under a shared worldview.
