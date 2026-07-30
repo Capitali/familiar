@@ -104,8 +104,19 @@ Concretely:
 
 ## Follow-on work
 
+- ~~Write and rehearse the escrow restore procedure.~~ **Mechanism done** —
+  `export_escrow` / `restore_from_escrow` / `reduce_to_covenant` in `crates/mesh/src/group.rs`, the
+  procedure in [`security/group-secret-escrow.md`](../../security/group-secret-escrow.md), and the
+  full round trip rehearsed as a test on every build: export, reduce, prove minting **fails**,
+  restore, prove a cert minted afterwards still verifies under the original group key.
+  **Still outstanding:** no escrow has actually been exported and stored, and the CLI surface is
+  unwired. Until a real escrow exists in the human's hands, the mechanism is proven and the
+  *insurance is not in force*.
 - Reduce `wildhorse` to a covenant credential; confirm `can_mint()` is `false`.
-- Write and **rehearse** the escrow restore procedure.
+  **Ordering matters and was initially recorded backwards:** as of 2026-07-30 `wildhorse` still
+  holds the secret, and that second copy is currently the group's *only* redundancy. Stripping it
+  before a real escrow exists would make the group less recoverable, not more. Export first, verify,
+  then reduce.
 - Correct the six dataflow documents that still name a home hub — chiefly
   `dataflows/auth-and-membership.md`, which has it holding the group key.
 - Fix the stale `FamiliarMac` comment in `ios/project.yml`, which still describes

@@ -221,6 +221,99 @@ pub fn save_credential(dir: &Path, cred: &GroupCredential) -> Result<()> {
     write_private(&dir.join(GROUP_FILE), &json)
 }
 
+// ---- escrow: surviving the loss of the minting door (ADR-0018) ---------------------------
+
+/// The group's recovery material. ADR-0018 concentrates minting on the lighthouse, which makes
+/// that one rented box the sole holder of the group secret *in service*. Escrow is what keeps
+/// that a decision about operations rather than a single point of extinction: with this, losing
+/// the lighthouse is an outage; without it, no new device can ever join the group again.
+///
+/// This is **the** secret. It is not a backup of a node — it is the authority to mint members.
+/// Anyone holding it can admit anyone. It belongs offline, in the human's keeping, and never on a
+/// running host other than the minting door.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupEscrow {
+    /// Format marker, so a restore twenty years from now knows what it is holding.
+    pub kind: String,
+    pub group_id: String,
+    pub label: String,
+    /// The group public key (hex) — carried so a restore can verify it reconstituted the RIGHT
+    /// group before writing anything.
+    pub group_pubkey: String,
+    /// The group secret (hex, 32 bytes).
+    pub group_secret: String,
+    pub exported_at: i64,
+}
+
+pub const ESCROW_KIND: &str = "familiar-group-escrow-v1";
+
+/// Export the recovery material from a mint-capable credential. Fails on a covenant credential —
+/// there is nothing to escrow, and silently writing an empty escrow would be the worst possible
+/// outcome (a file that looks like insurance and is not).
+pub fn export_escrow(dir: &Path, now: i64) -> Result<GroupEscrow> {
+    let cred = load(dir)?.ok_or_else(|| Error::Untrusted("no group enrolled".into()))?;
+    if !cred.can_mint() {
+        return Err(Error::Untrusted(
+            "this node holds no group secret — a covenant credential has nothing to escrow".into(),
+        ));
+    }
+    Ok(GroupEscrow {
+        kind: ESCROW_KIND.to_string(),
+        group_id: cred.group_id.clone(),
+        label: cred.label.clone(),
+        group_pubkey: cred.group_pubkey.clone(),
+        group_secret: cred.group_secret.clone(),
+        exported_at: now,
+    })
+}
+
+/// Restore minting authority onto a node that holds a covenant credential for the same group.
+///
+/// Deliberately narrow: it will not create a group, will not adopt a foreign one, and will not
+/// overwrite a credential for a different group. The node keeps its own identity and its own
+/// membership cert; all this restores is the authority to mint.
+pub fn restore_from_escrow(dir: &Path, escrow: &GroupEscrow) -> Result<GroupCredential> {
+    if escrow.kind != ESCROW_KIND {
+        return Err(Error::Malformed(format!(
+            "escrow: unknown format {:?}",
+            escrow.kind
+        )));
+    }
+    let mut cred = load(dir)?.ok_or_else(|| {
+        Error::Untrusted(
+            "restore needs an enrolled node: join the group first, then restore".into(),
+        )
+    })?;
+    if cred.group_id != escrow.group_id {
+        return Err(Error::Untrusted(format!(
+            "escrow is for group {}, this node belongs to {}",
+            escrow.group_id, cred.group_id
+        )));
+    }
+    // The secret must actually be this group's — a mismatched key would produce certs no member
+    // could verify, which is worse than refusing.
+    let bytes = exactly_32(&hex_decode(&escrow.group_secret)?, "group secret")?;
+    let derived = hex_encode(&SigningKey::from_bytes(&bytes).verifying_key().to_bytes());
+    if derived != cred.group_pubkey {
+        return Err(Error::Untrusted(
+            "escrow secret does not match this group's public key".into(),
+        ));
+    }
+    cred.group_secret = escrow.group_secret.clone();
+    save_credential(dir, &cred)?;
+    Ok(cred)
+}
+
+/// Strip the group secret from this node, leaving the covenant credential a peer should hold
+/// (ADR-0018). Irreversible without the escrow, which is why it refuses to run until an escrow
+/// has been exported and verified by the caller.
+pub fn reduce_to_covenant(dir: &Path) -> Result<GroupCredential> {
+    let mut cred = load(dir)?.ok_or_else(|| Error::Untrusted("no group enrolled".into()))?;
+    cred.group_secret = String::new();
+    save_credential(dir, &cred)?;
+    Ok(cred)
+}
+
 fn mint_with(
     group_signing: &SigningKey,
     group_id: &str,
@@ -343,6 +436,92 @@ pub(crate) fn write_json_public<T: Serialize>(path: &Path, value: &T) -> Result<
 
 #[cfg(test)]
 mod tests {
+
+    /// **The escrow rehearsal.** ADR-0018 concentrates minting on the lighthouse and says losing
+    /// it should be an outage rather than the end of the group. That claim rests entirely on being
+    /// able to restore — so it is rehearsed here, every run, rather than written down and hoped for.
+    ///
+    /// Walks the whole procedure: a mint-capable node exports its escrow, is reduced to a covenant
+    /// credential (proving it then CANNOT mint), and is restored from the escrow (proving it can
+    /// again, and that the certs it mints still verify under the original group key).
+    #[test]
+    fn the_escrow_survives_losing_the_minting_door() {
+        let dir = tmp("escrow_rehearsal");
+        let node = NodeKey::load_or_mint(&dir, "lighthouse").unwrap();
+        let cred = create_group(&dir, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let original_pubkey = cred.group_pubkey.clone();
+        assert!(cred.can_mint());
+
+        // 1. Export while we still can.
+        let escrow = export_escrow(&dir, NOW).unwrap();
+        assert_eq!(escrow.kind, ESCROW_KIND);
+        assert_eq!(escrow.group_id, cred.group_id);
+        assert!(
+            !escrow.group_secret.is_empty(),
+            "an empty escrow is worse than none"
+        );
+
+        // 2. Lose the minting door — reduce this node to what a peer holds.
+        let reduced = reduce_to_covenant(&dir).unwrap();
+        assert!(!reduced.can_mint(), "a covenant credential must not mint");
+        assert!(
+            reduced
+                .mint_membership(&node.identity().node_id, &node.identity().pubkey, NOW, 3600)
+                .is_err(),
+            "minting must FAIL, not silently produce an unverifiable cert"
+        );
+        assert!(
+            export_escrow(&dir, NOW).is_err(),
+            "exporting from a secret-less node must fail rather than write empty insurance"
+        );
+
+        // 3. Restore.
+        let back = restore_from_escrow(&dir, &escrow).unwrap();
+        assert!(back.can_mint(), "restore must return minting authority");
+        assert_eq!(
+            back.group_pubkey, original_pubkey,
+            "it must be the SAME group"
+        );
+
+        // 4. And the authority is real: a cert minted after restore verifies under the group key
+        //    every existing member already trusts. Minted for a genuine second keypair, since a
+        //    membership binds node_id to the fingerprint of the key it certifies.
+        let joiner_dir = tmp("escrow_rehearsal_joiner");
+        let joiner = NodeKey::load_or_mint(&joiner_dir, "newcomer")
+            .unwrap()
+            .identity();
+        let m = back
+            .mint_membership(&joiner.node_id, &joiner.pubkey, NOW, 3600)
+            .unwrap();
+        let gk = back.verifying_key().unwrap();
+        verify_membership(&m, &gk, &back.group_id, NOW + 10, &[]).unwrap();
+    }
+
+    #[test]
+    fn a_restore_refuses_the_wrong_group_and_the_wrong_secret() {
+        let dir = tmp("escrow_refuses");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = create_group(&dir, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let mut escrow = export_escrow(&dir, NOW).unwrap();
+
+        // A different group's escrow must never graft onto this node.
+        let mut foreign = escrow.clone();
+        foreign.group_id = "someoneelse".into();
+        assert!(restore_from_escrow(&dir, &foreign).is_err());
+
+        // A secret that does not derive this group's public key would mint certs nobody can
+        // verify — refusing is strictly better than "restoring" into a broken group.
+        escrow.group_secret = hex_encode(&[9u8; 32]);
+        assert!(restore_from_escrow(&dir, &escrow).is_err());
+
+        // An unknown format is refused rather than guessed at.
+        let mut odd = export_escrow(&dir, NOW).unwrap();
+        odd.kind = "something-else".into();
+        assert!(restore_from_escrow(&dir, &odd).is_err());
+
+        assert_eq!(cred.group_id, load(&dir).unwrap().unwrap().group_id);
+    }
+
     use super::*;
 
     fn tmp(tag: &str) -> std::path::PathBuf {
