@@ -4,8 +4,13 @@
 
 A familiar is an AI companion you host yourself, on the hardware you already own.
 
-It runs as a **mesh**, not an app: a daemon on your Mac, consoles on iPhone, iPad
-and Watch, and a small always-on node so they can find each other from anywhere.
+It runs as a **mesh**, not an app: a daemon on your Mac, and consoles on Mac,
+iPhone, iPad and Watch that are **peers among equals** rather than windows onto a
+host. Exactly one thing is permanent — a small always-on node, the *lighthouse*,
+which is how a device with no prior contact finds the mesh from anywhere and the
+only place membership is granted ([ADR-0018](docs/decision-records/0018-lighthouse-single-fixture.md)).
+Everything else can come and go.
+
 They share **one worldview** rather than a separate chat window each — what any
 node notices, the mesh knows. It senses what is around it, forms theories about
 what it sees, asks you questions when it is unsure, and remembers which human it
@@ -15,6 +20,16 @@ You hold the keys. The group is yours to admit people to and yours to abandon;
 the mesh talks to itself over pinned TLS, and its thinking can run on the **Apple
 Intelligence model already on your phone** — so a prompt need never leave your
 hardware at all.
+
+Membership and trust are **two different questions**. Joining is automatic for any
+device that proves its own identity and signs the covenant
+([ADR-0015](docs/decision-records/0015-automated-covenant-admission.md)) — but that
+only earns it the right to *read*. What it actually sees depends on **standing**,
+which you grant by hand, one node at a time. A member without standing reads a
+worldview with the same shape, cadence and timestamps as the real one and none of
+the identities: no names, no addresses, no observation text, and the map relocated
+so its geometry survives but its position does not. Default is deny, so a device
+that just joined is a guest until you say otherwise.
 
 And it is **telos-first**: it begins not with a machine but with three laws, and
 derives everything downward from them. The laws are not a policy layer bolted on
@@ -63,9 +78,15 @@ be narrowed — has its own standout page: [`docs/HUMANITY.md`](docs/HUMANITY.md
 ## Install & run
 
 macOS is the primary target; a Linux **desktop** also runs the daemon + CLI (a headless
-Raspberry Pi is on the roadmap — see [docs/TODO-linux.md](docs/TODO-linux.md)). The macOS
-install is two pieces: the **daemon** (Rust, launchd) and the **FamiliarMac console**
-(Swift, the sphere).
+Raspberry Pi is on the roadmap — see [docs/TODO-linux.md](docs/TODO-linux.md)).
+
+The two macOS pieces are **independent**, and it is worth being clear about which you
+need. The **daemon** (Rust, launchd) is a familiar: it runs the metabolism and holds a
+worldview. The **FamiliarMac console** (Swift, the sphere) is a *peer* — it enrols itself
+and reads the worldview over the mesh, exactly as the iPhone and iPad do. It does **not**
+need a daemon on the same machine, or any daemon you built yourself; a Mac with only the
+console joins whatever mesh it can reach. Run the daemon if you want this machine to *be*
+a familiar. Run only the console if you want this machine to *see* one.
 
 **Prerequisites**
 
@@ -97,8 +118,15 @@ xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac -configuration R
 # copy the built FamiliarMac.app to /Applications and launch it
 ```
 
-The console renders the mesh worldview — the satellite globe, the roster, theories,
-signals, the device screen with the **invite QR** that other devices scan to join. See
+On first launch the console shows a join screen, finds a reachable mesh through the
+lighthouse, and displays a confirmation code while it asks to be admitted. After that it
+renders the worldview — the satellite globe, the roster (live members, with everything
+last seen over 24h ago behind a history button), theories, signals, and the device screen.
+
+What it offers other devices is an **address**, not an invite: a console holds no group
+secret, so it cannot grant membership — only the lighthouse can
+([ADR-0018](docs/decision-records/0018-lighthouse-single-fixture.md)). Pasting or scanning
+that address just tells a new device where to knock; the lighthouse still admits it. See
 [`ios/README.md`](ios/README.md) for the iPhone/iPad/watch agents and TestFlight.
 
 **3 — give it a mind**
@@ -135,7 +163,8 @@ generate (LLM-drafted hypotheses) → test (sandboxed execution) → score → s
 inherit**, under the human-owned boundary it can never widen. It runs as a daemon
 (installable under launchd), and the FamiliarMac sphere console carries the interaction
 channel — the familiar asks ("What do you need most today?"), the human answers — with
-iPhone/iPad/watch agents enrolled into the same mesh by QR.
+Mac/iPhone/iPad/watch peers enrolling into the same mesh automatically through the
+lighthouse, and a pasted or scanned address as the offline fallback.
 
 It now also **watches**: with the `allow_camera` gate open, the daemon captures still
 frames through its eye (a bundled AVFoundation helper) and records that it saw. See

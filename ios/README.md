@@ -10,8 +10,11 @@ ed25519 trust the mesh uses.
 
 - `MacApp/` — **FamiliarMac**, the macOS sphere console: a WKWebView hosting the
   shared web bundle (`MacApp/Resources/sphere/index.html` — satellite globe,
-  hologram screens, the invite QR on the Device screen) over a native MKMapView
-  street layer. Talks to the local daemon on the loopback seam (`:47101`).
+  hologram screens, the joining address on the Device screen) over a native MKMapView
+  street layer. A **peer** — it enrols itself and reads the worldview over the mesh,
+  like the iOS shells (ADR-0018). It no longer reads a local daemon over loopback.
+  Everything the web bundle needs is vendored in `sphere/vendor/`, so the console draws
+  itself with no network; re-fetch with `tools/vendor-sphere-assets.sh`.
 - `App/` — the SwiftUI iPhone/iPad agent: enroll (scan/paste), consent switches,
   sensing (CoreLocation + CoreMotion + optional voice/face), and the same sphere
   console rendered from the shared web bundle (worldview read over the mesh).
@@ -42,9 +45,15 @@ xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac \
 open /Applications/FamiliarMac.app
 ```
 
-The console expects the daemon running on the same Mac (`familiar daemon install`
-— see the [root README](../README.md#install--run)). The Device screen renders the
-**invite QR** new devices scan to join.
+The console does **not** need a daemon on the same Mac. On first launch it shows a join
+screen, finds a reachable mesh through the lighthouse and asks to be admitted, displaying
+a confirmation code while it waits. Run a local daemon (`familiar daemon install` — see the
+[root README](../README.md#install--run)) only if you want this machine to *be* a familiar
+as well as see one; the two are separate mesh nodes and the roster shows both.
+
+The Device screen renders this peer's **address** for a new device to scan or paste. It is
+an address, not an invite: a console holds no group secret and cannot grant membership —
+the lighthouse admits every device (ADR-0018).
 
 ## Build & test (agents)
 
