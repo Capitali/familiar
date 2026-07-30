@@ -132,7 +132,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- state & real data ----------
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false };
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
 try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
@@ -540,11 +540,7 @@ function refreshScreen() {
       const selfCam = !!(v.gates && v.gates.camera);
       const selfHuman = ((v.members||[]).find(m => m.kind === 'self_node')||{}).human || 'observer';
       el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:14px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-          <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">SERVING</span>
-          <input id="servedHumanInput" value="${esc(selfHuman)}" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:150px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:13px;padding:7px 10px;"/>
-          <button onclick="window.setServedHuman()" class="glybtn" style="padding:7px 14px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-        </div>
+        ${servingRow(S.device || { presence: { handle: selfHuman === 'observer' ? '' : selfHuman } })}
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;max-width:300px;margin-bottom:22px;">
           <button onclick="sphereGate('allow_camera', ${selfCam ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${selfCam?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
             ${gateGlyph(selfCam)}
@@ -566,11 +562,7 @@ function refreshScreen() {
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-        <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">SERVING</span>
-        <input id="servedHumanInput" value="${esc(d.servedHuman||'observer')}" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
-        <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-      </div>
+      ${servingRow(d)}
       ${d.oracle && d.oracle !== 'unsupported' ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
         <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">ORACLE</span>
         <span class="m" style="font-size:10px;color:${d.oracle==='available'?'#7ff0c0':'rgba(190,210,240,0.65)'};">${esc(d.oracle)}</span>
@@ -706,8 +698,48 @@ window.sphereUnenroll = () => {
 };
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
+
+// Who the familiar believes is here, and how it worked that out (ADR-0019).
+//
+// This used to be a text field with the last-served name sitting in it, permanently asking a
+// question the familiar is supposed to answer for itself. Identity should be arrived at passively —
+// presence, speech, a face — and typing a name is the LAST resort, not the standing interface. So
+// the belief is shown, and the correction is one click away and otherwise out of the way. A field
+// that is edited twice a year should not look like a field that needs attention.
+function servingRow(d) {
+  const p = d.presence || {};
+  const who = (p.handle || '').trim();
+  const via = (p.via || '').trim();
+  const conf = typeof p.confidence === 'number' ? p.confidence : 0;
+  const VIA_WORD = {
+    binding: 'this device is theirs',
+    face: 'recognised',
+    asked: 'they told me',
+    inherited: 'from a paired device',
+  };
+  if (!S.correctServing) {
+    return `<div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap;">
+      <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">PRESENT</span>
+      <span style="font-size:13px;color:${who ? 'rgba(232,240,252,0.92)' : 'rgba(150,170,200,0.5)'};">
+        ${who ? esc(who) : 'no one identified'}
+      </span>
+      ${who ? `<span class="m" style="font-size:9px;color:rgba(150,180,255,0.5);">${esc(VIA_WORD[via] || via)}${conf ? ' · ' + Math.round(conf * 100) + '%' : ''}</span>` : ''}
+      <button onclick="sphereCorrectServing(1)" class="glybtn" style="padding:4px 10px;border-radius:7px;font-size:10px;width:auto;height:auto;">
+        ${who ? 'not you?' : 'tell it who you are'}
+      </button>
+    </div>`;
+  }
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+    <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">I AM</span>
+    <input id="servedHumanInput" value="" placeholder="your name" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
+    <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
+    <button onclick="sphereCorrectServing(0)" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
+  </div>`;
+}
+window.sphereCorrectServing = (on) => { S.correctServing = !!on; refreshScreen(); };
+
 // Set who this device is serving (ADR-0016) — the handle its reports attribute to.
-window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) toApp('setHuman', { name: v }); };
+window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) { toApp('setHuman', { name: v }); S.correctServing = false; refreshScreen(); } };
 window.onerror = (msg, src, line) => {
   // Cross-origin scripts (CDN three.js/qrcode) report opaquely as "Script error." with no
   // detail — that is noise, not diagnosis; only badge errors that carry information.

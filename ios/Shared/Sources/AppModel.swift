@@ -374,6 +374,16 @@ final class AppModel: ObservableObject {
             "hosts": hosts,
             "attempts": attemptLog,
             "servedHuman": servedHuman,
+            // What the ladder currently believes, so the console can SHOW the belief instead of
+            // asking (ADR-0019). An expired claim reports nobody rather than the last person seen.
+            "presence": [
+                "handle": presence.isLive ? presence.handle : "",
+                "via": presence.isLive ? presence.via.rawValue : "",
+                "confidence": presence.isLive ? presence.confidence : 0,
+                "since": presence.isLive ? Int(presence.since.timeIntervalSince1970) : 0,
+            ],
+            "deviceRole": deviceRole.rawValue,
+            "deviceOwner": deviceOwner,
             "oracle": ConsultRunner.state,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,

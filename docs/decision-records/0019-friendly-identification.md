@@ -9,7 +9,9 @@
   capability boundary, which this must never become part of),
   [ADR-0015](0015-automated-covenant-admission.md) (node admission — a different
   act on a different subject), `dataflows/served-identity.md`,
-  `crates/kernel/src/identity.rs`, `ios/App/Sources/FaceSensing.swift`
+  `crates/kernel/src/identity.rs`, `ios/App/Sources/FaceSensing.swift`,
+  [ADR-0022](0022-the-human-dossier.md) (what identification is ultimately *for* —
+  remembering a person well enough to anticipate serving them)
 
 ## Context
 
