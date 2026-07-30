@@ -25,7 +25,11 @@ Treat it accordingly:
 ## Exporting (do this before you need it)
 
 The escrow can only be taken from a node that still holds the secret. As of 2026-07-30 that is the
-lighthouse and `wildhorse`.
+lighthouse and `wildhorse` — the second being an accident of history this procedure exists to end.
+Prefer the **lighthouse**: it is the designated holder, and keeping `wildhorse` out of the recovery
+story entirely is the point. `wildhorse` is a user device, the oldest hardware here and expected to
+be replaced; nothing about the group's survival may depend on it. Its last act as a secret-holder is
+to be reduced (below), after which replacing that machine is an ordinary re-join.
 
 ```sh
 # On a node that can mint. Writes JSON to stdout; never leave it on disk unencrypted.
@@ -88,6 +92,18 @@ familiar mesh reduce-to-covenant     # strips group_secret; keeps identity + mem
 This is irreversible without the escrow. Until an escrow exists, a second node holding the secret
 *is* your redundancy — stripping it first makes the group less recoverable, not more.
 
+## The custodian is transient too
+
+[ADR-0018](../docs/decision-records/0018-lighthouse-single-fixture.md) says no device is permanent
+and **no human is permanent**. An escrow held by exactly one person honours the first half and
+quietly breaks the second: it moves the single point of failure from a rented VPS to a single pair
+of hands.
+
+This is not solved. What it needs is a succession story — a second custodian, a split secret
+requiring two of three to reconstitute, or a sealed instruction that outlives its author. Until one
+exists, write down **where the escrow is and how to decrypt it** somewhere a successor would
+actually look, and treat that note as part of the escrow.
+
 ## Compromise
 
 If the secret leaks, an attacker can mint members at will and every node will trust them. There is
@@ -120,3 +136,4 @@ changes.
 | CLI surface (`escrow-export` / `escrow-restore` / `reduce-to-covenant`) | ❌ not yet wired |
 | An escrow actually exported and stored | ❌ **not yet done** |
 | `wildhorse` reduced to a covenant credential | ❌ blocked on the above |
+| Succession plan for the custodian | ❌ owed — see above |

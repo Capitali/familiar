@@ -48,6 +48,18 @@ Two automatic doors is two attack surfaces for one policy.
 **The lighthouse is the only permanent fixture in the mesh. Every other node —
 phone, watch, iPad, Mac, `cpn`, a future Linux box — is a peer among equals.**
 
+Stated at full strength, because the weaker version invites exactly the drift this ADR exists to
+correct: **everything except the lighthouse is transient.** No device is permanent — `wildhorse` is
+the oldest hardware here and will be replaced, and the design must treat that as an ordinary
+Tuesday rather than an event. **No human is permanent either.** The familiar serves whoever is
+present (ADR-0016, ADR-0019); it must not assume any particular person persists, and nothing
+load-bearing may rest on one continuing to be there.
+
+The lighthouse is the sole non-transient processing component. That is a real weakness and it is
+accepted knowingly for now: **it should eventually be made redundant and physically distributed.**
+Until then, every consequence below follows from one box being irreplaceable, and should be read as
+the cost of a deliberate interim position rather than a permanent architecture.
+
 Concretely:
 
 1. **One online minting door.** The lighthouse is the only node that holds the
@@ -98,9 +110,15 @@ Concretely:
   members are unaffected — they hold their certs and can read from any peer whose
   pin they trust — but *new* devices cannot join while it is down. Offline escrow
   (decision 3) makes this an outage, not an ending.
-- **The escrow itself is now load-bearing** and is the least-tested part of this
-  decision. Writing the restore procedure — and actually rehearsing it — is
-  follow-on work, not something this ADR can assert is done.
+- **The escrow itself is now load-bearing.** The mechanism is built and rehearsed
+  (see Follow-on work), but it rests on a human custodian — and this ADR has just
+  said no human is permanent. That is an unresolved tension, not a solved problem:
+  an escrow in one person's keeping is a second single point of failure wearing a
+  friendlier hat. A succession story (a second custodian, a split secret, a sealed
+  instruction that outlives its author) is owed and does not exist yet.
+- **One box is irreplaceable, which contradicts the spirit of the decision above.**
+  Making the lighthouse redundant and physically distributed is the acknowledged
+  endpoint; every cost listed here is the price of not having done it yet.
 
 ## Follow-on work
 
