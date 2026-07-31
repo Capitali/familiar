@@ -407,6 +407,18 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 object: payload["object"] as? String ?? "",
                 context: payload["context"] as? String ?? "",
                 confidence: payload["confidence"] as? Double ?? 0.9))
+        case "local/standing":
+            // Recognise a guest, or hold them off (ADR-0020). Written straight to the daemon's
+            // roll, exactly like a gate flip — this used to fall through to `default: break`,
+            // so the welcome buttons called into nothing.
+            if let act = payload["act"] as? String, let node = payload["node_id"] as? String {
+                if act == "grant" {
+                    MacStanding.grant(node)
+                } else {
+                    // "not now" narrows what they see; it does not remove them from the mesh.
+                    MacStanding.revoke(node)
+                }
+            }
         case "local/gate":
             // The boundary is this machine's own, and stays a local file — a gate governs what
             // this shell may sense, and is nobody else's to set.
