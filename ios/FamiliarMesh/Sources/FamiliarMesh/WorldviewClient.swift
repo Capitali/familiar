@@ -165,6 +165,11 @@ public struct Worldview: Codable, Equatable {
     /// A console shows "asking Betty" rather than putting her question in front of whoever is
     /// holding the device. Absent from a guest projection, since it names a person.
     public var question_owner: String?
+    /// Members admitted but not yet granted standing — nobody has said who they are yet. The
+    /// welcome glyph pulses on this. Absent from a guest projection.
+    public var guests_waiting: Int?
+    /// Node ids at full standing — lets a console tell a recognised member from a waiting guest.
+    public var standing_full: [String]?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

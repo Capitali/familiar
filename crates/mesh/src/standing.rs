@@ -195,6 +195,9 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
     }
     // Who the question is addressed to names a person, so it goes with the rest of the names.
     view.question_owner = String::new();
+    // How many others are awaiting a decision is the household's business, not a guest's.
+    view.guests_waiting = 0;
+    view.standing_full.clear();
 
     for m in view.members.iter_mut() {
         let is_reader = m.node_id == reader_node_id;

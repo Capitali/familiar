@@ -1071,6 +1071,19 @@ async fn handle(
                 }
             }
         }
+        // Recognise a guest, or hold them off (ADR-0020). Loopback-only, same trust class as
+        // /local/gate: a human at this machine's own console is the authority, and ADR-0020 lets
+        // ANY active member decide rather than only a steward.
+        (Method::POST, "/local/standing") => {
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                match collect(req).await {
+                    Ok(b) => local_standing(&dir, &b),
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                }
+            }
+        }
         (Method::POST, "/local/observe") => {
             if peer_ip != "127.0.0.1" && peer_ip != "::1" {
                 text(StatusCode::FORBIDDEN, "local only")
@@ -1663,6 +1676,42 @@ fn rendezvous_directory(dir: &Path) -> Response<Full<Bytes>> {
     match serde_json::to_vec(&entries) {
         Ok(b) => text(StatusCode::OK, b),
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "directory encode"),
+    }
+}
+
+/// `POST /local/standing` → `{ act: "grant"|"deny", node_id }`. Recognise a waiting guest, or
+/// hold them off for [`crate::enroll::DENY_RETRY_SECS`]. Nothing here auto-grants and nothing
+/// removes a member — "not now" narrows what a stranger sees and starts a short retry window;
+/// removing a member is `mesh abandon`, a different and heavier act.
+fn local_standing(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
+    #[derive(serde::Deserialize)]
+    struct Decision {
+        act: String,
+        node_id: String,
+    }
+    let Ok(d) = serde_json::from_slice::<Decision>(body) else {
+        return text(StatusCode::BAD_REQUEST, "expected {act, node_id}");
+    };
+    if d.node_id.trim().is_empty() {
+        return text(StatusCode::BAD_REQUEST, "empty node_id");
+    }
+    match d.act.as_str() {
+        "grant" => match crate::standing::grant(dir, &d.node_id, "recognised from the console") {
+            Ok(_) => text(StatusCode::OK, "recognised"),
+            Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        },
+        "deny" => {
+            let now = now_secs();
+            let _ = crate::standing::revoke(dir, &d.node_id);
+            match crate::enroll::deny(dir, &d.node_id, now) {
+                Ok(_) => text(StatusCode::OK, "held off"),
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+        other => text(
+            StatusCode::BAD_REQUEST,
+            format!("act {other}? — grant | deny"),
+        ),
     }
 }
 

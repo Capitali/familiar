@@ -140,6 +140,15 @@ pub struct Worldview {
     /// answer, once confirmed, is an ordinary public observation.
     #[serde(default)]
     pub question_owner: String,
+    /// How many members are reading as **guests** — admitted (ADR-0015) but not yet granted
+    /// standing (ADR-0020), so nobody has said who they are. A waiting decision, and the number
+    /// the console's welcome glyph pulses on. Zero is the resting state, not an error.
+    #[serde(default)]
+    pub guests_waiting: usize,
+    /// Node ids at full standing, so a console can tell a recognised member from a waiting guest
+    /// without a second round trip. Node ids only — no names, and absent from a guest projection.
+    #[serde(default)]
+    pub standing_full: Vec<String>,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -507,6 +516,17 @@ pub fn assemble_worldview(
         })
         .unwrap_or_default();
     let members = crate::members::classify(dir, now);
+    // Members admitted but not yet stood — see `guests_waiting`. Counted from the roll rather
+    // than from a pending queue, because admission is automatic and there is no queue: being a
+    // guest IS the waiting state.
+    let roll = crate::standing::load(dir);
+    let guests_waiting = members
+        .iter()
+        .filter(|m| {
+            m.kind != crate::members::MemberKind::SelfNode
+                && !roll.full.iter().any(|n| n == &m.node_id)
+        })
+        .count();
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
     let goals = goal_views(dir);
@@ -520,6 +540,8 @@ pub fn assemble_worldview(
         pins: Vec::new(),
         question,
         question_owner,
+        guests_waiting,
+        standing_full: roll.full.clone(),
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,

@@ -91,14 +91,16 @@
   </div>
 
   <!-- device/settings (glyph, top-right) -->
-  <button id="devbtn" class="glybtn" title="device" style="position:absolute;top:20px;right:20px;z-index:9;width:46px;height:46px;">
+  <!-- Welcome: the door. Pulses red while anyone is waiting to be recognised. Replaces the old
+       device/sliders button, which duplicated the ring's Device screen; the capability gates it
+       used to reach now live inside that screen, where this device's other settings already are. -->
+  <button id="welcomebtn" class="glybtn" title="welcome" onclick="sphereScreen('welcome')" style="position:absolute;top:20px;right:20px;z-index:9;width:46px;height:46px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:24px;height:24px;overflow:visible;">
-      <line x1="8" y1="15" x2="40" y2="15" stroke-width="2" opacity="0.4"/>
-      <line x1="8" y1="24" x2="40" y2="24" stroke-width="2" opacity="0.4"/>
-      <line x1="8" y1="33" x2="40" y2="33" stroke-width="2" opacity="0.4"/>
-      <circle cx="18" cy="15" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3.2s ease-in-out infinite;"/>
-      <circle cx="30" cy="24" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3.6s ease-in-out infinite reverse;"/>
-      <circle cx="22" cy="33" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3s ease-in-out infinite 0.4s;"/>
+      <!-- an open doorway with a threshold, and someone standing in it -->
+      <path d="M14 42V12a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v30" stroke-width="2" opacity="0.55" stroke-linecap="round"/>
+      <line x1="9" y1="42" x2="39" y2="42" stroke-width="2" opacity="0.75" stroke-linecap="round"/>
+      <circle id="welcomedot" cx="24" cy="22" r="4.6" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/>
+      <path id="welcomearc" d="M17 34c0-4 3.2-7 7-7s7 3 7 7" stroke-width="2" opacity="0.6" stroke-linecap="round"/>
     </svg>
   </button>
 
@@ -257,7 +259,8 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
 const SCREENS = ['conversation','roster','theories','work','signals','network','vision','device'];
-const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device' };
+// 'welcome' is reached from its own corner button, not the ring — it is a door, not a view.
+const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device', welcome:'Welcome' };
 
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 // The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
@@ -399,6 +402,36 @@ function refreshScreen() {
       ? table()
       : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
         + live.map(card).join('') + `</div>`);
+
+  } else if (k === 'welcome') {
+    // The door. Everyone the mesh has admitted but nobody has yet recognised (ADR-0020) — being
+    // a guest IS the waiting state, so this is a list of open decisions rather than a queue.
+    // Any active member may decide; nothing here auto-grants, and a guest left alone stays a
+    // guest, which is the safe resting state.
+    const roll = (v.standing_full || []);
+    const guests = P.filter(p => !p.local && !roll.includes(p.m.node_id));
+    el.innerHTML = guests.length === 0
+      ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
+           Nobody is waiting. Every member here has been recognised.
+         </div>`
+      : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.6);margin-bottom:14px;">
+           ${guests.length} waiting to be recognised. Until someone says who they are, they read a
+           worldview with the same shape as yours and none of the names.
+         </div>` + guests.map(p => `
+        <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(255,110,110,0.22);margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+            <span style="font-size:16px;font-weight:600;">${esc(p.name)}</span>
+            ${chip(p.kindWord, '#bcd2ff')}
+            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(p.m.node_id.slice(0,8))}</span>
+          </div>
+          <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:12px;">
+            ${esc(p.os || 'unknown platform')} · first seen ${dstr(p.m.first_seen)} · ${esc(p.m.connectivity || '—')}
+          </div>
+          <div style="display:flex;gap:9px;">
+            <button onclick="sphereStanding('grant','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;">recognise</button>
+            <button onclick="sphereStanding('deny','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;color:rgba(255,140,140,0.9);">not now</button>
+          </div>
+        </div>`).join('');
 
   } else if (k === 'node') {
     const p = P[S.nodeIdx]; if (!p) { window.sphereScreen('roster'); return; }
@@ -606,9 +639,20 @@ function renderChrome() {
   $('holoRim').style.display = (S.holoHidden || street) ? 'none' : 'block';
   $('screenbtns').style.display = street ? 'none' : 'block';
   $('holobtn').style.display = street ? 'none' : 'flex';
-  $('devbtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
   $('modetoggle').style.display = street ? 'none' : 'flex';
+  // The door reddens while someone is waiting to be recognised. Colour AND rate, so it reads
+  // as urgency rather than decoration, and so it is legible without colour vision.
+  const waiting = (S.view && S.view.guests_waiting) || 0;
+  const wb = $('welcomebtn');
+  if (wb) {
+    wb.style.display = street ? 'none' : 'flex';
+    wb.style.color = waiting > 0 ? '#ff6e6e' : '';
+    wb.title = waiting > 0 ? `${waiting} waiting to be recognised` : 'welcome';
+    const dot = $('welcomedot'), arc = $('welcomearc');
+    if (dot) dot.style.animation = `iconpulse ${waiting > 0 ? '0.9s' : '2.6s'} ease-in-out infinite`;
+    if (arc) arc.style.opacity = waiting > 0 ? '0.95' : '0.6';
+  }
   const showBadge = !S.linkOk || !!S.jsErr;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
   const lm = $('linkmsg');
@@ -657,6 +701,9 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 // Toggle the live roster against the record of members not seen in over a day.
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
+// Recognise a guest, or hold them off. "not now" is a 5-minute retry window, not a ban — the mesh
+// cannot tell a hostile stranger from a housemate on a new phone.
+window.sphereStanding = (act, nodeId) => { toApp('standing', { act, node_id: nodeId }); };
 window.sphereAnswerThread = (id) => { S.answeringThread = id; refreshScreen(); };
 window.sphereToggleOffline = () => {
   S.hideOffline = !S.hideOffline;
@@ -775,7 +822,6 @@ window.sphereBackToGlobe = () => {
 };
 
 $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
-$('devbtn').onclick = () => window.sphereScreen('device');
 $('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------
