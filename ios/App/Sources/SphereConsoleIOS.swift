@@ -303,6 +303,9 @@ struct SphereWebViewIOS: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.userContentController.add(bridge, name: "sphere")
+        // Custom scheme, not file:// — an opaque file origin makes WebKit refuse the page's ES
+        // module imports and the console hangs on its spinner forever. See SphereScheme.
+        SphereScheme.register(on: cfg)
         let web = WKWebView(frame: .zero, configuration: cfg)
         web.isOpaque = false
         web.backgroundColor = .clear
@@ -312,9 +315,7 @@ struct SphereWebViewIOS: UIViewRepresentable {
         if #available(iOS 16.4, *) { web.isInspectable = true }   // Safari Web Inspector, debug aid
         web.navigationDelegate = bridge
         bridge.web = web
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "sphere") {
-            web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        }
+        web.load(URLRequest(url: SphereScheme.indexURL))
         return web
     }
 

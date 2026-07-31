@@ -450,12 +450,13 @@ struct SphereWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
         cfg.userContentController.add(bridge, name: "sphere")
+        // Serve the bundle over a custom scheme rather than file:// — see SphereScheme. Must be
+        // set on the configuration BEFORE the web view is created; WKWebView copies it at init.
+        SphereScheme.register(on: cfg)
         let web = WKWebView(frame: .zero, configuration: cfg)
         web.setValue(false, forKey: "drawsBackground")   // transparent over the native map
         bridge.start(web: web)
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "sphere") {
-            web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        }
+        web.load(URLRequest(url: SphereScheme.indexURL))
         return web
     }
 
