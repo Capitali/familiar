@@ -59,8 +59,12 @@ impl Observation {
 /// id is empty. Returns the stored record (with its assigned id).
 pub fn record(dir: &Path, mut obs: Observation) -> io::Result<Observation> {
     if obs.id.is_empty() {
-        let n = load(dir)?.len();
-        obs.id = format!("obs-{:04}", n + 1);
+        // The table's own high-water mark, not a row count. A count is O(n) — a full table
+        // load on every single append — and, worse, it repeats an id the moment any row is
+        // ever removed, which silently breaks every `load_by_id` lookup in the system. For an
+        // un-pruned table `next_seq == count + 1`, so existing data keeps identical ids.
+        let n = store::next_seq(dir, OBSERVATIONS_FILE)?;
+        obs.id = format!("obs-{n:04}");
     }
     store::append(dir, OBSERVATIONS_FILE, &obs)?;
     Ok(obs)

@@ -41,23 +41,43 @@ fn human_of(actor: &str) -> String {
     }
 }
 
-/// Evidence strength for being *here*, mirroring the mesh's presence tiers. A human speaking to the
-/// familiar is the strongest ordinary signal; a recognised face is stronger still; a device merely
+/// **The evidence ladder — one definition, used everywhere.** Who does this observation say is
+/// present, how strongly, and by what kind of evidence?
+///
+/// A human speaking to the familiar is the strongest ordinary signal; a recognised face is
+/// stronger still (and names its subject in the *object*, not the actor); a device merely
 /// reporting activity is the weakest thing that counts at all.
-fn strength(o: &Observation) -> Option<f64> {
-    if o.action == "recognized" && o.object.starts_with("face:") {
-        return Some(0.95);
+///
+/// `observer` is excluded deliberately: it is the *absence* of a name, and treating it as a person
+/// means addressing questions to nobody in particular.
+///
+/// This is `pub` because the ladder had already been forked once — `mesh::members::presence_evidence`
+/// carries a parallel copy of the same tiers. Two ladders that must agree and are edited separately
+/// is a bug waiting for a quiet afternoon; new callers use this one.
+pub fn subject_and_strength(o: &Observation) -> Option<(String, f64, &'static str)> {
+    let (who, strength, via) = if o.action == "recognized" && o.object.starts_with("face:") {
+        (
+            o.object
+                .strip_prefix("face:")
+                .unwrap_or_default()
+                .to_string(),
+            0.95,
+            "face",
+        )
+    } else if o.source == "observer" || o.action == "answered" || o.action == "told the familiar" {
+        (human_of(&o.actor), 0.9, "dialogue")
+    } else if o.action == "reports" && o.object == "presence" {
+        (human_of(&o.actor), 0.4, "activity")
+    } else if o.action == "reports" {
+        (human_of(&o.actor), 0.6, "motion")
+    } else {
+        return None;
+    };
+    let who = who.trim().to_lowercase();
+    if who.is_empty() || who == "observer" {
+        return None;
     }
-    if o.source == "observer" || o.action == "answered" || o.action == "told the familiar" {
-        return Some(0.9);
-    }
-    if o.action == "reports" && o.object == "presence" {
-        return Some(0.4);
-    }
-    if o.action == "reports" {
-        return Some(0.6);
-    }
-    None
+    Some((who, strength, via))
 }
 
 /// Everyone the familiar has fresh evidence for, strongest first. `observer` is excluded: it is the
@@ -68,20 +88,9 @@ pub fn present_humans(obs: &[Observation], now: i64) -> Vec<PresentHuman> {
         if now - o.ts > HERE_WINDOW_SECS || o.ts > now {
             continue;
         }
-        let Some(conf) = strength(o) else { continue };
-        // A recognised face names its subject in the object, not the actor.
-        let who = if o.action == "recognized" {
-            o.object
-                .strip_prefix("face:")
-                .unwrap_or_default()
-                .to_string()
-        } else {
-            human_of(&o.actor)
-        };
-        let who = who.trim().to_lowercase();
-        if who.is_empty() || who == "observer" {
+        let Some((who, conf, _via)) = subject_and_strength(o) else {
             continue;
-        }
+        };
         match best.iter_mut().find(|p| p.handle == who) {
             Some(p) => {
                 // Strongest evidence wins; freshness breaks ties.
