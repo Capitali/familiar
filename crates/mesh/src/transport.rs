@@ -63,7 +63,9 @@ pub fn now_secs() -> i64 {
 }
 
 /// A peer as last seen — surfaced in Glass, refreshed each successful exchange.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// `Default` so a row adopted from the status directory can fill the fields that only a brief or a
+/// worldview read can teach us (tools, arch, geo) without inventing values for them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PeerRecord {
     pub node_id: String,
     pub label: String,
@@ -406,7 +408,11 @@ async fn supervisor(dir: PathBuf, stop: Arc<AtomicBool>) {
 /// discover where to join without a QR (ADR-0012). Advertises the addresses a joiner can reach this
 /// familiar at (`reachable_hosts`) under the group's label, signed by this node's key + membership.
 /// Best-effort and idempotent — refreshed every gossip round; a lapse just lets the entry expire.
-async fn register_at_rendezvous(dir: &Path, cfg: &MeshConfig, cred: &crate::group::GroupCredential) {
+async fn register_at_rendezvous(
+    dir: &Path,
+    cfg: &MeshConfig,
+    cred: &crate::group::GroupCredential,
+) {
     if cfg.rendezvous_hosts.is_empty() {
         return;
     }
@@ -466,8 +472,11 @@ async fn heartbeat_status(dir: &Path, cfg: &MeshConfig, cred: &crate::group::Gro
         actor: String::new(),     // the home familiar isn't a device actor
         label: String::new(),     // a reader keeps its own label for a node it already knows
         present_human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+        // The daemon's own notion of who is here comes from the observation stream, not from a
+        // device's identification ladder (ADR-0019), so it asserts no provenance or confidence.
         present_via: String::new(),
         present_since: 0,
+        present_confidence: 0.0,
         connectivity: "local".into(),
         tailnet_addr: String::new(),
         tailnet_up: false,
@@ -588,8 +597,7 @@ async fn relay_consults(
         else {
             continue;
         };
-        let Ok(answers) =
-            serde_json::from_slice::<Vec<crate::consult::ConsultAnswer>>(&resp.body)
+        let Ok(answers) = serde_json::from_slice::<Vec<crate::consult::ConsultAnswer>>(&resp.body)
         else {
             continue;
         };
@@ -611,8 +619,7 @@ async fn pull_status(dir: &Path, cfg: &MeshConfig) {
     for rh in &cfg.rendezvous_hosts {
         let addr = format!("{}:{}", rh, cfg.gossip_port);
         if let Ok(resp) = http_send(&addr, Method::GET, "/mesh/status", None, &[]).await {
-            if let Ok(list) =
-                serde_json::from_slice::<Vec<crate::status::MemberStatus>>(&resp.body)
+            if let Ok(list) = serde_json::from_slice::<Vec<crate::status::MemberStatus>>(&resp.body)
             {
                 apply_status_freshness(dir, &list, now);
                 break; // one authoritative source is enough
@@ -622,17 +629,61 @@ async fn pull_status(dir: &Path, cfg: &MeshConfig) {
 }
 
 /// Bump a known peer's `last_seen` forward when the status directory reports it fresher than we hold
-/// (ADR-0017). Only ever moves last_seen forward — a stale directory row never regresses local truth
-/// — and a fresh heartbeat revives an abandoned peer, mirroring `register_device_peer`.
-fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], _now: i64) {
+/// (ADR-0017), and **adopt members we have never met**. Only ever moves last_seen forward — a stale
+/// directory row never regresses local truth — and a fresh heartbeat revives an abandoned peer,
+/// mirroring `register_device_peer`.
+///
+/// The adoption half matters as much as the bump. This used to `find()` and silently drop anything
+/// it didn't already hold, which meant a member admitted at the lighthouse — the ONLY minting door
+/// (ADR-0018), so in practice every remote member — never reached any other node's roster. A tester
+/// on the far side of the country could be enrolled, live and heartbeating, and simply not exist as
+/// far as the rest of the mesh was concerned. The lighthouse knew; nobody asked it to say.
+fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], now: i64) {
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    // Only ever adopt rows for OUR mesh, and never adopt ourselves.
+    let our_ref = group::load(dir)
+        .ok()
+        .flatten()
+        .map(|c| crate::rendezvous::group_ref(&c.group_id))
+        .unwrap_or_default();
+    let our_node = node_id_of(dir);
     let mut changed = false;
     for st in statuses {
         if st.node_id.is_empty() {
+            continue;
+        }
+        if peers.iter().all(|p| p.node_id != st.node_id) {
+            // Unknown member. Adopt it if it is demonstrably one of ours: same group_ref, not us.
+            // A row carrying no group_ref is from an older node and is not trusted into the roster.
+            if st.node_id == our_node || our_ref.is_empty() || st.group_ref != our_ref {
+                continue;
+            }
+            peers.push(PeerRecord {
+                node_id: st.node_id.clone(),
+                label: if st.label.is_empty() {
+                    st.node_id.chars().take(8).collect()
+                } else {
+                    st.label.clone()
+                },
+                addr: String::new(),
+                group_id: String::new(),
+                last_seen: st.updated_at,
+                // We are meeting it now; the lighthouse may have known it far longer, but this is
+                // the first moment WE can honestly attest to. `first_seen` is our own record.
+                first_seen: if st.updated_at > 0 {
+                    st.updated_at
+                } else {
+                    now
+                },
+                human: st.present_human.clone(),
+                connectivity: st.connectivity.clone(),
+                ..Default::default()
+            });
+            changed = true;
             continue;
         }
         if let Some(p) = peers.iter_mut().find(|p| p.node_id == st.node_id) {
@@ -1016,6 +1067,19 @@ async fn handle(
             } else {
                 match collect(req).await {
                     Ok(b) => local_gate(&dir, &b),
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                }
+            }
+        }
+        // Recognise a guest, or hold them off (ADR-0020). Loopback-only, same trust class as
+        // /local/gate: a human at this machine's own console is the authority, and ADR-0020 lets
+        // ANY active member decide rather than only a steward.
+        (Method::POST, "/local/standing") => {
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                match collect(req).await {
+                    Ok(b) => local_standing(&dir, &b),
                     Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
                 }
             }
@@ -1566,6 +1630,18 @@ fn recv_enroll_request(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Byt
             Ok(b) => text(StatusCode::ACCEPTED, b),
             Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "pending encode"),
         },
+        // Recently denied — 429 with the wait, so the asking device backs off instead of
+        // hammering, and so the answer is legibly "not yet" rather than a silent drop.
+        Ok(crate::enroll::Submitted::Denied { retry_in }) => {
+            let mut r = text(
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("denied — may ask again in {retry_in}s"),
+            );
+            if let Ok(v) = hyper::header::HeaderValue::from_str(&retry_in.to_string()) {
+                r.headers_mut().insert(hyper::header::RETRY_AFTER, v);
+            }
+            r
+        }
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad enroll request"),
     }
@@ -1600,6 +1676,42 @@ fn rendezvous_directory(dir: &Path) -> Response<Full<Bytes>> {
     match serde_json::to_vec(&entries) {
         Ok(b) => text(StatusCode::OK, b),
         Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "directory encode"),
+    }
+}
+
+/// `POST /local/standing` → `{ act: "grant"|"deny", node_id }`. Recognise a waiting guest, or
+/// hold them off for [`crate::enroll::DENY_RETRY_SECS`]. Nothing here auto-grants and nothing
+/// removes a member — "not now" narrows what a stranger sees and starts a short retry window;
+/// removing a member is `mesh abandon`, a different and heavier act.
+fn local_standing(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
+    #[derive(serde::Deserialize)]
+    struct Decision {
+        act: String,
+        node_id: String,
+    }
+    let Ok(d) = serde_json::from_slice::<Decision>(body) else {
+        return text(StatusCode::BAD_REQUEST, "expected {act, node_id}");
+    };
+    if d.node_id.trim().is_empty() {
+        return text(StatusCode::BAD_REQUEST, "empty node_id");
+    }
+    match d.act.as_str() {
+        "grant" => match crate::standing::grant(dir, &d.node_id, "recognised from the console") {
+            Ok(_) => text(StatusCode::OK, "recognised"),
+            Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        },
+        "deny" => {
+            let now = now_secs();
+            let _ = crate::standing::revoke(dir, &d.node_id);
+            match crate::enroll::deny(dir, &d.node_id, now) {
+                Ok(_) => text(StatusCode::OK, "held off"),
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+        other => text(
+            StatusCode::BAD_REQUEST,
+            format!("act {other}? — grant | deny"),
+        ),
     }
 }
 
@@ -1644,8 +1756,11 @@ fn status_directory_response(dir: &Path) -> Response<Full<Bytes>> {
             actor: String::new(),
             label: p.label.clone(),
             present_human: p.human.clone(),
+            // Relayed from our peer roster, which records who a node SERVES, not a live claim
+            // about who is at it — so this row carries no provenance and no confidence.
             present_via: String::new(),
             present_since: 0,
+            present_confidence: 0.0,
             connectivity: p.connectivity.clone(),
             tailnet_addr: String::new(),
             tailnet_up: false,
@@ -3032,6 +3147,91 @@ mod tests {
 
         // An unknown node id is a no-op, not an error.
         assert!(!abandon_peer(&dir, "nobody").unwrap());
+    }
+
+    #[test]
+    fn the_status_directory_teaches_us_members_we_have_never_met() {
+        // The bug this covers: a member admitted at the lighthouse (the only minting door,
+        // ADR-0018) heartbeats there, we pull the directory — and used to drop every row we did
+        // not already hold. A remote tester was live, enrolled, and invisible to the whole mesh.
+        let dir = fresh_dir("adopt_status");
+        let node = crate::node::NodeKey::load_or_mint(&dir, "familiar").unwrap();
+        let cred =
+            crate::group::create_group(&dir, &node, "TheRiver", 1_785_000_000, 86_400).unwrap();
+        let ours = crate::rendezvous::group_ref(&cred.group_id);
+
+        let mk =
+            |id: &str, gref: &str, label: &str, human: &str, at: i64| crate::status::MemberStatus {
+                node_id: id.into(),
+                group_ref: gref.into(),
+                actor: String::new(),
+                label: label.into(),
+                present_human: human.into(),
+                present_via: String::new(),
+                present_since: 0,
+                present_confidence: 0.0,
+                connectivity: "lighthouse".into(),
+                tailnet_addr: String::new(),
+                tailnet_up: false,
+                updated_at: at,
+            };
+
+        let statuses = vec![
+            mk("remote01", &ours, "Ivan's iPhone", "ivan", 1_785_100_000),
+            // A different mesh entirely — must never be adopted.
+            mk(
+                "stranger1",
+                "someoneelsesgroup",
+                "Not ours",
+                "",
+                1_785_100_000,
+            ),
+            // A pre-group_ref node — unattributable, so not trusted into the roster.
+            mk("legacy01", "", "Old node", "", 1_785_100_000),
+            // Ourselves — never adopt our own row as a peer.
+            mk(&node.node_id(), &ours, "Wildhorse", "ian", 1_785_100_000),
+        ];
+
+        apply_status_freshness(&dir, &statuses, 1_785_100_000);
+        let peers = load_peers(&dir);
+        let ids: Vec<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
+
+        assert!(
+            ids.contains(&"remote01"),
+            "a live member of OUR mesh must be adopted, got {ids:?}"
+        );
+        assert!(
+            !ids.contains(&"stranger1"),
+            "another mesh's member must never be adopted"
+        );
+        assert!(
+            !ids.contains(&"legacy01"),
+            "an unattributable row must not be adopted"
+        );
+        assert!(
+            !ids.contains(&node.node_id().as_str()),
+            "we must not adopt ourselves"
+        );
+
+        let ivan = peers.iter().find(|p| p.node_id == "remote01").unwrap();
+        assert_eq!(ivan.label, "Ivan's iPhone");
+        assert_eq!(ivan.last_seen, 1_785_100_000);
+        assert_eq!(
+            ivan.first_seen, 1_785_100_000,
+            "our own first sighting, not the lighthouse's"
+        );
+        assert_eq!(ivan.human, "ivan");
+        assert_eq!(ivan.connectivity, "lighthouse");
+
+        // Idempotent: a second pull must not duplicate the row.
+        apply_status_freshness(&dir, &statuses, 1_785_100_100);
+        assert_eq!(
+            load_peers(&dir)
+                .iter()
+                .filter(|p| p.node_id == "remote01")
+                .count(),
+            1
+        );
     }
 
     #[test]

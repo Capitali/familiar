@@ -25,6 +25,13 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     private var lastEmit: Date = .distantPast
     private var recognitionEnabled = false
     let recognizer = FaceRecognizer()
+
+    /// The handle this device expects to see — rung 1 of the ladder (ADR-0019), set by the model
+    /// from the bound owner. Empty/nil on a shared device, which is why such a device asks.
+    var prior: String?
+    /// Called after a 1:1 check: the handle when the face AGREED with the prior, nil when it ran
+    /// and disagreed. Never called when there was no prior to check against.
+    var onVerification: ((String?) -> Void)?
     /// The embedding + face last offered to the confirm/interactive-fallback UI, held so
     /// `FaceIdentifyPrompt`'s confirm/correct actions can link it without recapturing.
     private var pendingEmbedding: [Float]?
@@ -74,6 +81,7 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     func confirmIdentity(handle: String) {
         guard let embedding = pendingEmbedding else { return }
         recognizer.learn(handle: handle, embedding: embedding)
+        recognizer.noteSeen(handle)   // so the next sighting has something to verify against
         DispatchQueue.main.async {
             self.needsIdentification = false
             self.proposedHandle = nil
@@ -121,19 +129,40 @@ final class FaceSensing: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
 
     /// Only attempts a match on a good, stable capture — never on a fleeting or poorly-lit
     /// frame, so a wrong link isn't proposed from bad input in the first place.
+    ///
+    /// **Verifies a prior; it does not search.** Where `prior` is set (a personal device knows its
+    /// owner — ADR-0019 rung 1) this is a 1:1 question: "this should be Jeff; does the face agree?"
+    /// That is both cheaper and far more reliable than scanning every known face, which across a
+    /// household is exactly where false links come from. With no prior there is nothing to verify,
+    /// so we ask (rung 3) rather than guess — a shared iPad earns its answer from a human.
     private func attemptRecognition(face: VNFaceObservation, pixels: CVPixelBuffer) {
         guard let embedding = recognizer.embedder.embedding(for: pixels, face: face) else { return }
-        if let handle = recognizer.recognize(embedding) {
-            DispatchQueue.main.async {
-                self.pendingEmbedding = embedding
-                self.proposedHandle = handle
-                self.needsIdentification = false
-            }
-        } else {
+        // The bound owner first, then the few people recently seen here. Bounded and decaying —
+        // still verification against candidates we have a reason to expect, never a search of
+        // everyone this device has ever met.
+        var candidates: [String] = []
+        if let prior, !prior.isEmpty { candidates.append(prior) }
+        for h in recognizer.recentCandidates() where !candidates.contains(h) { candidates.append(h) }
+
+        guard !candidates.isEmpty else {
             DispatchQueue.main.async {
                 self.pendingEmbedding = embedding
                 self.proposedHandle = nil
                 self.needsIdentification = true
+            }
+            return
+        }
+        let matched = candidates.first { recognizer.verify(embedding, against: $0) }
+        DispatchQueue.main.async {
+            self.pendingEmbedding = embedding
+            self.proposedHandle = matched
+            self.needsIdentification = matched == nil
+            // Only report a VERIFICATION when there was a bound prior to verify against. Failing to
+            // match a recently-seen face means "someone else is here", not "the binding was
+            // contradicted" — conflating them would demote a good binding every time a guest walks
+            // past the camera.
+            if let p = self.prior, !p.isEmpty {
+                self.onVerification?(matched == p ? p : nil)
             }
         }
     }
@@ -177,6 +206,40 @@ final class FaceRecognizer {
         return decoded
     }
 
+    // A shared device has no bound owner, so ADR-0019 rung 2 has nothing to verify against and it
+    // falls to asking. Always asking is friction nobody tolerates on a galley iPad, but searching
+    // the whole registry is what produces false links in the first place. The middle is a SCOPED
+    // prior: the handful of people this device has actually seen lately, which decays. It matches
+    // the transience principle — nobody is permanently "the person at this iPad"; the set just
+    // reflects who has been around, and it empties itself if they stop coming.
+    private let recentKey = "faceRecognizer.recent.v1"
+    private let recentCap = 3
+    private let recentTTL: TimeInterval = 14 * 24 * 3600
+
+    private func recentRaw() -> [String: Double] {
+        (store.dictionary(forKey: recentKey) as? [String: Double]) ?? [:]
+    }
+
+    /// Remember that this human was confirmed here, so the next sighting has something to check.
+    func noteSeen(_ handle: String, at: Date = Date()) {
+        guard !handle.isEmpty else { return }
+        var all = recentRaw()
+        all[handle] = at.timeIntervalSince1970
+        // Keep only the freshest few — a long tail is a registry search wearing a disguise.
+        let kept = all.sorted { $0.value > $1.value }.prefix(recentCap)
+        store.set(Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) }), forKey: recentKey)
+    }
+
+    /// Who is worth checking against on this device, freshest first. Expired entries are dropped.
+    func recentCandidates(now: Date = Date()) -> [String] {
+        recentRaw()
+            .filter { now.timeIntervalSince1970 - $0.value <= recentTTL }
+            .sorted { $0.value > $1.value }
+            .map { $0.key }
+    }
+
+    func forgetRecent() { store.removeObject(forKey: recentKey) }
+
     func learn(handle: String, embedding: [Float]) {
         var all = links()
         all[handle] = embedding
@@ -187,6 +250,14 @@ final class FaceRecognizer {
         var all = links()
         all.removeValue(forKey: handle)
         if let data = try? JSONEncoder().encode(all) { store.set(data, forKey: key) }
+    }
+
+    /// 1:1 — does this face match the one handle we already expect? The question ADR-0019 wants
+    /// asked. Uses the same conservative threshold as `recognize`, but against a single candidate,
+    /// so there is no field of near-misses for the best of a bad set to win.
+    func verify(_ embedding: [Float], against handle: String) -> Bool {
+        guard let known = links()[handle] else { return false }
+        return cosineSimilarity(embedding, known) >= matchThreshold
     }
 
     func recognize(_ embedding: [Float]) -> String? {

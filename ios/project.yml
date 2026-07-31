@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: 8GHXL328AR
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "41"
+    CURRENT_PROJECT_VERSION: "42"
 packages:
   FamiliarMesh:
     path: FamiliarMesh
@@ -61,8 +61,9 @@ targets:
       # rides along through TestFlight. (Standalone-installed watch apps never link.)
       - target: FamiliarWatch
         embed: true
-  # The macOS peer's console — a SwiftUI app (the standard dark design) that reads the node running
-  # on the same machine over the loopback-only GET /local/worldview. A peer among equals, no "host".
+  # The macOS peer's console. It ENROLS and reads the worldview over the mesh like any other peer
+  # (ADR-0018) — it no longer reads a daemon on the same machine over loopback /local/worldview.
+  # A peer among equals: no "host", and holding no group secret it cannot mint, only offer its address.
   FamiliarMac:
     type: application
     platform: macOS
@@ -83,7 +84,7 @@ targets:
         INFOPLIST_FILE: MacApp/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "41"
+        CURRENT_PROJECT_VERSION: "42"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: MacApp/Support/Familiar.entitlements
         CODE_SIGN_STYLE: Automatic

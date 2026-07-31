@@ -11,6 +11,14 @@ import UIKit
 /// the whole core to be iOS-shaped.
 enum PlatformDevice {
     /// The human-facing name of this machine, used as the node's roster label ("Codex", "Wildhorse").
+    ///
+    /// On macOS this says "<machine> console", and that suffix is load-bearing. A Mac can run BOTH
+    /// the Rust daemon and this app, and they are two genuinely separate mesh nodes — separate keys,
+    /// separate node_ids, and the console can be quit while the daemon keeps running. Taking the
+    /// bare machine name put two identically-named rows in every roster ("Wildhorse" as a peer and
+    /// "Wildhorse" as a device) which read as a duplication bug rather than as the two real things
+    /// it is. They are not collapsed into one row, because collapsing would hide a distinction that
+    /// becomes visible the moment you quit the app.
     static var name: String {
         #if os(iOS)
         return UIDevice.current.name
@@ -18,7 +26,8 @@ enum PlatformDevice {
         // Host.current().localizedName is the Sharing name — the same string the user set in
         // Settings and the one they will recognise on the roster. ProcessInfo's hostName would
         // give "wildhorse.local", which reads like plumbing.
-        return Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        return "\(machine) console"
         #endif
     }
 

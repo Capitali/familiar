@@ -29,6 +29,75 @@ final class AppModel: ObservableObject {
     /// defaults to "observer" and is set by the human (Device menu), later by facial recognition.
     @AppStorage("identity.servedHuman") var servedHuman = "observer"
 
+    // MARK: friendly identification (ADR-0019)
+
+    /// How this device is used — decides whether it has a prior to verify at all. Defaults by
+    /// hardware kind and is a human's to change.
+    @AppStorage("identity.deviceRole") var deviceRoleRaw = DeviceRole.suggested.rawValue
+    /// The bound owner of a personal device. Rung 1 of the ladder, and usually the whole answer
+    /// on a phone — no camera, no model, no prompt.
+    @AppStorage("identity.deviceOwner") var deviceOwner = ""
+
+    var deviceRole: DeviceRole { DeviceRole(rawValue: deviceRoleRaw) ?? .shared }
+
+    /// Who the ladder says is here, with a confidence and an expiry.
+    @Published var presence: PresenceClaim = .unknown
+    /// The human's own answer to the confirm-or-correct prompt — outranks every inference.
+    private var answeredClaim: PresenceClaim?
+    /// A 1:1 face check that CONFIRMED the prior.
+    private var faceClaim: PresenceClaim?
+    /// A 1:1 check ran against the prior and disagreed. Demotes the binding rather than letting
+    /// the device's guess quietly overrule the camera.
+    private var faceContradicted = false
+
+    /// Who this device's reports are attributed to right now: the live claim when there is one,
+    /// otherwise the persisted served human. Identification decides addressing, never access.
+    var attributedHuman: String { presence.isLive ? presence.handle : servedHuman }
+
+    /// Re-run the ladder and republish. Cheap; safe to call on any signal.
+    func refreshPresence() {
+        presence = Identification.resolve(
+            role: deviceRole, owner: deviceOwner,
+            answered: answeredClaim, faceVerified: faceClaim,
+            faceContradicted: faceContradicted
+        )
+        DeviceActor.human = attributedHuman
+    }
+
+    /// The human said who they are. Authoritative, and it also settles the binding on a personal
+    /// device so the next launch starts at rung 1 instead of asking again.
+    func confirmPresentHuman(_ name: String) {
+        let handle = Self.slugHandle(name)
+        guard !handle.isEmpty else { return }
+        answeredClaim = .make(handle: handle, via: .asked)
+        faceContradicted = false
+        if deviceRole == .personal, deviceOwner.isEmpty { deviceOwner = handle }
+        refreshPresence()
+        note("identified \(handle) (asked)")
+    }
+
+    /// A 1:1 face check finished. `handle` non-nil means it agreed with the prior; nil means it
+    /// ran and disagreed — a different fact from never having looked.
+    func faceVerification(confirmed handle: String?) {
+        if let h = handle, !h.isEmpty {
+            faceClaim = .make(handle: h, via: .face)
+            faceContradicted = false
+        } else {
+            faceClaim = nil
+            faceContradicted = true
+        }
+        refreshPresence()
+    }
+
+    /// Bind or unbind this device's owner (a human act — a phone changes hands, a shared iPad
+    /// becomes someone's).
+    func setDeviceBinding(role: DeviceRole, owner: String) {
+        deviceRoleRaw = role.rawValue
+        deviceOwner = role == .personal ? Self.slugHandle(owner) : ""
+        refreshPresence()
+        note("device is \(role.rawValue)\(deviceOwner.isEmpty ? "" : " · \(deviceOwner)")")
+    }
+
     private let grantAccount = "grant.json"
     private let enrollAccount = "enroll.info"   // {host,port,label} in the Keychain — survives reinstall
     private let defaults = UserDefaults.standard
@@ -59,10 +128,11 @@ final class AppModel: ObservableObject {
     private func ensureRendezvous() {
         var h = hosts
         if !h.contains(Self.rendezvousHost) { h.append(Self.rendezvousHost) }
-        // Read preference: the home hub first (fresh + local), the lighthouse as fallback, tailnet
-        // last. The enrollment handshake still knocks on the lighthouse first (orderedCandidates);
-        // this only orders the ONGOING worldview reads so an on-network member keeps the home node's
-        // roster current instead of routing every read through the remote lighthouse.
+        // Read preference: the nearest peer first (fresh + local), the lighthouse as fallback,
+        // tailnet last. The enrollment handshake still knocks on the lighthouse first
+        // (orderedCandidates); this only orders the ONGOING worldview reads so an on-network member
+        // keeps that peer's roster current instead of routing every read through the lighthouse.
+        // Preference is latency, never authority — a nearby peer earns no standing (ADR-0018).
         let ordered = Self.readOrderedCandidates(h)
         if ordered != hosts {
             hosts = ordered
@@ -140,11 +210,11 @@ final class AppModel: ObservableObject {
         return lighthouse + nonTail + tail
     }
 
-    /// The ONGOING read preference (distinct from the enrollment door order above): the local home
-    /// node first, the lighthouse second, Tailscale last. A member reads its worldview from the home
-    /// hub when they share a network — lower latency, and it keeps that hub's roster fresh about this
-    /// device (a read updates last_seen there). The lighthouse stays the always-reachable fallback for
-    /// when the home node isn't on the same network; tailnet is still the post-establishment path.
+    /// The ONGOING read preference (distinct from the enrollment door order above): the nearest
+    /// peer first, the lighthouse second, Tailscale last. A member reads its worldview from a peer
+    /// it shares a network with — lower latency, and it keeps that peer's roster fresh about this
+    /// device (a read updates last_seen there). The lighthouse stays the always-reachable fallback
+    /// for when no peer is on the same network; tailnet is still the post-establishment path.
     static func readOrderedCandidates(_ raw: [String]) -> [String] {
         var seen = Set<String>()
         let valid = raw.filter { isValidHost($0) && seen.insert($0).inserted }
@@ -177,7 +247,7 @@ final class AppModel: ObservableObject {
     private func learnHosts(_ advertised: [String]?) {
         let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
-        // Learning the home hub's LAN address (advertised in the worldview) lets a running device
+        // Learning a peer's LAN address (advertised in the worldview) lets a running device
         // switch its reads to it without a relaunch — re-sort to the read preference (home → lighthouse
         // → tailnet) so the freshest, most-local path wins.
         hosts.append(contentsOf: fresh)
@@ -263,10 +333,19 @@ final class AppModel: ObservableObject {
         ensureRendezvous()   // the public failover is always a candidate — never strand off-LAN
         // Attribute this device's reports to the human it serves, not a baked creator (ADR-0016).
         DeviceActor.human = servedHuman
+        // A personal device that already knows who it serves is already bound — seed rung 1 from
+        // it rather than making the human state the same fact twice. ("observer" is the
+        // *absence* of an answer, so it never becomes a binding.)
+        if deviceRole == .personal, deviceOwner.isEmpty, servedHuman != "observer" {
+            deviceOwner = servedHuman
+        }
+        refreshPresence()
         enrolled = storedGrant() != nil && !host.isEmpty
         #if os(iOS)
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
+        // Rung 2 reports back: agreed with the prior, or ran and disagreed (ADR-0019).
+        face.onVerification = { [weak self] handle in self?.faceVerification(confirmed: handle) }
         #endif
         // Migrate an existing UserDefaults-only enrollment into the Keychain so it stops evaporating.
         if enrolled { saveEnrollment() }
@@ -295,6 +374,16 @@ final class AppModel: ObservableObject {
             "hosts": hosts,
             "attempts": attemptLog,
             "servedHuman": servedHuman,
+            // What the ladder currently believes, so the console can SHOW the belief instead of
+            // asking (ADR-0019). An expired claim reports nobody rather than the last person seen.
+            "presence": [
+                "handle": presence.isLive ? presence.handle : "",
+                "via": presence.isLive ? presence.via.rawValue : "",
+                "confidence": presence.isLive ? presence.confidence : 0,
+                "since": presence.isLive ? Int(presence.since.timeIntervalSince1970) : 0,
+            ],
+            "deviceRole": deviceRole.rawValue,
+            "deviceOwner": deviceOwner,
             "oracle": ConsultRunner.state,
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
@@ -371,6 +460,9 @@ final class AppModel: ObservableObject {
     /// of plain presence — faceEnabled alone never triggers identity matching.
     func startFaceIfConsented() {
         #if os(iOS)
+        // Hand the sensor the prior to CHECK. A shared device has none, so it asks instead of
+        // searching every known face (ADR-0019 rungs 2–3).
+        face.prior = deviceRole == .personal && !deviceOwner.isEmpty ? deviceOwner : nil
         if enrolled, faceEnabled { face.start(recognize: faceRecognitionEnabled) } else { face.stop() }
         #endif
     }
@@ -397,9 +489,19 @@ final class AppModel: ObservableObject {
         let node = self.node
         Task {
             let port = enrollPort > 0 ? enrollPort : 47100
-            let doors = (try? await RendezvousClient.directory(host: Self.rendezvousHost, port: port)) ?? []
+            // Same rule as the status heartbeat: name the failure. `try?` here turned an ATS
+            // refusal into "no mesh found", which sent us hunting a directory that was up and
+            // answering the whole time. An empty list and an unreachable lighthouse are
+            // different facts and must read differently.
+            var doors: [MeshDoor] = []
+            do {
+                doors = try await RendezvousClient.directory(host: Self.rendezvousHost, port: port)
+            } catch {
+                note("✗ couldn't reach the lighthouse: \(Self.brief(error))")
+                return
+            }
             guard let door = doors.first else {
-                note("no familiar found automatically — scan a QR or paste an address")
+                note("the lighthouse lists no reachable mesh — use an invite instead")
                 return
             }
             // The lighthouse (always-on public door) is knocked on FIRST, then any other
@@ -423,7 +525,7 @@ final class AppModel: ObservableObject {
 
     func requestJoin(from json: String) {
         guard let p = EnrollmentPayload.parse(json) else {
-            note("✗ could not read that address")
+            note("✗ could not read that invite")
             return
         }
         hosts = p.candidateHosts
@@ -449,7 +551,7 @@ final class AppModel: ObservableObject {
             do {
                 var grant = try await enroller.requestJoin(node: node)     // non-nil if auto-approved
                 promoteHost(host)
-                if grant == nil { note("waiting for the familiar to approve this device…") }
+                if grant == nil { note("waiting for the mesh to admit this device…") }
                 var tries = 0
                 while grant == nil, tries < 150 {                          // ~5 min of polling
                     try await Task.sleep(nanoseconds: 2_000_000_000)
@@ -472,14 +574,14 @@ final class AppModel: ObservableObject {
                 return
             } catch EnrollmentClient.EnrollError.denied {
                 enrolling = false
-                note("✗ the familiar declined this device")
+                note("✗ the mesh declined this device")
                 return
             } catch {
                 lastError = error      // unreachable on this path — try the next address
             }
         }
         enrolling = false
-        note("… couldn't reach the familiar at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
+        note("… couldn't reach the mesh at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
     }
 
     /// Activate the watch link and, if we're enrolled, (re)hand the watch our address — so a watch
@@ -533,7 +635,7 @@ final class AppModel: ObservableObject {
     /// each with the on-device model, and push the answers back. Only devices with Apple Intelligence
     /// serve consults; others skip silently and the familiar's provider chain rolls on. Serialized so
     /// a slow generation never overlaps the next read cycle. Pulls from the host we just read from —
-    /// the muse queues on the home hub, so an on-network device picks them up.
+    /// the muse queues on whichever peer is serving, so an on-network device picks them up.
     func serviceConsults(host readHost: String) async {
         guard ConsultRunner.available, !servicingConsults else { return }
         guard let g = storedGrant(), !readHost.isEmpty else { return }
@@ -579,15 +681,49 @@ final class AppModel: ObservableObject {
     /// from the host it actually read its worldview from just now.
     func heartbeatStatus(readHost: String) async {
         guard let g = storedGrant() else { return }
+        // The presence CLAIM, not the persisted default: what the ladder concluded, how, how sure,
+        // and since when (ADR-0019). An expired claim reports nobody rather than the last person
+        // we saw — "Jeff is here" and "Jeff was here an hour ago" must not arrive as the same fact.
+        let claim = presence
+        let live = claim.isLive
         let status = StatusClient.Member(
             node_id: node.nodeId,
             actor: DeviceActor.current,
             label: PlatformDevice.name,
-            present_human: servedHuman,
-            connectivity: Self.connectivityMode(readHost)
+            present_human: live ? claim.handle : "",
+            connectivity: Self.connectivityMode(readHost),
+            present_via: live ? claim.via.rawValue : "",
+            present_since: live ? Int64(claim.since.timeIntervalSince1970) : 0,
+            present_confidence: live ? claim.confidence : 0
         )
         let client = StatusClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
-        _ = try? await client.send(status, host: Self.rendezvousHost, port: enrollPort)
+        // Do NOT swallow this. `send` reports a rejection as `false` and a transport failure as a
+        // throw, and `_ = try?` discarded both — so a device could be reading the worldview happily
+        // while being invisible to every OTHER device on the mesh, with nothing anywhere saying so.
+        // Logged on CHANGE only, since this runs on every poll tick.
+        do {
+            let ok = try await client.send(status, host: Self.rendezvousHost, port: enrollPort)
+            if ok != (lastStatusOK ?? false) {
+                note(ok ? "↑ status reaching the lighthouse" : "✗ lighthouse rejected this device's status")
+            }
+            lastStatusOK = ok
+        } catch {
+            if lastStatusOK ?? true {
+                note("✗ status heartbeat failed: \(Self.brief(error))")
+            }
+            lastStatusOK = false
+        }
+    }
+
+    /// Whether the last status heartbeat landed — nil until the first attempt. Only used to log
+    /// transitions, so a persistent failure doesn't flood the activity log every 5 seconds.
+    private var lastStatusOK: Bool?
+
+    /// A short, human-legible cause from an arbitrary error — URLError codes are what actually
+    /// show up here (ATS refusal, timeout, no route), and their raw descriptions are long.
+    static func brief(_ error: Error) -> String {
+        if let u = error as? URLError { return "\(u.code.rawValue) \(u.localizedDescription)" }
+        return (error as NSError).localizedDescription
     }
 
     /// Classify a worldview-read host into a connectivity mode for the roster badge (ADR-0017):

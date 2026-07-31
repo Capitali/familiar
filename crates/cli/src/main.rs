@@ -371,7 +371,8 @@ fn cmd_goal(args: &[String]) -> ExitCode {
                 + 1;
             let id = format!("goal-{seq:04}");
             // The originator is whoever the familiar is serving now — not a baked creator (ADR-0016).
-            let who = familiar_kernel::identity::current(&dir).unwrap_or_else(|| "observer".to_string());
+            let who =
+                familiar_kernel::identity::current(&dir).unwrap_or_else(|| "observer".to_string());
             let g = familiar_kernel::goal::Goal::seed(&id, desc, needs, &who, now_secs());
             match familiar_kernel::goal::append(&dir, &g) {
                 Ok(()) => {
@@ -1070,7 +1071,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 eprintln!("mesh: usage: familiar mesh deny <node_id>");
                 return ExitCode::FAILURE;
             };
-            match familiar_mesh::enroll::deny(&dir, node_id) {
+            match familiar_mesh::enroll::deny(&dir, node_id, now_secs()) {
                 Ok(true) => {
                     println!("✓ denied {}", short_id(node_id));
                     ExitCode::SUCCESS
@@ -1281,6 +1282,153 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        // ---- standing (ADR-0020): membership decides reading; standing decides seeing ---------
+        Some("standing") => {
+            let sub = args.get(1).map(String::as_str);
+            match sub {
+                Some("show") | None => {
+                    let roll = familiar_mesh::standing::load(&dir);
+                    if roll.full.is_empty() {
+                        println!("standing: nobody on the roll — every member reads as a guest");
+                    } else {
+                        println!("full standing ({}):", roll.full.len());
+                        for id in &roll.full {
+                            let note = roll.notes.get(id).map(String::as_str).unwrap_or("");
+                            println!("  {id}  {note}");
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Some("grant") => {
+                    let Some(node_id) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh standing grant <node_id> [--note N]");
+                        return ExitCode::FAILURE;
+                    };
+                    let note = f.get("note").cloned().unwrap_or_default();
+                    match familiar_mesh::standing::grant(&dir, node_id, &note) {
+                        Ok(true) => {
+                            println!("✓ {node_id} now reads at full standing");
+                            ExitCode::SUCCESS
+                        }
+                        Ok(false) => {
+                            println!("standing: {node_id} already stood (or empty id) — no change");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("revoke") => {
+                    let Some(node_id) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh standing revoke <node_id>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::standing::revoke(&dir, node_id) {
+                        Ok(true) => {
+                            // Narrows what they SEE; the membership itself is untouched.
+                            println!("✓ {node_id} returns to guest (still a member — `mesh abandon` removes)");
+                            ExitCode::SUCCESS
+                        }
+                        Ok(false) => {
+                            println!("standing: {node_id} was not on the roll — no change");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some(other) => {
+                    eprintln!("mesh: standing {other}? — show | grant <node_id> [--note N] | revoke <node_id>");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        // ---- group-secret escrow (ADR-0018) --------------------------------------------------
+        // The lighthouse is the only minting door, which makes the group secret a single point of
+        // extinction unless it is escrowed. These three commands are the whole procedure; the human
+        // side of it is security/group-secret-escrow.md.
+        Some("escrow-export") => match familiar_mesh::group::export_escrow(&dir, now_secs()) {
+            Ok(escrow) => match serde_json::to_string_pretty(&escrow) {
+                Ok(json) => {
+                    // Straight to stdout so it can be piped into an encryptor and never touch disk
+                    // in the clear. The warning goes to stderr so it does not corrupt the pipe.
+                    eprintln!(
+                        "⚠ this is the group's MINTING AUTHORITY, not a backup. Anyone holding it \
+                         can admit anyone. Encrypt it and keep it offline."
+                    );
+                    println!("{json}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: could not serialize escrow — {e}");
+                    ExitCode::FAILURE
+                }
+            },
+            Err(e) => {
+                eprintln!("mesh: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("escrow-restore") => {
+            use std::io::Read;
+            let mut buf = String::new();
+            if let Err(e) = std::io::stdin().read_to_string(&mut buf) {
+                eprintln!("mesh: could not read escrow from stdin — {e}");
+                return ExitCode::FAILURE;
+            }
+            let escrow: familiar_mesh::group::GroupEscrow = match serde_json::from_str(&buf) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("mesh: that is not an escrow document — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match familiar_mesh::group::restore_from_escrow(&dir, &escrow) {
+                Ok(cred) => {
+                    println!(
+                        "✓ minting authority restored for “{}” · id {}",
+                        cred.label,
+                        short_id(&cred.group_id)
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: restore refused — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("reduce-to-covenant") => {
+            // Irreversible without the escrow, so it refuses unless the human says the word. The
+            // confirmation is not ceremony: until an escrow exists, a second node holding the
+            // secret IS the group's redundancy, and stripping it makes things worse.
+            if !f.contains_key("yes") {
+                eprintln!(
+                    "mesh: this strips the group secret from this node. It CANNOT be undone \
+                     without an escrow (security/group-secret-escrow.md).\n\
+                     Export and verify an escrow first, then re-run with --yes."
+                );
+                return ExitCode::FAILURE;
+            }
+            match familiar_mesh::group::reduce_to_covenant(&dir) {
+                Ok(cred) => {
+                    println!(
+                        "✓ this node now holds a covenant credential for “{}” — it can prove \
+                         membership and verify peers, and can no longer mint members.",
+                        cred.label
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         _ => {
             eprintln!(
                 "mesh: usage: familiar mesh <create-group [--label L] | join --key K [--label L] \
@@ -1288,7 +1436,9 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | abandon <node_id> | forget <node_id> \
                  | share <tools|knowledge|identities> <on|off> | accept-observations <on|off> \
                  | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
-                 | invite [--minutes N] | optin <handle> | status>"
+                 | invite [--minutes N] | optin <handle> | status \
+                 | escrow-export | escrow-restore | reduce-to-covenant --yes \
+                 | standing [show | grant <node_id> [--note N] | revoke <node_id>]>"
             );
             ExitCode::FAILURE
         }

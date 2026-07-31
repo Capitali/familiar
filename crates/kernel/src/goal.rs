@@ -77,6 +77,11 @@ pub struct Goal {
     /// node_id of the node that claimed it; empty while unclaimed. The mesh dedups ownership on this.
     #[serde(default)]
     pub owner_node: String,
+    /// The **human** accountable for this goal — distinct from `owner_node`, which is only the
+    /// machine doing the work. A goal with no human owner belongs to everyone and therefore to
+    /// nobody. Falls back to `origin` when that names a person (see `crate::routing`).
+    #[serde(default)]
+    pub owner_human: String,
     /// Who seeded it: a human handle ("ian"), "familiar" (self-proposed), or "mesh:<node>".
     #[serde(default)]
     pub origin: String,
@@ -105,8 +110,21 @@ pub struct Goal {
     pub ended_at: i64,
 }
 
+/// A human handle from a goal's origin, or empty. Origins are either a handle ("ian"), the
+/// familiar itself, or `mesh:<node>` — only the first names a person who can be accountable.
+pub fn human_origin(origin: &str) -> String {
+    let o = origin.trim().to_lowercase();
+    if o.is_empty() || o == "familiar" || o == "observer" || o.starts_with("mesh:") {
+        String::new()
+    } else {
+        o
+    }
+}
+
 impl Goal {
-    /// A freshly-seeded goal: proposed, unclaimed, no owner.
+    /// A freshly-seeded goal: proposed, unclaimed by any node. Its **human** owner is taken from
+    /// the origin when that names a person, so a goal a human seeded starts out belonging to them
+    /// rather than to the room.
     pub fn seed(id: &str, description: &str, needs: Vec<String>, origin: &str, now: i64) -> Self {
         Goal {
             id: id.to_string(),
@@ -114,6 +132,7 @@ impl Goal {
             needs,
             status: Status::Proposed,
             owner_node: String::new(),
+            owner_human: human_origin(origin),
             origin: origin.to_string(),
             produced: String::new(),
             notes: String::new(),

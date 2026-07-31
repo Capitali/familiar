@@ -32,6 +32,7 @@ pub mod question;
 pub mod regression_guard;
 pub mod request;
 pub mod review;
+pub mod routing;
 pub mod score;
 pub mod selection;
 pub mod service;

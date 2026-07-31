@@ -65,6 +65,9 @@ public struct GoalView: Codable, Equatable, Identifiable {
     public var status: String
     /// Short node id of the owner (empty while unclaimed).
     public var owner: String
+    /// The **human** accountable for it — distinct from `owner`, which is only the machine doing
+    /// the work. Optional for back-compat with familiars that predate goal ownership.
+    public var owner_human: String?
     public var origin: String
     public var produced: String
     public var notes: String
@@ -158,6 +161,15 @@ public struct Worldview: Codable, Equatable {
     public var group_label: String
     public var node_id: String
     public var question: String?
+    /// The human the open question is addressed to (ADR-0019 routing). Empty/nil = unaddressed.
+    /// A console shows "asking Betty" rather than putting her question in front of whoever is
+    /// holding the device. Absent from a guest projection, since it names a person.
+    public var question_owner: String?
+    /// Members admitted but not yet granted standing — nobody has said who they are yet. The
+    /// welcome glyph pulses on this. Absent from a guest projection.
+    public var guests_waiting: Int?
+    /// Node ids at full standing — lets a console tell a recognised member from a waiting guest.
+    public var standing_full: [String]?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

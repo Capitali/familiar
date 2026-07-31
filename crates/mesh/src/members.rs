@@ -98,6 +98,10 @@ pub struct Member {
     /// When that presence was first established in the current unbroken run (unix secs). 0 = unknown.
     #[serde(default)]
     pub present_since: i64,
+    /// How sure we are the named human is here (ADR-0019). Carried rather than flattened, so a
+    /// device's 0.7 binding is never read as a human's own 1.0 answer.
+    #[serde(default)]
+    pub present_confidence: f64,
     /// How presence was established — "face" (recognized), "motion" (carried device biometrics),
     /// "dialogue" (the human spoke to the familiar), "activity" (the device is reporting at all).
     /// Empty = unknown. Strongest evidence wins when several are fresh.
@@ -303,6 +307,25 @@ pub fn os_from_actor(actor: &str) -> String {
 /// network. The self node comes first, then peers, then agents — each exactly once.
 pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
     let mut out = Vec::new();
+    // A device's OWN presence claim (ADR-0019), if it is heartbeating one. The device is closer to
+    // the evidence than we are — it holds the binding, ran the 1:1 face check, and heard the human
+    // answer — so where it makes a live claim about itself, that claim wins over what we can infer
+    // from its observation stream. `status::record` already enforces that a member may only place
+    // its OWN status, so a device can only ever speak for itself.
+    let claims = crate::status::directory(dir, now);
+    let claim_of = |node_id: &str| -> Option<(String, i64, String, f64)> {
+        claims
+            .iter()
+            .find(|s| s.node_id == node_id && !s.present_human.trim().is_empty())
+            .map(|s| {
+                (
+                    s.present_human.clone(),
+                    s.present_since,
+                    s.present_via.clone(),
+                    s.present_confidence,
+                )
+            })
+    };
 
     // Self — this instance of the familiar. Peers are equals: it is named by its host (like every
     // other peer's brief label), NOT by the group or a privileged "familiar" name. `SelfNode` marks
@@ -355,6 +378,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             total_online_secs: 0,
             interactive: !cfg.headless,
             human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+            present_confidence: match sp_via.as_str() {
+                "face" => 0.9,
+                "dialogue" => 0.85,
+                "motion" => 0.6,
+                "activity" => 0.4,
+                _ => 0.0,
+            },
             present_human: sp_human,
             present_since: sp_since,
             present_via: sp_via,
@@ -471,6 +501,24 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         } else {
             (String::new(), 0, String::new())
         };
+        // The device's own claim wins where it makes one; our derivation is the fallback for
+        // clients too old to report a claim, and for gossip peers that are not devices at all.
+        // Derived presence carries no stated confidence, so it is scored by its own evidence tier.
+        let claimed = claim_of(&p.node_id).unwrap_or_else(|| {
+            let conf = match dev_presence.2.as_str() {
+                "face" => 0.9,
+                "dialogue" => 0.85,
+                "motion" => 0.6,
+                "activity" => 0.4,
+                _ => 0.0,
+            };
+            (
+                dev_presence.0.clone(),
+                dev_presence.1,
+                dev_presence.2.clone(),
+                conf,
+            )
+        });
         out.push(Member {
             node_id: p.node_id.clone(),
             label,
@@ -500,9 +548,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             human,
             // A gossip peer's presence is its own to know and report; here we derive it only for
             // devices whose observations flow through this node's store (source `mesh:<node>`).
-            present_human: dev_presence.0.clone(),
-            present_since: dev_presence.1,
-            present_via: dev_presence.2.clone(),
+            present_human: claimed.0,
+            present_since: claimed.1,
+            present_via: claimed.2,
+            present_confidence: claimed.3,
             lat: p.lat,
             lon: p.lon,
             attached: Vec::new(),
@@ -556,6 +605,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
                 .split_once(':')
                 .map(|(_, h)| h.to_string())
                 .unwrap_or_default(),
+            present_confidence: match agent_presence.2.as_str() {
+                "face" => 0.9,
+                "dialogue" => 0.85,
+                "motion" => 0.6,
+                "activity" => 0.4,
+                _ => 0.0,
+            },
             present_human: agent_presence.0,
             present_since: agent_presence.1,
             present_via: agent_presence.2,
@@ -918,20 +974,50 @@ mod tests {
         ];
         let src = "mesh:watch1";
         let obs = vec![
-            Observation::new("watch:ian", "reports", "heart_rate:elevated", "", src, 100, 0.9),
+            Observation::new(
+                "watch:ian",
+                "reports",
+                "heart_rate:elevated",
+                "",
+                src,
+                100,
+                0.9,
+            ),
             Observation::new("watch:ian", "reports", "motion:walking", "", src, 101, 0.9),
             Observation::new("watch:ian", "reports", "gyro:turning", "", src, 102, 0.9),
-            Observation::new("watch:ian", "reports", "location:48.6,-93.4", "", src, 103, 0.9),
+            Observation::new(
+                "watch:ian",
+                "reports",
+                "location:48.6,-93.4",
+                "",
+                src,
+                103,
+                0.9,
+            ),
             // A newer heart reading must win over the older one.
-            Observation::new("watch:ian", "reports", "heart_rate:normal", "", src, 104, 0.9),
+            Observation::new(
+                "watch:ian",
+                "reports",
+                "heart_rate:normal",
+                "",
+                src,
+                104,
+                0.9,
+            ),
         ];
         attach_companions(&mut out, &obs);
         assert!(
             out[0].attached.iter().any(|a| a == "⌚ watch"),
             "the same human's phone is badged with its watch"
         );
-        assert!(out[1].attached.is_empty(), "the watch itself carries no badge");
-        assert!(out[2].attached.is_empty(), "a different human's iPad is not badged");
+        assert!(
+            out[1].attached.is_empty(),
+            "the watch itself carries no badge"
+        );
+        assert!(
+            out[2].attached.is_empty(),
+            "a different human's iPad is not badged"
+        );
         assert!(
             out[3].attached.is_empty(),
             "even the same human's iPad is not badged — a watch pairs with the iPhone, not the iPad"
@@ -945,29 +1031,45 @@ mod tests {
 
     #[test]
     fn dedup_collapses_reinstalled_device_identities() {
-        let mk = |node: &str, label: &str, actor: &str, kind: &str, last: i64, total: i64| -> Member {
-            serde_json::from_value(serde_json::json!({
-                "node_id": node, "label": label, "kind": kind, "os": "", "actor": actor,
-                "detail": "", "first_seen": 0, "last_seen": last, "online": false,
-                "total_online_secs": total
-            }))
-            .unwrap()
-        };
+        let mk =
+            |node: &str, label: &str, actor: &str, kind: &str, last: i64, total: i64| -> Member {
+                serde_json::from_value(serde_json::json!({
+                    "node_id": node, "label": label, "kind": kind, "os": "", "actor": actor,
+                    "detail": "", "first_seen": 0, "last_seen": last, "online": false,
+                    "total_online_secs": total
+                }))
+                .unwrap()
+            };
         let members = vec![
             mk("self1", "Wildhorse", "", "self_node", 500, 0), // no device actor — untouched
             mk("d5c3", "iPhone", "phone:ian", "device_peer", 100, 60), // oldest, nice label
             mk("7361", "phone:ian", "phone:ian", "device_agent", 200, 30),
             mk("8e51", "phone:ian", "phone:ian", "device_agent", 400, 10), // freshest
-            mk("ipad1", "iPad", "ipad:ian", "device_peer", 300, 90), // sole iPad — kept as-is
+            mk("ipad1", "iPad", "ipad:ian", "device_peer", 300, 90),       // sole iPad — kept as-is
         ];
         let out = dedup_devices(members);
         // Wildhorse + one iPhone + one iPad == 3 rows (the three phone:ian identities collapsed).
         assert_eq!(out.len(), 3, "three phone identities collapse to one");
         let phone = out.iter().find(|m| m.actor == "phone:ian").unwrap();
-        assert_eq!(phone.node_id, "8e51", "the freshest identity represents the device");
-        assert_eq!(phone.label, "iPhone", "a friendly label is carried from the lineage");
-        assert_eq!(phone.total_online_secs, 100, "cumulative online time summed across the lineage");
-        assert!(out.iter().any(|m| m.node_id == "self1"), "the self node is never merged");
-        assert!(out.iter().any(|m| m.node_id == "ipad1"), "a sole device is left intact");
+        assert_eq!(
+            phone.node_id, "8e51",
+            "the freshest identity represents the device"
+        );
+        assert_eq!(
+            phone.label, "iPhone",
+            "a friendly label is carried from the lineage"
+        );
+        assert_eq!(
+            phone.total_online_secs, 100,
+            "cumulative online time summed across the lineage"
+        );
+        assert!(
+            out.iter().any(|m| m.node_id == "self1"),
+            "the self node is never merged"
+        );
+        assert!(
+            out.iter().any(|m| m.node_id == "ipad1"),
+            "a sole device is left intact"
+        );
     }
 }

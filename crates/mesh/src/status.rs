@@ -38,10 +38,16 @@ pub struct MemberStatus {
     pub label: String,
     #[serde(default)]
     pub present_human: String,
+    /// How the present human was established — "binding" | "face" | "asked" | "inherited"
+    /// (ADR-0019). Empty when nobody is identified.
     #[serde(default)]
     pub present_via: String,
     #[serde(default)]
     pub present_since: i64,
+    /// How sure the reporting device is. Carried rather than flattened away, so a 0.7 binding is
+    /// never mistaken downstream for a human's own 1.0 answer.
+    #[serde(default)]
+    pub present_confidence: f64,
     /// How this member is currently reaching the mesh: "local" | "lighthouse" | "tailscale".
     #[serde(default)]
     pub connectivity: String,
@@ -164,6 +170,7 @@ mod tests {
             present_human: "betty".into(),
             present_via: "face".into(),
             present_since: NOW - 60,
+            present_confidence: 0.9,
             connectivity: "lighthouse".into(),
             tailnet_addr: String::new(),
             tailnet_up: false,

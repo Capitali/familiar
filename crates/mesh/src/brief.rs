@@ -181,6 +181,11 @@ pub struct GoalShare {
     /// The goal's status as a slug ("proposed"/"claimed"/"in_progress"/"awaiting_human"/"done"/…).
     pub status: String,
     pub owner_node: String,
+    /// The **human** accountable for the goal, so ownership travels with it across the mesh rather
+    /// than being re-guessed on every node. Skipped when empty so a brief stays byte-identical for
+    /// verifiers built before this field — an unknown field would break every signature.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner_human: String,
     pub origin: String,
     pub produced: String,
     pub notes: String,

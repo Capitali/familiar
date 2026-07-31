@@ -49,6 +49,14 @@ pub struct Question {
     /// Why it was waved off, when known — the seed of understanding dismissal, kept so it is
     /// never merely discarded.
     pub dismiss_notes: Vec<String>,
+    /// The human this question is **addressed to** — who is being asked, and who is accountable
+    /// for it (`crate::routing`). Empty means unaddressed, which for a familiar serving several
+    /// people means "announced at the room", the thing owners exist to stop.
+    ///
+    /// Ownership governs who is ASKED, never who may read: once an answer is confirmed it becomes
+    /// an ordinary observation in the shared worldview, public to the whole mesh.
+    #[serde(default)]
+    pub owner: String,
 }
 
 impl Question {
@@ -64,6 +72,7 @@ impl Question {
             last_dismissed: 0,
             answered: false,
             dismiss_notes: Vec::new(),
+            owner: String::new(),
         }
     }
 
@@ -133,6 +142,14 @@ fn update<F: FnMut(&mut Question)>(dir: &Path, id: &str, mut f: F) -> io::Result
     };
     f(&mut q);
     store::update_by_id(dir, QUESTIONS_FILE, id, &q)
+}
+
+/// Address this question to a human (`crate::routing::route` decides who). Idempotent, and
+/// re-addressing is normal rather than exceptional: the person a question was put to walks out of
+/// the room, and leaving it addressed to an empty chair is worse than handing it to whoever is here.
+pub fn set_owner(dir: &Path, id: &str, owner: &str) -> io::Result<bool> {
+    let owner = owner.trim().to_lowercase();
+    update(dir, id, |q| q.owner = owner.clone())
 }
 
 pub fn record_asked(dir: &Path, id: &str, now: i64) -> io::Result<bool> {

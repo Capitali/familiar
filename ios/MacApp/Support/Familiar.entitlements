@@ -3,9 +3,10 @@
 <plist version="1.0">
 <dict>
 	<!-- App Store / TestFlight distribution requires the App Sandbox. FamiliarMac is a pure
-	     client: it reads the local familiar over loopback (GET 127.0.0.1:47101/local/worldview)
-	     and relays human acts back. network.client covers outgoing connections, loopback
-	     included; no server, no file access, no other capability is needed. -->
+	     client: it enrols as a peer and reads the worldview over the mesh (ADR-0018), the same
+	     way the iOS shells do — it no longer reads a local daemon over loopback. network.client
+	     covers the outgoing TLS connections that needs; no server, no file access, no other
+	     capability is required. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 	<key>com.apple.security.network.client</key>

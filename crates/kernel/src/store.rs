@@ -171,6 +171,10 @@ pub fn load<T: DeserializeOwned>(dir: &Path, file: &str) -> io::Result<Vec<T>> {
 /// Replace `<file>`'s table with exactly these records (a transactional
 /// `DELETE` + re-`INSERT`). For genuine *bulk* sets (e.g. detected loops); id-targeted
 /// updates should use [`update_by_id`] instead so they don't touch every row.
+///
+/// **Never use this on a table anything reads through [`load_since_seq`].** The re-`INSERT`
+/// assigns fresh `seq` values, so a cursor holding the old high-water mark will silently
+/// either skip every rewritten row or replay all of them.
 pub fn rewrite<T: Serialize>(dir: &Path, file: &str, records: &[T]) -> io::Result<()> {
     let table = table_of(file);
     let arc = conn(dir)?;
@@ -237,6 +241,174 @@ pub fn update_by_id<T: Serialize>(
         )
         .map_err(se)?;
     Ok(n > 0)
+}
+
+/// Insert-or-replace by JSON `id`, in one transaction. [`update_by_id`] only updates an
+/// existing row; this is the upsert an accumulator needs — the first contribution to a slot
+/// creates it, every later one replaces it, and neither caller has to know which case it is in.
+/// Returns whether an existing row was replaced (`false` = inserted).
+pub fn upsert_by_id<T: Serialize>(
+    dir: &Path,
+    file: &str,
+    id: &str,
+    record: &T,
+) -> io::Result<bool> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let json = serde_json::to_string(record).map_err(invalid_data)?;
+    let tx = c.unchecked_transaction().map_err(se)?;
+    let n = tx
+        .execute(
+            &format!("UPDATE {table} SET data=?1 WHERE json_extract(data,'$.id')=?2"),
+            rusqlite::params![json, id],
+        )
+        .map_err(se)?;
+    if n == 0 {
+        tx.execute(
+            &format!("INSERT INTO {table}(data) VALUES(?1)"),
+            [json.as_str()],
+        )
+        .map_err(se)?;
+    }
+    tx.commit().map_err(se)?;
+    Ok(n > 0)
+}
+
+/// Every record whose JSON `id` starts with `prefix`, in id order. A **range** scan on the
+/// existing `$.id` expression index, not a full table scan — which is why ids that need
+/// grouping (`"ctb|<subject>|<kind>|<slot>"`) are built most-significant-part first.
+pub fn load_prefix<T: DeserializeOwned>(
+    dir: &Path,
+    file: &str,
+    prefix: &str,
+) -> io::Result<Vec<T>> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    // The upper bound is the prefix with the highest scalar value appended, so the range is
+    // half-open over exactly the keys that start with `prefix`.
+    let upper = format!("{prefix}\u{10FFFF}");
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT data FROM {table} \
+             WHERE json_extract(data,'$.id') >= ?1 AND json_extract(data,'$.id') < ?2 \
+             ORDER BY json_extract(data,'$.id')"
+        ))
+        .map_err(se)?;
+    let rows = stmt
+        .query_map(rusqlite::params![prefix, upper], |r| r.get::<_, String>(0))
+        .map_err(se)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let data = row.map_err(se)?;
+        out.push(serde_json::from_str(&data).map_err(invalid_data)?);
+    }
+    Ok(out)
+}
+
+/// Delete the record whose JSON `id` equals `id`. Returns whether a row matched.
+///
+/// The store deliberately had no delete until the dossier needed one: observations and the
+/// records derived from them are append-only, and "we do not delete" was load-bearing. This
+/// exists for records a human may withdraw (ADR-0022), not as a general-purpose eraser.
+pub fn delete_by_id(dir: &Path, file: &str, id: &str) -> io::Result<bool> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let n = c
+        .execute(
+            &format!("DELETE FROM {table} WHERE json_extract(data,'$.id')=?1"),
+            [id],
+        )
+        .map_err(se)?;
+    Ok(n > 0)
+}
+
+/// Delete every record whose JSON `id` starts with `prefix`. Returns how many went — the
+/// count a withdrawal receipt reports, so a human is told what actually happened rather than
+/// that it "succeeded".
+pub fn delete_prefix(dir: &Path, file: &str, prefix: &str) -> io::Result<usize> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let upper = format!("{prefix}\u{10FFFF}");
+    let n = c
+        .execute(
+            &format!(
+                "DELETE FROM {table} \
+                 WHERE json_extract(data,'$.id') >= ?1 AND json_extract(data,'$.id') < ?2"
+            ),
+            rusqlite::params![prefix, upper],
+        )
+        .map_err(se)?;
+    Ok(n)
+}
+
+/// Records with `seq > after`, oldest first, at most `limit`, each paired with its `seq` — the
+/// resumable cursor a fold reads through. The caller stores the last `seq` it handled and asks
+/// again from there, so a crash replays a bounded batch instead of the whole log.
+///
+/// Ordering is commit order: every write here is a single-statement transaction and SQLite's
+/// WAL serialises writers, so `seq` order is the order records became visible and no committed
+/// row can be skipped by a gap.
+pub fn load_since_seq<T: DeserializeOwned>(
+    dir: &Path,
+    file: &str,
+    after: i64,
+    limit: usize,
+) -> io::Result<Vec<(i64, T)>> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT seq, data FROM {table} WHERE seq > ?1 ORDER BY seq LIMIT ?2"
+        ))
+        .map_err(se)?;
+    let rows = stmt
+        .query_map(rusqlite::params![after, limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(se)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (seq, data) = row.map_err(se)?;
+        out.push((seq, serde_json::from_str(&data).map_err(invalid_data)?));
+    }
+    Ok(out)
+}
+
+/// The next `seq` this table will assign — the `AUTOINCREMENT` high-water mark plus one.
+///
+/// Monotone **across deletes**, which a row count is not. Anything minting sequential ids must
+/// use this: deriving an id from `load(dir)?.len()` mints duplicates the moment a single row is
+/// ever removed, and duplicate ids silently break every [`load_by_id`] lookup in the system.
+pub fn next_seq(dir: &Path, file: &str) -> io::Result<i64> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    // sqlite_sequence only has a row once the table has taken an insert; fall back to MAX(seq).
+    let high: i64 = c
+        .query_row(
+            "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name=?1), 0)",
+            [table.as_str()],
+            |r| r.get(0),
+        )
+        .map_err(se)?;
+    if high > 0 {
+        return Ok(high + 1);
+    }
+    let max: Option<i64> = c
+        .query_row(&format!("SELECT MAX(seq) FROM {table}"), [], |r| r.get(0))
+        .map_err(se)?;
+    Ok(max.unwrap_or(0) + 1)
 }
 
 /// Fold a legacy `<dir>/<file>` JSONL log into its table if it hasn't been already (the same
@@ -325,6 +497,120 @@ mod tests {
             id: id.into(),
             name: name.into(),
         }
+    }
+
+    // ---- the accumulator primitives (ADR-0022 contribution scoring) --------------------
+
+    #[test]
+    fn upsert_inserts_then_replaces() {
+        let d = TempDir::new("upsert");
+        let f = "acc.jsonl";
+        assert!(
+            !upsert_by_id(d.path(), f, "a", &rec("a", "one")).unwrap(),
+            "first is an insert"
+        );
+        assert!(
+            upsert_by_id(d.path(), f, "a", &rec("a", "two")).unwrap(),
+            "second replaces"
+        );
+        let all: Vec<Rec> = load(d.path(), f).unwrap();
+        assert_eq!(all.len(), 1, "an upsert must never duplicate the row");
+        assert_eq!(all[0].name, "two");
+    }
+
+    #[test]
+    fn load_prefix_is_a_range_not_a_scan() {
+        let d = TempDir::new("prefix");
+        let f = "acc.jsonl";
+        for id in [
+            "ctb|betty|presence|0002",
+            "ctb|betty|presence|0001",
+            "ctb|ian|presence|0001",
+        ] {
+            append(d.path(), f, &rec(id, "x")).unwrap();
+        }
+        let betty: Vec<Rec> = load_prefix(d.path(), f, "ctb|betty|").unwrap();
+        assert_eq!(betty.len(), 2, "only betty's rows");
+        assert_eq!(
+            betty[0].id, "ctb|betty|presence|0001",
+            "id order, not insertion order"
+        );
+        assert_eq!(betty[1].id, "ctb|betty|presence|0002");
+        // A prefix that is a strict extension must not sweep in its siblings.
+        let none: Vec<Rec> = load_prefix(d.path(), f, "ctb|bettyjo|").unwrap();
+        assert!(
+            none.is_empty(),
+            "prefix matching must not be substring matching"
+        );
+    }
+
+    #[test]
+    fn delete_by_id_and_prefix_report_what_went() {
+        let d = TempDir::new("delete");
+        let f = "acc.jsonl";
+        for id in ["ctb|betty|a", "ctb|betty|b", "ctb|ian|a"] {
+            append(d.path(), f, &rec(id, "x")).unwrap();
+        }
+        assert!(delete_by_id(d.path(), f, "ctb|ian|a").unwrap());
+        assert!(
+            !delete_by_id(d.path(), f, "ctb|ian|a").unwrap(),
+            "already gone"
+        );
+        assert_eq!(
+            delete_prefix(d.path(), f, "ctb|betty|").unwrap(),
+            2,
+            "the count a receipt reports"
+        );
+        let left: Vec<Rec> = load(d.path(), f).unwrap();
+        assert!(left.is_empty());
+    }
+
+    #[test]
+    fn next_seq_is_monotone_across_deletes() {
+        // THE property the observation id depends on. A row count would repeat an id here, and a
+        // duplicate id silently breaks every load_by_id lookup in the system.
+        let d = TempDir::new("nextseq");
+        let f = "acc.jsonl";
+        assert_eq!(
+            next_seq(d.path(), f).unwrap(),
+            1,
+            "an empty table starts at 1"
+        );
+        append(d.path(), f, &rec("a", "1")).unwrap();
+        append(d.path(), f, &rec("b", "2")).unwrap();
+        assert_eq!(next_seq(d.path(), f).unwrap(), 3);
+        assert!(delete_by_id(d.path(), f, "a").unwrap());
+        assert!(delete_by_id(d.path(), f, "b").unwrap());
+        let count_would_say = load::<Rec>(d.path(), f).unwrap().len() + 1;
+        assert_eq!(count_would_say, 1, "a count regresses after deletes …");
+        assert_eq!(next_seq(d.path(), f).unwrap(), 3, "… but next_seq does not");
+    }
+
+    #[test]
+    fn load_since_seq_is_a_resumable_bounded_cursor() {
+        let d = TempDir::new("cursor");
+        let f = "acc.jsonl";
+        for i in 0..5 {
+            append(d.path(), f, &rec(&format!("r{i}"), "x")).unwrap();
+        }
+        let first: Vec<(i64, Rec)> = load_since_seq(d.path(), f, 0, 2).unwrap();
+        assert_eq!(first.len(), 2, "limit is honoured");
+        assert_eq!(first[0].1.id, "r0");
+        let cursor = first.last().unwrap().0;
+        let rest: Vec<(i64, Rec)> = load_since_seq(d.path(), f, cursor, 100).unwrap();
+        assert_eq!(
+            rest.len(),
+            3,
+            "resumes after the cursor, no overlap and no gap"
+        );
+        assert_eq!(rest[0].1.id, "r2");
+        // Re-reading from the same cursor replays exactly the same batch — what makes a crash
+        // mid-fold safe.
+        let replay: Vec<(i64, Rec)> = load_since_seq(d.path(), f, cursor, 100).unwrap();
+        assert_eq!(replay.len(), 3);
+        assert!(load_since_seq::<Rec>(d.path(), f, 9_999, 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

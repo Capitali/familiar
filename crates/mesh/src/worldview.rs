@@ -134,6 +134,21 @@ pub struct Worldview {
     /// offers a reply.
     #[serde(default)]
     pub question: String,
+    /// The human the open question is **addressed to** (`familiar_kernel::routing`). Empty means
+    /// unaddressed. A console shows "asking Betty" rather than putting everyone's question in
+    /// front of whoever happens to be holding the device. Ownership is about who is ASKED — the
+    /// answer, once confirmed, is an ordinary public observation.
+    #[serde(default)]
+    pub question_owner: String,
+    /// How many members are reading as **guests** — admitted (ADR-0015) but not yet granted
+    /// standing (ADR-0020), so nobody has said who they are. A waiting decision, and the number
+    /// the console's welcome glyph pulses on. Zero is the resting state, not an error.
+    #[serde(default)]
+    pub guests_waiting: usize,
+    /// Node ids at full standing, so a console can tell a recognised member from a waiting guest
+    /// without a second round trip. Node ids only — no names, and absent from a guest projection.
+    #[serde(default)]
+    pub standing_full: Vec<String>,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -193,6 +208,10 @@ pub struct GoalView {
     pub status: String,
     /// Short node id of the owner (empty while unclaimed).
     pub owner: String,
+    /// The **human** accountable for it — distinct from `owner`, which is only the machine doing
+    /// the work. Empty when the goal belongs to no one in particular.
+    #[serde(default)]
+    pub owner_human: String,
     pub origin: String,
     /// Tools/artifacts it produced, for the audit trail.
     pub produced: String,
@@ -332,6 +351,13 @@ pub(crate) fn read_worldview(
             m.kind = crate::members::MemberKind::SelfNode;
             m.relationship = "self".into();
         }
+    }
+    // Membership decided that this node may READ. Standing decides what it sees. Admission is
+    // automatic (ADR-0015), so "admitted" and "trusted with the household's names" are not the
+    // same fact — an unlisted reader gets the same mesh with none of the identities. Default
+    // deny: full standing is granted by hand in `standing.json`.
+    if crate::standing::standing_of(dir, &req.node.node_id) == crate::standing::Standing::Guest {
+        crate::standing::to_guest_view(&mut view, &req.node.node_id);
     }
     // Tell the console every address the MESH answers at: human-asserted first (a
     // lighthouse's NAT-hidden public IP or DNS name — `advertise_hosts`), then ours, then
@@ -477,7 +503,30 @@ pub fn assemble_worldview(
         .unwrap_or_default()
         .trim()
         .to_string();
+    // Who it is being asked OF. The text lives in question.txt for the console's sake; the
+    // addressee lives on the question record, so read it back through the active id.
+    let question_owner = std::fs::read_to_string(dir.join("active_question.txt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .and_then(|id| {
+            familiar_kernel::question::load(dir)
+                .ok()
+                .and_then(|qs| qs.into_iter().find(|q| q.id == id).map(|q| q.owner))
+        })
+        .unwrap_or_default();
     let members = crate::members::classify(dir, now);
+    // Members admitted but not yet stood — see `guests_waiting`. Counted from the roll rather
+    // than from a pending queue, because admission is automatic and there is no queue: being a
+    // guest IS the waiting state.
+    let roll = crate::standing::load(dir);
+    let guests_waiting = members
+        .iter()
+        .filter(|m| {
+            m.kind != crate::members::MemberKind::SelfNode
+                && !roll.full.iter().any(|n| n == &m.node_id)
+        })
+        .count();
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
     let goals = goal_views(dir);
@@ -490,6 +539,9 @@ pub fn assemble_worldview(
         hosts: Vec::new(),
         pins: Vec::new(),
         question,
+        question_owner,
+        guests_waiting,
+        standing_full: roll.full.clone(),
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,
@@ -529,6 +581,11 @@ fn goal_views(dir: &Path) -> Vec<GoalView> {
             needs: g.needs,
             status: g.status.as_str().to_string(),
             owner: g.owner_node.chars().take(8).collect(),
+            owner_human: if g.owner_human.is_empty() {
+                familiar_kernel::goal::human_origin(&g.origin)
+            } else {
+                g.owner_human.clone()
+            },
             origin: g.origin,
             produced: g.produced,
             notes: g.notes,
@@ -816,6 +873,7 @@ mod tests {
             human: String::new(),
             present_human: String::new(),
             present_since: 0,
+            present_confidence: 0.0,
             present_via: String::new(),
             lat: 0.0,
             lon: 0.0,
@@ -942,12 +1000,98 @@ mod tests {
         )
         .unwrap();
 
+        // Reading is membership; SEEING the household is standing (ADR-0015 admits automatically,
+        // so the two are not the same fact). Put this reader on the roll to get the real snapshot.
+        grant_full_standing(&host, &device.node_id());
+
         let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
         let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
         assert_eq!(view.group_label, "river");
         assert_eq!(view.observation_count, 1);
         assert_eq!(view.recent.len(), 1);
         assert_eq!(view.recent[0].object, "the familiar for help");
+    }
+
+    /// Put a node on the standing roll, so it reads the household's real worldview.
+    fn grant_full_standing(dir: &std::path::Path, node_id: &str) {
+        let roll = crate::standing::StandingRoll {
+            full: vec![node_id.to_string()],
+            ..Default::default()
+        };
+        std::fs::write(
+            dir.join(crate::standing::STANDING_FILE),
+            serde_json::to_vec(&roll).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_member_not_on_the_standing_roll_reads_a_guest_view() {
+        // The case that matters: an auto-admitted stranger. It is a real member — the read
+        // SUCCEEDS, it is not an error — but it must not learn who lives here.
+        let (host, cred, device) = setup("guest");
+        observation::record(
+            &host,
+            Observation::new(
+                "ian",
+                "asked",
+                "the familiar for help",
+                "at the galley table",
+                "local",
+                NOW,
+                0.9,
+            ),
+        )
+        .unwrap();
+
+        // No standing.json at all — default deny.
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+
+        // The shape is intact and honest…
+        assert_eq!(view.observation_count, 1);
+        assert_eq!(view.recent.len(), 1);
+        assert_eq!(
+            view.recent[0].ts, NOW,
+            "timestamps must survive — Ian asked for this"
+        );
+        assert_eq!(view.recent[0].action, "asked", "the cadence stays legible");
+
+        // …and the people are gone.
+        assert_ne!(view.group_label, "river");
+        assert_ne!(view.recent[0].object, "the familiar for help");
+        assert!(view.recent[0].context.is_empty());
+        assert!(
+            !view.recent[0].actor.contains("ian"),
+            "actor must not name a human, got {:?}",
+            view.recent[0].actor
+        );
+        // The routing addressee and a goal's human owner both name a person, so both must go.
+        assert!(
+            view.question_owner.is_empty(),
+            "question_owner names who is being asked and must not reach a guest: {:?}",
+            view.question_owner
+        );
+        for g in &view.goals {
+            assert!(
+                g.owner_human.is_empty(),
+                "goal owner_human leaked to a guest: {:?}",
+                g.owner_human
+            );
+        }
+        for m in &view.members {
+            assert!(
+                !m.human.contains("ian"),
+                "member.human leaked: {:?}",
+                m.human
+            );
+            assert!(
+                !m.present_human.contains("ian"),
+                "member.present_human leaked: {:?}",
+                m.present_human
+            );
+            assert!(m.addr.is_empty(), "member.addr leaked: {:?}", m.addr);
+        }
     }
 
     #[test]

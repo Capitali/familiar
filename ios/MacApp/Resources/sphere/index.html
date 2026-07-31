@@ -11,9 +11,12 @@
   globe dive reaches map altitude; this page never fakes a map.
   Glyphs over words: controls are animated glyphs; text is data.
 -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Everything this page needs is in vendor/ and ships inside the app bundle. It loaded three.js,
+     the earth textures, qrcode and the fonts from unpkg/Google at RUNTIME before: with no
+     network there was no three.js, so the console was a black window rather than a degraded
+     one — and a shipping app had a hard dependency on two third-party CDNs. Re-vendor with
+     tools/vendor-sphere-assets.sh if a version ever needs bumping. -->
+<link href="vendor/fonts/fonts.css" rel="stylesheet">
 <style>
   *{box-sizing:border-box;}
   html,body{margin:0;height:100%;background:transparent;overflow:hidden;}
@@ -88,14 +91,16 @@
   </div>
 
   <!-- device/settings (glyph, top-right) -->
-  <button id="devbtn" class="glybtn" title="device" style="position:absolute;top:20px;right:20px;z-index:9;width:46px;height:46px;">
+  <!-- Welcome: the door. Pulses red while anyone is waiting to be recognised. Replaces the old
+       device/sliders button, which duplicated the ring's Device screen; the capability gates it
+       used to reach now live inside that screen, where this device's other settings already are. -->
+  <button id="welcomebtn" class="glybtn" title="welcome" onclick="sphereScreen('welcome')" style="position:absolute;top:20px;right:20px;z-index:9;width:46px;height:46px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:24px;height:24px;overflow:visible;">
-      <line x1="8" y1="15" x2="40" y2="15" stroke-width="2" opacity="0.4"/>
-      <line x1="8" y1="24" x2="40" y2="24" stroke-width="2" opacity="0.4"/>
-      <line x1="8" y1="33" x2="40" y2="33" stroke-width="2" opacity="0.4"/>
-      <circle cx="18" cy="15" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3.2s ease-in-out infinite;"/>
-      <circle cx="30" cy="24" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3.6s ease-in-out infinite reverse;"/>
-      <circle cx="22" cy="33" r="4" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:knob 3s ease-in-out infinite 0.4s;"/>
+      <!-- an open doorway with a threshold, and someone standing in it -->
+      <path d="M14 42V12a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v30" stroke-width="2" opacity="0.55" stroke-linecap="round"/>
+      <line x1="9" y1="42" x2="39" y2="42" stroke-width="2" opacity="0.75" stroke-linecap="round"/>
+      <circle id="welcomedot" cx="24" cy="22" r="4.6" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/>
+      <path id="welcomearc" d="M17 34c0-4 3.2-7 7-7s7 3 7 7" stroke-width="2" opacity="0.6" stroke-linecap="round"/>
     </svg>
   </button>
 
@@ -120,16 +125,16 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script type="importmap">
-{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+{"imports":{"three":"./vendor/three/three.module.js","three/addons/controls/OrbitControls.js":"./vendor/three/OrbitControls.js"}}
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- state & real data ----------
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false };
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
 try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
@@ -142,6 +147,18 @@ const utc = (ts) => { if (!(ts > 0)) return '—'; const d = new Date(ts*1000); 
 const dstr = (ts) => ts>0 ? new Date(ts*1000).toISOString().slice(0,10) : '—';
 const nowS = () => Date.now()/1000|0;
 const hash32 = (str) => { let h = 2166136261>>>0; for (const c of str) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h>>>0; };
+
+// A member the mesh has not heard from in a day belongs to the RECORD, not the live roster.
+// "Not here right now" and "not a member" are different facts, and the roster should only ever
+// answer the first one — a node last seen 25 hours ago sitting between two live ones makes the
+// whole panel untrustworthy. The rest live behind the history button, with their dates intact.
+const STALE_SECS = 24 * 3600;
+const isStale = (p) => {
+  const ls = p.m.last_seen || 0;
+  return p.status !== 'online' && (!ls || nowS() - ls > STALE_SECS);
+};
+// Date AND time for the history table — the whole point of it is when, precisely.
+const dtstr = (ts) => ts > 0 ? new Date(ts*1000).toISOString().slice(0,16).replace('T',' ') + 'UTC' : '—';
 
 function statusColor(st, kind) { return st === 'online' ? (kind === 'self_node' ? '#aee7ff' : '#3ddc97') : st === 'away' ? '#ffb15a' : 'rgba(140,160,190,0.55)'; }
 
@@ -242,7 +259,8 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
 const SCREENS = ['conversation','roster','theories','work','signals','network','vision','device'];
-const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device' };
+// 'welcome' is reached from its own corner button, not the ring — it is a door, not a view.
+const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device', welcome:'Welcome' };
 
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 // The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
@@ -300,9 +318,14 @@ function refreshScreen() {
       }
     }
     const q = (v.question || '').trim();
-    if (q) msgs.push({ f: true, text: q, isQ: true });
+    // Who it is addressed to (ADR-0019 routing). A question put to Betty is shown as hers rather
+    // than dropped in front of whoever is holding the device — that difference is the whole point
+    // of giving questions owners. Absent from a guest projection, which names nobody.
+    const qOwner = (v.question_owner || '').trim();
+    if (q) msgs.push({ f: true, text: q, isQ: true, owner: qOwner });
     const html = msgs.slice(-14).map(mm => `
       <div style="align-self:${mm.f?'flex-start':'flex-end'};max-width:78%;padding:14px 17px;border-radius:16px;background:${mm.f?'rgba(20,44,80,0.3)':'rgba(90,170,255,0.12)'};border:1px solid ${mm.isQ?'rgba(174,231,255,0.5)':mm.f?'rgba(120,190,255,0.2)':'rgba(174,231,255,0.28)'};">
+        ${mm.owner ? `<div class="m" style="font-size:8.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.6);margin-bottom:6px;">ASKING ${esc(mm.owner.toUpperCase())}</div>` : ''}
         <div style="font-size:clamp(14px,1.6vw,17px);line-height:1.5;color:rgba(232,240,252,0.92);">${esc(mm.text)}</div>
       </div>`).join('');
     if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
@@ -313,7 +336,12 @@ function refreshScreen() {
   const P = peers();
 
   if (k === 'roster') {
-    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">` + P.map((p, i) => `
+    // Carry the ORIGINAL index through the partition — sphereNode/sphereDive index into peers(),
+    // so filtering the grid without keeping `i` would dive to the wrong node.
+    const pairs = P.map((p, i) => [p, i]);
+    const past = pairs.filter(([p]) => isStale(p));
+    const live = pairs.filter(([p]) => !isStale(p));
+    const card = ([p, i]) => `
       <div onclick="sphereNode(${i})" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
@@ -333,7 +361,77 @@ function refreshScreen() {
         </div>
         <div style="height:4px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:13px;"><div style="height:100%;width:${p.status==='online'?100:p.status==='away'?45:8}%;border-radius:5px;background:${p.color};box-shadow:0 0 8px ${p.color};"></div></div>
         <button onclick="event.stopPropagation();sphereDive(${i})" class="glybtn" style="width:100%;height:38px;border-radius:11px;">${DIVE_GLYPH}</button>
-      </div>`).join('') + `</div>`;
+      </div>`;
+
+    // The history button only exists when there IS a history — an empty toggle is furniture.
+    const bar = past.length ? `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <button onclick="sphereRosterHistory()" class="glybtn" style="height:32px;padding:0 14px;border-radius:10px;display:flex;align-items:center;gap:8px;">
+          <span class="m" style="font-size:9px;letter-spacing:0.14em;color:${S.rosterHistory ? '#aee7ff' : 'rgba(160,195,255,0.72)'};">
+            ${S.rosterHistory ? 'LIVE ROSTER' : 'HISTORY · ' + past.length}
+          </span>
+        </button>
+        <span class="m" style="font-size:9px;color:rgba(150,180,255,0.45);">
+          ${S.rosterHistory ? 'members not seen in over 24h' : ''}
+        </span>
+      </div>` : '';
+
+    const table = () => `
+      <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead><tr style="text-align:left;">
+          ${['MEMBER','ROLE','OS · VERSION','LAST SEEN','TOTAL','SERVED','POSITION','VIA'].map(h =>
+            `<th class="m" style="font-size:7.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.5);font-weight:400;padding:0 12px 8px 0;white-space:nowrap;">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>${past.map(([p, i]) => `
+          <tr onclick="sphereNode(${i})" style="cursor:pointer;border-top:1px solid rgba(120,190,255,0.09);">
+            <td style="padding:9px 12px 9px 0;white-space:nowrap;">
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${p.color};margin-right:8px;"></span>${esc(p.name)}
+            </td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(188,210,255,0.75);white-space:nowrap;">${esc(p.kindWord)}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.os || '—')}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(174,231,255,0.8);white-space:nowrap;">${dtstr(p.m.last_seen)}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(156,192,255,0.7);white-space:nowrap;">${esc(p.total)}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.m.human || '—')}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '—'}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.m.connectivity || '—')}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>`;
+
+    el.innerHTML = bar + (S.rosterHistory
+      ? table()
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
+        + live.map(card).join('') + `</div>`);
+
+  } else if (k === 'welcome') {
+    // The door. Everyone the mesh has admitted but nobody has yet recognised (ADR-0020) — being
+    // a guest IS the waiting state, so this is a list of open decisions rather than a queue.
+    // Any active member may decide; nothing here auto-grants, and a guest left alone stays a
+    // guest, which is the safe resting state.
+    const roll = (v.standing_full || []);
+    const guests = P.filter(p => !p.local && !roll.includes(p.m.node_id));
+    el.innerHTML = guests.length === 0
+      ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
+           Nobody is waiting. Every member here has been recognised.
+         </div>`
+      : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.6);margin-bottom:14px;">
+           ${guests.length} waiting to be recognised. Until someone says who they are, they read a
+           worldview with the same shape as yours and none of the names.
+         </div>` + guests.map(p => `
+        <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(255,110,110,0.22);margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+            <span style="font-size:16px;font-weight:600;">${esc(p.name)}</span>
+            ${chip(p.kindWord, '#bcd2ff')}
+            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(p.m.node_id.slice(0,8))}</span>
+          </div>
+          <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:12px;">
+            ${esc(p.os || 'unknown platform')} · first seen ${dstr(p.m.first_seen)} · ${esc(p.m.connectivity || '—')}
+          </div>
+          <div style="display:flex;gap:9px;">
+            <button onclick="sphereStanding('grant','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;">recognise</button>
+            <button onclick="sphereStanding('deny','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;color:rgba(255,140,140,0.9);">not now</button>
+          </div>
+        </div>`).join('');
 
   } else if (k === 'node') {
     const p = P[S.nodeIdx]; if (!p) { window.sphereScreen('roster'); return; }
@@ -475,11 +573,7 @@ function refreshScreen() {
       const selfCam = !!(v.gates && v.gates.camera);
       const selfHuman = ((v.members||[]).find(m => m.kind === 'self_node')||{}).human || 'observer';
       el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:14px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-          <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">SERVING</span>
-          <input id="servedHumanInput" value="${esc(selfHuman)}" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:150px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:13px;padding:7px 10px;"/>
-          <button onclick="window.setServedHuman()" class="glybtn" style="padding:7px 14px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-        </div>
+        ${servingRow(S.device || { presence: { handle: selfHuman === 'observer' ? '' : selfHuman } })}
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;max-width:300px;margin-bottom:22px;">
           <button onclick="sphereGate('allow_camera', ${selfCam ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${selfCam?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
             ${gateGlyph(selfCam)}
@@ -501,11 +595,7 @@ function refreshScreen() {
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-        <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">SERVING</span>
-        <input id="servedHumanInput" value="${esc(d.servedHuman||'observer')}" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
-        <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-      </div>
+      ${servingRow(d)}
       ${d.oracle && d.oracle !== 'unsupported' ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
         <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">ORACLE</span>
         <span class="m" style="font-size:10px;color:${d.oracle==='available'?'#7ff0c0':'rgba(190,210,240,0.65)'};">${esc(d.oracle)}</span>
@@ -549,9 +639,20 @@ function renderChrome() {
   $('holoRim').style.display = (S.holoHidden || street) ? 'none' : 'block';
   $('screenbtns').style.display = street ? 'none' : 'block';
   $('holobtn').style.display = street ? 'none' : 'flex';
-  $('devbtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
   $('modetoggle').style.display = street ? 'none' : 'flex';
+  // The door reddens while someone is waiting to be recognised. Colour AND rate, so it reads
+  // as urgency rather than decoration, and so it is legible without colour vision.
+  const waiting = (S.view && S.view.guests_waiting) || 0;
+  const wb = $('welcomebtn');
+  if (wb) {
+    wb.style.display = street ? 'none' : 'flex';
+    wb.style.color = waiting > 0 ? '#ff6e6e' : '';
+    wb.title = waiting > 0 ? `${waiting} waiting to be recognised` : 'welcome';
+    const dot = $('welcomedot'), arc = $('welcomearc');
+    if (dot) dot.style.animation = `iconpulse ${waiting > 0 ? '0.9s' : '2.6s'} ease-in-out infinite`;
+    if (arc) arc.style.opacity = waiting > 0 ? '0.95' : '0.6';
+  }
   const showBadge = !S.linkOk || !!S.jsErr;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
   const lm = $('linkmsg');
@@ -598,6 +699,11 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + k + ': ' + e.message; }
   renderChrome(); };
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
+// Toggle the live roster against the record of members not seen in over a day.
+window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
+// Recognise a guest, or hold them off. "not now" is a 5-minute retry window, not a ban — the mesh
+// cannot tell a hostile stranger from a housemate on a new phone.
+window.sphereStanding = (act, nodeId) => { toApp('standing', { act, node_id: nodeId }); };
 window.sphereAnswerThread = (id) => { S.answeringThread = id; refreshScreen(); };
 window.sphereToggleOffline = () => {
   S.hideOffline = !S.hideOffline;
@@ -639,8 +745,48 @@ window.sphereUnenroll = () => {
 };
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
+
+// Who the familiar believes is here, and how it worked that out (ADR-0019).
+//
+// This used to be a text field with the last-served name sitting in it, permanently asking a
+// question the familiar is supposed to answer for itself. Identity should be arrived at passively —
+// presence, speech, a face — and typing a name is the LAST resort, not the standing interface. So
+// the belief is shown, and the correction is one click away and otherwise out of the way. A field
+// that is edited twice a year should not look like a field that needs attention.
+function servingRow(d) {
+  const p = d.presence || {};
+  const who = (p.handle || '').trim();
+  const via = (p.via || '').trim();
+  const conf = typeof p.confidence === 'number' ? p.confidence : 0;
+  const VIA_WORD = {
+    binding: 'this device is theirs',
+    face: 'recognised',
+    asked: 'they told me',
+    inherited: 'from a paired device',
+  };
+  if (!S.correctServing) {
+    return `<div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap;">
+      <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">PRESENT</span>
+      <span style="font-size:13px;color:${who ? 'rgba(232,240,252,0.92)' : 'rgba(150,170,200,0.5)'};">
+        ${who ? esc(who) : 'no one identified'}
+      </span>
+      ${who ? `<span class="m" style="font-size:9px;color:rgba(150,180,255,0.5);">${esc(VIA_WORD[via] || via)}${conf ? ' · ' + Math.round(conf * 100) + '%' : ''}</span>` : ''}
+      <button onclick="sphereCorrectServing(1)" class="glybtn" style="padding:4px 10px;border-radius:7px;font-size:10px;width:auto;height:auto;">
+        ${who ? 'not you?' : 'tell it who you are'}
+      </button>
+    </div>`;
+  }
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+    <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">I AM</span>
+    <input id="servedHumanInput" value="" placeholder="your name" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
+    <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
+    <button onclick="sphereCorrectServing(0)" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
+  </div>`;
+}
+window.sphereCorrectServing = (on) => { S.correctServing = !!on; refreshScreen(); };
+
 // Set who this device is serving (ADR-0016) — the handle its reports attribute to.
-window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) toApp('setHuman', { name: v }); };
+window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) { toApp('setHuman', { name: v }); S.correctServing = false; refreshScreen(); } };
 window.onerror = (msg, src, line) => {
   // Cross-origin scripts (CDN three.js/qrcode) report opaquely as "Script error." with no
   // detail — that is noise, not diagnosis; only badge errors that carry information.
@@ -676,7 +822,6 @@ window.sphereBackToGlobe = () => {
 };
 
 $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
-$('devbtn').onclick = () => window.sphereScreen('device');
 $('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------
@@ -688,12 +833,36 @@ const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (
 // crossfade — satellite fading out while REAL Apple Maps fades in, both descending in
 // step; last 25% street map only, zooming to close detail (MapKit finishes the flight).
 const ROTATE_MS = 900, ZOOM_MS = 3200;
+// Where "centred" actually is. The camera ORBITS (autoRotate, and the human can drag), so the
+// point under the camera is `camera.position` normalised — not world +Z. Aiming the target at
+// +Z centred it only in the one case where the camera happened to be sitting there; every other
+// time the globe swung the target off to wherever +Z had drifted to, which is the "spins to a
+// random spot" before the zoom. Recomputed each frame so leftover damping can't re-open the gap.
+//
+// The roll matters too: we hand off to an MKMapCamera with heading 0 (north up), so the sphere
+// has to arrive north-up as well or the satellite and the map sit rotated against each other for
+// the whole crossfade.
+function diveAimQ() {
+  const camDir = G.camera.position.clone().normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(G.diveDir, camDir);
+  const up = G.camera.up.clone();
+  const screenUp = up.sub(camDir.clone().multiplyScalar(up.dot(camDir)));
+  const north = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+  const northProj = north.sub(camDir.clone().multiplyScalar(north.dot(camDir)));
+  // Degenerate when the target IS a pole (north projects to nothing) — leave the roll alone.
+  if (screenUp.lengthSq() > 1e-8 && northProj.lengthSq() > 1e-8) {
+    screenUp.normalize(); northProj.normalize();
+    const ang = Math.atan2(northProj.clone().cross(screenUp).dot(camDir), northProj.dot(screenUp));
+    q.premultiply(new THREE.Quaternion().setFromAxisAngle(camDir, ang));
+  }
+  return q;
+}
 function beginDive(target, dir) {
   S.holoHidden = true; renderChrome();
   if (!G.group) { handoff(target); return; }
   G.diveTarget = target;
+  G.diveDir = dir.clone().normalize();
   G.diveStartQ = G.group.quaternion.clone();
-  G.diveTargetQ = new THREE.Quaternion().setFromUnitVectors(dir.clone(), new THREE.Vector3(0, 0, 1));
   G.diveFromZ = G.camera.position.length();
   G.diveT0 = performance.now();
   G.diving = true;
@@ -740,7 +909,7 @@ function initThree() {
   const geo = new THREE.SphereGeometry(1, 256, 128);
   const mgr = new THREE.LoadingManager();
   const loader = new THREE.TextureLoader(mgr);
-  const base = 'https://unpkg.com/three-globe/example/img/';
+  const base = 'vendor/textures/';
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
   const dayTex = loader.load(base + 'earth-blue-marble.jpg');
   const topoTex = loader.load(base + 'earth-topology.png');
@@ -817,13 +986,14 @@ function initThree() {
     }
     if (G.diving) {
       const el = performance.now() - G.diveT0;
+      const aimQ = diveAimQ();   // re-aimed every frame — see diveAimQ
       if (el < ROTATE_MS) {
-        // Phase 0 — rotate to center the target; no zoom yet.
+        // Phase 0 — rotate the target under the camera; no zoom yet.
         const rp = el / ROTATE_MS;
         const re = rp < 0.5 ? 2*rp*rp : 1 - Math.pow(-2*rp + 2, 2)/2;
-        group.quaternion.copy(G.diveStartQ).slerp(G.diveTargetQ, re);
+        group.quaternion.copy(G.diveStartQ).slerp(aimQ, re);
       } else {
-        group.quaternion.copy(G.diveTargetQ);
+        group.quaternion.copy(aimQ);
         const dp = Math.min(1, (el - ROTATE_MS)/ZOOM_MS);
         const de = dp < 0.5 ? 2*dp*dp : 1 - Math.pow(-2*dp + 2, 2)/2;
         camera.position.setLength(G.diveFromZ + (2.05 - G.diveFromZ)*de);
@@ -837,6 +1007,10 @@ function initThree() {
     const breath = 1 + Math.sin(t * (Math.PI*2/6)) * 0.012;
     group.scale.setScalar(breath);
     controls.autoRotate = !G.diving && S.mode === 'globe';
+    // A drag mid-dive fights the choreography (and moves the very camera the aim is computed
+    // against). Declarative rather than a flag to restore, so sphereBackToGlobe re-enables it
+    // for free when S.mode returns to 'globe'.
+    controls.enabled = !G.diving && S.mode === 'globe';
     controls.update();
     renderer.render(scene, camera);
 

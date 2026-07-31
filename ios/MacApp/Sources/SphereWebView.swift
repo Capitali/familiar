@@ -322,6 +322,16 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 if let gate = body["gate"] as? String {
                     self.post("local/gate", ["gate": gate, "open": body["open"] as? Bool ?? false])
                 }
+            case "standing":
+                // Recognise a guest, or hold them off (ADR-0020). Any active member may decide —
+                // this Mac is one, so the decision is taken here and written locally. NOTE: the
+                // standing roll is still per-node, so this applies where it is made until the roll
+                // federates from the minting door; the console reads its own node's roll back on
+                // the next poll, which is why the welcome list updates but a sibling's may not.
+                if let act = body["act"] as? String, let node = body["node_id"] as? String,
+                   !node.isEmpty {
+                    self.post("local/standing", ["act": act, "node_id": node])
+                }
             case "setHuman":
                 // The human at this Mac names who the familiar is serving now (ADR-0016) — writes
                 // the daemon's observer, same direct-to-disk trust class as MacBoundary's gate flips.

@@ -189,6 +189,7 @@ pub fn build_outbox(
                 needs: g.needs,
                 status: g.status.as_str().to_string(),
                 owner_node: g.owner_node,
+                owner_human: g.owner_human.clone(),
                 origin: g.origin,
                 produced: g.produced,
                 notes: g.notes,
@@ -563,6 +564,7 @@ fn merge_one(
                 needs: gs.needs.clone(),
                 status: incoming_status,
                 owner_node: gs.owner_node.clone(),
+                owner_human: gs.owner_human.clone(),
                 origin: gs.origin.clone(),
                 produced: gs.produced.clone(),
                 notes: gs.notes.clone(),
@@ -955,7 +957,7 @@ fn apply_authority_grant(
                     Err(_) => None,
                 }
             } else {
-                match crate::enroll::deny(dir, &grant.ref_id) {
+                match crate::enroll::deny(dir, &grant.ref_id, now) {
                     Ok(true) => Some(format!(
                         "declined node {}'s join — decided by a human at peer {}",
                         short(&grant.ref_id),
@@ -1535,10 +1537,22 @@ mod tests {
         let cfg = MeshConfig::default();
         build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
         let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
-        assert!(!raw.contains("heart_rate:elevated"), "health must not federate");
-        assert!(!raw.contains("48.601"), "precise location must not federate");
-        assert!(!raw.contains("gyro:turning"), "biometric motion must not federate");
-        assert!(raw.contains("service:mqtt"), "ordinary activity still federates");
+        assert!(
+            !raw.contains("heart_rate:elevated"),
+            "health must not federate"
+        );
+        assert!(
+            !raw.contains("48.601"),
+            "precise location must not federate"
+        );
+        assert!(
+            !raw.contains("gyro:turning"),
+            "biometric motion must not federate"
+        );
+        assert!(
+            raw.contains("service:mqtt"),
+            "ordinary activity still federates"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
