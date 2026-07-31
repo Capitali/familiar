@@ -1617,6 +1617,18 @@ fn recv_enroll_request(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Byt
             Ok(b) => text(StatusCode::ACCEPTED, b),
             Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "pending encode"),
         },
+        // Recently denied — 429 with the wait, so the asking device backs off instead of
+        // hammering, and so the answer is legibly "not yet" rather than a silent drop.
+        Ok(crate::enroll::Submitted::Denied { retry_in }) => {
+            let mut r = text(
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("denied — may ask again in {retry_in}s"),
+            );
+            if let Ok(v) = hyper::header::HeaderValue::from_str(&retry_in.to_string()) {
+                r.headers_mut().insert(hyper::header::RETRY_AFTER, v);
+            }
+            r
+        }
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad enroll request"),
     }

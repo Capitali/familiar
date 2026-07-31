@@ -1071,7 +1071,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 eprintln!("mesh: usage: familiar mesh deny <node_id>");
                 return ExitCode::FAILURE;
             };
-            match familiar_mesh::enroll::deny(&dir, node_id) {
+            match familiar_mesh::enroll::deny(&dir, node_id, now_secs()) {
                 Ok(true) => {
                     println!("✓ denied {}", short_id(node_id));
                     ExitCode::SUCCESS
@@ -1282,6 +1282,71 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        // ---- standing (ADR-0020): membership decides reading; standing decides seeing ---------
+        Some("standing") => {
+            let sub = args.get(1).map(String::as_str);
+            match sub {
+                Some("show") | None => {
+                    let roll = familiar_mesh::standing::load(&dir);
+                    if roll.full.is_empty() {
+                        println!("standing: nobody on the roll — every member reads as a guest");
+                    } else {
+                        println!("full standing ({}):", roll.full.len());
+                        for id in &roll.full {
+                            let note = roll.notes.get(id).map(String::as_str).unwrap_or("");
+                            println!("  {id}  {note}");
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Some("grant") => {
+                    let Some(node_id) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh standing grant <node_id> [--note N]");
+                        return ExitCode::FAILURE;
+                    };
+                    let note = f.get("note").cloned().unwrap_or_default();
+                    match familiar_mesh::standing::grant(&dir, node_id, &note) {
+                        Ok(true) => {
+                            println!("✓ {node_id} now reads at full standing");
+                            ExitCode::SUCCESS
+                        }
+                        Ok(false) => {
+                            println!("standing: {node_id} already stood (or empty id) — no change");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("revoke") => {
+                    let Some(node_id) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh standing revoke <node_id>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::standing::revoke(&dir, node_id) {
+                        Ok(true) => {
+                            // Narrows what they SEE; the membership itself is untouched.
+                            println!("✓ {node_id} returns to guest (still a member — `mesh abandon` removes)");
+                            ExitCode::SUCCESS
+                        }
+                        Ok(false) => {
+                            println!("standing: {node_id} was not on the roll — no change");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some(other) => {
+                    eprintln!("mesh: standing {other}? — show | grant <node_id> [--note N] | revoke <node_id>");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // ---- group-secret escrow (ADR-0018) --------------------------------------------------
         // The lighthouse is the only minting door, which makes the group secret a single point of
         // extinction unless it is escrowed. These three commands are the whole procedure; the human
@@ -1372,7 +1437,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | share <tools|knowledge|identities> <on|off> | accept-observations <on|off> \
                  | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
                  | invite [--minutes N] | optin <handle> | status \
-                 | escrow-export | escrow-restore | reduce-to-covenant --yes>"
+                 | escrow-export | escrow-restore | reduce-to-covenant --yes \
+                 | standing [show | grant <node_id> [--note N] | revoke <node_id>]>"
             );
             ExitCode::FAILURE
         }

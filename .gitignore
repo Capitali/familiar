@@ -22,3 +22,6 @@ llm/health.json
 campaign-out/
 campaign-apple-out/
 __pycache__/
+
+# The household's standing roll (ADR-0020) — names this household's nodes; deploy carries it, git does not.
+vps/standing.lighthouse.json

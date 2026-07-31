@@ -25,6 +25,19 @@ git push origin main
 REV=$(git rev-parse HEAD)
 echo "→ deploying $REV to $TARGET"
 
+# Seed the standing roll (ADR-0020) if a local copy exists. standing.json is read by the
+# SERVING node, and the lighthouse serves every off-LAN read — an unseeded roll there means
+# every household device that reads via the lighthouse goes anonymous (default is deny).
+# The file is untracked (it names this household's nodes); the deploy carries it so the roll
+# on the box is always the one reviewed here. Never overwrites a hand-edited box copy silently:
+# it is pushed to a staging path and installed only if different, with the old one kept.
+ROLL="$REPO_ROOT/vps/standing.lighthouse.json"
+if [ -f "$ROLL" ]; then
+  python3 -c "import json;json.load(open('$ROLL'))" || { echo "✗ $ROLL is not valid JSON" >&2; exit 1; }
+  scp -q "$ROLL" "$TARGET":/var/lib/familiar/familiar_data/standing.json.staged
+  echo "→ standing roll staged"
+fi
+
 # shellcheck disable=SC2087  # REV expands locally on purpose
 ssh "$TARGET" REV="$REV" 'bash -s' <<'REMOTE'
 set -euo pipefail
@@ -38,6 +51,19 @@ DEPLOYED=$(git rev-parse HEAD)
 
 cargo build --release -p familiar-cli
 install -m 0755 target/release/familiar /usr/local/bin/familiar
+
+# Install the staged standing roll, if the deploy carried one (see above).
+DATA=/var/lib/familiar/familiar_data
+if [ -f "$DATA/standing.json.staged" ]; then
+  if [ -f "$DATA/standing.json" ] && cmp -s "$DATA/standing.json.staged" "$DATA/standing.json"; then
+    rm -f "$DATA/standing.json.staged"
+  else
+    [ -f "$DATA/standing.json" ] && cp "$DATA/standing.json" "$DATA/standing.json.prev"
+    mv "$DATA/standing.json.staged" "$DATA/standing.json"
+    chown familiar:familiar "$DATA/standing.json" 2>/dev/null || true
+    echo "→ standing roll installed (previous kept as standing.json.prev)"
+  fi
+fi
 
 systemctl restart familiar-peer.service
 sleep 3

@@ -49,6 +49,46 @@ pub struct StandingRoll {
     pub notes: HashMap<String, String>,
 }
 
+pub fn save(dir: &Path, roll: &StandingRoll) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(roll)?;
+    std::fs::write(dir.join(STANDING_FILE), json)
+}
+
+/// Grant full standing — the explicit human act ADR-0020 requires. Idempotent; the note is
+/// kept beside the id so the file explains itself a year from now. Returns false if the node
+/// already stood.
+pub fn grant(dir: &Path, node_id: &str, note: &str) -> std::io::Result<bool> {
+    let node_id = node_id.trim();
+    if node_id.is_empty() {
+        return Ok(false);
+    }
+    let mut roll = load(dir);
+    if roll.full.iter().any(|n| n == node_id) {
+        return Ok(false);
+    }
+    roll.full.push(node_id.to_string());
+    if !note.trim().is_empty() {
+        roll.notes
+            .insert(node_id.to_string(), note.trim().to_string());
+    }
+    save(dir, &roll)?;
+    Ok(true)
+}
+
+/// Return a member to guest. The membership itself is untouched — this narrows what they see,
+/// it does not remove them (that is `mesh abandon`). Returns false if they were not on the roll.
+pub fn revoke(dir: &Path, node_id: &str) -> std::io::Result<bool> {
+    let mut roll = load(dir);
+    let before = roll.full.len();
+    roll.full.retain(|n| n != node_id.trim());
+    if roll.full.len() == before {
+        return Ok(false);
+    }
+    roll.notes.remove(node_id.trim());
+    save(dir, &roll)?;
+    Ok(true)
+}
+
 pub fn load(dir: &Path) -> StandingRoll {
     std::fs::read_to_string(dir.join(STANDING_FILE))
         .ok()

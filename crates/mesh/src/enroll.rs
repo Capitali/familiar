@@ -40,6 +40,13 @@ pub const COVENANT_STATEMENT: &str = "I accept the Three Laws: continuation is s
 const PENDING_DIR: &str = "mesh/pending";
 const GRANTED_DIR: &str = "mesh/granted";
 const INVITE_FILE: &str = "mesh/invite_until";
+const DENIED_DIR: &str = "mesh/denied";
+
+/// How long a denial holds before the node may ask again. Deliberately short: a denial here is
+/// "not now / not you", not a ban — the mesh has no way to know whether a stranger at the door is
+/// hostile or a housemate on a new phone, and a long lockout punishes the second to spite the
+/// first. Long enough to stop a retry loop and to make a mistaken deny cheap to undo.
+pub const DENY_RETRY_SECS: i64 = 5 * 60;
 
 /// A node's attestation that it accepts the Three Laws — the covenant it asks to join under.
 /// Retained on approval so a node can be held to what it accepted.
@@ -84,6 +91,11 @@ pub struct Pending {
 /// The outcome of submitting a request: granted immediately (an invite window was open) or held
 /// pending a human's approval.
 pub enum Submitted {
+    /// Denied recently; ignored until the window elapses. Carries the remaining seconds so the
+    /// asking device can wait rather than hammer.
+    Denied {
+        retry_in: i64,
+    },
     Granted(Box<Grant>),
     Pending(Pending),
 }
@@ -121,6 +133,16 @@ pub(crate) fn submit_request(dir: &Path, raw: &[u8], sig_hex: &str, now: i64) ->
     if let Some(grant) = load_grant(dir, &req.node.node_id)? {
         return Ok(Submitted::Granted(Box::new(grant)));
     }
+
+    // Recently denied? Ignore it — do not queue it, do not surface it again. A denied node that
+    // retries in a tight loop would otherwise re-raise the same decision every few seconds, which
+    // trains a human to dismiss the ask reflexively. The window is short and self-clearing.
+    let held = denied_for(dir, &req.node.node_id, now);
+    if held > 0 {
+        return Ok(Submitted::Denied { retry_in: held });
+    }
+    // Spent denial — clear it so the record does not accumulate.
+    let _ = allow_retry(dir, &req.node.node_id);
 
     let pending = Pending {
         node: req.node.clone(),
@@ -169,9 +191,57 @@ pub fn approve(dir: &Path, node_id: &str, now: i64) -> Result<Grant> {
     Ok(grant)
 }
 
-/// Refuse a pending request (removes it). Returns whether one was there.
-pub fn deny(dir: &Path, node_id: &str) -> Result<bool> {
+/// Refuse a request. Removes the pending record and starts a [`DENY_RETRY_SECS`] window during
+/// which further requests from that node are ignored outright — not queued, not re-shown. Any
+/// active member may do this (ADR-0020); it narrows what a stranger can do, never what a member
+/// already has. Returns whether a pending record was there to remove.
+pub fn deny(dir: &Path, node_id: &str, now: i64) -> Result<bool> {
+    write_json(
+        dir,
+        DENIED_DIR,
+        node_id,
+        &Denial {
+            node_id: node_id.to_string(),
+            at: now,
+        },
+    )?;
     let path = pending_path(dir, node_id);
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// A denial and when it was made. Kept rather than discarded so the retry window is enforceable
+/// and so a human can see that a decision was taken — a silently vanished request looks like a bug.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Denial {
+    pub node_id: String,
+    pub at: i64,
+}
+
+/// Seconds remaining on a node's deny window, or 0 when it may ask again. A denial older than
+/// [`DENY_RETRY_SECS`] is spent and is cleaned up on the next request.
+pub fn denied_for(dir: &Path, node_id: &str, now: i64) -> i64 {
+    let path = dir.join(DENIED_DIR).join(format!("{node_id}.json"));
+    let Ok(s) = std::fs::read_to_string(&path) else {
+        return 0;
+    };
+    let Ok(d) = serde_json::from_str::<Denial>(&s) else {
+        return 0;
+    };
+    let elapsed = now - d.at;
+    // A denial stamped in the future (clock skew) must not become a permanent ban.
+    if !(0..DENY_RETRY_SECS).contains(&elapsed) {
+        return 0;
+    }
+    DENY_RETRY_SECS - elapsed
+}
+
+/// Let a denied node ask again immediately — the undo for a mis-tap.
+pub fn allow_retry(dir: &Path, node_id: &str) -> Result<bool> {
+    let path = dir.join(DENIED_DIR).join(format!("{node_id}.json"));
     if path.exists() {
         std::fs::remove_file(&path)?;
         return Ok(true);
@@ -377,6 +447,30 @@ fn mint_grant(
         group_label: cred.label.clone(),
     };
     write_json(dir, GRANTED_DIR, &node.node_id, &grant)?;
+    // Admission is automatic (ADR-0015); DISCLOSURE is not (ADR-0020) — a fresh member reads as
+    // a guest until a human grants standing. That decision needs a human to actually be ASKED,
+    // or a new member sits unnoticed forever (the 2026-07-29 installer sat in the roster and
+    // nobody was asked anything). So admitting files a question on this node; devices reading
+    // their worldview from here surface it, routing addresses it to whoever is present, and the
+    // question system's own cadence (re-asking, rest periods) is the escalation. Origin "need":
+    // a stranger awaiting a human decision IS an unmet need for human authority. Best-effort —
+    // a failure to file must never fail the admission itself. Nothing ever auto-grants; an
+    // unanswered question leaves the member a guest, which is the safe resting state.
+    let short: String = node.node_id.chars().take(8).collect();
+    let label = if node.label.trim().is_empty() {
+        short.clone()
+    } else {
+        node.label.trim().to_string()
+    };
+    let _ = familiar_kernel::question::add(
+        dir,
+        &format!(
+            "A new device joined the mesh: “{label}” ({short}). Who does it belong to? \
+It reads as a guest until someone grants it standing."
+        ),
+        "need",
+        now,
+    );
     Ok(grant)
 }
 
@@ -497,6 +591,90 @@ mod tests {
     }
 
     #[test]
+    fn admission_asks_who_the_new_device_belongs_to() {
+        // ADR-0020: admission is automatic, disclosure is not — and the standing decision needs a
+        // human to actually be ASKED. Every path that mints a grant must file the question; the
+        // 2026-07-29 installer sat in the roster precisely because nothing did.
+        let (host, joiner) = setup("asks");
+        open_invite(&host, NOW + 300).unwrap();
+        let (raw, sig) = signed_request(&joiner, NOW, "nq");
+        assert!(matches!(
+            submit_request(&host, &raw, &sig, NOW).unwrap(),
+            Submitted::Granted(_)
+        ));
+        let qs = familiar_kernel::question::load(&host).unwrap();
+        let q = qs
+            .iter()
+            .find(|q| q.text.contains("Kali-Jeff") && q.text.contains("standing"))
+            .expect("admitting a device must file a who-is-this question");
+        assert_eq!(
+            q.origin, "need",
+            "a stranger awaiting a decision outranks the root question"
+        );
+        // Idempotent per node: a second admission of the same device must not ask twice.
+        let n = qs.iter().filter(|x| x.text == q.text).count();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn a_denial_holds_for_five_minutes_then_lets_them_ask_again() {
+        let (host, joiner) = setup("deny_window");
+        let (raw, sig) = signed_request(&joiner, NOW, "d1");
+        assert!(matches!(
+            submit_request(&host, &raw, &sig, NOW).unwrap(),
+            Submitted::Pending(_)
+        ));
+
+        assert!(
+            deny(&host, &joiner.node_id(), NOW).unwrap(),
+            "a pending record was there"
+        );
+        assert!(
+            list_pending(&host).unwrap().is_empty(),
+            "denying clears the pending"
+        );
+
+        // Inside the window: ignored outright, not re-queued — the whole point, so a retry loop
+        // cannot train a human to dismiss the ask reflexively.
+        let (raw2, sig2) = signed_request(&joiner, NOW + 10, "d2");
+        match submit_request(&host, &raw2, &sig2, NOW + 10).unwrap() {
+            Submitted::Denied { retry_in } => assert!((1..=DENY_RETRY_SECS).contains(&retry_in)),
+            _ => panic!("expected Denied inside the retry window"),
+        }
+        assert!(
+            list_pending(&host).unwrap().is_empty(),
+            "a denied retry must not re-queue"
+        );
+
+        // After the window: they may ask again, and it pends normally.
+        let (raw3, sig3) = signed_request(&joiner, NOW + DENY_RETRY_SECS + 1, "d3");
+        assert!(matches!(
+            submit_request(&host, &raw3, &sig3, NOW + DENY_RETRY_SECS + 1).unwrap(),
+            Submitted::Pending(_)
+        ));
+        assert_eq!(list_pending(&host).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_denial_is_undoable_and_cannot_become_permanent() {
+        let (host, joiner) = setup("deny_undo");
+        deny(&host, &joiner.node_id(), NOW).unwrap();
+        assert!(denied_for(&host, &joiner.node_id(), NOW) > 0);
+
+        // The undo for a mis-tap.
+        assert!(allow_retry(&host, &joiner.node_id()).unwrap());
+        assert_eq!(denied_for(&host, &joiner.node_id(), NOW), 0);
+
+        // A denial stamped in the FUTURE (clock skew) must not become an indefinite ban.
+        deny(&host, &joiner.node_id(), NOW + 86_400).unwrap();
+        assert_eq!(
+            denied_for(&host, &joiner.node_id(), NOW),
+            0,
+            "a future-dated denial must not lock a node out"
+        );
+    }
+
+    #[test]
     fn invite_window_auto_approves() {
         let (host, joiner) = setup("invite");
         open_invite(&host, NOW + 300).unwrap();
@@ -531,8 +709,8 @@ mod tests {
         let (host, joiner) = setup("deny");
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
         submit_request(&host, &raw, &sig, NOW).unwrap();
-        assert!(deny(&host, &joiner.node_id()).unwrap());
-        assert!(!deny(&host, &joiner.node_id()).unwrap()); // already gone
+        assert!(deny(&host, &joiner.node_id(), NOW).unwrap());
+        assert!(!deny(&host, &joiner.node_id(), NOW).unwrap()); // already gone
         assert!(matches!(
             enroll_status(&host, &joiner.node_id()).unwrap(),
             StatusOutcome::Unknown

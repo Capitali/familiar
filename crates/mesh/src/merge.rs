@@ -957,7 +957,7 @@ fn apply_authority_grant(
                     Err(_) => None,
                 }
             } else {
-                match crate::enroll::deny(dir, &grant.ref_id) {
+                match crate::enroll::deny(dir, &grant.ref_id, now) {
                     Ok(true) => Some(format!(
                         "declined node {}'s join — decided by a human at peer {}",
                         short(&grant.ref_id),
