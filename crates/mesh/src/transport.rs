@@ -933,6 +933,14 @@ fn tls_acceptor(dir: &Path) -> Result<tokio_rustls::TlsAcceptor> {
 
 /// Outbound TLS: encrypt to whoever answers. Payload signatures carry the authenticity.
 fn tls_connector() -> tokio_rustls::TlsConnector {
+    tokio_rustls::TlsConnector::from(opportunistic_tls_config())
+}
+
+/// The opportunistic-encryption client config, shared by every outbound dial this crate makes —
+/// the async transport above and the blocking enrolment client in [`crate::enroll`] alike. One
+/// config, so the posture ("encrypt to whoever answers; payload signatures carry authenticity")
+/// cannot quietly diverge between the two.
+pub(crate) fn opportunistic_tls_config() -> Arc<rustls::ClientConfig> {
     ensure_crypto_provider();
     #[derive(Debug)]
     struct AcceptAny;
@@ -976,7 +984,7 @@ fn tls_connector() -> tokio_rustls::TlsConnector {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(AcceptAny))
         .with_no_client_auth();
-    tokio_rustls::TlsConnector::from(Arc::new(config))
+    Arc::new(config)
 }
 
 async fn serve(listener: TcpListener, ctx: Arc<ServerCtx>, tls: Option<tokio_rustls::TlsAcceptor>) {

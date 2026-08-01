@@ -50,7 +50,7 @@ pub const DENY_RETRY_SECS: i64 = 5 * 60;
 
 /// A node's attestation that it accepts the Three Laws — the covenant it asks to join under.
 /// Retained on approval so a node can be held to what it accepted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attestation {
     pub laws_version: u32,
     /// The node's own words accepting the covenant (free-form, but must be non-empty).
@@ -376,9 +376,12 @@ fn persist_covenant(dir: &Path, grant: &Grant) -> Result<()> {
     group::save_credential(dir, &cred)
 }
 
-/// A minimal blocking HTTP/1.1 client — dependency-free (std `TcpStream`), matching the crate's
-/// no-crates ethos. Sends `Connection: close` and reads the response to EOF, then splits head/body.
-/// Sufficient for the small JSON bodies the enroll endpoints return on a LAN/tailnet.
+/// A minimal blocking HTTP/1.1 client **over TLS**. The mesh port has been TLS-only since
+/// ADR-0009 Phase 1, and this client spoke plaintext to it for a while — every Rust-native join
+/// failed at the first byte while the device clients (which had TLS) worked, so the breakage was
+/// invisible from the fleet. Same posture as the async transport's dials, via the shared config:
+/// encrypt to whoever answers; the request's own signature carries the authenticity.
+/// Sends `Connection: close` and reads the response to EOF, then splits head/body.
 fn http(
     host: &str,
     port: u16,
@@ -397,6 +400,14 @@ fn http(
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
 
+    // SNI wants a name; a bare IP falls back to the same constant the async dial uses.
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .unwrap_or_else(|_| rustls::pki_types::ServerName::try_from("familiar-mesh").unwrap());
+    let mut conn =
+        rustls::ClientConnection::new(crate::transport::opportunistic_tls_config(), server_name)
+            .map_err(|e| Error::Malformed(format!("tls: {e}")))?;
+    let mut tls = rustls::Stream::new(&mut conn, &mut stream);
+
     let mut req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
@@ -405,11 +416,21 @@ fn http(
         req.push_str(&format!("{k}: {v}\r\n"));
     }
     req.push_str("\r\n");
-    stream.write_all(req.as_bytes())?;
-    stream.write_all(body)?;
+    tls.write_all(req.as_bytes())?;
+    tls.write_all(body)?;
 
+    // Read to EOF by hand: a peer that drops without a TLS close_notify surfaces as
+    // `UnexpectedEof`, which after `Connection: close` is just how this conversation ends.
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf)?;
+    let mut chunk = [0u8; 4096];
+    loop {
+        match tls.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && !buf.is_empty() => break,
+            Err(e) => return Err(Error::Io(e)),
+        }
+    }
     let sep = buf
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
