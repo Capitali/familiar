@@ -182,11 +182,16 @@ const FRONTIER_COLOR = '#7d93a8';
 // Members → located mesh nodes. Real coordinates only: a node that reported none clusters
 // near the anchor (first located member) with a small deterministic spread, and its card
 // says the position is approximate. No invented places.
-function peers() {
+// `all` ignores the hide-offline preference. Pass it wherever the list is a set of DECISIONS
+// rather than a view of activity: someone waiting to be recognised is waiting whether or not
+// they happen to be online, and a display filter must never hide a pending decision. Getting
+// this wrong showed as an empty welcome screen under a red, pulsing glyph — the count comes
+// from the server, which knows nothing about a local toggle.
+function peers(all) {
   const v = S.view; if (!v || !v.members) return [];
   let ms = [...v.members].sort((a, b) => (a.kind === 'self_node' ? -1 : b.kind === 'self_node' ? 1 : 0));
   // Hide-offline toggle: drop non-self peers whose derived status isn't online (self always stays).
-  if (S.hideOffline) ms = ms.filter(m => m.kind === 'self_node' || (m.status || (m.online ? 'online' : 'offline')) === 'online');
+  if (S.hideOffline && !all) ms = ms.filter(m => m.kind === 'self_node' || (m.status || (m.online ? 'online' : 'offline')) === 'online');
   const anchor = ms.find(m => (m.lat || 0) !== 0 || (m.lon || 0) !== 0);
   return ms.map((m) => {
     const st = m.status || (m.online ? 'online' : 'offline');
@@ -409,7 +414,9 @@ function refreshScreen() {
     // Any active member may decide; nothing here auto-grants, and a guest left alone stays a
     // guest, which is the safe resting state.
     const roll = (v.standing_full || []);
-    const guests = P.filter(p => !p.local && !roll.includes(p.m.node_id));
+    // Unfiltered on purpose — see peers(all). A guest hidden by the offline toggle is still a
+    // decision the human owes, and the glyph counts it regardless.
+    const guests = peers(true).filter(p => !p.local && !roll.includes(p.m.node_id));
     el.innerHTML = guests.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
            Nobody is waiting. Every member here has been recognised.
