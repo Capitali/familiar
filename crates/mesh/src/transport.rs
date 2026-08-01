@@ -51,6 +51,14 @@ pub const INBOX_DIR: &str = "mesh/inbox";
 pub const INBOX_TOOLS_DIR: &str = "mesh/inbox_tools";
 /// Connected-peer roster (for Glass).
 pub const PEERS_FILE: &str = "mesh/peers.json";
+/// Nodes seen in the status directory but not yet admitted to the roster (ADR-0025).
+const CANDIDATES_FILE: &str = "mesh/candidates.json";
+/// How long a node must keep showing up before it becomes a member. Adoption used to happen on a
+/// SINGLE heartbeat, which is how four reinstalls in one afternoon left three ghost "iPhone"
+/// members in the roster forever: each throwaway key heartbeated once and was promoted for good.
+/// A key is not a device (ADR-0025), so a key that appears once and vanishes was never a device
+/// joining — it was a keypair passing through.
+const ADOPT_AFTER_SECS: i64 = 10 * 60;
 /// One-line human status (for Glass), like `connect_status.txt`.
 pub const STATUS_FILE: &str = "mesh/status.txt";
 
@@ -662,6 +670,11 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
             if st.node_id == our_node || our_ref.is_empty() || st.group_ref != our_ref {
                 continue;
             }
+            // …and if it has PERSISTED. One heartbeat is not a device arriving; it is a key
+            // passing through, and promoting it permanently is how ghosts are made (ADR-0025).
+            if !candidate_is_ripe(dir, &st.node_id, now) {
+                continue;
+            }
             peers.push(PeerRecord {
                 node_id: st.node_id.clone(),
                 label: if st.label.is_empty() {
@@ -674,11 +687,7 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
                 last_seen: st.updated_at,
                 // We are meeting it now; the lighthouse may have known it far longer, but this is
                 // the first moment WE can honestly attest to. `first_seen` is our own record.
-                first_seen: if st.updated_at > 0 {
-                    st.updated_at
-                } else {
-                    now
-                },
+                first_seen: now,
                 human: st.present_human.clone(),
                 connectivity: st.connectivity.clone(),
                 ..Default::default()
@@ -705,6 +714,29 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
             let _ = std::fs::write(&path, s);
         }
     }
+}
+
+/// Has this node been showing up long enough to be a member rather than a passer-by?
+///
+/// Records first sighting and returns true only once [`ADOPT_AFTER_SECS`] has elapsed since it.
+/// Deliberately a *duration*, not a count: a device that heartbeats every 60s and a device that
+/// heartbeats hourly are both real, and counting pulls would punish the second one.
+fn candidate_is_ripe(dir: &Path, node_id: &str, now: i64) -> bool {
+    let path = dir.join(CANDIDATES_FILE);
+    let mut seen: std::collections::BTreeMap<String, i64> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let first = *seen.entry(node_id.to_string()).or_insert(now);
+    // Forget candidates that stopped showing up, so the ledger cannot grow without bound — and so
+    // a key that vanishes never ripens into a member later.
+    seen.retain(|_, t| now - *t < ADOPT_AFTER_SECS * 6);
+    if let Ok(s) = serde_json::to_string(&seen) {
+        let _ = std::fs::create_dir_all(dir.join("mesh"));
+        let _ = std::fs::write(&path, s);
+    }
+    // A first sighting stamped in the future (clock skew) must not ripen instantly.
+    (0..=ADOPT_AFTER_SECS * 1000).contains(&(now - first)) && now - first >= ADOPT_AFTER_SECS
 }
 
 /// This node's stable id (minting the key on first use). Empty string on failure.
@@ -3196,9 +3228,11 @@ mod tests {
         let peers = load_peers(&dir);
         let ids: Vec<&str> = peers.iter().map(|p| p.node_id.as_str()).collect();
 
+        // A node seen ONCE is a key passing through, not a device arriving (ADR-0025). Adopting
+        // on a single heartbeat is what left three ghost "iPhone" members in the roster.
         assert!(
-            ids.contains(&"remote01"),
-            "a live member of OUR mesh must be adopted, got {ids:?}"
+            !ids.contains(&"remote01"),
+            "a node seen once must not be adopted, got {ids:?}"
         );
         assert!(
             !ids.contains(&"stranger1"),
@@ -3213,18 +3247,35 @@ mod tests {
             "we must not adopt ourselves"
         );
 
-        let ivan = peers.iter().find(|p| p.node_id == "remote01").unwrap();
+        // It ripens once it keeps showing up.
+        let later = 1_785_100_000 + ADOPT_AFTER_SECS + 1;
+        apply_status_freshness(&dir, &statuses, later);
+        let peers = load_peers(&dir);
+        let ids: Vec<String> = peers.iter().map(|p| p.node_id.clone()).collect();
+        assert!(
+            ids.iter().any(|i| i == "remote01"),
+            "a member that persists must be adopted, got {ids:?}"
+        );
+        assert!(
+            !ids.iter().any(|i| i == "stranger1"),
+            "persistence must not launder another mesh's member in"
+        );
+
+        let ivan = peers
+            .iter()
+            .find(|p| p.node_id == "remote01")
+            .expect("remote01 should be adopted once it has persisted");
         assert_eq!(ivan.label, "Ivan's iPhone");
         assert_eq!(ivan.last_seen, 1_785_100_000);
         assert_eq!(
-            ivan.first_seen, 1_785_100_000,
-            "our own first sighting, not the lighthouse's"
+            ivan.first_seen, later,
+            "our own first sighting is when WE adopted it, not the lighthouse's"
         );
         assert_eq!(ivan.human, "ivan");
         assert_eq!(ivan.connectivity, "lighthouse");
 
         // Idempotent: a second pull must not duplicate the row.
-        apply_status_freshness(&dir, &statuses, 1_785_100_100);
+        apply_status_freshness(&dir, &statuses, later + 100);
         assert_eq!(
             load_peers(&dir)
                 .iter()
