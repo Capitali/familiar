@@ -182,10 +182,21 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
         }
     }
 
+    /// Push this device's own state — consents, role, and the presence claim the console renders
+    /// as PRESENT (ADR-0019). The Mac never did this at all: `window.sphereDevice` existed and only
+    /// the iOS shell called it, so the Mac's Device screen had no claim to show and said "no one
+    /// identified" no matter who answered.
+    func pushDevice() {
+        let json = model.deviceStateJSON()
+        web?.evaluateJavaScript("window.sphereDevice && window.sphereDevice(\(json))",
+                                completionHandler: nil)
+    }
+
     func poll() async {
         // The core owns the read (host ordering, TLS pinning, failover, status heartbeat and the
         // consult service); the console just renders whatever it last saw.
         await model.refreshWorldview()
+        pushDevice()
         if let json = model.worldviewJSON {
             web?.evaluateJavaScript("window.sphereUpdate(\(json))", completionHandler: nil)
         } else {
@@ -333,9 +344,19 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     self.post("local/standing", ["act": act, "node_id": node])
                 }
             case "setHuman":
-                // The human at this Mac names who the familiar is serving now (ADR-0016) — writes
-                // the daemon's observer, same direct-to-disk trust class as MacBoundary's gate flips.
-                if let name = body["name"] as? String, !name.isEmpty { MacIdentity.setServing(name) }
+                // The human at this Mac says who they are — rung 3 of the identification ladder
+                // (ADR-0019), which is the AUTHORITATIVE rung. It sets the presence claim the
+                // console actually renders, and settles the device binding so the next launch
+                // starts at rung 1 instead of asking again.
+                //
+                // It used to write the daemon's observer.txt directly. That could never work: this
+                // app is sandboxed, so the write landed in the container and the console went on
+                // saying "no one identified" because nothing had touched the claim it displays.
+                if let name = body["name"] as? String, !name.isEmpty {
+                    self.model.confirmPresentHuman(name)
+                    self.model.setServedHuman(name)
+                    self.pushDevice()
+                }
             case "street":
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
                 self.surfaceStreet(lat: body["lat"] as? Double ?? 0,
@@ -412,11 +433,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             // roll, exactly like a gate flip — this used to fall through to `default: break`,
             // so the welcome buttons called into nothing.
             if let act = payload["act"] as? String, let node = payload["node_id"] as? String {
-                // Send it to the node we read from so every peer converges on one answer, and
-                // mirror it locally so this console reflects the decision even when the host is
-                // unreachable. The host is the authority; the local write is a courtesy.
+                // Over the mesh ONLY. The local mirror used to live here and was worse than
+                // useless: this app is sandboxed, so `homeDirectoryForCurrentUser` resolves to
+                // ~/Library/Containers/io.river.familiar.mac/Data — a private copy the daemon
+                // never reads. Clicking "recognise" wrote a file nobody would ever see and
+                // reported success. A sandboxed console cannot own the daemon's data dir, and
+                // should not: the serving node is the authority (ADR-0020).
                 Task { await model.decideStanding(node, act: act) }
-                if act == "grant" { MacStanding.grant(node) } else { MacStanding.revoke(node) }
             }
         case "local/gate":
             // The boundary is this machine's own, and stays a local file — a gate governs what
