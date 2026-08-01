@@ -412,12 +412,11 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             // roll, exactly like a gate flip — this used to fall through to `default: break`,
             // so the welcome buttons called into nothing.
             if let act = payload["act"] as? String, let node = payload["node_id"] as? String {
-                if act == "grant" {
-                    MacStanding.grant(node)
-                } else {
-                    // "not now" narrows what they see; it does not remove them from the mesh.
-                    MacStanding.revoke(node)
-                }
+                // Send it to the node we read from so every peer converges on one answer, and
+                // mirror it locally so this console reflects the decision even when the host is
+                // unreachable. The host is the authority; the local write is a courtesy.
+                Task { await model.decideStanding(node, act: act) }
+                if act == "grant" { MacStanding.grant(node) } else { MacStanding.revoke(node) }
             }
         case "local/gate":
             // The boundary is this machine's own, and stays a local file — a gate governs what

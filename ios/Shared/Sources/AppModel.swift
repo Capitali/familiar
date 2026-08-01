@@ -734,6 +734,32 @@ final class AppModel: ObservableObject {
         return "local"
     }
 
+    /// Recognise a guest, or hold them off (ADR-0020). Any active member may decide, so the
+    /// decision is signed and sent to the node this device reads from rather than written locally —
+    /// a phone has no roll to edit. The host settles it; we report back what it said.
+    ///
+    /// First decision wins: an `alreadyDecided` answer is surfaced, not retried.
+    func decideStanding(_ subject: String, act: String) async {
+        guard let g = storedGrant(), !host.isEmpty else {
+            note("✗ can't decide standing — not enrolled yet")
+            return
+        }
+        let client = StandingClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
+        do {
+            switch try await client.cast(subject: subject, act: act, host: host, port: enrollPort) {
+            case .decided(let said):
+                note("✓ \(subject.prefix(8)) — \(said)")
+            case .alreadyDecided(let said):
+                note("· \(subject.prefix(8)) — someone already decided (\(said))")
+            case .refused(let why):
+                note("✗ standing refused: \(why)")
+            }
+        } catch {
+            note("✗ standing vote failed: \(Self.brief(error))")
+        }
+        await refreshWorldview()   // reflect the new roll immediately
+    }
+
     /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
     func makeSession() -> ObservationClient.Session? {
         guard let g = storedGrant(), !host.isEmpty,

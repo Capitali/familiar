@@ -55,6 +55,9 @@ struct SphereConsoleIOS: View {
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
             bridge.onAnswerThread = { [weak model] id, text in model?.answerThread(id, text) }
+            bridge.onStanding = { [weak model] node, act in
+                Task { await model?.decideStanding(node, act: act) }
+            }
             bridge.onInvite = { [weak model] in model?.addressPayload }
             bridge.pushDevice(model.deviceStateJSON())
         }
@@ -111,6 +114,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onAnswer: ((String) -> Void)?
     var onConsent: ((String, Bool) -> Void)?
     var onAnswerThread: ((String, String) -> Void)?
+    /// (node_id, "grant"|"deny") — a standing decision (ADR-0020), sent over the mesh by the model.
+    var onStanding: ((String, String) -> Void)?
     var onUnenroll: (() -> Void)?
     var onSetHuman: ((String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
@@ -276,6 +281,15 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "unenroll":
                 self.onUnenroll?()
+            case "standing":
+                // Recognise a guest, or hold them off (ADR-0020). A phone has no roll to edit, so
+                // the decision is signed and sent to the node we read from; the host settles it and
+                // every peer converges on that answer. This case did not exist at all — the Mac
+                // bridge had it and this one did not, so every tap here went nowhere.
+                if let act = body["act"] as? String, let node = body["node_id"] as? String,
+                   !node.isEmpty {
+                    self.onStanding?(node, act)
+                }
             case "gate":
                 break   // boundary writes are a local human act at the familiar, never from a device
             default: break

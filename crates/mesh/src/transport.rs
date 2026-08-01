@@ -1163,6 +1163,21 @@ async fn handle(
         (Method::GET, "/mesh/rendezvous") => rendezvous_directory(&dir),
         // Status hub (ADR-0017): a member heartbeats its own status here; anyone reads the live
         // mesh-wide directory. Status only — no secret, admits no one.
+        // A member's decision about a guest (ADR-0020). Signed like a status heartbeat; any
+        // active member may vote, and the first decision wins.
+        (Method::POST, "/mesh/standing") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_standing_vote(&dir, &bytes, &sig)
+        }
         (Method::POST, "/mesh/status") => {
             let sig = req
                 .headers()
@@ -1764,6 +1779,40 @@ fn recv_status(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
         },
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "status rejected"),
+    }
+}
+
+/// `POST /mesh/standing` → a member recognises a guest, or holds them off.
+///
+/// This is what lets a phone decide: it has no data dir to write and no daemon beside it, so the
+/// decision has to travel. It goes to whichever node is serving — in practice the minting door —
+/// and everyone else converges on that roll at the next exchange.
+///
+/// 409 on an already-decided node rather than an overwrite: two consoles must not produce a roll
+/// that flips with packet order.
+fn recv_standing_vote(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let vote: crate::standing::StandingVote = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad vote"),
+    };
+    if vote.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let now = now_secs();
+    // The voter must be a member in good standing of the group it names — same check the status
+    // channel runs, and the reason a stranger cannot vote itself in.
+    if crate::group::verify_membership_consistent(&vote.membership, &vote.group_pubkey, now)
+        .is_err()
+    {
+        return text(StatusCode::FORBIDDEN, "membership does not verify");
+    }
+    match crate::standing::apply_vote(dir, &vote, now) {
+        Ok(word) => text(StatusCode::OK, word),
+        Err(crate::Error::Untrusted(m)) if m.contains("already decided") => {
+            text(StatusCode::CONFLICT, m)
+        }
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 

@@ -21,6 +21,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::group::Membership;
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::members::Member;
@@ -47,6 +49,88 @@ pub struct StandingRoll {
     /// Free-text note per node_id, so the file explains itself a year from now.
     #[serde(default)]
     pub notes: HashMap<String, String>,
+}
+
+/// A member's decision about a guest, signed and carried over the mesh (ADR-0020, ADR-0025).
+///
+/// Any active member may decide, so the decision has to travel rather than sit on whichever node
+/// the deciding console happened to be reading. It goes to the **minting door** — the one permanent
+/// fixture (ADR-0018) — which is the only place a single authoritative answer can live. Everyone
+/// else converges on it at the next exchange.
+///
+/// **First decision wins.** A later vote on an already-decided node is refused, not applied. Two
+/// people tapping different buttons on two consoles must not produce a roll that flips depending on
+/// packet order, and a member who disagrees should say so out loud rather than silently overwrite
+/// someone. Reversing a settled decision is a deliberate act (`mesh standing grant|revoke`), not a
+/// race.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StandingVote {
+    pub membership: Membership,
+    /// The group's public key (hex) — lets the host verify the cert without holding the secret.
+    pub group_pubkey: String,
+    /// The node being decided about.
+    pub subject: String,
+    /// "grant" (recognise) or "deny" (not now).
+    pub act: String,
+    pub nonce: String,
+    pub ts: i64,
+}
+
+impl StandingVote {
+    /// The voter signed these exact bytes with the key its membership certifies — the same proof
+    /// shape as a status heartbeat or an observation batch.
+    pub fn verify_sig(&self, raw: &[u8], sig_hex: &str) -> Result<()> {
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        let pk = crate::exactly_32(
+            &crate::hex_decode(&self.membership.node_pubkey)?,
+            "node pubkey",
+        )?;
+        let key = VerifyingKey::from_bytes(&pk)
+            .map_err(|_| Error::Untrusted("bad node pubkey".into()))?;
+        let sig_bytes = crate::node::exactly_64(&crate::hex_decode(sig_hex)?, "sig")?;
+        key.verify(raw, &Signature::from_bytes(&sig_bytes))
+            .map_err(|_| Error::Untrusted("standing: vote signature did not verify".into()))
+    }
+}
+
+/// Whether this node has already been decided — recognised, or denied within its retry window.
+/// Used to refuse a second vote rather than let it overwrite the first.
+pub fn already_decided(dir: &Path, subject: &str, now: i64) -> bool {
+    if load(dir).full.iter().any(|n| n == subject) {
+        return true;
+    }
+    crate::enroll::denied_for(dir, subject, now) > 0
+}
+
+/// Apply a verified vote. Membership is checked by the caller; this enforces first-decision-wins
+/// and does the write.
+pub fn apply_vote(dir: &Path, vote: &StandingVote, now: i64) -> Result<&'static str> {
+    let subject = vote.subject.trim();
+    if subject.is_empty() {
+        return Err(Error::Malformed("standing: empty subject".into()));
+    }
+    if subject == vote.membership.node_id {
+        return Err(Error::Untrusted(
+            "standing: a node may not decide about itself".into(),
+        ));
+    }
+    if already_decided(dir, subject, now) {
+        return Err(Error::Untrusted("standing: already decided".into()));
+    }
+    match vote.act.as_str() {
+        "grant" => {
+            grant(dir, subject, "recognised by a member over the mesh")
+                .map_err(|e| Error::Malformed(format!("standing: {e}")))?;
+            Ok("recognised")
+        }
+        "deny" => {
+            crate::enroll::deny(dir, subject, now)?;
+            Ok("held off")
+        }
+        other => Err(Error::Malformed(format!(
+            "standing: act {other}? — grant | deny"
+        ))),
+    }
 }
 
 pub fn save(dir: &Path, roll: &StandingRoll) -> std::io::Result<()> {
@@ -284,6 +368,34 @@ fn anon_member(m: &mut Member, is_reader: bool, dlat: f64, dlon: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// First decision wins — the property that keeps two consoles from producing a roll that
+    /// flips with packet order.
+    #[test]
+    fn a_second_vote_on_a_decided_node_is_refused() {
+        let dir = std::env::temp_dir().join(format!("standing-vote-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        const NOW: i64 = 1_785_000_000;
+
+        assert!(!already_decided(&dir, "guest1", NOW));
+        grant(&dir, "guest1", "recognised").unwrap();
+        assert!(
+            already_decided(&dir, "guest1", NOW),
+            "a recognised node is decided"
+        );
+
+        // A denial also counts as decided, for as long as its retry window holds — and stops
+        // counting once the window lapses, so "not now" really is not-now rather than never.
+        assert!(!already_decided(&dir, "guest2", NOW));
+        crate::enroll::deny(&dir, "guest2", NOW).unwrap();
+        assert!(already_decided(&dir, "guest2", NOW));
+        assert!(
+            !already_decided(&dir, "guest2", NOW + crate::enroll::DENY_RETRY_SECS + 1),
+            "a lapsed denial reopens the decision"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn unlisted_reader_is_a_guest_and_listed_is_full() {
