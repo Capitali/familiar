@@ -179,6 +179,56 @@ const seenCell = (p, bigPx, timePx) => p.seenSub
   : `<div style="font-size:${bigPx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`;
 const FRONTIER_COLOR = '#7d93a8';
 
+// What KIND of path is this address? Reading a bare 100.x or 192.168.x and knowing what it means
+// is knowledge nobody should have to carry in their head.
+//
+// Honest limit, stated rather than papered over: **an IP address cannot tell you wifi from
+// ethernet.** That distinction lives in the local interface table, not in the address, and this
+// function only ever sees the address. So a private address is labelled LAN — truthfully — rather
+// than guessed at. Naming it "wifi" would be a fabrication that happens to be right about half the
+// time, which is worse than an honest "LAN".
+function ifaceKind(addr) {
+  const raw = String(addr || '').trim();
+  if (!raw) return null;
+  // Strip brackets/port: "[fe80::1]:47100" and "192.168.1.4:47100" both reduce to the host.
+  let h = raw.replace(/^\[|\]$/g, '');
+  if (h.startsWith('[')) h = h.slice(1);
+  const br = h.indexOf(']');
+  if (br > -1) h = h.slice(1, br);
+  else if ((h.match(/:/g) || []).length === 1) h = h.split(':')[0];
+
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!v4) {
+    const l = h.toLowerCase();
+    if (l === '::1') return { label: 'loopback', tone: '#8ca5dc' };
+    if (l.startsWith('fe80')) return { label: 'link-local', tone: '#ffb15a' };
+    if (l.startsWith('fd') || l.startsWith('fc')) return { label: 'private v6', tone: '#9cc0ff' };
+    if (l.includes(':')) return { label: 'public v6', tone: '#7ce0b4' };
+    return { label: 'name', tone: '#8ca5dc' };   // a hostname, not an address
+  }
+  const [a, b, c] = [Number(v4[1]), Number(v4[2]), Number(v4[3])];
+  if (a === 127) return { label: 'loopback', tone: '#8ca5dc' };
+  // 100.64/10 — CGNAT. Tailscale hands these out, and so does a carrier; on this mesh it is
+  // Tailscale (ADR-0017 reports it as such in `connectivity`).
+  if (a === 100 && b >= 64 && b <= 127) return { label: 'tailscale', tone: '#aee7ff' };
+  if (a === 169 && b === 254) return { label: 'link-local', tone: '#ffb15a' };
+  // VirtualBox's default host-only network is 192.168.56.0/24 — the 56 is the THIRD octet, which
+  // is worth spelling out because checking it as the second silently mislabels every LAN address.
+  if (a === 192 && b === 168 && c === 56) return { label: 'local VM', tone: '#c9a7ff' };
+  if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
+    return { label: 'LAN', tone: '#3ddc97' };
+  }
+  return { label: 'public', tone: '#7ce0b4' };
+}
+
+// The address plus what it is, as one compact cell.
+function addrCell(addr) {
+  const k = ifaceKind(addr);
+  if (!k) return '';
+  return `<span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(addr)}</span>
+    <span class="m" style="font-size:8px;letter-spacing:0.1em;padding:2px 7px;border-radius:5px;background:rgba(120,190,255,0.09);color:${k.tone};white-space:nowrap;">${k.label.toUpperCase()}</span>`;
+}
+
 // Members → located mesh nodes. Real coordinates only: a node that reported none clusters
 // near the anchor (first located member) with a small deterministic spread, and its card
 // says the position is approximate. No invented places.
@@ -550,7 +600,8 @@ function refreshScreen() {
       <div onclick="sphereDive(${i})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:rgba(16,34,60,0.2);border:1px solid rgba(120,190,255,0.1);">
         <span style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color};"></span>
         <span style="font-size:14px;font-weight:600;flex:1;">${esc(p.name)}</span>
-        <span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(p.m.addr || '')}</span>
+        ${addrCell(p.m.addr)}
+        ${p.m.connectivity ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:2px 7px;border-radius:5px;background:rgba(120,190,255,0.06);color:rgba(174,231,255,0.75);white-space:nowrap;">via ${esc(p.m.connectivity)}</span>` : ''}
         <span class="m" style="font-size:11px;color:${p.color};white-space:nowrap;text-align:right;">${esc(p.seenFull)}</span>
       </div>`).join('') + F.map((fn, fi) => `
       <div onclick="sphereDiveFrontier(${fi})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:9px 14px;border-radius:12px;background:rgba(16,34,60,0.12);border:1px solid rgba(125,147,168,0.14);opacity:0.66;">
