@@ -1,6 +1,8 @@
 # ADR-0018 — The lighthouse is the single permanent fixture; everything else is a peer
 
-- **Status:** accepted
+- **Status:** accepted — **superseded in part 2026-08-01** by
+  [ADR-0026](0026-two-filter-admission.md) §6, which schedules the redundancy this record named
+  as its own endpoint; see the amendment at the end.
 - **Date:** 2026-07-29
 - **Relates to:** [ADR-0012](0012-lighthouse-rendezvous.md) (the lighthouse as the
   primary door — this generalises it from *rendezvous* to *fixture*),
@@ -139,3 +141,28 @@ Concretely:
   `dataflows/auth-and-membership.md`, which has it holding the group key.
 - Fix the stale `FamiliarMac` comment in `ios/project.yml`, which still describes
   the Mac as reading a local daemon over loopback.
+
+---
+
+## Amendment, 2026-08-01 — the endpoint this record named has a design and a schedule
+
+This record said, at full strength, that the lighthouse being irreplaceable "contradicts the
+spirit of the decision" and that it "should eventually be made redundant and physically
+distributed." [ADR-0026](0026-two-filter-admission.md) §6 is that design: **minting warrants**
+(the group key signs a warrant for a member node's key; verification walks cert → warrant →
+group public key), so any warranted member node can hold the door, and rendezvous becomes a
+service any well-addressed peer can offer.
+
+Decision 1 above ("one online minting door") is superseded by that work when it lands — Phase 4
+of the rebuild, gated on a kill-the-lighthouse drill and on the escrow being **actually
+exported first** (the ordering warning in Follow-on work stands: `wildhorse` is not reduced
+until a real escrow exists). Decisions 2–4 stand as written: peers still cannot mint *without a
+warrant*, the secret still lives offline plus its doors, and "home hub" stays retired.
+
+The security argument here — "two automatic doors is two attack surfaces for one policy" —
+deserves its answer on this page rather than by reference: what made a door dangerous was that
+*reaching it* sufficed for admission. Under ADR-0026, every door runs the same mechanical rule
+set, whose satisfying evidence (cryptographic continuity, or a member's deliberate act) a
+stranger cannot produce by reaching an address. What distributes is rule *evaluation*, not
+policy; every admission is a signed, attributable fact; and corrections travel mesh-wide. More
+doors no longer means more policy surface — it means more places the same policy is enforced.

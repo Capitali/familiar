@@ -47,10 +47,17 @@ lighthouse without re-enrollment and fail over to it when they leave the LAN.
   loopback. The provisioning script sets ufw default-deny + SSH + 47100.
 - Everything served is covenant-gated: briefs, worldview reads, and observation
   batches are signature- and membership-verified after TLS. What an internet
-  stranger can do: read `/mesh/hello`, and file an enrollment request that sits
-  pending until a human at a human-facing peer approves or denies it.
-- `auto_accept_enrollments` must stay **off** on any public node — admitting a
-  member is a human act, doubly so on a port the whole internet can reach.
+  stranger can do: read `/mesh/hello`, and knock — which lands them as a guest
+  reading the anonymised projection, nothing more.
+- Under [ADR-0026](../docs/decision-records/0026-two-filter-admission.md) the
+  `auto_accept_enrollments` switch is retired in both directions: admission is
+  rules-based — a knock lands a **guest** reading the anonymised projection, and
+  membership requires the human identity to be *established by evidence* (a
+  rotation proof, a device voucher, an invite, or an introduction made in the
+  mesh's own space — nothing a port-scanning stranger can produce). This page's
+  old instinct ("auto-accept must stay off on a public node") is vindicated by
+  deletion: what an internet stranger can get from this box is a guest's
+  projected read, ever.
 
 ## Known seams (deliberate, tracked)
 

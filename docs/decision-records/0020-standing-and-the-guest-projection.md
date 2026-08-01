@@ -1,6 +1,8 @@
 # ADR-0020 — Standing: membership decides whether you may read; standing decides what you see
 
-- **Status:** accepted (implemented 2026-07-29; not yet deployed to the lighthouse)
+- **Status:** accepted (implemented 2026-07-29; deployed to the lighthouse 2026-08-01) —
+  **amended 2026-08-01**: [ADR-0026](0026-two-filter-admission.md) keeps the projection and
+  retires the roll; see the amendment at the end.
 - **Date:** 2026-07-30
 - **Relates to:** [ADR-0015](0015-automated-covenant-admission.md) (automatic admission — the
   decision this completes, and whose hole this closes),
@@ -111,3 +113,27 @@ mesh to without showing them your life.
   the point at which this decision becomes real.**
 - Consider whether standing should have more than two levels. Two is the honest minimum; a
   household/guest/steward gradient may earn itself later, but not before something needs it.
+
+---
+
+## Amendment, 2026-08-01 — the projection stays; the roll retires
+
+[ADR-0026](0026-two-filter-admission.md) absorbs this record's question into rules-based
+admission. The review called the projection "the best idea in the current design," and it
+survives byte-for-byte: same kept fields, same removals, same per-reader relocation, same
+unchanged dialog screen. What changes is what selects it and who maintains that.
+
+- **Standing stops being a hand-granted roll and becomes a derived fact**: a *guest* is a
+  device whose two admission filters (covenant attested ∧ identity established) have not both
+  held; a *member* is one whose filters have. `standing.json`, its per-node divergence, and the
+  human-facing grant path this record's follow-on asked for are all retired — the follow-on is
+  answered by deletion rather than by UI.
+- **Default-deny is preserved and strengthened**: the default is still that a new arrival sees
+  the projection, but the failure mode "a household device mysteriously gone anonymous because
+  someone forgot to edit a roll" disappears — establishment travels with the record.
+- **The "more than two levels" question** this record left open is answered *no*: two levels
+  were the honest minimum, and rules-based admission keeps exactly two, with "ready for
+  admission" as display state rather than a third disclosure tier.
+- The one capability lost is naming: "admitted but deliberately anonymous forever" is no longer
+  a state a human grants — it is a guest who never establishes, self-chosen, which covers the
+  reviewer, the demo viewer, and the curious visitor without anyone deciding about them.

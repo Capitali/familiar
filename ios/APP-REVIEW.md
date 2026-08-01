@@ -137,3 +137,28 @@ Fixed since the last build:
   satellite view sat rotated against the map through the transition.
 · The console needed an internet connection to draw itself. It no longer does.
 ```
+
+---
+
+## 4. The review story under ADR-0026 — the reviewer is a guest by construction
+
+For builds that ship the two-filter admission
+([ADR-0026](../docs/decision-records/0026-two-filter-admission.md)), the verification story
+gets simpler and *more* honest, and the notes above should be rewritten around it when that
+build is submitted:
+
+- A reviewer who launches with nothing nearby **founds their own one-node mesh** and sees their
+  own device's real local activity immediately — nothing synthetic, nothing of ours.
+- A reviewer who visits the demonstration mesh reads its **guest projection**: the live system
+  with the people taken out. They are a guest *by construction* — identity is established by
+  evidence (a handoff, an invite, an introduction in the mesh's own space), none of which a
+  remote reviewer can or should produce — so no one has to remember to keep them anonymous,
+  and no one could forget to.
+- The console tells them so in plain words: the covenant is accepted, identity is not
+  established, and what each would take. "Admission pending" is a true statement about their
+  state, not an apology for a broken screen.
+
+The standing promise in §2 — *"No real personal information is shown to anyone who has not been
+explicitly invited to a private mesh"* — stops depending on a hand-maintained roll and becomes
+a property of the rules themselves. Keep that sentence; under ADR-0026 it is load-bearing and
+true by construction.

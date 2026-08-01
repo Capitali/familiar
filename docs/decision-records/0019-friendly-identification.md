@@ -1,7 +1,9 @@
 # ADR-0019 — Friendly identification: knowing who is present, so the familiar can address a person
 
 - **Status:** accepted — the ladder and presence claims are implemented client-side and carried on
-  the wire (2026-07-29). What remains is listed under **Follow-on work**.
+  the wire (2026-07-29). What remains is listed under **Follow-on work**. **Amended 2026-08-01**:
+  the invariant is restated by [ADR-0026](0026-two-filter-admission.md) — see the amendment at
+  the end.
 - **Date:** 2026-07-29
 - **Relates to:** [ADR-0016](0016-multi-human-served-identity.md) (served identity
   and per-human attribution — this ADR says *how* the served human is
@@ -185,3 +187,33 @@ confidence and provenance along with the name.
   answer is an ordinary public observation.
 - The daemon's own `derive_presence` has no binding tier — it reasons only from observations, so a
   device's claim and the daemon's derivation can still disagree. Reconciling them is unfinished.
+
+---
+
+## Amendment, 2026-08-01 — the invariant, restated for rules-based admission
+
+This record's invariant was written in bold — *identification addresses; it never authorises* —
+and [ADR-0026](0026-two-filter-admission.md) changes it, so the change is stated here rather
+than left to be discovered. The invariant becomes:
+
+> **A claim addresses; establishment admits.**
+
+What is preserved, exactly as this record demanded: recognition alone never admits anything. A
+face match, a voice match, a proposed handle — all of it remains a routing hint carrying a
+confidence, cheap to correct, unlocking nothing. "The camera believes this is Betty" still opens
+none of Betty's doors, and the sensitive-personal rules (a face signature never federates; a
+guest sees no dossier) are untouched.
+
+What changed: under ADR-0026, admission to the mesh is gated on the human identity being
+**established by evidence** — a rotation proof, a device voucher, an invite token, or an
+introduction made in the mesh's own space. Every establishing class is either cryptographic
+continuity or a deliberate human act; the deliberate act moved from a third party approving at
+a door to the arriving human (or their own hardware, or their inviter) producing the evidence.
+Identification-as-claim keeps this record's contract in full. Establishment is a different act
+with a different artifact, and it is the *only* identification-adjacent thing that authorises —
+and only ever the one thing admission grants: membership, never capability (ADR-0005) and never
+another person's data (ADR-0016).
+
+The ladder above is unchanged and remains the machinery presence runs on; its `asked` rung is
+also how an E4 introduction begins, which is why reviving the dead `confirmPresentHuman` path
+is scheduled work rather than optional polish.
