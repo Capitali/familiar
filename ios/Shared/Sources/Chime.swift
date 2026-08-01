@@ -11,8 +11,15 @@ enum Chime {
     private static var player: AVAudioPlayer?
 
     /// Someone new is waiting to be recognised (ADR-0020).
-    static func guestWaiting() {
-        guard let url = Bundle.main.url(forResource: "guest-waiting", withExtension: "mp3") else {
+    static func guestWaiting() { play("guest-waiting", "mp3") }
+
+    /// A guest was recognised. Plays for the person who decided **and** on the device that was
+    /// just let in — the second is the point: being accepted should be felt on the accepted
+    /// device, not only announced on the one that granted it.
+    static func accepted() { play("acceptance", "wav") }
+
+    private static func play(_ name: String, _ ext: String) {
+        guard let url = Bundle.main.url(forResource: name, withExtension: ext) else {
             return
         }
         #if os(iOS)

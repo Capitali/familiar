@@ -718,6 +718,9 @@ final class AppModel: ObservableObject {
     /// Guests waiting as of the previous successful read — nil until the first one, so launch is
     /// silent. The chime is an arrival, not a standing condition.
     private var lastGuestsWaiting: Int?
+    /// Whether this device stood at full standing as of the previous read. nil until the first,
+    /// so launching already-recognised is silent.
+    private var wasRecognised: Bool?
 
     /// Whether the last status heartbeat landed — nil until the first attempt. Only used to log
     /// transitions, so a persistent failure doesn't flood the activity log every 5 seconds.
@@ -752,6 +755,8 @@ final class AppModel: ObservableObject {
         do {
             switch try await client.cast(subject: subject, act: act, host: host, port: enrollPort) {
             case .decided(let said):
+                // Only for a grant: holding someone off is not a moment to celebrate.
+                if act == "grant" { Chime.accepted() }
                 note("✓ \(subject.prefix(8)) — \(said)")
             case .alreadyDecided(let said):
                 note("· \(subject.prefix(8)) — someone already decided (\(said))")
@@ -827,6 +832,18 @@ final class AppModel: ObservableObject {
                     note("someone new is waiting to be recognised")
                 }
                 lastGuestsWaiting = waiting
+
+                // Were WE just let in? The moment this device's own id appears on the roll it had
+                // been absent from. Being accepted should be felt on the accepted device, not only
+                // announced on the one that granted it. Edge-triggered and silent on the first
+                // read, like the door chime — a device that was already recognised at launch has
+                // not just been accepted.
+                let recognisedNow = (view.standing_full ?? []).contains(node.nodeId)
+                if let was = wasRecognised, !was, recognisedNow {
+                    Chime.accepted()
+                    note("✓ recognised — reading the mesh in full")
+                }
+                wasRecognised = recognisedNow
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
