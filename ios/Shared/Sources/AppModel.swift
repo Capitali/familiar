@@ -715,6 +715,10 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Guests waiting as of the previous successful read — nil until the first one, so launch is
+    /// silent. The chime is an arrival, not a standing condition.
+    private var lastGuestsWaiting: Int?
+
     /// Whether the last status heartbeat landed — nil until the first attempt. Only used to log
     /// transitions, so a persistent failure doesn't flood the activity log every 5 seconds.
     private var lastStatusOK: Bool?
@@ -814,6 +818,15 @@ final class AppModel: ObservableObject {
                 let (view, raw) = try await WorldviewClient(session: session)
                     .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                                   lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
+                // Someone new at the door. Edge-triggered against the previous count, and
+                // deliberately silent on the FIRST read after launch — otherwise every launch
+                // announces guests who have been waiting since yesterday.
+                let waiting = view.guests_waiting ?? 0
+                if let before = lastGuestsWaiting, waiting > before {
+                    Chime.guestWaiting()
+                    note("someone new is waiting to be recognised")
+                }
+                lastGuestsWaiting = waiting
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil

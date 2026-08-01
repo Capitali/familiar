@@ -25,6 +25,8 @@ targets:
       # The client core both shells share (ADR-0018): enrolment, worldview reads, status
       # heartbeat, consults. A Mac is a peer among equals, so it runs the same code.
       - Shared/Sources
+      # The door chime (ADR-0020) — one sound, shared by both shells.
+      - Shared/Resources
       - App/Assets.xcassets
       # The Metal Sphere console — the same web bundle the Mac console renders, kept as a
       # folder reference so the page loads from "sphere/" at runtime on every platform.
@@ -72,6 +74,7 @@ targets:
       # The same shared client core the iOS shell uses — the Mac joins the mesh as a peer
       # rather than reading a daemon over loopback.
       - Shared/Sources
+      - Shared/Resources
       - MacApp/Assets.xcassets
       # The Metal Sphere web console — kept as a folder reference so the page loads from
       # the "sphere/" subdirectory at runtime (Bundle …/Resources/sphere/index.html).
