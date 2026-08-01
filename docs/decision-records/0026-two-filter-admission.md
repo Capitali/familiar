@@ -1,7 +1,8 @@
 # ADR-0026 — Two filters, one record: admission is rules-based, and the welcome is a greeting
 
-- **Status:** proposed — written as the Phase 0 gate of the join/authorize rebuild; in force
-  when Ian accepts it. Everything downstream of this record waits on that acceptance.
+- **Status:** **accepted** (Ian, 2026-08-01) — written as the Phase 0 gate of the
+  join/authorize rebuild and accepted the same day. Phase 1 (the evidence-path prototype)
+  proceeds.
 - **Date:** 2026-08-01
 - **Relates to:** the architectural review and planning brief that called for this
   ([`docs/reviews/2026-08-01-join-and-authorize.md`](../reviews/2026-08-01-join-and-authorize.md),
