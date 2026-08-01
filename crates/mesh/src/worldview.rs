@@ -381,7 +381,7 @@ pub(crate) fn read_worldview(
     for p in crate::transport::load_peers(dir) {
         if now - p.last_seen <= crate::transport::GOSSIP_FRESH_SECS * 5 {
             let ip = p.addr.split(':').next().unwrap_or("").to_string();
-            if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_ok() && !hosts.contains(&ip) {
+            if !ip.is_empty() && is_gossipable_addr(&ip) && !hosts.contains(&ip) {
                 hosts.push(ip);
             }
         }
@@ -389,6 +389,45 @@ pub(crate) fn read_worldview(
     view.hosts = hosts;
     view.pins = crate::transport::advertised_pins(dir);
     Ok(view)
+}
+
+/// May a peer's **observed source address** be gossiped to other devices as somewhere the mesh can
+/// be reached?
+///
+/// Only if it is private (RFC1918 / unique-local) or tailnet (CGNAT 100.64/10). Everything else is
+/// refused, and the reason is a category error worth naming: `peer.addr` is the socket address a
+/// peer *connected from*, not an address it *listens on*. For a peer behind NAT — every device on
+/// a Starlink uplink — those are different things. The public one is a NAT exit with nothing behind
+/// it, so gossiping it hands every device in the mesh an address that can only ever time out.
+///
+/// This was not theoretical. The rig's public IP changes whenever it moves, each new one entered
+/// the gossip as a fresh "host", nothing ever pruned them, and a single iPad accumulated 33
+/// candidate addresses — ~30 of them dead NAT exits it retried at 10s each before reaching anything
+/// real. A private address does not have this problem: a LAN sibling genuinely can dial it, and
+/// when it goes stale it fails fast on the same network rather than hanging.
+///
+/// The lighthouse's own public address is unaffected — it arrives via `advertise_hosts` /
+/// `rendezvous_hosts`, which are *asserted by that node about itself* rather than observed of
+/// someone else. That is the distinction being enforced here, and it is why a future second
+/// lighthouse (ADR-0018 wants the door eventually redundant) must be introduced by configuration
+/// or enrolment rather than inferred from a connection.
+fn is_gossipable_addr(ip: &str) -> bool {
+    use std::net::IpAddr;
+    match ip.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            let o = v4.octets();
+            // Tailscale's CGNAT range is a real reachable path, and the doctrine (ADR-0012) already
+            // sorts it last rather than excluding it.
+            v4.is_private() || v4.is_link_local() || v4.is_loopback() || o[0] == 100 && (64..=127).contains(&o[1])
+        }
+        // Unique-local (fc00::/7) and link-local; a global v6 address is directly routable in
+        // principle, but it is still an observed source address, so it gets the same treatment.
+        Ok(IpAddr::V6(v6)) => {
+            let s = v6.segments()[0];
+            v6.is_loopback() || (s & 0xfe00) == 0xfc00 || (s & 0xffc0) == 0xfe80
+        }
+        Err(_) => false,
+    }
 }
 
 /// Assemble the worldview snapshot from the canonical store + signals + peers + theories + gates +
@@ -830,6 +869,59 @@ fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec
     v.sort_by_key(|s| std::cmp::Reverse(s.last_seen));
     v.truncate(80);
     v
+}
+
+#[cfg(test)]
+mod gossip_addr_tests {
+    use super::is_gossipable_addr;
+
+    /// The exact addresses one iPad had accumulated on 2026-08-01, read off its own error banner.
+    /// Roughly thirty were public NAT exits handed out by Starlink as the rig moved; each one was
+    /// retried at a 10s timeout before anything real was reached, which is what a closed eye and a
+    /// spinning wheel actually were.
+    #[test]
+    fn the_nat_exits_that_poisoned_the_ipad_are_refused() {
+        let observed_junk = [
+            "129.224.211.181", "139.178.131.76", "129.222.46.137", "97.202.192.132",
+            "207.213.186.129", "207.213.186.177", "129.224.211.90", "24.111.157.40",
+            "107.115.39.17", "129.222.44.157", "129.222.44.228", "129.222.44.227",
+            "129.224.211.42", "139.178.129.14", "209.79.170.49", "207.213.186.50",
+            "139.178.130.73", "207.213.186.145", "107.115.39.18", "207.213.186.49",
+            "139.178.129.4", "207.213.186.178", "129.224.211.45", "107.115.39.82",
+            "207.213.186.97",
+        ];
+        for ip in observed_junk {
+            assert!(!is_gossipable_addr(ip), "{ip} is a NAT exit and must never be gossiped");
+        }
+    }
+
+    #[test]
+    fn real_paths_still_gossip() {
+        for ip in ["192.168.108.10", "192.168.108.119", "10.0.0.5", "172.16.0.9",
+                   "100.78.40.47", "100.105.39.72", "100.101.24.40", "fd00::1", "::1"] {
+            assert!(is_gossipable_addr(ip), "{ip} is a genuinely dialable path");
+        }
+    }
+
+    /// The lighthouse's public address must keep working — it just does not travel by this route.
+    /// It is asserted by that node about itself (`advertise_hosts` / `rendezvous_hosts`), which is
+    /// the whole distinction: self-asserted listener vs. observed source.
+    #[test]
+    fn the_lighthouse_public_address_is_not_gossipable_but_is_configured() {
+        assert!(!is_gossipable_addr("134.209.168.50"));
+    }
+
+    #[test]
+    fn boundaries_that_are_easy_to_get_wrong() {
+        assert!(is_gossipable_addr("100.64.0.1"));      // first tailnet address
+        assert!(is_gossipable_addr("100.127.255.254")); // last tailnet address
+        assert!(!is_gossipable_addr("100.63.0.1"));     // just below — public
+        assert!(!is_gossipable_addr("100.128.0.1"));    // just above — public
+        assert!(is_gossipable_addr("172.31.255.254"));  // last RFC1918 in the 172 block
+        assert!(!is_gossipable_addr("172.32.0.1"));     // just above — public
+        assert!(!is_gossipable_addr(""));
+        assert!(!is_gossipable_addr("cerbo.river.io")); // not an address at all
+    }
 }
 
 #[cfg(test)]

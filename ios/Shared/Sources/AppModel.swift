@@ -224,12 +224,25 @@ final class AppModel: ObservableObject {
         return lan + lighthouse + tail
     }
 
+    /// Consecutive read failures per address, since the last success. In memory only: an address
+    /// that fails because the device moved networks deserves a clean slate at next launch.
+    private var hostFailures: [String: Int] = [:]
+
     /// Drop any invalid candidates (self-heal a poisoned stored list) and keep `host` valid.
+    ///
+    /// Also drops the undialable ones. This runs at load, which matters: the bad addresses are
+    /// *persisted*, so devices already holding them (one iPad had 33) heal on the next launch
+    /// instead of waiting to fail their way out one timeout at a time.
     private func sanitizeHosts() {
         let before = hosts
-        hosts = hosts.filter { Self.isValidHost($0) }
-        if !Self.isValidHost(host) { host = hosts.first ?? "" }
-        if hosts != before { saveEnrollment() }
+        hosts = hosts.filter { Self.isValidHost($0) && Self.isDialable($0) }
+        if !hosts.contains(Self.rendezvousHost) { hosts.append(Self.rendezvousHost) }
+        if !Self.isValidHost(host) || !hosts.contains(host) { host = hosts.first ?? "" }
+        if hosts != before {
+            let n = before.count - hosts.count
+            if n > 0 { note("forgot \(n) address\(n > 1 ? "es" : "") that can't be dialled") }
+            saveEnrollment()
+        }
     }
 
     /// `h` answered — make it the standing preference (front of the candidate list).
@@ -245,17 +258,81 @@ final class AppModel: ObservableObject {
     /// don't hold yet, after the current preference. This is how a device that enrolled on the LAN
     /// learns the tailnet path and can reach the mesh from cellular without re-enrolling.
     private func learnHosts(_ advertised: [String]?) {
-        let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
+        let fresh = (advertised ?? [])
+            .filter { Self.isValidHost($0) && Self.isDialable($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
-        // Learning a peer's LAN address (advertised in the worldview) lets a running device
-        // switch its reads to it without a relaunch — re-sort to the read preference (home → lighthouse
-        // → tailnet) so the freshest, most-local path wins.
-        hosts.append(contentsOf: fresh)
-        hosts = Self.readOrderedCandidates(hosts)
+        // Learning a peer's LAN address (advertised in the worldview) lets a running device switch
+        // its reads to it without a relaunch. New candidates go to the BACK, unproven.
+        //
+        // This used to re-sort the whole list into read preference on every learn, and that single
+        // line was the flap: `promoteHost` had just moved the host that actually answered to the
+        // front, and the re-sort immediately threw that away and put an untried address there
+        // instead. With the mesh minting a new address every time the uplink's public IP changed,
+        // the two functions fought each other on a loop — reads alternated between two hosts whose
+        // rosters disagree, so the welcome list cycled between "nobody is waiting" and everyone,
+        // and the door chime replayed on every crossing. What answered stays in front; only what
+        // fails moves.
+        hosts.append(contentsOf: Self.readOrderedCandidates(fresh))
+        trimHosts()
         if !hosts.contains(host), let first = hosts.first { host = first }
         saveEnrollment()
         note("learned address\(fresh.count > 1 ? "es" : ""): \(fresh.joined(separator: ", "))")
     }
+
+    /// Is this an address a device can actually dial? Private, link-local or tailnet — plus the
+    /// lighthouse, which is public but *self-asserted* rather than observed.
+    ///
+    /// The mirror of `worldview::is_gossipable_addr` on the Rust side, kept here as well because a
+    /// peer running an older build still gossips NAT exits, and this list is persisted: one bad
+    /// address learned once outlives the release that fixed the sender. A public address observed
+    /// of a NAT'd peer is where it connected FROM, never where it listens.
+    static func isDialable(_ h: String) -> Bool {
+        if h == rendezvousHost { return true }
+        let bare = h.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
+        let hostPart = bare.contains(".") ? (bare.split(separator: ":").first.map(String.init) ?? bare) : bare
+        let p = hostPart.split(separator: ".")
+        if p.count == 4, let a = Int(p[0]), let b = Int(p[1]),
+           p.allSatisfy({ Int($0).map { (0...255).contains($0) } ?? false }) {
+            if a == 10 || a == 127 { return true }
+            if a == 172, (16...31).contains(b) { return true }
+            if a == 192, b == 168 { return true }
+            if a == 169, b == 254 { return true }
+            if a == 100, (64...127).contains(b) { return true }   // tailnet
+            return false
+        }
+        // v6: loopback, unique-local (fc00::/7), link-local (fe80::/10).
+        let low = hostPart.lowercased()
+        if low == "::1" { return true }
+        if low.hasPrefix("fc") || low.hasPrefix("fd") || low.hasPrefix("fe8")
+            || low.hasPrefix("fe9") || low.hasPrefix("fea") || low.hasPrefix("feb") { return true }
+        // A name (mDNS, a DNS entry someone configured) is asserted, not observed — keep it.
+        return !hostPart.isEmpty && Int(p.first.map(String.init) ?? "x") == nil
+    }
+
+    /// Keep the candidate list bounded and drop what has repeatedly refused to answer.
+    ///
+    /// Unbounded growth is not a tidiness problem: every candidate costs a 10s timeout on the way
+    /// to a working one, so a long list of dead addresses reads to a human as an app that has
+    /// stopped working. The lighthouse and the host currently in use are never evicted — the
+    /// lighthouse is the one address guaranteed to be reachable from anywhere (ADR-0018).
+    private func trimHosts() {
+        var kept: [String] = []
+        for h in hosts where kept.count < Self.maxCandidateHosts {
+            let dead = (hostFailures[h] ?? 0) >= Self.forgetHostAfterFailures
+            if dead && h != Self.rendezvousHost && h != host { continue }
+            kept.append(h)
+        }
+        // Whatever else happens, the always-on door stays a candidate.
+        if !kept.contains(Self.rendezvousHost) { kept.append(Self.rendezvousHost) }
+        let dropped = hosts.filter { !kept.contains($0) }
+        guard !dropped.isEmpty else { hosts = kept; return }
+        hosts = kept
+        for d in dropped { hostFailures[d] = nil }
+        note("forgot \(dropped.count) unreachable address\(dropped.count > 1 ? "es" : "")")
+    }
+
+    static let maxCandidateHosts = 12
+    static let forgetHostAfterFailures = 3
 
     /// The familiar told us the group's trusted TLS pins — adopt any we don't hold, so a later
     /// failover to a sibling (the lighthouse) passes the pin check (ADR-0012). This is how a
@@ -717,7 +794,10 @@ final class AppModel: ObservableObject {
 
     /// Guests waiting as of the previous successful read — nil until the first one, so launch is
     /// silent. The chime is an arrival, not a standing condition.
-    private var lastGuestsWaiting: Int?
+    /// Which guests this device has already announced. Identities, not a count — see the door
+    /// chime in `refreshWorldview`. Session-scoped: a relaunch is allowed to re-announce, because
+    /// after a relaunch nobody has necessarily heard it yet.
+    private var guestsSeenWaiting: Set<String>?
     /// Whether this device stood at full standing as of the previous read. nil until the first,
     /// so launching already-recognised is silent.
     private var wasRecognised: Bool?
@@ -823,27 +903,47 @@ final class AppModel: ObservableObject {
                 let (view, raw) = try await WorldviewClient(session: session)
                     .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                                   lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
-                // Someone new at the door. Edge-triggered against the previous count, and
-                // deliberately silent on the FIRST read after launch — otherwise every launch
-                // announces guests who have been waiting since yesterday.
-                let waiting = view.guests_waiting ?? 0
-                if let before = lastGuestsWaiting, waiting > before {
-                    Chime.guestWaiting()
-                    note("someone new is waiting to be recognised")
-                }
-                lastGuestsWaiting = waiting
-
                 // Were WE just let in? The moment this device's own id appears on the roll it had
                 // been absent from. Being accepted should be felt on the accepted device, not only
                 // announced on the one that granted it. Edge-triggered and silent on the first
                 // read, like the door chime — a device that was already recognised at launch has
                 // not just been accepted.
-                let recognisedNow = (view.standing_full ?? []).contains(node.nodeId)
+                let roll = Set(view.standing_full ?? [])
+                let recognisedNow = roll.contains(node.nodeId)
                 if let was = wasRecognised, !was, recognisedNow {
                     Chime.accepted()
                     note("✓ recognised — reading the mesh in full")
                 }
                 wasRecognised = recognisedNow
+
+                // Someone new at the door — deliberately silent on the FIRST read after launch,
+                // otherwise every launch announces guests who have been waiting since yesterday.
+                //
+                // The edge is on WHO is waiting, not how many. A count is the wrong thing to
+                // compare because the number comes from whichever host answered, and hosts
+                // disagree — reading 0 from one and 7 from another replayed the chime on every
+                // crossing, which is exactly the sound a door makes when it is being told about the
+                // same people over and over. Comparing identities makes an already-known guest
+                // silent no matter who reports them.
+                //
+                // Derived here rather than read from a server field on purpose: the door this
+                // device reads from may be running an older build, and a missing field would read
+                // as "nobody waiting" — a silent door is the worse failure.
+                let waitingNow = recognisedNow
+                    ? Set((view.members ?? []).map(\.node_id)
+                        .filter { $0 != node.nodeId && !roll.contains($0) })
+                    : []   // a guest is not told who else is waiting, and does not ring the door
+                if let before = guestsSeenWaiting {
+                    if !waitingNow.subtracting(before).isEmpty {
+                        Chime.guestWaiting()
+                        note("someone new is waiting to be recognised")
+                    }
+                    // Union, not replacement: a host that cannot see a guest is not evidence the
+                    // guest left, and forgetting them would re-announce them on the next crossing.
+                    guestsSeenWaiting = before.union(waitingNow)
+                } else {
+                    guestsSeenWaiting = waitingNow   // first read after launch is always silent
+                }
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
@@ -872,7 +972,9 @@ final class AppModel: ObservableObject {
                 default: cause = "\((error as NSError).code)"
                 }
                 attempts.append("\(tried)→\(cause)")
+                hostFailures[tried, default: 0] += 1
                 if failoverHost() == nil { break }
+                trimHosts()
             }
         }
         // Every candidate failed — surface the full picture so the cause is diagnosable at a glance:
