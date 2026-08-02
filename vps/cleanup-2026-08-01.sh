@@ -42,7 +42,10 @@ GHOSTS=(
   147cfa12ca86540f   # iPhone, 2026-07-31 23:30 → 23:33   (3 min)
 )
 
-ssh "$TARGET" GHOSTS="${GHOSTS[*]}" PUBLIC_ADDR="$PUBLIC_ADDR" 'bash -s' <<'REMOTE'
+# The assignments must be quoted as ONE remote word each: ssh joins its arguments and hands the
+# result to a shell, so an unquoted space-separated list reads as "assign the first, then run the
+# second as a command".
+ssh "$TARGET" "GHOSTS='${GHOSTS[*]}' PUBLIC_ADDR='$PUBLIC_ADDR' bash -s" <<'REMOTE'
 set -euo pipefail
 D=/var/lib/familiar/familiar_data
 
@@ -54,7 +57,9 @@ echo "backups: /root/peers.backup-$STAMP.json  /root/config.backup-$STAMP.json"
 echo
 echo "— abandoning ghost records —"
 for n in $GHOSTS; do
-  familiar --data-dir "$D" mesh abandon "$n" 2>&1 | sed 's/^/  /'
+  # `--data-dir` is parsed as a trailing flag, not a global one — before the subcommand it is
+  # silently ignored and the whole thing degrades to a usage dump.
+  familiar mesh abandon "$n" --data-dir "$D" 2>&1 | sed 's/^/  /'
 done
 
 echo
@@ -75,8 +80,11 @@ else:
 PY
 
 echo
-systemctl restart familiar 2>/dev/null || echo "  (restart the familiar service by hand if it is not under systemd)"
-sleep 3
+# The unit is `familiar-peer`, not `familiar`. Restarting matters less for the config edit
+# (`advertise_hosts` is re-read on every worldview build) than for the abandons: a daemon holding
+# peers in memory could write its own copy back over them.
+systemctl restart familiar-peer
+sleep 5
 echo "— active roster after cleanup —"
 python3 - <<'PY'
 import json
