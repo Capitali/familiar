@@ -400,7 +400,9 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     /// (the lighthouse, ADR-0012), which is where it belongs.
     private func fetchInvite() {
         Task { @MainActor in
-            guard let payload = model.addressPayload,
+            // A member's payload carries a fresh single-use invite token (ADR-0026), so the
+            // scanning device is admitted in one motion; a guest's is the plain address.
+            guard let payload = model.invitePayload(handoff: false),
                   let quoted = (try? JSONEncoder().encode(payload)).flatMap({ String(data: $0, encoding: .utf8) })
             else { return }
             self.web?.evaluateJavaScript("window.sphereInvite(\(quoted))", completionHandler: nil)

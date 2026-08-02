@@ -20,10 +20,16 @@ public struct EnrollmentPayload: Codable, Equatable {
     /// The group's trusted TLS pins (this node's + siblings' it vouches for). The device accepts
     /// any, so failover to a reachable member (the lighthouse) passes the pin check (ADR-0012).
     public var pins: [String]?
+    /// A member-signed invite token (ADR-0026, E3) riding along with the address. When present,
+    /// the scanning device knocks AND introduces in one motion — admitted end to end with no
+    /// third person and no waiting. Ten minutes, single-use, and never a secret: spending it
+    /// establishes one identity once, on the inviter's deliberate act. Absent on plain address
+    /// payloads and older invites, which still land the device as a guest.
+    public var invite: InviteToken?
 
     public init(v: Int = 1, label: String, host: String, port: Int, hosts: [String]? = nil,
                 group: String? = nil, secret: String? = nil, tlspin: String? = nil,
-                pins: [String]? = nil) {
+                pins: [String]? = nil, invite: InviteToken? = nil) {
         self.v = v
         self.label = label
         self.host = host
@@ -33,6 +39,7 @@ public struct EnrollmentPayload: Codable, Equatable {
         self.secret = secret
         self.tlspin = tlspin
         self.pins = pins
+        self.invite = invite
     }
 
     /// The addresses to try, in order — `hosts` when present, else just `host`. The device should

@@ -157,6 +157,21 @@ public struct GateStates: Codable, Equatable {
 /// a Glass-like console: the three constitutional meters, the peer roster, the recent feed, the
 /// familiar's own theories, the boundary gates, and a coarse tick/uptime. The later fields are
 /// optional so an older familiar that predates them still decodes.
+/// One row of the welcome screen's greeting: who arrived in the last day, as what, how their
+/// identity was established ("InviteToken", "RotationProof", …), and when. A guest projection
+/// carries these with the names taken out — the mesh greets; the shape is real.
+public struct ArrivalView: Codable, Equatable {
+    public var node_id: String
+    public var label: String
+    /// "member" | "guest".
+    public var state: String
+    /// The established handle (empty for a guest, or an unnamed household device).
+    public var handle: String
+    /// The evidence class that established them (empty for a guest).
+    public var via: String
+    public var at: Int64
+}
+
 public struct Worldview: Codable, Equatable {
     public var group_label: String
     public var node_id: String
@@ -170,6 +185,9 @@ public struct Worldview: Codable, Equatable {
     public var guests_waiting: Int?
     /// Node ids at full standing — lets a console tell a recognised member from a waiting guest.
     public var standing_full: [String]?
+    /// **Who is new** (ADR-0026): arrivals within the last 24 hours — what the welcome screen
+    /// greets. Informational only; nothing here frames a decision. Absent on older familiars.
+    public var arrivals: [ArrivalView]?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

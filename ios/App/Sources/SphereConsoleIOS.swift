@@ -58,7 +58,9 @@ struct SphereConsoleIOS: View {
             bridge.onStanding = { [weak model] node, act in
                 Task { await model?.decideStanding(node, act: act) }
             }
-            bridge.onInvite = { [weak model] in model?.addressPayload }
+            // A member's QR carries a fresh single-use invite token (ADR-0026) — the scanner
+            // is admitted in one motion. A guest's falls back to the plain address.
+            bridge.onInvite = { [weak model] in model?.invitePayload(handoff: false) }
             bridge.pushDevice(model.deviceStateJSON())
         }
         .onReceive(model.$worldviewJSON) { json in

@@ -233,6 +233,7 @@ struct StatusView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var watch = PhoneWatchLink.shared
     @State private var showJoinQR = false
+    @State private var joinQRHandoff = false
     var body: some View {
         Form {
             Section("Connected") {
@@ -290,14 +291,25 @@ struct StatusView: View {
         .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented(); model.startDiscoveryIfConsented() }
         .sheet(isPresented: $showJoinQR) {
             VStack(spacing: 16) {
-                Text("Join \(model.groupLabel)").font(.headline)
-                if let payload = model.addressPayload, let img = QRKit.image(from: payload) {
+                Text(joinQRHandoff ? "Hand off to my new device" : "Join \(model.groupLabel)").font(.headline)
+                // Re-minted per render: an invite token is single-use and lives ten minutes, so
+                // the QR on screen is always spendable (ADR-0026). Handoff names this device's
+                // own human — the scanner becomes theirs, no third person involved.
+                if let payload = model.invitePayload(handoff: joinQRHandoff), let img = QRKit.image(from: payload) {
                     Image(uiImage: img)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: 320, maxHeight: 320)
-                    Text("Scan with another device to join this familiar").font(.footnote).foregroundStyle(.secondary)
+                    Text(joinQRHandoff
+                         ? "Scan on the new device — it joins as \(model.attributedHuman)"
+                         : "Scan with another device to join this familiar")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if case .member = model.membership, model.attributedHuman != "observer" {
+                        Toggle("This is my own new device", isOn: $joinQRHandoff)
+                            .frame(maxWidth: 320)
+                            .font(.footnote)
+                    }
                 } else {
                     Text("No address yet.").foregroundStyle(.secondary)
                 }

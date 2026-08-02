@@ -1,21 +1,23 @@
 import Foundation
 import AVFoundation
 
-/// The familiar's one sound: someone is at the door.
+/// The familiar's one sound: someone has arrived.
 ///
-/// Deliberately a single, sparse cue rather than a notification vocabulary. It plays when a guest
-/// *arrives* — an edge, not a state — so a guest who waits is announced once and then waits
-/// quietly. A sound that repeats while nothing has changed teaches you to ignore it, which would
-/// defeat the point of having one at all.
+/// Deliberately a single, sparse cue rather than a notification vocabulary. It plays on an
+/// *arrival* — an edge, not a state — and under ADR-0026 it is a greeting, not an ask: nothing
+/// waits on anyone, so the sound announces "someone new has joined" and then the mesh simply
+/// carries on. A sound that repeats while nothing has changed teaches you to ignore it, which
+/// would defeat the point of having one at all.
 enum Chime {
     private static var player: AVAudioPlayer?
 
-    /// Someone new is waiting to be recognised (ADR-0020).
+    /// Someone new has arrived — a guest looking around, a member admitted (ADR-0026: the
+    /// welcome is a greeting, not a gate).
     static func guestWaiting() { play("guest-waiting", "mp3") }
 
-    /// A guest was recognised. Plays for the person who decided **and** on the device that was
-    /// just let in — the second is the point: being accepted should be felt on the accepted
-    /// device, not only announced on the one that granted it.
+    /// An admission completed. Plays on every member console greeting the arrival **and** on
+    /// the device that was just admitted — the second is the point: being accepted should be
+    /// felt on the accepted device, not only announced elsewhere.
     static func accepted() { play("acceptance", "wav") }
 
     private static func play(_ name: String, _ ext: String) {

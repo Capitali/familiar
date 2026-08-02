@@ -1949,6 +1949,43 @@ mod tests {
         assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Full);
     }
 
+    /// The invite token's canonical body, pinned byte-for-byte — because the Swift twin
+    /// (`InviteToken.canonicalBody` in ios/FamiliarMesh/Sources/FamiliarMesh/AdmissionClient.swift)
+    /// hand-builds this exact string to sign, JSONEncoder having no ordering promise. Change the
+    /// two together or every Swift-minted invite dies at the door with "signature did not verify".
+    /// The signature is the deterministic ed25519 (RFC 8032) over these bytes with the same test
+    /// seed the cert conformance vectors use, so Swift can assert the identical value.
+    #[test]
+    fn the_invite_body_wire_format_is_pinned_for_the_swift_twin() {
+        let body = serde_json::to_vec(&InviteBody {
+            token_id: "00112233445566778899aabbccddeeff",
+            group_id: "10ba682c8ad13513",
+            minted_by_node: "1325b850c2871916",
+            expected_handle: "betty",
+            issued: 1_700_000_000,
+            expires: 1_700_000_600,
+        })
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(body.clone()).unwrap(),
+            "{\"token_id\":\"00112233445566778899aabbccddeeff\",\
+             \"group_id\":\"10ba682c8ad13513\",\
+             \"minted_by_node\":\"1325b850c2871916\",\
+             \"expected_handle\":\"betty\",\
+             \"issued\":1700000000,\"expires\":1700000600}",
+        );
+        let seed = [0x22u8; 32];
+        let signing = ed25519_dalek::SigningKey::from_bytes(&seed);
+        use ed25519_dalek::Signer;
+        let sig = hex_encode(&signing.sign(&body).to_bytes());
+        assert_eq!(
+            sig,
+            "d6e8500da43c344b017d182c6689f3bad3e2c9273b3ad3038427a8956ae5b6ea\
+             999d63fe2c62f950a294b9fa9d9f9e5f00f640edcc8dc0e75818c454d467af0c",
+            "the golden invite signature InviteConformanceTests.swift asserts too"
+        );
+    }
+
     #[test]
     fn a_record_names_its_missing_filters_and_round_trips_disk() {
         let dir = fresh("store");
