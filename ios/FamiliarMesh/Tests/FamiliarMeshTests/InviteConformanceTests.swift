@@ -31,11 +31,20 @@ final class InviteConformanceTests: XCTestCase {
     }
 
     func testSignatureOverCanonicalBodyMatchesRust() throws {
-        // ed25519 is deterministic (RFC 8032): same seed + same bytes = same signature, so a
-        // match here proves a Swift-minted token verifies under the Rust door.
+        // CryptoKit randomizes ed25519 signatures (unlike dalek's deterministic RFC 8032), so
+        // Swift can't reproduce the golden bytes. Verifying instead proves the same two facts:
+        // the Rust-minted golden signature validating under the Swift-derived public key over the
+        // Swift-built body means seed→key derivation and the canonical bytes both match Rust.
         let node = try NodeKey(seed: Golden.nodeSecret, label: "vector")
-        let sig = try node.sign(Data(Golden.body.utf8))
-        XCTAssertEqual(sig, Golden.sig)
+        let rustSig = try XCTUnwrap(Hex.decode(Golden.sig))
+        XCTAssertTrue(
+            node.signing.publicKey.isValidSignature(rustSig, for: Data(Golden.body.utf8)),
+            "Rust golden signature must verify under the Swift-derived key over the Swift body"
+        )
+        // And the reverse direction: a Swift signature over those bytes verifies too, so a
+        // Swift-minted token passes the Rust door (dalek accepts any valid RFC 8032 signature).
+        let swiftSig = try XCTUnwrap(Hex.decode(node.sign(Data(Golden.body.utf8))))
+        XCTAssertTrue(node.signing.publicKey.isValidSignature(swiftSig, for: Data(Golden.body.utf8)))
     }
 
     func testJsonStringEscapesLikeSerde() {
