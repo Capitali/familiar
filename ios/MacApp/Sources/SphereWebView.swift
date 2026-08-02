@@ -371,6 +371,31 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 if let id = body["id"] as? String, let text = body["text"] as? String, !text.isEmpty {
                     self.post("local/answer", ["text": text, "thread": id])
                 }
+            case "consent":
+                // The device screen's five status buttons (position / motion / face / survey /
+                // reason). This case did not exist — the exact mirror of the iOS bridge's old
+                // missing "standing" case — so every click here went nowhere. Two halves, both
+                // needed: setConsent flips the state the screen renders back, and the matching
+                // MacBoundary gate is what actually arms this shell's sensing (applyGates).
+                if let key = body["key"] as? String {
+                    let on = body["on"] as? Bool ?? false
+                    self.model.setConsent(key, on)
+                    MacBoundary.set { g in
+                        switch key {
+                        case "location": g.allow_location = on
+                        case "motion": g.allow_motion = on
+                        case "face": g.allow_camera = on
+                        case "discovery": g.allow_network_discovery = on
+                        default: break   // "reasoning" has no shell gate; setConsent runs it
+                        }
+                    }
+                    self.applyGates()   // arm now, not on the next 3s tick
+                    self.pushDevice()
+                }
+            case "unenroll":
+                // The SEVER button (armed + confirm in the web layer) — also previously dead.
+                self.model.unenroll()
+                self.pushDevice()
             default: break
             }
         }
