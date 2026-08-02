@@ -1347,6 +1347,64 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        // ---- the unified record (ADR-0026, Phase 2) ------------------------------------------
+        Some("migrate-records") => {
+            // `mesh migrate-records` — the ONE migration: fold granted/ + pending/ + peers +
+            // standing.json + revoked.json + denied/ into mesh/records/. Idempotent; the legacy
+            // stores are left untouched and stay authoritative until `read_records` flips.
+            match familiar_mesh::record::migrate(&dir, now_secs()) {
+                Ok(r) => {
+                    println!("✓ folded the legacy stores into mesh/records/ ({} records)", r.records);
+                    println!("  from grants: {}   from pending: {}   from peers: {}", r.from_granted, r.from_pending, r.from_peers);
+                    println!("  established from the roll: {}   severed from revoked.json: {}   holds: {}", r.established_from_roll, r.severed_from_revoked, r.held_from_denials);
+                    println!("  next: `familiar mesh doctor` — flip read_records only on a clean report");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: migration failed — {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("doctor") => {
+            // `mesh doctor` — the Phase 2 deploy gate: compare every membership answer the
+            // legacy stores give against the record's answer. Flip read_records on a clean
+            // report only; a divergent row means the fold missed something real.
+            let report = familiar_mesh::record::doctor(&dir, now_secs());
+            if report.rows.is_empty() {
+                println!("doctor: nothing to compare — no grants, peers, roll or records here");
+                return ExitCode::SUCCESS;
+            }
+            println!("{:<18} {:>7} {:>7} {:>8} {:>8}  ok", "node", "roll", "record", "revoked", "severed");
+            for row in &report.rows {
+                println!(
+                    "{:<18} {:>7} {:>7} {:>8} {:>8}  {}",
+                    row.node_id.chars().take(16).collect::<String>(),
+                    row.legacy_standing,
+                    row.record_standing,
+                    if row.legacy_revoked { "yes" } else { "-" },
+                    if row.record_severed { "yes" } else { "-" },
+                    if row.ok { "✓" } else { "✗ DIVERGENT" },
+                );
+            }
+            for (label, ids) in &report.ghost_suspects {
+                println!(
+                    "ghost suspect: “{label}” answers under {} keys ({}) — reinstalls? `mesh abandon` the dead ones",
+                    ids.len(),
+                    ids.join(", ")
+                );
+            }
+            if report.candidates_pending > 0 {
+                println!("candidates ripening (not folded, transient): {}", report.candidates_pending);
+            }
+            if report.divergent == 0 {
+                println!("✓ every answer agrees — safe to set read_records true in mesh/config.json");
+                ExitCode::SUCCESS
+            } else {
+                eprintln!("✗ {} divergent — do NOT flip read_records; fix and re-run", report.divergent);
+                ExitCode::FAILURE
+            }
+        }
         // ---- group-secret escrow (ADR-0018) --------------------------------------------------
         // The lighthouse is the only minting door, which makes the group secret a single point of
         // extinction unless it is escrowed. These three commands are the whole procedure; the human
@@ -1438,7 +1496,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | auto-accept <on|off> | pending | approve <node_id> | deny <node_id> \
                  | invite [--minutes N] | optin <handle> | status \
                  | escrow-export | escrow-restore | reduce-to-covenant --yes \
-                 | standing [show | grant <node_id> [--note N] | revoke <node_id>]>"
+                 | standing [show | grant <node_id> [--note N] | revoke <node_id>] \
+                 | migrate-records | doctor>"
             );
             ExitCode::FAILURE
         }

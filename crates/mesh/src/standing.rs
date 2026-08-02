@@ -156,6 +156,19 @@ pub fn grant(dir: &Path, node_id: &str, note: &str) -> std::io::Result<bool> {
             .insert(node_id.to_string(), note.trim().to_string());
     }
     save(dir, &roll)?;
+    // Dual-write (ADR-0026 Phase 2): full standing = established + admitted on the record.
+    let minted_by = std::fs::read_to_string(dir.join(crate::node::NODE_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str::<crate::node::NodeIdentity>(&s).ok())
+        .map(|n| n.node_id)
+        .unwrap_or_else(|| "local".into());
+    let _ = crate::record::record_standing_grant(
+        dir,
+        &minted_by,
+        node_id,
+        note,
+        crate::transport::now_secs(),
+    );
     Ok(true)
 }
 
@@ -170,6 +183,11 @@ pub fn revoke(dir: &Path, node_id: &str) -> std::io::Result<bool> {
     }
     roll.notes.remove(node_id.trim());
     save(dir, &roll)?;
+    let _ = crate::record::record_standing_revoke(
+        dir,
+        node_id.trim(),
+        crate::transport::now_secs(),
+    );
     Ok(true)
 }
 
@@ -181,9 +199,25 @@ pub fn load(dir: &Path) -> StandingRoll {
 }
 
 /// A reader's standing. Default deny: unlisted is a guest.
+///
+/// With `read_records` on (ADR-0026 Phase 2, after a clean `mesh doctor`), the answer comes
+/// from the unified record instead of the roll: a member is a device whose two filters both
+/// hold. A missing record is a guest — the safe direction to fail, same as a missing roll.
+/// Flipping the flag back is the rollback; the roll keeps being dual-written either way.
 pub fn standing_of(dir: &Path, node_id: &str) -> Standing {
     if node_id.is_empty() {
         return Standing::Guest;
+    }
+    let read_records = crate::config::load(dir)
+        .map(|c| c.read_records)
+        .unwrap_or(false);
+    if read_records {
+        return match crate::record::find_by_key(dir, node_id) {
+            Some(r) if crate::record::derive_state(&r) == crate::record::RecordState::Member => {
+                Standing::Full
+            }
+            _ => Standing::Guest,
+        };
     }
     let roll = load(dir);
     if roll.full.iter().any(|n| n == node_id) {

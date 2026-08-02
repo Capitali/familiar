@@ -147,6 +147,10 @@ pub struct MembershipRecord {
     /// RETAINED — a node can be held to what it accepted. (The legacy path deleted it.)
     #[serde(default)]
     pub attestation: Option<crate::enroll::Attestation>,
+    /// Free text carried over from the standing roll's notes ("ian's iPad") and editable later —
+    /// so the record explains itself a year from now, exactly as the roll's notes did.
+    #[serde(default)]
+    pub note: String,
     pub first_seen: i64,
     pub last_seen: i64,
 }
@@ -168,6 +172,7 @@ impl MembershipRecord {
             held_until: None,
             corrections: Vec::new(),
             attestation: Some(attestation),
+            note: String::new(),
             first_seen: now,
             last_seen: now,
         }
@@ -259,6 +264,11 @@ pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRe
         },
         corrections,
         attestation: a.attestation.clone().or_else(|| b.attestation.clone()),
+        note: if a.note.is_empty() {
+            b.note.clone()
+        } else {
+            a.note.clone()
+        },
         first_seen: a.first_seen.min(b.first_seen),
         last_seen: a.last_seen.max(b.last_seen),
     };
@@ -765,6 +775,340 @@ pub fn load_all(dir: &Path) -> Vec<MembershipRecord> {
     }
     out.sort_by(|a, b| a.device_id.cmp(&b.device_id));
     out
+}
+
+/// Find the record that holds `node_id` — as its device_id (the Phase 2 window keys records by
+/// current node_id) or anywhere in its key history.
+pub fn find_by_key(dir: &Path, node_id: &str) -> Option<MembershipRecord> {
+    if let Ok(Some(r)) = load(dir, node_id) {
+        return Some(r);
+    }
+    load_all(dir)
+        .into_iter()
+        .find(|r| r.keys.iter().any(|k| k == node_id))
+}
+
+// ---- dual-write seams + the ONE migration (Phase 2) ---------------------------------
+//
+// Until the Phase 3 door swap, the legacy stores stay authoritative and every legacy write
+// also lands here, so the two answer sets can be compared (`doctor`) before the read flag
+// (`config.read_records`) makes the record the answer. Rollback is the flag, not a restore.
+
+/// Load-or-create by device_id, mutate, re-derive state, save.
+fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i64, f: F) -> Result<()> {
+    let mut r = load(dir, device_id)?.unwrap_or(MembershipRecord {
+        device_id: device_id.to_string(),
+        keys: vec![device_id.to_string()],
+        state: RecordState::Guest,
+        identity: IdentityStatus::default(),
+        admitted: None,
+        held_until: None,
+        corrections: Vec::new(),
+        attestation: None,
+        note: String::new(),
+        first_seen: now,
+        last_seen: now,
+    });
+    f(&mut r);
+    r.last_seen = r.last_seen.max(now);
+    r.state = derive_state(&r);
+    save(dir, &r)
+}
+
+/// Dual-write from the legacy enrolment path: a grant was minted, so a record exists — and the
+/// attestation is RETAINED here even though the legacy flow drops its pending record.
+pub(crate) fn upsert_enrolled(
+    dir: &Path,
+    node_id: &str,
+    attestation: Option<&crate::enroll::Attestation>,
+    now: i64,
+) -> Result<()> {
+    upsert(dir, node_id, now, |r| {
+        if r.attestation.is_none() {
+            r.attestation = attestation.cloned();
+        }
+    })
+}
+
+/// Dual-write from the legacy standing roll: full standing maps to *established + admitted*,
+/// class `Migration` — the migration era covers the dual-write window, and the roll's note
+/// rides along so nothing the file used to explain goes silent.
+pub(crate) fn record_standing_grant(
+    dir: &Path,
+    minted_by: &str,
+    node_id: &str,
+    note: &str,
+    now: i64,
+) -> Result<()> {
+    upsert(dir, node_id, now, |r| {
+        if r.identity.established.is_none() {
+            r.identity.established = Some(Establishment {
+                handle: String::new(), // the roll never named the human; a false name would be worse
+                class: EvidenceClass::Migration,
+                artifact: "standing-roll".into(),
+                at: now,
+            });
+        }
+        if r.admitted.is_none() {
+            r.admitted = Some(AdmissionFact {
+                minted_by: minted_by.to_string(),
+                at: now,
+                evidence: EvidenceClass::Migration,
+                artifact: "standing-roll".into(),
+            });
+        }
+        if r.note.is_empty() && !note.trim().is_empty() {
+            r.note = note.trim().to_string();
+        }
+    })
+}
+
+/// Dual-write from the legacy standing revoke: back to guest — establishment cleared, the
+/// admission fact kept as history (state derives from both).
+pub(crate) fn record_standing_revoke(dir: &Path, node_id: &str, now: i64) -> Result<()> {
+    upsert(dir, node_id, now, |r| {
+        r.identity.established = None;
+    })
+}
+
+/// Dual-write from a denial: the hold window on the record.
+pub(crate) fn record_hold(dir: &Path, node_id: &str, until: i64, now: i64) -> Result<()> {
+    upsert(dir, node_id, now, |r| {
+        r.held_until = Some(r.held_until.unwrap_or(0).max(until));
+    })
+}
+
+/// Dual-write from `allow_retry`: the hold is lifted.
+pub(crate) fn clear_hold(dir: &Path, node_id: &str) -> Result<()> {
+    if let Ok(Some(mut r)) = load(dir, node_id) {
+        r.held_until = None;
+        save(dir, &r)?;
+    }
+    Ok(())
+}
+
+/// What the migration folded, for the operator to read back.
+#[derive(Debug, Default, Serialize)]
+pub struct MigrationReport {
+    pub records: usize,
+    pub from_granted: usize,
+    pub from_pending: usize,
+    pub from_peers: usize,
+    pub established_from_roll: usize,
+    pub severed_from_revoked: usize,
+    pub held_from_denials: usize,
+}
+
+/// **The ONE migration** (ADR-0026 / Phase 2). Folds every legacy membership store into
+/// `mesh/records/`:
+///
+/// - `mesh/granted/*.json` → a record per grant (attestation is gone for old grants — the
+///   legacy flow deleted it; the dual-write keeps it from now on)
+/// - `mesh/pending/*.json` → a guest record WITH its attestation
+/// - `mesh/peers.json`     → a record per peer (first/last seen carried over)
+/// - `standing.json`       → established + admitted, class `Migration`, note preserved
+/// - `mesh/revoked.json`   → a `Sever` correction (nonce-keyed, so re-running cannot stack)
+/// - `mesh/denied/*.json`  → `held_until`
+///
+/// `mesh/candidates.json` is deliberately NOT folded: a candidate is a key passing through,
+/// not a device joining (ADR-0025) — records minted from it would be exactly the ghosts this
+/// rebuild exists to stop. The ledger keeps pruning itself and dies with the Phase 3 door.
+///
+/// Idempotent: upserts never overwrite an earlier establishment/admission, corrections dedupe
+/// by nonce, and running it twice produces byte-identical records. The legacy stores are left
+/// in place untouched — they stay authoritative until `read_records` flips, and that flag is
+/// the rollback.
+pub fn migrate(dir: &Path, now: i64) -> Result<MigrationReport> {
+    let mut report = MigrationReport::default();
+    let self_node = std::fs::read_to_string(dir.join(crate::node::NODE_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str::<crate::node::NodeIdentity>(&s).ok())
+        .map(|n| n.node_id)
+        .unwrap_or_else(|| "migration".into());
+
+    for grant in crate::enroll::list_grants(dir) {
+        let issued = grant.membership.issued;
+        upsert(dir, &grant.membership.node_id, now, |r| {
+            r.first_seen = r.first_seen.min(issued);
+        })?;
+        report.from_granted += 1;
+    }
+
+    for p in crate::enroll::list_pending(dir)? {
+        let (received, att) = (p.received_at, p.attestation.clone());
+        upsert(dir, &p.node.node_id, now, |r| {
+            r.first_seen = r.first_seen.min(received);
+            if r.attestation.is_none() {
+                r.attestation = Some(att);
+            }
+        })?;
+        report.from_pending += 1;
+    }
+
+    for peer in crate::transport::load_peers(dir) {
+        let (first, last) = (peer.first_seen, peer.last_seen);
+        upsert(dir, &peer.node_id, now, |r| {
+            if first > 0 {
+                r.first_seen = r.first_seen.min(first);
+            }
+            r.last_seen = r.last_seen.max(last);
+        })?;
+        report.from_peers += 1;
+    }
+
+    let roll = crate::standing::load(dir);
+    for node_id in &roll.full {
+        let note = roll.notes.get(node_id).map(String::as_str).unwrap_or("");
+        record_standing_grant(dir, &self_node, node_id, note, now)?;
+        report.established_from_roll += 1;
+    }
+
+    for node_id in crate::group::load_revoked(dir)? {
+        let nonce = format!("migration-revoked-{node_id}");
+        upsert(dir, &node_id, now, |r| {
+            if !r.corrections.iter().any(|c| c.nonce == nonce) {
+                r.corrections.push(Correction {
+                    act: CorrectionAct::Sever,
+                    subject_device: node_id.clone(),
+                    corrected_by: self_node.clone(),
+                    reason: "folded from mesh/revoked.json".into(),
+                    ts: now,
+                    nonce: nonce.clone(),
+                    sig: String::new(),
+                });
+            }
+        })?;
+        report.severed_from_revoked += 1;
+    }
+
+    for d in crate::enroll::list_denials(dir) {
+        record_hold(
+            dir,
+            &d.node_id,
+            d.at + crate::enroll::DENY_RETRY_SECS,
+            now,
+        )?;
+        report.held_from_denials += 1;
+    }
+
+    report.records = load_all(dir).len();
+    Ok(report)
+}
+
+// ---- the doctor ---------------------------------------------------------------------
+
+/// One node's answers, old store vs. record. `ok` means every answer agrees.
+#[derive(Debug, Serialize)]
+pub struct DoctorRow {
+    pub node_id: String,
+    pub legacy_standing: &'static str,
+    pub record_standing: &'static str,
+    pub legacy_revoked: bool,
+    pub record_severed: bool,
+    pub has_record: bool,
+    pub ok: bool,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct DoctorReport {
+    pub rows: Vec<DoctorRow>,
+    pub divergent: usize,
+    /// Labels appearing in the peer roster under more than one key with a stale entry — the
+    /// reinstall-ghost signature (three "iPhone"s, one alive). Candidates for `mesh abandon`.
+    pub ghost_suspects: Vec<(String, Vec<String>)>,
+    /// Size of the transient adoption ledger (not folded; dies with the Phase 3 door).
+    pub candidates_pending: usize,
+}
+
+/// Compare every membership answer the legacy stores give against the record's answer — the
+/// Phase 2 deploy gate: `read_records` flips only on a clean report, on the real nodes.
+pub fn doctor(dir: &Path, now: i64) -> DoctorReport {
+    let roll = crate::standing::load(dir);
+    let revoked = crate::group::load_revoked(dir).unwrap_or_default();
+
+    let mut ids: Vec<String> = Vec::new();
+    let push = |id: &str, ids: &mut Vec<String>| {
+        if !id.is_empty() && !ids.iter().any(|x| x == id) {
+            ids.push(id.to_string());
+        }
+    };
+    for g in crate::enroll::list_grants(dir) {
+        push(&g.membership.node_id, &mut ids);
+    }
+    for p in crate::transport::load_peers(dir) {
+        push(&p.node_id, &mut ids);
+    }
+    for n in roll.full.iter().chain(revoked.iter()) {
+        push(n, &mut ids);
+    }
+    for r in load_all(dir) {
+        push(&r.device_id, &mut ids);
+        for k in &r.keys {
+            push(k, &mut ids);
+        }
+    }
+    ids.sort();
+
+    let mut rows = Vec::new();
+    let mut divergent = 0;
+    for id in &ids {
+        let legacy_full = roll.full.iter().any(|n| n == id);
+        let legacy_revoked = revoked.iter().any(|n| n == id);
+        let rec = find_by_key(dir, id);
+        let (record_full, record_severed, has_record) = match &rec {
+            Some(r) => match derive_state(r) {
+                RecordState::Member => (true, false, true),
+                RecordState::Severed { .. } => (false, true, true),
+                RecordState::Guest => (false, false, true),
+            },
+            None => (false, false, false),
+        };
+        let ok = legacy_full == record_full && legacy_revoked == record_severed && has_record;
+        if !ok {
+            divergent += 1;
+        }
+        rows.push(DoctorRow {
+            node_id: id.clone(),
+            legacy_standing: if legacy_full { "full" } else { "guest" },
+            record_standing: if record_full { "full" } else { "guest" },
+            legacy_revoked,
+            record_severed,
+            has_record,
+            ok,
+        });
+    }
+
+    // Ghost signature: one label, several keys, at least one stale — reinstalls that each
+    // minted a fresh key and stuck (the 2026-07-31 lighthouse roster, in miniature).
+    let mut by_label: std::collections::BTreeMap<String, Vec<(String, i64)>> = Default::default();
+    for p in crate::transport::load_peers(dir) {
+        if p.status == "abandoned" {
+            continue;
+        }
+        by_label
+            .entry(p.label.clone())
+            .or_default()
+            .push((p.node_id.clone(), p.last_seen));
+    }
+    const STALE_GHOST_SECS: i64 = 7 * 24 * 60 * 60;
+    let ghost_suspects = by_label
+        .into_iter()
+        .filter(|(_, v)| v.len() > 1 && v.iter().any(|(_, seen)| now - seen > STALE_GHOST_SECS))
+        .map(|(label, v)| (label, v.into_iter().map(|(id, _)| id).collect()))
+        .collect();
+
+    let candidates_pending = std::fs::read_to_string(dir.join("mesh/candidates.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<std::collections::BTreeMap<String, i64>>(&s).ok())
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    DoctorReport {
+        rows,
+        divergent,
+        ghost_suspects,
+        candidates_pending,
+    }
 }
 
 fn verify_hex_sig(pubkey_hex: &str, body: &[u8], sig_hex: &str, what: &str) -> Result<()> {
@@ -1280,6 +1624,158 @@ mod tests {
         let m2 = merge_records(&a, &c);
         assert!(matches!(m2.state, RecordState::Severed { .. }));
         assert_eq!(merge_records(&a, &c), merge_records(&c, &a));
+    }
+
+    // ---- Phase 2: the migration, the doctor, the flag ----
+
+    /// A legacy world in one dir: A granted + full standing, B pending, C denied, a hand-written
+    /// revocation, and a peer row — then the records wiped, as on a fleet node that predates them.
+    fn legacy_world(tag: &str) -> (PathBuf, NodeKey, NodeKey, NodeKey) {
+        let host = fresh(&format!("legacy_{tag}"));
+        let host_node = NodeKey::load_or_mint(&host, "host").unwrap();
+        group::create_group(&host, &host_node, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        let submit = |k: &NodeKey| {
+            let req = crate::enroll::EnrollRequest {
+                node: k.identity(),
+                attestation: crate::enroll::Attestation {
+                    laws_version: 1,
+                    statement: "I accept the Three Laws.".into(),
+                    ts: NOW,
+                },
+                nonce: format!("n-{}", k.node_id()),
+                ts: NOW,
+            };
+            let raw = serde_json::to_vec(&req).unwrap();
+            let sig = k.sign(&raw);
+            crate::enroll::submit_request(&host, &raw, &sig, NOW).unwrap();
+        };
+
+        let a = key(&format!("{tag}_a"));
+        let b = key(&format!("{tag}_b"));
+        let c = key(&format!("{tag}_c"));
+        submit(&a);
+        crate::enroll::approve(&host, &a.node_id(), NOW).unwrap();
+        crate::standing::grant(&host, &a.node_id(), "ian's iPad").unwrap();
+        submit(&b); // stays pending
+        crate::enroll::deny(&host, &c.node_id(), NOW).unwrap();
+        std::fs::write(
+            host.join(crate::group::REVOKED_FILE),
+            serde_json::to_vec(&vec!["deadcafe00001111".to_string()]).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            host.join(crate::transport::PEERS_FILE),
+            serde_json::json!([{
+                "node_id": "peerx11122233344", "label": "FamTalker01", "addr": "",
+                "group_id": "", "last_seen": NOW, "tools_offered": 0,
+                "patterns_offered": 0, "first_seen": NOW - 500
+            }])
+            .to_string(),
+        )
+        .unwrap();
+
+        // The fleet's real nodes predate the record store: wipe what dual-writes created.
+        let _ = std::fs::remove_dir_all(host.join(RECORDS_DIR));
+        (host, a, b, c)
+    }
+
+    #[test]
+    fn the_migration_folds_every_legacy_store_and_is_idempotent() {
+        let (host, a, b, c) = legacy_world("fold");
+        let report = migrate(&host, NOW + 100).unwrap();
+        assert_eq!(report.established_from_roll, 1);
+        assert_eq!(report.severed_from_revoked, 1);
+        assert_eq!(report.held_from_denials, 1);
+        assert!(report.from_granted >= 1 && report.from_pending >= 1 && report.from_peers >= 1);
+
+        // A: full standing → member, note carried, admission attributable to the fold.
+        let ra = load(&host, &a.node_id()).unwrap().unwrap();
+        assert_eq!(derive_state(&ra), RecordState::Member);
+        assert_eq!(ra.note, "ian's iPad");
+        assert_eq!(
+            ra.identity.established.as_ref().unwrap().class,
+            EvidenceClass::Migration
+        );
+
+        // B: pending → guest WITH its attestation retained.
+        let rb = load(&host, &b.node_id()).unwrap().unwrap();
+        assert_eq!(derive_state(&rb), RecordState::Guest);
+        assert!(rb.attestation.is_some(), "a pending's attestation must survive");
+
+        // C: denied → held.
+        let rc = load(&host, &c.node_id()).unwrap().unwrap();
+        assert_eq!(rc.held_until, Some(NOW + crate::enroll::DENY_RETRY_SECS));
+
+        // The hand-revoked node → severed; the peer row → a guest with its history.
+        let rd = load(&host, "deadcafe00001111").unwrap().unwrap();
+        assert!(matches!(derive_state(&rd), RecordState::Severed { .. }));
+        let re = load(&host, "peerx11122233344").unwrap().unwrap();
+        assert_eq!(re.first_seen, NOW - 500);
+
+        // Idempotent: a second run at the same instant is byte-identical.
+        let before: Vec<_> = load_all(&host);
+        migrate(&host, NOW + 100).unwrap();
+        assert_eq!(load_all(&host), before, "re-running the fold must change nothing");
+    }
+
+    #[test]
+    fn the_doctor_passes_after_the_fold_and_catches_divergence_and_ghosts() {
+        let (host, _a, _b, _c) = legacy_world("doctor");
+        migrate(&host, NOW + 100).unwrap();
+        let rep = doctor(&host, NOW + 100);
+        assert!(!rep.rows.is_empty());
+        assert_eq!(
+            rep.divergent, 0,
+            "after the fold every answer must agree: {:?}",
+            rep.rows.iter().filter(|r| !r.ok).collect::<Vec<_>>()
+        );
+
+        // Tamper behind the record's back: a roll entry with no record → divergent, loudly.
+        let mut roll = crate::standing::load(&host);
+        roll.full.push("aaaa000011112222".into());
+        crate::standing::save(&host, &roll).unwrap();
+        assert!(doctor(&host, NOW + 100).divergent >= 1);
+
+        // The ghost signature: one label under several keys, one of them long stale.
+        std::fs::write(
+            host.join(crate::transport::PEERS_FILE),
+            serde_json::json!([
+                {"node_id": "ghost111", "label": "iPhone", "addr": "", "group_id": "",
+                 "last_seen": NOW - 9 * 24 * 3600, "tools_offered": 0, "patterns_offered": 0},
+                {"node_id": "alive222", "label": "iPhone", "addr": "", "group_id": "",
+                 "last_seen": NOW + 100, "tools_offered": 0, "patterns_offered": 0}
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        let rep2 = doctor(&host, NOW + 100);
+        assert!(
+            rep2.ghost_suspects.iter().any(|(l, ids)| l == "iPhone" && ids.len() == 2),
+            "three iPhones one alive is the exact failure this flags"
+        );
+    }
+
+    #[test]
+    fn the_read_flag_flips_answers_to_the_record_and_back() {
+        use crate::standing::{standing_of, Standing};
+        let dirp = fresh("flag");
+        crate::standing::grant(&dirp, "node-full-000001", "ian's mac").unwrap();
+        assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Full);
+
+        // Flag on: the record (dual-written by the grant) answers; the unknown stays a guest.
+        std::fs::create_dir_all(dirp.join("mesh")).unwrap();
+        std::fs::write(dirp.join(crate::config::CONFIG_FILE), r#"{"read_records":true}"#).unwrap();
+        assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Full);
+        assert_eq!(standing_of(&dirp, "total-stranger"), Standing::Guest);
+
+        // No record at all under the flag → guest. Failing closed, same as a missing roll.
+        let _ = std::fs::remove_dir_all(dirp.join(RECORDS_DIR));
+        assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Guest);
+
+        // Flag off: the roll answers again — that is the whole rollback.
+        std::fs::write(dirp.join(crate::config::CONFIG_FILE), r#"{"read_records":false}"#).unwrap();
+        assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Full);
     }
 
     #[test]

@@ -160,7 +160,7 @@ pub(crate) fn submit_request(dir: &Path, raw: &[u8], sig_hex: &str, now: i64) ->
         .map(|c| c.auto_accept_enrollments)
         .unwrap_or(false);
     if auto || invite_open(dir, now) {
-        let grant = mint_grant(dir, &cred, &req.node, now)?;
+        let grant = mint_grant(dir, &cred, &req.node, Some(&req.attestation), now)?;
         remove_pending(dir, &req.node.node_id)?;
         return Ok(Submitted::Granted(Box::new(grant)));
     }
@@ -186,7 +186,7 @@ pub fn approve(dir: &Path, node_id: &str, now: i64) -> Result<Grant> {
     let cred = group::load(dir)?.ok_or_else(|| Error::Untrusted("no group enrolled".into()))?;
     let pending = load_pending(dir, node_id)?
         .ok_or_else(|| Error::Malformed(format!("no pending request for {node_id}")))?;
-    let grant = mint_grant(dir, &cred, &pending.node, now)?;
+    let grant = mint_grant(dir, &cred, &pending.node, Some(&pending.attestation), now)?;
     remove_pending(dir, node_id)?;
     Ok(grant)
 }
@@ -205,6 +205,8 @@ pub fn deny(dir: &Path, node_id: &str, now: i64) -> Result<bool> {
             at: now,
         },
     )?;
+    // Dual-write (ADR-0026 Phase 2): the hold window lives on the record too.
+    let _ = crate::record::record_hold(dir, node_id, now + DENY_RETRY_SECS, now);
     let path = pending_path(dir, node_id);
     if path.exists() {
         std::fs::remove_file(&path)?;
@@ -242,11 +244,44 @@ pub fn denied_for(dir: &Path, node_id: &str, now: i64) -> i64 {
 /// Let a denied node ask again immediately — the undo for a mis-tap.
 pub fn allow_retry(dir: &Path, node_id: &str) -> Result<bool> {
     let path = dir.join(DENIED_DIR).join(format!("{node_id}.json"));
+    let _ = crate::record::clear_hold(dir, node_id);
     if path.exists() {
         std::fs::remove_file(&path)?;
         return Ok(true);
     }
     Ok(false)
+}
+
+/// Every grant this node has minted — the migration's primary source (ADR-0026 Phase 2).
+pub(crate) fn list_grants(dir: &Path) -> Vec<Grant> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir.join(GRANTED_DIR)) {
+        for e in entries.flatten() {
+            if let Ok(s) = std::fs::read_to_string(e.path()) {
+                if let Ok(g) = serde_json::from_str::<Grant>(&s) {
+                    out.push(g);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.membership.node_id.cmp(&b.membership.node_id));
+    out
+}
+
+/// Every live denial — folded into `held_until` by the migration.
+pub(crate) fn list_denials(dir: &Path) -> Vec<Denial> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir.join(DENIED_DIR)) {
+        for e in entries.flatten() {
+            if let Ok(s) = std::fs::read_to_string(e.path()) {
+                if let Ok(d) = serde_json::from_str::<Denial>(&s) {
+                    out.push(d);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    out
 }
 
 /// All pending requests, oldest first.
@@ -453,6 +488,7 @@ fn mint_grant(
     dir: &Path,
     cred: &group::GroupCredential,
     node: &NodeIdentity,
+    attestation: Option<&Attestation>,
     now: i64,
 ) -> Result<Grant> {
     let membership = cred.mint_membership(
@@ -468,6 +504,9 @@ fn mint_grant(
         group_label: cred.label.clone(),
     };
     write_json(dir, GRANTED_DIR, &node.node_id, &grant)?;
+    // Dual-write (ADR-0026 Phase 2): the record mirrors the grant — and RETAINS the
+    // attestation the legacy flow is about to drop with its pending record.
+    let _ = crate::record::upsert_enrolled(dir, &node.node_id, attestation, now);
     // Admission is automatic (ADR-0015); DISCLOSURE is not (ADR-0020) — a fresh member reads as
     // a guest until a human grants standing. That decision needs a human to actually be ASKED,
     // or a new member sits unnoticed forever (the 2026-07-29 installer sat in the roster and

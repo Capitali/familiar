@@ -101,6 +101,12 @@ pub struct MeshConfig {
     /// no one. Empty until a human (or, later, gossip) supplies a sibling's pin.
     #[serde(default)]
     pub advertise_pins: Vec<String>,
+    /// **ADR-0026 Phase 2**: answer standing/membership questions from the unified record store
+    /// (`mesh/records/`) instead of the legacy roll. Off by default. Flip it only after
+    /// `familiar mesh migrate-records` and a clean `familiar mesh doctor` on this node; flipping
+    /// it back is the rollback — the legacy stores keep being dual-written either way.
+    #[serde(default)]
+    pub read_records: bool,
 }
 
 impl Default for MeshConfig {
@@ -123,6 +129,7 @@ impl Default for MeshConfig {
             advertise_hosts: Vec::new(),
             rendezvous_hosts: Vec::new(),
             advertise_pins: Vec::new(),
+            read_records: false,
         }
     }
 }
