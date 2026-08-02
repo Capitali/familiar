@@ -1631,12 +1631,7 @@ async fn enroll_or_relay(
     sig: String,
     relayed: bool,
 ) -> Response<Full<Bytes>> {
-    let can_mint = group::load(dir)
-        .ok()
-        .flatten()
-        .map(|c| c.can_mint())
-        .unwrap_or(false);
-    if can_mint {
+    if can_admit(dir) {
         return recv_enroll_request(dir, &bytes, &sig);
     }
     if relayed {
@@ -1683,12 +1678,7 @@ async fn enroll_status_or_relay(
 ) -> Response<Full<Bytes>> {
     let local = enroll_status(dir, &node_id);
     let unknown = local.status() == StatusCode::NOT_FOUND;
-    let can_mint = group::load(dir)
-        .ok()
-        .flatten()
-        .map(|c| c.can_mint())
-        .unwrap_or(false);
-    if !unknown || can_mint || relayed {
+    if !unknown || can_admit(dir) || relayed {
         return local;
     }
     let cfg = config::load(dir).unwrap_or_default();
@@ -1709,6 +1699,17 @@ async fn enroll_status_or_relay(
         }
     }
     local
+}
+
+/// Whether this node can admit a knock itself: it holds the group secret (a founding door) or
+/// a live minting warrant (ADR-0026 §6 — any warranted member is a door). Everyone else relays.
+fn can_admit(dir: &Path) -> bool {
+    group::load(dir)
+        .ok()
+        .flatten()
+        .map(|c| c.can_mint())
+        .unwrap_or(false)
+        || group::load_warrant(dir, now_secs()).is_some()
 }
 
 /// `POST /mesh/enroll-request` → a node attests to the Laws and asks to join. `sig` is the
@@ -3404,7 +3405,7 @@ mod tests {
         let token =
             crate::record::mint_invite_token(&host, &cred.membership, "jeff", now_secs()).unwrap();
         let (raw, sig) =
-            signed_introduce(&guest, None, crate::record::Evidence::Invite(token.clone()));
+            signed_introduce(&guest, None, crate::record::Evidence::Invite(Box::new(token.clone())));
 
         // From a PUBLIC address — the inviter's deliberate act carries it.
         let resp = recv_introduce(&dir, &raw, &sig, "203.0.113.7", false);
@@ -3499,7 +3500,7 @@ mod tests {
         // Establish the guest first (via a token), so there is a member to correct.
         let token =
             crate::record::mint_invite_token(&host, &cred.membership, "jeff", now_secs()).unwrap();
-        let (raw, sig) = signed_introduce(&guest, None, crate::record::Evidence::Invite(token));
+        let (raw, sig) = signed_introduce(&guest, None, crate::record::Evidence::Invite(Box::new(token)));
         assert_eq!(body_status(&recv_introduce(&dir, &raw, &sig, "192.168.1.9", false)), StatusCode::OK);
 
         let send = |act: crate::record::CorrectionAct, nonce: &str| {

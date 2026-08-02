@@ -552,7 +552,7 @@ pub enum Provenance {
 pub enum Evidence {
     Rotation(RotationProof),
     Voucher(DeviceVoucher),
-    Invite(InviteToken),
+    Invite(Box<InviteToken>),
     Introduction {
         intro: Introduction,
         provenance: Provenance,
@@ -1457,7 +1457,7 @@ mod tests {
         let e = evaluate_admission(
             &subject(&newcomer.node_id()),
             None,
-            &Evidence::Invite(t.clone()),
+            &Evidence::Invite(Box::new(t.clone())),
             &ctx,
         )
         .unwrap();
@@ -1489,7 +1489,7 @@ mod tests {
         assert!(evaluate_admission(
             &subject(&newcomer.node_id()),
             None,
-            &Evidence::Invite(t),
+            &Evidence::Invite(Box::new(t)),
             &late
         )
         .is_err());
@@ -1502,7 +1502,7 @@ mod tests {
         assert!(evaluate_admission(
             &subject(&newcomer.node_id()),
             None,
-            &Evidence::Invite(forged),
+            &Evidence::Invite(Box::new(forged)),
             &ctx
         )
         .is_err());
@@ -1524,7 +1524,7 @@ mod tests {
         let e = evaluate_admission(
             &subject(&newcomer.node_id()),
             Some(&claim),
-            &Evidence::Invite(t),
+            &Evidence::Invite(Box::new(t)),
             &ctx,
         )
         .unwrap();
@@ -1540,7 +1540,7 @@ mod tests {
         assert!(evaluate_admission(
             &subject(&newcomer.node_id()),
             Some(&betty_claim),
-            &Evidence::Invite(t2),
+            &Evidence::Invite(Box::new(t2)),
             &ctx
         )
         .is_err());
@@ -1550,7 +1550,7 @@ mod tests {
         assert!(evaluate_admission(
             &subject(&newcomer.node_id()),
             None,
-            &Evidence::Invite(t3),
+            &Evidence::Invite(Box::new(t3)),
             &ctx
         )
         .is_err());

@@ -167,10 +167,12 @@ pub(crate) fn enroll_status(dir: &Path, node_id: &str) -> Result<StatusOutcome> 
         return Ok(StatusOutcome::Granted(Box::new(grant)));
     }
     if let Some(p) = load_pending(dir, node_id)? {
-        if let Some(cred) = group::load(dir)?.filter(|c| c.can_mint()) {
-            let grant = mint_grant(dir, &cred, &p.node, Some(&p.attestation), p.received_at)?;
-            remove_pending(dir, node_id)?;
-            return Ok(StatusOutcome::Granted(Box::new(grant)));
+        if let Some(cred) = group::load(dir)? {
+            if let Ok(grant) = mint_grant(dir, &cred, &p.node, Some(&p.attestation), p.received_at)
+            {
+                remove_pending(dir, node_id)?;
+                return Ok(StatusOutcome::Granted(Box::new(grant)));
+            }
         }
         return Ok(StatusOutcome::Pending);
     }
@@ -485,12 +487,32 @@ fn mint_grant(
     attestation: Option<&Attestation>,
     now: i64,
 ) -> Result<Grant> {
-    let membership = cred.mint_membership(
-        &node.node_id,
-        &node.pubkey,
-        now,
-        group::DEFAULT_CERT_TTL_SECS,
-    )?;
+    // Two ways to hold the door (ADR-0026 §6): the group secret (the founding doors), or a
+    // minting warrant — the group key's deliberate act empowering this member node, so certs
+    // it mints verify by chain (cert → warrant → group key) with no secret anywhere near it.
+    let membership = if cred.can_mint() {
+        cred.mint_membership(
+            &node.node_id,
+            &node.pubkey,
+            now,
+            group::DEFAULT_CERT_TTL_SECS,
+        )?
+    } else if let Some(w) = group::load_warrant(dir, now) {
+        let key = NodeKey::load_or_mint(dir, "familiar")?;
+        group::mint_membership_warranted(
+            &key,
+            &w,
+            &node.node_id,
+            &node.pubkey,
+            now,
+            group::DEFAULT_CERT_TTL_SECS,
+        )?
+    } else {
+        return Err(Error::Untrusted(
+            "this node holds no group secret and no warrant — it relays knocks, it cannot admit"
+                .into(),
+        ));
+    };
     let grant = Grant {
         membership,
         group_id: cred.group_id.clone(),
@@ -754,6 +776,52 @@ mod tests {
             submit_request(&host, &raw, &wrong, NOW),
             Err(Error::Untrusted(_))
         ));
+    }
+
+    #[test]
+    fn a_warranted_covenant_node_holds_the_door_and_an_unwarranted_one_cannot() {
+        // ADR-0026 §6 / the kill-the-lighthouse property: a member node with a warrant admits
+        // knocks locally — no group secret anywhere near it — and its grants verify by chain.
+        let (founder_dir, joiner) = setup("warrant_door");
+        let founder_cred = group::load(&founder_dir).unwrap().unwrap();
+
+        // The door: a covenant (secret-less) member node.
+        let door_dir = fresh("warrant_door_node");
+        let door = NodeKey::load_or_mint(&door_dir, "mac-door").unwrap();
+        let door_id = door.identity();
+        let m = founder_cred
+            .mint_membership(&door_id.node_id, &door_id.pubkey, NOW, DEFAULT_CERT_TTL_SECS)
+            .unwrap();
+        group::save_credential(
+            &door_dir,
+            &group::GroupCredential::covenant(
+                founder_cred.group_id.clone(),
+                founder_cred.group_pubkey.clone(),
+                "river".into(),
+                m,
+            ),
+        )
+        .unwrap();
+
+        // Unwarranted: the door cannot admit — it relays (the transport's job), never errs open.
+        let (raw, sig) = signed_request(&joiner, NOW, "wd1");
+        assert!(matches!(
+            submit_request(&door_dir, &raw, &sig, NOW),
+            Err(Error::Untrusted(_))
+        ));
+
+        // Warranted: the same knock lands a guest grant whose cert verifies by chain.
+        let w = group::issue_warrant(&founder_cred, &door_id.node_id, &door_id.pubkey, NOW, 3600)
+            .unwrap();
+        group::install_warrant(&door_dir, &w, NOW).unwrap();
+        let grant = match submit_request(&door_dir, &raw, &sig, NOW + 1).unwrap() {
+            Submitted::Granted(g) => g,
+            _ => panic!("a warranted door admits"),
+        };
+        assert!(grant.membership.warrant.is_some(), "the cert carries its chain");
+        let gk = founder_cred.verifying_key().unwrap();
+        group::verify_membership(&grant.membership, &gk, &founder_cred.group_id, NOW + 2, &[])
+            .unwrap();
     }
 
     #[test]

@@ -1478,6 +1478,66 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        // ---- minting warrants (ADR-0026 §6): any warranted member is a door ------------------
+        Some("warrant") => {
+            // `mesh warrant <node_id> <pubkey_hex>` — the group key's deliberate act turning a
+            // member node into a door. Run on a secret-holding node; find the target's id and
+            // pubkey in its mesh/node.json. Prints the warrant JSON; install it on the target
+            // with `mesh warrant-install '<json>'`.
+            let (Some(node_id), Some(pubkey)) = (args.get(1), args.get(2)) else {
+                eprintln!("mesh: usage: familiar mesh warrant <node_id> <pubkey_hex>  (both from the target's mesh/node.json)");
+                return ExitCode::FAILURE;
+            };
+            let Ok(Some(cred)) = familiar_mesh::group::load(&dir) else {
+                eprintln!("mesh: no group enrolled");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::group::issue_warrant(
+                &cred,
+                node_id,
+                pubkey,
+                now_secs(),
+                familiar_mesh::group::DEFAULT_WARRANT_TTL_SECS,
+            ) {
+                Ok(w) => {
+                    eprintln!(
+                        "⚠ this empowers {node_id} to ADMIT MEMBERS for {} days — hand it over a trusted channel",
+                        familiar_mesh::group::DEFAULT_WARRANT_TTL_SECS / 86_400
+                    );
+                    println!("{}", serde_json::to_string(&w).unwrap_or_default());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("warrant-install") => {
+            // `mesh warrant-install '<json>'` — install a warrant issued to THIS node. Verified
+            // against the group key and this node's identity before it is written.
+            let Some(json) = args.get(1) else {
+                eprintln!("mesh: usage: familiar mesh warrant-install '<warrant json>'");
+                return ExitCode::FAILURE;
+            };
+            let w: familiar_mesh::group::MintWarrant = match serde_json::from_str(json) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("mesh: bad warrant json — {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match familiar_mesh::group::install_warrant(&dir, &w, now_secs()) {
+                Ok(()) => {
+                    println!("✓ warrant installed — this node can now admit knocks (expires {})", w.expiry);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // ---- group-secret escrow (ADR-0018) --------------------------------------------------
         // The lighthouse is the only minting door, which makes the group secret a single point of
         // extinction unless it is escrowed. These three commands are the whole procedure; the human
@@ -1571,7 +1631,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | escrow-export | escrow-restore | reduce-to-covenant --yes \
                  | standing [show | grant <node_id> [--note N] | revoke <node_id>] \
                  | sever|hold|disestablish|restore <node_id> [--reason R] \
-                 | invite-token [--handle H] | migrate-records | doctor>"
+                 | invite-token [--handle H] | warrant <node_id> <pubkey> | warrant-install <json> \
+                 | migrate-records | doctor>"
             );
             ExitCode::FAILURE
         }
