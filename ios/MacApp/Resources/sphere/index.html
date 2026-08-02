@@ -182,11 +182,10 @@ const FRONTIER_COLOR = '#7d93a8';
 // Members → located mesh nodes. Real coordinates only: a node that reported none clusters
 // near the anchor (first located member) with a small deterministic spread, and its card
 // says the position is approximate. No invented places.
-// `all` ignores the hide-offline preference. Pass it wherever the list is a set of DECISIONS
-// rather than a view of activity: someone waiting to be recognised is waiting whether or not
-// they happen to be online, and a display filter must never hide a pending decision. Getting
-// this wrong showed as an empty welcome screen under a red, pulsing glyph — the count comes
-// from the server, which knows nothing about a local toggle.
+// `all` ignores the hide-offline preference. Pass it wherever the list must be COMPLETE
+// rather than a view of activity — a display filter must never make a screen disagree with a
+// server-supplied count (that mismatch once showed as an empty welcome screen under a pulsing
+// glyph; the welcome now renders `v.arrivals` directly, but the lesson generalises).
 function peers(all) {
   const v = S.view; if (!v || !v.members) return [];
   let ms = [...v.members].sort((a, b) => (a.kind === 'self_node' ? -1 : b.kind === 'self_node' ? 1 : 0));
@@ -264,7 +263,7 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
 const SCREENS = ['conversation','roster','theories','work','signals','network','vision','device'];
-// 'welcome' is reached from its own corner button, not the ring — it is a door, not a view.
+// 'welcome' is reached from its own corner button, not the ring — a greeting with its own bell.
 const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device', welcome:'Welcome' };
 
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
@@ -409,34 +408,37 @@ function refreshScreen() {
         + live.map(card).join('') + `</div>`);
 
   } else if (k === 'welcome') {
-    // The door. Everyone the mesh has admitted but nobody has yet recognised (ADR-0020) — being
-    // a guest IS the waiting state, so this is a list of open decisions rather than a queue.
-    // Any active member may decide; nothing here auto-grants, and a guest left alone stays a
-    // guest, which is the safe resting state.
-    const roll = (v.standing_full || []);
-    // Unfiltered on purpose — see peers(all). A guest hidden by the offline toggle is still a
-    // decision the human owes, and the glyph counts it regardless.
-    const guests = peers(true).filter(p => !p.local && !roll.includes(p.m.node_id));
-    el.innerHTML = guests.length === 0
+    // A greeting, not a gate (ADR-0026): who is new — the last 24 hours of members, devices,
+    // agents and peers, greeted. Admission is rules-based (covenant contracted ∧ identity
+    // established), so nothing here frames a decision and there are no buttons. Corrections
+    // (sever, "that's not Betty") live on the roster card and the CLI, where administration
+    // honestly is.
+    const arrivals = (v.arrivals || []);
+    const viaWord = {
+      RotationProof: 'same device, fresh key',
+      DeviceVoucher: 'vouched for by their own device',
+      InviteToken: 'invited by a member',
+      LocalIntroduction: 'introduced themselves here',
+      Migration: 'longstanding',
+    };
+    el.innerHTML = arrivals.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
-           Nobody is waiting. Every member here has been recognised.
+           Nobody new in the last day. The next arrival will be greeted here.
          </div>`
       : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.6);margin-bottom:14px;">
-           ${guests.length} waiting to be recognised. Until someone says who they are, they read a
-           worldview with the same shape as yours and none of the names.
-         </div>` + guests.map(p => `
-        <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(255,110,110,0.22);margin-bottom:10px;">
+           Welcome to these new members — ${arrivals.length} arrival${arrivals.length === 1 ? '' : 's'} in the last day.
+         </div>` + arrivals.map(a => `
+        <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(120,190,255,0.18);margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
-            <span style="font-size:16px;font-weight:600;">${esc(p.name)}</span>
-            ${chip(p.kindWord, '#bcd2ff')}
-            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(p.m.node_id.slice(0,8))}</span>
+            <span style="font-size:16px;font-weight:600;">${esc(a.label || a.node_id.slice(0,8))}</span>
+            ${a.state === 'guest' ? chip('VISITOR', '#bcd2ff') : chip('MEMBER', '#9fe8c0')}
+            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(a.node_id.slice(0,8))}</span>
           </div>
-          <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:12px;">
-            ${esc(p.os || 'unknown platform')} · first seen ${dstr(p.m.first_seen)} · ${esc(p.m.connectivity || '—')}
-          </div>
-          <div style="display:flex;gap:9px;">
-            <button onclick="sphereStanding('grant','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;">recognise</button>
-            <button onclick="sphereStanding('deny','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;color:rgba(255,140,140,0.9);">not now</button>
+          <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);">
+            ${a.state === 'guest'
+              ? 'a visitor is looking around — they read the mesh’s shape and none of the names'
+              : esc((a.handle ? a.handle + ' — ' : '') + (viaWord[a.via] || 'established'))}
+            · arrived ${dstr(a.at)}
           </div>
         </div>`).join('');
 
@@ -648,17 +650,18 @@ function renderChrome() {
   $('holobtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
   $('modetoggle').style.display = street ? 'none' : 'flex';
-  // The door reddens while someone is waiting to be recognised. Colour AND rate, so it reads
-  // as urgency rather than decoration, and so it is legible without colour vision.
-  const waiting = (S.view && S.view.guests_waiting) || 0;
+  // The glyph greets while someone is new (ADR-0026): a warmer colour and a livelier pulse —
+  // "someone new has joined", never urgency. Rate AND colour, so it stays legible without
+  // colour vision.
+  const arriving = ((S.view && S.view.arrivals) || []).length;
   const wb = $('welcomebtn');
   if (wb) {
     wb.style.display = street ? 'none' : 'flex';
-    wb.style.color = waiting > 0 ? '#ff6e6e' : '';
-    wb.title = waiting > 0 ? `${waiting} waiting to be recognised` : 'welcome';
+    wb.style.color = arriving > 0 ? '#9fe8c0' : '';
+    wb.title = arriving > 0 ? `${arriving} new arrival${arriving === 1 ? '' : 's'} today` : 'welcome';
     const dot = $('welcomedot'), arc = $('welcomearc');
-    if (dot) dot.style.animation = `iconpulse ${waiting > 0 ? '0.9s' : '2.6s'} ease-in-out infinite`;
-    if (arc) arc.style.opacity = waiting > 0 ? '0.95' : '0.6';
+    if (dot) dot.style.animation = `iconpulse ${arriving > 0 ? '1.4s' : '2.6s'} ease-in-out infinite`;
+    if (arc) arc.style.opacity = arriving > 0 ? '0.95' : '0.6';
   }
   const showBadge = !S.linkOk || !!S.jsErr;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
