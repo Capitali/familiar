@@ -123,6 +123,26 @@ pub struct PeerView {
     pub patterns_offered: usize,
 }
 
+/// One row of the welcome screen: who arrived, in what state, established how, when.
+/// "welcome to these new members" — a greeting, never a gate (ADR-0026 §4).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArrivalView {
+    pub node_id: String,
+    pub label: String,
+    /// "member" | "guest" — a visitor looking around appears too, with no pending-decision framing.
+    pub state: String,
+    /// The established handle, when there is one. Projected away for guest readers.
+    #[serde(default)]
+    pub handle: String,
+    /// How the identity was established ("invite_token", "rotation_proof", …) — empty for a guest.
+    #[serde(default)]
+    pub via: String,
+    pub at: i64,
+}
+
+/// The arrivals window — the same 24-hour judgement ADR-0021 uses for the live roster split.
+pub const ARRIVAL_WINDOW_SECS: i64 = 24 * 60 * 60;
+
 /// The compact snapshot returned to a member device — enough to render a Glass-like console: the
 /// three constitutional meters, the peer roster, and the recent observation feed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +169,10 @@ pub struct Worldview {
     /// without a second round trip. Node ids only — no names, and absent from a guest projection.
     #[serde(default)]
     pub standing_full: Vec<String>,
+    /// **Who is new** (ADR-0026 / ADR-0021's third view): arrivals within the last 24 hours —
+    /// what the welcome screen greets. Informational only; nothing here frames a decision.
+    #[serde(default)]
+    pub arrivals: Vec<ArrivalView>,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -529,6 +553,43 @@ pub fn assemble_worldview(
         .count();
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
+
+    // Who is new: every record whose admission (or, for a guest, first sighting) falls within
+    // the last 24 hours. Newest first. Severed records are not arrivals.
+    let mut arrivals: Vec<ArrivalView> = crate::record::load_all(dir)
+        .into_iter()
+        .filter_map(|r| {
+            let state = crate::record::derive_state(&r);
+            let (word, at) = match &state {
+                crate::record::RecordState::Member => {
+                    ("member", r.admitted.as_ref().map(|a| a.at).unwrap_or(r.first_seen))
+                }
+                crate::record::RecordState::Guest => ("guest", r.first_seen),
+                crate::record::RecordState::Severed { .. } => return None,
+            };
+            if now - at > ARRIVAL_WINDOW_SECS || at > now + 60 {
+                return None;
+            }
+            let label = members
+                .iter()
+                .find(|m| m.node_id == r.device_id || r.keys.contains(&m.node_id))
+                .map(|m| m.label.clone())
+                .unwrap_or_else(|| r.device_id.chars().take(8).collect());
+            let (handle, via) = match &r.identity.established {
+                Some(e) => (e.handle.clone(), format!("{:?}", e.class)),
+                None => (String::new(), String::new()),
+            };
+            Some(ArrivalView {
+                node_id: r.device_id,
+                label,
+                state: word.into(),
+                handle,
+                via,
+                at,
+            })
+        })
+        .collect();
+    arrivals.sort_by_key(|a| std::cmp::Reverse(a.at));
     let goals = goal_views(dir);
 
     Ok(Worldview {
@@ -542,6 +603,7 @@ pub fn assemble_worldview(
         question_owner,
         guests_waiting,
         standing_full: roll.full.clone(),
+        arrivals,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,
@@ -1023,6 +1085,61 @@ mod tests {
             serde_json::to_vec(&roll).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn an_arrival_appears_in_the_welcome_window_and_is_projected_for_guests() {
+        // ADR-0026 §4: who is new, last 24 hours, greeted — and a guest reader sees the
+        // arrivals' SHAPE (kinds, times, states) with the names taken out.
+        let (host, cred, device) = setup("arrivals");
+
+        // A stranger knocks: instantly a guest, instantly an arrival.
+        let stranger = NodeKey::load_or_mint(&fresh("arrivals_stranger"), "Kali-Jeff").unwrap();
+        let req = crate::enroll::EnrollRequest {
+            node: stranger.identity(),
+            attestation: crate::enroll::Attestation {
+                laws_version: crate::enroll::LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: NOW,
+            },
+            nonce: "arr1".into(),
+            ts: NOW,
+        };
+        let raw = serde_json::to_vec(&req).unwrap();
+        let sig = stranger.sign(&raw);
+        crate::enroll::submit_request(&host, &raw, &sig, NOW).unwrap();
+
+        // A full-standing reader sees the arrivals as they are.
+        grant_full_standing(&host, &device.node_id());
+        let (raw, sig) = signed_request(&cred, &device, NOW, "arrv1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(
+            view.arrivals.iter().any(|a| a.node_id == stranger.node_id() && a.state == "guest"),
+            "the knocking stranger is an arrival: {:?}",
+            view.arrivals
+        );
+        assert!(
+            view.arrivals.iter().any(|a| a.state == "member"),
+            "the founder is an arrival too (founding admits)"
+        );
+
+        // A guest reader: same list shape, no names.
+        let guest_dev = NodeKey::load_or_mint(&fresh("arrivals_guestdev"), "visitor").unwrap();
+        let (raw, sig) = signed_request(&cred, &guest_dev, NOW, "arrv2");
+        let gview = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(!gview.arrivals.is_empty());
+        for a in &gview.arrivals {
+            assert!(
+                a.label.starts_with("peer-"),
+                "an arrival label reached a guest unprojected: {:?}",
+                a.label
+            );
+            assert!(
+                a.handle.is_empty() || a.handle == "someone",
+                "an arrival handle leaked to a guest: {:?}",
+                a.handle
+            );
+        }
     }
 
     #[test]

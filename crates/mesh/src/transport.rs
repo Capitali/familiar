@@ -1186,6 +1186,37 @@ async fn handle(
             };
             recv_standing_vote(&dir, &bytes, &sig)
         }
+        // The second filter (ADR-0026): a guest presents evidence of who it serves; the rules
+        // engine — not a human — decides, and the decision is a signed, attributable fact.
+        (Method::POST, "/mesh/introduce") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let relayed = req.headers().contains_key("x-familiar-relayed");
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_introduce(&dir, &bytes, &sig, &peer_ip, relayed)
+        }
+        // A member's deliberate reversal (ADR-0026 §5): sever / disestablish / hold / restore.
+        // Corrections travel; approval never existed to.
+        (Method::POST, "/mesh/correct") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_correction(&dir, &bytes, &sig)
+        }
         (Method::POST, "/mesh/status") => {
             let sig = req
                 .headers()
@@ -1403,9 +1434,11 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     text(StatusCode::OK, "ok")
 }
 
-/// `GET /local/invite` → the enrollment payload a new device scans/pastes to join: group
-/// secret + every address the mesh answers at + the TLS pin. The same payload `mesh qr`
-/// prints; here the local console renders it as a QR hologram.
+/// `GET /local/invite` → the invite payload a new device scans/pastes: every address the mesh
+/// answers at, the TLS pins, and a **single-use ten-minute invite token** (ADR-0026 E3) — the
+/// minting member's deliberate act, displaced in time. **It no longer carries the group
+/// secret**: an invite was never supposed to be the power to mint members, and under the
+/// two-filter door the token establishes identity while the knock itself earns the guest cert.
 fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
     let Some(cred) = group::load(dir).ok().flatten() else {
         return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
@@ -1421,9 +1454,13 @@ fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
             hosts.push(h.clone());
         }
     }
+    let invite = crate::node::NodeKey::load_or_mint(dir, &cred.label)
+        .ok()
+        .and_then(|node| {
+            crate::record::mint_invite_token(&node, &cred.membership, "", now_secs()).ok()
+        });
     let payload = serde_json::json!({
-        "v": 1,
-        "secret": cred.join_key(),
+        "v": 2,
         "group": cred.group_id,
         "label": cred.label,
         "host": hosts.first().cloned().unwrap_or_default(),
@@ -1433,6 +1470,8 @@ fn local_invite(dir: &Path) -> Response<Full<Bytes>> {
         // Every pin a device may meet across the group's hosts — so a failover target's cert
         // is accepted (ADR-0012). `tlspin` stays for v1 clients that pin a single node.
         "pins": advertised_pins(dir),
+        // The E3 token. A scanning device knocks (guest), then presents this to establish.
+        "invite": invite,
     });
     text(StatusCode::OK, payload.to_string())
 }
@@ -1819,6 +1858,244 @@ fn recv_standing_vote(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Byte
         Err(crate::Error::Untrusted(m)) if m.contains("already decided") => {
             text(StatusCode::CONFLICT, m)
         }
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+/// Where an introduction was actually made, as this door observed it — never as the introducer
+/// claims. Loopback is this node's own console (the shared-iPad case: the device itself is the
+/// provenance). A private or tailnet address is the mesh's own network — a member device (this
+/// one, at minimum) is colocated there. Everything else — public internet, or a relayed hop —
+/// is nowhere the mesh inhabits, and establishes nothing (ADR-0026's second guardrail).
+fn observed_provenance(self_node_id: &str, peer_ip: &str, relayed: bool) -> crate::record::Provenance {
+    use crate::record::Provenance;
+    if relayed {
+        return Provenance::Remote;
+    }
+    if peer_ip == "127.0.0.1" || peer_ip == "::1" {
+        return Provenance::EstablishedDevice {
+            device_node_id: self_node_id.to_string(),
+        };
+    }
+    let private = match peer_ip.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(v4)) => {
+            let o = v4.octets();
+            v4.is_private()
+                || v4.is_link_local()
+                // The tailnet (CGNAT range) is the household's own overlay — a stranger
+                // cannot be on it.
+                || (o[0] == 100 && (64..128).contains(&o[1]))
+        }
+        Ok(std::net::IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80
+        }
+        Err(_) => false,
+    };
+    if private {
+        crate::record::Provenance::MemberColocatedNetwork
+    } else {
+        crate::record::Provenance::Remote
+    }
+}
+
+/// Every established member device this door can anchor evidence to: node ids + handles from
+/// the records, public keys from the grants this door minted (its own cert included). A device
+/// admitted elsewhere still guards the existing-handle rule; it just cannot anchor an E1/E2
+/// until its key is known here — the warrant work (Phase 4) closes that.
+fn established_devices(dir: &Path, cred: &group::GroupCredential) -> Vec<crate::record::EstablishedDeviceRef> {
+    let mut pubkeys: std::collections::HashMap<String, String> = crate::enroll::list_grants(dir)
+        .into_iter()
+        .map(|g| (g.membership.node_id.clone(), g.membership.node_pubkey.clone()))
+        .collect();
+    pubkeys.insert(
+        cred.membership.node_id.clone(),
+        cred.membership.node_pubkey.clone(),
+    );
+    let mut out = Vec::new();
+    for r in crate::record::load_all(dir) {
+        if crate::record::derive_state(&r) != crate::record::RecordState::Member {
+            continue;
+        }
+        let Some(est) = &r.identity.established else {
+            continue;
+        };
+        for key in &r.keys {
+            out.push(crate::record::EstablishedDeviceRef {
+                node_id: key.clone(),
+                pubkey: pubkeys.get(key).cloned().unwrap_or_default(),
+                handle: est.handle.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// `POST /mesh/introduce` → the identity filter. Verifies the sender holds its key and has
+/// knocked here (the contract filter), replaces any claimed E4 provenance with what the door
+/// itself observed, runs the rules engine, and — on yes — admits: record, roll, feed. The 403
+/// text on refusal is exactly what the guest's console shows as the path to admission.
+fn recv_introduce(
+    dir: &Path,
+    bytes: &[u8],
+    sig: &str,
+    peer_ip: &str,
+    relayed: bool,
+) -> Response<Full<Bytes>> {
+    let req: crate::record::IntroduceRequest = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad introduce request"),
+    };
+    let now = now_secs();
+    if req.node.verify(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Ok(pk) = crate::hex_decode(&req.node.pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad pubkey");
+    };
+    match crate::exactly_32(&pk, "node pubkey") {
+        Ok(arr) if crate::node::fingerprint(&arr) == req.node.node_id => {}
+        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Some(rec) = crate::record::find_by_key(dir, &req.node.node_id) else {
+        return text(
+            StatusCode::FORBIDDEN,
+            "knock first — the covenant handshake is the first filter",
+        );
+    };
+    if let Some(held) = rec.held_until {
+        if now < held {
+            let mut r = text(
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("held — try again in {}s", held - now),
+            );
+            if let Ok(v) = hyper::header::HeaderValue::from_str(&(held - now).to_string()) {
+                r.headers_mut().insert(hyper::header::RETRY_AFTER, v);
+            }
+            return r;
+        }
+    }
+    if crate::record::derive_state(&rec) == crate::record::RecordState::Member {
+        let handle = rec
+            .identity
+            .established
+            .as_ref()
+            .map(|e| e.handle.clone())
+            .unwrap_or_default();
+        return text(
+            StatusCode::OK,
+            serde_json::json!({"state": "member", "handle": handle}).to_string(),
+        );
+    }
+    let covenant_attested =
+        rec.attestation.is_some() || crate::enroll::has_grant(dir, &req.node.node_id);
+
+    // The door's own observation outranks whatever provenance the introducer claimed.
+    let evidence = match req.evidence.clone() {
+        crate::record::Evidence::Introduction { intro, .. } => {
+            crate::record::Evidence::Introduction {
+                intro,
+                provenance: observed_provenance(&cred.membership.node_id, peer_ip, relayed),
+            }
+        }
+        e => e,
+    };
+
+    let established = established_devices(dir, &cred);
+    let ctx = crate::record::AdmissionContext {
+        now,
+        group_id: &cred.group_id,
+        group_pubkey: &cred.group_pubkey,
+        established: &established,
+    };
+    let subject = crate::record::Subject {
+        node_id: &req.node.node_id,
+        covenant_attested,
+    };
+    match crate::record::evaluate_admission(&subject, req.claim.as_ref(), &evidence, &ctx) {
+        Ok(est) => {
+            // Single-use before mint: a spent-but-failed admission wastes a cheap token; the
+            // other order would let one token admit twice.
+            if let crate::record::Evidence::Invite(t) = &evidence {
+                if let Err(e) = crate::record::spend_invite(dir, &t.token_id) {
+                    return text(StatusCode::FORBIDDEN, e.to_string());
+                }
+            }
+            let handle = est.handle.clone();
+            match crate::record::admit(
+                dir,
+                &req.node.node_id,
+                req.claim.clone(),
+                est,
+                &cred.membership.node_id,
+                now,
+            ) {
+                Ok(_) => {
+                    let label = if req.node.label.trim().is_empty() {
+                        req.node.node_id.chars().take(8).collect()
+                    } else {
+                        req.node.label.trim().to_string()
+                    };
+                    let obs = familiar_kernel::observation::Observation::new(
+                        format!("device:{label}"),
+                        "was established",
+                        &if handle.is_empty() {
+                            "and admitted to the mesh".to_string()
+                        } else {
+                            format!("as {handle} — admitted to the mesh")
+                        },
+                        "mesh",
+                        "mesh",
+                        now,
+                        1.0,
+                    );
+                    let _ = familiar_kernel::observation::record(dir, obs);
+                    text(
+                        StatusCode::OK,
+                        serde_json::json!({"state": "member", "handle": handle}).to_string(),
+                    )
+                }
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+        // The refusal text IS the guest's path-to-admission copy — pass it through verbatim.
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "bad evidence"),
+    }
+}
+
+/// `POST /mesh/correct` → a member's deliberate reversal, traveling. Same verification shape as
+/// every signed member write; a device cannot correct itself, and the correcting member must be
+/// the signer — nobody corrects in someone else's name.
+fn recv_correction(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let env: crate::record::CorrectionEnvelope = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad correction"),
+    };
+    if env.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let now = now_secs();
+    if crate::group::verify_membership_consistent(&env.membership, &env.group_pubkey, now).is_err()
+    {
+        return text(StatusCode::FORBIDDEN, "membership does not verify");
+    }
+    if env.correction.corrected_by != env.membership.node_id {
+        return text(
+            StatusCode::FORBIDDEN,
+            "a correction is the signer's own act",
+        );
+    }
+    match crate::record::apply_correction(dir, &env.correction, now) {
+        Ok(r) => text(
+            StatusCode::OK,
+            serde_json::json!({"state": format!("{:?}", crate::record::derive_state(&r))})
+                .to_string(),
+        ),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
     }
@@ -3060,6 +3337,7 @@ fn write_status(dir: &Path, msg: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::NodeKey;
 
     fn fresh_dir(tag: &str) -> std::path::PathBuf {
         let p =
@@ -3071,6 +3349,211 @@ mod tests {
 
     fn body_status(resp: &Response<Full<Bytes>>) -> StatusCode {
         resp.status()
+    }
+
+    // ---- the two-filter door over the wire (ADR-0026, Phase 3) ----
+
+    /// A door with a group, and a stranger who has knocked (guest grant in hand).
+    fn door_and_guest(tag: &str) -> (std::path::PathBuf, NodeKey, group::GroupCredential, NodeKey) {
+        let dir = fresh_dir(&format!("door_{tag}"));
+        let host = NodeKey::load_or_mint(&dir, "door").unwrap();
+        let now = now_secs();
+        let cred =
+            group::create_group(&dir, &host, "river", now, group::DEFAULT_CERT_TTL_SECS).unwrap();
+        let guest = NodeKey::load_or_mint(&fresh_dir(&format!("door_{tag}_guest")), "Kali-Jeff")
+            .unwrap();
+        let req = crate::enroll::EnrollRequest {
+            node: guest.identity(),
+            attestation: crate::enroll::Attestation {
+                laws_version: crate::enroll::LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: now,
+            },
+            nonce: format!("knock-{tag}"),
+            ts: now,
+        };
+        let raw = serde_json::to_vec(&req).unwrap();
+        let sig = guest.sign(&raw);
+        assert!(matches!(
+            crate::enroll::submit_request(&dir, &raw, &sig, now).unwrap(),
+            crate::enroll::Submitted::Granted(_)
+        ));
+        (dir, host, cred, guest)
+    }
+
+    fn signed_introduce(
+        guest: &NodeKey,
+        claim: Option<crate::record::IdentityClaim>,
+        evidence: crate::record::Evidence,
+    ) -> (Vec<u8>, String) {
+        let req = crate::record::IntroduceRequest {
+            node: guest.identity(),
+            claim,
+            evidence,
+            nonce: "i1".into(),
+            ts: now_secs(),
+        };
+        let raw = serde_json::to_vec(&req).unwrap();
+        let sig = guest.sign(&raw);
+        (raw, sig)
+    }
+
+    #[test]
+    fn an_invite_token_completes_admission_from_anywhere_and_is_single_use() {
+        let (dir, host, cred, guest) = door_and_guest("invite");
+        let token =
+            crate::record::mint_invite_token(&host, &cred.membership, "jeff", now_secs()).unwrap();
+        let (raw, sig) =
+            signed_introduce(&guest, None, crate::record::Evidence::Invite(token.clone()));
+
+        // From a PUBLIC address — the inviter's deliberate act carries it.
+        let resp = recv_introduce(&dir, &raw, &sig, "203.0.113.7", false);
+        assert_eq!(body_status(&resp), StatusCode::OK);
+        let rec = crate::record::load(&dir, &guest.node_id()).unwrap().unwrap();
+        assert_eq!(crate::record::derive_state(&rec), crate::record::RecordState::Member);
+        assert_eq!(rec.identity.established.as_ref().unwrap().handle, "jeff");
+        assert_eq!(
+            crate::standing::standing_of(&dir, &guest.node_id()),
+            crate::standing::Standing::Full,
+            "the legacy roll is dual-written on admit"
+        );
+        // The token is spent on this door — a second device cannot ride it.
+        assert!(matches!(
+            crate::record::spend_invite(&dir, &token.token_id),
+            Err(crate::Error::Untrusted(_))
+        ));
+        // Re-introducing is idempotent, not an error.
+        assert_eq!(body_status(&recv_introduce(&dir, &raw, &sig, "203.0.113.7", false)), StatusCode::OK);
+    }
+
+    #[test]
+    fn an_introduction_needs_the_meshes_own_ground_and_cannot_take_an_existing_name() {
+        let (dir, _host, _cred, guest) = door_and_guest("intro");
+        let intro = crate::record::Evidence::Introduction {
+            intro: crate::record::Introduction {
+                handle: "jeff".into(),
+                statement: "hi, I'm Jeff".into(),
+                ts: now_secs(),
+            },
+            // Whatever the client CLAIMS, the door substitutes what it observed:
+            provenance: crate::record::Provenance::Founding,
+        };
+        let (raw, sig) = signed_introduce(&guest, None, intro);
+
+        // From the public internet: refused — the claimed Founding provenance is ignored.
+        assert_eq!(
+            body_status(&recv_introduce(&dir, &raw, &sig, "203.0.113.7", false)),
+            StatusCode::FORBIDDEN
+        );
+        // Relayed through a member: still not the mesh's own ground.
+        assert_eq!(
+            body_status(&recv_introduce(&dir, &raw, &sig, "192.168.1.40", true)),
+            StatusCode::FORBIDDEN
+        );
+        // On the mesh's own network: establishes.
+        assert_eq!(
+            body_status(&recv_introduce(&dir, &raw, &sig, "192.168.1.40", false)),
+            StatusCode::OK
+        );
+
+        // And a second stranger typing the SAME name on the same LAN is refused — an
+        // introduction never attaches to an existing identity (the impersonation guardrail).
+        let (dir2, _h2, _c2, imposter) = {
+            // second guest knocking at the SAME door
+            let imposter =
+                NodeKey::load_or_mint(&fresh_dir("door_intro_imposter"), "sneaky").unwrap();
+            let now = now_secs();
+            let req = crate::enroll::EnrollRequest {
+                node: imposter.identity(),
+                attestation: crate::enroll::Attestation {
+                    laws_version: crate::enroll::LAWS_VERSION,
+                    statement: "I accept the Three Laws.".into(),
+                    ts: now,
+                },
+                nonce: "knock-imposter".into(),
+                ts: now,
+            };
+            let raw = serde_json::to_vec(&req).unwrap();
+            let sig = imposter.sign(&raw);
+            crate::enroll::submit_request(&dir, &raw, &sig, now).unwrap();
+            (dir.clone(), (), (), imposter)
+        };
+        let intro2 = crate::record::Evidence::Introduction {
+            intro: crate::record::Introduction {
+                handle: "Jeff".into(),
+                statement: "I am Jeff".into(),
+                ts: now_secs(),
+            },
+            provenance: crate::record::Provenance::Remote,
+        };
+        let (raw2, sig2) = signed_introduce(&imposter, None, intro2);
+        assert_eq!(
+            body_status(&recv_introduce(&dir2, &raw2, &sig2, "192.168.1.41", false)),
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn a_traveling_correction_severs_then_restores() {
+        let (dir, host, cred, guest) = door_and_guest("correct");
+        // Establish the guest first (via a token), so there is a member to correct.
+        let token =
+            crate::record::mint_invite_token(&host, &cred.membership, "jeff", now_secs()).unwrap();
+        let (raw, sig) = signed_introduce(&guest, None, crate::record::Evidence::Invite(token));
+        assert_eq!(body_status(&recv_introduce(&dir, &raw, &sig, "192.168.1.9", false)), StatusCode::OK);
+
+        let send = |act: crate::record::CorrectionAct, nonce: &str| {
+            let env = crate::record::CorrectionEnvelope {
+                membership: cred.membership.clone(),
+                group_pubkey: cred.group_pubkey.clone(),
+                correction: crate::record::Correction {
+                    act,
+                    subject_device: guest.node_id(),
+                    corrected_by: host.node_id(),
+                    reason: "that's not Jeff".into(),
+                    ts: now_secs(),
+                    nonce: nonce.into(),
+                    sig: String::new(),
+                },
+            };
+            let raw = serde_json::to_vec(&env).unwrap();
+            let sig = host.sign(&raw);
+            recv_correction(&dir, &raw, &sig)
+        };
+
+        assert_eq!(body_status(&send(crate::record::CorrectionAct::Sever, "c1")), StatusCode::OK);
+        let rec = crate::record::load(&dir, &guest.node_id()).unwrap().unwrap();
+        assert!(matches!(
+            crate::record::derive_state(&rec),
+            crate::record::RecordState::Severed { .. }
+        ));
+        assert!(
+            group::load_revoked(&dir).unwrap().contains(&guest.node_id()),
+            "sever mirrors into revoked.json during the window"
+        );
+
+        assert_eq!(body_status(&send(crate::record::CorrectionAct::Restore, "c2")), StatusCode::OK);
+        let rec = crate::record::load(&dir, &guest.node_id()).unwrap().unwrap();
+        assert_eq!(crate::record::derive_state(&rec), crate::record::RecordState::Member);
+        assert!(!group::load_revoked(&dir).unwrap().contains(&guest.node_id()));
+
+        // A device cannot correct itself — even with a valid membership and signature.
+        let env = crate::record::CorrectionEnvelope {
+            membership: cred.membership.clone(),
+            group_pubkey: cred.group_pubkey.clone(),
+            correction: crate::record::Correction {
+                act: crate::record::CorrectionAct::Sever,
+                subject_device: host.node_id(),
+                corrected_by: host.node_id(),
+                reason: "no".into(),
+                ts: now_secs(),
+                nonce: "c3".into(),
+                sig: String::new(),
+            },
+        };
+        let raw = serde_json::to_vec(&env).unwrap();
+        let sig = host.sign(&raw);
+        assert_eq!(body_status(&recv_correction(&dir, &raw, &sig)), StatusCode::FORBIDDEN);
     }
 
     #[test]

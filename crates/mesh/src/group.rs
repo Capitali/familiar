@@ -155,6 +155,10 @@ impl GroupCredential {
 /// Create a brand-new group: generate the group keypair, mint this node's membership, and
 /// persist the credential (0600). Returns the credential (its `join_key()` is what you copy
 /// to peers). `now` is caller-supplied (unix secs) so this stays deterministic/testable.
+///
+/// Founding is also the first admission (ADR-0026 E4, provenance `Founding`): the founder's
+/// own record is written established + admitted, so a one-node mesh is a mesh of one member
+/// rather than a mesh of one guest. Best-effort — a record failure must not fail the founding.
 pub fn create_group(
     dir: &Path,
     node: &NodeKey,
@@ -163,7 +167,22 @@ pub fn create_group(
     ttl_secs: i64,
 ) -> Result<GroupCredential> {
     let secret: [u8; 32] = crate::os_random()?;
-    enroll(dir, node, &secret, label, now, ttl_secs)
+    let cred = enroll(dir, node, &secret, label, now, ttl_secs)?;
+    let id = node.identity();
+    let _ = crate::record::admit(
+        dir,
+        &id.node_id,
+        None,
+        crate::record::Establishment {
+            handle: String::new(), // the founding human names themself on their own console
+            class: crate::record::EvidenceClass::LocalIntroduction,
+            artifact: "founding".into(),
+            at: now,
+        },
+        &id.node_id,
+        now,
+    );
+    Ok(cred)
 }
 
 /// Join an existing group from a join key (the group secret, hex). Mints this node's own

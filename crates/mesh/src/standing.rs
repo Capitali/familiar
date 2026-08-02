@@ -316,6 +316,14 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
     // How many others are awaiting a decision is the household's business, not a guest's.
     view.guests_waiting = 0;
     view.standing_full.clear();
+    // A guest sees the arrivals too — the mesh greets, that is shape — but not who: labels
+    // pseudonymize and handles fall to "someone", same rule as the roster.
+    for a in view.arrivals.iter_mut() {
+        a.label = pseudonym(&a.node_id);
+        if !a.handle.is_empty() {
+            a.handle = "someone".into();
+        }
+    }
 
     for m in view.members.iter_mut() {
         let is_reader = m.node_id == reader_node_id;

@@ -887,6 +887,159 @@ pub(crate) fn clear_hold(dir: &Path, node_id: &str) -> Result<()> {
     Ok(())
 }
 
+// ---- the door's acts (Phase 3) ------------------------------------------------------
+
+/// What a knocking device sends to `POST /mesh/introduce`: who it says it serves, and the
+/// evidence. Signed over the raw body with the node key, like every mesh write.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntroduceRequest {
+    pub node: crate::node::NodeIdentity,
+    #[serde(default)]
+    pub claim: Option<IdentityClaim>,
+    pub evidence: Evidence,
+    pub nonce: String,
+    pub ts: i64,
+}
+
+/// The door's act after the rules engine says yes: claim, establishment and the signed
+/// admission fact land on the record — and the legacy roll is dual-written so the doctor's
+/// equality holds in both directions for as long as the window lasts.
+pub fn admit(
+    dir: &Path,
+    node_id: &str,
+    claim: Option<IdentityClaim>,
+    est: Establishment,
+    minted_by: &str,
+    now: i64,
+) -> Result<MembershipRecord> {
+    let handle = est.handle.clone();
+    let class = est.class;
+    let artifact = est.artifact.clone();
+    upsert(dir, node_id, now, |r| {
+        if claim.is_some() {
+            r.identity.claim = claim.clone();
+        }
+        if r.identity.established.is_none() {
+            r.identity.established = Some(est);
+        }
+        if r.admitted.is_none() {
+            r.admitted = Some(AdmissionFact {
+                minted_by: minted_by.to_string(),
+                at: now,
+                evidence: class,
+                artifact,
+            });
+        }
+    })?;
+    // Legacy mirror — the roll's note says how, so the file keeps explaining itself.
+    let note = if handle.is_empty() {
+        format!("established via {class:?}")
+    } else {
+        format!("{handle} — established via {class:?}")
+    };
+    let _ = crate::standing::grant(dir, node_id, &note);
+    load(dir, node_id)?.ok_or_else(|| Error::Malformed("record vanished during admit".into()))
+}
+
+/// A correction traveling the mesh: the correcting member's cert + the act, signed over the
+/// raw body with the key the cert certifies — the same proof shape as every other mesh write.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrectionEnvelope {
+    pub membership: Membership,
+    /// The group's public key (hex) so any door verifies the cert without holding a roll.
+    pub group_pubkey: String,
+    pub correction: Correction,
+}
+
+impl CorrectionEnvelope {
+    pub fn verify_sig(&self, raw: &[u8], sig_hex: &str) -> Result<()> {
+        verify_hex_sig(&self.membership.node_pubkey, raw, sig_hex, "correction")
+    }
+}
+
+/// Apply a correction to the subject's record (idempotent by nonce) and mirror it into the
+/// legacy stores for the dual-write window. The caller has already verified signature and
+/// membership at the wire seam — or IS the local human (CLI / console), who needs no proof.
+pub fn apply_correction(dir: &Path, c: &Correction, now: i64) -> Result<MembershipRecord> {
+    let subject = c.subject_device.trim();
+    if subject.is_empty() {
+        return Err(Error::Malformed("correction: empty subject".into()));
+    }
+    if subject == c.corrected_by {
+        return Err(Error::Untrusted(
+            "correction: a device may not correct itself".into(),
+        ));
+    }
+    upsert(dir, subject, now, |r| {
+        if !r.corrections.iter().any(|x| x.nonce == c.nonce) {
+            r.corrections.push(c.clone());
+            r.corrections.sort_by(|x, y| (x.ts, &x.nonce).cmp(&(y.ts, &y.nonce)));
+        }
+        if c.act == CorrectionAct::Disestablish {
+            r.identity.established = None;
+        }
+        if c.act == CorrectionAct::Hold {
+            r.held_until = Some(r.held_until.unwrap_or(0).max(c.ts + crate::enroll::DENY_RETRY_SECS));
+        }
+        if c.act == CorrectionAct::Restore {
+            r.held_until = None;
+        }
+    })?;
+    // Legacy mirrors, best-effort: the record is the authority; these keep the window honest.
+    // The roll is edited DIRECTLY — `standing::revoke`'s own dual-write would clear the
+    // record's establishment, and a sever must not erase facts (restore derives them back).
+    let roll_remove = |subject: &str| {
+        let mut roll = crate::standing::load(dir);
+        let before = roll.full.len();
+        roll.full.retain(|n| n != subject);
+        if roll.full.len() != before {
+            let _ = crate::standing::save(dir, &roll);
+        }
+    };
+    match c.act {
+        CorrectionAct::Sever => {
+            roll_remove(subject);
+            let mut revoked = crate::group::load_revoked(dir).unwrap_or_default();
+            if !revoked.iter().any(|n| n == subject) {
+                revoked.push(subject.to_string());
+                let _ = crate::group::write_json_public(
+                    &dir.join(crate::group::REVOKED_FILE),
+                    &revoked,
+                );
+            }
+        }
+        CorrectionAct::Disestablish => {
+            roll_remove(subject);
+        }
+        CorrectionAct::Hold => {
+            let _ = crate::enroll::deny(dir, subject, c.ts);
+        }
+        CorrectionAct::Restore => {
+            let _ = crate::enroll::allow_retry(dir, subject);
+            let revoked = crate::group::load_revoked(dir).unwrap_or_default();
+            if revoked.iter().any(|n| n == subject) {
+                let remaining: Vec<String> =
+                    revoked.into_iter().filter(|n| n != subject).collect();
+                let _ = crate::group::write_json_public(
+                    &dir.join(crate::group::REVOKED_FILE),
+                    &remaining,
+                );
+            }
+            // If the facts still say member, the roll says so again too.
+            if let Ok(Some(r)) = load(dir, subject) {
+                if derive_state(&r) == RecordState::Member
+                    && !crate::standing::load(dir).full.iter().any(|n| n == subject)
+                {
+                    let mut roll = crate::standing::load(dir);
+                    roll.full.push(subject.to_string());
+                    let _ = crate::standing::save(dir, &roll);
+                }
+            }
+        }
+    }
+    load(dir, subject)?.ok_or_else(|| Error::Malformed("record vanished during correction".into()))
+}
+
 /// What the migration folded, for the operator to read back.
 #[derive(Debug, Default, Serialize)]
 pub struct MigrationReport {
@@ -1655,9 +1808,25 @@ mod tests {
         let b = key(&format!("{tag}_b"));
         let c = key(&format!("{tag}_c"));
         submit(&a);
-        crate::enroll::approve(&host, &a.node_id(), NOW).unwrap();
         crate::standing::grant(&host, &a.node_id(), "ian's iPad").unwrap();
-        submit(&b); // stays pending
+        // B: a pending left behind by the OLD door (nothing files pendings any more) —
+        // hand-written the way the old flow persisted it.
+        let pend = crate::enroll::Pending {
+            node: b.identity(),
+            attestation: crate::enroll::Attestation {
+                laws_version: 1,
+                statement: "I accept the Three Laws.".into(),
+                ts: NOW,
+            },
+            received_at: NOW - 50,
+            code: b.node_id().chars().take(6).collect(),
+        };
+        std::fs::create_dir_all(host.join("mesh/pending")).unwrap();
+        std::fs::write(
+            host.join(format!("mesh/pending/{}.json", b.node_id())),
+            serde_json::to_vec_pretty(&pend).unwrap(),
+        )
+        .unwrap();
         crate::enroll::deny(&host, &c.node_id(), NOW).unwrap();
         std::fs::write(
             host.join(crate::group::REVOKED_FILE),
@@ -1684,7 +1853,9 @@ mod tests {
     fn the_migration_folds_every_legacy_store_and_is_idempotent() {
         let (host, a, b, c) = legacy_world("fold");
         let report = migrate(&host, NOW + 100).unwrap();
-        assert_eq!(report.established_from_roll, 1);
+        // Two on the roll: A (granted standing above) and the host itself (founding admits
+        // the founder since the Phase 3 door).
+        assert_eq!(report.established_from_roll, 2);
         assert_eq!(report.severed_from_revoked, 1);
         assert_eq!(report.held_from_denials, 1);
         assert!(report.from_granted >= 1 && report.from_pending >= 1 && report.from_peers >= 1);

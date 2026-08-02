@@ -107,6 +107,8 @@ pub enum StatusOutcome {
     Unknown,
 }
 
+/// The short display code kept on a legacy pending record (first 6 of the node id).
+#[cfg(test)]
 fn short_code(node_id: &str) -> String {
     node_id.chars().take(6).collect()
 }
@@ -144,37 +146,32 @@ pub(crate) fn submit_request(dir: &Path, raw: &[u8], sig_hex: &str, now: i64) ->
     // Spent denial — clear it so the record does not accumulate.
     let _ = allow_retry(dir, &req.node.node_id);
 
-    let pending = Pending {
-        node: req.node.clone(),
-        attestation: req.attestation.clone(),
-        received_at: now,
-        code: short_code(&req.node.node_id),
-    };
-
-    // Auto-admit if the human has set a standing auto-accept, or opened a timed invite window. A node
-    // that attests the Laws (verified above: it signed a non-empty covenant statement with the key
-    // its id fingerprints) is admitted without a second approval. This stays a *deliberate* switch,
-    // not implied by `allow_mesh` — a headless node may serve the mesh yet route each enrollment to a
-    // human for approval (the authority proxy). Opening auto-peering is its own human decision.
-    let auto = crate::config::load(dir)
-        .map(|c| c.auto_accept_enrollments)
-        .unwrap_or(false);
-    if auto || invite_open(dir, now) {
-        let grant = mint_grant(dir, &cred, &req.node, Some(&req.attestation), now)?;
-        remove_pending(dir, &req.node.node_id)?;
-        return Ok(Submitted::Granted(Box::new(grant)));
-    }
-
-    write_json(dir, PENDING_DIR, &req.node.node_id, &pending)?;
-    Ok(Submitted::Pending(pending))
+    // The two-filter door (ADR-0026): a node that attests the Laws (verified above — it signed a
+    // non-empty covenant statement with the key its id fingerprints) has satisfied the DEVICE
+    // CONTRACT filter, and that is all a knock needs. It is admitted as a **guest** — a real
+    // cert, so its reads succeed and return the projection — and stays one until the HUMAN
+    // IDENTITY filter is satisfied by evidence (`/mesh/introduce`, the rules engine). Nothing
+    // pends, no window is consulted, and `auto_accept_enrollments` is not read: there is no
+    // switch, because reaching a door was never the thing that admitted anyone — evidence is.
+    let grant = mint_grant(dir, &cred, &req.node, Some(&req.attestation), now)?;
+    remove_pending(dir, &req.node.node_id)?;
+    Ok(Submitted::Granted(Box::new(grant)))
 }
 
-/// A node polling for a decision on its request.
+/// A node polling for a decision on its request. Under the two-filter door nothing pends — but
+/// a pending filed by the OLD door (its knock was signature-verified when it was filed) would
+/// otherwise wait forever, so the poll upgrades it to a guest grant on the spot. That unhangs
+/// every joiner the old door left stuck, the moment this code deploys.
 pub(crate) fn enroll_status(dir: &Path, node_id: &str) -> Result<StatusOutcome> {
     if let Some(grant) = load_grant(dir, node_id)? {
         return Ok(StatusOutcome::Granted(Box::new(grant)));
     }
-    if pending_path(dir, node_id).exists() {
+    if let Some(p) = load_pending(dir, node_id)? {
+        if let Some(cred) = group::load(dir)?.filter(|c| c.can_mint()) {
+            let grant = mint_grant(dir, &cred, &p.node, Some(&p.attestation), p.received_at)?;
+            remove_pending(dir, node_id)?;
+            return Ok(StatusOutcome::Granted(Box::new(grant)));
+        }
         return Ok(StatusOutcome::Pending);
     }
     Ok(StatusOutcome::Unknown)
@@ -301,22 +298,19 @@ pub fn list_pending(dir: &Path) -> Result<Vec<Pending>> {
     Ok(out)
 }
 
-/// Open a pairing/invite window until `until` (unix secs): requests that arrive before then are
-/// auto-approved. Use for "authorize this expansion once" so many devices don't need many taps.
+/// RETIRED as a door mechanism (ADR-0026: the two-filter door consults no windows — every valid
+/// knock lands a guest). Kept so callers that open a "window" (auto-formation, older CLIs) keep
+/// working as a harmless recorded intent; nothing reads it on the admission path any more.
 pub fn open_invite(dir: &Path, until: i64) -> Result<()> {
     write_raw(dir, INVITE_FILE, &until.to_string())
 }
 
-/// When the invite window closes (0 / absent = no window).
+/// When the invite window closes (0 / absent = no window). See [`open_invite`] — retired.
 pub fn invite_until(dir: &Path) -> i64 {
     std::fs::read_to_string(dir.join(INVITE_FILE))
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
-}
-
-fn invite_open(dir: &Path, now: i64) -> bool {
-    now < invite_until(dir)
 }
 
 // ---- the JOIN side: a node requesting to join another familiar by covenant ----------
@@ -505,33 +499,37 @@ fn mint_grant(
     };
     write_json(dir, GRANTED_DIR, &node.node_id, &grant)?;
     // Dual-write (ADR-0026 Phase 2): the record mirrors the grant — and RETAINS the
-    // attestation the legacy flow is about to drop with its pending record.
+    // attestation the legacy flow used to drop with its pending record.
     let _ = crate::record::upsert_enrolled(dir, &node.node_id, attestation, now);
-    // Admission is automatic (ADR-0015); DISCLOSURE is not (ADR-0020) — a fresh member reads as
-    // a guest until a human grants standing. That decision needs a human to actually be ASKED,
-    // or a new member sits unnoticed forever (the 2026-07-29 installer sat in the roster and
-    // nobody was asked anything). So admitting files a question on this node; devices reading
-    // their worldview from here surface it, routing addresses it to whoever is present, and the
-    // question system's own cadence (re-asking, rest periods) is the escalation. Origin "need":
-    // a stranger awaiting a human decision IS an unmet need for human authority. Best-effort —
-    // a failure to file must never fail the admission itself. Nothing ever auto-grants; an
-    // unanswered question leaves the member a guest, which is the safe resting state.
+    // No question is filed (ADR-0026: nothing waits on an answer — a guest is the stable
+    // resting state, not a pending decision). The arrival is an informational observation:
+    // it reaches the feed and the welcome list, and asks nothing of anyone. Best-effort — a
+    // failure to record it must never fail the admission.
     let short: String = node.node_id.chars().take(8).collect();
     let label = if node.label.trim().is_empty() {
         short.clone()
     } else {
         node.label.trim().to_string()
     };
-    let _ = familiar_kernel::question::add(
-        dir,
-        &format!(
-            "A new device joined the mesh: “{label}” ({short}). Who does it belong to? \
-It reads as a guest until someone grants it standing."
-        ),
-        "need",
+    let obs = familiar_kernel::observation::Observation::new(
+        format!("device:{label}"),
+        "joined the mesh",
+        "as a guest — reading the projection until an identity is established",
+        "mesh",
+        "mesh",
         now,
+        1.0,
     );
+    let _ = familiar_kernel::observation::record(dir, obs);
     Ok(grant)
+}
+
+/// Whether this door has minted a grant for `node_id` — the covenant filter held here, even if
+/// the attestation text predates the record store (the legacy flow deleted it on approval).
+pub(crate) fn has_grant(dir: &Path, node_id: &str) -> bool {
+    dir.join(GRANTED_DIR)
+        .join(format!("{node_id}.json"))
+        .exists()
 }
 
 fn pending_path(dir: &Path, node_id: &str) -> std::path::PathBuf {
@@ -620,99 +618,98 @@ mod tests {
     }
 
     #[test]
-    fn request_pends_then_approval_grants_a_verifiable_cert() {
-        let (host, joiner) = setup("approve");
+    fn a_valid_knock_lands_a_guest_grant_immediately() {
+        // The two-filter door (ADR-0026): no window, no switch, no queue. A verified,
+        // covenant-attesting knock gets a real cert on the spot — and reads as a GUEST until
+        // an identity is established by evidence.
+        let (host, joiner) = setup("knock");
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
 
-        // Submit → pending (no invite window).
-        match submit_request(&host, &raw, &sig, NOW).unwrap() {
-            Submitted::Pending(p) => assert_eq!(p.node.node_id, joiner.node_id()),
-            _ => panic!("expected pending"),
-        }
-        assert!(matches!(
-            enroll_status(&host, &joiner.node_id()).unwrap(),
-            StatusOutcome::Pending
-        ));
-        assert_eq!(list_pending(&host).unwrap().len(), 1);
-
-        // Human approves → a grant whose cert verifies under the group key.
-        let grant = approve(&host, &joiner.node_id(), NOW).unwrap();
+        let grant = match submit_request(&host, &raw, &sig, NOW).unwrap() {
+            Submitted::Granted(g) => g,
+            _ => panic!("a valid knock must land a guest grant"),
+        };
         let cred = group::load(&host).unwrap().unwrap();
         let gk = cred.verifying_key().unwrap();
         group::verify_membership(&grant.membership, &gk, &cred.group_id, NOW, &[]).unwrap();
-        assert_eq!(grant.membership.node_id, joiner.node_id());
-        assert!(list_pending(&host).unwrap().is_empty());
+        assert!(list_pending(&host).unwrap().is_empty(), "nothing pends");
 
-        // The joiner can now poll and receive the grant.
-        assert!(matches!(
-            enroll_status(&host, &joiner.node_id()).unwrap(),
-            StatusOutcome::Granted(_)
-        ));
+        // The record holds the two-filter state: contract attested, identity missing.
+        let rec = crate::record::load(&host, &joiner.node_id()).unwrap().unwrap();
+        assert!(rec.attestation.is_some(), "the attestation is retained");
+        assert_eq!(rec.missing_filters(), vec!["identity"]);
+        assert_eq!(
+            crate::standing::standing_of(&host, &joiner.node_id()),
+            crate::standing::Standing::Guest,
+            "a fresh knock reads the projection"
+        );
     }
 
     #[test]
-    fn admission_asks_who_the_new_device_belongs_to() {
-        // ADR-0020: admission is automatic, disclosure is not — and the standing decision needs a
-        // human to actually be ASKED. Every path that mints a grant must file the question; the
-        // 2026-07-29 installer sat in the roster precisely because nothing did.
-        let (host, joiner) = setup("asks");
-        open_invite(&host, NOW + 300).unwrap();
+    fn admission_records_an_arrival_and_asks_nothing() {
+        // ADR-0026: no decision is pending at the door, so no question is filed — the arrival
+        // is an informational observation feeding the welcome list.
+        let (host, joiner) = setup("arrival");
         let (raw, sig) = signed_request(&joiner, NOW, "nq");
         assert!(matches!(
             submit_request(&host, &raw, &sig, NOW).unwrap(),
             Submitted::Granted(_)
         ));
         let qs = familiar_kernel::question::load(&host).unwrap();
-        let q = qs
-            .iter()
-            .find(|q| q.text.contains("Kali-Jeff") && q.text.contains("standing"))
-            .expect("admitting a device must file a who-is-this question");
-        assert_eq!(
-            q.origin, "need",
-            "a stranger awaiting a decision outranks the root question"
+        assert!(
+            !qs.iter().any(|q| q.text.contains("standing") || q.text.contains("belong")),
+            "the who-does-it-belong-to question is retired"
         );
-        // Idempotent per node: a second admission of the same device must not ask twice.
-        let n = qs.iter().filter(|x| x.text == q.text).count();
-        assert_eq!(n, 1);
+        let obs = familiar_kernel::observation::load(&host).unwrap();
+        assert!(
+            obs.iter().any(|o| o.action == "joined the mesh"),
+            "the arrival must reach the feed"
+        );
     }
 
     #[test]
-    fn a_denial_holds_for_five_minutes_then_lets_them_ask_again() {
+    fn a_hold_blocks_the_next_knock_until_the_window_lapses() {
+        // A hold (deny) is a correction cool-off: a held stranger's knock is ignored outright —
+        // not queued, not granted — until the short window lapses.
         let (host, joiner) = setup("deny_window");
-        let (raw, sig) = signed_request(&joiner, NOW, "d1");
-        assert!(matches!(
-            submit_request(&host, &raw, &sig, NOW).unwrap(),
-            Submitted::Pending(_)
-        ));
+        deny(&host, &joiner.node_id(), NOW).unwrap();
 
-        assert!(
-            deny(&host, &joiner.node_id(), NOW).unwrap(),
-            "a pending record was there"
-        );
-        assert!(
-            list_pending(&host).unwrap().is_empty(),
-            "denying clears the pending"
-        );
-
-        // Inside the window: ignored outright, not re-queued — the whole point, so a retry loop
-        // cannot train a human to dismiss the ask reflexively.
-        let (raw2, sig2) = signed_request(&joiner, NOW + 10, "d2");
-        match submit_request(&host, &raw2, &sig2, NOW + 10).unwrap() {
+        let (raw, sig) = signed_request(&joiner, NOW + 10, "d1");
+        match submit_request(&host, &raw, &sig, NOW + 10).unwrap() {
             Submitted::Denied { retry_in } => assert!((1..=DENY_RETRY_SECS).contains(&retry_in)),
             _ => panic!("expected Denied inside the retry window"),
         }
-        assert!(
-            list_pending(&host).unwrap().is_empty(),
-            "a denied retry must not re-queue"
-        );
 
-        // After the window: they may ask again, and it pends normally.
-        let (raw3, sig3) = signed_request(&joiner, NOW + DENY_RETRY_SECS + 1, "d3");
+        // After the window: the knock lands a guest grant like any other.
+        let (raw2, sig2) = signed_request(&joiner, NOW + DENY_RETRY_SECS + 11, "d2");
         assert!(matches!(
-            submit_request(&host, &raw3, &sig3, NOW + DENY_RETRY_SECS + 1).unwrap(),
-            Submitted::Pending(_)
+            submit_request(&host, &raw2, &sig2, NOW + DENY_RETRY_SECS + 11).unwrap(),
+            Submitted::Granted(_)
         ));
-        assert_eq!(list_pending(&host).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_legacy_pending_upgrades_to_a_guest_grant_on_poll() {
+        // A pending filed by the OLD door would wait forever now that nothing approves. Its
+        // knock was signature-verified when filed, so the poll upgrades it on the spot.
+        let (host, joiner) = setup("legacy_pending");
+        let pending = Pending {
+            node: joiner.identity(),
+            attestation: Attestation {
+                laws_version: LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: NOW,
+            },
+            received_at: NOW,
+            code: short_code(&joiner.node_id()),
+        };
+        write_json(&host, PENDING_DIR, &joiner.node_id(), &pending).unwrap();
+
+        match enroll_status(&host, &joiner.node_id()).unwrap() {
+            StatusOutcome::Granted(g) => assert_eq!(g.membership.node_id, joiner.node_id()),
+            _ => panic!("a stuck pending must upgrade to a guest grant"),
+        }
+        assert!(list_pending(&host).unwrap().is_empty());
     }
 
     #[test]
@@ -735,21 +732,16 @@ mod tests {
     }
 
     #[test]
-    fn invite_window_auto_approves() {
-        let (host, joiner) = setup("invite");
-        open_invite(&host, NOW + 300).unwrap();
+    fn the_door_consults_no_windows_and_no_switches() {
+        // Neither an open invite window nor auto_accept matters any more: the same knock lands
+        // the same guest grant with the window long closed and the switch never set.
+        let (host, joiner) = setup("no_windows");
+        open_invite(&host, NOW - 1000).unwrap(); // long closed
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
         match submit_request(&host, &raw, &sig, NOW).unwrap() {
             Submitted::Granted(g) => assert_eq!(g.membership.node_id, joiner.node_id()),
-            _ => panic!("invite window should auto-approve"),
+            _ => panic!("every valid knock lands a guest grant"),
         }
-        // After the window closes, a new joiner pends again.
-        let other = NodeKey::load_or_mint(&fresh("invite_other"), "phone").unwrap();
-        let (raw2, sig2) = signed_request(&other, NOW + 400, "n2");
-        assert!(matches!(
-            submit_request(&host, &raw2, &sig2, NOW + 400).unwrap(),
-            Submitted::Pending(_)
-        ));
     }
 
     #[test]
@@ -765,15 +757,18 @@ mod tests {
     }
 
     #[test]
-    fn deny_removes_a_pending_request() {
-        let (host, joiner) = setup("deny");
+    fn a_granted_guest_keeps_its_grant_through_a_hold() {
+        // A hold narrows what happens NEXT (no establishment, no fresh knock) — it never
+        // retracts the guest floor: the projection is safe by construction (ADR-0020/0026).
+        let (host, joiner) = setup("hold_keeps");
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
         submit_request(&host, &raw, &sig, NOW).unwrap();
-        assert!(deny(&host, &joiner.node_id(), NOW).unwrap());
-        assert!(!deny(&host, &joiner.node_id(), NOW).unwrap()); // already gone
+        deny(&host, &joiner.node_id(), NOW + 5).unwrap();
         assert!(matches!(
             enroll_status(&host, &joiner.node_id()).unwrap(),
-            StatusOutcome::Unknown
+            StatusOutcome::Granted(_)
         ));
+        let rec = crate::record::load(&host, &joiner.node_id()).unwrap().unwrap();
+        assert_eq!(rec.held_until, Some(NOW + 5 + DENY_RETRY_SECS));
     }
 }

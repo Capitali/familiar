@@ -1347,6 +1347,79 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        // ---- corrections (ADR-0026 §5): the deliberate reversals -----------------------------
+        // Low-ceremony by design (ADR-0022): trust extended automatically must be cheap to
+        // withdraw deliberately. These live here and on the roster card — never on the welcome.
+        Some(act @ ("sever" | "hold" | "disestablish" | "restore")) => {
+            let Some(node_id) = args.get(1).filter(|a| !a.starts_with("--")) else {
+                eprintln!("mesh: usage: familiar mesh {act} <node_id> [--reason R]");
+                return ExitCode::FAILURE;
+            };
+            let reason = f.get("reason").cloned().unwrap_or_else(|| match act {
+                "sever" => "removed by the operator".into(),
+                "hold" => "not now".into(),
+                "disestablish" => "identity was wrong".into(),
+                _ => "restored".into(),
+            });
+            let act_kind = match act {
+                "sever" => familiar_mesh::record::CorrectionAct::Sever,
+                "hold" => familiar_mesh::record::CorrectionAct::Hold,
+                "disestablish" => familiar_mesh::record::CorrectionAct::Disestablish,
+                _ => familiar_mesh::record::CorrectionAct::Restore,
+            };
+            let corrected_by = familiar_mesh::node::NodeKey::load_or_mint(&dir, "familiar")
+                .map(|n| n.node_id())
+                .unwrap_or_else(|_| "local".into());
+            let now = now_secs();
+            let c = familiar_mesh::record::Correction {
+                act: act_kind,
+                subject_device: node_id.clone(),
+                corrected_by,
+                reason,
+                ts: now,
+                nonce: format!("cli-{act}-{node_id}-{now}"),
+                sig: String::new(), // the local human IS the authority; signatures gate the wire
+            };
+            match familiar_mesh::record::apply_correction(&dir, &c, now) {
+                Ok(r) => {
+                    println!("✓ {act} {node_id} — record now: {:?}", familiar_mesh::record::derive_state(&r));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("invite-token") => {
+            // `mesh invite-token [--handle H]` — a member's deliberate act, displaced in time:
+            // single-use, ten minutes, carries NO secret. Naming a handle lets the newcomer
+            // attach to that existing identity; unnamed establishes a new one.
+            let handle = f.get("handle").cloned().unwrap_or_default();
+            let Ok(Some(cred)) = familiar_mesh::group::load(&dir) else {
+                eprintln!("mesh: no group enrolled");
+                return ExitCode::FAILURE;
+            };
+            let Ok(node) = familiar_mesh::node::NodeKey::load_or_mint(&dir, "familiar") else {
+                eprintln!("mesh: no node key");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::record::mint_invite_token(&node, &cred.membership, &handle, now_secs()) {
+                Ok(t) => {
+                    eprintln!(
+                        "single use, expires in {} min{}",
+                        familiar_mesh::record::INVITE_TOKEN_TTL_SECS / 60,
+                        if handle.is_empty() { String::new() } else { format!(", names “{handle}”") }
+                    );
+                    println!("{}", serde_json::to_string(&t).unwrap_or_default());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // ---- the unified record (ADR-0026, Phase 2) ------------------------------------------
         Some("migrate-records") => {
             // `mesh migrate-records` — the ONE migration: fold granted/ + pending/ + peers +
@@ -1497,7 +1570,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | invite [--minutes N] | optin <handle> | status \
                  | escrow-export | escrow-restore | reduce-to-covenant --yes \
                  | standing [show | grant <node_id> [--note N] | revoke <node_id>] \
-                 | migrate-records | doctor>"
+                 | sever|hold|disestablish|restore <node_id> [--reason R] \
+                 | invite-token [--handle H] | migrate-records | doctor>"
             );
             ExitCode::FAILURE
         }
