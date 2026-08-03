@@ -617,6 +617,18 @@ function refreshScreen() {
       if (S.invite) renderInviteQR();
       return;
     }
+    // Which network a candidate host address reaches the familiar over, from the address class
+    // alone. Wifi vs ethernet is not knowable from an IP — both are "lan"; the OS doesn't put
+    // the medium in the address.
+    const hostNet = (h) => {
+      const s = String(h).toLowerCase().replace(/^\[/, '');
+      if (s.startsWith('127.') || s.startsWith('localhost') || s.startsWith('::1')) return 'this machine';
+      if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(s)) return 'tailscale vpn';
+      if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(s)) return 'lan';
+      if (/^(fe80|fd|fc)/.test(s)) return 'lan ipv6';
+      if (/^\d/.test(s) || s.includes('::')) return 'internet';
+      return 'dns name';
+    };
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
@@ -625,7 +637,7 @@ function refreshScreen() {
         <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">ORACLE</span>
         <span class="m" style="font-size:10px;color:${d.oracle==='available'?'#7ff0c0':'rgba(190,210,240,0.65)'};">${esc(d.oracle)}</span>
       </div>` : ''}
-      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h,i)=>(h===d.host?'▸':'')+esc(h)).join(' · ')}</div>
+      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h)=>(h===d.host?'▸':'')+esc(h)+' <span style="color:rgba(174,231,255,0.55);">'+hostNet(h)+'</span>').join(' · ')}</div>
       ${(d.attempts||[]).length ? `<div class="m" style="font-size:9px;color:rgba(150,180,255,0.5);margin-bottom:6px;">${d.attempts.map(esc).join('<br>')}</div>` : ''}
       ${S.jsErr ? `<div class="m" style="font-size:9px;color:rgba(255,160,160,0.8);margin-bottom:6px;">${esc(S.jsErr)}</div>` : ''}
       <div style="margin-bottom:10px;"></div>
