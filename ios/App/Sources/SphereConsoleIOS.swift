@@ -51,6 +51,11 @@ struct SphereConsoleIOS: View {
             }
             bridge.onUnenroll = { [weak model] in model?.unenroll() }
             bridge.onSetHuman = { [weak model] name in
+                // Both halves, exactly like the Mac bridge: confirmPresentHuman is the presence
+                // claim the device screen's PRESENT row actually renders (ADR-0019) — without it
+                // the name lands only in servedHuman and the row keeps saying "no one
+                // identified", which read as the input not taking.
+                model?.confirmPresentHuman(name)
                 model?.setServedHuman(name)
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
