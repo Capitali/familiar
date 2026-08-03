@@ -437,7 +437,35 @@ function refreshScreen() {
       LocalIntroduction: 'introduced themselves here',
       Migration: 'longstanding',
     };
-    el.innerHTML = arrivals.length === 0
+    // The ONE exception to no-buttons: a claim naming THIS device's human (ADR-0026 E2 over
+    // the mesh). That is not an approval gate — it is the second person, and the second person
+    // is you. One tap mints the voucher; the rules engine does the admitting.
+    const myHuman = ((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '';
+    const dismissed = (S.dismissedClaims = S.dismissedClaims || {});
+    const claims = (v.claims_waiting || []).filter(c =>
+      myHuman && c.handle.toLowerCase() === myHuman.toLowerCase() && !dismissed[c.node_id]);
+    const claimsHtml = claims.map(c => `
+      <div style="padding:14px 16px;border-radius:14px;background:rgba(40,60,24,0.28);border:1px solid rgba(61,220,151,0.3);margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-size:16px;font-weight:600;">${esc(c.label || c.node_id.slice(0,8))}</span>
+          ${chip('SAYS IT IS YOURS', '#9fe8c0')}
+          <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(c.node_id.slice(0,8))}</span>
+        </div>
+        <div class="m" style="font-size:9.5px;color:rgba(180,215,190,0.7);margin-bottom:10px;">
+          a new device is claiming to be ${esc(c.handle)}'s — if that's you setting it up, confirm; if not, ignore it and it stays a guest
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick='toApp("vouch",{node_id:${JSON.stringify(c.node_id)},pubkey:${JSON.stringify(c.pubkey)},handle:${JSON.stringify(c.handle)}})'
+                  style="padding:9px 16px;border-radius:10px;background:rgba(61,220,151,0.18);border:1px solid rgba(61,220,151,0.45);color:#9fe8c0;cursor:pointer;font-size:12px;">
+            Yes — it's mine
+          </button>
+          <button onclick="S.dismissedClaims[${JSON.stringify(c.node_id)}]=1;refreshScreen()"
+                  style="padding:9px 16px;border-radius:10px;background:rgba(16,34,60,0.3);border:1px solid rgba(120,190,255,0.2);color:rgba(188,210,255,0.75);cursor:pointer;font-size:12px;">
+            Not mine
+          </button>
+        </div>
+      </div>`).join('');
+    el.innerHTML = claimsHtml + (arrivals.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
            Nobody new in the last day. The next arrival will be greeted here.
          </div>`
@@ -456,7 +484,7 @@ function refreshScreen() {
               : esc((a.handle ? a.handle + ' — ' : '') + (viaWord[a.via] || 'established'))}
             · arrived ${dstr(a.at)}
           </div>
-        </div>`).join('');
+        </div>`).join(''));
 
   } else if (k === 'node') {
     const p = P[S.nodeIdx]; if (!p) { window.sphereScreen('roster'); return; }
@@ -681,7 +709,11 @@ function renderChrome() {
   // The glyph greets while someone is new (ADR-0026): a warmer colour and a livelier pulse —
   // "someone new has joined", never urgency. Rate AND colour, so it stays legible without
   // colour vision.
-  const arriving = ((S.view && S.view.arrivals) || []).length;
+  const chromeHuman = ((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '';
+  const claimsForMe = ((S.view && S.view.claims_waiting) || []).filter(c =>
+    chromeHuman && c.handle.toLowerCase() === chromeHuman.toLowerCase()
+    && !((S.dismissedClaims || {})[c.node_id])).length;
+  const arriving = ((S.view && S.view.arrivals) || []).length + claimsForMe;
   const wb = $('welcomebtn');
   if (wb) {
     wb.style.display = street ? 'none' : 'flex';

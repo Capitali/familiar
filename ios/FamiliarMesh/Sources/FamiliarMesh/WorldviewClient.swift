@@ -172,6 +172,18 @@ public struct ArrivalView: Codable, Equatable {
     public var at: Int64
 }
 
+/// A guest whose refused introduction claimed an existing human — waiting for that human's own
+/// device to vouch (ADR-0026 E2, over the mesh). Member view only. If `handle` is this device's
+/// human, the console asks THEM: "this device says it is yours — vouch?"
+public struct ClaimView: Codable, Equatable {
+    public var node_id: String
+    public var label: String
+    public var handle: String
+    /// The claiming device's key — what a voucher names; the door re-verifies by fingerprint.
+    public var pubkey: String
+    public var since: Int64
+}
+
 public struct Worldview: Codable, Equatable {
     public var group_label: String
     public var node_id: String
@@ -188,6 +200,9 @@ public struct Worldview: Codable, Equatable {
     /// **Who is new** (ADR-0026): arrivals within the last 24 hours — what the welcome screen
     /// greets. Informational only; nothing here frames a decision. Absent on older familiars.
     public var arrivals: [ArrivalView]?
+    /// Guests claiming an existing human, awaiting that human's own device (E2 over the mesh).
+    /// Absent on older familiars and in guest projections.
+    public var claims_waiting: [ClaimView]?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

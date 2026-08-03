@@ -1202,6 +1202,21 @@ async fn handle(
             };
             recv_introduce(&dir, &bytes, &sig, &peer_ip, relayed)
         }
+        // E2 traveling over the mesh: an established device of the claimed handle confirms
+        // "that new device is mine" from its own console — same rules engine as a handoff.
+        (Method::POST, "/mesh/vouch") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_vouch(&dir, &bytes, &sig)
+        }
         // A member's deliberate reversal (ADR-0026 §5): sever / disestablish / hold / restore.
         // Corrections travel; approval never existed to.
         (Method::POST, "/mesh/correct") => {
@@ -2064,6 +2079,139 @@ fn recv_introduce(
             }
         }
         // The refusal text IS the guest's path-to-admission copy — pass it through verbatim.
+        // But a claim ADDRESSES even when the evidence fails (ADR-0019): keep it on the record,
+        // with the claimant's key, so the claimed human's own devices see "this device says it
+        // is yours" and one of them can vouch (E2 over the mesh) — the automatic path that
+        // needs no invite paste and no QR. Only claims naming an ESTABLISHED handle are kept;
+        // an unknown name has nobody to ask.
+        Err(crate::Error::Untrusted(m)) => {
+            let claimed_existing = req
+                .claim
+                .as_ref()
+                .map(|c| {
+                    established
+                        .iter()
+                        .any(|d| d.handle.eq_ignore_ascii_case(c.handle.trim()))
+                })
+                .unwrap_or(false);
+            if claimed_existing {
+                let claim = req.claim.as_ref().expect("checked above");
+                let _ =
+                    crate::record::record_claim(dir, &req.node.node_id, claim, &req.node.pubkey, now);
+                return text(
+                    StatusCode::FORBIDDEN,
+                    format!("{m} — {}'s devices have been asked to confirm this one is theirs", claim.handle.trim()),
+                );
+            }
+            text(StatusCode::FORBIDDEN, m)
+        }
+        Err(_) => text(StatusCode::BAD_REQUEST, "bad evidence"),
+    }
+}
+
+/// The vouching side of E2, traveling over the mesh: `POST /mesh/vouch` — an established
+/// device of the claimed handle confirms "that new device is mine" from its own console. The
+/// voucher is minted on the vouching device (its key, its signature) and the door runs the
+/// same rules engine an in-person handoff would: nothing here is a second admission path,
+/// only a second way for the same evidence to arrive.
+#[derive(serde::Deserialize)]
+struct VouchEnvelope {
+    node: crate::node::NodeIdentity,
+    voucher: crate::record::DeviceVoucher,
+}
+
+fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let env: VouchEnvelope = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad vouch"),
+    };
+    let now = now_secs();
+    if env.node.verify(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Ok(pk) = crate::hex_decode(&env.node.pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad pubkey");
+    };
+    match crate::exactly_32(&pk, "node pubkey") {
+        Ok(arr) if crate::node::fingerprint(&arr) == env.node.node_id => {}
+        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
+    }
+    // The envelope must be signed by the device that minted the voucher — nobody vouches in
+    // someone else's name.
+    if env.node.node_id != env.voucher.voucher_node_id {
+        return text(StatusCode::FORBIDDEN, "the voucher is not the sender's own");
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    // The subject: looked up by the vouched key's fingerprint — the record the claim landed on.
+    let Ok(subj_pk) = crate::hex_decode(&env.voucher.subject_pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad subject pubkey");
+    };
+    let subject_node_id = match crate::exactly_32(&subj_pk, "subject pubkey") {
+        Ok(arr) => crate::node::fingerprint(&arr),
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad subject pubkey"),
+    };
+    let Some(rec) = crate::record::find_by_key(dir, &subject_node_id) else {
+        return text(StatusCode::FORBIDDEN, "no such guest — they must knock first");
+    };
+    if crate::record::derive_state(&rec) == crate::record::RecordState::Member {
+        let handle = rec
+            .identity
+            .established
+            .as_ref()
+            .map(|e| e.handle.clone())
+            .unwrap_or_default();
+        return text(
+            StatusCode::OK,
+            serde_json::json!({"state": "member", "handle": handle}).to_string(),
+        );
+    }
+    let covenant_attested =
+        rec.attestation.is_some() || crate::enroll::has_grant(dir, &subject_node_id);
+    let established = established_devices(dir, &cred);
+    let ctx = crate::record::AdmissionContext {
+        now,
+        group_id: &cred.group_id,
+        group_pubkey: &cred.group_pubkey,
+        established: &established,
+    };
+    let subject = crate::record::Subject {
+        node_id: &subject_node_id,
+        covenant_attested,
+    };
+    let evidence = crate::record::Evidence::Voucher(env.voucher.clone());
+    match crate::record::evaluate_admission(&subject, rec.identity.claim.as_ref(), &evidence, &ctx)
+    {
+        Ok(est) => {
+            let handle = est.handle.clone();
+            match crate::record::admit(
+                dir,
+                &subject_node_id,
+                rec.identity.claim.clone(),
+                est,
+                &cred.membership.node_id,
+                now,
+            ) {
+                Ok(_) => {
+                    let obs = familiar_kernel::observation::Observation::new(
+                        format!("device:{}", env.node.label),
+                        "vouched",
+                        format!("for a new device of {handle} — admitted to the mesh"),
+                        "mesh",
+                        "mesh",
+                        now,
+                        1.0,
+                    );
+                    let _ = familiar_kernel::observation::record(dir, obs);
+                    text(
+                        StatusCode::OK,
+                        serde_json::json!({"state": "member", "handle": handle}).to_string(),
+                    )
+                }
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad evidence"),
     }
@@ -3492,6 +3640,88 @@ mod tests {
             body_status(&recv_introduce(&dir2, &raw2, &sig2, "192.168.1.41", false)),
             StatusCode::FORBIDDEN
         );
+    }
+
+    #[test]
+    fn a_refused_claim_waits_and_the_humans_own_device_vouches_it_in() {
+        let (dir, host, cred, ipad) = door_and_guest("vouch");
+        // "ian" exists: the iPad established via a named invite.
+        let token =
+            crate::record::mint_invite_token(&host, &cred.membership, "ian", now_secs()).unwrap();
+        let (raw, sig) = signed_introduce(&ipad, None, crate::record::Evidence::Invite(Box::new(token)));
+        assert_eq!(body_status(&recv_introduce(&dir, &raw, &sig, "192.168.1.9", false)), StatusCode::OK);
+
+        // A new device (the Air) knocks at the same door, then introduces itself as "ian" from
+        // the public internet — refused twice over (remote provenance, existing handle) …
+        let air = NodeKey::load_or_mint(&fresh_dir("door_vouch_air"), "Air console").unwrap();
+        let now = now_secs();
+        let knock = crate::enroll::EnrollRequest {
+            node: air.identity(),
+            attestation: crate::enroll::Attestation {
+                laws_version: crate::enroll::LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: now,
+            },
+            nonce: "knock-air".into(),
+            ts: now,
+        };
+        let kraw = serde_json::to_vec(&knock).unwrap();
+        let ksig = air.sign(&kraw);
+        crate::enroll::submit_request(&dir, &kraw, &ksig, now).unwrap();
+        let claim = crate::record::IdentityClaim { handle: "ian".into(), ts: now };
+        let intro = crate::record::Evidence::Introduction {
+            intro: crate::record::Introduction {
+                handle: "ian".into(),
+                statement: "this Air is mine".into(),
+                ts: now,
+            },
+            provenance: crate::record::Provenance::Remote,
+        };
+        let (araw, asig) = signed_introduce(&air, Some(claim), intro);
+        assert_eq!(
+            body_status(&recv_introduce(&dir, &araw, &asig, "203.0.113.9", false)),
+            StatusCode::FORBIDDEN
+        );
+        // … but the claim ADDRESSES: it is on the record, with the claimant's key, so ian's
+        // own devices can be shown it.
+        let rec = crate::record::find_by_key(&dir, &air.node_id()).unwrap();
+        assert_eq!(rec.identity.claim.as_ref().unwrap().handle, "ian");
+        assert_eq!(rec.pubkey, air.identity().pubkey, "the key a voucher will name");
+        assert!(rec.identity.established.is_none(), "a claim admits nothing by itself");
+
+        // A guest cannot vouch — the Air vouching for itself is refused.
+        let self_vouch =
+            crate::record::DeviceVoucher::mint(&air, "ian", &air.identity().pubkey, now, "n-self")
+                .unwrap();
+        let env = serde_json::json!({"node": air.identity(), "voucher": self_vouch});
+        let vraw = serde_json::to_vec(&env).unwrap();
+        let vsig = air.sign(&vraw);
+        assert_eq!(body_status(&recv_vouch(&dir, &vraw, &vsig)), StatusCode::FORBIDDEN);
+
+        // ian's iPad vouches from its console: one tap, and the rules engine admits.
+        let voucher =
+            crate::record::DeviceVoucher::mint(&ipad, "ian", &air.identity().pubkey, now, "n-air")
+                .unwrap();
+        let env = serde_json::json!({"node": ipad.identity(), "voucher": voucher});
+        let vraw = serde_json::to_vec(&env).unwrap();
+        let vsig = ipad.sign(&vraw);
+        assert_eq!(body_status(&recv_vouch(&dir, &vraw, &vsig)), StatusCode::OK);
+        let rec = crate::record::find_by_key(&dir, &air.node_id()).unwrap();
+        assert_eq!(crate::record::derive_state(&rec), crate::record::RecordState::Member);
+        let est = rec.identity.established.as_ref().unwrap();
+        assert_eq!(est.handle, "ian");
+        assert_eq!(est.class, crate::record::EvidenceClass::DeviceVoucher);
+
+        // Idempotent: vouching again answers member, not an error.
+        assert_eq!(body_status(&recv_vouch(&dir, &vraw, &vsig)), StatusCode::OK);
+
+        // And the envelope must be the voucher device's own signature — the host relaying the
+        // iPad's voucher under its own key is refused.
+        let env = serde_json::json!({"node": host.identity(), "voucher":
+            crate::record::DeviceVoucher::mint(&ipad, "ian", &air.identity().pubkey, now, "n-relay").unwrap()});
+        let vraw = serde_json::to_vec(&env).unwrap();
+        let vsig = host.sign(&vraw);
+        assert_eq!(body_status(&recv_vouch(&dir, &vraw, &vsig)), StatusCode::FORBIDDEN);
     }
 
     #[test]

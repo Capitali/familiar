@@ -648,6 +648,31 @@ final class AppModel: ObservableObject {
 
     /// Present evidence at `POST /mesh/introduce`. On yes the device is a member and both sides
     /// hear it; on not-yet the door's words become the guest screen's path-to-admission copy.
+    /// One tap on the claimed human's own device (ADR-0026 E2 over the mesh): mint a voucher
+    /// for the waiting device's key and deliver it to the door. The rules engine does the rest —
+    /// the new device's next poll finds itself a member. Returns the door's words on refusal.
+    func vouchFor(nodeId: String, pubkey: String, handle: String) async -> String? {
+        guard !host.isEmpty else { return "no host" }
+        do {
+            let voucher = try DeviceVoucher.mint(node: node, handle: handle, subjectPubkey: pubkey)
+            switch try await VouchClient(node: node).vouch(voucher, host: host, port: enrollPort) {
+            case .admitted(let h):
+                note("✓ vouched — their device is now \(h.isEmpty ? "a member" : h)'s")
+                await refreshWorldview()
+                return nil
+            case .refused(let why):
+                note("vouch refused: \(why)")
+                return why
+            case .error(let e):
+                note("vouch failed: \(e)")
+                return e
+            }
+        } catch {
+            note("vouch failed: \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
     @discardableResult
     private func introduce(claim: IdentityClaim?, evidence: Evidence) async -> Bool {
         guard storedGrant() != nil, !host.isEmpty else { return false }
@@ -851,6 +876,7 @@ final class AppModel: ObservableObject {
     private var lastGuestsWaiting: Int?
     /// Arrival ids as of the previous read — nil until the first, so launch greets nobody twice.
     private var knownArrivalIds: Set<String>?
+    private var knownClaimIds: Set<String>?
     /// Whether this device stood at full standing as of the previous read. nil until the first,
     /// so launching already-recognised is silent.
     private var wasRecognised: Bool?
@@ -1001,6 +1027,24 @@ final class AppModel: ObservableObject {
                         note("someone new is at the door")
                     }
                     lastGuestsWaiting = waiting
+                }
+
+                // Someone's new device is claiming THIS device's human (E2 over the mesh) —
+                // the second person is us. Edge-triggered like arrivals, silent on first read.
+                if let claims = view.claims_waiting {
+                    let mine = claims.filter {
+                        $0.handle.caseInsensitiveCompare(attributedHuman) == .orderedSame
+                    }
+                    let ids = Set(mine.map { $0.node_id })
+                    if let known = knownClaimIds, case .member = membership {
+                        let fresh = mine.filter { !known.contains($0.node_id) }
+                        if !fresh.isEmpty {
+                            Chime.guestWaiting()
+                            let names = fresh.map { $0.label }.joined(separator: ", ")
+                            note("\(names) says it is yours — confirm on the welcome screen")
+                        }
+                    }
+                    knownClaimIds = ids
                 }
 
                 // Were WE just admitted? The moment this device's own id appears on the roll it

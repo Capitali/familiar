@@ -50,6 +50,9 @@ struct SphereConsoleIOS: View {
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
             bridge.onUnenroll = { [weak model] in model?.unenroll() }
+            bridge.onVouch = { [weak model] nodeId, pubkey, handle in
+                Task { _ = await model?.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle) }
+            }
             bridge.onSetHuman = { [weak model] name in
                 // Both halves, exactly like the Mac bridge: confirmPresentHuman is the presence
                 // claim the device screen's PRESENT row actually renders (ADR-0019) — without it
@@ -125,6 +128,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onStanding: ((String, String) -> Void)?
     var onUnenroll: (() -> Void)?
     var onSetHuman: ((String) -> Void)?
+    var onVouch: ((String, String, String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -276,6 +280,12 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "consent":
                 if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
+            case "vouch":
+                if let nodeId = body["node_id"] as? String,
+                   let pubkey = body["pubkey"] as? String,
+                   let handle = body["handle"] as? String {
+                    self.onVouch?(nodeId, pubkey, handle)
+                }
             case "setHuman":
                 if let name = body["name"] as? String, !name.isEmpty { self.onSetHuman?(name) }
             case "invite":

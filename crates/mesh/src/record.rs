@@ -151,6 +151,11 @@ pub struct MembershipRecord {
     /// so the record explains itself a year from now, exactly as the roll's notes did.
     #[serde(default)]
     pub note: String,
+    /// The device's current public key (hex), captured when it introduces itself. A voucher
+    /// names a subject *pubkey* (verified against `device_id` by fingerprint), so the claimed
+    /// human's device needs it to vouch without a QR crossing between machines.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pubkey: String,
     pub first_seen: i64,
     pub last_seen: i64,
 }
@@ -173,6 +178,7 @@ impl MembershipRecord {
             corrections: Vec::new(),
             attestation: Some(attestation),
             note: String::new(),
+            pubkey: String::new(),
             first_seen: now,
             last_seen: now,
         }
@@ -268,6 +274,11 @@ pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRe
             b.note.clone()
         } else {
             a.note.clone()
+        },
+        pubkey: if a.pubkey.is_empty() {
+            b.pubkey.clone()
+        } else {
+            a.pubkey.clone()
         },
         first_seen: a.first_seen.min(b.first_seen),
         last_seen: a.last_seen.max(b.last_seen),
@@ -806,6 +817,7 @@ fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i6
         corrections: Vec::new(),
         attestation: None,
         note: String::new(),
+        pubkey: String::new(),
         first_seen: now,
         last_seen: now,
     });
@@ -813,6 +825,31 @@ fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i6
     r.last_seen = r.last_seen.max(now);
     r.state = derive_state(&r);
     save(dir, &r)
+}
+
+/// A claim addresses (ADR-0019): when an introduction is REFUSED, the claim itself is still
+/// worth keeping — it is what the claimed human's own devices are shown so one of them can
+/// vouch (E2) without a QR crossing between machines. Never touches establishment or state;
+/// a member's record is left alone entirely.
+pub fn record_claim(
+    dir: &Path,
+    node_id: &str,
+    claim: &IdentityClaim,
+    pubkey: &str,
+    now: i64,
+) -> Result<()> {
+    let Some(rec) = find_by_key(dir, node_id) else {
+        return Err(Error::Untrusted("no record — knock first".into()));
+    };
+    if derive_state(&rec) == RecordState::Member {
+        return Ok(());
+    }
+    upsert(dir, &rec.device_id, now, |r| {
+        r.identity.claim = Some(claim.clone());
+        if r.pubkey.is_empty() {
+            r.pubkey = pubkey.to_string();
+        }
+    })
 }
 
 /// Dual-write from the legacy enrolment path: a grant was minted, so a record exists — and the
@@ -1983,6 +2020,29 @@ mod tests {
             "d6e8500da43c344b017d182c6689f3bad3e2c9273b3ad3038427a8956ae5b6ea\
              999d63fe2c62f950a294b9fa9d9f9e5f00f640edcc8dc0e75818c454d467af0c",
             "the golden invite signature InviteConformanceTests.swift asserts too"
+        );
+    }
+
+    #[test]
+    fn the_voucher_body_wire_format_is_pinned_for_the_swift_twin() {
+        // A device vouches from the console now (no QR crossing machines), so Swift mints the
+        // voucher and the Rust door verifies it — the canonical body is a cross-language wire
+        // contract exactly like the invite's. VoucherConformanceTests.swift pins the same body.
+        let body = serde_json::to_vec(&VoucherBody {
+            handle: "ian",
+            subject_pubkey: "aa11bb22cc33dd44ee55ff660011223344556677889900aabbccddeeff001122",
+            voucher_node_id: "1325b850c2871916",
+            ts: 1_700_000_000,
+            nonce: "00112233445566778899aabbccddeeff",
+        })
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(body).unwrap(),
+            "{\"handle\":\"ian\",\
+             \"subject_pubkey\":\"aa11bb22cc33dd44ee55ff660011223344556677889900aabbccddeeff001122\",\
+             \"voucher_node_id\":\"1325b850c2871916\",\
+             \"ts\":1700000000,\
+             \"nonce\":\"00112233445566778899aabbccddeeff\"}",
         );
     }
 

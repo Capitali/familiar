@@ -143,6 +143,21 @@ pub struct ArrivalView {
 /// The arrivals window — the same 24-hour judgement ADR-0021 uses for the live roster split.
 pub const ARRIVAL_WINDOW_SECS: i64 = 24 * 60 * 60;
 
+/// A guest's claim awaiting the claimed human's own device (ADR-0026 E2, over the mesh): "this
+/// device says it belongs to `handle`". Shown ONLY to member readers; a device of that handle
+/// can mint a voucher from it in one tap — the automatic path for "old user, new device" that
+/// needs no invite paste and no QR. Carries the subject's pubkey because a voucher names a key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimView {
+    pub node_id: String,
+    pub label: String,
+    pub handle: String,
+    /// The claiming device's public key (hex) — what a voucher vouches for; the door re-verifies
+    /// it against the record by fingerprint, so a tampered value only fails the vouch.
+    pub pubkey: String,
+    pub since: i64,
+}
+
 /// The compact snapshot returned to a member device — enough to render a Glass-like console: the
 /// three constitutional meters, the peer roster, and the recent observation feed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +188,10 @@ pub struct Worldview {
     /// what the welcome screen greets. Informational only; nothing here frames a decision.
     #[serde(default)]
     pub arrivals: Vec<ArrivalView>,
+    /// Guests whose refused introductions CLAIMED an existing human — waiting for that human's
+    /// own device to vouch (E2 over the mesh). Members only; projected away for guest readers.
+    #[serde(default)]
+    pub claims_waiting: Vec<ClaimView>,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -590,6 +609,35 @@ pub fn assemble_worldview(
         })
         .collect();
     arrivals.sort_by_key(|a| std::cmp::Reverse(a.at));
+
+    // Claims awaiting the claimed human's own device (E2 over the mesh): guests whose refused
+    // introduction named someone — surfaced so that human's device can vouch in one tap.
+    let mut claims_waiting: Vec<ClaimView> = crate::record::load_all(dir)
+        .into_iter()
+        .filter_map(|r| {
+            if crate::record::derive_state(&r) != crate::record::RecordState::Guest {
+                return None;
+            }
+            let claim = r.identity.claim.as_ref()?;
+            if claim.handle.trim().is_empty() || r.pubkey.is_empty() {
+                return None;
+            }
+            let label = members
+                .iter()
+                .find(|m| m.node_id == r.device_id || r.keys.contains(&m.node_id))
+                .map(|m| m.label.clone())
+                .unwrap_or_else(|| r.device_id.chars().take(8).collect());
+            Some(ClaimView {
+                node_id: r.device_id,
+                label,
+                handle: claim.handle.clone(),
+                pubkey: r.pubkey.clone(),
+                since: claim.ts,
+            })
+        })
+        .collect();
+    claims_waiting.sort_by_key(|c| std::cmp::Reverse(c.since));
+
     let goals = goal_views(dir);
 
     Ok(Worldview {
@@ -604,6 +652,7 @@ pub fn assemble_worldview(
         guests_waiting,
         standing_full: roll.full.clone(),
         arrivals,
+        claims_waiting,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,

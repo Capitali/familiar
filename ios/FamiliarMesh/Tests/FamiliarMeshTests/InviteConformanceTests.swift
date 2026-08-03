@@ -54,6 +54,33 @@ final class InviteConformanceTests: XCTestCase {
         XCTAssertEqual(InviteToken.jsonString("bell\u{07}"), "\"bell\\u0007\"")
     }
 
+    func testVoucherBodyMatchesRustByteForByte() throws {
+        // Rust pins the same body in record::tests::the_voucher_body_wire_format_is_pinned_…
+        XCTAssertEqual(
+            DeviceVoucher.canonicalBody(
+                handle: "ian",
+                subjectPubkey: "aa11bb22cc33dd44ee55ff660011223344556677889900aabbccddeeff001122",
+                voucherNodeId: "1325b850c2871916",
+                ts: 1_700_000_000,
+                nonce: "00112233445566778899aabbccddeeff"),
+            "{\"handle\":\"ian\","
+                + "\"subject_pubkey\":\"aa11bb22cc33dd44ee55ff660011223344556677889900aabbccddeeff001122\","
+                + "\"voucher_node_id\":\"1325b850c2871916\","
+                + "\"ts\":1700000000,"
+                + "\"nonce\":\"00112233445566778899aabbccddeeff\"}"
+        )
+        // A minted voucher's signature verifies over that exact body under this device's key —
+        // the same check the Rust door runs against the key it already holds.
+        let node = try NodeKey(seed: Golden.nodeSecret, label: "vector")
+        let v = try DeviceVoucher.mint(node: node, handle: "ian",
+                                       subjectPubkey: "aa11bb22cc33dd44ee55ff660011223344556677889900aabbccddeeff001122",
+                                       now: 1_700_000_000)
+        let body = DeviceVoucher.canonicalBody(handle: v.handle, subjectPubkey: v.subject_pubkey,
+                                               voucherNodeId: v.voucher_node_id, ts: v.ts, nonce: v.nonce)
+        let sig = try XCTUnwrap(Hex.decode(v.sig))
+        XCTAssertTrue(node.signing.publicKey.isValidSignature(sig, for: Data(body.utf8)))
+    }
+
     func testMintedTokenIsWellFormedAndTenMinutes() throws {
         let node = try NodeKey(seed: Golden.nodeSecret, label: "vector")
         let m = Membership(node_id: node.nodeId, node_pubkey: node.pubkeyHex,

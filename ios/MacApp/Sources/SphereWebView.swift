@@ -396,6 +396,17 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 // The SEVER button (armed + confirm in the web layer) — also previously dead.
                 self.model.unenroll()
                 self.pushDevice()
+            case "vouch":
+                // The second person is this human: their own device confirms the claim and the
+                // rules engine admits (ADR-0026 E2 over the mesh — no invite paste, no QR).
+                if let nodeId = body["node_id"] as? String,
+                   let pubkey = body["pubkey"] as? String,
+                   let handle = body["handle"] as? String {
+                    Task {
+                        _ = await self.model.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle)
+                        await self.poll()
+                    }
+                }
             default: break
             }
         }

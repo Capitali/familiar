@@ -316,6 +316,9 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
     // How many others are awaiting a decision is the household's business, not a guest's.
     view.guests_waiting = 0;
     view.standing_full.clear();
+    // Whose device is claiming whom is entirely the household's business — a guest never
+    // learns that another guest is knocking as "ian", let alone gets a key to vouch for.
+    view.claims_waiting.clear();
     // A guest sees the arrivals too — the mesh greets, that is shape — but not who: labels
     // pseudonymize and handles fall to "someone", same rule as the roster.
     for a in view.arrivals.iter_mut() {

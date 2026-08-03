@@ -87,6 +87,93 @@ public struct InviteToken: Codable, Equatable {
     }
 }
 
+/// E2 — a device already established for a handle vouches for a new one, from its own console
+/// (ADR-0026, the voucher traveling over the mesh instead of by QR). Minted HERE on the
+/// established device; the door verifies the signature against the key it already holds for
+/// this device, checks the handle matches, and runs the same rules engine a handoff would.
+public struct DeviceVoucher: Codable, Equatable {
+    public var handle: String
+    public var subject_pubkey: String
+    public var voucher_node_id: String
+    public var ts: Int64
+    public var nonce: String
+    public var sig: String
+
+    /// The signature covers the canonical body — Rust `record::VoucherBody`, serde_json,
+    /// declared field order, pinned on both sides by conformance tests.
+    public static func mint(node: NodeKey, handle: String, subjectPubkey: String,
+                            now: Int64 = Int64(Date().timeIntervalSince1970)) throws -> DeviceVoucher {
+        let raw = SymmetricKey(size: .bits128).withUnsafeBytes { Data($0) }
+        let nonce = raw.map { String(format: "%02x", $0) }.joined()
+        let body = canonicalBody(handle: handle, subjectPubkey: subjectPubkey,
+                                 voucherNodeId: node.nodeId, ts: now, nonce: nonce)
+        let sig = try node.sign(Data(body.utf8))
+        return DeviceVoucher(handle: handle, subject_pubkey: subjectPubkey,
+                             voucher_node_id: node.nodeId, ts: now, nonce: nonce, sig: sig)
+    }
+
+    static func canonicalBody(handle: String, subjectPubkey: String, voucherNodeId: String,
+                              ts: Int64, nonce: String) -> String {
+        "{\"handle\":\(InviteToken.jsonString(handle)),"
+            + "\"subject_pubkey\":\(InviteToken.jsonString(subjectPubkey)),"
+            + "\"voucher_node_id\":\(InviteToken.jsonString(voucherNodeId)),"
+            + "\"ts\":\(ts),\"nonce\":\(InviteToken.jsonString(nonce))}"
+    }
+}
+
+/// `POST /mesh/vouch` — deliver a voucher to the door. One tap on the claimed human's own
+/// device; the guest's next standing poll finds itself a member.
+public struct VouchClient {
+    public enum Outcome: Equatable {
+        case admitted(handle: String)
+        case refused(String)
+        case error(String)
+    }
+
+    public var node: NodeKey
+    public var urlSession: URLSession
+
+    public init(node: NodeKey, urlSession: URLSession = MeshTLS.session) {
+        self.node = node
+        self.urlSession = urlSession
+    }
+
+    public func vouch(_ voucher: DeviceVoucher, host: String, port: Int) async throws -> Outcome {
+        let obj: [String: Any] = [
+            "node": ["node_id": node.nodeId, "pubkey": node.pubkeyHex, "label": node.label],
+            "voucher": [
+                "handle": voucher.handle, "subject_pubkey": voucher.subject_pubkey,
+                "voucher_node_id": voucher.voucher_node_id, "ts": voucher.ts,
+                "nonce": voucher.nonce, "sig": voucher.sig,
+            ],
+        ]
+        guard JSONSerialization.isValidJSONObject(obj),
+              let body = try? JSONSerialization.data(withJSONObject: obj) else {
+            return .error("could not encode the vouch")
+        }
+        let sig = try node.sign(body)
+        guard let url = URL(string: "https://\(host):\(port)/mesh/vouch") else {
+            return .error("bad host")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 8
+        req.setValue(sig, forHTTPHeaderField: "X-Familiar-Sig")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let (data, resp) = try await urlSession.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let said = String(data: data, encoding: .utf8) ?? ""
+        switch code {
+        case 200:
+            let obj2 = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            return .admitted(handle: obj2?["handle"] as? String ?? "")
+        case 403: return .refused(said)
+        default: return .error(said.isEmpty ? "host said \(code)" : said)
+        }
+    }
+}
+
 /// The evidence a device presents for the identity filter. Mirrors the Rust `Evidence` enum's
 /// internally-tagged wire (`{"class": "…", …}`). Rotation proofs and device vouchers are minted
 /// device-to-device (the watch link) and ride the same shapes when that path lands.
