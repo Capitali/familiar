@@ -345,6 +345,21 @@ function refreshScreen() {
     const pairs = P.map((p, i) => [p, i]);
     const past = pairs.filter(([p]) => isStale(p));
     const live = pairs.filter(([p]) => !isStale(p));
+    // A member that runs ON another machine (a Mac's console shell — m.attached_to carries the
+    // host's node_id) nests inside its host's card instead of standing as an unexplained
+    // sibling. Still its own member — own key, own row in history, own dive — and if the host
+    // is absent from the live roster the member stands alone again (quit the daemon and the
+    // console honestly reappears at top level).
+    const nestedIn = (host) => live.filter(([q]) => q.m.attached_to === host.m.node_id);
+    const standing_ = live.filter(([p]) =>
+      !p.m.attached_to || !live.some(([h]) => h.m.node_id === p.m.attached_to));
+    const nestedRow = ([q, qi]) => `
+      <div onclick="event.stopPropagation();sphereNode(${qi})" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 12px;border-radius:11px;background:rgba(20,44,80,0.3);border:1px solid rgba(120,190,255,0.14);cursor:pointer;">
+        <span style="width:7px;height:7px;border-radius:50%;background:${q.color};box-shadow:0 0 9px ${q.color};"></span>
+        <span style="font-size:13px;font-weight:500;flex:1;letter-spacing:-0.01em;">${esc(q.name)}</span>
+        ${chip(q.kindWord, '#bcd2ff')}
+        <span class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(160,195,255,0.55);">${esc((q.status||'').toUpperCase())}</span>
+      </div>`;
     const card = ([p, i]) => `
       <div onclick="sphereNode(${i})" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
@@ -364,6 +379,7 @@ function refreshScreen() {
           <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#9cc0ff;">${esc(p.total)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">TOTAL</div></div>
         </div>
         <div style="height:4px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:13px;"><div style="height:100%;width:${p.status==='online'?100:p.status==='away'?45:8}%;border-radius:5px;background:${p.color};box-shadow:0 0 8px ${p.color};"></div></div>
+        ${nestedIn(p).map(nestedRow).join('')}
         <button onclick="event.stopPropagation();sphereDive(${i})" class="glybtn" style="width:100%;height:38px;border-radius:11px;">${DIVE_GLYPH}</button>
       </div>`;
 
@@ -405,7 +421,7 @@ function refreshScreen() {
     el.innerHTML = bar + (S.rosterHistory
       ? table()
       : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
-        + live.map(card).join('') + `</div>`);
+        + standing_.map(card).join('') + `</div>`);
 
   } else if (k === 'welcome') {
     // A greeting, not a gate (ADR-0026): who is new — the last 24 hours of members, devices,

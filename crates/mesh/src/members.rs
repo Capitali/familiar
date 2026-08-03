@@ -123,6 +123,12 @@ pub struct Member {
     /// heartbeat (ADR-0017). Empty when unknown. Rendered as a connectivity badge on the roster.
     #[serde(default)]
     pub connectivity: String,
+    /// The node this member runs ON — a Mac console shell carries the node_id of the daemon on
+    /// the same machine. They stay two real members (separate keys; see PlatformDevice.name's
+    /// load-bearing " console" suffix), but the roster may nest this one under its host instead
+    /// of showing an unexplained sibling. Empty for members that stand on their own machine.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub attached_to: String,
 }
 
 /// Liveness thresholds, per member kind: a gossip peer beacons every ~30s, so two missed
@@ -391,6 +397,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             lat: self_lat,
             lon: self_lon,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: "local".into(),
         });
     }
@@ -555,6 +562,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             lat: p.lat,
             lon: p.lon,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: p.connectivity.clone(),
         });
     }
@@ -618,13 +626,67 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             lat: 0.0,
             lon: 0.0,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: String::new(),
         });
     }
 
     out = dedup_devices(out);
     attach_companions(&mut out, &obs);
+    attach_consoles(&mut out, &transport::reachable_hosts());
     out
+}
+
+/// A Mac console shell (`mac:*`) and the daemon on the same machine are two real members —
+/// separate keys, and the console can quit while the daemon runs on (the " console" label
+/// suffix is load-bearing; see the Swift side's PlatformDevice.name). What the roster was
+/// missing is the RELATIONSHIP: mark the console `attached_to` its host node and badge the
+/// host, so the UI can nest one under the other instead of showing an unexplained sibling.
+///
+/// The link is structural first — the console's address is the host machine's address (a full
+/// peer's addr, or one of this host's own addresses for the self node) — with the label
+/// convention ("<machine> console" vs "<machine>") as the fallback when addresses are absent
+/// or stale. Pure over the member list + this host's own addresses, so it's directly testable.
+fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
+    let ip_of = |addr: &str| addr.split(':').next().unwrap_or("").to_string();
+    let mut links: Vec<(usize, usize)> = Vec::new();
+    for (ci, c) in out.iter().enumerate() {
+        if c.kind != MemberKind::DevicePeer || c.actor.split(':').next() != Some("mac") {
+            continue;
+        }
+        let cip = ip_of(&c.addr);
+        let on_self_host =
+            !cip.is_empty() && (cip == "127.0.0.1" || self_hosts.contains(&cip));
+        let stem = c.label.to_lowercase();
+        let stem = stem.strip_suffix(" console").unwrap_or("").trim().to_string();
+        let full_node = |h: &Member| matches!(h.kind, MemberKind::SelfNode | MemberKind::GossipPeer);
+        // The label convention is machine-specific, so it decides first: behind one NAT many
+        // machines share a recorded public address, and an IP-first match could nest a console
+        // under a different machine's daemon that merely egresses the same way.
+        let host = out
+            .iter()
+            .enumerate()
+            .find(|(hi, h)| {
+                *hi != ci && full_node(h) && !stem.is_empty() && h.label.to_lowercase() == stem
+            })
+            .or_else(|| {
+                out.iter().enumerate().find(|(hi, h)| {
+                    *hi != ci
+                        && full_node(h)
+                        && ((h.kind == MemberKind::SelfNode && on_self_host)
+                            || (!cip.is_empty() && ip_of(&h.addr) == cip))
+                })
+            });
+        if let Some((hi, _)) = host {
+            links.push((ci, hi));
+        }
+    }
+    for (ci, hi) in links {
+        out[ci].attached_to = out[hi].node_id.clone();
+        if !out[hi].attached.iter().any(|a| a == "🖥 console") {
+            out[hi].attached.push("🖥 console".to_string());
+        }
+    }
 }
 
 /// Collapse repeated identities of the same physical device into one roster row. A device that is
@@ -669,7 +731,7 @@ fn dedup_devices(members: Vec<Member>) -> Vec<Member> {
             .map(|m| m.label.clone())
             .find(|l| !l.is_empty() && !l.contains(':'));
         // Freshest identity represents the device now.
-        g.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        g.sort_by_key(|m| std::cmp::Reverse(m.last_seen));
         let mut rep = g.remove(0);
         rep.total_online_secs = total;
         if rep.label.contains(':') || rep.label.is_empty() {
@@ -704,7 +766,7 @@ fn attach_companions(out: &mut [Member], obs: &[familiar_kernel::observation::Ob
             .iter()
             .filter(|o| (o.source == src || o.actor == m.actor) && o.action == "reports")
             .collect();
-        recent.sort_by(|a, b| b.ts.cmp(&a.ts));
+        recent.sort_by_key(|o| std::cmp::Reverse(o.ts));
         let (mut heart, mut motion, mut gyro, mut gps) = (None, None, None, None);
         for o in recent {
             let obj = o.object.as_str();
@@ -1027,6 +1089,61 @@ mod tests {
         assert!(d.contains("walking"), "motion in summary: {d}");
         assert!(d.contains("gyro turning"), "gyro in summary: {d}");
         assert!(d.contains("gps 48.6,-93.4"), "gps in summary: {d}");
+    }
+
+    #[test]
+    fn a_mac_console_nests_under_the_machine_it_runs_on() {
+        let mk = |node: &str, label: &str, actor: &str, kind: &str, addr: &str| -> Member {
+            serde_json::from_value(serde_json::json!({
+                "node_id": node, "label": label, "kind": kind, "actor": actor, "addr": addr,
+                "os": "", "detail": "", "first_seen": 0, "last_seen": 0, "online": true,
+            }))
+            .unwrap()
+        };
+        // Seen from a third node (the lighthouse): wildhorse's daemon is a gossip peer and its
+        // console a device peer, both reporting the same machine address.
+        let mut out = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("1c99", "wildhorse", "", "gossip_peer", "192.168.108.10"),
+            mk("a24d", "Wildhorse console", "mac:ian", "device_peer", "192.168.108.10"),
+            mk("d5c3", "iPhone", "phone:ian", "device_peer", "192.168.108.188"),
+        ];
+        attach_consoles(&mut out, &[]);
+        assert_eq!(
+            out[2].attached_to, "1c99",
+            "the console is attached to the daemon on its machine (label stem match)"
+        );
+        assert!(
+            out[1].attached.iter().any(|a| a == "🖥 console"),
+            "the machine's daemon is badged with its console"
+        );
+        assert!(
+            out[3].attached_to.is_empty(),
+            "a phone stands on its own — no attachment"
+        );
+
+        // Seen from the Mac itself: the daemon is the self node ("localhost"), the console's
+        // address is one of this host's own. No label dependence — structural match.
+        let mut own = vec![
+            mk("1c99", "TheRiver", "", "self_node", "localhost"),
+            mk("a24d", "Renamed Thing", "mac:ian", "device_peer", "192.168.108.10"),
+        ];
+        attach_consoles(&mut own, &["192.168.108.10".to_string()]);
+        assert_eq!(
+            own[1].attached_to, "1c99",
+            "on the host itself the console attaches to the self node by address"
+        );
+
+        // A console whose machine is nowhere on the roster stays a sibling — no false nesting.
+        let mut alone = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("a24d", "Codex console", "mac:ian", "device_peer", "10.0.0.7"),
+        ];
+        attach_consoles(&mut alone, &[]);
+        assert!(
+            alone[1].attached_to.is_empty(),
+            "no host on the roster — the console stands alone rather than guessing"
+        );
     }
 
     #[test]
