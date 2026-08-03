@@ -418,7 +418,10 @@ fn is_gossipable_addr(ip: &str) -> bool {
             let o = v4.octets();
             // Tailscale's CGNAT range is a real reachable path, and the doctrine (ADR-0012) already
             // sorts it last rather than excluding it.
-            v4.is_private() || v4.is_link_local() || v4.is_loopback() || o[0] == 100 && (64..=127).contains(&o[1])
+            v4.is_private()
+                || v4.is_link_local()
+                || v4.is_loopback()
+                || o[0] == 100 && (64..=127).contains(&o[1])
         }
         // Unique-local (fc00::/7) and link-local; a global v6 address is directly routable in
         // principle, but it is still an observed source address, so it gets the same treatment.
@@ -882,23 +885,53 @@ mod gossip_addr_tests {
     #[test]
     fn the_nat_exits_that_poisoned_the_ipad_are_refused() {
         let observed_junk = [
-            "129.224.211.181", "139.178.131.76", "129.222.46.137", "97.202.192.132",
-            "207.213.186.129", "207.213.186.177", "129.224.211.90", "24.111.157.40",
-            "107.115.39.17", "129.222.44.157", "129.222.44.228", "129.222.44.227",
-            "129.224.211.42", "139.178.129.14", "209.79.170.49", "207.213.186.50",
-            "139.178.130.73", "207.213.186.145", "107.115.39.18", "207.213.186.49",
-            "139.178.129.4", "207.213.186.178", "129.224.211.45", "107.115.39.82",
+            "129.224.211.181",
+            "139.178.131.76",
+            "129.222.46.137",
+            "97.202.192.132",
+            "207.213.186.129",
+            "207.213.186.177",
+            "129.224.211.90",
+            "24.111.157.40",
+            "107.115.39.17",
+            "129.222.44.157",
+            "129.222.44.228",
+            "129.222.44.227",
+            "129.224.211.42",
+            "139.178.129.14",
+            "209.79.170.49",
+            "207.213.186.50",
+            "139.178.130.73",
+            "207.213.186.145",
+            "107.115.39.18",
+            "207.213.186.49",
+            "139.178.129.4",
+            "207.213.186.178",
+            "129.224.211.45",
+            "107.115.39.82",
             "207.213.186.97",
         ];
         for ip in observed_junk {
-            assert!(!is_gossipable_addr(ip), "{ip} is a NAT exit and must never be gossiped");
+            assert!(
+                !is_gossipable_addr(ip),
+                "{ip} is a NAT exit and must never be gossiped"
+            );
         }
     }
 
     #[test]
     fn real_paths_still_gossip() {
-        for ip in ["192.168.108.10", "192.168.108.119", "10.0.0.5", "172.16.0.9",
-                   "100.78.40.47", "100.105.39.72", "100.101.24.40", "fd00::1", "::1"] {
+        for ip in [
+            "192.168.108.10",
+            "192.168.108.119",
+            "10.0.0.5",
+            "172.16.0.9",
+            "100.78.40.47",
+            "100.105.39.72",
+            "100.101.24.40",
+            "fd00::1",
+            "::1",
+        ] {
             assert!(is_gossipable_addr(ip), "{ip} is a genuinely dialable path");
         }
     }
@@ -913,12 +946,12 @@ mod gossip_addr_tests {
 
     #[test]
     fn boundaries_that_are_easy_to_get_wrong() {
-        assert!(is_gossipable_addr("100.64.0.1"));      // first tailnet address
+        assert!(is_gossipable_addr("100.64.0.1")); // first tailnet address
         assert!(is_gossipable_addr("100.127.255.254")); // last tailnet address
-        assert!(!is_gossipable_addr("100.63.0.1"));     // just below — public
-        assert!(!is_gossipable_addr("100.128.0.1"));    // just above — public
-        assert!(is_gossipable_addr("172.31.255.254"));  // last RFC1918 in the 172 block
-        assert!(!is_gossipable_addr("172.32.0.1"));     // just above — public
+        assert!(!is_gossipable_addr("100.63.0.1")); // just below — public
+        assert!(!is_gossipable_addr("100.128.0.1")); // just above — public
+        assert!(is_gossipable_addr("172.31.255.254")); // last RFC1918 in the 172 block
+        assert!(!is_gossipable_addr("172.32.0.1")); // just above — public
         assert!(!is_gossipable_addr(""));
         assert!(!is_gossipable_addr("cerbo.river.io")); // not an address at all
     }

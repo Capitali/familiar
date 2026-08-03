@@ -6,6 +6,58 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-03 — The UCF market feed: an external exchange as perception
+
+### What changed
+
+- **`familiar_sense::market`** — a new perception source: the United Cat Foods
+  market daemon (`ucfmarketd`, a.k.a. `UCFTRADE_SERVER`). One poll reads
+  `/v1/status` (keyless), `/v1/galaxy/prices`, and `/v1/news` (bearer-keyed)
+  and turns them into observations: `ucf-market advanced tick:<n>`,
+  `station:<id> quotes <good>@<mid>`, `ucf-dispatch <status> <headline>`.
+  The price and the event status live *in the triple*, so structural dedup
+  records only changes — a poller on the exchange's 5-minute cadence appends
+  a trickle, not a flood. Source is `market`, never laundered into `sensor`.
+- **`familiar market pull`** — periphery-invoked on the shell's cadence (the
+  `discover` pattern), gated by `allow_network` through the obedience guard,
+  fail-closed. Config is a human-placed `market.json` in the data dir
+  (`{"server", "key"}` — the same authorize-by-placing doctrine as
+  `call_llm.sh`); `--server`/`--key` override. Std-only HTTP/1.0 client;
+  zero new dependencies.
+- From the store the existing machinery takes over: loops, theories, and
+  mesh replication via briefs (`share_observations`) — market data reaches
+  the mesh like every other observation, with nothing market-specific in
+  the mesh at all.
+- Toolchain housekeeping for clippy 1.97 on pre-existing code (const-block
+  assertion in `routing.rs`, `sort_by_key` in `members.rs`, a redundant
+  borrow in `cli`).
+
+### Why
+
+The familiar should perceive the worlds its human works in. The UCF exchange
+is a live, tick-driven external world; feeding it through the observe seam —
+rather than a bespoke pipeline — proves the doctrine that *everything* is an
+observation, and gives the metabolism real non-host data to find loops in.
+
+### Checks run
+
+- fmt, clippy `-D warnings`, `cargo test --all` green; kernel unsafe-guard.
+- Module tests: parsers (status/prices/news/garbage), URL strictness, HTTP
+  response splitting/completeness.
+- `crates/sense/tests/market_feed.rs`: a scripted fake exchange on a real
+  loopback socket — keyed pull records the expected triples and sends the
+  bearer header; keyless pull touches only `/v1/status`; an absent exchange
+  and garbage/401 replies yield notes, never panics.
+- Live against the running exchange (tick 61850): first pull recorded 44
+  observations (1 clock, 40 quotes, 3+ dispatch), second pull recorded 0
+  (dedup); closing the boundary refuses before any reach.
+
+### Next
+
+A shell cadence for the pull (launchd/cron or the daemon's periphery hook),
+and letting theories form over price loops before deciding whether the feed
+deserves richer triples (per-station stock, trade receipts).
+
 ## 2026-07-24 — Console polish + retiring the marble era
 
 ### What changed

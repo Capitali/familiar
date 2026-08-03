@@ -292,6 +292,6 @@ mod tests {
     #[test]
     fn presence_here_is_tighter_than_the_withdrawal_horizon() {
         // Being askable is a stricter test than not-having-abandoned-us.
-        assert!(HERE_WINDOW_SECS < presence::WITHDRAWAL_HORIZON_SECS);
+        const { assert!(HERE_WINDOW_SECS < presence::WITHDRAWAL_HORIZON_SECS) }
     }
 }
