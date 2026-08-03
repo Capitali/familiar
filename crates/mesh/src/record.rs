@@ -827,6 +827,36 @@ fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i6
     save(dir, &r)
 }
 
+/// The human at this door naming an established device whose establishment carries no handle —
+/// the roll migration deliberately wrote "" rather than invent names, but an unnamed handle
+/// can neither be protected by the guardrails nor vouch for anyone (E2 keys on it). Refuses
+/// to RE-name: changing an established name is a disestablish-then-re-establish, not an edit.
+pub fn name_established(dir: &Path, node_id: &str, handle: &str, now: i64) -> Result<()> {
+    let handle = handle.trim();
+    if handle.is_empty() {
+        return Err(Error::Untrusted("a name is required".into()));
+    }
+    let Some(rec) = find_by_key(dir, node_id) else {
+        return Err(Error::Untrusted("no record for that node".into()));
+    };
+    let Some(est) = &rec.identity.established else {
+        return Err(Error::Untrusted(
+            "not established — naming only fills in a missing name, it never admits".into(),
+        ));
+    };
+    if !est.handle.is_empty() {
+        return Err(Error::Untrusted(format!(
+            "already established as “{}” — changing a name is disestablish + re-establish",
+            est.handle
+        )));
+    }
+    upsert(dir, &rec.device_id, now, |r| {
+        if let Some(e) = r.identity.established.as_mut() {
+            e.handle = handle.to_string();
+        }
+    })
+}
+
 /// A claim addresses (ADR-0019): when an introduction is REFUSED, the claim itself is still
 /// worth keeping — it is what the claimed human's own devices are shown so one of them can
 /// vouch (E2) without a QR crossing between machines. Never touches establishment or state;

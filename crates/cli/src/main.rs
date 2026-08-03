@@ -1391,6 +1391,29 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("name") => {
+            // `mesh name <node_id> <handle>` — the human at this door naming an established
+            // device whose establishment carries no handle (the roll migration deliberately
+            // wrote "" rather than invent names). The name is what the E2/E4 guardrails and
+            // the voucher path key on, so an unnamed fleet cannot protect or vouch for anyone.
+            let (Some(node_id), Some(handle)) = (
+                args.get(1).filter(|a| !a.starts_with("--")),
+                args.get(2).filter(|a| !a.starts_with("--")),
+            ) else {
+                eprintln!("mesh: usage: familiar mesh name <node_id> <handle>");
+                return ExitCode::FAILURE;
+            };
+            match familiar_mesh::record::name_established(&dir, node_id, handle, now_secs()) {
+                Ok(_) => {
+                    println!("✓ {node_id} established as “{handle}”");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mesh: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("invite-token") => {
             // `mesh invite-token [--handle H]` — a member's deliberate act, displaced in time:
             // single-use, ten minutes, carries NO secret. Naming a handle lets the newcomer
@@ -1631,7 +1654,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | escrow-export | escrow-restore | reduce-to-covenant --yes \
                  | standing [show | grant <node_id> [--note N] | revoke <node_id>] \
                  | sever|hold|disestablish|restore <node_id> [--reason R] \
-                 | invite-token [--handle H] | warrant <node_id> <pubkey> | warrant-install <json> \
+                 | name <node_id> <handle> | invite-token [--handle H] | warrant <node_id> <pubkey> | warrant-install <json> \
                  | migrate-records | doctor>"
             );
             ExitCode::FAILURE
