@@ -36,6 +36,9 @@ commands:
                  classify each (agent-capable / protocol-controllable / observable)
   discover       periphery-invoked LAN survey: discover devices + assess reach in one
                  pass, recording the observations that seed the roster and the frontier
+  market         pull the UCF trade feed (status, galaxy prices, Dispatch news) into
+                 observations: `market pull`. Needs `allow_network` open and a
+                 market.json ({\"server\", \"key\"}) in the data dir
   tool prune     purge authored tools that reach the network (LAN scans); --dry-run to list
   tick           run one cycle of the metabolism (sense → detect → muse → act → measure)
   run            run the metabolism: --ticks N (bounded) or --daemon/--ticks 0
@@ -99,6 +102,7 @@ fn main() -> ExitCode {
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
+        Some("market") => cmd_market(rest),
         Some("tool") => cmd_tool(rest),
         Some("tick") => cmd_tick(rest),
         Some("run") => cmd_run(rest),
@@ -828,7 +832,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         familiar_mesh::members::MemberKind::DeviceAgent => "agent ",
                     },
                     m.label,
-                    &m.node_id.chars().take(8).collect::<String>(),
+                    m.node_id.chars().take(8).collect::<String>(),
                     m.status,
                     if m.status == "online" {
                         String::new()
@@ -2125,6 +2129,85 @@ fn cmd_discover(args: &[String]) -> ExitCode {
         "discover: {} device(s) assessed, {recorded} observation(s) recorded.",
         reaches.len()
     );
+    ExitCode::SUCCESS
+}
+
+/// `familiar market pull [--server URL] [--key K]` — poll the UCF exchange and record
+/// what changed as observations. Periphery-invoked (the shell's cadence, like
+/// `discover`), gated by `allow_network`, configured by a human-placed `market.json`.
+fn cmd_market(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let now = now_secs();
+    if args.first().map(String::as_str) != Some("pull") {
+        eprintln!("usage: familiar market pull [--server URL] [--key ucfk_...]");
+        return ExitCode::FAILURE;
+    }
+    let b = match boundary::load(&dir) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("market: boundary policy error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let verdict = guard::evaluate(&Action::new(ActionKind::Network, "market"), &b);
+    if verdict.decision != Decision::Allow {
+        eprintln!(
+            "market: the network is outside the boundary — open `allow_network` to let the \
+             periphery read the exchange.\n  {}",
+            verdict.rationale
+        );
+        return ExitCode::FAILURE;
+    }
+    // Flags override the human-placed config; either alone is enough to name a server.
+    let mut cfg = familiar_sense::market::load_config(&dir);
+    if let Some(server) = f.get("server") {
+        let key = f
+            .get("key")
+            .cloned()
+            .or_else(|| cfg.as_ref().and_then(|c| c.key.clone()));
+        cfg = Some(familiar_sense::market::MarketConfig {
+            server: server.clone(),
+            key,
+        });
+    } else if let (Some(c), Some(key)) = (cfg.as_mut(), f.get("key")) {
+        c.key = Some(key.clone());
+    }
+    let Some(cfg) = cfg else {
+        eprintln!(
+            "market: no exchange configured — place {} in the data dir \
+             ({{\"server\": \"http://127.0.0.1:7877\", \"key\": \"ucfk_...\"}}) \
+             or pass --server/--key.",
+            familiar_sense::market::MARKET_CONFIG
+        );
+        return ExitCode::FAILURE;
+    };
+    let pull = familiar_sense::market::poll(&cfg, now);
+    // Structural dedup, the tick's own discipline: record only triples not already held.
+    let mut seen: std::collections::HashSet<(String, String, String)> =
+        match observation::load(&dir) {
+            Ok(obs) => obs
+                .iter()
+                .map(|o| (o.actor.clone(), o.action.clone(), o.object.clone()))
+                .collect(),
+            Err(e) => {
+                eprintln!("market: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+    let polled = pull.observations.len();
+    let mut recorded = 0;
+    for o in pull.observations {
+        if seen.insert((o.actor.clone(), o.action.clone(), o.object.clone()))
+            && observation::record(&dir, o).is_ok()
+        {
+            recorded += 1;
+        }
+    }
+    for note in &pull.notes {
+        eprintln!("market: {note}");
+    }
+    println!("market: {polled} fact(s) polled, {recorded} new observation(s) recorded.");
     ExitCode::SUCCESS
 }
 

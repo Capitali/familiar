@@ -669,7 +669,7 @@ fn dedup_devices(members: Vec<Member>) -> Vec<Member> {
             .map(|m| m.label.clone())
             .find(|l| !l.is_empty() && !l.contains(':'));
         // Freshest identity represents the device now.
-        g.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        g.sort_by_key(|m| std::cmp::Reverse(m.last_seen));
         let mut rep = g.remove(0);
         rep.total_online_secs = total;
         if rep.label.contains(':') || rep.label.is_empty() {
@@ -704,7 +704,7 @@ fn attach_companions(out: &mut [Member], obs: &[familiar_kernel::observation::Ob
             .iter()
             .filter(|o| (o.source == src || o.actor == m.actor) && o.action == "reports")
             .collect();
-        recent.sort_by(|a, b| b.ts.cmp(&a.ts));
+        recent.sort_by_key(|o| std::cmp::Reverse(o.ts));
         let (mut heart, mut motion, mut gyro, mut gps) = (None, None, None, None);
         for o in recent {
             let obj = o.object.as_str();

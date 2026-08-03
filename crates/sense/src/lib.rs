@@ -12,6 +12,8 @@
 //!
 //! Returned observations have empty ids; the caller assigns them on record.
 
+pub mod market;
+
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::process::Command;
