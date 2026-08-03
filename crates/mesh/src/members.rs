@@ -649,9 +649,18 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
 /// or stale. Pure over the member list + this host's own addresses, so it's directly testable.
 fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
     let ip_of = |addr: &str| addr.split(':').next().unwrap_or("").to_string();
+    // A console that has pushed observations recently classifies as a DevicePeer with a `mac:*`
+    // actor; one that has merely been gossiping sits as a GossipPeer with an EMPTY actor, and
+    // only its label ("<machine> console" — PlatformDevice.name) says what it is. Accept both,
+    // and never let a console be another console's host.
+    let is_console = |m: &Member| {
+        m.kind != MemberKind::SelfNode
+            && (m.actor.split(':').next() == Some("mac")
+                || m.label.to_lowercase().ends_with(" console"))
+    };
     let mut links: Vec<(usize, usize)> = Vec::new();
     for (ci, c) in out.iter().enumerate() {
-        if c.kind != MemberKind::DevicePeer || c.actor.split(':').next() != Some("mac") {
+        if !is_console(c) {
             continue;
         }
         let cip = ip_of(&c.addr);
@@ -659,7 +668,9 @@ fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
             !cip.is_empty() && (cip == "127.0.0.1" || self_hosts.contains(&cip));
         let stem = c.label.to_lowercase();
         let stem = stem.strip_suffix(" console").unwrap_or("").trim().to_string();
-        let full_node = |h: &Member| matches!(h.kind, MemberKind::SelfNode | MemberKind::GossipPeer);
+        let full_node = |h: &Member| {
+            matches!(h.kind, MemberKind::SelfNode | MemberKind::GossipPeer) && !is_console(h)
+        };
         // The label convention is machine-specific, so it decides first: behind one NAT many
         // machines share a recorded public address, and an IP-first match could nest a console
         // under a different machine's daemon that merely egresses the same way.
@@ -1143,6 +1154,25 @@ mod tests {
         assert!(
             alone[1].attached_to.is_empty(),
             "no host on the roster — the console stands alone rather than guessing"
+        );
+
+        // The live shape on wildhorse: a console that has only been gossiping (no recent
+        // observation reports) classifies as a GossipPeer with an EMPTY actor — only the
+        // "<machine> console" label says what it is. It must still nest, and must never be
+        // taken as another console's host.
+        let mut quiet = vec![
+            mk("1c99", "TheRiver", "", "self_node", "localhost"),
+            mk("a24d", "Wildhorse console", "", "gossip_peer", "192.168.108.10"),
+            mk("aaaa", "Codex console", "", "gossip_peer", "192.168.108.10"),
+        ];
+        attach_consoles(&mut quiet, &["192.168.108.10".to_string()]);
+        assert_eq!(
+            quiet[1].attached_to, "1c99",
+            "a quiet console (gossip peer, empty actor) still nests by its label + address"
+        );
+        assert_eq!(
+            quiet[2].attached_to, "1c99",
+            "the second console attaches to the machine, never to the first console"
         );
     }
 
