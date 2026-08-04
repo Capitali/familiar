@@ -1202,6 +1202,17 @@ async fn handle(
             };
             recv_introduce(&dir, &bytes, &sig, &peer_ip, relayed)
         }
+        // Record replication (ADR-0026): a sibling door offers its recent records; merge
+        // reconciles. GET is this door's own offer, POST accepts a sibling's — both are called
+        // by the dial-OUT side of a gossip exchange, so CGNAT'd doors sync in both directions.
+        (Method::GET, "/mesh/records") => offer_records(&dir),
+        (Method::POST, "/mesh/record-sync") => {
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_record_sync(&dir, &bytes)
+        }
         // E2 traveling over the mesh: an established device of the claimed handle confirms
         // "that new device is mine" from its own console — same rules engine as a handoff.
         (Method::POST, "/mesh/vouch") => {
@@ -1938,9 +1949,12 @@ fn established_devices(dir: &Path, cred: &group::GroupCredential) -> Vec<crate::
             continue;
         };
         for key in &r.keys {
+            // The record's own pubkey covers the CURRENT key at doors that never granted this
+            // device (record-sync brought the record; there is no local grant to consult).
+            let fallback = if *key == r.device_id { r.pubkey.clone() } else { String::new() };
             out.push(crate::record::EstablishedDeviceRef {
                 node_id: key.clone(),
-                pubkey: pubkeys.get(key).cloned().unwrap_or_default(),
+                pubkey: pubkeys.get(key).cloned().unwrap_or(fallback),
                 handle: est.handle.clone(),
             });
         }
@@ -2051,6 +2065,9 @@ fn recv_introduce(
                 now,
             ) {
                 Ok(_) => {
+                    // The key the door just verified travels WITH the record (record-sync) —
+                    // a sibling door can then check a voucher against it with no grant of its own.
+                    let _ = crate::record::record_pubkey(dir, &req.node.node_id, &req.node.pubkey, now);
                     let label = if req.node.label.trim().is_empty() {
                         req.node.node_id.chars().take(8).collect()
                     } else {
@@ -2214,6 +2231,99 @@ fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
         }
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad evidence"),
+    }
+}
+
+/// `GET /mesh/records` → this door's signed offer of recently-changed records. 204 when the
+/// window is quiet — the common steady state, and the caller skips absorption entirely.
+fn offer_records(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no node key");
+    };
+    match crate::record::build_record_sync(dir, &cred, &node, now_secs()) {
+        Ok(Some(sync)) => match serde_json::to_vec(&sync) {
+            Ok(body) => text(StatusCode::OK, body),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        },
+        Ok(None) => text(StatusCode::NO_CONTENT, ""),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "assemble"),
+    }
+}
+
+/// `POST /mesh/record-sync` → absorb a sibling door's records. The envelope is self-proving
+/// (cert + signature inside the body, verified against OUR group key), so no header sig.
+fn recv_record_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
+    let sync: crate::record::RecordSync = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad record-sync"),
+    };
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Ok(gk) = cred.verifying_key() else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "bad group key");
+    };
+    let revoked = group::load_revoked(dir).unwrap_or_default();
+    if let Err(e) =
+        crate::record::verify_record_sync(&sync, &gk, &cred.group_id, now_secs(), &revoked)
+    {
+        return text(StatusCode::FORBIDDEN, e.to_string());
+    }
+    let mut absorbed = 0usize;
+    for r in &sync.body.records {
+        if crate::record::absorb(dir, r).is_ok() {
+            absorbed += 1;
+        }
+    }
+    text(StatusCode::OK, format!("absorbed {absorbed}"))
+}
+
+/// The dial-out half of record replication, run right after a brief exchange: offer ours,
+/// absorb theirs. Best-effort — an old peer 404s both and nothing is lost.
+async fn sync_records_with(dir: &Path, addr: &str) {
+    let now = now_secs();
+    if let (Ok(Some(cred)), Ok(node)) = (
+        group::load(dir),
+        crate::node::NodeKey::load_or_mint(dir, "familiar"),
+    ) {
+        if let Ok(Some(ours)) = crate::record::build_record_sync(dir, &cred, &node, now) {
+            if let Ok(raw) = serde_json::to_vec(&ours) {
+                let _ = http_send(
+                    addr,
+                    Method::POST,
+                    "/mesh/record-sync",
+                    Some(raw),
+                    &[("content-type", "application/json")],
+                )
+                .await;
+            }
+        }
+        if let Ok(resp) = http_send(addr, Method::GET, "/mesh/records", None, &[]).await {
+            if resp.status == StatusCode::OK {
+                if let Ok(theirs) = serde_json::from_slice::<crate::record::RecordSync>(&resp.body)
+                {
+                    let revoked = group::load_revoked(dir).unwrap_or_default();
+                    if let Ok(gk) = cred.verifying_key() {
+                        if crate::record::verify_record_sync(
+                            &theirs,
+                            &gk,
+                            &cred.group_id,
+                            now,
+                            &revoked,
+                        )
+                        .is_ok()
+                        {
+                            for r in &theirs.body.records {
+                                let _ = crate::record::absorb(dir, r);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2632,6 +2742,9 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
     }
     // Verify the peer's brief before it touches disk (defense at ingress).
     ingest_brief(dir, &reply.body, addr)?;
+    // Records replicate on the same dial-out connection path (a CGNAT'd door can only be
+    // reached by whoever dials out) — offer ours, absorb theirs, best-effort.
+    sync_records_with(dir, addr).await;
     // Pre-fetch tool bodies we don't already have, content-addressed for the in-tick merge.
     if let Ok(brief) = serde_json::from_slice::<MeshBrief>(&reply.body) {
         upsert_peer(dir, &brief, addr)?;
@@ -3722,6 +3835,114 @@ mod tests {
         let vraw = serde_json::to_vec(&env).unwrap();
         let vsig = host.sign(&vraw);
         assert_eq!(body_status(&recv_vouch(&dir, &vraw, &vsig)), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn records_replicate_between_doors_and_the_vouch_loop_closes_across_them() {
+        // Door A: the lighthouse — where the Air's claim lands. Door B: the household door the
+        // consoles poll and the iPhone vouches at. Without sync they are private truths.
+        let (dir_a, host_a, cred_a, ipad) = door_and_guest("sync_a");
+        let now = now_secs();
+
+        // Door B is a second member of the SAME group, with its own store.
+        let dir_b = fresh_dir("sync_b");
+        let node_b = NodeKey::load_or_mint(&dir_b, "door-b").unwrap();
+        let m_b = cred_a
+            .mint_membership(&node_b.node_id(), &node_b.identity().pubkey, now, 3600)
+            .unwrap();
+        let cred_b = crate::group::GroupCredential {
+            membership: m_b,
+            ..cred_a.clone()
+        };
+        crate::group::save_credential(&dir_b, &cred_b).unwrap();
+
+        // "ian" established on the iPad at door A (named invite), then the Air's refused claim
+        // lands at A — exactly the live shape.
+        let token =
+            crate::record::mint_invite_token(&host_a, &cred_a.membership, "ian", now).unwrap();
+        let (raw, sig) =
+            signed_introduce(&ipad, None, crate::record::Evidence::Invite(Box::new(token)));
+        assert_eq!(body_status(&recv_introduce(&dir_a, &raw, &sig, "192.168.1.9", false)), StatusCode::OK);
+        let air = NodeKey::load_or_mint(&fresh_dir("sync_air"), "Air console").unwrap();
+        let knock = crate::enroll::EnrollRequest {
+            node: air.identity(),
+            attestation: crate::enroll::Attestation {
+                laws_version: crate::enroll::LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: now,
+            },
+            nonce: "knock-air-sync".into(),
+            ts: now,
+        };
+        let kraw = serde_json::to_vec(&knock).unwrap();
+        let ksig = air.sign(&kraw);
+        crate::enroll::submit_request(&dir_a, &kraw, &ksig, now).unwrap();
+        let (araw, asig) = signed_introduce(
+            &air,
+            Some(crate::record::IdentityClaim { handle: "ian".into(), ts: now }),
+            crate::record::Evidence::Introduction {
+                intro: crate::record::Introduction {
+                    handle: "ian".into(),
+                    statement: "mine".into(),
+                    ts: now,
+                },
+                provenance: crate::record::Provenance::Remote,
+            },
+        );
+        assert_eq!(
+            body_status(&recv_introduce(&dir_a, &araw, &asig, "203.0.113.9", false)),
+            StatusCode::FORBIDDEN
+        );
+
+        // A offers its records; B absorbs — the claim (and the iPad's establishment) now
+        // exist at B, where they never happened.
+        let offer_a = crate::record::build_record_sync(&dir_a, &cred_a, &host_a, now)
+            .unwrap()
+            .expect("door A has recent records");
+        let bytes = serde_json::to_vec(&offer_a).unwrap();
+        assert_eq!(body_status(&recv_record_sync(&dir_b, &bytes)), StatusCode::OK);
+        let rec_b = crate::record::find_by_key(&dir_b, &air.node_id()).unwrap();
+        assert_eq!(rec_b.identity.claim.as_ref().unwrap().handle, "ian");
+        assert_eq!(rec_b.pubkey, air.identity().pubkey);
+        assert_eq!(
+            crate::record::find_by_key(&dir_b, &ipad.node_id())
+                .unwrap()
+                .identity
+                .established
+                .unwrap()
+                .handle,
+            "ian",
+            "the voucher's authority travelled too"
+        );
+
+        // The iPhone-at-door-B moment: the iPad vouches AT B. The rules engine there has
+        // everything it needs — the loop closes at a door the claim never visited.
+        let voucher =
+            crate::record::DeviceVoucher::mint(&ipad, "ian", &air.identity().pubkey, now, "n-b")
+                .unwrap();
+        let env = serde_json::json!({"node": ipad.identity(), "voucher": voucher});
+        let vraw = serde_json::to_vec(&env).unwrap();
+        let vsig = ipad.sign(&vraw);
+        assert_eq!(body_status(&recv_vouch(&dir_b, &vraw, &vsig)), StatusCode::OK);
+
+        // And B's offer carries the admission back to A: merged, the Air is a member there too.
+        let offer_b = crate::record::build_record_sync(&dir_b, &cred_b, &node_b, now)
+            .unwrap()
+            .expect("door B has the admission");
+        let bytes = serde_json::to_vec(&offer_b).unwrap();
+        assert_eq!(body_status(&recv_record_sync(&dir_a, &bytes)), StatusCode::OK);
+        let rec_a = crate::record::find_by_key(&dir_a, &air.node_id()).unwrap();
+        assert_eq!(crate::record::derive_state(&rec_a), crate::record::RecordState::Member);
+        assert_eq!(rec_a.identity.established.unwrap().handle, "ian");
+
+        // A stranger's self-signed sync is refused — records only travel between members.
+        let stranger = NodeKey::load_or_mint(&fresh_dir("sync_stranger"), "stranger").unwrap();
+        let mut forged = offer_a.clone();
+        forged.body.node = stranger.identity();
+        let fraw = serde_json::to_vec(&forged.body).unwrap();
+        forged.sig = stranger.sign(&fraw);
+        let fbytes = serde_json::to_vec(&forged).unwrap();
+        assert_eq!(body_status(&recv_record_sync(&dir_b, &fbytes)), StatusCode::FORBIDDEN);
     }
 
     #[test]

@@ -857,6 +857,22 @@ pub fn name_established(dir: &Path, node_id: &str, handle: &str, now: i64) -> Re
     })
 }
 
+/// Stamp the device's public key on its record when the door actually verified it (a signed
+/// introduce, a knock). The key is what lets the record stand alone at OTHER doors after
+/// record-sync — a voucher's signature check and an established-device lookup both need it,
+/// and a door the device never visited has no grant store to consult.
+pub fn record_pubkey(dir: &Path, node_id: &str, pubkey: &str, now: i64) -> Result<()> {
+    let Some(rec) = find_by_key(dir, node_id) else {
+        return Ok(());
+    };
+    if !rec.pubkey.is_empty() || pubkey.trim().is_empty() {
+        return Ok(());
+    }
+    upsert(dir, &rec.device_id, now, |r| {
+        r.pubkey = pubkey.trim().to_string();
+    })
+}
+
 /// A claim addresses (ADR-0019): when an introduction is REFUSED, the claim itself is still
 /// worth keeping — it is what the claimed human's own devices are shown so one of them can
 /// vouch (E2) without a QR crossing between machines. Never touches establishment or state;
@@ -1006,6 +1022,138 @@ pub fn admit(
     };
     let _ = crate::standing::grant(dir, node_id, &note);
     load(dir, node_id)?.ok_or_else(|| Error::Malformed("record vanished during admit".into()))
+}
+
+// ---- record-sync: records replicate between doors, merge reconciles --------------------
+//
+// A claim lands at whichever door the device happened to talk to; a vouch may arrive at a
+// different one; the consoles poll a third. Without replication each door holds a private
+// truth and the loop only closes when everyone happens to share a door. Records therefore
+// TRAVEL: each door offers its recently-changed records (`GET /mesh/records`) and accepts a
+// sibling's (`POST /mesh/record-sync`), both called right after the gossip brief exchange —
+// which matters because a lighthouse can never dial into a CGNAT'd household; the household
+// dials OUT, and both directions of sync ride that same outbound connection. merge_records
+// (admission earliest-wins, corrections union, establishment earliest) makes absorption
+// idempotent and order-free, so re-offering a record you were just offered converges instead
+// of looping.
+
+/// How far back "recently changed" reaches, and how many records one sync carries. A door
+/// offline longer than the window catches up through `mesh doctor` + the next live event —
+/// anti-entropy beyond the window is deliberately not built until the fleet needs it.
+pub const RECORD_SYNC_WINDOW_SECS: i64 = 48 * 60 * 60;
+pub const RECORD_SYNC_CAP: usize = 128;
+
+/// The signed body of a record-sync — same proof shape as a brief: the sending door's
+/// identity + cert, freshness, and the records themselves. Field order is the signature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordSyncBody {
+    pub node: crate::node::NodeIdentity,
+    pub membership: Membership,
+    pub ts: i64,
+    pub nonce: String,
+    pub records: Vec<MembershipRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordSync {
+    pub body: RecordSyncBody,
+    /// ed25519 (hex) by the sending door's node key over `serde_json(body)`.
+    pub sig: String,
+}
+
+/// Build + sign this door's offer: records changed inside the window, newest first, capped.
+/// Returns None when there is nothing to say — the caller skips the POST entirely.
+pub fn build_record_sync(
+    dir: &Path,
+    cred: &crate::group::GroupCredential,
+    node: &NodeKey,
+    now: i64,
+) -> Result<Option<RecordSync>> {
+    let mut recent: Vec<MembershipRecord> = load_all(dir)
+        .into_iter()
+        .filter(|r| now - r.last_seen <= RECORD_SYNC_WINDOW_SECS)
+        .collect();
+    if recent.is_empty() {
+        return Ok(None);
+    }
+    recent.sort_by_key(|r| std::cmp::Reverse(r.last_seen));
+    recent.truncate(RECORD_SYNC_CAP);
+    let body = RecordSyncBody {
+        node: node.identity(),
+        membership: cred.membership.clone(),
+        ts: now,
+        nonce: format!("{:016x}", fastrand_nonce(now)),
+        records: recent,
+    };
+    let sig = node.sign(&serde_json::to_vec(&body)?);
+    Ok(Some(RecordSync { body, sig }))
+}
+
+fn fastrand_nonce(now: i64) -> u64 {
+    // A per-sync marker, not a security boundary (the signature is): time + pid mixed.
+    let pid = std::process::id() as u64;
+    (now as u64)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(pid.rotate_left(17))
+}
+
+/// Verify a sync came from a live member of OUR group — the same three checks a brief gets:
+/// cert in the group, cert certifies the signing key, signature over the canonical body.
+pub fn verify_record_sync(
+    sync: &RecordSync,
+    group_key: &ed25519_dalek::VerifyingKey,
+    group_id: &str,
+    now: i64,
+    revoked: &[String],
+) -> Result<()> {
+    let b = &sync.body;
+    crate::group::verify_membership(&b.membership, group_key, group_id, now, revoked)?;
+    if b.membership.node_pubkey != b.node.pubkey || b.membership.node_id != b.node.node_id {
+        return Err(Error::Untrusted(
+            "record-sync: membership cert does not match the signing node".into(),
+        ));
+    }
+    if now - b.ts > RECORD_SYNC_WINDOW_SECS {
+        return Err(Error::Untrusted("record-sync: stale".into()));
+    }
+    b.node.verify(&serde_json::to_vec(b)?, &sync.sig)
+}
+
+/// Absorb one record from a sibling door: merge with what this door holds, or take it whole.
+/// The legacy roll is mirrored (member on, severed off) so the doctor's answers stay agreed.
+pub fn absorb(dir: &Path, incoming: &MembershipRecord) -> Result<MembershipRecord> {
+    let device_id = incoming.device_id.trim().to_string();
+    if device_id.is_empty() || incoming.keys.is_empty() {
+        return Err(Error::Malformed("record-sync: empty record".into()));
+    }
+    let local = load(dir, &device_id)?;
+    let merged = match &local {
+        Some(l) if *l == *incoming => l.clone(), // idempotent fast path — no write, no mirror churn
+        Some(l) => merge_records(l, incoming),
+        None => {
+            let mut r = incoming.clone();
+            r.state = derive_state(&r);
+            r
+        }
+    };
+    if local.as_ref() != Some(&merged) {
+        save(dir, &merged)?;
+    }
+    match derive_state(&merged) {
+        RecordState::Member => {
+            let _ = crate::standing::grant(dir, &device_id, &merged.note);
+        }
+        RecordState::Severed { .. } => {
+            let mut roll = crate::standing::load(dir);
+            let before = roll.full.len();
+            roll.full.retain(|n| n != &device_id);
+            if roll.full.len() != before {
+                let _ = crate::standing::save(dir, &roll);
+            }
+        }
+        RecordState::Guest => {}
+    }
+    Ok(merged)
 }
 
 /// A correction traveling the mesh: the correcting member's cert + the act, signed over the
