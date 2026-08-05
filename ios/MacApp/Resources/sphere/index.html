@@ -382,7 +382,7 @@ function refreshScreen() {
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
           ${(v.game && v.game.status === 'open' && v.game.holder === p.m.node_id)
-            ? `<span onclick="event.stopPropagation();S.gameNav='live';sphereScreen('games');" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">--:--</span></span>` : ''}
+            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">--:--</span></span>` : ''}
           ${connBadge(p.m.connectivity)}`;
     const closedCard = ([p, i]) => `
       <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:13px 17px;border-radius:14px;background:${p.local?'rgba(90,175,255,0.08)':'rgba(20,44,80,0.16)'};border:1px solid ${p.local?'rgba(174,231,255,0.2)':'rgba(120,190,255,0.12)'};display:flex;align-items:center;gap:9px;">
@@ -487,7 +487,7 @@ function refreshScreen() {
                   style="padding:9px 16px;border-radius:10px;background:rgba(61,220,151,0.18);border:1px solid rgba(61,220,151,0.45);color:#9fe8c0;cursor:pointer;font-size:12px;">
             Yes — it's mine
           </button>
-          <button onclick="S.dismissedClaims[${JSON.stringify(c.node_id)}]=1;refreshScreen()"
+          <button onclick="sphereClaimDismiss(${JSON.stringify(c.node_id)})"
                   style="padding:9px 16px;border-radius:10px;background:rgba(16,34,60,0.3);border:1px solid rgba(120,190,255,0.2);color:rgba(188,210,255,0.75);cursor:pointer;font-size:12px;">
             Not mine
           </button>
@@ -683,7 +683,7 @@ function refreshScreen() {
             ${g.kind === 'riddle' ? `<button onclick="toApp('game',{act:'pass',to:''});" class="glybtn" style="margin-top:9px;height:28px;padding:0 12px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;">PASS — NO GUESS</span></button>` : ''}
           </div>` : ''}
         ${open && !mine ? `<div class="m" style="font-size:10px;color:rgba(160,195,255,0.55);margin-top:12px;">the ember is with ${esc(holderP ? holderP.label : 'someone')} — your console will chime when it reaches you</div>` : ''}
-        ${open && g.started_by === myId ? `<button onclick="if(confirm('Close the game?'))toApp('game',{act:'close'})" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">CLOSE THE GAME</span></button>` : ''}
+        ${open && g.started_by === myId ? `<button onclick="sphereGameClose()" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;${S.closeArmed ? 'background:rgba(60,10,16,0.5);border-color:rgba(255,110,110,0.6);' : ''}"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">${S.closeArmed ? 'TAP AGAIN TO CLOSE' : 'CLOSE THE GAME'}</span></button>` : ''}
         ${!open ? `<div style="margin-top:14px;">${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK TO THE GAMES', false)}</div>` : ''}
       </div>`;
     }
@@ -1027,6 +1027,16 @@ window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidde
 // Toggle the live roster against the record of members not seen in over a day.
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
 window.sphereRosterToggle = (id) => { S.rosterOpen = S.rosterOpen || {}; S.rosterOpen[id] = !S.rosterOpen[id]; refreshScreen(); };
+// Inline handlers resolve on window, never module scope — every act the HTML strings call
+// must live here (the badge's bare `S.gameNav=` threw ReferenceError on click).
+window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
+window.sphereClaimDismiss = (id) => { (S.dismissedClaims = S.dismissedClaims || {})[id] = 1; refreshScreen(); };
+// confirm() is silent inside WKWebView (no UI delegate) — the close is a two-tap arm, like SEVER.
+window.sphereGameClose = () => {
+  if (S.closeArmed) { S.closeArmed = false; toApp('game', { act: 'close' }); }
+  else { S.closeArmed = true; setTimeout(() => { if (S.closeArmed) { S.closeArmed = false; try { refreshScreen(); } catch (_) {} } }, 4000); }
+  refreshScreen();
+};
 // ---- the games (Riddle of the Mesh / The Campfire) ----
 window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
 // NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
