@@ -68,7 +68,9 @@
   <canvas id="streetArcs" style="position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;opacity:0;transition:opacity 1.6s;"></canvas>
 
   <!-- daemon-down badge: appears only when the link is lost (otherwise no chrome) -->
-  <div id="linkdown" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;">
+  <!-- pointer-events:none + pushed below the ring: the badge INFORMS, it must never eat the
+       dialogue glyph's clicks (the odd-count ring now parks a button at top centre). -->
+  <div id="linkdown" style="display:none;position:absolute;top:84px;left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;pointer-events:none;">
     <div style="width:34px;height:34px;border-radius:50%;background:rgba(60,10,16,0.6);border:1px solid rgba(255,110,110,0.5);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;">
       <svg viewBox="0 0 24 24" fill="none" stroke="#ff6e6e" stroke-width="1.8" stroke-linecap="round" style="width:18px;height:18px;"><path d="M12 3v10"/><circle cx="12" cy="18.5" r="1.2" fill="#ff6e6e" stroke="none"/></svg>
     </div>

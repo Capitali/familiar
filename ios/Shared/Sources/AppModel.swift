@@ -836,20 +836,31 @@ final class AppModel: ObservableObject {
         guard let tailnet = hosts.first(where: { Self.isTailnet($0) }) else { return }  // none known
         if let last = lastTailnetProbe, Date().timeIntervalSince(last) < 30 { return }
         lastTailnetProbe = Date()
-        if await Self.probeHello(host: tailnet, port: enrollPort) {
+        // Same DOOR only: each door serves its own worldview (its theories, its feed), so a
+        // tailnet address that answers as a DIFFERENT node is a different door, not a better
+        // path — promoting it swapped the whole console between doors every probe cycle (the
+        // theories screen flickered between wildhorse's and the lighthouse's). A path upgrade
+        // must keep the node identity fixed.
+        guard let reading = worldview?.node_id else { return }
+        if let heard = await Self.helloNodeId(host: tailnet, port: enrollPort), heard == reading {
             promoteHost(tailnet)   // data now flows peer-to-peer over Tailscale; the badge flips
             note("↔ Tailscale confirmed — data over \(tailnet)")
         }
     }
 
-    /// A cheap liveness probe of a candidate path — GET /mesh/hello. True iff it answers 200.
-    static func probeHello(host: String, port: Int) async -> Bool {
-        guard let url = URL(string: "https://\(host):\(port)/mesh/hello") else { return false }
+    /// Who answers at a candidate path — GET /mesh/hello's node_id, or nil if unreachable.
+    static func helloNodeId(host: String, port: Int) async -> String? {
+        guard let url = URL(string: "https://\(host):\(port)/mesh/hello") else { return nil }
         var r = URLRequest(url: url)
         r.timeoutInterval = 4
-        guard let (_, resp) = try? await MeshTLS.session.data(for: r) else { return false }
-        return ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200
+        guard let (data, resp) = try? await MeshTLS.session.data(for: r),
+              ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200,
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        return obj["node_id"] as? String
     }
+
 
     /// Heartbeat this device's status to the lighthouse (ADR-0017) — status flows through the always-
     /// on hub so the mesh sees this device whatever path it's on. The connectivity mode is classified
