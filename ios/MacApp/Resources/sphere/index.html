@@ -110,6 +110,13 @@
   </button>
 
   <!-- ONE surface control: shows the surface you'd dive to -->
+  <!-- The visitor's compass: while this device is a guest, one warm, ever-present pill that
+       leads to the path — the two-filter state is never something the human should have to
+       infer from a projection looking oddly anonymous. -->
+  <button id="guestbar" onclick="sphereScreen('device')" style="display:none;position:absolute;bottom:88px;left:50%;transform:translateX(-50%);z-index:8;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,178,102,0.14);border:1px solid rgba(255,178,102,0.45);cursor:pointer;backdrop-filter:blur(8px);">
+    <span style="width:8px;height:8px;border-radius:50%;background:#ffb266;box-shadow:0 0 10px #ffb266;animation:gatepulse 1.8s ease-in-out infinite;"></span>
+    <span id="guestbartext" class="m" style="font-size:9.5px;letter-spacing:0.14em;color:#ffcf9e;">VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP</span>
+  </button>
   <button id="modetoggle" class="glybtn" title="surface" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:7;width:56px;height:56px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:32px;height:32px;overflow:visible;">
       <path d="M8 40 L18 8 M30 8 L40 40" stroke-width="1.6" opacity="0.7"/>
@@ -831,8 +838,35 @@ function refreshScreen() {
       return 'dns name';
     };
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
+    // The visitor's path — ADR-0026's two filters as a literal checklist, with the door's own
+    // words and every way in spelled out. A guest should never have to infer what to do next.
+    const mem = d.membership || {};
+    const isMac = /console/i.test(d.label || '');
+    const pathCard = (mem.state !== 'guest' && mem.state !== 'held') ? '' : `
+      <div style="margin:4px 0 16px;padding:16px 18px;border-radius:15px;background:rgba(255,178,102,0.07);border:1px solid rgba(255,178,102,0.35);">
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#ffb266;margin-bottom:10px;">YOUR PATH TO MEMBERSHIP</div>
+        <div class="m" style="font-size:11px;color:rgba(210,235,220,0.9);padding:3px 0;">✓ &nbsp;① device contract — this device accepted the Three Laws when it knocked</div>
+        <div class="m" style="font-size:11px;color:#ffcf9e;padding:3px 0;">○ &nbsp;② identity — the mesh doesn't yet know whose device this is</div>
+        ${mem.path ? `<div class="m" style="font-size:10px;line-height:1.5;color:rgba(255,207,158,0.8);margin:9px 0;padding:9px 11px;border-radius:9px;background:rgba(16,34,60,0.4);">the door says: “${esc(mem.path)}”</div>` : ''}
+        <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin:11px 0 6px;">THREE WAYS IN — ANY ONE COMPLETES IT</div>
+        <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
+          <b>1 · Say who you are</b> — <button onclick="sphereCorrectServing(1);setTimeout(()=>{const i=document.getElementById('servedHumanInput');if(i)i.focus();},60);" style="background:none;border:none;color:#7fb8ff;cursor:pointer;font:inherit;text-decoration:underline;padding:0;">type your name below</button>.
+          A NEW name on the mesh's own network admits you on the spot. A name the mesh already
+          knows asks that person's other devices to confirm — one tap there finishes it.
+        </div>
+        <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
+          <b>2 · Be vouched for</b> — if this is your own new device, pick up one you already use:
+          it will show “this device says it is yours” on its welcome screen. Tap <i>Yes — it's mine</i>.
+        </div>
+        <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
+          <b>3 · Take an invite</b> — any member can mint one (10 minutes, single use):
+          ${isMac ? 'paste it at this Mac’s join screen' : 'scan their join QR from this device'} and admission completes in one motion.
+        </div>
+        <div class="m" style="font-size:9px;color:rgba(160,195,255,0.5);margin-top:9px;">until then you read the mesh as a visitor: real shape, no names — nothing to be fixed, just the house not assuming who you are</div>
+      </div>`;
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      ${pathCard}
       ${servingRow(d)}
       ${d.oracle && d.oracle !== 'unsupported' ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
         <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">ORACLE</span>
@@ -866,8 +900,12 @@ function renderButtons() {
   // The ember calls: when it is THIS device's turn, the games glyph burns warm.
   const gg = (S.view || {}).game;
   const myTurn = gg && gg.status === 'open' && gg.holder === ((S.device || {}).node_id || '');
+  // Ring rotation: with an odd count, a half-step start plants one button at exactly 90° —
+  // dead centre bottom, on top of the surface toggle (it ate the zoom button under signals).
+  // A ¾-step start keeps every slot clear of both the bottom toggle and the top link badge.
+  const off = N % 2 === 1 ? 0.75 : 0.5;
   $('screenbtns').innerHTML = SCREENS.map((key, i) => {
-    const ang = (-90 + (i + 0.5) * (360 / N)) * Math.PI / 180;
+    const ang = (-90 + (i + off) * (360 / N)) * Math.PI / 180;
     const on = key === S.activeScreen;
     const warm = key === 'games' && myTurn;
     return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${warm ? 'radial-gradient(circle, rgba(255,178,102,0.4), transparent 66%)' : on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
@@ -899,6 +937,18 @@ function renderChrome() {
     const dot = $('welcomedot'), arc = $('welcomearc');
     if (dot) dot.style.animation = `iconpulse ${arriving > 0 ? '1.4s' : '2.6s'} ease-in-out infinite`;
     if (arc) arc.style.opacity = arriving > 0 ? '0.95' : '0.6';
+  }
+  // The visitor's compass shows whenever this device reads as a guest (or is held) — and
+  // never on the device screen itself, where the path it points to already is.
+  const mem = ((S.device || {}).membership || {});
+  const gb = $('guestbar');
+  if (gb) {
+    const guesty = (mem.state === 'guest' || mem.state === 'held') && S.activeScreen !== 'device' && !street;
+    gb.style.display = guesty ? 'flex' : 'none';
+    const gt = $('guestbartext');
+    if (gt) gt.textContent = mem.state === 'held'
+      ? 'HELD — TAP TO SEE WHEN TO TRY AGAIN'
+      : 'VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP';
   }
   const showBadge = !S.linkOk || !!S.jsErr;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
