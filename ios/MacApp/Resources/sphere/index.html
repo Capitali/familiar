@@ -372,16 +372,30 @@ function refreshScreen() {
         ${chip(q.kindWord, '#bcd2ff')}
         <span class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(160,195,255,0.55);">${esc((q.status||'').toUpperCase())}</span>
       </div>`;
-    const card = ([p, i]) => `
-      <div onclick="sphereNode(${i})" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
-        <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
+    // Accordion: every entry rests as one calm row — the name and its badges. A tap opens
+    // the full card in place; the detail glyph inside goes deeper (the node screen); DIVE
+    // still flies. Open state lives in S so the 3s poll can't slam cards shut.
+    S.rosterOpen = S.rosterOpen || {};
+    const headerRow = (p) => `
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
           <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
           ${(v.game && v.game.status === 'open' && v.game.holder === p.m.node_id)
             ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">--:--</span></span>` : ''}
-          ${connBadge(p.m.connectivity)}
+          ${connBadge(p.m.connectivity)}`;
+    const closedCard = ([p, i]) => `
+      <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:13px 17px;border-radius:14px;background:${p.local?'rgba(90,175,255,0.08)':'rgba(20,44,80,0.16)'};border:1px solid ${p.local?'rgba(174,231,255,0.2)':'rgba(120,190,255,0.12)'};display:flex;align-items:center;gap:9px;">
+        ${headerRow(p)}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:13px;height:13px;color:rgba(160,195,255,0.45);flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+      </div>`;
+    const card = ([p, i]) => `
+      <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
+          ${headerRow(p)}
+          <button onclick="event.stopPropagation();sphereNode(${i})" class="glybtn" style="width:30px;height:30px;border-radius:9px;flex-shrink:0;" title="detail">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="12" cy="12" r="9" opacity="0.4"/><path d="M12 11v5"/><circle cx="12" cy="8" r="0.8" fill="currentColor"/></svg>
+          </button>
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
         ${p.m.detail ? `<div class="m" style="font-size:10px;color:rgba(174,231,255,0.7);margin-bottom:8px;">${esc(p.m.detail)}</div>` : ''}
@@ -435,7 +449,7 @@ function refreshScreen() {
     el.innerHTML = bar + (S.rosterHistory
       ? table()
       : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
-        + standing_.map(card).join('') + `</div>`);
+        + standing_.map(pi => S.rosterOpen[pi[0].m.node_id] ? card(pi) : closedCard(pi)).join('') + `</div>`);
 
   } else if (k === 'welcome') {
     // A greeting, not a gate (ADR-0026): who is new — the last 24 hours of members, devices,
@@ -600,6 +614,14 @@ function refreshScreen() {
     } else {
       // live (or finished) game view
       if (!g) { S.gameNav = 'menu'; refreshScreen(); return; }
+      // A human mid-sentence outranks a data refresh: while the input is focused (or holds
+      // text), the poll must NOT rebuild this screen out from under their thumbs — the same
+      // rule the conversation screen enforces with its persistent input row. Countdowns keep
+      // ticking regardless (the data-deadline ticker touches text nodes, not the tree).
+      const prevInp = document.getElementById('gameinput');
+      if (prevInp && (document.activeElement === prevInp || prevInp.value.trim())) {
+        return;
+      }
       const open = g.status === 'open';
       const mine = open && g.holder === myId;
       const holderP = g.players.find(p => p.node_id === g.holder);
@@ -795,6 +817,11 @@ function refreshScreen() {
       </div></div>`;
 
   } else if (k === 'device') {
+    // A human typing their name outranks the 3s device push — same rule as the game input.
+    const nameInp = document.getElementById('servedHumanInput');
+    if (nameInp && (document.activeElement === nameInp || nameInp.value.trim())) {
+      return;
+    }
     const d = S.device;
     if (!d) {
       // No device push → this console speaks for the node itself (the Mac): identity plus
@@ -999,6 +1026,7 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 // Toggle the live roster against the record of members not seen in over a day.
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
+window.sphereRosterToggle = (id) => { S.rosterOpen = S.rosterOpen || {}; S.rosterOpen[id] = !S.rosterOpen[id]; refreshScreen(); };
 // ---- the games (Riddle of the Mesh / The Campfire) ----
 window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
 // NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
