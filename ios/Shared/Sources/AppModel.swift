@@ -909,6 +909,7 @@ final class AppModel: ObservableObject {
     private var knownArrivalIds: Set<String>?
     private var knownClaimIds: Set<String>?
     private var wasMyTurn = false
+    private var preferredReadFails = 0
     /// Whether this device stood at full standing as of the previous read. nil until the first,
     /// so launching already-recognised is silent.
     private var wasRecognised: Bool?
@@ -1019,6 +1020,11 @@ final class AppModel: ObservableObject {
     func refreshWorldview() async {
         // One read per candidate address at most — the preferred host first, failing over to the
         // others so a device off-LAN (cellular + tailnet) still reads the worldview.
+        // Every round RE-STARTS at the preferred door: a fallback read is data, not a
+        // defection. Each door serves its own worldview, so swapping doors on every hiccup
+        // flapped the whole console (roster nesting, theories) between two houses' truths.
+        if let preferred = hosts.first { host = preferred }
+        let preferred = host
         var attempts: [String] = []   // per-host diagnostic, surfaced if every candidate fails
         for _ in 0..<max(1, hosts.count) {
             let tried = host
@@ -1114,7 +1120,19 @@ final class AppModel: ObservableObject {
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
-                promoteHost(host)
+                // Loyalty with hysteresis: only a preferred door that keeps failing loses its
+                // place. Five consecutive misses ≈ 15s of silence — a real outage, not a hiccup.
+                if tried == preferred {
+                    preferredReadFails = 0
+                    promoteHost(host)
+                } else {
+                    preferredReadFails += 1
+                    if preferredReadFails >= 5 {
+                        preferredReadFails = 0
+                        promoteHost(host)
+                        note("↪ reading from \(host) — \(preferred) stopped answering")
+                    }
+                }
                 learnPins(view.pins)     // trust the group's pins before learning new hosts
                 learnHosts(view.hosts)
                 let readHost = host
