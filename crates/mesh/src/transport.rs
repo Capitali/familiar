@@ -2253,7 +2253,24 @@ fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
 /// daemons and the lighthouse keep score and judge; they don't take turns at the fire.
 fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
     let roll = crate::standing::load(dir);
-    crate::members::classify(dir, now)
+    let members = crate::members::classify(dir, now);
+    // A console plays under its MACHINE's name: the seat is the console's key (it is what can
+    // act), but "Wildhorse console" at the fire reads as a second wildhorse — the machine is
+    // one identity to the humans around it. Attached consoles take their host's label; an
+    // unattached one just drops the suffix.
+    let machine_label = |m: &crate::members::Member| -> String {
+        if !m.attached_to.is_empty() {
+            if let Some(h) = members.iter().find(|x| x.node_id == m.attached_to) {
+                return h.label.clone();
+            }
+        }
+        if m.label.to_lowercase().ends_with(" console") && m.label.len() > 8 {
+            return m.label[..m.label.len() - 8].to_string();
+        }
+        m.label.clone()
+    };
+    members
+        .clone()
         .into_iter()
         .filter(|m| {
             // A player is a HUMAN-FACING seat: a phone/iPad/Mac shell (device actor), or a
@@ -2268,8 +2285,8 @@ fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
                 && m.status != "offline"
         })
         .map(|m| crate::game::Player {
+            label: machine_label(&m),
             node_id: m.node_id,
-            label: m.label,
             handle: m.human,
             score: 0,
             strikes: 0,

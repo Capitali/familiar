@@ -376,12 +376,21 @@ function refreshScreen() {
     // the full card in place; the detail glyph inside goes deeper (the node screen); DIVE
     // still flies. Open state lives in S so the 3s poll can't slam cards shut.
     S.rosterOpen = S.rosterOpen || {};
+    // The ember badge lands on the MACHINE's row: when a console holds the turn, its host
+    // (the row the console nests under) wears the fire — a hidden nested row must never be
+    // the only place the countdown lives.
+    const emberIds = new Set();
+    if (v.game && v.game.status === 'open') {
+      emberIds.add(v.game.holder);
+      const hp = pairs.find(([q]) => q.m.node_id === v.game.holder);
+      if (hp && hp[0].m.attached_to) emberIds.add(hp[0].m.attached_to);
+    }
     const headerRow = (p) => `
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
           <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
-          ${(v.game && v.game.status === 'open' && v.game.holder === p.m.node_id)
+          ${(v.game && v.game.status === 'open' && emberIds.has(p.m.node_id))
             ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">--:--</span></span>` : ''}
           ${connBadge(p.m.connectivity)}`;
     const closedCard = ([p, i]) => `
