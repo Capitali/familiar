@@ -895,6 +895,25 @@ function refreshScreen() {
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
       ${pathCard}
       ${servingRow(d)}
+      ${(() => {
+        // Whose hands hold this machine — the fact that decides whether identity SURVIVES a
+        // relaunch. A personal device rebinds its owner every launch (rung 1, no asking); a
+        // shared one deliberately forgets, because assuming the last person is still at a
+        // shared screen would misattribute everything. Hardware only suggests; the human decides.
+        const role = d.deviceRole || 'shared';
+        const who = ((d.presence || {}).handle || '').trim() || (d.servedHuman !== 'observer' ? d.servedHuman : '');
+        const chipBtn = (on, label, cb, dis) => `
+          <button ${dis ? 'disabled' : `onclick="${cb}"`} class="glybtn" style="height:30px;padding:0 13px;border-radius:9px;${on ? 'border-color:rgba(61,220,151,0.5);color:#9fe8c0;background:rgba(61,220,151,0.1);' : ''}${dis ? 'opacity:0.35;cursor:default;' : ''}">
+            <span class="m" style="font-size:8.5px;letter-spacing:0.13em;">${label}</span></button>`;
+        return `<div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap;">
+          <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">THIS DEVICE IS</span>
+          ${chipBtn(role === 'personal', who ? `MINE — ${esc(who.toUpperCase())}'S` : 'MINE', `toApp('deviceRole',{role:'personal',owner:${JSON.stringify(who)}})`, !who)}
+          ${chipBtn(role === 'shared', 'SHARED', `toApp('deviceRole',{role:'shared',owner:''})`, false)}
+          ${role === 'personal'
+            ? `<span class="m" style="font-size:9px;color:rgba(160,195,255,0.5);">it will know its human at every launch</span>`
+            : `<span class="m" style="font-size:9px;color:rgba(160,195,255,0.5);">${who ? 'a shared device asks again after a restart — mark it MINE to make identity stick' : 'name yourself first, then it can be yours'}</span>`}
+        </div>`;
+      })()}
       ${d.oracle && d.oracle !== 'unsupported' ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
         <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">ORACLE</span>
         <span class="m" style="font-size:10px;color:${d.oracle==='available'?'#7ff0c0':'rgba(190,210,240,0.65)'};">${esc(d.oracle)}</span>

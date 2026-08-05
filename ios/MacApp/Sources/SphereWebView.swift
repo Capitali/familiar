@@ -409,6 +409,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                         await self.poll()
                     }
                 }
+            case "deviceRole":
+                // Whose hands hold this machine — decides whether identity survives relaunch.
+                if let roleRaw = body["role"] as? String,
+                   let role = DeviceRole(rawValue: roleRaw) {
+                    self.model.setDeviceBinding(role: role, owner: body["owner"] as? String ?? "")
+                    self.pushDevice()
+                }
             case "vouch":
                 // The second person is this human: their own device confirms the claim and the
                 // rules engine admits (ADR-0026 E2 over the mesh — no invite paste, no QR).

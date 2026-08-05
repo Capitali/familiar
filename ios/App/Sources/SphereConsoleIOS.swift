@@ -56,6 +56,11 @@ struct SphereConsoleIOS: View {
             bridge.onGame = { [weak model] act, kind, text, to in
                 Task { await model?.gameAct(act, kind: kind, text: text, to: to) }
             }
+            bridge.onDeviceRole = { [weak model] roleRaw, owner in
+                guard let role = DeviceRole(rawValue: roleRaw) else { return }
+                model?.setDeviceBinding(role: role, owner: owner)
+                model.map { bridge.pushDevice($0.deviceStateJSON()) }
+            }
             bridge.onSetHuman = { [weak model] name in
                 // Both halves, exactly like the Mac bridge: confirmPresentHuman is the presence
                 // claim the device screen's PRESENT row actually renders (ADR-0019) — without it
@@ -133,6 +138,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onSetHuman: ((String) -> Void)?
     var onVouch: ((String, String, String) -> Void)?
     var onGame: ((String, String?, String, String) -> Void)?
+    var onDeviceRole: ((String, String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -289,6 +295,10 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                    let pubkey = body["pubkey"] as? String,
                    let handle = body["handle"] as? String {
                     self.onVouch?(nodeId, pubkey, handle)
+                }
+            case "deviceRole":
+                if let roleRaw = body["role"] as? String {
+                    self.onDeviceRole?(roleRaw, body["owner"] as? String ?? "")
                 }
             case "game":
                 // game_kind, not "kind" — the routing key would be overwritten (see Mac bridge).
