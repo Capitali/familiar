@@ -291,8 +291,9 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                     self.onVouch?(nodeId, pubkey, handle)
                 }
             case "game":
+                // game_kind, not "kind" — the routing key would be overwritten (see Mac bridge).
                 if let act = body["act"] as? String {
-                    self.onGame?(act, body["kind"] as? String,
+                    self.onGame?(act, body["game_kind"] as? String,
                                  body["text"] as? String ?? "", body["to"] as? String ?? "")
                 }
             case "setHuman":

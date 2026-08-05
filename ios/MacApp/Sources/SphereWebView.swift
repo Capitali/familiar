@@ -398,8 +398,10 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 self.pushDevice()
             case "game":
                 // A move in the mesh game — signed by this console's own key; the door judges.
+                // The game's kind travels as "game_kind": the message-routing key is "kind",
+                // and a same-named payload field would overwrite it in toApp's spread.
                 if let act = body["act"] as? String {
-                    let kind = body["kind"] as? String
+                    let kind = body["game_kind"] as? String
                     let text = body["text"] as? String ?? ""
                     let to = body["to"] as? String ?? ""
                     Task {

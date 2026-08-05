@@ -902,8 +902,9 @@ function renderButtons() {
   const myTurn = gg && gg.status === 'open' && gg.holder === ((S.device || {}).node_id || '');
   // Ring rotation: with an odd count, a half-step start plants one button at exactly 90° —
   // dead centre bottom, on top of the surface toggle (it ate the zoom button under signals).
-  // A ¾-step start keeps every slot clear of both the bottom toggle and the top link badge.
-  const off = N % 2 === 1 ? 0.75 : 0.5;
+  // Odd counts start AT top centre instead: evenly spaced, mirror-symmetric about the
+  // vertical axis, and the bottom-centre slot (the toggle's home) falls between buttons.
+  const off = N % 2 === 1 ? 0 : 0.5;
   $('screenbtns').innerHTML = SCREENS.map((key, i) => {
     const ang = (-90 + (i + off) * (360 / N)) * Math.PI / 180;
     const on = key === S.activeScreen;
@@ -1000,7 +1001,9 @@ window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidde
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
 // ---- the games (Riddle of the Mesh / The Campfire) ----
 window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
-window.sphereGameBegin = (kind) => { toApp('game', { act: 'begin', kind }); S.gameNav = 'live'; };
+// NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
+// a payload "kind" would overwrite the message kind and the bridge would drop the act.
+window.sphereGameBegin = (kind) => { toApp('game', { act: 'begin', game_kind: kind }); S.gameNav = 'live'; };
 window.sphereGamePassTo = (id) => { S.gamePassTo = id; refreshScreen(); };
 window.sphereGameSubmit = () => {
   const inp = document.getElementById('gameinput');
