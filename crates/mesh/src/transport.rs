@@ -2256,9 +2256,14 @@ fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
     crate::members::classify(dir, now)
         .into_iter()
         .filter(|m| {
+            // A player is a HUMAN-FACING seat: a phone/iPad/Mac shell (device actor), or a
+            // console known by its label. Kind alone is not enough — a sibling door's daemon
+            // classifies as a DevicePeer here (it reports observations to us), and a daemon
+            // holding a turn is nobody's fun. Watches are sensors, not seats.
+            let ns = m.actor.split(':').next().unwrap_or("");
+            let human_device = matches!(ns, "phone" | "iphone" | "ipad" | "mac");
             let console = m.label.to_lowercase().ends_with(" console");
-            let device = m.kind == crate::members::MemberKind::DevicePeer;
-            (device || console)
+            (human_device || console)
                 && roll.full.iter().any(|n| n == &m.node_id)
                 && m.status != "offline"
         })
