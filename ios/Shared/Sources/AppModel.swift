@@ -408,6 +408,9 @@ final class AppModel: ObservableObject {
         }
         let d: [String: Any] = [
             "label": PlatformDevice.name,
+            // This device's own node id — the console needs it to know "is it MY turn",
+            // "is this claim for MY human", distinct from the daemon's id in the worldview.
+            "node_id": node.nodeId,
             "build": Self.appBuild,
             "host": host,
             "hosts": hosts,
@@ -648,6 +651,23 @@ final class AppModel: ObservableObject {
 
     /// Present evidence at `POST /mesh/introduce`. On yes the device is a member and both sides
     /// hear it; on not-yet the door's words become the guest screen's path-to-admission copy.
+    /// One move in the mesh game (begin / guess / line / pass / close), signed and sent to
+    /// the door. The judge's reply lands in the activity feed verbatim.
+    func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "") async {
+        guard !host.isEmpty else { return }
+        do {
+            switch try await GameClient(node: node).act(act, kind: kind, text: text, to: to,
+                                                        host: host, port: enrollPort) {
+            case .said(let words): note(words.isEmpty ? "the move landed" : words)
+            case .refused(let why): note(why)
+            case .error(let e): note("the move failed: \(e)")
+            }
+        } catch {
+            note("the move failed: \(error.localizedDescription)")
+        }
+        await refreshWorldview()
+    }
+
     /// One tap on the claimed human's own device (ADR-0026 E2 over the mesh): mint a voucher
     /// for the waiting device's key and deliver it to the door. The rules engine does the rest —
     /// the new device's next poll finds itself a member. Returns the door's words on refusal.
@@ -877,6 +897,7 @@ final class AppModel: ObservableObject {
     /// Arrival ids as of the previous read — nil until the first, so launch greets nobody twice.
     private var knownArrivalIds: Set<String>?
     private var knownClaimIds: Set<String>?
+    private var wasMyTurn = false
     /// Whether this device stood at full standing as of the previous read. nil until the first,
     /// so launching already-recognised is silent.
     private var wasRecognised: Bool?
@@ -1046,6 +1067,17 @@ final class AppModel: ObservableObject {
                     }
                     knownClaimIds = ids
                 }
+
+                // The ember reached this device (the mesh games): edge-triggered chime, so a
+                // player who wandered off hears their turn arrive.
+                let myTurn = view.game.map { $0.status == "open" && $0.holder == node.nodeId } ?? false
+                if myTurn && !wasMyTurn {
+                    Chime.guestWaiting()
+                    note(view.game?.kind == "campfire"
+                         ? "🔥 the ember has reached you — add your line"
+                         : "🧩 your turn — the riddle waits on you")
+                }
+                wasMyTurn = myTurn
 
                 // Were WE just admitted? The moment this device's own id appears on the roll it
                 // had been absent from — an admission completed elsewhere (another door, a

@@ -1202,6 +1202,21 @@ async fn handle(
             };
             recv_introduce(&dir, &bytes, &sig, &peer_ip, relayed)
         }
+        // The mesh games: a member's signed move. The door runs the rules; the console only
+        // renders. One game at a time, judged deterministically — the familiar is the referee.
+        (Method::POST, "/mesh/game/act") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_game_act(&dir, &bytes, &sig)
+        }
         // Record replication (ADR-0026): a sibling door offers its recent records; merge
         // reconciles. GET is this door's own offer, POST accepts a sibling's — both are called
         // by the dial-OUT side of a gossip exchange, so CGNAT'd doors sync in both directions.
@@ -2234,6 +2249,86 @@ fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     }
 }
 
+/// Who can hold a turn: standing-full, human-facing devices — phones, iPads, consoles. The
+/// daemons and the lighthouse keep score and judge; they don't take turns at the fire.
+fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
+    let roll = crate::standing::load(dir);
+    crate::members::classify(dir, now)
+        .into_iter()
+        .filter(|m| {
+            let console = m.label.to_lowercase().ends_with(" console");
+            let device = m.kind == crate::members::MemberKind::DevicePeer;
+            (device || console)
+                && roll.full.iter().any(|n| n == &m.node_id)
+                && m.status != "offline"
+        })
+        .map(|m| crate::game::Player {
+            node_id: m.node_id,
+            label: m.label,
+            handle: m.human,
+            score: 0,
+            strikes: 0,
+            eliminated: false,
+        })
+        .collect()
+}
+
+/// The signed wrapper every game act arrives in — same proof shape as an introduce.
+#[derive(serde::Deserialize)]
+struct GameActEnvelope {
+    node: crate::node::NodeIdentity,
+    #[serde(flatten)]
+    act: crate::game::GameAct,
+    #[allow(dead_code)]
+    ts: i64,
+    #[allow(dead_code)]
+    nonce: String,
+}
+
+/// `POST /mesh/game/act` → verify the member and apply the move. The reply body is the
+/// judge's words ("✓ solved!", "not it — the ember moves on"), shown to the player verbatim.
+fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let env: GameActEnvelope = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad game act"),
+    };
+    let now = now_secs();
+    if env.node.verify(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Ok(pk) = crate::hex_decode(&env.node.pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad pubkey");
+    };
+    match crate::exactly_32(&pk, "node pubkey") {
+        Ok(arr) if crate::node::fingerprint(&arr) == env.node.node_id => {}
+        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
+    }
+    if crate::standing::standing_of(dir, &env.node.node_id) != crate::standing::Standing::Full {
+        return text(StatusCode::FORBIDDEN, "members only — the fire is inside the house");
+    }
+    let mut state = crate::game::load(dir);
+    let players = if env.act.act == "begin" {
+        game_players(dir, now)
+    } else {
+        Vec::new()
+    };
+    let label = if env.node.label.trim().is_empty() {
+        env.node.node_id.chars().take(8).collect()
+    } else {
+        env.node.label.trim().to_string()
+    };
+    match crate::game::apply_act(&mut state, &env.act, &env.node.node_id, &label, &players, now) {
+        Ok(reply) => {
+            if let Some(s) = &state {
+                let _ = crate::game::save(dir, s);
+            }
+            text(StatusCode::OK, reply)
+        }
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
 /// `GET /mesh/records` → this door's signed offer of recently-changed records. 204 when the
 /// window is quiet — the common steady state, and the caller skips absorption entirely.
 fn offer_records(dir: &Path) -> Response<Full<Bytes>> {
@@ -2278,6 +2373,9 @@ fn recv_record_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
             absorbed += 1;
         }
     }
+    if let Some(g) = &sync.body.game {
+        let _ = crate::game::absorb(dir, g);
+    }
     text(StatusCode::OK, format!("absorbed {absorbed}"))
 }
 
@@ -2318,6 +2416,9 @@ async fn sync_records_with(dir: &Path, addr: &str) {
                         {
                             for r in &theirs.body.records {
                                 let _ = crate::record::absorb(dir, r);
+                            }
+                            if let Some(g) = &theirs.body.game {
+                                let _ = crate::game::absorb(dir, g);
                             }
                         }
                     }

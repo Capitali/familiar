@@ -203,6 +203,9 @@ public struct Worldview: Codable, Equatable {
     /// Guests claiming an existing human, awaiting that human's own device (E2 over the mesh).
     /// Absent on older familiars and in guest projections.
     public var claims_waiting: [ClaimView]?
+    /// The live mesh game, when one is burning. Just the glance the shell needs — the web
+    /// layer renders the full state from raw JSON. Absent when no fire is lit.
+    public var game: GameGlance?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

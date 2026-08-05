@@ -250,7 +250,12 @@ const GLYPHS = {
   network: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><circle cx="24" cy="24" r="14" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.75"/><ellipse cx="24" cy="24" rx="14" ry="5" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><ellipse cx="24" cy="24" rx="5" ry="14" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5" style="transform-box:fill-box;transform-origin:center;animation:mer 5s ease-in-out infinite;"/><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 6s linear infinite;"><circle cx="24" cy="6" r="2.6" fill="currentColor"/></g></svg>`,
   vision: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:blink 5s ease-in-out infinite;"><path d="M4 24s7-11 20-11 20 11 20 11-7 11-20 11S4 24 4 24z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="24" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 4"/></g><circle cx="24" cy="24" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 3s ease-in-out infinite;"/></g></svg>`,
   device: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><rect x="14" y="5" width="20" height="38" rx="4.5" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><line x1="21" y1="9.5" x2="27" y2="9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="25" r="7.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 4" opacity="0.6"/></g><circle cx="24" cy="25" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/></svg>`,
+  games: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:spin 14s linear infinite;"><rect x="15" y="15" width="18" height="18" rx="4.5" transform="rotate(45 24 24)" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/></g><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 5s linear infinite;"><circle cx="24" cy="8" r="2.1" fill="currentColor"/></g><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 8s linear infinite reverse;"><circle cx="24" cy="41" r="1.6" fill="currentColor" opacity="0.7"/></g><circle cx="24" cy="24" r="3.6" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.7s ease-in-out infinite;"/></svg>`,
 };
+// The games' own control glyphs — back (chevron orbit) and begin (kindled play) — animated
+// like everything else on the ring: wordless, alive.
+const BACK_GLYPH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M15 18l-6-6 6-6" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.4s ease-in-out infinite;"/></svg>`;
+const BEGIN_GLYPH = `<svg viewBox="0 0 24 24" fill="none" style="width:20px;height:20px;"><circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.2" opacity="0.45" stroke-dasharray="3 4" style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"/><path d="M10 8.5v7l6-3.5z" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.8s ease-in-out infinite;"/></svg>`;
 // dive-to-surface glyph (map pin descending) and send glyph (plane) — controls, wordless
 const DIVE_GLYPH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:19px;height:19px;"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.6" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.2s ease-in-out infinite;"/></svg>`;
 const SEND_GLYPH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:19px;height:19px;"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>`;
@@ -262,9 +267,9 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // ---------- hologram screens (real data; skeleton built once per screen, data refreshed in place) ----------
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
-const SCREENS = ['conversation','roster','theories','work','signals','network','vision','device'];
+const SCREENS = ['conversation','roster','theories','work','signals','network','vision','games','device'];
 // 'welcome' is reached from its own corner button, not the ring — a greeting with its own bell.
-const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device', welcome:'Welcome' };
+const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', games:'Games', node:'', device:'Device', welcome:'Welcome' };
 
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 // The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
@@ -367,6 +372,8 @@ function refreshScreen() {
           <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
+          ${(v.game && v.game.status === 'open' && v.game.holder === p.m.node_id)
+            ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">--:--</span></span>` : ''}
           ${connBadge(p.m.connectivity)}
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
@@ -485,6 +492,172 @@ function refreshScreen() {
             · arrived ${dstr(a.at)}
           </div>
         </div>`).join(''));
+
+  } else if (k === 'games') {
+    // The mesh games. The screens say — prominently — which seams each game exercises,
+    // because that is the point: testers playing IS the test.
+    const g = v.game;
+    const myId = (S.device || {}).node_id || '';
+    const nav = S.gameNav || ((g && g.status === 'open') ? 'live' : 'menu');
+    const glybtn = (onclick, glyph, label, warm) => `
+      <button onclick="${onclick}" class="glybtn" style="height:44px;padding:0 18px;border-radius:12px;display:flex;align-items:center;gap:10px;${warm ? 'background:rgba(61,220,151,0.14);border:1px solid rgba(61,220,151,0.4);color:#9fe8c0;' : ''}">
+        ${glyph}<span class="m" style="font-size:9px;letter-spacing:0.16em;">${label}</span>
+      </button>`;
+    const tests = (items) => `
+      <div style="margin:14px 0;padding:14px 16px;border-radius:13px;background:rgba(61,220,151,0.07);border:1px solid rgba(61,220,151,0.22);">
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#7ff0c0;margin-bottom:9px;">WHAT THIS GAME TESTS IN THE FAMILIAR</div>
+        ${items.map(t => `<div class="m" style="font-size:10.5px;color:rgba(200,240,215,0.85);padding:3px 0;">◆ ${t}</div>`).join('')}
+      </div>`;
+    const rules = (items) => items.map(t => `<div class="m" style="font-size:10.5px;color:rgba(188,210,255,0.78);padding:3px 0;">· ${t}</div>`).join('');
+    const cd = (deadline) => `<span class="m" data-deadline="${deadline}" style="font-size:inherit;color:#aee7ff;">--:--</span>`;
+
+    if (nav === 'menu') {
+      const gameCard = (key, title, flavor, glyph) => `
+        <div onclick="sphereGameNav('info-${key}')" style="cursor:pointer;padding:22px 20px;border-radius:18px;background:rgba(20,44,80,0.24);border:1px solid rgba(120,190,255,0.2);display:flex;align-items:center;gap:18px;">
+          <div style="width:54px;height:54px;flex-shrink:0;color:#aee7ff;">${glyph}</div>
+          <div style="flex:1;">
+            <div style="font-size:18px;font-weight:600;margin-bottom:5px;">${title}</div>
+            <div class="m" style="font-size:10.5px;color:rgba(160,195,255,0.65);">${flavor}</div>
+          </div>
+          <div style="color:rgba(160,195,255,0.5);">${DIVE_GLYPH}</div>
+        </div>`;
+      el.innerHTML = `<div style="max-width:640px;display:flex;flex-direction:column;gap:14px;">
+        <div class="m" style="font-size:10.5px;color:rgba(160,195,255,0.6);margin-bottom:2px;">
+          Two fires to light. Playing them exercises the mesh on purpose — every move is a signed member act, and the familiar referees.
+        </div>
+        ${gameCard('riddle', 'Riddle of the Mesh', 'the familiar asks; the ember passes; one right answer takes it', GLYPHS.theories)}
+        ${gameCard('campfire', 'The Campfire', 'one story, one line each, the ember chooses whose turn it is', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.6s ease-in-out infinite;"/><circle cx="24" cy="33" r="3" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.4s ease-in-out infinite;"/></svg>`)}
+        ${g && g.status === 'done' ? `
+          <div style="padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.18);border:1px solid rgba(120,190,255,0.13);">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:7px;">LAST GAME</div>
+            <div class="m" style="font-size:11px;color:rgba(188,210,255,0.8);">${esc(g.verdict || 'finished')}</div>
+            <button onclick="sphereGameNav('live')" class="glybtn" style="margin-top:9px;height:30px;padding:0 12px;border-radius:9px;"><span class="m" style="font-size:8.5px;letter-spacing:0.14em;">SEE IT</span></button>
+          </div>` : ''}
+      </div>`;
+
+    } else if (nav === 'info-riddle' || nav === 'info-campfire') {
+      const riddle = nav === 'info-riddle';
+      el.innerHTML = `<div style="max-width:640px;">
+        <div style="font-size:21px;font-weight:600;margin-bottom:8px;">${riddle ? 'Riddle of the Mesh' : 'The Campfire'}</div>
+        <div style="font-size:13px;line-height:1.55;color:rgba(220,232,250,0.85);margin-bottom:4px;">
+          ${riddle
+            ? 'The familiar draws a riddle from its own bank and hands the ember to whoever lit the game. The holder gets one guess — or passes. Right answer wins on the spot; wrong answers stay on the record for everyone to laugh at later.'
+            : 'The familiar speaks the first line of a story. Whoever holds the ember adds ONE line and passes it — to a chosen member, or wherever the circle turns next. The story closes at 24 lines or when its starter closes it, and the familiar names the line of the story.'}
+        </div>
+        ${tests(riddle ? [
+          'signed member acts — every guess is an ed25519-signed write the door verifies',
+          'standing &amp; identity — only admitted members may play; guests see no game at all',
+          'turn state traveling doors — the ember rides record-sync between wildhorse and the lighthouse',
+          'the lazy clock — turn expiry is enforced by whichever door reads next, no game loop anywhere',
+          'worldview latency — how fast your console learns the ember moved',
+        ] : [
+          'everything the riddle tests, plus:',
+          'multi-door last-writer-wins — two people acting at two doors must converge on one story',
+          'presence &amp; attribution — each line signed, labelled, and timestamped by its author',
+          'the chime path — your device rings when the ember reaches you',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">HOW THE FAMILIAR JUDGES</div>
+        ${rules(riddle ? [
+          'the door judges each guess against its answer card — the answer never travels to any console',
+          'articles, case and punctuation are forgiven: “the map”, “Map!” and “map” are one answer',
+          'first correct guess wins and closes the game',
+        ] : [
+          'when the fire closes, the familiar names the LINE OF THE STORY: the line with the most words no other line used — novelty is the prize, and the rule is one sentence long',
+          'the familiar’s own opening line can never take its own prize',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">LAGGING PLAYERS</div>
+        ${rules([
+          `each turn carries a countdown (default ${riddle ? '15 minutes' : '1 hour'}) — visible on the roster badge`,
+          'let it run out and the ember moves on by itself, and you take a strike',
+          'two strikes and the mesh stops waiting for you: eliminated to spectator',
+          'if everyone else strikes out, the last player standing takes the game',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">RULES</div>
+        ${rules(riddle ? [
+          'players are the interactive member devices online when the game begins',
+          'one guess or one pass per turn — passing costs nothing but time',
+          'anyone may light the game; only its lighter may close it unsolved',
+        ] : [
+          'one line per turn, 240 characters — a line, not a chapter',
+          'pass to whoever you like, or let the circle decide',
+          'the starter may close the fire early; 24 lines closes it by itself',
+        ])}
+        <div style="display:flex;gap:12px;margin-top:20px;">
+          ${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK', false)}
+          ${g && g.status === 'open'
+            ? glybtn("sphereGameNav('live')", DIVE_GLYPH, 'A GAME IS BURNING — JOIN THE VIEW', true)
+            : glybtn(`sphereGameBegin('${riddle ? 'riddle' : 'campfire'}')`, BEGIN_GLYPH, 'BEGIN', true)}
+        </div>
+      </div>`;
+
+    } else {
+      // live (or finished) game view
+      if (!g) { S.gameNav = 'menu'; refreshScreen(); return; }
+      const open = g.status === 'open';
+      const mine = open && g.holder === myId;
+      const holderP = g.players.find(p => p.node_id === g.holder);
+      const deadline = g.holder_since + g.turn_secs;
+      const playerRow = (p) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;background:${p.node_id === g.holder && open ? 'rgba(255,178,102,0.1)' : 'rgba(20,44,80,0.18)'};${p.eliminated ? 'opacity:0.4;' : ''}">
+          <span style="font-size:12px;font-weight:500;flex:1;">${esc(p.label)}${p.handle ? ` <span class="m" style="font-size:8.5px;color:rgba(160,195,255,0.55);">${esc(p.handle)}</span>` : ''}</span>
+          ${p.node_id === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
+          ${p.score ? `<span class="m" style="font-size:9px;color:#9fe8c0;">★ ${p.score}</span>` : ''}
+          ${p.strikes ? `<span class="m" style="font-size:9px;color:#ff8fa3;">${'✕'.repeat(p.strikes)}</span>` : ''}
+          ${p.eliminated ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(255,143,163,0.8);">OUT</span>` : ''}
+        </div>`;
+      const entryRow = (e) => `
+        <div style="padding:10px 13px;border-radius:11px;background:${e.correct ? 'rgba(61,220,151,0.12)' : e.node_id ? 'rgba(20,44,80,0.22)' : 'rgba(120,90,200,0.12)'};border:1px solid ${e.correct ? 'rgba(61,220,151,0.4)' : 'rgba(120,190,255,0.12)'};margin-bottom:8px;">
+          <div class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(160,195,255,0.55);margin-bottom:4px;">${esc(e.label || 'the familiar')}${e.correct ? ' · ✓ SOLVED IT' : ''}</div>
+          <div style="font-size:13.5px;line-height:1.5;color:rgba(228,240,252,0.92);">${esc(e.text)}</div>
+        </div>`;
+      el.innerHTML = `<div style="max-width:680px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          <button onclick="sphereGameNav('menu')" class="glybtn" style="width:34px;height:34px;flex-shrink:0;">${BACK_GLYPH}</button>
+          <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : 'The Campfire'}</span>
+          ${open ? `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#ffb266;">${esc(holderP ? holderP.label : g.holder.slice(0,8))}'S TURN · ${cd(deadline)}</span>`
+                 : `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#9fe8c0;">FINISHED</span>`}
+        </div>
+        ${g.kind === 'riddle' && g.question ? `
+          <div style="padding:16px 18px;border-radius:14px;background:rgba(120,90,200,0.1);border:1px solid rgba(160,130,255,0.25);margin-bottom:12px;">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(190,170,255,0.7);margin-bottom:7px;">THE FAMILIAR ASKS</div>
+            <div style="font-size:15px;line-height:1.55;color:rgba(232,240,252,0.95);">${esc(g.question)}</div>
+            ${g.hint && !open ? `<div class="m" style="font-size:10px;color:rgba(190,170,255,0.6);margin-top:7px;">hint: ${esc(g.hint)}</div>` : ''}
+          </div>` : ''}
+        ${!open && g.verdict ? `
+          <div style="padding:13px 16px;border-radius:12px;background:rgba(61,220,151,0.1);border:1px solid rgba(61,220,151,0.32);margin-bottom:12px;">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#7ff0c0;margin-bottom:5px;">THE FAMILIAR'S VERDICT</div>
+            <div class="m" style="font-size:11.5px;line-height:1.5;color:rgba(210,245,225,0.9);">${esc(g.verdict)}</div>
+          </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr minmax(150px,200px);gap:14px;align-items:start;">
+          <div>${g.entries.length ? g.entries.map(entryRow).join('') : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.5);padding:8px 0;">${g.kind === 'riddle' ? 'no guesses yet' : ''}</div>`}</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:2px;">PLAYERS</div>
+            ${g.players.map(playerRow).join('')}
+          </div>
+        </div>
+        ${mine ? `
+          <div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
+            <div style="display:flex;gap:9px;">
+              <input id="gameinput" placeholder="${g.kind === 'riddle' ? 'one guess…' : 'one line of the story…'}" maxlength="240" spellcheck="true"
+                onkeydown="if(event.key==='Enter'){sphereGameSubmit();}"
+                style="flex:1;background:rgba(16,34,60,0.5);border:1px solid rgba(255,178,102,0.3);border-radius:10px;color:#e8f0fc;font-size:13px;padding:10px 12px;"/>
+              <button onclick="sphereGameSubmit()" class="glybtn" style="width:46px;height:42px;border-radius:10px;">${SEND_GLYPH}</button>
+            </div>
+            ${g.kind === 'campfire' ? `
+              <div class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin:10px 0 5px;">HAND THE EMBER TO</div>
+              <div style="display:flex;gap:7px;flex-wrap:wrap;">
+                <button onclick="sphereGamePassTo('')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${!S.gamePassTo ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">THE CIRCLE</span></button>
+                ${g.players.filter(p => !p.eliminated && p.node_id !== myId).map(p => `
+                  <button onclick="sphereGamePassTo('${p.node_id}')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${S.gamePassTo === p.node_id ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">${esc(p.label.toUpperCase())}</span></button>`).join('')}
+              </div>` : ''}
+            ${g.kind === 'riddle' ? `<button onclick="toApp('game',{act:'pass',to:''});" class="glybtn" style="margin-top:9px;height:28px;padding:0 12px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;">PASS — NO GUESS</span></button>` : ''}
+          </div>` : ''}
+        ${open && !mine ? `<div class="m" style="font-size:10px;color:rgba(160,195,255,0.55);margin-top:12px;">the ember is with ${esc(holderP ? holderP.label : 'someone')} — your console will chime when it reaches you</div>` : ''}
+        ${open && g.started_by === myId ? `<button onclick="if(confirm('Close the game?'))toApp('game',{act:'close'})" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">CLOSE THE GAME</span></button>` : ''}
+        ${!open ? `<div style="margin-top:14px;">${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK TO THE GAMES', false)}</div>` : ''}
+      </div>`;
+    }
 
   } else if (k === 'node') {
     const p = P[S.nodeIdx]; if (!p) { window.sphereScreen('roster'); return; }
@@ -690,11 +863,15 @@ function refreshScreen() {
 
 function renderButtons() {
   const N = SCREENS.length, Rx = 46, Ry = 45;
+  // The ember calls: when it is THIS device's turn, the games glyph burns warm.
+  const gg = (S.view || {}).game;
+  const myTurn = gg && gg.status === 'open' && gg.holder === ((S.device || {}).node_id || '');
   $('screenbtns').innerHTML = SCREENS.map((key, i) => {
     const ang = (-90 + (i + 0.5) * (360 / N)) * Math.PI / 180;
     const on = key === S.activeScreen;
-    return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
-      <span class="ic" style="color:${on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};">${GLYPHS[key]}</span></button>`;
+    const warm = key === 'games' && myTurn;
+    return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${warm ? 'radial-gradient(circle, rgba(255,178,102,0.4), transparent 66%)' : on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
+      <span class="ic" style="color:${warm ? '#ffcf9e' : on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};${warm ? 'animation:iconpulse 1.2s ease-in-out infinite;' : ''}">${GLYPHS[key]}</span></button>`;
   }).join('');
 }
 
@@ -771,6 +948,29 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 // Toggle the live roster against the record of members not seen in over a day.
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
+// ---- the games (Riddle of the Mesh / The Campfire) ----
+window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
+window.sphereGameBegin = (kind) => { toApp('game', { act: 'begin', kind }); S.gameNav = 'live'; };
+window.sphereGamePassTo = (id) => { S.gamePassTo = id; refreshScreen(); };
+window.sphereGameSubmit = () => {
+  const inp = document.getElementById('gameinput');
+  const text = (inp && inp.value || '').trim();
+  if (!text) return;
+  const g = (S.view || {}).game || {};
+  toApp('game', { act: g.kind === 'riddle' ? 'guess' : 'line', text, to: S.gamePassTo || '' });
+  if (inp) inp.value = '';
+  S.gamePassTo = '';
+};
+// One ticker drives every countdown on the page (turn clocks, roster badges).
+setInterval(() => {
+  document.querySelectorAll('[data-deadline]').forEach(el => {
+    const d = parseInt(el.dataset.deadline, 10) || 0;
+    const r = Math.max(0, d - Math.floor(Date.now() / 1000));
+    el.textContent = String(Math.floor(r / 60)).padStart(2, '0') + ':' + String(r % 60).padStart(2, '0');
+    if (r === 0) el.style.color = '#ff8fa3';
+    else if (r < 60) el.style.color = '#ffb266';
+  });
+}, 1000);
 // Recognise a guest, or hold them off. "not now" is a 5-minute retry window, not a ban — the mesh
 // cannot tell a hostile stranger from a housemate on a new phone.
 window.sphereStanding = (act, nodeId) => { toApp('standing', { act, node_id: nodeId }); };
@@ -870,6 +1070,7 @@ window.sphereUpdate = (view) => {
   try { renderCallouts(); } catch (e) { S.jsErr = 'callouts: ' + e.message; }
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + S.activeScreen + ': ' + e.message; }
   renderChrome();
+  renderButtons();   // the games glyph burns warm the moment the ember reaches this device
   if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };
 window.sphereLinkDown = (msg) => { S.linkOk = false; S.linkErr = msg || ''; renderChrome(); };

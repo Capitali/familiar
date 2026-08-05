@@ -1052,6 +1052,10 @@ pub struct RecordSyncBody {
     pub ts: i64,
     pub nonce: String,
     pub records: Vec<MembershipRecord>,
+    /// The live game rides the same channel (turn-based play is last-writer-wins by nature,
+    /// so the ember follows a player whichever door they act at). Absent when no fire is lit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<crate::game::GameState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1073,7 +1077,8 @@ pub fn build_record_sync(
         .into_iter()
         .filter(|r| now - r.last_seen <= RECORD_SYNC_WINDOW_SECS)
         .collect();
-    if recent.is_empty() {
+    let game = crate::game::load(dir).filter(|g| now - g.updated <= RECORD_SYNC_WINDOW_SECS);
+    if recent.is_empty() && game.is_none() {
         return Ok(None);
     }
     recent.sort_by_key(|r| std::cmp::Reverse(r.last_seen));
@@ -1084,6 +1089,7 @@ pub fn build_record_sync(
         ts: now,
         nonce: format!("{:016x}", fastrand_nonce(now)),
         records: recent,
+        game,
     };
     let sig = node.sign(&serde_json::to_vec(&body)?);
     Ok(Some(RecordSync { body, sig }))

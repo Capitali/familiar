@@ -192,6 +192,10 @@ pub struct Worldview {
     /// own device to vouch (E2 over the mesh). Members only; projected away for guest readers.
     #[serde(default)]
     pub claims_waiting: Vec<ClaimView>,
+    /// The live mesh game, when one is burning (Riddle of the Mesh / The Campfire). Members
+    /// only; a guest's projection carries no game — the fire is inside the house.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<crate::game::GameView>,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -638,6 +642,15 @@ pub fn assemble_worldview(
         .collect();
     claims_waiting.sort_by_key(|c| std::cmp::Reverse(c.since));
 
+    // The live game: tick the clock lazily on every read (the mesh has no game loop, only
+    // readers and actors) and persist any expiry it caused before rendering the view.
+    let game = crate::game::load(dir).map(|mut g| {
+        if crate::game::tick(&mut g, now) {
+            let _ = crate::game::save(dir, &g);
+        }
+        crate::game::view(&g)
+    });
+
     let goals = goal_views(dir);
 
     Ok(Worldview {
@@ -653,6 +666,7 @@ pub fn assemble_worldview(
         standing_full: roll.full.clone(),
         arrivals,
         claims_waiting,
+        game,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,
