@@ -496,7 +496,7 @@ function refreshScreen() {
                   style="padding:9px 16px;border-radius:10px;background:rgba(61,220,151,0.18);border:1px solid rgba(61,220,151,0.45);color:#9fe8c0;cursor:pointer;font-size:12px;">
             Yes — it's mine
           </button>
-          <button onclick="sphereClaimDismiss(${JSON.stringify(c.node_id)})"
+          <button onclick="sphereClaimDismiss('${c.node_id.replace(/[^a-f0-9]/gi, '')}')"
                   style="padding:9px 16px;border-radius:10px;background:rgba(16,34,60,0.3);border:1px solid rgba(120,190,255,0.2);color:rgba(188,210,255,0.75);cursor:pointer;font-size:12px;">
             Not mine
           </button>
@@ -916,8 +916,8 @@ function refreshScreen() {
             <span class="m" style="font-size:8.5px;letter-spacing:0.13em;">${label}</span></button>`;
         return `<div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap;">
           <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">THIS DEVICE IS</span>
-          ${chipBtn(role === 'personal', who ? `MINE — ${esc(who.toUpperCase())}'S` : 'MINE', `toApp('deviceRole',{role:'personal',owner:${JSON.stringify(who)}})`, !who)}
-          ${chipBtn(role === 'shared', 'SHARED', `toApp('deviceRole',{role:'shared',owner:''})`, false)}
+          ${chipBtn(role === 'personal', who ? `MINE — ${esc(who.toUpperCase())}'S` : 'MINE', `sphereSetRole('personal','${who.replace(/[^a-z0-9_-]/gi, '')}')`, !who)}
+          ${chipBtn(role === 'shared', 'SHARED', `sphereSetRole('shared','')`, false)}
           ${role === 'personal'
             ? `<span class="m" style="font-size:9px;color:rgba(160,195,255,0.5);">it will know its human at every launch</span>`
             : `<span class="m" style="font-size:9px;color:rgba(160,195,255,0.5);">${who ? 'a shared device asks again after a restart — mark it MINE to make identity stick' : 'name yourself first, then it can be yours'}</span>`}
@@ -1058,6 +1058,10 @@ window.sphereRosterToggle = (id) => { S.rosterOpen = S.rosterOpen || {}; S.roste
 // Inline handlers resolve on window, never module scope — every act the HTML strings call
 // must live here (the badge's bare `S.gameNav=` threw ReferenceError on click).
 window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
+// Values interpolated into inline handlers must never carry quotes — JSON.stringify emits
+// double quotes, which TERMINATE a double-quoted attribute (the MINE button's SyntaxError).
+// Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
+window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
 window.sphereClaimDismiss = (id) => { (S.dismissedClaims = S.dismissedClaims || {})[id] = 1; refreshScreen(); };
 // confirm() is silent inside WKWebView (no UI delegate) — the close is a two-tap arm, like SEVER.
 window.sphereGameClose = () => {
