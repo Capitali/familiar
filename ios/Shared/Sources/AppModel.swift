@@ -812,6 +812,15 @@ final class AppModel: ObservableObject {
         // human explicitly asks to join again.
         severedByHuman = true
         autoEnrollTried = true   // the join screen shows the explicit button, not the spinner
+        // And a severed device forgets whom it served: the serving relationship ended with
+        // the membership. Without this, "MINE — IAN'S" pre-filled from the old life before
+        // the new one had said a single name.
+        servedHuman = "observer"
+        deviceOwner = ""
+        deviceRoleRaw = DeviceRole.suggested.rawValue
+        answeredClaim = nil
+        faceClaim = nil
+        refreshPresence()
         note("severed by your hand — this device will not rejoin until you ask it to")
     }
 

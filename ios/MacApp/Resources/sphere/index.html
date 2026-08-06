@@ -632,7 +632,7 @@ function refreshScreen() {
       // rule the conversation screen enforces with its persistent input row. Countdowns keep
       // ticking regardless (the data-deadline ticker touches text nodes, not the tree).
       const prevInp = document.getElementById('gameinput');
-      if (prevInp && (document.activeElement === prevInp || prevInp.value.trim())) {
+      if (prevInp && document.activeElement === prevInp) {
         return;
       }
       const open = g.status === 'open';
@@ -830,9 +830,11 @@ function refreshScreen() {
       </div></div>`;
 
   } else if (k === 'device') {
-    // A human typing their name outranks the 3s device push — same rule as the game input.
+    // A human typing their name outranks the 3s device push — FOCUS-gated only. Gating on a
+    // leftover value froze the screen permanently once anything lingered in the box; commit
+    // and cancel clear + blur, so focus is the one honest signal that composing is happening.
     const nameInp = document.getElementById('servedHumanInput');
-    if (nameInp && (document.activeElement === nameInp || nameInp.value.trim())) {
+    if (nameInp && document.activeElement === nameInp) {
       return;
     }
     const d = S.device;
@@ -1085,7 +1087,7 @@ window.sphereGameSubmit = () => {
   if (!text) return;
   const g = (S.view || {}).game || {};
   toApp('game', { act: g.kind === 'riddle' ? 'guess' : 'line', text, to: S.gamePassTo || '' });
-  if (inp) inp.value = '';
+  if (inp) { inp.value = ''; inp.blur(); }
   S.gamePassTo = '';
 };
 // One ticker drives every countdown on the page (turn clocks, roster badges).
@@ -1177,13 +1179,31 @@ function servingRow(d) {
     <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">I AM</span>
     <input id="servedHumanInput" value="" placeholder="your name" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
     <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-    <button onclick="sphereCorrectServing(0)" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
+    <button onclick="sphereCancelServing()" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
   </div>`;
 }
 window.sphereCorrectServing = (on) => { S.correctServing = !!on; refreshScreen(); };
 
 // Set who this device is serving (ADR-0016) — the handle its reports attribute to.
-window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) { toApp('setHuman', { name: v }); S.correctServing = false; refreshScreen(); } };
+// Commit and cancel BOTH clear + blur the input: a leftover value (or WKWebView's habit of
+// leaving focus on the input after a button click) would trip the typing-guard and freeze
+// the device screen's renders permanently — taps still fired, but nothing ever repainted.
+window.setServedHuman = () => {
+  const el = document.getElementById('servedHumanInput');
+  const v = el && el.value.trim();
+  if (v) {
+    toApp('setHuman', { name: v });
+    el.value = ''; el.blur();
+    S.correctServing = false;
+    refreshScreen();
+  }
+};
+window.sphereCancelServing = () => {
+  const el = document.getElementById('servedHumanInput');
+  if (el) { el.value = ''; el.blur(); }
+  S.correctServing = false;
+  refreshScreen();
+};
 window.onerror = (msg, src, line) => {
   // Cross-origin scripts (CDN three.js/qrcode) report opaquely as "Script error." with no
   // detail — that is noise, not diagnosis; only badge errors that carry information.
