@@ -391,7 +391,9 @@ function refreshScreen() {
     }
     const headerRow = (p) => `
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
-          <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;">${esc(p.name)}</span>
+          ${p.m.human ? `<span style="font-size:15px;font-weight:500;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(p.m.human)}</span>` : ''}
+          <span style="flex:1;"></span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
           ${(v.game && v.game.status === 'open' && emberIds.has(p.m.node_id))
