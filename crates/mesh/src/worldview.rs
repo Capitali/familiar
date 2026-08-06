@@ -663,7 +663,19 @@ pub fn assemble_worldview(
         question,
         question_owner,
         guests_waiting,
-        standing_full: roll.full.clone(),
+        // Record-truth: when the records are the authority (read_records), the standing list
+        // the consoles reconcile against must come from THEM — the legacy roll drifts (a
+        // vouch minted at one door reached the other as a record, and the stale roll left the
+        // iPad reading as a visitor while both doors' records said member).
+        standing_full: if crate::config::load(dir).map(|c| c.read_records).unwrap_or(false) {
+            crate::record::load_all(dir)
+                .iter()
+                .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+                .flat_map(|r| r.keys.clone())
+                .collect()
+        } else {
+            roll.full.clone()
+        },
         arrivals,
         claims_waiting,
         game,
