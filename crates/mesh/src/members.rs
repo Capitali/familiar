@@ -484,13 +484,22 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let status = status_of(kind, now - p.last_seen);
         // The human at that node: what its brief shared, else the device's actor namespace
         // (`ipad:ian` → "ian" — the device is inherently a human's console).
-        let human = if !p.human.is_empty() {
-            p.human.clone()
-        } else {
-            actor
+        // Whose device this IS: the record's ESTABLISHED handle is the identity truth and
+        // outranks every cached claim — after a release/disestablish the cached brief kept
+        // whispering the old name ("iPhone ian" while bob was present). A record that exists
+        // with NO establishment names nobody, honestly; only devices without records at all
+        // fall back to what they said about themselves.
+        let human = match crate::record::find_by_key(dir, &p.node_id) {
+            Some(r) => r
+                .identity
+                .established
+                .map(|e| e.handle)
+                .unwrap_or_default(),
+            None if !p.human.is_empty() => p.human.clone(),
+            None => actor
                 .split_once(':')
                 .map(|(_, h)| h.to_string())
-                .unwrap_or_default()
+                .unwrap_or_default(),
         };
         // Cumulative online time, live session included while it's still fresh.
         let live = if status == "online" && p.session_start > 0 {
