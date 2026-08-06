@@ -668,17 +668,20 @@ fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
             !cip.is_empty() && (cip == "127.0.0.1" || self_hosts.contains(&cip));
         let stem = c.label.to_lowercase();
         let stem = stem.strip_suffix(" console").unwrap_or("").trim().to_string();
+        // The label pass accepts ANY non-console member as the machine — from a sibling door's
+        // view the wildhorse daemon classifies as a DevicePeer (it reports observations there),
+        // and nesting must hold from EVERY door or the roster flaps whenever a console fails
+        // over. The label convention is machine-specific, so it decides first regardless of
+        // kind; the structural (address) pass stays restricted to full nodes, because behind
+        // one NAT many machines share a recorded public address.
         let full_node = |h: &Member| {
             matches!(h.kind, MemberKind::SelfNode | MemberKind::GossipPeer) && !is_console(h)
         };
-        // The label convention is machine-specific, so it decides first: behind one NAT many
-        // machines share a recorded public address, and an IP-first match could nest a console
-        // under a different machine's daemon that merely egresses the same way.
         let host = out
             .iter()
             .enumerate()
             .find(|(hi, h)| {
-                *hi != ci && full_node(h) && !stem.is_empty() && h.label.to_lowercase() == stem
+                *hi != ci && !is_console(h) && !stem.is_empty() && h.label.to_lowercase() == stem
             })
             .or_else(|| {
                 out.iter().enumerate().find(|(hi, h)| {
@@ -1173,6 +1176,20 @@ mod tests {
         assert_eq!(
             quiet[2].attached_to, "1c99",
             "the second console attaches to the machine, never to the first console"
+        );
+
+        // From a SIBLING door's view the machine's daemon classifies as a DevicePeer (it
+        // reports observations there) — nesting must hold from every door, or the roster
+        // flaps whenever a console reads through its fallback.
+        let mut sibling = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("1c99", "Wildhorse", "familiar:wildhorse", "device_peer", "129.224.211.111"),
+            mk("a24d", "Wildhorse console", "mac:ian", "device_peer", "129.224.211.111"),
+        ];
+        attach_consoles(&mut sibling, &[]);
+        assert_eq!(
+            sibling[2].attached_to, "1c99",
+            "the console nests under its machine even when the machine reads as a device peer"
         );
     }
 
