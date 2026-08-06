@@ -282,6 +282,9 @@ const SCREENS = ['conversation','roster','theories','work','signals','network','
 // 'welcome' is reached from its own corner button, not the ring — a greeting with its own bell.
 const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', games:'Games', node:'', device:'Device', welcome:'Welcome' };
 
+// Display capitalization: handles are lowercase slugs by design ("ian", "betty-jo") — but
+// names read as names: Ian, Betty-jo. Display-only; the slug stays the identity.
+function cap(h) { return h ? h.charAt(0).toUpperCase() + h.slice(1) : h; }
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 // The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
 function connBadge(mode) {
@@ -385,14 +388,19 @@ function refreshScreen() {
     // the only place the countdown lives.
     const emberIds = new Set();
     if (v.game && v.game.status === 'open') {
-      emberIds.add(v.game.holder);
-      const hp = pairs.find(([q]) => q.m.node_id === v.game.holder);
-      if (hp && hp[0].m.attached_to) emberIds.add(hp[0].m.attached_to);
+      // The holder is a HUMAN — the fire burns on every device of theirs (and the machines
+      // those devices nest under).
+      const seat = (v.game.players || []).find(pl => pl.handle === v.game.holder);
+      for (const dev of (seat && seat.devices) || [v.game.holder]) {
+        emberIds.add(dev);
+        const hp = pairs.find(([q]) => q.m.node_id === dev);
+        if (hp && hp[0].m.attached_to) emberIds.add(hp[0].m.attached_to);
+      }
     }
     const headerRow = (p) => `
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
           <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;">${esc(p.name)}</span>
-          ${p.m.human ? `<span style="font-size:15px;font-weight:500;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(p.m.human)}</span>` : ''}
+          ${p.m.human ? `<span style="font-size:15px;font-weight:500;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(cap(p.m.human))}</span>` : ''}
           <span style="flex:1;"></span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
@@ -638,13 +646,14 @@ function refreshScreen() {
         return;
       }
       const open = g.status === 'open';
-      const mine = open && g.holder === myId;
-      const holderP = g.players.find(p => p.node_id === g.holder);
+      const myHuman2 = (((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '').toLowerCase();
+      const mine = open && myHuman2 && g.holder.toLowerCase() === myHuman2 && myHuman2 !== 'observer';
+      const holderP = g.players.find(p => p.handle === g.holder) || g.players.find(p => p.node_id === g.holder);
       const deadline = g.holder_since + g.turn_secs;
       const playerRow = (p) => `
         <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;background:${p.node_id === g.holder && open ? 'rgba(255,178,102,0.1)' : 'rgba(20,44,80,0.18)'};${p.eliminated ? 'opacity:0.4;' : ''}">
-          <span style="font-size:12px;font-weight:500;flex:1;">${esc(p.label)}${p.handle ? ` <span class="m" style="font-size:8.5px;color:rgba(160,195,255,0.55);">${esc(p.handle)}</span>` : ''}</span>
-          ${p.node_id === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
+          <span style="font-size:12px;font-weight:500;flex:1;">${esc(cap(p.handle || p.label))}${(p.devices && p.devices.length > 1) ? ` <span class="m" style="font-size:8.5px;color:rgba(160,195,255,0.55);">${p.devices.length} devices</span>` : ''}</span>
+          ${p.handle === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
           ${p.score ? `<span class="m" style="font-size:9px;color:#9fe8c0;">★ ${p.score}</span>` : ''}
           ${p.strikes ? `<span class="m" style="font-size:9px;color:#ff8fa3;">${'✕'.repeat(p.strikes)}</span>` : ''}
           ${p.eliminated ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(255,143,163,0.8);">OUT</span>` : ''}
@@ -658,7 +667,7 @@ function refreshScreen() {
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
           <button onclick="sphereGameNav('menu')" class="glybtn" style="width:34px;height:34px;flex-shrink:0;">${BACK_GLYPH}</button>
           <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : 'The Campfire'}</span>
-          ${open ? `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#ffb266;">${esc(holderP ? holderP.label : g.holder.slice(0,8))}'S TURN · ${cd(deadline)}</span>`
+          ${open ? `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#ffb266;">${esc(cap(holderP ? (holderP.handle || holderP.label) : g.holder))}'S TURN · ${cd(deadline)}</span>`
                  : `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#9fe8c0;">FINISHED</span>`}
         </div>
         ${g.kind === 'riddle' && g.question ? `
@@ -692,13 +701,13 @@ function refreshScreen() {
               <div class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin:10px 0 5px;">HAND THE EMBER TO</div>
               <div style="display:flex;gap:7px;flex-wrap:wrap;">
                 <button onclick="sphereGamePassTo('')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${!S.gamePassTo ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">THE CIRCLE</span></button>
-                ${g.players.filter(p => !p.eliminated && p.node_id !== myId).map(p => `
-                  <button onclick="sphereGamePassTo('${p.node_id}')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${S.gamePassTo === p.node_id ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">${esc(p.label.toUpperCase())}</span></button>`).join('')}
+                ${g.players.filter(p => !p.eliminated && p.handle.toLowerCase() !== myHuman2).map(p => `
+                  <button onclick="sphereGamePassTo('${p.handle.replace(/[^a-z0-9_-]/gi,'')}')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${S.gamePassTo === p.handle ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">${esc(cap(p.handle).toUpperCase())}</span></button>`).join('')}
               </div>` : ''}
             ${g.kind === 'riddle' ? `<button onclick="toApp('game',{act:'pass',to:''});" class="glybtn" style="margin-top:9px;height:28px;padding:0 12px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;">PASS — NO GUESS</span></button>` : ''}
           </div>` : ''}
-        ${open && !mine ? `<div class="m" style="font-size:10px;color:rgba(160,195,255,0.55);margin-top:12px;">the ember is with ${esc(holderP ? holderP.label : 'someone')} — your console will chime when it reaches you</div>` : ''}
-        ${open && g.started_by === myId ? `<button onclick="sphereGameClose()" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;${S.closeArmed ? 'background:rgba(60,10,16,0.5);border-color:rgba(255,110,110,0.6);' : ''}"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">${S.closeArmed ? 'TAP AGAIN TO CLOSE' : 'CLOSE THE GAME'}</span></button>` : ''}
+        ${open && !mine ? `<div class="m" style="font-size:10px;color:rgba(160,195,255,0.55);margin-top:12px;">the ember is with ${esc(cap(holderP ? (holderP.handle || holderP.label) : 'someone'))} — every one of their devices shows it; any one may answer</div>` : ''}
+        ${open && myHuman2 && g.started_by.toLowerCase() === myHuman2 ? `<button onclick="sphereGameClose()" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;${S.closeArmed ? 'background:rgba(60,10,16,0.5);border-color:rgba(255,110,110,0.6);' : ''}"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">${S.closeArmed ? 'TAP AGAIN TO CLOSE' : 'CLOSE THE GAME'}</span></button>` : ''}
         ${!open ? `<div style="margin-top:14px;">${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK TO THE GAMES', false)}</div>` : ''}
       </div>`;
     }
@@ -730,6 +739,18 @@ function refreshScreen() {
       ${row('ADDRESS', m.addr)}
       ${row('OFFERS', (m.tools||0) + ' tools · ' + (m.patterns||0) + ' patterns')}
       ${row('ROLE', m.relationship)}
+      ${/lighthouse/i.test(p.name) ? `
+        <div style="margin-top:16px;padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.2);border:1px solid rgba(120,190,255,0.15);">
+          <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin-bottom:7px;">WHAT A LIGHTHOUSE IS</div>
+          <div class="m" style="font-size:11px;line-height:1.6;color:rgba(188,210,255,0.8);">
+            A household door standing on a public address. When your devices are away from home —
+            cellular, someone else's wifi — they reach the mesh through it. It relays messages
+            between homes that cannot dial each other, keeps the shared record in sync, and holds
+            the door open for new devices knocking from anywhere. It serves no human, takes no
+            turns in games, and can do nothing a member device could not — it simply never sleeps
+            and can always be found.
+          </div>
+        </div>` : ''}
       ${row('LAST', m.detail)}
     </div>`;
 
@@ -962,7 +983,8 @@ function renderButtons() {
   const N = SCREENS.length, Rx = 46, Ry = 45;
   // The ember calls: when it is THIS device's turn, the games glyph burns warm.
   const gg = (S.view || {}).game;
-  const myTurn = gg && gg.status === 'open' && gg.holder === ((S.device || {}).node_id || '');
+  const myH = (((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '').toLowerCase();
+  const myTurn = gg && gg.status === 'open' && myH && myH !== 'observer' && gg.holder.toLowerCase() === myH;
   // Ring rotation: with an odd count, a half-step start plants one button at exactly 90° —
   // dead centre bottom, on top of the surface toggle (it ate the zoom button under signals).
   // Odd counts start AT top centre instead: evenly spaced, mirror-symmetric about the

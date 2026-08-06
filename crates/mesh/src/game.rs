@@ -35,13 +35,19 @@ pub enum GameKind {
     Campfire,
 }
 
+/// A player is a HUMAN (Ian's law of the fire: games are played between humans). The handle
+/// is the seat; every present device of that human shows the ember, and any ONE of them may
+/// answer. `node_id` stays as the first device for wire/display compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Player {
     pub node_id: String,
     pub label: String,
-    /// The human the device serves, when known — the roster's word, not the player's.
+    /// The human who holds this seat — the turn key.
     #[serde(default)]
     pub handle: String,
+    /// Every device of this human at begin time — the ember shows on all of them.
+    #[serde(default)]
+    pub devices: Vec<String>,
     #[serde(default)]
     pub score: i64,
     #[serde(default)]
@@ -80,6 +86,8 @@ pub struct GameState {
     /// "open" | "done".
     pub status: String,
     pub turn_secs: i64,
+    /// The HANDLE whose turn it is (games are played between humans) — every device of this
+    /// human shows the ember; any one of them may act.
     pub holder: String,
     pub holder_since: i64,
     pub players: Vec<Player>,
@@ -230,8 +238,8 @@ fn next_holder(players: &[Player], from: &str) -> Option<String> {
     if alive.is_empty() {
         return None;
     }
-    let pos = alive.iter().position(|p| p.node_id == from).unwrap_or(0);
-    Some(alive[(pos + 1) % alive.len()].node_id.clone())
+    let pos = alive.iter().position(|p| p.handle == from).unwrap_or(0);
+    Some(alive[(pos + 1) % alive.len()].handle.clone())
 }
 
 /// Advance the clock: expire overdue turns into strikes, eliminate at [`STRIKES_OUT`],
@@ -245,7 +253,7 @@ pub fn tick(state: &mut GameState, now: i64) -> bool {
     // turn_secs is clamped ≥ 60 at begin, so this loop always terminates.
     while now - state.holder_since >= state.turn_secs {
         let overdue = state.holder.clone();
-        if let Some(p) = state.players.iter_mut().find(|p| p.node_id == overdue) {
+        if let Some(p) = state.players.iter_mut().find(|p| p.handle == overdue) {
             p.strikes += 1;
             if p.strikes >= STRIKES_OUT {
                 p.eliminated = true;
@@ -259,7 +267,7 @@ pub fn tick(state: &mut GameState, now: i64) -> bool {
                 .players
                 .iter()
                 .find(|p| !p.eliminated)
-                .map(|p| p.node_id.clone())
+                .map(|p| p.handle.clone())
                 .unwrap_or_default();
             state.verdict = match state.kind {
                 GameKind::Riddle => {
@@ -311,8 +319,8 @@ fn settle_campfire(state: &mut GameState) {
 pub fn apply_act(
     state: &mut Option<GameState>,
     act: &GameAct,
-    actor: &str,
-    actor_label: &str,
+    actor: &str,        // the HUMAN handle acting (any of their devices)
+    actor_label: &str,  // the acting device's label — entries attribute device AND human
     players_at_begin: &[Player],
     now: i64,
 ) -> Result<String> {
@@ -327,14 +335,19 @@ pub fn apply_act(
                 ));
             }
             let kind = act.kind.ok_or_else(|| Error::Untrusted("which game?".into()))?;
+            if actor.is_empty() {
+                return Err(Error::Untrusted(
+                    "the fire knows humans — say who you are before lighting a game".into(),
+                ));
+            }
             let mut players = players_at_begin.to_vec();
             if players.is_empty() {
                 return Err(Error::Untrusted(
-                    "no players — the roster shows nobody interactive to invite".into(),
+                    "no players — no established humans are present to invite".into(),
                 ));
             }
             // The starter takes the first turn: they're demonstrably present.
-            players.sort_by_key(|p| p.node_id != actor);
+            players.sort_by_key(|p| p.handle != actor);
             let used = state.as_ref().map(|s| s.riddles_used.clone()).unwrap_or_default();
             let riddle = match kind {
                 GameKind::Riddle => {
@@ -415,7 +428,7 @@ pub fn apply_act(
                             "“{text}” is the answer — solved on guess {}",
                             s.entries.iter().filter(|e| !e.correct).count() + 1
                         );
-                        if let Some(p) = s.players.iter_mut().find(|p| p.node_id == actor) {
+                        if let Some(p) = s.players.iter_mut().find(|p| p.handle == actor) {
                             p.score += 1;
                         }
                         reply = "✓ solved!".into();
@@ -445,8 +458,8 @@ pub fn apply_act(
                     } else {
                         s.players
                             .iter()
-                            .find(|p| p.node_id == act.to && !p.eliminated)
-                            .map(|p| p.node_id.clone())
+                            .find(|p| (p.handle == act.to || p.node_id == act.to) && !p.eliminated)
+                            .map(|p| p.handle.clone())
                     };
                     let Some(next) = to else {
                         return Err(Error::Untrusted(
@@ -474,8 +487,8 @@ pub fn apply_act(
             } else {
                 s.players
                     .iter()
-                    .find(|p| p.node_id == act.to && !p.eliminated)
-                    .map(|p| p.node_id.clone())
+                    .find(|p| (p.handle == act.to || p.node_id == act.to) && !p.eliminated)
+                    .map(|p| p.handle.clone())
             };
             let Some(next) = next else {
                 return Err(Error::Untrusted("nobody to pass to".into()));
@@ -569,6 +582,8 @@ pub struct GameView {
     pub status: String,
     pub started_by: String,
     pub turn_secs: i64,
+    /// The HANDLE whose turn it is (games are played between humans) — every device of this
+    /// human shows the ember; any one of them may act.
     pub holder: String,
     pub holder_since: i64,
     pub players: Vec<Player>,
@@ -616,8 +631,9 @@ mod tests {
         (0..n)
             .map(|i| Player {
                 node_id: format!("node{i}"),
-                label: format!("device {i}"),
-                handle: String::new(),
+                label: format!("human {i}"),
+                handle: format!("h{i}"),
+                devices: vec![format!("node{i}"), format!("node{i}b")],
                 score: 0,
                 strikes: 0,
                 eliminated: false,
@@ -649,28 +665,28 @@ mod tests {
             to: String::new(),
             turn_secs: None,
         };
-        apply_act(&mut state, &act("begin", "", Some(GameKind::Riddle)), "node0", "d0", &players(3), 1000).unwrap();
+        apply_act(&mut state, &act("begin", "", Some(GameKind::Riddle)), "h0", "d0", &players(3), 1000).unwrap();
         let s = state.as_ref().unwrap();
-        assert_eq!(s.holder, "node0", "the starter takes the first turn");
+        assert_eq!(s.holder, "h0", "the starter's HUMAN takes the first turn");
         let answer = s.riddle.as_ref().unwrap().answers[0].clone();
 
         // A wrong guess is kept and the ember moves round-robin.
-        apply_act(&mut state, &act("guess", "definitely wrong", None), "node0", "d0", &[], 1010).unwrap();
+        apply_act(&mut state, &act("guess", "definitely wrong", None), "h0", "d0", &[], 1010).unwrap();
         let s = state.as_ref().unwrap();
-        assert_eq!(s.holder, "node1");
+        assert_eq!(s.holder, "h1", "the ember passes human to human");
         assert_eq!(s.entries.len(), 1);
         assert!(!s.entries[0].correct);
 
         // Out of turn is refused.
-        assert!(apply_act(&mut state, &act("guess", "x", None), "node2", "d2", &[], 1020).is_err());
+        assert!(apply_act(&mut state, &act("guess", "x", None), "h2", "d2", &[], 1020).is_err());
 
         // node1 passes; node2 solves.
-        apply_act(&mut state, &act("pass", "", None), "node1", "d1", &[], 1030).unwrap();
-        apply_act(&mut state, &act("guess", &answer, None), "node2", "d2", &[], 1040).unwrap();
+        apply_act(&mut state, &act("pass", "", None), "h1", "d1", &[], 1030).unwrap();
+        apply_act(&mut state, &act("guess", &answer, None), "h2", "d2-second-device", &[], 1040).unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "done");
-        assert_eq!(s.winner, "node2");
-        assert_eq!(s.players.iter().find(|p| p.node_id == "node2").unwrap().score, 1);
+        assert_eq!(s.winner, "h2", "the HUMAN wins, from whichever device answered");
+        assert_eq!(s.players.iter().find(|p| p.handle == "h2").unwrap().score, 1);
     }
 
     #[test]
@@ -679,7 +695,7 @@ mod tests {
         apply_act(
             &mut state,
             &GameAct { act: "begin".into(), kind: Some(GameKind::Riddle), text: String::new(), to: String::new(), turn_secs: Some(60) },
-            "node0", "d0", &players(2), 0,
+            "h0", "d0", &players(2), 0,
         )
         .unwrap();
         let s = state.as_mut().unwrap();
@@ -698,18 +714,18 @@ mod tests {
         apply_act(
             &mut state,
             &GameAct { act: "begin".into(), kind: Some(GameKind::Campfire), text: String::new(), to: String::new(), turn_secs: None },
-            "node0", "d0", &players(2), 0,
+            "h0", "d0", &players(2), 0,
         )
         .unwrap();
         assert_eq!(state.as_ref().unwrap().entries.len(), 1, "the familiar opens the story");
-        apply_act(&mut state, &line("The dog walked to the river and waited."), "node0", "d0", &[], 10).unwrap();
-        apply_act(&mut state, &line("A zeppelin descended, silver and impossible."), "node1", "d1", &[], 20).unwrap();
-        apply_act(&mut state, &line("The dog walked back from the river."), "node0", "d0", &[], 30).unwrap();
+        apply_act(&mut state, &line("The dog walked to the river and waited."), "h0", "d0", &[], 10).unwrap();
+        apply_act(&mut state, &line("A zeppelin descended, silver and impossible."), "h1", "d1", &[], 20).unwrap();
+        apply_act(&mut state, &line("The dog walked back from the river."), "h0", "d0", &[], 30).unwrap();
         // Starter closes; the zeppelin line is the most novel.
-        apply_act(&mut state, &GameAct { act: "close".into(), kind: None, text: String::new(), to: String::new(), turn_secs: None }, "node0", "d0", &[], 40).unwrap();
+        apply_act(&mut state, &GameAct { act: "close".into(), kind: None, text: String::new(), to: String::new(), turn_secs: None }, "h0", "d0", &[], 40).unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "done");
-        assert_eq!(s.winner, "node1", "novelty takes the line of the story");
+        assert_eq!(s.winner, "h1", "novelty takes the line of the story — credited to the human");
         assert!(s.verdict.contains("zeppelin"));
     }
 
@@ -719,7 +735,7 @@ mod tests {
         apply_act(
             &mut state,
             &GameAct { act: "begin".into(), kind: Some(GameKind::Riddle), text: String::new(), to: String::new(), turn_secs: None },
-            "node0", "d0", &players(2), 0,
+            "h0", "d0", &players(2), 0,
         )
         .unwrap();
         let v = view(state.as_ref().unwrap());
@@ -742,17 +758,17 @@ mod tests {
         apply_act(
             &mut state,
             &GameAct { act: "begin".into(), kind: Some(GameKind::Campfire), text: String::new(), to: String::new(), turn_secs: None },
-            "node0", "d0", &players(2), 100,
+            "h0", "d0", &players(2), 100,
         )
         .unwrap();
         let older = state.clone().unwrap();
         let mut newer = older.clone();
         newer.seq += 3;
         newer.updated = 200;
-        newer.holder = "node1".into();
+        newer.holder = "h1".into();
         absorb(&dir, &newer).unwrap();
         absorb(&dir, &older).unwrap(); // the echo must not roll back the turn
-        assert_eq!(load(&dir).unwrap().holder, "node1");
+        assert_eq!(load(&dir).unwrap().holder, "h1");
 
         // A finished game's tombstone (inflated seq, possibly a skewed-later clock) must never
         // smother a NEW game begun seconds later — different id = different generation, and

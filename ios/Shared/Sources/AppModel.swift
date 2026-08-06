@@ -792,6 +792,16 @@ final class AppModel: ObservableObject {
     }
 
     func unenroll() {
+        // Tell the mesh this identity is RELEASED before forgetting how to reach it — the
+        // record travels as a self-Disestablish correction, so the roster stops naming who
+        // left and the next human on this hardware introduces themselves fresh. Best-effort:
+        // leaving must never wait on the network.
+        if !host.isEmpty {
+            let releaseHost = host, releasePort = enrollPort, releaseNode = node
+            Task.detached {
+                await ReleaseClient(node: releaseNode).release(host: releaseHost, port: releasePort)
+            }
+        }
         KeychainStore.delete(account: grantAccount)
         KeychainStore.delete(account: enrollAccount)
         host = ""
@@ -1108,7 +1118,13 @@ final class AppModel: ObservableObject {
 
                 // The ember reached this device (the mesh games): edge-triggered chime, so a
                 // player who wandered off hears their turn arrive.
-                let myTurn = view.game.map { $0.status == "open" && $0.holder == node.nodeId } ?? false
+                // The turn belongs to the HUMAN: chime when the holder handle is this
+                // device's human — whichever of their devices they're nearest.
+                let myHandle = attributedHuman.lowercased()
+                let myTurn = view.game.map {
+                    $0.status == "open" && myHandle != "observer" && !myHandle.isEmpty
+                        && $0.holder.lowercased() == myHandle
+                } ?? false
                 if myTurn && !wasMyTurn {
                     Chime.guestWaiting()
                     note(view.game?.kind == "campfire"

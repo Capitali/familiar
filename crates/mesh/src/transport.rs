@@ -1243,6 +1243,21 @@ async fn handle(
             };
             recv_vouch(&dir, &bytes, &sig)
         }
+        // A device renouncing its own identity — the leaving half of E2's symmetry. Signed by
+        // the device's own key; establishes nothing, releases everything, covenant stands.
+        (Method::POST, "/mesh/identity/release") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_release(&dir, &bytes, &sig)
+        }
         // A member's deliberate reversal (ADR-0026 §5): sever / disestablish / hold / restore.
         // Corrections travel; approval never existed to.
         (Method::POST, "/mesh/correct") => {
@@ -2251,48 +2266,52 @@ fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
 
 /// Who can hold a turn: standing-full, human-facing devices — phones, iPads, consoles. The
 /// daemons and the lighthouse keep score and judge; they don't take turns at the fire.
+/// The seats at the fire are HUMANS (Ian's law: games are played between humans). Every
+/// standing, online, human-facing device whose ESTABLISHED human is known folds into that
+/// human's one seat — the ember shows on all their devices; any one may answer. Devices
+/// serving nobody, daemons, and watches hold no seat.
 fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
     let roll = crate::standing::load(dir);
     let members = crate::members::classify(dir, now);
-    // A console plays under its MACHINE's name: the seat is the console's key (it is what can
-    // act), but "Wildhorse console" at the fire reads as a second wildhorse — the machine is
-    // one identity to the humans around it. Attached consoles take their host's label; an
-    // unattached one just drops the suffix.
-    let machine_label = |m: &crate::members::Member| -> String {
-        if !m.attached_to.is_empty() {
-            if let Some(h) = members.iter().find(|x| x.node_id == m.attached_to) {
-                return h.label.clone();
-            }
-        }
-        if m.label.to_lowercase().ends_with(" console") && m.label.len() > 8 {
-            return m.label[..m.label.len() - 8].to_string();
-        }
-        m.label.clone()
+    // The established handle is the seat key — the record's word, not the device's claim.
+    let established_handle = |node_id: &str| -> String {
+        crate::record::find_by_key(dir, node_id)
+            .and_then(|r| r.identity.established.map(|e| e.handle))
+            .unwrap_or_default()
     };
-    members
-        .clone()
-        .into_iter()
-        .filter(|m| {
-            // A player is a HUMAN-FACING seat: a phone/iPad/Mac shell (device actor), or a
-            // console known by its label. Kind alone is not enough — a sibling door's daemon
-            // classifies as a DevicePeer here (it reports observations to us), and a daemon
-            // holding a turn is nobody's fun. Watches are sensors, not seats.
-            let ns = m.actor.split(':').next().unwrap_or("");
-            let human_device = matches!(ns, "phone" | "iphone" | "ipad" | "mac");
-            let console = m.label.to_lowercase().ends_with(" console");
-            (human_device || console)
-                && roll.full.iter().any(|n| n == &m.node_id)
-                && m.status != "offline"
-        })
-        .map(|m| crate::game::Player {
-            label: machine_label(&m),
-            node_id: m.node_id,
-            handle: m.human,
-            score: 0,
-            strikes: 0,
-            eliminated: false,
-        })
-        .collect()
+    let mut seats: Vec<crate::game::Player> = Vec::new();
+    for m in &members {
+        let ns = m.actor.split(':').next().unwrap_or("");
+        let human_device = matches!(ns, "phone" | "iphone" | "ipad" | "mac");
+        let console = m.label.to_lowercase().ends_with(" console");
+        if !(human_device || console)
+            || !roll.full.iter().any(|n| n == &m.node_id)
+            || m.status == "offline"
+        {
+            continue;
+        }
+        let handle = established_handle(&m.node_id);
+        if handle.is_empty() {
+            continue; // an unnamed device seats nobody
+        }
+        match seats.iter_mut().find(|p| p.handle == handle) {
+            Some(seat) => {
+                if !seat.devices.contains(&m.node_id) {
+                    seat.devices.push(m.node_id.clone());
+                }
+            }
+            None => seats.push(crate::game::Player {
+                node_id: m.node_id.clone(),
+                label: handle.clone(),
+                handle,
+                devices: vec![m.node_id.clone()],
+                score: 0,
+                strikes: 0,
+                eliminated: false,
+            }),
+        }
+    }
+    seats
 }
 
 /// The signed wrapper every game act arrives in — same proof shape as an introduce.
@@ -2328,6 +2347,17 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     if crate::standing::standing_of(dir, &env.node.node_id) != crate::standing::Standing::Full {
         return text(StatusCode::FORBIDDEN, "members only — the fire is inside the house");
     }
+    // The turn belongs to the HUMAN: resolve the acting device to its established handle.
+    // Any of a human's devices may act on their turn; a device serving nobody plays nothing.
+    let actor_handle = crate::record::find_by_key(dir, &env.node.node_id)
+        .and_then(|r| r.identity.established.map(|e| e.handle))
+        .unwrap_or_default();
+    if actor_handle.is_empty() {
+        return text(
+            StatusCode::FORBIDDEN,
+            "the fire knows humans — establish who you are before playing",
+        );
+    }
     let mut state = crate::game::load(dir);
     let players = if env.act.act == "begin" {
         game_players(dir, now)
@@ -2339,7 +2369,7 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     } else {
         env.node.label.trim().to_string()
     };
-    match crate::game::apply_act(&mut state, &env.act, &env.node.node_id, &label, &players, now) {
+    match crate::game::apply_act(&mut state, &env.act, &actor_handle, &label, &players, now) {
         Ok(reply) => {
             if let Some(s) = &state {
                 let _ = crate::game::save(dir, s);
@@ -2447,6 +2477,55 @@ async fn sync_records_with(dir: &Path, addr: &str) {
                 }
             }
         }
+    }
+}
+
+/// `POST /mesh/identity/release` → the device's own signed renunciation. Applied as a
+/// self-Disestablish correction (a ledger entry that travels), and the peer roster's cached
+/// human is cleared so the row stops naming the person who just walked away.
+#[derive(serde::Deserialize)]
+struct ReleaseEnvelope {
+    node: crate::node::NodeIdentity,
+    #[allow(dead_code)]
+    ts: i64,
+    #[allow(dead_code)]
+    nonce: String,
+}
+
+fn recv_release(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let env: ReleaseEnvelope = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad release"),
+    };
+    if env.node.verify(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Ok(pk) = crate::hex_decode(&env.node.pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad pubkey");
+    };
+    match crate::exactly_32(&pk, "node pubkey") {
+        Ok(arr) if crate::node::fingerprint(&arr) == env.node.node_id => {}
+        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
+    }
+    match crate::record::release_identity(dir, &env.node.node_id, now_secs()) {
+        Ok(_) => {
+            // The roster's cached human must not keep naming who left.
+            let mut peers = load_peers(dir);
+            let mut touched = false;
+            for p in peers.iter_mut() {
+                if p.node_id == env.node.node_id && !p.human.is_empty() {
+                    p.human = String::new();
+                    touched = true;
+                }
+            }
+            if touched {
+                let _ = serde_json::to_vec_pretty(&peers)
+                    .map(|b| std::fs::write(dir.join(PEERS_FILE), b));
+            }
+            text(StatusCode::OK, "released — the device is a guest with its covenant intact")
+        }
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 

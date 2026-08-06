@@ -121,6 +121,39 @@ public struct DeviceVoucher: Codable, Equatable {
     }
 }
 
+/// `POST /mesh/identity/release` — this device renouncing its own identity (the leaving half
+/// of E2's symmetry). Fire-and-forget from unenroll: best effort, short timeout, because the
+/// human severing must never wait on the network to be allowed to leave.
+public struct ReleaseClient {
+    public var node: NodeKey
+    public var urlSession: URLSession
+
+    public init(node: NodeKey, urlSession: URLSession = MeshTLS.session) {
+        self.node = node
+        self.urlSession = urlSession
+    }
+
+    public func release(host: String, port: Int,
+                        now: Int64 = Int64(Date().timeIntervalSince1970),
+                        nonce: String = ObservationClient.freshNonce()) async {
+        let obj: [String: Any] = [
+            "node": ["node_id": node.nodeId, "pubkey": node.pubkeyHex, "label": node.label],
+            "ts": now,
+            "nonce": nonce,
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: obj),
+              let sig = try? node.sign(body),
+              let url = URL(string: "https://\(host):\(port)/mesh/identity/release") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        req.setValue(sig, forHTTPHeaderField: "X-Familiar-Sig")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        _ = try? await urlSession.data(for: req)
+    }
+}
+
 /// `POST /mesh/vouch` — deliver a voucher to the door. One tap on the claimed human's own
 /// device; the guest's next standing poll finds itself a member.
 public struct VouchClient {

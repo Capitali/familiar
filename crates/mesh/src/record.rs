@@ -208,30 +208,49 @@ impl MembershipRecord {
 pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRecord {
     debug_assert_eq!(a.device_id, b.device_id, "merge is per-device");
 
-    let admitted = match (&a.admitted, &b.admitted) {
+    // The corrections ledger decides what still counts: facts at or before the latest
+    // Disestablish are SPENT — a released identity must not resurrect through a replica that
+    // never heard the release, and a NEW establishment after the release must beat the old
+    // one whatever earliest-wins would say.
+    let spent_before = a
+        .corrections
+        .iter()
+        .chain(b.corrections.iter())
+        .filter(|c| c.act == CorrectionAct::Disestablish)
+        .map(|c| c.ts)
+        .max()
+        .unwrap_or(i64::MIN);
+    let live_adm = |x: &Option<AdmissionFact>| {
+        x.as_ref().filter(|f| f.at > spent_before).cloned()
+    };
+    let live_est = |x: &Option<Establishment>| {
+        x.as_ref().filter(|e| e.at > spent_before).cloned()
+    };
+
+    let admitted = match (live_adm(&a.admitted), live_adm(&b.admitted)) {
         (Some(x), Some(y)) => {
             // Earliest wins; ties break on the door's id so the pick is deterministic, not
             // whichever replica we happened to fold first.
             if (x.at, &x.minted_by) <= (y.at, &y.minted_by) {
-                Some(x.clone())
+                Some(x)
             } else {
-                Some(y.clone())
+                Some(y)
             }
         }
-        (Some(x), None) => Some(x.clone()),
-        (None, y) => y.clone(),
+        (Some(x), None) => Some(x),
+        (None, y) => y,
     };
 
-    let established = match (&a.identity.established, &b.identity.established) {
+    let established = match (live_est(&a.identity.established), live_est(&b.identity.established)) {
         (Some(x), Some(y)) => {
             if (x.at, &x.artifact) <= (y.at, &y.artifact) {
-                Some(x.clone())
+                Some(x)
             } else {
-                Some(y.clone())
+                Some(y)
             }
         }
-        (Some(x), None) => Some(x.clone()),
-        (None, y) => y.clone(),
+        (Some(x), None) => Some(x),
+        (None, y) => y,
     };
     let claim = match (&a.identity.claim, &b.identity.claim) {
         (Some(x), Some(y)) => Some(if (x.ts, &x.handle) >= (y.ts, &y.handle) {
@@ -295,13 +314,24 @@ pub fn derive_state(r: &MembershipRecord) -> RecordState {
     } else {
         RecordState::Guest
     };
-    // Corrections are sorted by ts on merge; the latest deliberate act wins.
+    // Corrections are sorted by ts on merge; the latest deliberate act wins. A Disestablish
+    // spends only facts OLDER than itself: an establishment minted after the release (a new
+    // human introducing themselves on the same hardware) supersedes it. Sever stands until
+    // an explicit Restore — leaving and being banished are different verbs.
     match r.corrections.last() {
         Some(c) if c.act == CorrectionAct::Sever => RecordState::Severed {
             reason: c.reason.clone(),
             at: c.ts,
         },
-        Some(c) if c.act == CorrectionAct::Disestablish => RecordState::Guest,
+        Some(c) if c.act == CorrectionAct::Disestablish
+            && r.identity
+                .established
+                .as_ref()
+                .map(|e| e.at <= c.ts)
+                .unwrap_or(true) =>
+        {
+            RecordState::Guest
+        }
         _ => base,
     }
 }
@@ -827,6 +857,28 @@ fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i6
     save(dir, &r)
 }
 
+/// A device renouncing its own identity (the leaving half of E2's symmetry): a device can
+/// never vouch itself IN, but it may always bow OUT. Modeled as a self-Disestablish
+/// CORRECTION — a bare absence would be resurrected by merge, but a correction is a ledger
+/// entry that unions across doors. The covenant attestation stays (the contract was with the
+/// device, and the device is still bound by it); the next human introduces themselves fresh,
+/// and an establishment NEWER than the release supersedes it (see derive_state / merge).
+pub fn release_identity(dir: &Path, node_id: &str, now: i64) -> Result<MembershipRecord> {
+    let Some(rec) = find_by_key(dir, node_id) else {
+        return Err(Error::Untrusted("no record — nothing to release".into()));
+    };
+    let c = Correction {
+        act: CorrectionAct::Disestablish,
+        subject_device: rec.device_id.clone(),
+        corrected_by: rec.device_id.clone(),
+        reason: "released by the device's own hand".into(),
+        ts: now,
+        nonce: format!("release-{}-{now}", rec.device_id),
+        sig: String::new(), // the device's own signature was verified at the wire seam
+    };
+    apply_correction(dir, &c, now)
+}
+
 /// The human at this door naming an established device whose establishment carries no handle —
 /// the roll migration deliberately wrote "" rather than invent names, but an unnamed handle
 /// can neither be protected by the guardrails nor vouch for anyone (E2 keys on it). Refuses
@@ -1186,7 +1238,10 @@ pub fn apply_correction(dir: &Path, c: &Correction, now: i64) -> Result<Membersh
     if subject.is_empty() {
         return Err(Error::Malformed("correction: empty subject".into()));
     }
-    if subject == c.corrected_by {
+    // A device may not correct itself — with ONE exception: Disestablish of your own record
+    // is renunciation, and renouncing your own name is always yours to do. Sever/hold/restore
+    // of yourself stay forbidden (leaving is not the same as judging).
+    if subject == c.corrected_by && c.act != CorrectionAct::Disestablish {
         return Err(Error::Untrusted(
             "correction: a device may not correct itself".into(),
         ));
