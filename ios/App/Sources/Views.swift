@@ -81,12 +81,20 @@ struct EnrollView: View {
                                 Text("Looking for the mesh…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
                         }.padding(.horizontal, 22)
                     } else {
-                        // Auto-discovery found nothing — offer to retry or use an invite.
-                        Text("Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see.")
+                        // Severed by the human: the device waits for an explicit ask — it must
+                        // never quietly rejoin (there was no way to leave, or to test arriving).
+                        Text(model.severedByHuman
+                             ? "Severed, by your hand. This device holds its key but sends nothing — it rejoins only when you ask."
+                             : "Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see.")
                             .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                             .multilineTextAlignment(.center).padding(.horizontal, 28)
-                        Button { model.autoEnrollTried = false; model.autoEnroll() } label: {
-                            Label("Try again", systemImage: "arrow.clockwise")
+                        Button {
+                            model.severedByHuman = false
+                            model.autoEnrollTried = false
+                            model.autoEnroll()
+                        } label: {
+                            Label(model.severedByHuman ? "Join the mesh" : "Try again",
+                                  systemImage: model.severedByHuman ? "point.3.connected.trianglepath.dotted" : "arrow.clockwise")
                                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0x0a1330))
                                 .frame(maxWidth: .infinity).padding(.vertical, 15)
                                 .background(RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [Color(hex: 0x8fb4ff), Color(hex: 0x3f7bff)], startPoint: .top, endPoint: .bottom)))

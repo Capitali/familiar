@@ -60,14 +60,18 @@ struct MacEnrollView: View {
                             .frame(maxWidth: .infinity)
                         }.frame(maxWidth: 460)
                     } else {
-                        Text("Couldn't reach the mesh automatically. Try again, or paste an invite from a peer you can reach.")
+                        Text(model.severedByHuman
+                             ? "Severed, by your hand. This Mac holds its key but sends nothing — it rejoins only when you ask."
+                             : "Couldn't reach the mesh automatically. Try again, or paste an invite from a peer you can reach.")
                             .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                             .multilineTextAlignment(.center).frame(maxWidth: 430)
                         Button {
+                            model.severedByHuman = false
                             model.autoEnrollTried = false
                             model.autoEnroll()
                         } label: {
-                            Label("Try again", systemImage: "arrow.clockwise")
+                            Label(model.severedByHuman ? "Join the mesh" : "Try again",
+                                  systemImage: model.severedByHuman ? "point.3.connected.trianglepath.dotted" : "arrow.clockwise")
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Color(hex: 0x0a1330))
                                 .frame(maxWidth: .infinity).padding(.vertical, 13)

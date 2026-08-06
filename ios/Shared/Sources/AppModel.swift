@@ -55,6 +55,10 @@ final class AppModel: ObservableObject {
     /// The bound owner of a personal device. Rung 1 of the ladder, and usually the whole answer
     /// on a phone — no camera, no model, no prompt.
     @AppStorage("identity.deviceOwner") var deviceOwner = ""
+    /// The human severed this device (SEVER, twice) — it must not rejoin on its own. Cleared
+    /// only by the explicit "Join the mesh" act on the join screen. Persisted: a relaunch
+    /// after a severing is still severed.
+    @AppStorage("enroll.severedByHuman") var severedByHuman = false
 
     var deviceRole: DeviceRole { DeviceRole(rawValue: deviceRoleRaw) ?? .shared }
 
@@ -527,6 +531,7 @@ final class AppModel: ObservableObject {
     /// the Three Laws and shows its confirmation code; the human approves at the familiar. Falls
     /// back to the QR/paste path when the rendezvous is unreachable or lists nothing.
     func autoEnroll() {
+        guard !severedByHuman else { autoEnrollTried = true; return }
         guard !enrolled, !enrolling, !autoEnrollTried else { return }
         autoEnrollTried = true
         let node = self.node
@@ -800,7 +805,14 @@ final class AppModel: ObservableObject {
         enrolled = false
         membership = .none
         pendingInvite = nil
-        note("unenrolled — nothing is sent")
+        // A severing is a human's deliberate act — the device must NOT quietly rejoin the
+        // moment the join screen appears (it did: auto-enroll fired instantly and the mesh,
+        // still holding this key's record, handed the old identity straight back — there was
+        // no way to leave, and no way to test arriving). Severed stays severed until the
+        // human explicitly asks to join again.
+        severedByHuman = true
+        autoEnrollTried = true   // the join screen shows the explicit button, not the spinner
+        note("severed by your hand — this device will not rejoin until you ask it to")
     }
 
     private var lastTailnetProbe: Date?
