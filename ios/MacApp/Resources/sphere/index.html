@@ -471,7 +471,7 @@ function refreshScreen() {
 
     el.innerHTML = bar + (S.rosterHistory
       ? table()
-      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;align-items:start;">`
         + standing_.map(pi => S.rosterOpen[pi[0].m.node_id] ? card(pi) : closedCard(pi)).join('') + `</div>`);
 
   } else if (k === 'welcome') {
