@@ -543,11 +543,17 @@ pub fn save(dir: &Path, state: &GameState) -> Result<()> {
     Ok(())
 }
 
-/// Last-writer-wins across doors, exactly like a turn-based game serializes: the higher
-/// (updated, seq) is the truth. Absorbing your own echo is a no-op.
+/// Reconcile across doors. Two different game ids are different GENERATIONS: the later-lit
+/// fire wins outright, whatever the older one's clock or inflated sequence says — a finished
+/// game's tombstone (seq bumped hard at settle) must never smother a fresh game begun seconds
+/// later at the other door. Within ONE game, last-writer-wins by (updated, seq) — turn-based
+/// play serializes writes, so LWW is honest there. Absorbing your own echo is a no-op.
 pub fn absorb(dir: &Path, incoming: &GameState) -> Result<()> {
     let keep = match load(dir) {
-        Some(local) => (incoming.updated, incoming.seq) > (local.updated, local.seq),
+        Some(local) if local.id == incoming.id => {
+            (incoming.updated, incoming.seq) > (local.updated, local.seq)
+        }
+        Some(local) => (incoming.started, &incoming.id) > (local.started, &local.id),
         None => true,
     };
     if keep {
@@ -747,6 +753,24 @@ mod tests {
         absorb(&dir, &newer).unwrap();
         absorb(&dir, &older).unwrap(); // the echo must not roll back the turn
         assert_eq!(load(&dir).unwrap().holder, "node1");
+
+        // A finished game's tombstone (inflated seq, possibly a skewed-later clock) must never
+        // smother a NEW game begun seconds later — different id = different generation, and
+        // the later-lit fire wins outright.
+        let mut done = newer.clone();
+        done.status = "done".into();
+        done.seq += 1000;
+        done.updated = 10_000; // even "later" than the fresh game's clock — skew simulated
+        let mut fresh = older.clone();
+        fresh.id = "campfire-9999".into();
+        fresh.started = 300;
+        fresh.seq = 1;
+        fresh.updated = 300;
+        absorb(&dir, &done).unwrap();
+        absorb(&dir, &fresh).unwrap();
+        assert_eq!(load(&dir).unwrap().id, "campfire-9999", "the fresh fire survives the tombstone");
+        absorb(&dir, &done).unwrap(); // the tombstone echoing back must not re-smother it
+        assert_eq!(load(&dir).unwrap().id, "campfire-9999");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
