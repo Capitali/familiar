@@ -416,6 +416,15 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     self.model.setDeviceBinding(role: role, owner: body["owner"] as? String ?? "")
                     self.pushDevice()
                 }
+            case "sponsor":
+                // A member welcomes a NEW name in — the sponsor's half of vouching.
+                if let nodeId = body["node_id"] as? String,
+                   let handle = body["handle"] as? String {
+                    Task {
+                        _ = await self.model.sponsorFor(nodeId: nodeId, handle: handle)
+                        await self.poll()
+                    }
+                }
             case "vouch":
                 // The second person is this human: their own device confirms the claim and the
                 // rules engine admits (ADR-0026 E2 over the mesh — no invite paste, no QR).

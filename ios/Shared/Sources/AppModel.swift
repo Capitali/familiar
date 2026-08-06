@@ -673,6 +673,29 @@ final class AppModel: ObservableObject {
         await refreshWorldview()
     }
 
+    /// A member welcoming a NEW human in by name — the sponsor's half of vouchFor.
+    func sponsorFor(nodeId: String, handle: String) async -> String? {
+        guard !host.isEmpty else { return "no host" }
+        do {
+            switch try await SponsorClient(node: node).sponsor(subject: nodeId, handle: handle,
+                                                               host: host, port: enrollPort) {
+            case .welcomed(let h):
+                note("✓ welcomed \(h) into the mesh")
+                await refreshWorldview()
+                return nil
+            case .refused(let why):
+                note("welcome refused: \(why)")
+                return why
+            case .error(let e):
+                note("welcome failed: \(e)")
+                return e
+            }
+        } catch {
+            note("welcome failed: \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
     /// One tap on the claimed human's own device (ADR-0026 E2 over the mesh): mint a voucher
     /// for the waiting device's key and deliver it to the door. The rules engine does the rest —
     /// the new device's next poll finds itself a member. Returns the door's words on refusal.

@@ -182,6 +182,8 @@ public struct ClaimView: Codable, Equatable {
     /// The claiming device's key — what a voucher names; the door re-verifies by fingerprint.
     public var pubkey: String
     public var since: Int64
+    /// True = the handle is established here (vouch flow); false/absent = a new name (sponsor).
+    public var known: Bool?
 }
 
 public struct Worldview: Codable, Equatable {

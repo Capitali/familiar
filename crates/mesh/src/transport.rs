@@ -1243,6 +1243,21 @@ async fn handle(
             };
             recv_vouch(&dir, &bytes, &sig)
         }
+        // A member welcomes a NEW human in by name — the sponsor's half of what /mesh/vouch
+        // does for existing humans.
+        (Method::POST, "/mesh/sponsor") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_sponsor(&dir, &bytes, &sig)
+        }
         // A device renouncing its own identity — the leaving half of E2's symmetry. Signed by
         // the device's own key; establishes nothing, releases everything, covenant stands.
         (Method::POST, "/mesh/identity/release") => {
@@ -1284,7 +1299,7 @@ async fn handle(
                 Ok(b) => b,
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
-            recv_status(&dir, &bytes, &sig)
+            recv_status(&dir, &bytes, &sig, &peer_ip)
         }
         (Method::GET, "/mesh/status") => status_directory_response(&dir),
         // Device oracle (ADR-0014): a member device pulls pending prompts and pushes back answers.
@@ -1868,7 +1883,7 @@ fn local_standing(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
 
 /// `POST /mesh/status` → a member heartbeats its own status (ADR-0017). Signed + membership-bearing;
 /// kept only for the sender's own node. 200 + the stored status; 403 untrusted; 400 malformed.
-fn recv_status(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+fn recv_status(dir: &Path, bytes: &[u8], sig: &str, peer_ip: &str) -> Response<Full<Bytes>> {
     let report: crate::status::StatusReport = match serde_json::from_slice(bytes) {
         Ok(r) => r,
         Err(_) => return text(StatusCode::BAD_REQUEST, "bad status"),
@@ -1876,11 +1891,62 @@ fn recv_status(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     if report.verify_sig(bytes, sig).is_err() {
         return text(StatusCode::FORBIDDEN, "signature did not verify");
     }
-    match crate::status::record(dir, &report, now_secs()) {
-        Ok(entry) => match serde_json::to_vec(&entry) {
-            Ok(b) => text(StatusCode::OK, b),
-            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "status encode"),
-        },
+    let now = now_secs();
+    match crate::status::record(dir, &report, now) {
+        Ok(entry) => {
+            // The lighthouse-only law: this hub receives every device's heartbeat, so every
+            // device must be REAL here — a roster row and a record — not just a status line.
+            // Without this, a device that only ever read through its LAN door was invisible
+            // to everyone reading through the hub. Cert verified against OUR group first.
+            if let Ok(Some(cred)) = group::load(dir) {
+                if let Ok(gk) = cred.verifying_key() {
+                    let revoked = group::load_revoked(dir).unwrap_or_default();
+                    if group::verify_membership(&report.membership, &gk, &cred.group_id, now, &revoked)
+                        .is_ok()
+                    {
+                        let _ = register_device_peer(
+                            dir,
+                            &report.membership.node_id,
+                            &report.status.label,
+                            peer_ip,
+                            "",
+                            "",
+                            0.0,
+                            0.0,
+                        );
+                        if crate::record::find_by_key(dir, &report.membership.node_id).is_none() {
+                            let attestation = crate::enroll::Attestation {
+                                laws_version: crate::enroll::LAWS_VERSION,
+                                statement: format!(
+                                    "{} (record restored from the member's cert at status heartbeat; \
+                                     originally attested at {})",
+                                    crate::enroll::COVENANT_STATEMENT,
+                                    report.membership.issued
+                                ),
+                                ts: report.membership.issued,
+                            };
+                            let rec = crate::record::MembershipRecord::guest(
+                                &report.membership.node_id,
+                                &report.membership.node_id,
+                                attestation,
+                                now,
+                            );
+                            let _ = crate::record::save(dir, &rec);
+                            let _ = crate::record::record_pubkey(
+                                dir,
+                                &report.membership.node_id,
+                                &report.membership.node_pubkey,
+                                now,
+                            );
+                        }
+                    }
+                }
+            }
+            match serde_json::to_vec(&entry) {
+                Ok(b) => text(StatusCode::OK, b),
+                Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "status encode"),
+            }
+        }
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "status rejected"),
     }
@@ -2132,22 +2198,31 @@ fn recv_introduce(
         // needs no invite paste and no QR. Only claims naming an ESTABLISHED handle are kept;
         // an unknown name has nobody to ask.
         Err(crate::Error::Untrusted(m)) => {
-            let claimed_existing = req
-                .claim
-                .as_ref()
-                .map(|c| {
-                    established
-                        .iter()
-                        .any(|d| d.handle.eq_ignore_ascii_case(c.handle.trim()))
-                })
-                .unwrap_or(false);
-            if claimed_existing {
-                let claim = req.claim.as_ref().expect("checked above");
+            // EVERY refused claim is kept (a claim addresses, ADR-0019) — the difference is
+            // who gets asked. An EXISTING handle asks that human's own devices to vouch; a
+            // NEW handle asks the household to welcome a stranger by name (sponsorship — a
+            // member's deliberate act, same weight as an invite). Without the second half, a
+            // new human enrolling through the lighthouse had no path at all: their intro
+            // arrived Remote (refused) and their claim evaporated.
+            if let Some(claim) = req.claim.as_ref().filter(|c| !c.handle.trim().is_empty()) {
+                let existing = established
+                    .iter()
+                    .any(|d| d.handle.eq_ignore_ascii_case(claim.handle.trim()));
                 let _ =
                     crate::record::record_claim(dir, &req.node.node_id, claim, &req.node.pubkey, now);
                 return text(
                     StatusCode::FORBIDDEN,
-                    format!("{m} — {}'s devices have been asked to confirm this one is theirs", claim.handle.trim()),
+                    if existing {
+                        format!(
+                            "{m} — {}'s devices have been asked to confirm this one is theirs",
+                            claim.handle.trim()
+                        )
+                    } else {
+                        format!(
+                            "{m} — the household has been asked to welcome {}",
+                            claim.handle.trim()
+                        )
+                    },
                 );
             }
             text(StatusCode::FORBIDDEN, m)
@@ -2477,6 +2552,104 @@ async fn sync_records_with(dir: &Path, addr: &str) {
                 }
             }
         }
+    }
+}
+
+/// `POST /mesh/sponsor` → a member welcomes a NEW human in by name (the new-human half of
+/// what vouching does for existing ones). The sponsor's signed act converts the waiting
+/// claim into an introduction with EstablishedDevice provenance — the rules engine's own
+/// E4 path — so the guardrails still hold: an existing handle refuses here (that road is
+/// the voucher's), and the sponsor must be a standing member.
+#[derive(serde::Deserialize)]
+struct SponsorEnvelope {
+    node: crate::node::NodeIdentity,
+    subject: String,
+    handle: String,
+    #[allow(dead_code)]
+    ts: i64,
+    #[allow(dead_code)]
+    nonce: String,
+}
+
+fn recv_sponsor(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let env: SponsorEnvelope = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad sponsor"),
+    };
+    let now = now_secs();
+    if env.node.verify(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Ok(pk) = crate::hex_decode(&env.node.pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad pubkey");
+    };
+    match crate::exactly_32(&pk, "node pubkey") {
+        Ok(arr) if crate::node::fingerprint(&arr) == env.node.node_id => {}
+        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
+    }
+    if crate::standing::standing_of(dir, &env.node.node_id) != crate::standing::Standing::Full {
+        return text(StatusCode::FORBIDDEN, "only a member may welcome someone in");
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Some(rec) = crate::record::find_by_key(dir, &env.subject) else {
+        return text(StatusCode::FORBIDDEN, "no such guest — they must knock first");
+    };
+    if crate::record::derive_state(&rec) == crate::record::RecordState::Member {
+        return text(StatusCode::OK, serde_json::json!({"state": "member"}).to_string());
+    }
+    let handle = env.handle.trim();
+    if handle.is_empty() {
+        return text(StatusCode::BAD_REQUEST, "a name is required");
+    }
+    let covenant_attested =
+        rec.attestation.is_some() || crate::enroll::has_grant(dir, &env.subject);
+    let established = established_devices(dir, &cred);
+    let ctx = crate::record::AdmissionContext {
+        now,
+        group_id: &cred.group_id,
+        group_pubkey: &cred.group_pubkey,
+        established: &established,
+    };
+    let subject = crate::record::Subject {
+        node_id: &env.subject,
+        covenant_attested,
+    };
+    let evidence = crate::record::Evidence::Introduction {
+        intro: crate::record::Introduction {
+            handle: handle.to_string(),
+            statement: format!("welcomed in by {}", env.node.label),
+            ts: now,
+        },
+        provenance: crate::record::Provenance::EstablishedDevice {
+            device_node_id: env.node.node_id.clone(),
+        },
+    };
+    match crate::record::evaluate_admission(&subject, rec.identity.claim.as_ref(), &evidence, &ctx) {
+        Ok(est) => {
+            let handle = est.handle.clone();
+            match crate::record::admit(dir, &env.subject, rec.identity.claim.clone(), est,
+                                       &cred.membership.node_id, now) {
+                Ok(_) => {
+                    let obs = familiar_kernel::observation::Observation::new(
+                        format!("device:{}", env.node.label),
+                        "welcomed",
+                        format!("{handle} into the mesh — sponsored by a member"),
+                        "mesh",
+                        "mesh",
+                        now,
+                        1.0,
+                    );
+                    let _ = familiar_kernel::observation::record(dir, obs);
+                    text(StatusCode::OK,
+                         serde_json::json!({"state": "member", "handle": handle}).to_string())
+                }
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(_) => text(StatusCode::BAD_REQUEST, "bad evidence"),
     }
 }
 

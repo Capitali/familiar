@@ -156,6 +156,10 @@ pub struct ClaimView {
     /// it against the record by fingerprint, so a tampered value only fails the vouch.
     pub pubkey: String,
     pub since: i64,
+    /// True when the claimed handle is already ESTABLISHED here: the card asks that human's
+    /// own devices to vouch. False = a NEW name: the card asks any member to welcome them.
+    #[serde(default)]
+    pub known: bool,
 }
 
 /// The compact snapshot returned to a member device — enough to render a Glass-like console: the
@@ -384,6 +388,28 @@ pub(crate) fn read_worldview(
         req.lat,
         req.lon,
     );
+
+    // A certified reader with NO record gets its guest record RESTORED: the cert it just
+    // proved is the receipt of a covenant it once attested (a cert is only ever minted upon
+    // attestation), so filter 1 is satisfied by evidence in hand. Without this, a device
+    // whose record was lost (a purge, a fresh door) reads forever as an invisible ghost —
+    // absent from the welcome, unvouchable, unnameable. First filter from the cert; the
+    // second (identity) it earns like anyone.
+    if crate::record::find_by_key(dir, &req.node.node_id).is_none() {
+        let attestation = crate::enroll::Attestation {
+            laws_version: crate::enroll::LAWS_VERSION,
+            statement: format!(
+                "{} (record restored from the member's cert at read; originally attested at {})",
+                crate::enroll::COVENANT_STATEMENT,
+                req.membership.issued
+            ),
+            ts: req.membership.issued,
+        };
+        let rec =
+            crate::record::MembershipRecord::guest(&req.node.node_id, &req.node.node_id, attestation, now);
+        let _ = crate::record::save(dir, &rec);
+        let _ = crate::record::record_pubkey(dir, &req.node.node_id, &req.node.pubkey, now);
+    }
 
     let mut view = assemble_worldview(dir, &cred, now)?;
     // "You are here" belongs to the *requester*, not to us. classify() marks this serving
@@ -616,6 +642,12 @@ pub fn assemble_worldview(
 
     // Claims awaiting the claimed human's own device (E2 over the mesh): guests whose refused
     // introduction named someone — surfaced so that human's device can vouch in one tap.
+    let established_handles: Vec<String> = crate::record::load_all(dir)
+        .iter()
+        .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+        .filter_map(|r| r.identity.established.as_ref().map(|e| e.handle.to_lowercase()))
+        .filter(|h| !h.is_empty())
+        .collect();
     let mut claims_waiting: Vec<ClaimView> = crate::record::load_all(dir)
         .into_iter()
         .filter_map(|r| {
@@ -632,6 +664,7 @@ pub fn assemble_worldview(
                 .map(|m| m.label.clone())
                 .unwrap_or_else(|| r.device_id.chars().take(8).collect());
             Some(ClaimView {
+                known: established_handles.contains(&claim.handle.to_lowercase()),
                 node_id: r.device_id,
                 label,
                 handle: claim.handle.clone(),

@@ -53,6 +53,9 @@ struct SphereConsoleIOS: View {
             bridge.onVouch = { [weak model] nodeId, pubkey, handle in
                 Task { _ = await model?.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle) }
             }
+            bridge.onSponsor = { [weak model] nodeId, handle in
+                Task { _ = await model?.sponsorFor(nodeId: nodeId, handle: handle) }
+            }
             bridge.onGame = { [weak model] act, kind, text, to in
                 Task { await model?.gameAct(act, kind: kind, text: text, to: to) }
             }
@@ -137,6 +140,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onUnenroll: (() -> Void)?
     var onSetHuman: ((String) -> Void)?
     var onVouch: ((String, String, String) -> Void)?
+    var onSponsor: ((String, String) -> Void)?
     var onGame: ((String, String?, String, String) -> Void)?
     var onDeviceRole: ((String, String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
@@ -290,6 +294,11 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "consent":
                 if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
+            case "sponsor":
+                if let nodeId = body["node_id"] as? String,
+                   let handle = body["handle"] as? String {
+                    self.onSponsor?(nodeId, handle)
+                }
             case "vouch":
                 if let nodeId = body["node_id"] as? String,
                    let pubkey = body["pubkey"] as? String,

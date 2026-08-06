@@ -121,6 +121,59 @@ public struct DeviceVoucher: Codable, Equatable {
     }
 }
 
+/// `POST /mesh/sponsor` — a member welcomes a NEW human in by name: the sponsor's half of
+/// what vouching does for existing humans. One tap; the door's rules engine does the rest.
+public struct SponsorClient {
+    public enum Outcome: Equatable {
+        case welcomed(handle: String)
+        case refused(String)
+        case error(String)
+    }
+
+    public var node: NodeKey
+    public var urlSession: URLSession
+
+    public init(node: NodeKey, urlSession: URLSession = MeshTLS.session) {
+        self.node = node
+        self.urlSession = urlSession
+    }
+
+    public func sponsor(subject: String, handle: String, host: String, port: Int,
+                        now: Int64 = Int64(Date().timeIntervalSince1970),
+                        nonce: String = ObservationClient.freshNonce()) async throws -> Outcome {
+        let obj: [String: Any] = [
+            "node": ["node_id": node.nodeId, "pubkey": node.pubkeyHex, "label": node.label],
+            "subject": subject,
+            "handle": handle,
+            "ts": now,
+            "nonce": nonce,
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: obj) else {
+            return .error("could not encode the welcome")
+        }
+        let sig = try node.sign(body)
+        guard let url = URL(string: "https://\(host):\(port)/mesh/sponsor") else {
+            return .error("bad host")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 8
+        req.setValue(sig, forHTTPHeaderField: "X-Familiar-Sig")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let (data, resp) = try await urlSession.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let said = String(data: data, encoding: .utf8) ?? ""
+        switch code {
+        case 200:
+            let obj2 = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            return .welcomed(handle: obj2?["handle"] as? String ?? handle)
+        case 403: return .refused(said)
+        default: return .error(said.isEmpty ? "host said \(code)" : said)
+        }
+    }
+}
+
 /// `POST /mesh/identity/release` — this device renouncing its own identity (the leaving half
 /// of E2's symmetry). Fire-and-forget from unenroll: best effort, short timeout, because the
 /// human severing must never wait on the network to be allowed to leave.

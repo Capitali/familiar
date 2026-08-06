@@ -493,23 +493,34 @@ function refreshScreen() {
     // is you. One tap mints the voucher; the rules engine does the admitting.
     const myHuman = ((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '';
     const dismissed = (S.dismissedClaims = S.dismissedClaims || {});
-    const claims = (v.claims_waiting || []).filter(c =>
-      myHuman && c.handle.toLowerCase() === myHuman.toLowerCase() && !dismissed[c.node_id]);
+    const amMember = ((S.device || {}).membership || {}).state === 'member';
+    // Two flavours: a KNOWN handle asks that human's own devices; a NEW name asks any member
+    // to welcome the stranger in (sponsorship). Both are the second person — and the second
+    // person is a human, never a rule.
+    const claims = (v.claims_waiting || []).filter(c => !dismissed[c.node_id] && (
+      c.known
+        ? (myHuman && c.handle.toLowerCase() === myHuman.toLowerCase())
+        : amMember));
     const claimsHtml = claims.map(c => `
       <div style="padding:14px 16px;border-radius:14px;background:rgba(40,60,24,0.28);border:1px solid rgba(61,220,151,0.3);margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
           <span style="font-size:16px;font-weight:600;">${esc(c.label || c.node_id.slice(0,8))}</span>
-          ${chip('SAYS IT IS YOURS', '#9fe8c0')}
+          ${c.known ? chip('SAYS IT IS YOURS', '#9fe8c0') : chip('A NEW NAME — ' + esc(cap(c.handle).toUpperCase()), '#ffcf9e')}
           <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(c.node_id.slice(0,8))}</span>
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(180,215,190,0.7);margin-bottom:10px;">
-          a new device is claiming to be ${esc(c.handle)}'s — if that's you setting it up, confirm; if not, ignore it and it stays a guest
+          ${c.known
+            ? `a new device is claiming to be ${esc(c.handle)}'s — if that's you setting it up, confirm; if not, ignore it and it stays a guest`
+            : `a device here introduces ${esc(cap(c.handle))} — nobody in the mesh holds that name yet. If they're standing in your world, welcome them; if not, leave them a guest`}
         </div>
         <div style="display:flex;gap:10px;">
-          <button onclick='toApp("vouch",{node_id:${JSON.stringify(c.node_id)},pubkey:${JSON.stringify(c.pubkey)},handle:${JSON.stringify(c.handle)}})'
+          ${c.known ? `<button onclick='toApp("vouch",{node_id:${JSON.stringify(c.node_id)},pubkey:${JSON.stringify(c.pubkey)},handle:${JSON.stringify(c.handle)}})'
                   style="padding:9px 16px;border-radius:10px;background:rgba(61,220,151,0.18);border:1px solid rgba(61,220,151,0.45);color:#9fe8c0;cursor:pointer;font-size:12px;">
             Yes — it's mine
-          </button>
+          </button>` : `<button onclick="sphereSponsor('${c.node_id.replace(/[^a-f0-9]/gi,'')}','${c.handle.replace(/[^a-z0-9_-]/gi,'')}')"
+                  style="padding:9px 16px;border-radius:10px;background:rgba(255,178,102,0.16);border:1px solid rgba(255,178,102,0.5);color:#ffcf9e;cursor:pointer;font-size:12px;">
+            Welcome ${esc(cap(c.handle))} in
+          </button>`}
           <button onclick="sphereClaimDismiss('${c.node_id.replace(/[^a-f0-9]/gi, '')}')"
                   style="padding:9px 16px;border-radius:10px;background:rgba(16,34,60,0.3);border:1px solid rgba(120,190,255,0.2);color:rgba(188,210,255,0.75);cursor:pointer;font-size:12px;">
             Not mine
@@ -1092,6 +1103,7 @@ window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
 // double quotes, which TERMINATE a double-quoted attribute (the MINE button's SyntaxError).
 // Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
 window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
+window.sphereSponsor = (nodeId, handle) => toApp('sponsor', { node_id: nodeId, handle });
 window.sphereClaimDismiss = (id) => { (S.dismissedClaims = S.dismissedClaims || {})[id] = 1; refreshScreen(); };
 // confirm() is silent inside WKWebView (no UI delegate) — the close is a two-tap arm, like SEVER.
 window.sphereGameClose = () => {
