@@ -1221,6 +1221,21 @@ async fn handle(
             };
             recv_game_act(&dir, &bytes, &sig)
         }
+        // APNs registration: a member device hands its door a push token so the ember can
+        // reach a locked phone. Signed like every member write; stored per node.
+        (Method::POST, "/mesh/push-token") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_push_token(&dir, &bytes, &sig)
+        }
         // Record replication (ADR-0026): a sibling door offers its recent records; merge
         // reconciles. GET is this door's own offer, POST accepts a sibling's — both are called
         // by the dial-OUT side of a gossip exchange, so CGNAT'd doors sync in both directions.
@@ -2435,6 +2450,76 @@ struct GameActEnvelope {
     nonce: String,
 }
 
+/// `POST /mesh/push-token` — a member device registers its APNs token with this door so the
+/// ember can reach it while the app sleeps. Same verification ladder as a game act: the body
+/// signature, the key-fingerprint identity, and full standing.
+fn recv_push_token(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    #[derive(serde::Deserialize)]
+    struct PushTokenEnvelope {
+        node: crate::node::NodeIdentity,
+        token: String,
+        #[serde(default)]
+        env: String,
+        #[allow(dead_code)]
+        ts: i64,
+        #[allow(dead_code)]
+        nonce: String,
+    }
+    let env: PushTokenEnvelope = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad push-token envelope"),
+    };
+    if env.node.verify(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Ok(pk) = crate::hex_decode(&env.node.pubkey) else {
+        return text(StatusCode::BAD_REQUEST, "bad pubkey");
+    };
+    match crate::exactly_32(&pk, "node pubkey") {
+        Ok(arr) if crate::node::fingerprint(&arr) == env.node.node_id => {}
+        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
+    }
+    if crate::standing::standing_of(dir, &env.node.node_id) != crate::standing::Standing::Full {
+        return text(StatusCode::FORBIDDEN, "members only");
+    }
+    let token: String = env.token.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    if token.is_empty() || token.len() > 200 {
+        return text(StatusCode::BAD_REQUEST, "that is not an APNs token");
+    }
+    match crate::push::upsert_token(dir, &env.node.node_id, &token, &env.env, now_secs()) {
+        Ok(()) => text(StatusCode::OK, "the door will call for you"),
+        Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// The ember changed hands (or a fresh fire lit): tell the new holder's pocket. Compares the
+/// game before and after a mutation; a different holder or a different generation, still
+/// open, gets a push. Quiet on everything else — closes, guesses that didn't move the turn.
+fn notify_if_turn_changed(dir: &Path, before: Option<(String, String)>) {
+    let Some(after) = crate::game::load(dir) else {
+        return;
+    };
+    if after.status != "open" || after.holder.is_empty() {
+        return;
+    }
+    let moved = match &before {
+        Some((id, holder)) => *id != after.id || *holder != after.holder,
+        None => true,
+    };
+    if moved {
+        let kind = format!("{:?}", after.kind).to_lowercase();
+        crate::push::spawn_notify_turn(dir, &after.holder, &kind);
+    }
+}
+
+/// Absorb a synced game and push if the turn crossed to someone here — the ember arriving
+/// from the OTHER door is exactly the moment the holder's phone is most likely locked.
+fn absorb_game_notifying(dir: &Path, g: &crate::game::GameState) {
+    let before = crate::game::load(dir).map(|s| (s.id.clone(), s.holder.clone()));
+    let _ = crate::game::absorb(dir, g);
+    notify_if_turn_changed(dir, before);
+}
+
 /// `POST /mesh/game/act` → verify the member and apply the move. The reply body is the
 /// judge's words ("✓ solved!", "not it — the ember moves on"), shown to the player verbatim.
 fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
@@ -2468,6 +2553,7 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
         );
     }
     let mut state = crate::game::load(dir);
+    let before = state.as_ref().map(|s| (s.id.clone(), s.holder.clone()));
     let players = if env.act.act == "begin" {
         game_players(dir, now)
     } else {
@@ -2490,6 +2576,8 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
                     );
                 }
             }
+            // The turn may have crossed to a human whose phone is locked — call for them.
+            notify_if_turn_changed(dir, before);
             // The ember must not wait for the next gossip round to cross doors: two humans
             // acting through two doors saw a ~30s holder seesaw as each door's periodic sync
             // swung the other's view. Push records to the sibling doors NOW, best-effort —
@@ -2559,7 +2647,7 @@ fn recv_record_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
         }
     }
     if let Some(g) = &sync.body.game {
-        let _ = crate::game::absorb(dir, g);
+        absorb_game_notifying(dir, g);
     }
     text(StatusCode::OK, format!("absorbed {absorbed}"))
 }
@@ -2603,7 +2691,7 @@ async fn sync_records_with(dir: &Path, addr: &str) {
                                 let _ = crate::record::absorb(dir, r);
                             }
                             if let Some(g) = &theirs.body.game {
-                                let _ = crate::game::absorb(dir, g);
+                                absorb_game_notifying(dir, g);
                             }
                         }
                     }

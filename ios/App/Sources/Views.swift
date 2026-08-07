@@ -6,6 +6,8 @@ import WatchConnectivity
 struct FamiliarAgentApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
+    // APNs: the token callback lands on the app delegate (PushRegistration.swift).
+    @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
 
     init() {
         // Must register before launch finishes (SPEC.md R12) — can't wait for a view's
@@ -15,15 +17,18 @@ struct FamiliarAgentApp: App {
     }
 
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(model) }
-            .onChange(of: scenePhase) { phase in
-                if phase == .background { BackgroundSync.scheduleNext() }
-            }
+        WindowGroup {
+            RootView(pushDelegate: pushDelegate).environmentObject(model)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { BackgroundSync.scheduleNext() }
+        }
     }
 }
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    let pushDelegate: PushDelegate
     var body: some View {
         Group {
             if model.enrolled {
@@ -35,7 +40,14 @@ struct RootView: View {
                 EnrollView().background(Fam.bg.ignoresSafeArea()).preferredColorScheme(.dark)
             }
         }
-        .onAppear { model.syncWatch() }
+        .onAppear {
+            model.syncWatch()
+            if model.enrolled { PushRegistration.request(model, delegate: pushDelegate) }
+        }
+        .onChange(of: model.enrolled) { enrolled in
+            // A device that just became a member registers for the ember's push right away.
+            if enrolled { PushRegistration.request(model, delegate: pushDelegate) }
+        }
     }
 }
 

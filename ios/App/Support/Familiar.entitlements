@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- APNs: the door pushes "the ember is yours" to a locked phone. Xcode rewrites this
+	     to `production` automatically for TestFlight/App Store distribution builds; the
+	     value here covers development-provisioned installs (sandbox gateway). -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

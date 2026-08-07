@@ -663,6 +663,29 @@ final class AppModel: ObservableObject {
     /// hear it; on not-yet the door's words become the guest screen's path-to-admission copy.
     /// One move in the mesh game (begin / guess / line / pass / close), signed and sent to
     /// the door. The judge's reply lands in the activity feed verbatim.
+    // ---- APNs (the ember reaches a locked phone) ------------------------------------------
+    /// The OS-issued device token, hex — held until the device is enrolled with a door.
+    private var apnsToken: String?
+
+    /// The app delegate got a token from the OS. Keep it and hand it to the door.
+    func apnsTokenArrived(_ hex: String) {
+        apnsToken = hex
+        Task { await sendApnsToken() }
+    }
+
+    /// Post the token to this device's door (idempotent — the door keeps one row per node).
+    /// Called on token arrival and safe to call again after enrollment or a door change.
+    func sendApnsToken() async {
+        guard enrolled, !host.isEmpty, let tok = apnsToken else { return }
+        do {
+            let said = try await PushTokenClient(node: node)
+                .register(token: tok, host: host, port: enrollPort)
+            note("push: \(said)")
+        } catch {
+            note("push registration failed at door \(host): \(error.localizedDescription)")
+        }
+    }
+
     func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "") async {
         // Never bail silently: a dead-looking button is worse than an error. The note surfaces
         // on the games screen (deviceStateJSON.notes), door named, so a refusal is legible.
