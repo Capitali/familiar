@@ -676,11 +676,27 @@ fn attach_watches(out: &mut [Member]) {
             continue;
         }
         let wip = ip_of(&w.addr);
+        // Together = same place, judged by address: exact match (a shared NAT seen from the
+        // lighthouse), or the same private /24 (the home LAN, where every device holds its
+        // own address). A watch on cellular carries an address matching neither.
+        let together = |a: &str, b: &str| -> bool {
+            if a == b {
+                return true;
+            }
+            let p = |s: &str| s.rsplitn(2, '.').nth(1).map(|x| x.to_string());
+            let private = |s: &str| {
+                s.starts_with("192.168.") || s.starts_with("10.")
+                    || s.starts_with("172.16.") || s.starts_with("172.17.")
+                    || s.starts_with("172.18.") || s.starts_with("172.19.")
+                    || s.starts_with("172.2") || s.starts_with("172.30.") || s.starts_with("172.31.")
+            };
+            private(a) && private(b) && p(a).is_some() && p(a) == p(b)
+        };
         let host = out.iter().enumerate().find(|(hi, h)| {
             *hi != wi
                 && matches!(h.actor.split(':').next(), Some("phone") | Some("iphone"))
                 && h.actor.split(':').nth(1) == Some(human)
-                && (wip.is_empty() || wip == ip_of(&h.addr))
+                && (wip.is_empty() || together(&wip, &ip_of(&h.addr)))
         });
         if let Some((hi, _)) = host {
             links.push((wi, hi));
