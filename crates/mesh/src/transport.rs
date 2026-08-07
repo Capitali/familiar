@@ -2380,7 +2380,6 @@ fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
 /// human's one seat — the ember shows on all their devices; any one may answer. Devices
 /// serving nobody, daemons, and watches hold no seat.
 fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
-    let roll = crate::standing::load(dir);
     let members = crate::members::classify(dir, now);
     // The established handle is the seat key — the record's word, not the device's claim.
     let established_handle = |node_id: &str| -> String {
@@ -2395,7 +2394,12 @@ fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
         // honest test. (An actor-namespace filter looked right and silently unseated any
         // fresh device that had never posted an observation — Betty lit a game she had no
         // seat in.)
-        if !roll.full.iter().any(|n| n == &m.node_id) || m.status == "offline" {
+        // Record-truth standing, never the legacy roll — the roll drifts (Betty's admission
+        // reached this door as a record while its roll slept, and she lit a game she had no
+        // seat in for the second time; same class as the standing_full drift).
+        if crate::standing::standing_of(dir, &m.node_id) != crate::standing::Standing::Full
+            || m.status == "offline"
+        {
             continue;
         }
         let handle = established_handle(&m.node_id);
