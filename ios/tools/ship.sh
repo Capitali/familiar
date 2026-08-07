@@ -49,8 +49,14 @@ open /Applications/FamiliarMac.app
 ditto -c -k --keepParent "$MACAPP" "$HOME/Downloads/FamiliarMac-universal.zip"
 echo "✓ Mac installed + zip refreshed"
 
+# -allowProvisioningUpdates needs an authenticated session; the CLI has no Xcode account,
+# so authenticate with the App Store Connect API key (same one testflight.sh uploads with).
+# Without it, any NEW entitlement (push, build 69) fails the build on a stale team profile.
 xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent -configuration Release \
   -destination 'generic/platform=iOS' -allowProvisioningUpdates \
+  -authenticationKeyPath /Users/ian/.appstoreconnect/private_keys/AuthKey_LTK6QL7C9P.p8 \
+  -authenticationKeyID LTK6QL7C9P \
+  -authenticationKeyIssuerID 69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
   -derivedDataPath build/ios-rel build \
   | grep -q "BUILD SUCCEEDED" || { echo "✗ iOS build failed"; exit 1; }
 IOSAPP="$IOS/build/ios-rel/Build/Products/Release-iphoneos/FamiliarAgent.app"

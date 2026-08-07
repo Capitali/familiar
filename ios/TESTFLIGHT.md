@@ -42,6 +42,14 @@ The build appears under your app → **TestFlight** after processing (~5–15 mi
 
 ---
 
+## As of build 69 (2026-08-07)
+
+- Build 69 adds APNs: the app asks for notification permission once it is a member,
+  registers its token with its door, and the door pushes "🔥 the ember is yours" to a
+  locked phone when the turn arrives (ADR-0030). Direct installs push via the sandbox
+  gateway; TestFlight installs need the APNs key re-issued for Sandbox & Production
+  (currently sandbox-only — see the ADR).
+
 ## As of build 68 (2026-08-07)
 
 - Build 68 shipped the first two-human game session's fixes (see ADR-0029 "the door under
