@@ -661,7 +661,25 @@ function refreshScreen() {
 
     } else {
       // live (or finished) game view
-      if (!g) { S.gameNav = 'menu'; refreshScreen(); return; }
+      if (!g) {
+        // A begin's own poll race: the snapshot in flight when BEGIN was tapped arrives
+        // game-less a beat later — bouncing to the menu PINNED the menu while every other
+        // console showed the fire. Grace the gap, and never pin: clearing gameNav lets the
+        // default (live-when-burning) take over the moment the game lands.
+        if (S.gameBeginAt && Date.now() - S.gameBeginAt < 12000) {
+          el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:60px 0;">
+            <div style="width:46px;height:46px;color:#ffb266;animation:iconpulse 1.1s ease-in-out infinite;">
+              <svg viewBox="0 0 48 48" fill="currentColor"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z"/></svg>
+            </div>
+            <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(255,207,158,0.8);">LIGHTING THE FIRE…</span>
+          </div>`;
+          return;
+        }
+        S.gameNav = undefined;
+        refreshScreen();
+        return;
+      }
+      S.gameBeginAt = 0;
       // A human mid-sentence outranks a data refresh: while the input is focused (or holds
       // text), the poll must NOT rebuild this screen out from under their thumbs — the same
       // rule the conversation screen enforces with its persistent input row. Countdowns keep
@@ -1141,7 +1159,7 @@ window.sphereGameClose = () => {
 window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
 // NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
 // a payload "kind" would overwrite the message kind and the bridge would drop the act.
-window.sphereGameBegin = (kind) => { toApp('game', { act: 'begin', game_kind: kind }); S.gameNav = 'live'; };
+window.sphereGameBegin = (kind) => { S.gameBeginAt = Date.now(); toApp('game', { act: 'begin', game_kind: kind }); S.gameNav = 'live'; refreshScreen(); };
 window.sphereGamePassTo = (id) => { S.gamePassTo = id; refreshScreen(); };
 window.sphereGameSubmit = () => {
   const inp = document.getElementById('gameinput');
