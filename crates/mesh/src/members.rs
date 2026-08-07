@@ -155,7 +155,10 @@ pub const ONLINE_WINDOW_SECS: i64 = 600;
 /// The window for a device to still read **"online"** in the roster — tighter than
 /// [`ONLINE_WINDOW_SECS`] (which still governs session continuity), so a phone that drops
 /// off the network (airplane mode) visibly decays within minutes, not ten.
-pub const DEVICE_FRESH_SECS: i64 = 180;
+// 7 minutes: a phone stops polling the moment its screen locks, and normal handling gaps
+// (pocket, table, conversation) run minutes — 180s churned the roster online↔away on every
+// lock (watched live, four flips in four minutes). Devices decay honestly, just not twitchily.
+pub const DEVICE_FRESH_SECS: i64 = 420;
 /// A device agent older than this has departed — dropped from the roster.
 const AGENT_FRESH_SECS: i64 = 6 * 3600;
 
@@ -652,7 +655,43 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
     out = dedup_devices(out);
     attach_companions(&mut out, &obs);
     attach_consoles(&mut out, &transport::reachable_hosts());
+    attach_watches(&mut out);
     out
+}
+
+/// A watch rides its paired phone (the design of record): TOGETHER, it is the ⌚ badge on the
+/// phone's row — its own row folds into the host card like a console's does. Apart — its own
+/// address, different from the phone's (cellular, foreign wifi) — it stands alone in the
+/// mesh. "Together" is judged the same honest way consoles nest: no address of its own
+/// (presence relayed through the pairing) or the same address as the phone.
+fn attach_watches(out: &mut [Member]) {
+    let ip_of = |addr: &str| addr.split(':').next().unwrap_or("").to_string();
+    let mut links: Vec<(usize, usize)> = Vec::new();
+    for (wi, w) in out.iter().enumerate() {
+        if w.actor.split(':').next() != Some("watch") {
+            continue;
+        }
+        let human = w.actor.split(':').nth(1).unwrap_or("");
+        if human.is_empty() {
+            continue;
+        }
+        let wip = ip_of(&w.addr);
+        let host = out.iter().enumerate().find(|(hi, h)| {
+            *hi != wi
+                && matches!(h.actor.split(':').next(), Some("phone") | Some("iphone"))
+                && h.actor.split(':').nth(1) == Some(human)
+                && (wip.is_empty() || wip == ip_of(&h.addr))
+        });
+        if let Some((hi, _)) = host {
+            links.push((wi, hi));
+        }
+    }
+    for (wi, hi) in links {
+        out[wi].attached_to = out[hi].node_id.clone();
+        if !out[hi].attached.iter().any(|a| a == "⌚ watch") {
+            out[hi].attached.push("⌚ watch".to_string());
+        }
+    }
 }
 
 /// A Mac console shell (`mac:*`) and the daemon on the same machine are two real members —
@@ -736,6 +775,25 @@ fn dedup_devices(members: Vec<Member>) -> Vec<Member> {
             "phone" | "iphone" | "ipad" | "mac" | "watch" | "tv"
         )
     };
+    // One node, one row: a watch (or phone) can appear both as an actor-carrying agent row
+    // and an actorless peer row for the SAME node_id — adopt the actor onto the actorless
+    // twin first, so the grouping below folds them into one member.
+    let node_actor: HashMap<String, String> = members
+        .iter()
+        .filter(|m| !m.actor.is_empty() && is_device_ns(&m.actor))
+        .map(|m| (m.node_id.clone(), m.actor.clone()))
+        .collect();
+    let members: Vec<Member> = members
+        .into_iter()
+        .map(|mut m| {
+            if m.actor.is_empty() {
+                if let Some(a) = node_actor.get(&m.node_id) {
+                    m.actor = a.clone();
+                }
+            }
+            m
+        })
+        .collect();
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Vec<Member>> = HashMap::new();
     for m in members {
