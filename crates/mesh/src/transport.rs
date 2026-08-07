@@ -716,9 +716,7 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
         }
     }
     if changed {
-        if let Ok(s) = serde_json::to_string(&peers) {
-            let _ = std::fs::write(&path, s);
-        }
+        let _ = save_peers(dir, &peers);
     }
 }
 
@@ -1457,8 +1455,7 @@ fn recv_observe(
                     if let Some(pr) = peers.iter_mut().find(|p| p.node_id == node_id) {
                         if pr.actor != actor {
                             pr.actor = actor.to_string();
-                            let _ = serde_json::to_vec_pretty(&peers)
-                                .map(|b| std::fs::write(dir.join(PEERS_FILE), b));
+                            let _ = save_peers(dir, &peers);
                         }
                     }
                 }
@@ -2729,8 +2726,7 @@ fn recv_release(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
                 }
             }
             if touched {
-                let _ = serde_json::to_vec_pretty(&peers)
-                    .map(|b| std::fs::write(dir.join(PEERS_FILE), b));
+                let _ = save_peers(dir, &peers);
             }
             text(StatusCode::OK, "released — the device is a guest with its covenant intact")
         }
@@ -3823,10 +3819,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         }
         None => peers.push(rec),
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    save_peers(dir, &peers)?;
     Ok(())
 }
 
@@ -3929,10 +3922,7 @@ pub(crate) fn register_device_peer(
             connectivity: String::new(),
         }),
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    save_peers(dir, &peers)?;
     Ok(())
 }
 
@@ -3950,7 +3940,7 @@ pub fn remove_peer(dir: &Path, node_id: &str) -> Result<bool> {
     if peers.len() == before {
         return Ok(false);
     }
-    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    save_peers(dir, &peers)?;
     Ok(true)
 }
 
@@ -3962,6 +3952,27 @@ pub(crate) fn load_peers(dir: &Path) -> Vec<PeerRecord> {
         .unwrap_or_default()
 }
 
+/// Persist the peer roster atomically: write a sibling temp file, then rename it over
+/// `peers.json`. A concurrent `load_peers` sees either the old roster or the new one — never a
+/// torn write. A plain truncate-and-write let a racing reader parse half a file as an EMPTY
+/// roster and save that emptiness back on its next upsert, silently wiping every learned peer
+/// (watched live at the lighthouse, 2026-08-07).
+pub(crate) fn save_peers(dir: &Path, peers: &[PeerRecord]) -> Result<()> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let path = dir.join(PEERS_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_file_name(format!(
+        "peers.json.tmp-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::write(&tmp, serde_json::to_vec_pretty(peers)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
 /// A human's call that `node_id` is gone for good — decommissioned hardware, a retired VM
 /// (`familiar mesh abandon <node_id>`). The record is never deleted, only excluded from the
 /// active roster/worldview (`members::classify`) — full history stays queryable. Self-healing:
@@ -3969,13 +3980,12 @@ pub(crate) fn load_peers(dir: &Path) -> Vec<PeerRecord> {
 /// renewed contact is itself evidence it isn't defunct after all — see `upsert_peer`/
 /// `register_device_peer`. Returns `false` if no peer with that id exists.
 pub fn abandon_peer(dir: &Path, node_id: &str) -> Result<bool> {
-    let path = dir.join(PEERS_FILE);
     let mut peers = load_peers(dir);
     let Some(p) = peers.iter_mut().find(|p| p.node_id == node_id) else {
         return Ok(false);
     };
     p.status = "abandoned".to_string();
-    std::fs::write(&path, serde_json::to_vec_pretty(&peers)?)?;
+    save_peers(dir, &peers)?;
     Ok(true)
 }
 
