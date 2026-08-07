@@ -1904,16 +1904,22 @@ fn recv_status(dir: &Path, bytes: &[u8], sig: &str, peer_ip: &str) -> Response<F
                     if group::verify_membership(&report.membership, &gk, &cred.group_id, now, &revoked)
                         .is_ok()
                     {
-                        let _ = register_device_peer(
-                            dir,
-                            &report.membership.node_id,
-                            &report.status.label,
-                            peer_ip,
-                            "",
-                            "",
-                            0.0,
-                            0.0,
-                        );
+                        // Never let a heartbeat BLANK what a richer path already recorded —
+                        // an empty-label register overwrote the daemon's peer label on the
+                        // lighthouse every heartbeat, the console's label-stem nesting broke,
+                        // and the roster flapped on a metronome (caught live, 11:58:24).
+                        if !report.status.label.trim().is_empty() {
+                            let _ = register_device_peer(
+                                dir,
+                                &report.membership.node_id,
+                                &report.status.label,
+                                peer_ip,
+                                "",
+                                "",
+                                0.0,
+                                0.0,
+                            );
+                        }
                         if crate::record::find_by_key(dir, &report.membership.node_id).is_none() {
                             let attestation = crate::enroll::Attestation {
                                 laws_version: crate::enroll::LAWS_VERSION,
@@ -2356,13 +2362,12 @@ fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
     };
     let mut seats: Vec<crate::game::Player> = Vec::new();
     for m in &members {
-        let ns = m.actor.split(':').next().unwrap_or("");
-        let human_device = matches!(ns, "phone" | "iphone" | "ipad" | "mac");
-        let console = m.label.to_lowercase().ends_with(" console");
-        if !(human_device || console)
-            || !roll.full.iter().any(|n| n == &m.node_id)
-            || m.status == "offline"
-        {
+        // The established handle IS the eligibility: daemons and the lighthouse are
+        // established with an empty handle, watches are guests — all excluded by the one
+        // honest test. (An actor-namespace filter looked right and silently unseated any
+        // fresh device that had never posted an observation — Betty lit a game she had no
+        // seat in.)
+        if !roll.full.iter().any(|n| n == &m.node_id) || m.status == "offline" {
             continue;
         }
         let handle = established_handle(&m.node_id);
