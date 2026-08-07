@@ -2480,8 +2480,15 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     };
     match crate::game::apply_act(&mut state, &env.act, &actor_handle, &label, &players, now) {
         Ok(reply) => {
+            // A move that judged but didn't persist is a lie to the player — say so instead
+            // of returning the judge's words over state the next read won't show.
             if let Some(s) = &state {
-                let _ = crate::game::save(dir, s);
+                if let Err(e) = crate::game::save(dir, s) {
+                    return text(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("the move judged but did not save: {e}"),
+                    );
+                }
             }
             text(StatusCode::OK, reply)
         }

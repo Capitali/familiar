@@ -473,7 +473,10 @@ pub fn assemble_worldview(
     cred: &crate::group::GroupCredential,
     now: i64,
 ) -> Result<Worldview> {
-    let obs = familiar_kernel::observation::load(dir).map_err(Error::Io)?;
+    // The recent window only: presence/service/capacity signals and the recent-observations
+    // strip all work over minutes-to-hours of history. A full load of the whole log per
+    // request saturated the door once the log passed ~20k rows.
+    let obs = familiar_kernel::observation::load_recent(dir, 4000).map_err(Error::Io)?;
     let presence = familiar_kernel::presence::presence_signal(&obs, now);
     let service = familiar_kernel::service::service_signal(&obs);
     let capacity = familiar_kernel::capacities::capacities_signal(&obs);

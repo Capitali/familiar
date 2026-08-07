@@ -145,7 +145,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- state & real data ----------
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
+// holoHidden starts TRUE: the app opens onto the bare globe, home centered, menus tucked
+// away — as if the hide glyph had already been clicked. One tap on it brings the screens back.
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: true, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
 try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
@@ -222,6 +224,14 @@ function peers(all) {
       present: presentLine(m),
     };
   });
+}
+
+// A countdown's text, computed at render time — emitting "--:--" and waiting for the 1s
+// ticker made every poll re-render flash dashes (the "strange flashing timers" of the first
+// two-human game). Same math as the ticker; the ticker only keeps it moving.
+function cdText(deadline) {
+  const r = Math.max(0, (deadline || 0) - Math.floor(Date.now() / 1000));
+  return String(Math.floor(r / 60)).padStart(2, '0') + ':' + String(r % 60).padStart(2, '0');
 }
 
 // Who is present at a node now, for how long, and how established — or 'unknown' when no
@@ -327,6 +337,14 @@ function refreshScreen() {
     if (inp && document.activeElement === inp) return;
   }
 
+  // Same law for the game's guess/line box: a poll mid-thought wiped the player's typing
+  // (watched live — the iPad's answer vanished under Ian's fingers). Focus-gated only, so a
+  // blurred input never blocks the screen.
+  if (k === 'games') {
+    const ginp = document.getElementById('gameinput');
+    if (ginp && document.activeElement === ginp) return;
+  }
+
   if (k === 'conversation') {
     const box = $('convmsgs'); if (!box) return;
     if (!v) { box.innerHTML = ''; return; }
@@ -361,7 +379,10 @@ function refreshScreen() {
   if (k === 'roster') {
     // Carry the ORIGINAL index through the partition — sphereNode/sphereDive index into peers(),
     // so filtering the grid without keeping `i` would dive to the wrong node.
-    const pairs = P.map((p, i) => [p, i]);
+    // The lighthouse is infrastructure, not a housemate: it keeps its globe dot and its node
+    // dive, but takes no card in the roster of who is here.
+    const pairs = P.map((p, i) => [p, i])
+      .filter(([p]) => !(!(p.m.human || '') && /lighthouse/i.test(p.name || '')));
     const past = pairs.filter(([p]) => isStale(p));
     const live = pairs.filter(([p]) => !isStale(p));
     // A member that runs ON another machine (a Mac's console shell — m.attached_to carries the
@@ -405,7 +426,7 @@ function refreshScreen() {
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
           ${(v.game && v.game.status === 'open' && emberIds.has(p.m.node_id))
-            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">--:--</span></span>` : ''}
+            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">${cdText(v.game.holder_since + v.game.turn_secs)}</span></span>` : ''}
           ${connBadge(p.m.connectivity)}`;
     const closedCard = ([p, i]) => `
       <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:13px 17px;border-radius:14px;background:${p.local?'rgba(90,175,255,0.08)':'rgba(20,44,80,0.16)'};border:1px solid ${p.local?'rgba(174,231,255,0.2)':'rgba(120,190,255,0.12)'};display:flex;align-items:center;gap:9px;">
@@ -578,7 +599,14 @@ function refreshScreen() {
         ${items.map(t => `<div class="m" style="font-size:10.5px;color:rgba(200,240,215,0.85);padding:3px 0;">◆ ${t}</div>`).join('')}
       </div>`;
     const rules = (items) => items.map(t => `<div class="m" style="font-size:10.5px;color:rgba(188,210,255,0.78);padding:3px 0;">· ${t}</div>`).join('');
-    const cd = (deadline) => `<span class="m" data-deadline="${deadline}" style="font-size:inherit;color:#aee7ff;">--:--</span>`;
+    const cd = (deadline) => `<span class="m" data-deadline="${deadline}" style="font-size:inherit;color:#aee7ff;">${cdText(deadline)}</span>`;
+    // The door's last words to THIS device, door named — a refused or slow act must never
+    // look like a dead button (the door's reply used to land in a log no screen read).
+    const doorLine = () => {
+      const d = S.device || {};
+      const n = (d.notes || [])[0];
+      return n ? `<div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.6);margin-top:12px;padding:9px 12px;border-radius:10px;background:rgba(20,44,80,0.18);border:1px solid rgba(120,190,255,0.12);">door ${esc(d.host || '?')} · ${esc(n)}</div>` : '';
+    };
 
     if (nav === 'menu') {
       const gameCard = (key, title, flavor, glyph) => `
@@ -602,6 +630,7 @@ function refreshScreen() {
             <div class="m" style="font-size:11px;color:rgba(188,210,255,0.8);">${esc(g.verdict || 'finished')}</div>
             <button onclick="sphereGameNav('live')" class="glybtn" style="margin-top:9px;height:30px;padding:0 12px;border-radius:9px;"><span class="m" style="font-size:8.5px;letter-spacing:0.14em;">SEE IT</span></button>
           </div>` : ''}
+        ${doorLine()}
       </div>`;
 
     } else if (nav === 'info-riddle' || nav === 'info-campfire') {
@@ -731,7 +760,19 @@ function refreshScreen() {
             ${g.players.map(playerRow).join('')}
           </div>
         </div>
-        ${mine ? `
+        ${(() => {
+          // A move is in flight: the door hasn't judged yet (same entry count, same holder,
+          // < 25s). Show the wait, not the question — a live input reads as "answer again".
+          const pending = S.gameActAt && Date.now() - S.gameActAt < 25000
+            && (g.entries || []).length === S.gameActEntries && (g.holder || '') === S.gameActHolder;
+          if (!pending) { S.gameActAt = 0; }
+          return pending ? `
+          <div style="margin-top:14px;padding:16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);display:flex;align-items:center;gap:12px;">
+            <div style="width:22px;height:22px;color:#ffb266;animation:iconpulse 1.1s ease-in-out infinite;"><svg viewBox="0 0 48 48" fill="currentColor"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z"/></svg></div>
+            <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(255,207,158,0.85);">THE DOOR IS JUDGING — your answer is in</span>
+          </div>` : '';
+        })() || ''}
+        ${mine && !(S.gameActAt) ? `
           <div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);">
             <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
             <div style="display:flex;gap:9px;">
@@ -751,6 +792,7 @@ function refreshScreen() {
           </div>` : ''}
         ${open && !mine ? `<div class="m" style="font-size:10px;color:rgba(160,195,255,0.55);margin-top:12px;">the ember is with ${esc(cap(holderP ? (holderP.handle || holderP.label) : 'someone'))} — every one of their devices shows it; any one may answer</div>` : ''}
         ${open && myHuman2 && g.started_by.toLowerCase() === myHuman2 ? `<button onclick="sphereGameClose()" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;${S.closeArmed ? 'background:rgba(60,10,16,0.5);border-color:rgba(255,110,110,0.6);' : ''}"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">${S.closeArmed ? 'TAP AGAIN TO CLOSE' : 'CLOSE THE GAME'}</span></button>` : ''}
+        ${doorLine()}
         ${!open ? `<div style="margin-top:14px;">${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK TO THE GAMES', false)}</div>` : ''}
       </div>`;
     }
@@ -1169,6 +1211,13 @@ window.sphereGameSubmit = () => {
   toApp('game', { act: g.kind === 'riddle' ? 'guess' : 'line', text, to: S.gamePassTo || '' });
   if (inp) { inp.value = ''; inp.blur(); }
   S.gamePassTo = '';
+  // The door may take seconds to judge under load. Leaving the question live read as "answer
+  // again" — Betty answered three times and each duplicate became a recorded guess. Mark the
+  // move in flight; the input area renders JUDGING… until the state moves or the wait expires.
+  S.gameActAt = Date.now();
+  S.gameActEntries = (g.entries || []).length;
+  S.gameActHolder = g.holder || '';
+  refreshScreen();
 };
 // One ticker drives every countdown on the page (turn clocks, roster badges).
 setInterval(() => {
@@ -1199,7 +1248,7 @@ window.sphereSubmitThreadAnswer = (id) => {
   if (text) toApp('answerThread', { id, text });
   refreshScreen();
 };
-window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
+window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device' || S.activeScreen === 'games') refreshScreen(); };
 window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device' || S.activeScreen === 'welcome') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
 function renderInviteQR() {
   const box = $('inviteqr'); if (!box || !S.invite) return;
@@ -1298,8 +1347,24 @@ window.sphereUpdate = (view) => {
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + S.activeScreen + ': ' + e.message; }
   renderChrome();
   renderButtons();   // the games glyph burns warm the moment the ember reaches this device
+  // First data after launch: turn the globe so home is under the camera. Once — after that
+  // the globe is the human's to spin.
+  if (!S.centeredOnce) { try { centerOnSelf(); S.centeredOnce = true; } catch (e) {} }
   if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };
+// Aim the self node (or the mesh anchor when self carries no fix) at the camera — the launch
+// view is "the world with home in front of you", menus tucked away.
+function centerOnSelf() {
+  if (!G.group || !G.anchorDirs.length) return;
+  const P = peers();
+  let i = P.findIndex(p => p.local && (p.located || p.hasAnchor));
+  if (i < 0) i = P.findIndex(p => p.located);
+  if (i < 0 || !G.anchorDirs[i]) return;
+  const saved = G.diveDir;
+  G.diveDir = G.anchorDirs[i].clone();
+  G.group.quaternion.copy(diveAimQ());
+  G.diveDir = saved;
+}
 window.sphereLinkDown = (msg) => { S.linkOk = false; S.linkErr = msg || ''; renderChrome(); };
 // The native map finished its own flight and the human surfaced back to orbit.
 // Reverse of the dive: called at the crossfade point of the ascent (25% street zoom-out

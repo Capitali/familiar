@@ -432,6 +432,11 @@ final class AppModel: ObservableObject {
             "deviceRole": deviceRole.rawValue,
             "deviceOwner": deviceOwner,
             "oracle": ConsultRunner.state,
+            // The app's recent working notes — the door's verbatim replies to this device's own
+            // acts (game moves, vouches, invites). The console shows the newest one; without
+            // this, a refused BEGIN looked like a dead button (the door's words landed in a
+            // log no screen ever read).
+            "notes": Array(log.prefix(5)),
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "faceRecognition": faceRecognitionEnabled,
@@ -659,16 +664,21 @@ final class AppModel: ObservableObject {
     /// One move in the mesh game (begin / guess / line / pass / close), signed and sent to
     /// the door. The judge's reply lands in the activity feed verbatim.
     func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "") async {
-        guard !host.isEmpty else { return }
+        // Never bail silently: a dead-looking button is worse than an error. The note surfaces
+        // on the games screen (deviceStateJSON.notes), door named, so a refusal is legible.
+        guard !host.isEmpty else {
+            note("\(act): no door to act through — this device has no enrolled host")
+            return
+        }
         do {
             switch try await GameClient(node: node).act(act, kind: kind, text: text, to: to,
                                                         host: host, port: enrollPort) {
             case .said(let words): note(words.isEmpty ? "the move landed" : words)
-            case .refused(let why): note(why)
-            case .error(let e): note("the move failed: \(e)")
+            case .refused(let why): note("door \(host) refused \(act): \(why)")
+            case .error(let e): note("\(act) failed at door \(host): \(e)")
             }
         } catch {
-            note("the move failed: \(error.localizedDescription)")
+            note("\(act) failed at door \(host): \(error.localizedDescription)")
         }
         await refreshWorldview()
     }

@@ -168,6 +168,51 @@ pub fn load<T: DeserializeOwned>(dir: &Path, file: &str) -> io::Result<Vec<T>> {
     Ok(out)
 }
 
+/// Load the LAST `limit` records from `<file>`'s table, still oldest-first among themselves.
+/// The hot read path for large append-only logs: a full [`load`] of a 20k-row observation log
+/// on every worldview request saturated a door (2–5s per read, watched live 2026-08-07) when
+/// every consumer only wanted the recent window anyway.
+pub fn load_last<T: DeserializeOwned>(dir: &Path, file: &str, limit: usize) -> io::Result<Vec<T>> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT data FROM (SELECT seq, data FROM {table} ORDER BY seq DESC LIMIT ?1) ORDER BY seq"
+        ))
+        .map_err(se)?;
+    let rows = stmt
+        .query_map([limit as i64], |r| r.get::<_, String>(0))
+        .map_err(se)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let data = row.map_err(se)?;
+        out.push(serde_json::from_str(&data).map_err(invalid_data)?);
+    }
+    Ok(out)
+}
+
+/// Load only the FIRST record of `<file>`'s table (the oldest), if any — for "since when"
+/// questions that don't justify loading the whole log.
+pub fn load_first<T: DeserializeOwned>(dir: &Path, file: &str) -> io::Result<Option<T>> {
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let mut stmt = c
+        .prepare(&format!("SELECT data FROM {table} ORDER BY seq LIMIT 1"))
+        .map_err(se)?;
+    let mut rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(se)?;
+    match rows.next() {
+        Some(row) => {
+            let data = row.map_err(se)?;
+            Ok(Some(serde_json::from_str(&data).map_err(invalid_data)?))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Replace `<file>`'s table with exactly these records (a transactional
 /// `DELETE` + re-`INSERT`). For genuine *bulk* sets (e.g. detected loops); id-targeted
 /// updates should use [`update_by_id`] instead so they don't touch every row.

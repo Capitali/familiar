@@ -75,6 +75,20 @@ pub fn load(dir: &Path) -> io::Result<Vec<Observation>> {
     store::load(dir, OBSERVATIONS_FILE)
 }
 
+/// Load only the newest `limit` observations, still oldest-first among themselves — the hot
+/// read path. Every per-request consumer (presence, device reports, worldview signals) works
+/// over a freshness window measured in minutes; loading a 20k-row history for each of ~4
+/// requests a second saturated a door.
+pub fn load_recent(dir: &Path, limit: usize) -> io::Result<Vec<Observation>> {
+    store::load_last(dir, OBSERVATIONS_FILE, limit)
+}
+
+/// The timestamp of the oldest recorded observation, if any — "since when has this node been
+/// observing" without loading the log.
+pub fn first_ts(dir: &Path) -> io::Result<Option<i64>> {
+    Ok(store::load_first::<Observation>(dir, OBSERVATIONS_FILE)?.map(|o| o.ts))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

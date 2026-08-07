@@ -345,8 +345,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             .map(|n| n.identity().label)
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| cred.membership.node_id.chars().take(8).collect());
-        let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
-        let first = obs.iter().map(|o| o.ts).min().unwrap_or(now);
+        let obs = familiar_kernel::observation::load_recent(dir, 4000).unwrap_or_default();
+        let first = familiar_kernel::observation::first_ts(dir)
+            .ok()
+            .flatten()
+            .unwrap_or(now);
         let last = obs.iter().map(|o| o.ts).max().unwrap_or(now);
         let tools = familiar_kernel::tool::load(dir)
             .map(|t| t.len())
@@ -405,7 +408,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         });
     }
 
-    let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
+    let obs = familiar_kernel::observation::load_recent(dir, 4000).unwrap_or_default();
     let reports = device_reports(&obs);
     // The graduated trust tier per actor (monitor → throttle → marginalize → sever), from the shared
     // refusal log. Surfaced so the roster/map can badge a peer whose standing has slipped.
