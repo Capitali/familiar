@@ -2,7 +2,8 @@
 
 Everything human-facing lives here: the **FamiliarMac** sphere console, the
 **iPhone/iPad agent** (which hosts the same sphere console), and the **watch app**.
-Devices enroll into the familiar's mesh by scanning a QR, then push **derived
+Devices join the familiar's mesh through the lighthouse automatically (a one-scan
+invite is the shortcut, not the requirement — ADR-0026), then push **derived
 observations** (never raw data) to `POST /mesh/observe`, signed with the same
 ed25519 trust the mesh uses.
 
@@ -45,15 +46,18 @@ xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac \
 open /Applications/FamiliarMac.app
 ```
 
-The console does **not** need a daemon on the same Mac. On first launch it shows a join
-screen, finds a reachable mesh through the lighthouse and asks to be admitted, displaying
-a confirmation code while it waits. Run a local daemon (`familiar daemon install` — see the
+The console does **not** need a daemon on the same Mac. On first launch it greets you,
+finds a reachable mesh through the lighthouse, and joins as a guest; the guided path on
+its own screen — say a name, be vouched for or sponsored by a member, or redeem a
+one-scan invite — carries it to membership (ADR-0026: two-filter admission; the welcome
+is a greeting, not a gate). Run a local daemon (`familiar daemon install` — see the
 [root README](../README.md#install--run)) only if you want this machine to *be* a familiar
-as well as see one; the two are separate mesh nodes and the roster shows both.
+as well as see one; the two are separate mesh nodes and the roster nests the console
+under its host machine.
 
-The Device screen renders this peer's **address** for a new device to scan or paste. It is
-an address, not an invite: a console holds no group secret and cannot grant membership —
-the lighthouse admits every device (ADR-0018).
+A member console's Welcome screen mints **one-scan invites**: any warranted member is a
+door (ADR-0026 Phase 4), and admission is judged by the two filters wherever the knock
+lands — the lighthouse is the door that is always home, not the only door.
 
 ## Build & test (agents)
 

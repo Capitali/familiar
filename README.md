@@ -8,8 +8,10 @@ It runs as a **mesh**, not an app: a daemon on your Mac, and consoles on Mac,
 iPhone, iPad and Watch that are **peers among equals** rather than windows onto a
 host. Exactly one thing is permanent — a small always-on node, the *lighthouse*,
 which is how a device with no prior contact finds the mesh from anywhere and the
-only place membership is granted ([ADR-0018](docs/decision-records/0018-lighthouse-single-fixture.md)).
-Everything else can come and go.
+one node that never sleeps ([ADR-0018](docs/decision-records/0018-lighthouse-single-fixture.md),
+[ADR-0027](docs/decision-records/0027-records-travel-lighthouse-law.md)).
+Everything else can come and go — the mesh must survive every other device being
+off at once, and does.
 
 They share **one worldview** rather than a separate chat window each — what any
 node notices, the mesh knows. It senses what is around it, forms theories about
@@ -17,19 +19,24 @@ what it sees, asks you questions when it is unsure, and remembers which human it
 is serving on a device that many people touch.
 
 You hold the keys. The group is yours to admit people to and yours to abandon;
-the mesh talks to itself over pinned TLS, and its thinking can run on the **Apple
-Intelligence model already on your phone** — so a prompt need never leave your
-hardware at all.
+the mesh talks to itself over pinned TLS, and its thinking runs through a
+boundary-gated adapter pointed at a provider you choose — a local model, a
+free-tier API, or (on supported devices) the **Apple Intelligence model already
+on your phone**, so a prompt need never leave your hardware at all.
 
-Membership and trust are **two different questions**. Joining is automatic for any
-device that proves its own identity and signs the covenant
-([ADR-0015](docs/decision-records/0015-automated-covenant-admission.md)) — but that
-only earns it the right to *read*. What it actually sees depends on **standing**,
-which you grant by hand, one node at a time. A member without standing reads a
+Membership is **two filters, both legible**
+([ADR-0026](docs/decision-records/0026-two-filter-admission.md)): a device is a
+member when it has **contracted the covenant** and **established who it serves**
+— and when both hold, admission is automatic. The welcome is a greeting, not a
+gate. A stranger's device walks a guided path on its own screen (say your name;
+an existing member vouches for you or sponsors a new name; or redeem a one-scan
+invite), and every step is a signed record. Until then it is a guest: it reads a
 worldview with the same shape, cadence and timestamps as the real one and none of
-the identities: no names, no addresses, no observation text, and the map relocated
-so its geometry survives but its position does not. Default is deny, so a device
-that just joined is a guest until you say otherwise.
+the identities — no names, no addresses, no observation text, and the map
+relocated so its geometry survives but its position does not. Membership itself
+lives in **records that travel** from door to door
+([ADR-0027](docs/decision-records/0027-records-travel-lighthouse-law.md)), so who
+belongs is never trapped on any one machine.
 
 And it is **telos-first**: it begins not with a machine but with three laws, and
 derives everything downward from them. The laws are not a policy layer bolted on
@@ -118,16 +125,19 @@ xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac -configuration R
 # copy the built FamiliarMac.app to /Applications and launch it
 ```
 
-On first launch the console shows a join screen, finds a reachable mesh through the
-lighthouse, and displays a confirmation code while it asks to be admitted. After that it
-renders the worldview — the satellite globe, the roster (live members, with everything
-last seen over 24h ago behind a history button), theories, signals, and the device screen.
+On first launch the console greets you, finds a reachable mesh through the lighthouse,
+and joins as a guest; the guided path on its own screen (say a name, be vouched for or
+sponsored, or redeem a one-scan invite) carries it to membership. After that it renders
+the worldview — the satellite globe centered over home, the roster (live members, with
+everything last seen over 24h ago behind a history button), theories, signals, the games,
+and the device screen.
 
-What it offers other devices is an **address**, not an invite: a console holds no group
-secret, so it cannot grant membership — only the lighthouse can
-([ADR-0018](docs/decision-records/0018-lighthouse-single-fixture.md)). Pasting or scanning
-that address just tells a new device where to knock; the lighthouse still admits it. See
-[`ios/README.md`](ios/README.md) for the iPhone/iPad/watch agents and TestFlight.
+A member console can also hold the door open itself: any **warranted** member mints
+one-scan invites, and admission is judged by the two filters wherever the knock lands
+([ADR-0026](docs/decision-records/0026-two-filter-admission.md)) — the lighthouse is the
+door that is always home, not the only door. See [`ios/README.md`](ios/README.md) for the
+iPhone/iPad/watch agents and TestFlight (public beta:
+[testflight.apple.com/join/Vab9UDhb](https://testflight.apple.com/join/Vab9UDhb)).
 
 **3 — give it a mind**
 
@@ -169,6 +179,15 @@ lighthouse, and a pasted or scanned address as the offline fallback.
 It now also **watches**: with the `allow_camera` gate open, the daemon captures still
 frames through its eye (a bundled AVFoundation helper) and records that it saw. See
 [Install & run](#install--run).
+
+And it **plays**: two mesh games — Riddle of the Mesh and The Campfire — where every
+move is a signed member act, seats belong to humans (any of your devices may answer;
+none of them takes a turn for you), and the familiar referees
+([ADR-0028](docs/decision-records/0028-the-mesh-games.md)). The first full two-human
+game was played across two doors and four devices on 2026-08-07; the six defects it
+surfaced, and the hardening they taught, are
+[ADR-0029](docs/decision-records/0029-the-door-under-load.md) — testers playing IS the
+test.
 
 Outward reach (network, LLM, executing generated code, **watching through the camera**) is
 each a separate gate only a human opens. See [CHANGELOG.md](CHANGELOG.md) and
