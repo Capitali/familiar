@@ -596,7 +596,16 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let agent_presence = derive_presence(&obs, now, |o| o.source == src);
         out.push(Member {
             node_id: node.clone(),
-            label: actor.clone(),
+            // A friendly label, not the raw actor — "watch:ian" beside the prominent human
+            // name read as a stutter ("watch:ian Ian"). The namespace names the hardware;
+            // the human column names the human.
+            label: match ns {
+                "watch" => "Apple Watch".to_string(),
+                "phone" | "iphone" => "iPhone".to_string(),
+                "ipad" => "iPad".to_string(),
+                "mac" => "Mac".to_string(),
+                _ => actor.clone(),
+            },
             kind: MemberKind::DeviceAgent,
             os: os_from_actor(actor),
             os_version: String::new(),
