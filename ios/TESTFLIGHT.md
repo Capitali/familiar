@@ -42,6 +42,16 @@ The build appears under your app → **TestFlight** after processing (~5–15 mi
 
 ---
 
+## As of build 68 (2026-08-07)
+
+- Build 68 shipped the first two-human game session's fixes (see ADR-0029 "the door under
+  load"): the games screen shows the door's verbatim reply to every act, submit shows THE
+  DOOR IS JUDGING instead of re-offering the question, the guess input survives polls,
+  countdowns don't flash, the lighthouse is off the roster (infrastructure), and launch
+  opens to the bare globe centered over home.
+- Both doors must run daemon commit `bebe630` or later — the client fixes assume act-speed
+  cross-door sync and windowed reads.
+
 ## As of build 64 (2026-08-06)
 
 - **Ship a release with ONE command:** `bash ios/tools/ship.sh <build-number>` — bumps and
