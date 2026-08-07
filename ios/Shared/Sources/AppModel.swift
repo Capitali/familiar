@@ -673,6 +673,27 @@ final class AppModel: ObservableObject {
         await refreshWorldview()
     }
 
+    /// An enrolled visitor redeeming a pasted invite (the visitor path card's REDEEM box).
+    /// Accepts the full enrollment payload OR a bare invite token (the CLI prints the latter).
+    func redeemInvite(_ text: String) async {
+        guard let data = text.data(using: .utf8) else { return }
+        var token: InviteToken?
+        if let payload = try? JSONDecoder().decode(EnrollmentPayload.self, from: data) {
+            token = payload.invite
+        }
+        if token == nil {
+            token = try? JSONDecoder().decode(InviteToken.self, from: data)
+        }
+        guard let tok = token else {
+            note("that didn't read as an invite — paste exactly what the member sent")
+            return
+        }
+        pendingInvite = tok
+        let name = attributedHuman != "observer" ? attributedHuman : tok.expected_handle
+        note("redeeming the invite…")
+        await introduceMesh(name)
+    }
+
     /// A member welcoming a NEW human in by name — the sponsor's half of vouchFor.
     func sponsorFor(nodeId: String, handle: String) async -> String? {
         guard !host.isEmpty else { return "no host" }

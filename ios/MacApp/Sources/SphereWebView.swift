@@ -416,6 +416,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     self.model.setDeviceBinding(role: role, owner: body["owner"] as? String ?? "")
                     self.pushDevice()
                 }
+            case "inviteRedeem":
+                if let payload = body["payload"] as? String {
+                    Task {
+                        await self.model.redeemInvite(payload)
+                        await self.poll()
+                    }
+                }
             case "sponsor":
                 // A member welcomes a NEW name in — the sponsor's half of vouching.
                 if let nodeId = body["node_id"] as? String,

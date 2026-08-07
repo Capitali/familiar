@@ -527,7 +527,21 @@ function refreshScreen() {
           </button>
         </div>
       </div>`).join('');
-    el.innerHTML = claimsHtml + (arrivals.length === 0
+    // Invite someone — the member's half of the visitor path card's promise. The QR is for
+    // a phone at join time; the selectable text under it is for paste (the Mac join screen,
+    // or an enrolled visitor's REDEEM box). Ten minutes, single use, carries no secret.
+    const inviteHtml = amMember ? `
+      <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.2);border:1px solid rgba(120,190,255,0.16);margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <button onclick="toApp('invite',{})" class="glybtn" title="mint an invite" style="height:40px;padding:0 16px;border-radius:11px;display:flex;align-items:center;gap:9px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:19px;height:19px;"><rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><path d="M14 14h3v3h-3zM18 18h3v3h-3z" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/></svg>
+            <span class="m" style="font-size:9px;letter-spacing:0.15em;">INVITE SOMEONE</span>
+          </button>
+          <span class="m" style="font-size:9.5px;color:rgba(160,195,255,0.55);">mints a 10-minute, single-use pass — scan the QR at join, or send them the text to paste</span>
+        </div>
+        <div id="inviteqr" style="margin-top:10px;"></div>
+      </div>` : '';
+    el.innerHTML = inviteHtml + claimsHtml + (arrivals.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
            Nobody new in the last day. The next arrival will be greeted here.
          </div>`
@@ -935,8 +949,13 @@ function refreshScreen() {
           it will show “this device says it is yours” on its welcome screen. Tap <i>Yes — it's mine</i>.
         </div>
         <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
-          <b>3 · Take an invite</b> — any member can mint one (10 minutes, single use):
-          ${isMac ? 'paste it at this Mac’s join screen' : 'scan their join QR from this device'} and admission completes in one motion.
+          <b>3 · Take an invite</b> — ask a member to open their <i>Welcome</i> screen and tap
+          INVITE SOMEONE, then have them send you the invite text. Paste it here:
+        </div>
+        <div style="display:flex;gap:8px;margin:7px 0 2px;">
+          <input id="invitepaste" placeholder='{"v":1,"host":…,"invite":…}' spellcheck="false" autocapitalize="none" autocorrect="off"
+            style="flex:1;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:11px;padding:7px 10px;font-family:monospace;"/>
+          <button onclick="sphereRedeemInvite()" class="glybtn" style="height:32px;padding:0 13px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.13em;">REDEEM</span></button>
         </div>
         <div class="m" style="font-size:9px;color:rgba(160,195,255,0.5);margin-top:9px;">until then you read the mesh as a visitor: real shape, no names — nothing to be fixed, just the house not assuming who you are</div>
       </div>`;
@@ -1104,6 +1123,13 @@ window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
 // Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
 window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
 window.sphereSponsor = (nodeId, handle) => toApp('sponsor', { node_id: nodeId, handle });
+window.sphereRedeemInvite = () => {
+  const el = document.getElementById('invitepaste');
+  const text = (el && el.value || '').trim();
+  if (!text) return;
+  toApp('inviteRedeem', { payload: text });
+  if (el) { el.value = ''; el.blur(); }
+};
 window.sphereClaimDismiss = (id) => { (S.dismissedClaims = S.dismissedClaims || {})[id] = 1; refreshScreen(); };
 // confirm() is silent inside WKWebView (no UI delegate) — the close is a two-tap arm, like SEVER.
 window.sphereGameClose = () => {
@@ -1156,7 +1182,7 @@ window.sphereSubmitThreadAnswer = (id) => {
   refreshScreen();
 };
 window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
-window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
+window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device' || S.activeScreen === 'welcome') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
 function renderInviteQR() {
   const box = $('inviteqr'); if (!box || !S.invite) return;
   let svg = '';
