@@ -69,3 +69,14 @@ lighthouse without re-enrollment and fail over to it when they leave the LAN.
   membership certs.
 - **Hole punching** (lighthouse as rendezvous for direct CGNAT↔CGNAT paths) is
   Phase 3, on QUIC's UDP substrate. Until then all off-LAN traffic relays.
+
+---
+
+## The lighthouse-only law (ADR-0027, 2026-08-06)
+
+The mesh must survive every device being off — this box is the only non-transient entity.
+Accordingly it now carries, beyond the standard peer posture: the LLM adapter
+(`familiar_data/llm/call_llm.sh` + keys, free-tier chain, `allow_llm` opened by the operator),
+the full membership record via record-sync, a roster of every heartbeating device, and the
+group secret (from its keyed join) so admission works with no other door alive. The
+acceptance test for any mesh feature: does it work with only this box up?

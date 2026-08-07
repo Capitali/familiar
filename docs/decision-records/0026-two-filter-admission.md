@@ -241,3 +241,15 @@ attributable fact that travels with the record.
 - Where Ian may wish to loosen: the E4 provenance rule (whether a typed name from a pure remote
   stranger should ever establish) and the demo-mesh window for the cold-start founder. Both are
   single rules in one engine, changeable by policy rather than surgery.
+
+---
+
+## As-built addendum (2026-08-06)
+
+Phases 0–4 shipped, and two days of live household testing completed the design in the field.
+The record of what running it taught — vouch-over-the-mesh, sponsorship for new humans,
+identity release, cert-based record restoration, record replication between doors, and the
+lighthouse-only law — lives in [ADR-0027](0027-records-travel-lighthouse-law.md). The mesh
+games that drove the testing are [ADR-0028](0028-the-mesh-games.md). The four join patterns
+this record set out to cover (new/old user × new/old device) each work end-to-end through
+their own evidence path.

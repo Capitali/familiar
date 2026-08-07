@@ -70,3 +70,19 @@ stay a guest, told plainly what is missing.
 | **The record** | One `MembershipRecord` per device — keys, state, identity claim vs. establishment, the signed `AdmissionFact`, corrections. Replicates everywhere; the only answer to any membership question. |
 | **The welcome** | The third leg of [ADR-0021](../decision-records/0021-live-roster-and-the-record.md)'s split: *who is new*, last 24 hours, rendered as a greeting with how each identity was established. No buttons. |
 | **Correction** | `sever` / `disestablish` / `hold` / `restore` — signed, traveling, cheap. Lives on the roster card and the CLI, never the welcome screen. Trust extended automatically must be cheap to withdraw deliberately. |
+
+---
+
+## As-built: the four patterns and their doors (2026-08-06)
+
+| pattern | path | who acts |
+|---|---|---|
+| new user, new device | knock → guest → type a name → (LAN: admitted on the spot) or (via lighthouse: claim kept → **sponsor card** on every member console → one tap) | the newcomer, then any member |
+| old user, new device | knock → guest → claim the handle → **vouch card** on that human's own devices → one tap. Or scan a member's handoff QR / invite (admits in one motion). | the human, on hardware they already hold |
+| new user, old device | previous human SEVERs (fires **release** — a self-Disestablish that travels) → new human introduces fresh | each human for themselves |
+| old user, old device | reinstall: E1 rotation proof; record loss: **restoration** from the cert at first read | nobody — automatic |
+
+Claims are kept whenever an introduction is refused; the refusal text names the path and the
+console shows it verbatim. Cards, admissions and the roster converge across doors within a
+record-sync round (~30 s worst case). Severed stays severed until the human's explicit
+"Join the mesh". See [ADR-0027](../decision-records/0027-records-travel-lighthouse-law.md).
