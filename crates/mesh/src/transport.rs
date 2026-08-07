@@ -77,6 +77,11 @@ pub fn now_secs() -> i64 {
 pub struct PeerRecord {
     pub node_id: String,
     pub label: String,
+    /// The device's actor namespace ("watch:ian") — STICKY: learned when it posts
+    /// observations and kept thereafter, so its roster identity (and the watch-fold)
+    /// survives quiet spells that age its reports out of the attribution window.
+    #[serde(default)]
+    pub actor: String,
     pub addr: String,
     pub group_id: String,
     pub last_seen: i64,
@@ -677,6 +682,7 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
             }
             peers.push(PeerRecord {
                 node_id: st.node_id.clone(),
+                actor: st.actor.clone(),
                 label: if st.label.is_empty() {
                     st.node_id.chars().take(8).collect()
                 } else {
@@ -1436,7 +1442,29 @@ fn recv_observe(
     ring: &std::sync::Mutex<crate::observe::IngestGuard>,
 ) -> Response<Full<Bytes>> {
     match crate::observe::ingest_observations(dir, bytes, sig, now_secs(), ring) {
-        Ok(n) => text(StatusCode::OK, format!("recorded {n}")),
+        Ok(n) => {
+            // Sticky actor: a verified batch names its device ("watch:ian") — remember it on
+            // the peer record so the roster identity (and the watch-fold) survives quiet
+            // spells that age the reports out of the attribution window.
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(bytes) {
+                let node_id = v["node"]["node_id"].as_str().unwrap_or("");
+                let actor = v["observations"][0]["actor"].as_str().unwrap_or("");
+                let ns = actor.split(':').next().unwrap_or("");
+                if !node_id.is_empty()
+                    && matches!(ns, "watch" | "phone" | "iphone" | "ipad" | "mac" | "tv")
+                {
+                    let mut peers = load_peers(dir);
+                    if let Some(pr) = peers.iter_mut().find(|p| p.node_id == node_id) {
+                        if pr.actor != actor {
+                            pr.actor = actor.to_string();
+                            let _ = serde_json::to_vec_pretty(&peers)
+                                .map(|b| std::fs::write(dir.join(PEERS_FILE), b));
+                        }
+                    }
+                }
+            }
+            text(StatusCode::OK, format!("recorded {n}"))
+        }
         Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad batch"),
@@ -3714,6 +3742,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
     let rec = PeerRecord {
         node_id: brief.body.node.node_id.clone(),
         label: brief.body.node.label.clone(),
+        actor: String::new(),
         addr: addr.to_string(),
         group_id: brief.body.membership.group_id.clone(),
         last_seen: now,
@@ -3874,6 +3903,7 @@ pub(crate) fn register_device_peer(
         None => peers.push(PeerRecord {
             node_id: node_id.to_string(),
             label: label.to_string(),
+            actor: String::new(),
             addr: addr.to_string(),
             group_id,
             last_seen: now,
@@ -4516,6 +4546,7 @@ mod tests {
         let peers = vec![PeerRecord {
             node_id: "node1".into(),
             label: "Old Box".into(),
+            actor: String::new(),
             addr: "10.0.0.5:47100".into(),
             group_id: "g".into(),
             last_seen: 100,

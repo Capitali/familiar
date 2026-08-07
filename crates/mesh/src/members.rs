@@ -437,12 +437,21 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
 
     for p in &peers {
         let ip = p.addr.split(':').next().unwrap_or("").to_string();
-        let is_device = reports.contains_key(&p.node_id);
+        let is_device = reports.contains_key(&p.node_id) || !p.actor.is_empty();
         let (kind, os, actor, relationship) = if let Some((actor, _, _)) = reports.get(&p.node_id) {
             (
                 MemberKind::DevicePeer,
                 os_from_actor(actor),
                 actor.clone(),
+                "reads worldview".to_string(),
+            )
+        } else if !p.actor.is_empty() {
+            // The sticky actor: identity survives report-quiet spells (the watch-fold and the
+            // hardware label both key on it).
+            (
+                MemberKind::DevicePeer,
+                os_from_actor(&p.actor),
+                p.actor.clone(),
                 "reads worldview".to_string(),
             )
         } else {
