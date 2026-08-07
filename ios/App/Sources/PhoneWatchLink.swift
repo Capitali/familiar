@@ -59,6 +59,22 @@ final class PhoneWatchLink: NSObject, WCSessionDelegate, ObservableObject {
         DispatchQueue.main.async { self.lastSent = ctx["host"] as? String }
     }
 
+    /// The ember, urgent: live message when reachable (instant wrist chime), queued userInfo
+    /// otherwise so the flame still lands when the watch wakes. `on: false` clears it.
+    func sendEmber(_ on: Bool, kind: String) {
+        guard WCSession.isSupported() else { return }
+        let s = WCSession.default
+        guard s.activationState == .activated, s.isWatchAppInstalled else { return }
+        let payload: [String: Any] = ["ember": on, "kind": kind]
+        if s.isReachable {
+            s.sendMessage(payload, replyHandler: nil, errorHandler: { _ in
+                s.transferUserInfo(payload)
+            })
+        } else {
+            s.transferUserInfo(payload)
+        }
+    }
+
     func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) { flush() }
     func sessionReachabilityDidChange(_ s: WCSession) { flush() }
     func sessionWatchStateDidChange(_ s: WCSession) { flush() }

@@ -1175,6 +1175,13 @@ final class AppModel: ObservableObject {
                          ? "🔥 the ember has reached you — add your line"
                          : "🧩 your turn — the riddle waits on you")
                 }
+                #if os(iOS)
+                // The wrist is a device of the holder too (the law of the fire): flame on the
+                // rising edge, cleared on the falling one.
+                if myTurn != wasMyTurn {
+                    PhoneWatchLink.shared.sendEmber(myTurn, kind: view.game?.kind ?? "riddle")
+                }
+                #endif
                 wasMyTurn = myTurn
 
                 // Were WE just admitted? The moment this device's own id appears on the roll it
