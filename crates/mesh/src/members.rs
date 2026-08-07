@@ -184,6 +184,7 @@ fn is_device_actor(actor: &str) -> bool {
 /// human `ian`, gossip `mesh:*`) are ignored so a gossip peer isn't misclassified as a device.
 fn device_reports(
     obs: &[familiar_kernel::observation::Observation],
+    now: i64,
 ) -> HashMap<String, (String, String, i64)> {
     let mut latest: HashMap<String, (String, String, i64)> = HashMap::new();
     for o in obs {
@@ -192,6 +193,14 @@ fn device_reports(
         };
         if !is_device_actor(&o.actor) {
             continue; // not a device-sensor report (peer cycle / human / gossip presence)
+        }
+        // Stale reports don't classify: a weeks-old row from a since-retired relay path once
+        // tagged a DOOR as "watch:ian" forever, merging it into the watch's dedup lineage and
+        // flapping the lighthouse roster every time their last_seens leapfrogged. What a node
+        // IS deserves fresh evidence; the sticky peer actor carries identity across quiet
+        // spells, not this map.
+        if now - o.ts > AGENT_FRESH_SECS {
+            continue;
         }
         let e = latest
             .entry(node.to_string())
@@ -409,7 +418,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
     }
 
     let obs = familiar_kernel::observation::load_recent(dir, 4000).unwrap_or_default();
-    let reports = device_reports(&obs);
+    let reports = device_reports(&obs, now);
     // The graduated trust tier per actor (monitor → throttle → marginalize → sever), from the shared
     // refusal log. Surfaced so the roster/map can badge a peer whose standing has slipped.
     let refusals = familiar_kernel::corruption::load(dir).unwrap_or_default();

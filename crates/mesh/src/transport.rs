@@ -2490,6 +2490,23 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
                     );
                 }
             }
+            // The ember must not wait for the next gossip round to cross doors: two humans
+            // acting through two doors saw a ~30s holder seesaw as each door's periodic sync
+            // swung the other's view. Push records to the sibling doors NOW, best-effort —
+            // doors are the non-interactive peers with an address (devices don't listen).
+            if let Ok(h) = tokio::runtime::Handle::try_current() {
+                let dir2 = dir.to_path_buf();
+                let doors: Vec<String> = load_peers(dir)
+                    .into_iter()
+                    .filter(|p| !p.interactive && !p.addr.is_empty() && p.status != "abandoned")
+                    .map(|p| p.addr)
+                    .collect();
+                h.spawn(async move {
+                    for addr in doors {
+                        sync_records_with(&dir2, &addr).await;
+                    }
+                });
+            }
             text(StatusCode::OK, reply)
         }
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
