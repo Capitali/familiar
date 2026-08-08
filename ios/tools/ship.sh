@@ -73,4 +73,8 @@ done
 
 ASC_KEY_ID=SUZJSXVS25 ASC_ISSUER_ID=69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
   "$IOS/tools/testflight.sh" 2>&1 | tail -2
-echo "✓ ship $BUILD complete"
+# Release to the EXTERNAL testers once processing lands (add to the public-link group +
+# beta review submission) — uploading alone strands them on the last-reviewed build.
+# Backgrounded: processing takes 5-15 min and the ship shouldn't wait on Apple.
+nohup python3 "$IOS/tools/tf_release.py" "$BUILD" >> /tmp/tf_release.log 2>&1 &
+echo "✓ ship $BUILD complete (external release backgrounded — /tmp/tf_release.log)"
