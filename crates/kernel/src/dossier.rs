@@ -135,7 +135,15 @@ pub fn fold(dir: &Path, half_life_secs: i64) -> io::Result<usize> {
                 continue;
             }
             let hour = (o.ts.rem_euclid(86_400)) / 3_600;
-            contribute(dir, &who, "presence", &format!("h{hour:02}"), strength, o.ts, half_life_secs)?;
+            contribute(
+                dir,
+                &who,
+                "presence",
+                &format!("h{hour:02}"),
+                strength,
+                o.ts,
+                half_life_secs,
+            )?;
             contribute(dir, &who, "standing", via, strength, o.ts, half_life_secs)?;
         }
         read += batch.len();
@@ -160,16 +168,17 @@ fn contribute(
     half_life_secs: i64,
 ) -> io::Result<()> {
     let id = ctb_id(handle, kind, slot);
-    let mut c = store::load_by_id::<Contribution>(dir, DOSSIER_FILE, &id)?.unwrap_or(Contribution {
-        id: id.clone(),
-        subject: handle.to_string(),
-        kind: kind.to_string(),
-        slot: slot.to_string(),
-        weight: 0.0,
-        count: 0,
-        first_at: ts,
-        last_at: ts,
-    });
+    let mut c =
+        store::load_by_id::<Contribution>(dir, DOSSIER_FILE, &id)?.unwrap_or(Contribution {
+            id: id.clone(),
+            subject: handle.to_string(),
+            kind: kind.to_string(),
+            slot: slot.to_string(),
+            weight: 0.0,
+            count: 0,
+            first_at: ts,
+            last_at: ts,
+        });
     c.weight = decayed(c.weight, ts - c.last_at, half_life_secs) + strength;
     c.count += 1;
     c.last_at = c.last_at.max(ts);
@@ -222,8 +231,7 @@ pub fn read(dir: &Path, handle: &str, now: i64, half_life_secs: i64) -> io::Resu
     let contributions: Vec<Contribution> =
         store::load_prefix(dir, DOSSIER_FILE, &format!("ctb|{handle}|"))?;
     let view = |kind: &str| -> Vec<SlotView> {
-        let of_kind: Vec<&Contribution> =
-            contributions.iter().filter(|c| c.kind == kind).collect();
+        let of_kind: Vec<&Contribution> = contributions.iter().filter(|c| c.kind == kind).collect();
         let total: f64 = of_kind
             .iter()
             .map(|c| decayed(c.weight, now - c.last_at, half_life_secs))
@@ -241,7 +249,11 @@ pub fn read(dir: &Path, handle: &str, now: i64, half_life_secs: i64) -> io::Resu
                 count: c.count,
             })
             .collect();
-        out.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
+        out.sort_by(|a, b| {
+            b.share
+                .partial_cmp(&a.share)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         out
     };
     let mut presence_hours = view("presence");
@@ -249,7 +261,12 @@ pub fn read(dir: &Path, handle: &str, now: i64, half_life_secs: i64) -> io::Resu
     for h in 0..24 {
         let slot = format!("h{h:02}");
         if !presence_hours.iter().any(|s| s.slot == slot) {
-            presence_hours.push(SlotView { slot, share: 0.0, confidence: 0.0, count: 0 });
+            presence_hours.push(SlotView {
+                slot,
+                share: 0.0,
+                confidence: 0.0,
+                count: 0,
+            });
         }
     }
     presence_hours.sort_by(|a, b| a.slot.cmp(&b.slot));
@@ -282,7 +299,9 @@ pub fn read(dir: &Path, handle: &str, now: i64, half_life_secs: i64) -> io::Resu
     );
 
     Ok(Dossier {
-        identity: identity::load(dir)?.into_iter().find(|p| p.handle == handle),
+        identity: identity::load(dir)?
+            .into_iter()
+            .find(|p| p.handle == handle),
         presence_hours,
         standing: view("standing"),
         needs,
@@ -307,7 +326,11 @@ pub fn coarse_summary(d: &Dossier) -> String {
         .presence_hours
         .iter()
         .filter(|s| s.count > 0)
-        .max_by(|a, b| a.share.partial_cmp(&b.share).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| {
+            a.share
+                .partial_cmp(&b.share)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     {
         parts.push(format!(
             "usually here {} (confidence {:.1})",
@@ -346,7 +369,11 @@ pub fn withdraw(dir: &Path, handle: &str, now: i64) -> io::Result<WithdrawalRece
         dir,
         DOSSIER_FILE,
         &id,
-        &Withdrawal { id: id.clone(), subject: handle.clone(), at: now },
+        &Withdrawal {
+            id: id.clone(),
+            subject: handle.clone(),
+            at: now,
+        },
     )?;
     observation::record(
         dir,
@@ -360,7 +387,10 @@ pub fn withdraw(dir: &Path, handle: &str, now: i64) -> io::Result<WithdrawalRece
             1.0,
         ),
     )?;
-    Ok(WithdrawalReceipt { contributions_removed: removed, face_unlinked })
+    Ok(WithdrawalReceipt {
+        contributions_removed: removed,
+        face_unlinked,
+    })
 }
 
 #[cfg(test)]
@@ -389,12 +419,17 @@ mod tests {
         observation::record(&p, obs("phone:betty", "told the familiar", "hello", t19)).unwrap();
         observation::record(&p, obs("watch:betty", "reports", "presence", t19 + 60)).unwrap();
         fold(&p, HL).unwrap();
-        let c: Contribution =
-            store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|presence|h19").unwrap().unwrap();
+        let c: Contribution = store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|presence|h19")
+            .unwrap()
+            .unwrap();
         assert_eq!(c.count, 2);
-        assert!((c.weight - 1.3).abs() < 0.01, "0.9 dialogue + 0.4 beacon, barely decayed");
-        let s: Contribution =
-            store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|standing|dialogue").unwrap().unwrap();
+        assert!(
+            (c.weight - 1.3).abs() < 0.01,
+            "0.9 dialogue + 0.4 beacon, barely decayed"
+        );
+        let s: Contribution = store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|standing|dialogue")
+            .unwrap()
+            .unwrap();
         assert_eq!(s.count, 1, "the evidence tier is remembered too");
         let _ = fs::remove_dir_all(&p);
     }
@@ -408,10 +443,17 @@ mod tests {
         let d = read(&p, "betty", t + HL, HL).unwrap();
         let h8 = d.presence_hours.iter().find(|s| s.slot == "h08").unwrap();
         // Share is normalized (only slot → 1.0), but the raw weight has halved:
-        let c: Contribution =
-            store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|presence|h08").unwrap().unwrap();
-        assert!((decayed(c.weight, HL, HL) - 0.45).abs() < 0.01, "0.9 → 0.45 after one half-life");
-        assert_eq!(h8.count, 1, "the count does not decay — it carries confidence");
+        let c: Contribution = store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|presence|h08")
+            .unwrap()
+            .unwrap();
+        assert!(
+            (decayed(c.weight, HL, HL) - 0.45).abs() < 0.01,
+            "0.9 → 0.45 after one half-life"
+        );
+        assert_eq!(
+            h8.count, 1,
+            "the count does not decay — it carries confidence"
+        );
         let _ = fs::remove_dir_all(&p);
     }
 
@@ -421,8 +463,9 @@ mod tests {
         observation::record(&p, obs("phone:betty", "told the familiar", "hi", 100)).unwrap();
         fold(&p, HL).unwrap();
         fold(&p, HL).unwrap(); // nothing new — must not re-fold
-        let c: Contribution =
-            store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|presence|h00").unwrap().unwrap();
+        let c: Contribution = store::load_by_id(&p, DOSSIER_FILE, "ctb|betty|presence|h00")
+            .unwrap()
+            .unwrap();
         assert_eq!(c.count, 1, "a second fold over the same log adds nothing");
         let _ = fs::remove_dir_all(&p);
     }
@@ -438,7 +481,10 @@ mod tests {
         observation::record(&p, peer).unwrap();
         fold(&p, HL).unwrap();
         let all: Vec<Contribution> = store::load_prefix(&p, DOSSIER_FILE, "ctb|").unwrap();
-        assert!(all.is_empty(), "no human here — and no mesh-merged picture of one: {all:?}");
+        assert!(
+            all.is_empty(),
+            "no human here — and no mesh-merged picture of one: {all:?}"
+        );
         let _ = fs::remove_dir_all(&p);
     }
 
@@ -446,12 +492,17 @@ mod tests {
     fn thin_history_presents_humbly() {
         let p = dir("substrate_dossier_humble");
         for i in 0..3 {
-            observation::record(&p, obs("phone:betty", "told the familiar", "hi", 100 + i)).unwrap();
+            observation::record(&p, obs("phone:betty", "told the familiar", "hi", 100 + i))
+                .unwrap();
         }
         fold(&p, HL).unwrap();
         let d = read(&p, "betty", 200, HL).unwrap();
         let h0 = d.presence_hours.iter().find(|s| s.slot == "h00").unwrap();
-        assert!(h0.confidence < 0.5, "three sightings are not a fact: {}", h0.confidence);
+        assert!(
+            h0.confidence < 0.5,
+            "three sightings are not a fact: {}",
+            h0.confidence
+        );
         let _ = fs::remove_dir_all(&p);
     }
 
@@ -462,12 +513,18 @@ mod tests {
         observation::record(&p, obs("watch:betty", "reports", "presence", 200)).unwrap();
         fold(&p, HL).unwrap();
         let receipt = withdraw(&p, "betty", 300).unwrap();
-        assert!(receipt.contributions_removed >= 2, "the receipt reports real rows");
+        assert!(
+            receipt.contributions_removed >= 2,
+            "the receipt reports real rows"
+        );
         // The load-bearing half: rewind the cursor (a rebuild) — she must not come back.
         fs::write(p.join(CURSOR_FILE), "0").unwrap();
         fold(&p, HL).unwrap();
         let after: Vec<Contribution> = store::load_prefix(&p, DOSSIER_FILE, "ctb|betty|").unwrap();
-        assert!(after.is_empty(), "the tombstone outranks the log: {after:?}");
+        assert!(
+            after.is_empty(),
+            "the tombstone outranks the log: {after:?}"
+        );
         assert!(read(&p, "betty", 400, HL).unwrap().withdrawn);
         let _ = fs::remove_dir_all(&p);
     }
@@ -479,7 +536,12 @@ mod tests {
         for i in 0..6 {
             observation::record(
                 &p,
-                obs("phone:betty", "told the familiar", "hi", evening + i * 86_400),
+                obs(
+                    "phone:betty",
+                    "told the familiar",
+                    "hi",
+                    evening + i * 86_400,
+                ),
             )
             .unwrap();
         }

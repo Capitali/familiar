@@ -1,6 +1,10 @@
 # ADR-0022 — The dossier: remembering a human well enough to serve them
 
-- **Status:** accepted (design) — not yet implemented
+- **Status:** accepted — **implemented (slice 1, 2026-08-08)**: contribution-scored
+  presence + standing patterns (`crates/kernel/src/dossier.rs`), the composed needs view,
+  subject-facing read + withdrawal (`familiar dossier <handle>`), and the federation
+  fence. Location patterns and habit patterns are follow-on kinds. Acting on theorized
+  needs is governed by [ADR-0031](0031-consent-by-observation.md).
 - **Date:** 2026-07-30
 - **Relates to:** [ADR-0019](0019-friendly-identification.md) (identification — this is what
   identification is *for*), [ADR-0016](0016-multi-human-served-identity.md) (per-human attribution

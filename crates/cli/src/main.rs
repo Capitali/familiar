@@ -1387,7 +1387,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             };
             match familiar_mesh::record::apply_correction(&dir, &c, now) {
                 Ok(r) => {
-                    println!("✓ {act} {node_id} — record now: {:?}", familiar_mesh::record::derive_state(&r));
+                    println!(
+                        "✓ {act} {node_id} — record now: {:?}",
+                        familiar_mesh::record::derive_state(&r)
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1432,12 +1435,21 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 eprintln!("mesh: no node key");
                 return ExitCode::FAILURE;
             };
-            match familiar_mesh::record::mint_invite_token(&node, &cred.membership, &handle, now_secs()) {
+            match familiar_mesh::record::mint_invite_token(
+                &node,
+                &cred.membership,
+                &handle,
+                now_secs(),
+            ) {
                 Ok(t) => {
                     eprintln!(
                         "single use, expires in {} min{}",
                         familiar_mesh::record::INVITE_TOKEN_TTL_SECS / 60,
-                        if handle.is_empty() { String::new() } else { format!(", names “{handle}”") }
+                        if handle.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", names “{handle}”")
+                        }
                     );
                     println!("{}", serde_json::to_string(&t).unwrap_or_default());
                     ExitCode::SUCCESS
@@ -1455,10 +1467,18 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             // stores are left untouched and stay authoritative until `read_records` flips.
             match familiar_mesh::record::migrate(&dir, now_secs()) {
                 Ok(r) => {
-                    println!("✓ folded the legacy stores into mesh/records/ ({} records)", r.records);
-                    println!("  from grants: {}   from pending: {}   from peers: {}", r.from_granted, r.from_pending, r.from_peers);
+                    println!(
+                        "✓ folded the legacy stores into mesh/records/ ({} records)",
+                        r.records
+                    );
+                    println!(
+                        "  from grants: {}   from pending: {}   from peers: {}",
+                        r.from_granted, r.from_pending, r.from_peers
+                    );
                     println!("  established from the roll: {}   severed from revoked.json: {}   holds: {}", r.established_from_roll, r.severed_from_revoked, r.held_from_denials);
-                    println!("  next: `familiar mesh doctor` — flip read_records only on a clean report");
+                    println!(
+                        "  next: `familiar mesh doctor` — flip read_records only on a clean report"
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1476,7 +1496,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 println!("doctor: nothing to compare — no grants, peers, roll or records here");
                 return ExitCode::SUCCESS;
             }
-            println!("{:<18} {:>7} {:>7} {:>8} {:>8}  ok", "node", "roll", "record", "revoked", "severed");
+            println!(
+                "{:<18} {:>7} {:>7} {:>8} {:>8}  ok",
+                "node", "roll", "record", "revoked", "severed"
+            );
             for row in &report.rows {
                 println!(
                     "{:<18} {:>7} {:>7} {:>8} {:>8}  {}",
@@ -1496,13 +1519,21 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 );
             }
             if report.candidates_pending > 0 {
-                println!("candidates ripening (not folded, transient): {}", report.candidates_pending);
+                println!(
+                    "candidates ripening (not folded, transient): {}",
+                    report.candidates_pending
+                );
             }
             if report.divergent == 0 {
-                println!("✓ every answer agrees — safe to set read_records true in mesh/config.json");
+                println!(
+                    "✓ every answer agrees — safe to set read_records true in mesh/config.json"
+                );
                 ExitCode::SUCCESS
             } else {
-                eprintln!("✗ {} divergent — do NOT flip read_records; fix and re-run", report.divergent);
+                eprintln!(
+                    "✗ {} divergent — do NOT flip read_records; fix and re-run",
+                    report.divergent
+                );
                 ExitCode::FAILURE
             }
         }
@@ -1557,7 +1588,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             };
             match familiar_mesh::group::install_warrant(&dir, &w, now_secs()) {
                 Ok(()) => {
-                    println!("✓ warrant installed — this node can now admit knocks (expires {})", w.expiry);
+                    println!(
+                        "✓ warrant installed — this node can now admit knocks (expires {})",
+                        w.expiry
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1941,9 +1975,7 @@ fn cmd_dossier(args: &[String]) -> ExitCode {
     let mut i = 0;
     while i < args.len() {
         if args[i].starts_with("--") {
-            if !args[i].contains('=')
-                && args.get(i + 1).is_some_and(|v| !v.starts_with("--"))
-            {
+            if !args[i].contains('=') && args.get(i + 1).is_some_and(|v| !v.starts_with("--")) {
                 i += 1; // the flag's value
             }
         } else {
@@ -1959,7 +1991,10 @@ fn cmd_dossier(args: &[String]) -> ExitCode {
         [w, handle] if w.as_str() == "withdraw" => {
             match familiar_kernel::dossier::withdraw(&dir, handle, now) {
                 Ok(r) => {
-                    println!("{} contributions removed; face link cleared: {}.", r.contributions_removed, r.face_unlinked);
+                    println!(
+                        "{} contributions removed; face link cleared: {}.",
+                        r.contributions_removed, r.face_unlinked
+                    );
                     println!("Your weight no longer feeds any pattern, and no later fold will rebuild one about you.");
                     println!("The honest boundary: aggregate structure that no longer identifies you survives; nothing that points at you does.");
                     ExitCode::SUCCESS
@@ -2006,7 +2041,10 @@ fn cmd_dossier(args: &[String]) -> ExitCode {
                     s.slot,
                     "#".repeat(bar_len),
                     if s.count > 0 {
-                        format!("share {:.2} · confidence {:.2} · {} sightings", s.share, s.confidence, s.count)
+                        format!(
+                            "share {:.2} · confidence {:.2} · {} sightings",
+                            s.share, s.confidence, s.count
+                        )
                     } else {
                         "·".to_string()
                     }
@@ -2034,8 +2072,13 @@ fn cmd_dossier(args: &[String]) -> ExitCode {
                     );
                 }
             }
-            println!("\nin a sentence: {}", familiar_kernel::dossier::coarse_summary(&d));
-            println!("this record is yours: `familiar dossier withdraw {handle}` removes you from it.");
+            println!(
+                "\nin a sentence: {}",
+                familiar_kernel::dossier::coarse_summary(&d)
+            );
+            println!(
+                "this record is yours: `familiar dossier withdraw {handle}` removes you from it."
+            );
             ExitCode::SUCCESS
         }
         _ => {

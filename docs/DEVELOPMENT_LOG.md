@@ -6,6 +6,60 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-08 — The dossier lands; the muse turns toward the people (ADR-0022, ADR-0031)
+
+### What changed
+
+- **`kernel::dossier`** — ADR-0022 implemented on the accumulator primitives the store
+  already carried (`upsert_by_id` / `load_prefix` / `delete_prefix` / `load_since_seq`,
+  key shape `ctb|<handle>|<kind>|<slot>`): presence-by-UTC-hour and standing-evidence
+  patterns as decayed weighted contributions (lazy exponential, `dossier_half_life_days`
+  co-owned parameter, envelope 7..365d), Laplace-humble per-slot confidence, a resumable
+  fold cursor, and withdrawal (`familiar dossier withdraw <handle>`) that reports a real
+  receipt and leaves a `wdr|<handle>` tombstone no refold can override. Fold exclusions
+  are design: `familiar`, `mesh:*` actors/sources (no mesh-wide picture of a person),
+  withdrawn subjects. Attribution rides `routing::subject_and_strength` — the one
+  ladder, deliberately not forked a third time.
+- **Needs theorizing (`cycle::maybe_theorize_needs`)** — once per person per theorize
+  cadence, the muse thinks about the ONE human whose attributed observations carry the
+  most novelty: a need hypothesis grounded in their coarse dossier sentence (never the
+  raw distribution; sensitive-personal readings never enter the prompt), recorded as a
+  thread carrying the new `Thread.origin_human`, pursued immediately, plus a
+  confirm-question (`Question.subject`/`thread_id`, origin `"need"`) addressed to them.
+- **Consent by observation (ADR-0031)** — Ian's direction, now in the record: for
+  reversible low-stakes service the familiar acts and reads the reaction; the direct
+  query is the final gate. Hence: no confirm gate on pursuit; the person's own answer
+  (`thread::add_answer_from`, matched via now-pub `routing::human_of`) flips a
+  theorized need to a stated one (`origin: observer`), lighting up `unmet_needs` and
+  the `"need"` question rank — the pathway that had zero producers.
+- **Law I routing lands** — `coordinate_questions` finally passes a name to
+  `routing::route` (the ":440" comment's promise): a subject-addressed question waits
+  for its person up to `SUBJECT_HOLD_MAX_SECS` (7d), then may ask the room.
+- **Privacy fence first** — `merge.rs` theorist path no longer federates threads with
+  `origin_human` set (a hypothesis about a person is not delegatable work), landed
+  before any producer existed. `familiar dossier` is deliberately CLI-only; no
+  Worldview field, so the guest projection needed no change.
+
+### Checks run
+
+- `cargo test --workspace` green (kernel 141 incl. 7 new dossier tests; cycle 41 incl.
+  needs-muse pacing/gating, subject-hold, Law I routing; mesh incl.
+  `a_personal_need_thread_never_federates` asserting the text is absent from the brief).
+- Live walkthrough: seeded `phone:betty`/`watch:betty`/`ian` observations → `tick` →
+  `familiar dossier betty` shows the h20 bar, humble 0.33 confidence; `withdraw` prints
+  a 3-row receipt; cursor rewind + re-tick does not resurrect her; ian untouched.
+
+### Next
+
+- **Reaction evidence + auto-revert**: score "the human undid it" into trials — built
+  WITH the first actuator, never after it. First actuator candidate: the BLE light
+  strip (reversible, local, observable reaction).
+- **Habit patterns**: `ctb|<handle>|habit|<surface>@h<hour>` — slot grammar already
+  anticipates the kind.
+- The Mac console's `/local/answer` still hardcodes actor `"ian"` — a Betty confirm via
+  the Mac won't flip her thread (device-signed answers do). Fine until the console
+  knows its holder.
+
 ## 2026-07-24 — Console polish + retiring the marble era
 
 ### What changed

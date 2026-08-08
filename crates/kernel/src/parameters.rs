@@ -186,7 +186,9 @@ impl Parameters {
             p.interval_ceiling_secs = ceil;
         }
 
-        let hl = p.dossier_half_life_days.clamp(DOSSIER_HL_MIN, DOSSIER_HL_MAX);
+        let hl = p
+            .dossier_half_life_days
+            .clamp(DOSSIER_HL_MIN, DOSSIER_HL_MAX);
         if hl != p.dossier_half_life_days {
             reverts.push(Revert {
                 field: "dossier_half_life_days",

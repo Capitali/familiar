@@ -13,6 +13,19 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The dossier, and needs theorized per human (ADR-0022, ADR-0031).** The familiar now
+  remembers each person well enough to serve them: every observation that names a human
+  feeds a contribution-scored pattern (presence by hour, how they are usually identified)
+  with lazy exponential decay and Laplace-humble confidence — patterns not tape,
+  node-local, never federated, subject-readable (`familiar dossier <handle>`) and
+  withdrawable with an honest receipt and a refold-proof tombstone. On that substrate the
+  muse turns toward the people: once per person per cadence it theorizes ONE concrete
+  need from their attributed observations (sensitive-personal readings never enter the
+  prompt), records it as a thread that names its human, pursues it immediately — consent
+  by observation (ADR-0031): act on the reversible, read the reaction, undo on a bad
+  one — and files a confirm-question that waits for its person (Law I routing, held up
+  to a week). Only that person's own answer flips a theorized need into a stated one.
+  *Validated by unit tests across kernel/cycle/mesh + a live seeded-daemon walkthrough.*
 - **Network discovery moved to the periphery.** The device/reach survey no longer runs from the
   core's own metabolism — `sense::devices()` is off the tick loop and the every-15-ticks reach
   sweep is off the daemon loop, so the core stops flooding its own loop/theory pipeline with

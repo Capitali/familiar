@@ -833,7 +833,11 @@ fn maybe_theorize_needs(
             format!(
                 "- {}{}",
                 n.text,
-                if n.stated { " (they said so)" } else { " (theorized)" }
+                if n.stated {
+                    " (they said so)"
+                } else {
+                    " (theorized)"
+                }
             )
         })
         .collect();
@@ -852,7 +856,10 @@ fn maybe_theorize_needs(
         needs = if open_needs.is_empty() {
             String::new()
         } else {
-            format!("Needs already on your mind (do not repeat these):\n{}\n", open_needs.join("\n"))
+            format!(
+                "Needs already on your mind (do not repeat these):\n{}\n",
+                open_needs.join("\n")
+            )
         },
     );
     // Pace even on failure/refusal — a person is not re-mused about every tick because
@@ -875,7 +882,8 @@ fn maybe_theorize_needs(
             .trim()
             .to_string()
     };
-    let (need, confirm_q, direction) = (field("need"), field("confirm_question"), field("direction"));
+    let (need, confirm_q, direction) =
+        (field("need"), field("confirm_question"), field("direction"));
     if need.is_empty() {
         return Ok(false);
     }
@@ -2638,8 +2646,10 @@ pub fn tick(
     //     between ticks. Best-effort like reflection: a derived, rebuildable view must
     //     never abort the metabolism. Deliberately not in the TickReport: folding a
     //     heartbeat must not hold the daemon at its cadence floor.
-    let half_life_secs =
-        Parameters::load_or_default(dir).sane().dossier_half_life_days * 86_400;
+    let half_life_secs = Parameters::load_or_default(dir)
+        .sane()
+        .dossier_half_life_days
+        * 86_400;
     let _ = dossier::fold(dir, half_life_secs);
 
     // 3. Generate a candidate for each uncovered loop.
@@ -2927,7 +2937,10 @@ mod tests {
         // Gate closed: no muse, no thread, and no pacing stamp burned.
         assert!(!maybe_theorize_needs(&t.0, now, &said, false).unwrap());
         assert!(thread::load(&t.0).unwrap().is_empty());
-        assert!(need_muse_times(&t.0).is_empty(), "a closed gate costs nothing");
+        assert!(
+            need_muse_times(&t.0).is_empty(),
+            "a closed gate costs nothing"
+        );
         // Recently mused about her: paced out before any consult happens.
         fs::write(
             t.0.join(NEED_MUSE_FILE),
@@ -2949,8 +2962,15 @@ mod tests {
     fn routing_prefers_the_human_whose_need_it_serves() {
         let t = Temp::new("route_subject");
         let now = 50_000;
-        question::add_addressed(&t.0, "Betty — long evenings?", "need", "betty", "thread-0001", now)
-            .unwrap();
+        question::add_addressed(
+            &t.0,
+            "Betty — long evenings?",
+            "need",
+            "betty",
+            "thread-0001",
+            now,
+        )
+        .unwrap();
         // Both are here; ian's evidence is fresher, so he'd win a subject-less route.
         let obs = vec![
             observation::Observation::new(
@@ -2977,15 +2997,25 @@ mod tests {
         let qs = question::load(&t.0).unwrap();
         let q = qs.iter().find(|q| q.id == active.trim()).unwrap();
         assert_eq!(q.subject, "betty");
-        assert_eq!(q.owner, "betty", "her question goes to her, not to whoever is loudest");
+        assert_eq!(
+            q.owner, "betty",
+            "her question goes to her, not to whoever is loudest"
+        );
     }
 
     #[test]
     fn a_subject_addressed_question_waits_for_its_subject() {
         let t = Temp::new("subject_hold");
         let now = 50_000;
-        question::add_addressed(&t.0, "Betty — long evenings?", "need", "betty", "thread-0001", now)
-            .unwrap();
+        question::add_addressed(
+            &t.0,
+            "Betty — long evenings?",
+            "need",
+            "betty",
+            "thread-0001",
+            now,
+        )
+        .unwrap();
         // Only ian is here: Betty's question is held, and the room gets the root instead.
         let ian_here = |ts: i64| {
             vec![observation::Observation::new(
@@ -3000,7 +3030,11 @@ mod tests {
         };
         coordinate_questions(&t.0, now, &ian_here(now - 10)).unwrap();
         let active = fs::read_to_string(t.0.join(ACTIVE_QUESTION_FILE)).unwrap();
-        assert_eq!(active.trim(), question::ROOT_ID, "held for its person, not handed around");
+        assert_eq!(
+            active.trim(),
+            question::ROOT_ID,
+            "held for its person, not handed around"
+        );
         // Past the hold horizon it goes to whoever is here — held, never buried.
         question::record_answered(&t.0, question::ROOT_ID, now).unwrap();
         fs::write(t.0.join(ACTIVE_QUESTION_FILE), "").unwrap();

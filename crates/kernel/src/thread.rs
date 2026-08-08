@@ -187,7 +187,14 @@ mod tests {
         fs::create_dir_all(&p).unwrap();
         append(&p, &need_thread("thread-0001")).unwrap();
         // Her device speaks for her — the namespace parse finds the human.
-        add_answer_from(&p, "thread-0001", "yes — after eight, please", "phone:betty", 200).unwrap();
+        add_answer_from(
+            &p,
+            "thread-0001",
+            "yes — after eight, please",
+            "phone:betty",
+            200,
+        )
+        .unwrap();
         let t = &load(&p).unwrap()[0];
         assert_eq!(t.origin, "observer", "her words make the need a stated one");
         assert_eq!(t.actor, "betty", "the need now belongs to its human");
@@ -203,7 +210,10 @@ mod tests {
         append(&p, &need_thread("thread-0001")).unwrap();
         add_answer_from(&p, "thread-0001", "she does like it dim", "ian", 200).unwrap();
         let t = &load(&p).unwrap()[0];
-        assert_eq!(t.origin, "llm", "another voice is evidence, not confirmation");
+        assert_eq!(
+            t.origin, "llm",
+            "another voice is evidence, not confirmation"
+        );
         assert_eq!(t.actor, "familiar");
         assert_eq!(
             t.answers,
