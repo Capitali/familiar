@@ -54,8 +54,8 @@ echo "✓ Mac installed + zip refreshed"
 # Without it, any NEW entitlement (push, build 69) fails the build on a stale team profile.
 xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent -configuration Release \
   -destination 'generic/platform=iOS' -allowProvisioningUpdates \
-  -authenticationKeyPath /Users/ian/.appstoreconnect/private_keys/AuthKey_LTK6QL7C9P.p8 \
-  -authenticationKeyID LTK6QL7C9P \
+  -authenticationKeyPath /Users/ian/.appstoreconnect/private_keys/AuthKey_SUZJSXVS25.p8 \
+  -authenticationKeyID SUZJSXVS25 \
   -authenticationKeyIssuerID 69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
   -derivedDataPath build/ios-rel build \
   | grep -q "BUILD SUCCEEDED" || { echo "✗ iOS build failed"; exit 1; }
@@ -71,6 +71,6 @@ for D in "${DEVICES[@]}"; do
   [ -n "$ok" ] || echo "⚠ $D unreachable (TestFlight will cover it)"
 done
 
-ASC_KEY_ID=LTK6QL7C9P ASC_ISSUER_ID=69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
+ASC_KEY_ID=SUZJSXVS25 ASC_ISSUER_ID=69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
   "$IOS/tools/testflight.sh" 2>&1 | tail -2
 echo "✓ ship $BUILD complete"
