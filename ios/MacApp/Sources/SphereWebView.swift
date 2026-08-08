@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import MapKit
 import CoreLocation
+import CoreImage
 import FamiliarMesh
 
 // The Metal Sphere console (imported from Claude Design "Familiar Metal Sphere.dc.html"):
@@ -367,9 +368,88 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
             case "invite":
                 self.fetchInvite()
+            case "shareInvite":
+                // The invite QR handed to a blank Messages compose — for inviting someone who
+                // isn't in the room to scan. The payload is a 10-minute single-use pass carrying
+                // no secret, so an image in a message is an acceptable channel.
+                if let payload = body["payload"] as? String, !payload.isEmpty {
+                    self.composeInviteMessage(payload)
+                }
             case "answerThread":
                 if let id = body["id"] as? String, let text = body["text"] as? String, !text.isEmpty {
                     self.post("local/answer", ["text": text, "thread": id])
+                }
+            case "consent":
+                // The device screen's five status buttons (position / motion / face / survey /
+                // reason). This case did not exist — the exact mirror of the iOS bridge's old
+                // missing "standing" case — so every click here went nowhere. Two halves, both
+                // needed: setConsent flips the state the screen renders back, and the matching
+                // MacBoundary gate is what actually arms this shell's sensing (applyGates).
+                if let key = body["key"] as? String {
+                    let on = body["on"] as? Bool ?? false
+                    self.model.setConsent(key, on)
+                    MacBoundary.set { g in
+                        switch key {
+                        case "location": g.allow_location = on
+                        case "motion": g.allow_motion = on
+                        case "face": g.allow_camera = on
+                        case "discovery": g.allow_network_discovery = on
+                        default: break   // "reasoning" has no shell gate; setConsent runs it
+                        }
+                    }
+                    self.applyGates()   // arm now, not on the next 3s tick
+                    self.pushDevice()
+                }
+            case "unenroll":
+                // The SEVER button (armed + confirm in the web layer) — also previously dead.
+                self.model.unenroll()
+                self.pushDevice()
+            case "game":
+                // A move in the mesh game — signed by this console's own key; the door judges.
+                // The game's kind travels as "game_kind": the message-routing key is "kind",
+                // and a same-named payload field would overwrite it in toApp's spread.
+                if let act = body["act"] as? String {
+                    let kind = body["game_kind"] as? String
+                    let text = body["text"] as? String ?? ""
+                    let to = body["to"] as? String ?? ""
+                    Task {
+                        await self.model.gameAct(act, kind: kind, text: text, to: to)
+                        await self.poll()
+                    }
+                }
+            case "deviceRole":
+                // Whose hands hold this machine — decides whether identity survives relaunch.
+                if let roleRaw = body["role"] as? String,
+                   let role = DeviceRole(rawValue: roleRaw) {
+                    self.model.setDeviceBinding(role: role, owner: body["owner"] as? String ?? "")
+                    self.pushDevice()
+                }
+            case "inviteRedeem":
+                if let payload = body["payload"] as? String {
+                    Task {
+                        await self.model.redeemInvite(payload)
+                        await self.poll()
+                    }
+                }
+            case "sponsor":
+                // A member welcomes a NEW name in — the sponsor's half of vouching.
+                if let nodeId = body["node_id"] as? String,
+                   let handle = body["handle"] as? String {
+                    Task {
+                        _ = await self.model.sponsorFor(nodeId: nodeId, handle: handle)
+                        await self.poll()
+                    }
+                }
+            case "vouch":
+                // The second person is this human: their own device confirms the claim and the
+                // rules engine admits (ADR-0026 E2 over the mesh — no invite paste, no QR).
+                if let nodeId = body["node_id"] as? String,
+                   let pubkey = body["pubkey"] as? String,
+                   let handle = body["handle"] as? String {
+                    Task {
+                        _ = await self.model.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle)
+                        await self.poll()
+                    }
                 }
             default: break
             }
@@ -400,7 +480,9 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     /// (the lighthouse, ADR-0012), which is where it belongs.
     private func fetchInvite() {
         Task { @MainActor in
-            guard let payload = model.addressPayload,
+            // A member's payload carries a fresh single-use invite token (ADR-0026), so the
+            // scanning device is admitted in one motion; a guest's is the plain address.
+            guard let payload = model.invitePayload(handoff: false),
                   let quoted = (try? JSONEncoder().encode(payload)).flatMap({ String(data: $0, encoding: .utf8) })
             else { return }
             self.web?.evaluateJavaScript("window.sphereInvite(\(quoted))", completionHandler: nil)
@@ -462,6 +544,35 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             break
         }
         Task { await poll() }   // reflect the act right away
+    }
+}
+
+// MARK: - invite → Messages
+
+extension SphereBridge {
+    /// Open a blank Messages compose with the invite QR attached — the image when the QR
+    /// renders, the raw payload as text otherwise, so the invite travels in exactly one form.
+    func composeInviteMessage(_ payload: String) {
+        guard let service = NSSharingService(named: .composeMessage) else { return }
+        var items: [Any] = [payload]
+        if let png = Self.qrPNG(payload) {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("familiar-invite.png")
+            if (try? png.write(to: url)) != nil { items = [url] }
+        }
+        guard service.canPerform(withItems: items) else { return }
+        service.perform(withItems: items)
+    }
+
+    private static func qrPNG(_ text: String) -> Data? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let img = filter.outputImage else { return nil }
+        // The generator emits 1pt modules — scale up or Messages shows a smudge.
+        let scaled = img.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+        guard let cg = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
+        return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
     }
 }
 

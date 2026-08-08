@@ -1,7 +1,9 @@
 # ADR-0015 — Automated covenant admission: the process is the consent
 
 - **Status:** accepted (in force on TheRiver) — **amended 2026-07-30** after the policy was
-  exercised by a stranger for the first time; see the amendment at the end.
+  exercised by a stranger for the first time, and **again 2026-08-01** when
+  [ADR-0026](0026-two-filter-admission.md) completed the design this record started; see the
+  amendments at the end.
 - **Date:** 2026-07-27
 - **Relates to:** [ADR-0009](0009-sovereign-mesh-transport.md) (the covenant
   transport), [ADR-0012](0012-lighthouse-rendezvous.md) (the lighthouse as the
@@ -140,3 +142,32 @@ The vector was **distribution**, not admission. An unlimited public TestFlight l
 invitation to be admitted, and no door policy compensates for handing out the address. That link is
 now closed. Worth stating plainly because the instinct after an event like this is to tighten the
 gate that did not fail.
+
+---
+
+## Third amendment, 2026-08-01 — the automation extends to the whole admission
+
+[ADR-0026](0026-two-filter-admission.md) finishes what this record began. The first amendment
+split admission from disclosure and left disclosure to a hand-granted standing roll — a second
+gate, bolted on to compensate for removing the first one. ADR-0026 removes the bolt-on by making
+the whole admission **rules-based**: a device is admitted the moment the covenant is attested
+*and* the human identity is **established by evidence** — cryptographic continuity, a member's
+deliberate act displaced in time, or an introduction made in the mesh's own space. Until then it
+is a guest reading the projection, which remains the floor this record's first amendment laid.
+
+Three corrections to the machinery named above:
+
+- `auto_accept_enrollments` no longer exists as a switch — in either direction. Evidence gates
+  admission now, not a boolean, so there is nothing to toggle and no per-deployment posture to
+  record.
+- The `Pending`/`approve`/`deny`/`invite` machinery this record kept "for deployments that keep
+  the human at the door" is retired with it. What survives of "deny" is the correction plane's
+  *hold* — the same five-minute not-now, now a field on the record.
+- The deferred follow-up above (authenticated admin actions sequenced behind facial recognition)
+  is unchanged in spirit but now applies to **corrections** (sever / disestablish / hold), which
+  are the only administrative acts left at the door. Until it lands, corrections live on the
+  roster card and the CLI, exactly as un-ceremonious as this record wanted revocation to be.
+
+The consent argument holds in its strongest form yet: the human consents once, to a process
+whose every admission is a signed, attributable fact produced by rules the human authored — and
+what the human governs afterwards is no longer a roll to remember but a record that answers.

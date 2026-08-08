@@ -39,3 +39,36 @@ The build appears under your app → **TestFlight** after processing (~5–15 mi
   pipeline ships the iPhone/iPad app only. Embedding the watch so it rides along is a follow-up.
 - **First upload** may require accepting updated agreements in App Store Connect (Business/Paid
   Apps) — a one-time click.
+
+---
+
+## As of build 69 (2026-08-07)
+
+- Build 69 adds APNs: the app asks for notification permission once it is a member,
+  registers its token with its door, and the door pushes "🔥 the ember is yours" to a
+  locked phone when the turn arrives (ADR-0030). Direct installs push via the sandbox
+  gateway; TestFlight installs need the APNs key re-issued for Sandbox & Production
+  (currently sandbox-only — see the ADR).
+
+## As of build 68 (2026-08-07)
+
+- Build 68 shipped the first two-human game session's fixes (see ADR-0029 "the door under
+  load"): the games screen shows the door's verbatim reply to every act, submit shows THE
+  DOOR IS JUDGING instead of re-offering the question, the guess input survives polls,
+  countdowns don't flash, the lighthouse is off the roster (infrastructure), and launch
+  opens to the bare globe centered over home.
+- Both doors must run daemon commit `bebe630` or later — the client fixes assume act-speed
+  cross-door sync and windowed reads.
+
+## As of build 64 (2026-08-06)
+
+- **Ship a release with ONE command:** `bash ios/tools/ship.sh <build-number>` — bumps and
+  verifies the version, commits it, builds the universal Mac app (installs to /Applications
+  and refreshes `~/Downloads/FamiliarMac-universal.zip` for AirDrop), builds iOS,
+  direct-installs to the household devices, uploads to TestFlight. Never hand-roll the chain.
+- **External testers (any Apple ID):** public link `https://testflight.apple.com/join/Vab9UDhb`
+  ("Mesh Testers" group, capped 100). External builds require Beta App Review once; the review
+  contact + notes are filled in App Store Connect (the notes describe the two-device test:
+  second device joins as a visitor and follows the on-screen path to membership).
+- The reviewer-facing story is real: install on two devices, one joins as a visitor, the
+  guided path (name / vouch / sponsor / invite) admits it, then light a riddle at the fire.

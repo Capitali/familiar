@@ -65,6 +65,15 @@ if [ -f "$DATA/standing.json.staged" ]; then
   fi
 fi
 
+# The lighthouse stands at the North Pole. A VPS has no honest place on the household's
+# map — and without an asserted position it INHERITS one: `self_geo` falls back to the
+# freshest device fix, so a visitor knocking from Beijing once dragged the lighthouse
+# (and every unlocated node clustered on it) to Beijing. geo.json always wins over
+# device fixes, so the pole is where it stays. Asserted here, not hand-edited on the box.
+mkdir -p "$DATA/mesh"
+printf '{"lat": 90.0, "lon": 0.0}\n' > "$DATA/mesh/geo.json"
+chown familiar:familiar "$DATA/mesh/geo.json" 2>/dev/null || true
+
 systemctl restart familiar-peer.service
 sleep 3
 systemctl is-active --quiet familiar-peer.service || {

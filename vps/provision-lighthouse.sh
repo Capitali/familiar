@@ -71,6 +71,11 @@ cat > /var/lib/familiar/familiar_data/mesh/config.json <<EOF
   "auto_peer": false$ADV_JSON
 }
 EOF
+
+# The lighthouse stands at the North Pole (see deploy-lighthouse.sh, which re-asserts this
+# every deploy). Without an asserted geo.json a node's position falls back to the freshest
+# member-device fix — the wrong answer for a box whose readers knock from anywhere on earth.
+printf '{"lat": 90.0, "lon": 0.0}\n' > /var/lib/familiar/familiar_data/mesh/geo.json
 chown -R familiar-svc:familiar-svc /var/lib/familiar
 
 # Join the covenant by key — offline: the key IS the group secret; holding it mints

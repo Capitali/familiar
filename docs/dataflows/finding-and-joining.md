@@ -4,6 +4,12 @@ How a fresh device finds a mesh with no QR and no one standing next to it, and j
 by covenant. The lighthouse is the one always-on piece of infrastructure, so every
 device starts there.
 
+> **Being rebuilt** ([ADR-0026](../decision-records/0026-two-filter-admission.md)): the
+> grant at the end of this page stops being full membership — it lands the device as a
+> **guest**, and admission completes when the human identity is established by evidence.
+> [Joining & the welcome](join-and-welcome.md) traces the new flow; this page remains
+> accurate for discovery and the handshake mechanics.
+
 Related: [ADR-0012](../decision-records/0012-lighthouse-rendezvous.md) (rendezvous /
 the door), [ADR-0015](../decision-records/0015-automated-covenant-admission.md)
 (automated admission). The identity + cert mechanics live in

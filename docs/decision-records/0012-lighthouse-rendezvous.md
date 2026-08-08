@@ -1,6 +1,8 @@
 # ADR-0012 — The lighthouse as rendezvous: joining without a QR
 
-- **Status:** accepted (building)
+- **Status:** accepted — **amended 2026-08-01**: the admission model described below was
+  superseded twice after this was written (ADR-0015, then ADR-0026); see the amendment at the
+  end. The rendezvous/discovery half stands.
 - **Date:** 2026-07-25
 - **Relates to:** [ADR-0009](0009-sovereign-mesh-transport.md) (the covenant
   transport and the pinless-device reality this works within),
@@ -116,3 +118,26 @@ rendezvous; letting discovery imply consent. Finding a door is not being let in.
 - 2026-07-25 — accepted; supersedes the reserved-number placeholder. Building
   the rendezvous spine (config + register/list + confirmation code) at the
   daemon/lighthouse layer, then the device first-run flow (build 24).
+
+---
+
+## Amendment, 2026-08-01 — the admission half of this record no longer describes the system
+
+This record was never updated when the door changed, and for two days it was the single most
+misleading document in the set. Corrected:
+
+- *"Admission remains a human act, always"*, *"`auto_accept_enrollments` stays off, doubly so
+  behind a public rendezvous"*, and the refusal of *"auto-admission of any kind"* were reversed
+  by [ADR-0015](0015-automated-covenant-admission.md) (2026-07-27) — and then reshaped by
+  [ADR-0026](0026-two-filter-admission.md), under which admission is **rules-based**: automatic
+  when the covenant is attested **and** the human identity is established by evidence, with the
+  guest projection as the waiting state. There is no per-join human approval and no
+  `auto_accept_enrollments` switch at all.
+- The **confirmation-code authorization ceremony** (§3) is retired with the approval step it
+  served. The short code survives only as a display handle (the same six characters the roster
+  shows).
+- `enroll::confirmation_code` as named here was never built; the code that exists is
+  `enroll::short_code` (first six of the node id) with a Swift twin.
+- **What stands**: the rendezvous register/directory (§1–2), the no-secrets rule, the failover
+  host (§4), and founding-first (§5) — with the correction that under ADR-0026 §6 rendezvous is
+  a *service any well-addressed peer can offer*, not a fixture's prerogative.

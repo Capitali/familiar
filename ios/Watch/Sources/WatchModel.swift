@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import WatchConnectivity
+import WatchKit
 import FamiliarMesh
 
 /// The watch agent's state: it enrols into the familiar **by covenant** (receiving the familiar's
@@ -18,6 +19,10 @@ final class WatchModel: NSObject, ObservableObject {
     /// True right after first enrollment, until the human resolves the consent prompt —
     /// sensing never starts silently on a newly-paired watch. See `consentAsked`.
     @Published var needsConsentPrompt = false
+    /// The mesh game's turn has reached this watch's human — "riddle" | "campfire", nil when
+    /// not their turn. Drives the full-screen ember and the wrist chime (the law of the fire:
+    /// the ember shows on every device of the holder).
+    @Published var emberKind: String?
 
     /// Off by default, matching phone/iPad's posture — a watch left on a wrist unattended
     /// shouldn't silently start reporting health/motion data. `consentAsked` distinguishes
@@ -195,7 +200,30 @@ extension WatchModel: WCSessionDelegate {
     // The reliable, queued delivery (the phone also sends the address this way so it lands even if the
     // watch app was closed when the phone enrolled).
     nonisolated func session(_ s: WCSession, didReceiveUserInfo info: [String: Any]) {
-        handleAddress(info)
+        handleEmber(info); handleAddress(info)
+    }
+    // The ember, urgent and transient: sent as a live message when the watch is reachable,
+    // queued as userInfo when not. `on: false` clears the flame when the turn moves on.
+    nonisolated func session(_ s: WCSession, didReceiveMessage m: [String: Any]) {
+        handleEmber(m); handleAddress(m)
+    }
+    private nonisolated func handleEmber(_ d: [String: Any]) {
+        guard let on = d["ember"] as? Bool else { return }
+        let kind = d["kind"] as? String ?? "riddle"
+        Task { @MainActor in
+            if on {
+                self.emberKind = kind
+                // A chime the wrist can't miss: three rising taps.
+                WKInterfaceDevice.current().play(.notification)
+                for delay in [0.35, 0.7] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        WKInterfaceDevice.current().play(.directionUp)
+                    }
+                }
+            } else {
+                self.emberKind = nil
+            }
+        }
     }
     private nonisolated func handleAddress(_ d: [String: Any]) {
         guard let host = d["host"] as? String, let port = d["port"] as? Int else { return }

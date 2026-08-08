@@ -17,7 +17,12 @@ sha2 = "0.10"
 getrandom = "0.2"
 # Phase-3 transport: native async HTTP over the tailnet. Heavy, but isolated to this crate
 # and never inherited by kernel/cycle/cli (they call sync entry points only).
-tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util", "process"] }
+# APNs (the ember reaches a locked phone): ES256 provider tokens signed with ring — already
+# in the tree via rustls — and base64url for the JWT segments. The HTTP/2 send itself shells
+# to curl (both doors ship one), keeping hyper http1-only.
+ring = "0.17"
+base64 = "0.22"
 hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 # Phase-1 transport security (ADR-0009): covenant-pinned TLS on the mesh port. rustls +

@@ -156,6 +156,19 @@ pub fn grant(dir: &Path, node_id: &str, note: &str) -> std::io::Result<bool> {
             .insert(node_id.to_string(), note.trim().to_string());
     }
     save(dir, &roll)?;
+    // Dual-write (ADR-0026 Phase 2): full standing = established + admitted on the record.
+    let minted_by = std::fs::read_to_string(dir.join(crate::node::NODE_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str::<crate::node::NodeIdentity>(&s).ok())
+        .map(|n| n.node_id)
+        .unwrap_or_else(|| "local".into());
+    let _ = crate::record::record_standing_grant(
+        dir,
+        &minted_by,
+        node_id,
+        note,
+        crate::transport::now_secs(),
+    );
     Ok(true)
 }
 
@@ -170,6 +183,11 @@ pub fn revoke(dir: &Path, node_id: &str) -> std::io::Result<bool> {
     }
     roll.notes.remove(node_id.trim());
     save(dir, &roll)?;
+    let _ = crate::record::record_standing_revoke(
+        dir,
+        node_id.trim(),
+        crate::transport::now_secs(),
+    );
     Ok(true)
 }
 
@@ -181,9 +199,25 @@ pub fn load(dir: &Path) -> StandingRoll {
 }
 
 /// A reader's standing. Default deny: unlisted is a guest.
+///
+/// With `read_records` on (ADR-0026 Phase 2, after a clean `mesh doctor`), the answer comes
+/// from the unified record instead of the roll: a member is a device whose two filters both
+/// hold. A missing record is a guest — the safe direction to fail, same as a missing roll.
+/// Flipping the flag back is the rollback; the roll keeps being dual-written either way.
 pub fn standing_of(dir: &Path, node_id: &str) -> Standing {
     if node_id.is_empty() {
         return Standing::Guest;
+    }
+    let read_records = crate::config::load(dir)
+        .map(|c| c.read_records)
+        .unwrap_or(false);
+    if read_records {
+        return match crate::record::find_by_key(dir, node_id) {
+            Some(r) if crate::record::derive_state(&r) == crate::record::RecordState::Member => {
+                Standing::Full
+            }
+            _ => Standing::Guest,
+        };
     }
     let roll = load(dir);
     if roll.full.iter().any(|n| n == node_id) {
@@ -282,6 +316,26 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
     // How many others are awaiting a decision is the household's business, not a guest's.
     view.guests_waiting = 0;
     view.standing_full.clear();
+    // Whose device is claiming whom is entirely the household's business — a guest never
+    // learns that another guest is knocking as "ian", let alone gets a key to vouch for.
+    view.claims_waiting.clear();
+    // The fire is inside the house: a guest sees no game, no players, no story.
+    view.game = None;
+    // A guest sees the arrivals too — the mesh greets, that is shape — but not who: labels
+    // pseudonymize and handles fall to "someone", same rule as the roster.
+    for a in view.arrivals.iter_mut() {
+        a.label = pseudonym(&a.node_id);
+        if !a.handle.is_empty() {
+            a.handle = "someone".into();
+        }
+        // Origin is the household's verification evidence, never a fellow visitor's to see.
+        a.lat = 0.0;
+        a.lon = 0.0;
+        a.addr.clear();
+        a.build.clear();
+        // Same for activity: when another arrival was last heard from is household evidence.
+        a.last_seen = 0;
+    }
 
     for m in view.members.iter_mut() {
         let is_reader = m.node_id == reader_node_id;

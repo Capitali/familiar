@@ -1140,8 +1140,11 @@ mod tests {
     }
 
     #[test]
-    fn an_approved_grant_opens_the_targets_gate_and_admits_an_enrollment() {
-        // Target T (headless) receives grants from peer H (whose human decided).
+    fn an_approved_grant_opens_the_targets_gate_and_an_enrollment_grant_is_vestigial() {
+        // Target T (headless) receives grants from peer H (whose human decided). Gate grants
+        // still travel; enrollment grants are vestigial under the two-filter door (ADR-0026:
+        // the knock itself admits a guest, so there is never a pending to approve) — an old
+        // peer may still send one, and it must no-op cleanly rather than break the drain.
         let dir_t = tmp("grant_target");
         let t_node = NodeKey::load_or_mint(&dir_t, "target").unwrap();
         let cred = group::create_group(&dir_t, &t_node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
@@ -1155,7 +1158,7 @@ mod tests {
         )
         .unwrap();
 
-        // A third node X has a pending enrollment at T (so the enrollment grant has something to act on).
+        // A third node X knocks at T — and is a guest immediately; nothing pends any more.
         let x = NodeKey::load_or_mint(&tmp("grant_joiner"), "joiner").unwrap();
         let xid = x.identity();
         let req = crate::enroll::EnrollRequest {
@@ -1170,8 +1173,11 @@ mod tests {
         };
         let raw = serde_json::to_vec(&req).unwrap();
         let sig = x.sign(&raw);
-        crate::enroll::submit_request(&dir_t, &raw, &sig, NOW).unwrap();
-        assert_eq!(crate::enroll::list_pending(&dir_t).unwrap().len(), 1);
+        assert!(matches!(
+            crate::enroll::submit_request(&dir_t, &raw, &sig, NOW).unwrap(),
+            crate::enroll::Submitted::Granted(_)
+        ));
+        assert!(crate::enroll::list_pending(&dir_t).unwrap().is_empty());
 
         // Peer H (in the group) relays two approved grants addressed to T.
         let dir_h = tmp("grant_human");
@@ -1223,16 +1229,13 @@ mod tests {
             boundary::load(&dir_t).unwrap().allow_execute,
             "the human-granted gate opened"
         );
-        // The enrollment was admitted (no longer pending).
-        assert!(
-            crate::enroll::list_pending(&dir_t).unwrap().is_empty(),
-            "the enrollment was admitted"
-        );
+        // The enrollment grant no-opped: X was already a guest, nothing was pending, and the
+        // drain carried on. Only the gate grant is audited.
         let obs = observation::load(&dir_t).unwrap();
         assert_eq!(
             obs.iter().filter(|o| o.action == "applied-grant").count(),
-            2,
-            "both grants audited"
+            1,
+            "the gate grant is audited; the vestigial enrollment grant is not"
         );
 
         // Idempotent: re-draining applies nothing new.
@@ -1250,7 +1253,7 @@ mod tests {
                 .iter()
                 .filter(|o| o.action == "applied-grant")
                 .count(),
-            2,
+            1,
             "grants apply once"
         );
 

@@ -68,7 +68,9 @@
   <canvas id="streetArcs" style="position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;opacity:0;transition:opacity 1.6s;"></canvas>
 
   <!-- daemon-down badge: appears only when the link is lost (otherwise no chrome) -->
-  <div id="linkdown" style="display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;">
+  <!-- pointer-events:none + pushed below the ring: the badge INFORMS, it must never eat the
+       dialogue glyph's clicks (the odd-count ring now parks a button at top centre). -->
+  <div id="linkdown" style="display:none;position:absolute;top:84px;left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;pointer-events:none;">
     <div style="width:34px;height:34px;border-radius:50%;background:rgba(60,10,16,0.6);border:1px solid rgba(255,110,110,0.5);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;">
       <svg viewBox="0 0 24 24" fill="none" stroke="#ff6e6e" stroke-width="1.8" stroke-linecap="round" style="width:18px;height:18px;"><path d="M12 3v10"/><circle cx="12" cy="18.5" r="1.2" fill="#ff6e6e" stroke="none"/></svg>
     </div>
@@ -77,10 +79,12 @@
 
   <div id="screenbtns"></div>
 
-  <div id="holo" style="position:absolute;top:50%;left:50%;width:min(1040px,80vw);height:min(85vh,940px);z-index:6;display:flex;flex-direction:column;border-radius:60px;overflow:hidden;background:linear-gradient(158deg,rgba(20,44,80,0.128),rgba(8,20,40,0.056));backdrop-filter:blur(15px) saturate(1.35);-webkit-backdrop-filter:blur(15px) saturate(1.35);box-shadow:0 0 90px rgba(60,150,255,0.13);-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 11%,#000 89%,transparent 100%),linear-gradient(90deg,transparent 0%,#000 6%,#000 94%,transparent 100%);-webkit-mask-composite:source-in;-webkit-mask-repeat:no-repeat;animation:floaty 11s ease-in-out infinite,holoflicker 8s ease-in-out infinite;">
+  <!-- top:53% + 78vh: the holo's top edge clears the ring's top-centre glyph (the odd-count
+       ring parks one there), and the tightened header pad tucks the title just inside. -->
+  <div id="holo" style="position:absolute;top:53%;left:50%;width:min(1040px,80vw);height:min(78vh,880px);z-index:6;display:flex;flex-direction:column;border-radius:60px;overflow:hidden;background:linear-gradient(158deg,rgba(20,44,80,0.128),rgba(8,20,40,0.056));backdrop-filter:blur(15px) saturate(1.35);-webkit-backdrop-filter:blur(15px) saturate(1.35);box-shadow:0 0 90px rgba(60,150,255,0.13);-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 11%,#000 89%,transparent 100%),linear-gradient(90deg,transparent 0%,#000 6%,#000 94%,transparent 100%);-webkit-mask-composite:source-in;-webkit-mask-repeat:no-repeat;animation:floaty 11s ease-in-out infinite,holoflicker 8s ease-in-out infinite;">
     <div style="position:absolute;inset:0;z-index:1;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(150,215,255,0.04) 0px,rgba(150,215,255,0.04) 1px,transparent 1px,transparent 3px);mix-blend-mode:screen;animation:holoscan 9s linear infinite;"></div>
     <div style="position:absolute;left:50%;bottom:8%;width:min(60%,520px);height:2px;transform:translateX(-50%);background:linear-gradient(90deg,transparent,rgba(150,215,255,0.9),transparent);box-shadow:0 0 22px rgba(120,200,255,0.8);animation:holobase 4.5s ease-in-out infinite;z-index:1;pointer-events:none;"></div>
-    <div style="position:relative;z-index:2;flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:clamp(22px,4vh,44px) clamp(30px,6vw,84px) clamp(12px,2vh,20px);">
+    <div style="position:relative;z-index:2;flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:clamp(10px,1.6vh,18px) clamp(30px,6vw,84px) clamp(12px,2vh,20px);">
       <div id="sctitle" style="font-size:clamp(24px,3.2vw,36px);font-weight:600;letter-spacing:-0.02em;line-height:1;text-shadow:0.6px 0 rgba(255,80,140,0.25),-0.6px 0 rgba(90,210,255,0.35);"></div>
       <span style="width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 10px #3ddc97;animation:iconpulse 2.4s ease-in-out infinite;flex-shrink:0;"></span>
     </div>
@@ -110,6 +114,32 @@
   </button>
 
   <!-- ONE surface control: shows the surface you'd dive to -->
+  <!-- The visitor's compass: while this device is a guest, one warm, ever-present pill that
+       leads to the path — the two-filter state is never something the human should have to
+       infer from a projection looking oddly anonymous. -->
+  <button id="guestbar" onclick="sphereScreen('device')" style="display:none;position:absolute;bottom:88px;left:50%;transform:translateX(-50%);z-index:8;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,178,102,0.14);border:1px solid rgba(255,178,102,0.45);cursor:pointer;backdrop-filter:blur(8px);animation:gatepulse 2.6s ease-in-out infinite;">
+    <span style="width:8px;height:8px;border-radius:50%;background:#ffb266;box-shadow:0 0 10px #ffb266;animation:gatepulse 1.8s ease-in-out infinite;"></span>
+    <span id="guestbartext" class="m" style="font-size:9.5px;letter-spacing:0.14em;color:#ffcf9e;">VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP</span>
+  </button>
+  <!-- The recurring ask (a visitor should be INVITED to identify, often — not left to idle
+       anonymous): a centered overlay that returns every few minutes until the path is begun.
+       Dismissible, never while typing, never on the device screen where the path already is. -->
+  <div id="guestnudge" style="display:none;position:absolute;inset:0;z-index:40;align-items:center;justify-content:center;background:rgba(4,8,20,0.55);backdrop-filter:blur(6px);">
+    <div style="max-width:420px;margin:20px;padding:22px 24px;border-radius:18px;background:rgba(20,34,60,0.92);border:1px solid rgba(255,178,102,0.5);box-shadow:0 0 40px rgba(255,178,102,0.15);">
+      <div class="m" style="font-size:9px;letter-spacing:0.2em;color:#ffb266;margin-bottom:10px;">THE MESH DOESN'T KNOW YOU YET</div>
+      <div style="font-size:14px;line-height:1.55;color:rgba(230,240,252,0.95);margin-bottom:8px;">
+        You're reading this mesh as a <b>visitor</b> — real shape, none of the names.
+        Membership takes one step: say who you are.
+      </div>
+      <div class="m" style="font-size:10.5px;line-height:1.6;color:rgba(200,220,250,0.75);margin-bottom:14px;">
+        ① say your name &nbsp;·&nbsp; ② or have a member vouch for you &nbsp;·&nbsp; ③ or redeem an invite
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button onclick="sphereGuestNudgeGo()" class="glybtn" style="height:38px;padding:0 16px;border-radius:10px;background:rgba(255,178,102,0.16);border:1px solid rgba(255,178,102,0.5);color:#ffcf9e;"><span class="m" style="font-size:9px;letter-spacing:0.14em;">SAY WHO I AM</span></button>
+        <button onclick="sphereGuestNudgeLater()" class="glybtn" style="height:38px;padding:0 14px;border-radius:10px;"><span class="m" style="font-size:9px;letter-spacing:0.14em;">NOT YET</span></button>
+      </div>
+    </div>
+  </div>
   <button id="modetoggle" class="glybtn" title="surface" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:7;width:56px;height:56px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:32px;height:32px;overflow:visible;">
       <path d="M8 40 L18 8 M30 8 L40 40" stroke-width="1.6" opacity="0.7"/>
@@ -134,7 +164,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------- state & real data ----------
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: false, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
+// holoHidden starts TRUE: the app opens onto the bare globe, home centered, menus tucked
+// away — as if the hide glyph had already been clicked. One tap on it brings the screens back.
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: true, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
 try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
@@ -230,19 +262,30 @@ function addrCell(addr) {
 }
 
 // Members → located mesh nodes. Real coordinates only: a node that reported none clusters
-// near the anchor (first located member) with a small deterministic spread, and its card
-// says the position is approximate. No invented places.
-// `all` ignores the hide-offline preference. Pass it wherever the list is a set of DECISIONS
-// rather than a view of activity: someone waiting to be recognised is waiting whether or not
-// they happen to be online, and a display filter must never hide a pending decision. Getting
-// this wrong showed as an empty welcome screen under a red, pulsing glyph — the count comes
-// from the server, which knows nothing about a local toggle.
+// near the anchor with a small deterministic spread, and its card says the position is
+// approximate. No invented places.
+//
+// The anchor is the mesh's own ground truth — the place unlocated nodes cluster near. Only a
+// fix the household can stand behind qualifies: this console's own node, the serving daemon
+// ("· host" after the worldview's self re-tag), or a full member device's own GPS
+// (m.geo_device). Never a mere nonzero coordinate — a visitor's self-reported origin once
+// anchored the whole roster to Beijing — and never the lighthouse's North Pole post
+// (|lat| ≥ 85; see vps/deploy-lighthouse.sh).
+const anchorable = m => {
+  const lat = m.lat || 0, lon = m.lon || 0;
+  if ((lat === 0 && lon === 0) || Math.abs(lat) >= 85) return false;
+  return m.kind === 'self_node' || !!m.geo_device || (m.relationship || '').includes('host');
+};
+// `all` ignores the hide-offline preference. Pass it wherever the list must be COMPLETE
+// rather than a view of activity — a display filter must never make a screen disagree with a
+// server-supplied count (that mismatch once showed as an empty welcome screen under a pulsing
+// glyph; the welcome now renders `v.arrivals` directly, but the lesson generalises).
 function peers(all) {
   const v = S.view; if (!v || !v.members) return [];
   let ms = [...v.members].sort((a, b) => (a.kind === 'self_node' ? -1 : b.kind === 'self_node' ? 1 : 0));
   // Hide-offline toggle: drop non-self peers whose derived status isn't online (self always stays).
   if (S.hideOffline && !all) ms = ms.filter(m => m.kind === 'self_node' || (m.status || (m.online ? 'online' : 'offline')) === 'online');
-  const anchor = ms.find(m => (m.lat || 0) !== 0 || (m.lon || 0) !== 0);
+  const anchor = ms.find(anchorable);
   return ms.map((m) => {
     const st = m.status || (m.online ? 'online' : 'offline');
     let lat = m.lat || 0, lon = m.lon || 0, located = lat !== 0 || lon !== 0;
@@ -264,6 +307,14 @@ function peers(all) {
   });
 }
 
+// A countdown's text, computed at render time — emitting "--:--" and waiting for the 1s
+// ticker made every poll re-render flash dashes (the "strange flashing timers" of the first
+// two-human game). Same math as the ticker; the ticker only keeps it moving.
+function cdText(deadline) {
+  const r = Math.max(0, (deadline || 0) - Math.floor(Date.now() / 1000));
+  return String(Math.floor(r / 60)).padStart(2, '0') + ':' + String(r % 60).padStart(2, '0');
+}
+
 // Who is present at a node now, for how long, and how established — or 'unknown' when no
 // evidence is fresh. present_human/via/since are set by members::derive_presence.
 function presentLine(m) {
@@ -279,7 +330,9 @@ function presentLine(m) {
 function frontierNodes() {
   const v = S.view; if (!v || !v.frontier) return [];
   const P = peers();
-  const anchor = P.find(p => p.located);
+  // Frontier devices are LAN neighbours of the mesh's own site — scatter them around the
+  // same trusted anchor peers() uses, never around a visitor's pin or the lighthouse's pole.
+  const anchor = P.find(p => anchorable(p.m));
   return v.frontier.slice(0, 12).map(f => {
     const h = hash32(f.label + f.ip);
     return {
@@ -301,7 +354,12 @@ const GLYPHS = {
   network: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><circle cx="24" cy="24" r="14" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.75"/><ellipse cx="24" cy="24" rx="14" ry="5" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><ellipse cx="24" cy="24" rx="5" ry="14" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.5" style="transform-box:fill-box;transform-origin:center;animation:mer 5s ease-in-out infinite;"/><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 6s linear infinite;"><circle cx="24" cy="6" r="2.6" fill="currentColor"/></g></svg>`,
   vision: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:blink 5s ease-in-out infinite;"><path d="M4 24s7-11 20-11 20 11 20 11-7 11-20 11S4 24 4 24z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="24" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 4"/></g><circle cx="24" cy="24" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 3s ease-in-out infinite;"/></g></svg>`,
   device: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><rect x="14" y="5" width="20" height="38" rx="4.5" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><line x1="21" y1="9.5" x2="27" y2="9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="25" r="7.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 4" opacity="0.6"/></g><circle cx="24" cy="25" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/></svg>`,
+  games: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:spin 14s linear infinite;"><rect x="15" y="15" width="18" height="18" rx="4.5" transform="rotate(45 24 24)" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/></g><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 5s linear infinite;"><circle cx="24" cy="8" r="2.1" fill="currentColor"/></g><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 8s linear infinite reverse;"><circle cx="24" cy="41" r="1.6" fill="currentColor" opacity="0.7"/></g><circle cx="24" cy="24" r="3.6" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.7s ease-in-out infinite;"/></svg>`,
 };
+// The games' own control glyphs — back (chevron orbit) and begin (kindled play) — animated
+// like everything else on the ring: wordless, alive.
+const BACK_GLYPH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M15 18l-6-6 6-6" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.4s ease-in-out infinite;"/></svg>`;
+const BEGIN_GLYPH = `<svg viewBox="0 0 24 24" fill="none" style="width:20px;height:20px;"><circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="1.2" opacity="0.45" stroke-dasharray="3 4" style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"/><path d="M10 8.5v7l6-3.5z" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.8s ease-in-out infinite;"/></svg>`;
 // dive-to-surface glyph (map pin descending) and send glyph (plane) — controls, wordless
 const DIVE_GLYPH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:19px;height:19px;"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.6" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.2s ease-in-out infinite;"/></svg>`;
 const SEND_GLYPH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:19px;height:19px;"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>`;
@@ -313,10 +371,13 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // ---------- hologram screens (real data; skeleton built once per screen, data refreshed in place) ----------
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
-const SCREENS = ['conversation','roster','theories','work','signals','network','vision','device'];
-// 'welcome' is reached from its own corner button, not the ring — it is a door, not a view.
-const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', node:'', device:'Device', welcome:'Welcome' };
+const SCREENS = ['conversation','roster','theories','work','signals','network','vision','games','device'];
+// 'welcome' is reached from its own corner button, not the ring — a greeting with its own bell.
+const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', games:'Games', node:'', device:'Device', welcome:'Welcome' };
 
+// Display capitalization: handles are lowercase slugs by design ("ian", "betty-jo") — but
+// names read as names: Ian, Betty-jo. Display-only; the slug stays the identity.
+function cap(h) { return h ? h.charAt(0).toUpperCase() + h.slice(1) : h; }
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 // The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
 function connBadge(mode) {
@@ -359,6 +420,14 @@ function refreshScreen() {
     if (inp && document.activeElement === inp) return;
   }
 
+  // Same law for the game's guess/line box: a poll mid-thought wiped the player's typing
+  // (watched live — the iPad's answer vanished under Ian's fingers). Focus-gated only, so a
+  // blurred input never blocks the screen.
+  if (k === 'games') {
+    const ginp = document.getElementById('gameinput');
+    if (ginp && document.activeElement === ginp) return;
+  }
+
   if (k === 'conversation') {
     const box = $('convmsgs'); if (!box) return;
     if (!v) { box.innerHTML = ''; return; }
@@ -393,17 +462,67 @@ function refreshScreen() {
   if (k === 'roster') {
     // Carry the ORIGINAL index through the partition — sphereNode/sphereDive index into peers(),
     // so filtering the grid without keeping `i` would dive to the wrong node.
-    const pairs = P.map((p, i) => [p, i]);
+    // The lighthouse is infrastructure, not a housemate: it keeps its globe dot and its node
+    // dive, but takes no card in the roster of who is here.
+    const pairs = P.map((p, i) => [p, i])
+      .filter(([p]) => !(!(p.m.human || '') && /lighthouse/i.test(p.name || '')));
     const past = pairs.filter(([p]) => isStale(p));
     const live = pairs.filter(([p]) => !isStale(p));
-    const card = ([p, i]) => `
-      <div onclick="sphereNode(${i})" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
-        <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
+    // A member that runs ON another machine (a Mac's console shell — m.attached_to carries the
+    // host's node_id) nests inside its host's card instead of standing as an unexplained
+    // sibling. Still its own member — own key, own row in history, own dive — and if the host
+    // is absent from the live roster the member stands alone again (quit the daemon and the
+    // console honestly reappears at top level).
+    const nestedIn = (host) => live.filter(([q]) => q.m.attached_to === host.m.node_id);
+    const standing_ = live.filter(([p]) =>
+      !p.m.attached_to || !live.some(([h]) => h.m.node_id === p.m.attached_to));
+    const nestedRow = ([q, qi]) => `
+      <div onclick="event.stopPropagation();sphereNode(${qi})" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 12px;border-radius:11px;background:rgba(20,44,80,0.3);border:1px solid rgba(120,190,255,0.14);cursor:pointer;">
+        <span style="width:7px;height:7px;border-radius:50%;background:${q.color};box-shadow:0 0 9px ${q.color};"></span>
+        <span style="font-size:13px;font-weight:500;flex:1;letter-spacing:-0.01em;">${esc(q.name)}</span>
+        ${chip(q.kindWord, '#bcd2ff')}
+        <span class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(160,195,255,0.55);">${esc((q.status||'').toUpperCase())}</span>
+      </div>`;
+    // Accordion: every entry rests as one calm row — the name and its badges. A tap opens
+    // the full card in place; the detail glyph inside goes deeper (the node screen); DIVE
+    // still flies. Open state lives in S so the 3s poll can't slam cards shut.
+    S.rosterOpen = S.rosterOpen || {};
+    // The ember badge lands on the MACHINE's row: when a console holds the turn, its host
+    // (the row the console nests under) wears the fire — a hidden nested row must never be
+    // the only place the countdown lives.
+    const emberIds = new Set();
+    if (v.game && v.game.status === 'open') {
+      // The holder is a HUMAN — the fire burns on every device of theirs (and the machines
+      // those devices nest under).
+      const seat = (v.game.players || []).find(pl => pl.handle === v.game.holder);
+      for (const dev of (seat && seat.devices) || [v.game.holder]) {
+        emberIds.add(dev);
+        const hp = pairs.find(([q]) => q.m.node_id === dev);
+        if (hp && hp[0].m.attached_to) emberIds.add(hp[0].m.attached_to);
+      }
+    }
+    const headerRow = (p) => `
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
-          <span style="font-size:17px;font-weight:600;flex:1;letter-spacing:-0.01em;">${esc(p.name)}</span>
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;">${esc(p.name)}</span>
+          ${p.m.human ? `<span style="font-size:15px;font-weight:500;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(cap(p.m.human))}</span>` : ''}
+          <span style="flex:1;"></span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
-          ${connBadge(p.m.connectivity)}
+          ${(v.game && v.game.status === 'open' && emberIds.has(p.m.node_id))
+            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">${cdText(v.game.holder_since + v.game.turn_secs)}</span></span>` : ''}
+          ${connBadge(p.m.connectivity)}`;
+    const closedCard = ([p, i]) => `
+      <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:13px 17px;border-radius:14px;background:${p.local?'rgba(90,175,255,0.08)':'rgba(20,44,80,0.16)'};border:1px solid ${p.local?'rgba(174,231,255,0.2)':'rgba(120,190,255,0.12)'};display:flex;align-items:center;gap:9px;">
+        ${headerRow(p)}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:13px;height:13px;color:rgba(160,195,255,0.45);flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+      </div>`;
+    const card = ([p, i]) => `
+      <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:16px 17px;border-radius:16px;background:${p.local?'rgba(90,175,255,0.1)':'rgba(20,44,80,0.2)'};border:1px solid ${p.local?'rgba(174,231,255,0.28)':'rgba(120,190,255,0.16)'};">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px;">
+          ${headerRow(p)}
+          <button onclick="event.stopPropagation();sphereNode(${i})" class="glybtn" style="width:30px;height:30px;border-radius:9px;flex-shrink:0;" title="detail">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="12" cy="12" r="9" opacity="0.4"/><path d="M12 11v5"/><circle cx="12" cy="8" r="0.8" fill="currentColor"/></svg>
+          </button>
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
         ${p.m.detail ? `<div class="m" style="font-size:10px;color:rgba(174,231,255,0.7);margin-bottom:8px;">${esc(p.m.detail)}</div>` : ''}
@@ -415,6 +534,7 @@ function refreshScreen() {
           <div><div style="font-size:18px;font-weight:300;line-height:0.85;color:#9cc0ff;">${esc(p.total)}</div><div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">TOTAL</div></div>
         </div>
         <div style="height:4px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;margin-bottom:13px;"><div style="height:100%;width:${p.status==='online'?100:p.status==='away'?45:8}%;border-radius:5px;background:${p.color};box-shadow:0 0 8px ${p.color};"></div></div>
+        ${nestedIn(p).map(nestedRow).join('')}
         <button onclick="event.stopPropagation();sphereDive(${i})" class="glybtn" style="width:100%;height:38px;border-radius:11px;">${DIVE_GLYPH}</button>
       </div>`;
 
@@ -455,40 +575,320 @@ function refreshScreen() {
 
     el.innerHTML = bar + (S.rosterHistory
       ? table()
-      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;">`
-        + live.map(card).join('') + `</div>`);
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:14px;align-items:start;">`
+        + standing_.map(pi => S.rosterOpen[pi[0].m.node_id] ? card(pi) : closedCard(pi)).join('') + `</div>`);
 
   } else if (k === 'welcome') {
-    // The door. Everyone the mesh has admitted but nobody has yet recognised (ADR-0020) — being
-    // a guest IS the waiting state, so this is a list of open decisions rather than a queue.
-    // Any active member may decide; nothing here auto-grants, and a guest left alone stays a
-    // guest, which is the safe resting state.
-    const roll = (v.standing_full || []);
-    // Unfiltered on purpose — see peers(all). A guest hidden by the offline toggle is still a
-    // decision the human owes, and the glyph counts it regardless.
-    const guests = peers(true).filter(p => !p.local && !roll.includes(p.m.node_id));
-    el.innerHTML = guests.length === 0
+    // A greeting, not a gate (ADR-0026): who is new — the last 24 hours of members, devices,
+    // agents and peers, greeted. Admission is rules-based (covenant contracted ∧ identity
+    // established), so nothing here frames a decision and there are no buttons. Corrections
+    // (sever, "that's not Betty") live on the roster card and the CLI, where administration
+    // honestly is.
+    const arrivals = (v.arrivals || []);
+    const viaWord = {
+      RotationProof: 'same device, fresh key',
+      DeviceVoucher: 'vouched for by their own device',
+      InviteToken: 'invited by a member',
+      LocalIntroduction: 'introduced themselves here',
+      Migration: 'longstanding',
+    };
+    // The ONE exception to no-buttons: a claim naming THIS device's human (ADR-0026 E2 over
+    // the mesh). That is not an approval gate — it is the second person, and the second person
+    // is you. One tap mints the voucher; the rules engine does the admitting.
+    const myHuman = ((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '';
+    const dismissed = (S.dismissedClaims = S.dismissedClaims || {});
+    const amMember = ((S.device || {}).membership || {}).state === 'member';
+    // Two flavours: a KNOWN handle asks that human's own devices; a NEW name asks any member
+    // to welcome the stranger in (sponsorship). Both are the second person — and the second
+    // person is a human, never a rule.
+    const claims = (v.claims_waiting || []).filter(c => !dismissed[c.node_id] && (
+      c.known
+        ? (myHuman && c.handle.toLowerCase() === myHuman.toLowerCase())
+        : amMember));
+    const claimsHtml = claims.map(c => `
+      <div style="padding:14px 16px;border-radius:14px;background:rgba(40,60,24,0.28);border:1px solid rgba(61,220,151,0.3);margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-size:16px;font-weight:600;">${esc(c.label || c.node_id.slice(0,8))}</span>
+          ${c.known ? chip('SAYS IT IS YOURS', '#9fe8c0') : chip('A NEW NAME — ' + esc(cap(c.handle).toUpperCase()), '#ffcf9e')}
+          <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(c.node_id.slice(0,8))}</span>
+        </div>
+        <div class="m" style="font-size:9.5px;color:rgba(180,215,190,0.7);margin-bottom:10px;">
+          ${c.known
+            ? `a new device is claiming to be ${esc(c.handle)}'s — if that's you setting it up, confirm; if not, ignore it and it stays a guest`
+            : `a device here introduces ${esc(cap(c.handle))} — nobody in the mesh holds that name yet. If they're standing in your world, welcome them; if not, leave them a guest`}
+        </div>
+        <div style="display:flex;gap:10px;">
+          ${c.known ? `<button onclick='toApp("vouch",{node_id:${JSON.stringify(c.node_id)},pubkey:${JSON.stringify(c.pubkey)},handle:${JSON.stringify(c.handle)}})'
+                  style="padding:9px 16px;border-radius:10px;background:rgba(61,220,151,0.18);border:1px solid rgba(61,220,151,0.45);color:#9fe8c0;cursor:pointer;font-size:12px;">
+            Yes — it's mine
+          </button>` : `<button onclick="sphereSponsor('${c.node_id.replace(/[^a-f0-9]/gi,'')}','${c.handle.replace(/[^a-z0-9_-]/gi,'')}')"
+                  style="padding:9px 16px;border-radius:10px;background:rgba(255,178,102,0.16);border:1px solid rgba(255,178,102,0.5);color:#ffcf9e;cursor:pointer;font-size:12px;">
+            Welcome ${esc(cap(c.handle))} in
+          </button>`}
+          <button onclick="sphereClaimDismiss('${c.node_id.replace(/[^a-f0-9]/gi, '')}')"
+                  style="padding:9px 16px;border-radius:10px;background:rgba(16,34,60,0.3);border:1px solid rgba(120,190,255,0.2);color:rgba(188,210,255,0.75);cursor:pointer;font-size:12px;">
+            Not mine
+          </button>
+        </div>
+      </div>`).join('');
+    // Invite someone — the member's half of the visitor path card's promise. The QR is for
+    // a phone at join time; the selectable text under it is for paste (the Mac join screen,
+    // or an enrolled visitor's REDEEM box). Ten minutes, single use, carries no secret.
+    const inviteHtml = amMember ? `
+      <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.2);border:1px solid rgba(120,190,255,0.16);margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <button onclick="toApp('invite',{})" class="glybtn" title="mint an invite" style="height:40px;padding:0 16px;border-radius:11px;display:flex;align-items:center;gap:9px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:19px;height:19px;"><rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><path d="M14 14h3v3h-3zM18 18h3v3h-3z" fill="currentColor" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/></svg>
+            <span class="m" style="font-size:9px;letter-spacing:0.15em;">INVITE SOMEONE</span>
+          </button>
+          <span class="m" style="font-size:9.5px;color:rgba(160,195,255,0.55);">mints a 10-minute, single-use pass — scan the QR at join, or send them the text to paste</span>
+        </div>
+        <div id="inviteqr" style="margin-top:10px;"></div>
+      </div>` : '';
+    el.innerHTML = inviteHtml + claimsHtml + (arrivals.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
-           Nobody is waiting. Every member here has been recognised.
+           Nobody new in the last day. The next arrival will be greeted here.
          </div>`
       : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.6);margin-bottom:14px;">
-           ${guests.length} waiting to be recognised. Until someone says who they are, they read a
-           worldview with the same shape as yours and none of the names.
-         </div>` + guests.map(p => `
-        <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(255,110,110,0.22);margin-bottom:10px;">
+           Welcome to these new members — ${arrivals.length} arrival${arrivals.length === 1 ? '' : 's'} in the last day.
+         </div>` + arrivals.map(a => `
+        <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(120,190,255,0.18);margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
-            <span style="font-size:16px;font-weight:600;">${esc(p.name)}</span>
-            ${chip(p.kindWord, '#bcd2ff')}
-            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(p.m.node_id.slice(0,8))}</span>
+            <span style="font-size:16px;font-weight:600;">${esc(a.label || a.node_id.slice(0,8))}</span>
+            ${a.state === 'guest' ? chip('VISITOR', '#bcd2ff') : chip('MEMBER', '#9fe8c0')}
+            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(a.node_id.slice(0,8))}</span>
           </div>
-          <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:12px;">
-            ${esc(p.os || 'unknown platform')} · first seen ${dstr(p.m.first_seen)} · ${esc(p.m.connectivity || '—')}
+          <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);">
+            ${a.state === 'guest'
+              ? 'a visitor is looking around — they read the mesh’s shape and none of the names'
+              : esc((a.handle ? a.handle + ' — ' : '') + (viaWord[a.via] || 'established'))}
+            · arrived ${dtstr(a.at)}${a.last_seen > 0 ? ' · seen ' + (nowS() - a.last_seen < 90 ? 'just now' : dur(nowS() - a.last_seen) + ' ago') : ''}
           </div>
-          <div style="display:flex;gap:9px;">
-            <button onclick="sphereStanding('grant','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;">recognise</button>
-            <button onclick="sphereStanding('deny','${esc(p.m.node_id)}')" class="glybtn" style="padding:8px 16px;border-radius:10px;font-size:12px;width:auto;height:auto;color:rgba(255,140,140,0.9);">not now</button>
+          ${(a.addr || a.build || a.lat || a.lon) ? `
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
+            <span class="m" style="font-size:9px;color:rgba(255,207,158,0.75);">
+              knocking from ${(a.lat || a.lon) ? `${(+a.lat).toFixed(2)}°, ${(+a.lon).toFixed(2)}°` : 'an unreported position'}${a.addr ? ` · ${esc(a.addr)}` : ''}${a.build ? ` · ${esc(a.build)}` : ''}
+            </span>
+            ${(a.lat || a.lon) ? `<button onclick="sphereVisitorDive(${+a.lat}, ${+a.lon}, '${a.node_id.replace(/[^0-9a-f]/gi,'').slice(0,8)}')" class="glybtn" style="height:24px;padding:0 10px;border-radius:7px;"><span class="m" style="font-size:8px;letter-spacing:0.12em;">SHOW ON GLOBE</span></button>` : ''}
           </div>
-        </div>`).join('');
+          <div class="m" style="font-size:8.5px;color:rgba(160,195,255,0.45);margin-top:4px;">
+            verify before you welcome: does the place, address and build match the person you expect?
+          </div>` : ''}
+        </div>`).join(''));
+
+  } else if (k === 'games') {
+    // The mesh games. The screens say — prominently — which seams each game exercises,
+    // because that is the point: testers playing IS the test.
+    const g = v.game;
+    const myId = (S.device || {}).node_id || '';
+    const nav = S.gameNav || ((g && g.status === 'open') ? 'live' : 'menu');
+    const glybtn = (onclick, glyph, label, warm) => `
+      <button onclick="${onclick}" class="glybtn" style="height:44px;padding:0 18px;border-radius:12px;display:flex;align-items:center;gap:10px;${warm ? 'background:rgba(61,220,151,0.14);border:1px solid rgba(61,220,151,0.4);color:#9fe8c0;' : ''}">
+        ${glyph}<span class="m" style="font-size:9px;letter-spacing:0.16em;">${label}</span>
+      </button>`;
+    const tests = (items) => `
+      <div style="margin:14px 0;padding:14px 16px;border-radius:13px;background:rgba(61,220,151,0.07);border:1px solid rgba(61,220,151,0.22);">
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#7ff0c0;margin-bottom:9px;">WHAT THIS GAME TESTS IN THE FAMILIAR</div>
+        ${items.map(t => `<div class="m" style="font-size:10.5px;color:rgba(200,240,215,0.85);padding:3px 0;">◆ ${t}</div>`).join('')}
+      </div>`;
+    const rules = (items) => items.map(t => `<div class="m" style="font-size:10.5px;color:rgba(188,210,255,0.78);padding:3px 0;">· ${t}</div>`).join('');
+    const cd = (deadline) => `<span class="m" data-deadline="${deadline}" style="font-size:inherit;color:#aee7ff;">${cdText(deadline)}</span>`;
+    // The door's last words to THIS device, door named — a refused or slow act must never
+    // look like a dead button (the door's reply used to land in a log no screen read).
+    const doorLine = () => {
+      const d = S.device || {};
+      const n = (d.notes || [])[0];
+      return n ? `<div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.6);margin-top:12px;padding:9px 12px;border-radius:10px;background:rgba(20,44,80,0.18);border:1px solid rgba(120,190,255,0.12);">door ${esc(d.host || '?')} · ${esc(n)}</div>` : '';
+    };
+
+    if (nav === 'menu') {
+      const gameCard = (key, title, flavor, glyph) => `
+        <div onclick="sphereGameNav('info-${key}')" style="cursor:pointer;padding:22px 20px;border-radius:18px;background:rgba(20,44,80,0.24);border:1px solid rgba(120,190,255,0.2);display:flex;align-items:center;gap:18px;">
+          <div style="width:54px;height:54px;flex-shrink:0;color:#aee7ff;">${glyph}</div>
+          <div style="flex:1;">
+            <div style="font-size:18px;font-weight:600;margin-bottom:5px;">${title}</div>
+            <div class="m" style="font-size:10.5px;color:rgba(160,195,255,0.65);">${flavor}</div>
+          </div>
+          <div style="color:rgba(160,195,255,0.5);">${DIVE_GLYPH}</div>
+        </div>`;
+      el.innerHTML = `<div style="max-width:640px;display:flex;flex-direction:column;gap:14px;">
+        <div class="m" style="font-size:10.5px;color:rgba(160,195,255,0.6);margin-bottom:2px;">
+          Two fires to light. Playing them exercises the mesh on purpose — every move is a signed member act, and the familiar referees.
+        </div>
+        ${gameCard('riddle', 'Riddle of the Mesh', 'the familiar asks; the ember passes; one right answer takes it', GLYPHS.theories)}
+        ${gameCard('campfire', 'The Campfire', 'one story, one line each, the ember chooses whose turn it is', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.6s ease-in-out infinite;"/><circle cx="24" cy="33" r="3" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.4s ease-in-out infinite;"/></svg>`)}
+        ${g && g.status === 'done' ? `
+          <div style="padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.18);border:1px solid rgba(120,190,255,0.13);">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:7px;">LAST GAME</div>
+            <div class="m" style="font-size:11px;color:rgba(188,210,255,0.8);">${esc(g.verdict || 'finished')}</div>
+            <button onclick="sphereGameNav('live')" class="glybtn" style="margin-top:9px;height:30px;padding:0 12px;border-radius:9px;"><span class="m" style="font-size:8.5px;letter-spacing:0.14em;">SEE IT</span></button>
+          </div>` : ''}
+        ${doorLine()}
+      </div>`;
+
+    } else if (nav === 'info-riddle' || nav === 'info-campfire') {
+      const riddle = nav === 'info-riddle';
+      el.innerHTML = `<div style="max-width:640px;">
+        <div style="font-size:21px;font-weight:600;margin-bottom:8px;">${riddle ? 'Riddle of the Mesh' : 'The Campfire'}</div>
+        <div style="font-size:13px;line-height:1.55;color:rgba(220,232,250,0.85);margin-bottom:4px;">
+          ${riddle
+            ? 'The familiar draws a riddle from its own bank and hands the ember to whoever lit the game. The holder gets one guess — or passes. Right answer wins on the spot; wrong answers stay on the record for everyone to laugh at later.'
+            : 'The familiar speaks the first line of a story. Whoever holds the ember adds ONE line and passes it — to a chosen member, or wherever the circle turns next. The story closes at 24 lines or when its starter closes it, and the familiar names the line of the story.'}
+        </div>
+        ${tests(riddle ? [
+          'signed member acts — every guess is an ed25519-signed write the door verifies',
+          'standing &amp; identity — only admitted members may play; guests see no game at all',
+          'turn state traveling doors — the ember rides record-sync between wildhorse and the lighthouse',
+          'the lazy clock — turn expiry is enforced by whichever door reads next, no game loop anywhere',
+          'worldview latency — how fast your console learns the ember moved',
+        ] : [
+          'everything the riddle tests, plus:',
+          'multi-door last-writer-wins — two people acting at two doors must converge on one story',
+          'presence &amp; attribution — each line signed, labelled, and timestamped by its author',
+          'the chime path — your device rings when the ember reaches you',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">HOW THE FAMILIAR JUDGES</div>
+        ${rules(riddle ? [
+          'the door judges each guess against its answer card — the answer never travels to any console',
+          'articles, case and punctuation are forgiven: “the map”, “Map!” and “map” are one answer',
+          'first correct guess wins and closes the game',
+        ] : [
+          'when the fire closes, the familiar names the LINE OF THE STORY: the line with the most words no other line used — novelty is the prize, and the rule is one sentence long',
+          'the familiar’s own opening line can never take its own prize',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">LAGGING PLAYERS</div>
+        ${rules([
+          `each turn carries a countdown (default ${riddle ? '15 minutes' : '1 hour'}) — visible on the roster badge`,
+          'let it run out and the ember moves on by itself, and you take a strike',
+          'two strikes and the mesh stops waiting for you: eliminated to spectator',
+          'if everyone else strikes out, the last player standing takes the game',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">RULES</div>
+        ${rules(riddle ? [
+          'players are the interactive member devices online when the game begins',
+          'one guess or one pass per turn — passing costs nothing but time',
+          'anyone may light the game; only its lighter may close it unsolved',
+        ] : [
+          'one line per turn, 240 characters — a line, not a chapter',
+          'pass to whoever you like, or let the circle decide',
+          'the starter may close the fire early; 24 lines closes it by itself',
+        ])}
+        <div style="display:flex;gap:12px;margin-top:20px;">
+          ${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK', false)}
+          ${g && g.status === 'open'
+            ? glybtn("sphereGameNav('live')", DIVE_GLYPH, 'A GAME IS BURNING — JOIN THE VIEW', true)
+            : glybtn(`sphereGameBegin('${riddle ? 'riddle' : 'campfire'}')`, BEGIN_GLYPH, 'BEGIN', true)}
+        </div>
+      </div>`;
+
+    } else {
+      // live (or finished) game view
+      if (!g) {
+        // A begin's own poll race: the snapshot in flight when BEGIN was tapped arrives
+        // game-less a beat later — bouncing to the menu PINNED the menu while every other
+        // console showed the fire. Grace the gap, and never pin: clearing gameNav lets the
+        // default (live-when-burning) take over the moment the game lands.
+        if (S.gameBeginAt && Date.now() - S.gameBeginAt < 12000) {
+          el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:60px 0;">
+            <div style="width:46px;height:46px;color:#ffb266;animation:iconpulse 1.1s ease-in-out infinite;">
+              <svg viewBox="0 0 48 48" fill="currentColor"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z"/></svg>
+            </div>
+            <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(255,207,158,0.8);">LIGHTING THE FIRE…</span>
+          </div>`;
+          return;
+        }
+        S.gameNav = undefined;
+        refreshScreen();
+        return;
+      }
+      S.gameBeginAt = 0;
+      // A human mid-sentence outranks a data refresh: while the input is focused (or holds
+      // text), the poll must NOT rebuild this screen out from under their thumbs — the same
+      // rule the conversation screen enforces with its persistent input row. Countdowns keep
+      // ticking regardless (the data-deadline ticker touches text nodes, not the tree).
+      const prevInp = document.getElementById('gameinput');
+      if (prevInp && document.activeElement === prevInp) {
+        return;
+      }
+      const open = g.status === 'open';
+      const myHuman2 = (((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '').toLowerCase();
+      const mine = open && myHuman2 && g.holder.toLowerCase() === myHuman2 && myHuman2 !== 'observer';
+      const holderP = g.players.find(p => p.handle === g.holder) || g.players.find(p => p.node_id === g.holder);
+      const deadline = g.holder_since + g.turn_secs;
+      const playerRow = (p) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;background:${p.node_id === g.holder && open ? 'rgba(255,178,102,0.1)' : 'rgba(20,44,80,0.18)'};${p.eliminated ? 'opacity:0.4;' : ''}">
+          <span style="font-size:12px;font-weight:500;flex:1;">${esc(cap(p.handle || p.label))}${(p.devices && p.devices.length > 1) ? ` <span class="m" style="font-size:8.5px;color:rgba(160,195,255,0.55);">${p.devices.length} devices</span>` : ''}</span>
+          ${p.handle === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
+          ${p.score ? `<span class="m" style="font-size:9px;color:#9fe8c0;">★ ${p.score}</span>` : ''}
+          ${p.strikes ? `<span class="m" style="font-size:9px;color:#ff8fa3;">${'✕'.repeat(p.strikes)}</span>` : ''}
+          ${p.eliminated ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(255,143,163,0.8);">OUT</span>` : ''}
+        </div>`;
+      const entryRow = (e) => `
+        <div style="padding:10px 13px;border-radius:11px;background:${e.correct ? 'rgba(61,220,151,0.12)' : e.node_id ? 'rgba(20,44,80,0.22)' : 'rgba(120,90,200,0.12)'};border:1px solid ${e.correct ? 'rgba(61,220,151,0.4)' : 'rgba(120,190,255,0.12)'};margin-bottom:8px;">
+          <div class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(160,195,255,0.55);margin-bottom:4px;">${esc(e.label || 'the familiar')}${e.correct ? ' · ✓ SOLVED IT' : ''}</div>
+          <div style="font-size:13.5px;line-height:1.5;color:rgba(228,240,252,0.92);">${esc(e.text)}</div>
+        </div>`;
+      el.innerHTML = `<div style="max-width:680px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          <button onclick="sphereGameNav('menu')" class="glybtn" style="width:34px;height:34px;flex-shrink:0;">${BACK_GLYPH}</button>
+          <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : 'The Campfire'}</span>
+          ${open ? `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#ffb266;">${esc(cap(holderP ? (holderP.handle || holderP.label) : g.holder))}'S TURN · ${cd(deadline)}</span>`
+                 : `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#9fe8c0;">FINISHED</span>`}
+        </div>
+        ${g.kind === 'riddle' && g.question ? `
+          <div style="padding:16px 18px;border-radius:14px;background:rgba(120,90,200,0.1);border:1px solid rgba(160,130,255,0.25);margin-bottom:12px;">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(190,170,255,0.7);margin-bottom:7px;">THE FAMILIAR ASKS</div>
+            <div style="font-size:15px;line-height:1.55;color:rgba(232,240,252,0.95);">${esc(g.question)}</div>
+            ${g.hint && !open ? `<div class="m" style="font-size:10px;color:rgba(190,170,255,0.6);margin-top:7px;">hint: ${esc(g.hint)}</div>` : ''}
+          </div>` : ''}
+        ${!open && g.verdict ? `
+          <div style="padding:13px 16px;border-radius:12px;background:rgba(61,220,151,0.1);border:1px solid rgba(61,220,151,0.32);margin-bottom:12px;">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#7ff0c0;margin-bottom:5px;">THE FAMILIAR'S VERDICT</div>
+            <div class="m" style="font-size:11.5px;line-height:1.5;color:rgba(210,245,225,0.9);">${esc(g.verdict)}</div>
+          </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr minmax(150px,200px);gap:14px;align-items:start;">
+          <div>${g.entries.length ? g.entries.map(entryRow).join('') : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.5);padding:8px 0;">${g.kind === 'riddle' ? 'no guesses yet' : ''}</div>`}</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:2px;">PLAYERS</div>
+            ${g.players.map(playerRow).join('')}
+          </div>
+        </div>
+        ${(() => {
+          // A move is in flight: the door hasn't judged yet (same entry count, same holder,
+          // < 25s). Show the wait, not the question — a live input reads as "answer again".
+          const pending = S.gameActAt && Date.now() - S.gameActAt < 25000
+            && (g.entries || []).length === S.gameActEntries && (g.holder || '') === S.gameActHolder;
+          if (!pending) { S.gameActAt = 0; }
+          return pending ? `
+          <div style="margin-top:14px;padding:16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);display:flex;align-items:center;gap:12px;">
+            <div style="width:22px;height:22px;color:#ffb266;animation:iconpulse 1.1s ease-in-out infinite;"><svg viewBox="0 0 48 48" fill="currentColor"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z"/></svg></div>
+            <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(255,207,158,0.85);">THE DOOR IS JUDGING — your answer is in</span>
+          </div>` : '';
+        })() || ''}
+        ${mine && !(S.gameActAt) ? `
+          <div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);">
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
+            <div style="display:flex;gap:9px;">
+              <input id="gameinput" placeholder="${g.kind === 'riddle' ? 'one guess…' : 'one line of the story…'}" maxlength="240" spellcheck="true"
+                onkeydown="if(event.key==='Enter'){sphereGameSubmit();}"
+                style="flex:1;background:rgba(16,34,60,0.5);border:1px solid rgba(255,178,102,0.3);border-radius:10px;color:#e8f0fc;font-size:13px;padding:10px 12px;"/>
+              <button onclick="sphereGameSubmit()" class="glybtn" style="width:46px;height:42px;border-radius:10px;">${SEND_GLYPH}</button>
+            </div>
+            ${g.kind === 'campfire' ? `
+              <div class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin:10px 0 5px;">HAND THE EMBER TO</div>
+              <div style="display:flex;gap:7px;flex-wrap:wrap;">
+                <button onclick="sphereGamePassTo('')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${!S.gamePassTo ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">THE CIRCLE</span></button>
+                ${g.players.filter(p => !p.eliminated && p.handle.toLowerCase() !== myHuman2).map(p => `
+                  <button onclick="sphereGamePassTo('${p.handle.replace(/[^a-z0-9_-]/gi,'')}')" class="glybtn" style="height:28px;padding:0 11px;border-radius:8px;${S.gamePassTo === p.handle ? 'border-color:rgba(255,178,102,0.5);color:#ffb266;' : ''}"><span class="m" style="font-size:8.5px;">${esc(cap(p.handle).toUpperCase())}</span></button>`).join('')}
+              </div>` : ''}
+            ${g.kind === 'riddle' ? `<button onclick="toApp('game',{act:'pass',to:''});" class="glybtn" style="margin-top:9px;height:28px;padding:0 12px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;">PASS — NO GUESS</span></button>` : ''}
+          </div>` : ''}
+        ${open && !mine ? `<div class="m" style="font-size:10px;color:rgba(160,195,255,0.55);margin-top:12px;">the ember is with ${esc(cap(holderP ? (holderP.handle || holderP.label) : 'someone'))} — every one of their devices shows it; any one may answer</div>` : ''}
+        ${open && myHuman2 && g.started_by.toLowerCase() === myHuman2 ? `<button onclick="sphereGameClose()" class="glybtn" style="margin-top:12px;height:28px;padding:0 12px;border-radius:8px;${S.closeArmed ? 'background:rgba(60,10,16,0.5);border-color:rgba(255,110,110,0.6);' : ''}"><span class="m" style="font-size:8.5px;letter-spacing:0.12em;color:#ff8fa3;">${S.closeArmed ? 'TAP AGAIN TO CLOSE' : 'CLOSE THE GAME'}</span></button>` : ''}
+        ${doorLine()}
+        ${!open ? `<div style="margin-top:14px;">${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK TO THE GAMES', false)}</div>` : ''}
+      </div>`;
+    }
 
   } else if (k === 'node') {
     const p = P[S.nodeIdx]; if (!p) { window.sphereScreen('roster'); return; }
@@ -517,6 +917,18 @@ function refreshScreen() {
       ${row('ADDRESS', m.addr)}
       ${row('OFFERS', (m.tools||0) + ' tools · ' + (m.patterns||0) + ' patterns')}
       ${row('ROLE', m.relationship)}
+      ${/lighthouse/i.test(p.name) ? `
+        <div style="margin-top:16px;padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.2);border:1px solid rgba(120,190,255,0.15);">
+          <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin-bottom:7px;">WHAT A LIGHTHOUSE IS</div>
+          <div class="m" style="font-size:11px;line-height:1.6;color:rgba(188,210,255,0.8);">
+            A household door standing on a public address. When your devices are away from home —
+            cellular, someone else's wifi — they reach the mesh through it. It relays messages
+            between homes that cannot dial each other, keeps the shared record in sync, and holds
+            the door open for new devices knocking from anywhere. It serves no human, takes no
+            turns in games, and can do nothing a member device could not — it simply never sleeps
+            and can always be found.
+          </div>
+        </div>` : ''}
       ${row('LAST', m.detail)}
     </div>`;
 
@@ -620,6 +1032,13 @@ function refreshScreen() {
       </div></div>`;
 
   } else if (k === 'device') {
+    // A human typing their name outranks the 3s device push — FOCUS-gated only. Gating on a
+    // leftover value froze the screen permanently once anything lingered in the box; commit
+    // and cancel clear + blur, so focus is the one honest signal that composing is happening.
+    const nameInp = document.getElementById('servedHumanInput');
+    if (nameInp && document.activeElement === nameInp) {
+      return;
+    }
     const d = S.device;
     if (!d) {
       // No device push → this console speaks for the node itself (the Mac): identity plus
@@ -650,15 +1069,78 @@ function refreshScreen() {
       if (S.invite) renderInviteQR();
       return;
     }
+    // Which network a candidate host address reaches the familiar over, from the address class
+    // alone. Wifi vs ethernet is not knowable from an IP — both are "lan"; the OS doesn't put
+    // the medium in the address.
+    const hostNet = (h) => {
+      const s = String(h).toLowerCase().replace(/^\[/, '');
+      if (s.startsWith('127.') || s.startsWith('localhost') || s.startsWith('::1')) return 'this machine';
+      if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(s)) return 'tailscale vpn';
+      if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(s)) return 'lan';
+      if (/^(fe80|fd|fc)/.test(s)) return 'lan ipv6';
+      if (/^\d/.test(s) || s.includes('::')) return 'internet';
+      return 'dns name';
+    };
     const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
+    // The visitor's path — ADR-0026's two filters as a literal checklist, with the door's own
+    // words and every way in spelled out. A guest should never have to infer what to do next.
+    const mem = d.membership || {};
+    const isMac = /console/i.test(d.label || '');
+    const pathCard = (mem.state !== 'guest' && mem.state !== 'held') ? '' : `
+      <div style="margin:4px 0 16px;padding:16px 18px;border-radius:15px;background:rgba(255,178,102,0.07);border:1px solid rgba(255,178,102,0.35);">
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#ffb266;margin-bottom:10px;">YOUR PATH TO MEMBERSHIP</div>
+        <div class="m" style="font-size:11px;color:rgba(210,235,220,0.9);padding:3px 0;">✓ &nbsp;① device contract — this device accepted the Three Laws when it knocked</div>
+        <div class="m" style="font-size:11px;color:#ffcf9e;padding:3px 0;">○ &nbsp;② identity — the mesh doesn't yet know whose device this is</div>
+        ${mem.path ? `<div class="m" style="font-size:10px;line-height:1.5;color:rgba(255,207,158,0.8);margin:9px 0;padding:9px 11px;border-radius:9px;background:rgba(16,34,60,0.4);">the door says: “${esc(mem.path)}”</div>` : ''}
+        <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin:11px 0 6px;">THREE WAYS IN — ANY ONE COMPLETES IT</div>
+        <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
+          <b>1 · Say who you are</b> — <button onclick="sphereCorrectServing(1);setTimeout(()=>{const i=document.getElementById('servedHumanInput');if(i)i.focus();},60);" style="background:none;border:none;color:#7fb8ff;cursor:pointer;font:inherit;text-decoration:underline;padding:0;">type your name below</button>.
+          A NEW name on the mesh's own network admits you on the spot. A name the mesh already
+          knows asks that person's other devices to confirm — one tap there finishes it.
+        </div>
+        <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
+          <b>2 · Be vouched for</b> — if this is your own new device, pick up one you already use:
+          it will show “this device says it is yours” on its welcome screen. Tap <i>Yes — it's mine</i>.
+        </div>
+        <div class="m" style="font-size:10.5px;line-height:1.55;color:rgba(220,232,250,0.85);padding:2px 0;">
+          <b>3 · Take an invite</b> — ask a member to open their <i>Welcome</i> screen and tap
+          INVITE SOMEONE, then have them send you the invite text. Paste it here:
+        </div>
+        <div style="display:flex;gap:8px;margin:7px 0 2px;">
+          <input id="invitepaste" placeholder='{"v":1,"host":…,"invite":…}' spellcheck="false" autocapitalize="none" autocorrect="off"
+            style="flex:1;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:11px;padding:7px 10px;font-family:monospace;"/>
+          <button onclick="sphereRedeemInvite()" class="glybtn" style="height:32px;padding:0 13px;border-radius:8px;"><span class="m" style="font-size:8.5px;letter-spacing:0.13em;">REDEEM</span></button>
+        </div>
+        <div class="m" style="font-size:9px;color:rgba(160,195,255,0.5);margin-top:9px;">until then you read the mesh as a visitor: real shape, no names — nothing to be fixed, just the house not assuming who you are</div>
+      </div>`;
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      ${pathCard}
       ${servingRow(d)}
+      ${(() => {
+        // Whose hands hold this machine — the fact that decides whether identity SURVIVES a
+        // relaunch. A personal device rebinds its owner every launch (rung 1, no asking); a
+        // shared one deliberately forgets, because assuming the last person is still at a
+        // shared screen would misattribute everything. Hardware only suggests; the human decides.
+        const role = d.deviceRole || 'shared';
+        const who = ((d.presence || {}).handle || '').trim() || (d.servedHuman !== 'observer' ? d.servedHuman : '');
+        const chipBtn = (on, label, cb, dis) => `
+          <button ${dis ? 'disabled' : `onclick="${cb}"`} class="glybtn" style="height:30px;padding:0 13px;border-radius:9px;${on ? 'border-color:rgba(61,220,151,0.5);color:#9fe8c0;background:rgba(61,220,151,0.1);' : ''}${dis ? 'opacity:0.35;cursor:default;' : ''}">
+            <span class="m" style="font-size:8.5px;letter-spacing:0.13em;">${label}</span></button>`;
+        return `<div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap;">
+          <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">THIS DEVICE IS</span>
+          ${chipBtn(role === 'personal', who ? `MINE — ${esc(who.toUpperCase())}'S` : 'MINE', `sphereSetRole('personal','${who.replace(/[^a-z0-9_-]/gi, '')}')`, !who)}
+          ${chipBtn(role === 'shared', 'SHARED', `sphereSetRole('shared','')`, false)}
+          ${role === 'personal'
+            ? `<span class="m" style="font-size:9px;color:rgba(160,195,255,0.5);">it will know its human at every launch</span>`
+            : `<span class="m" style="font-size:9px;color:rgba(160,195,255,0.5);">${who ? 'a shared device asks again after a restart — mark it MINE to make identity stick' : 'name yourself first, then it can be yours'}</span>`}
+        </div>`;
+      })()}
       ${d.oracle && d.oracle !== 'unsupported' ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
         <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">ORACLE</span>
         <span class="m" style="font-size:10px;color:${d.oracle==='available'?'#7ff0c0':'rgba(190,210,240,0.65)'};">${esc(d.oracle)}</span>
       </div>` : ''}
-      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h,i)=>(h===d.host?'▸':'')+esc(h)).join(' · ')}</div>
+      <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h)=>(h===d.host?'▸':'')+esc(h)+' <span style="color:rgba(174,231,255,0.55);">'+hostNet(h)+'</span>').join(' · ')}</div>
       ${(d.attempts||[]).length ? `<div class="m" style="font-size:9px;color:rgba(150,180,255,0.5);margin-bottom:6px;">${d.attempts.map(esc).join('<br>')}</div>` : ''}
       ${S.jsErr ? `<div class="m" style="font-size:9px;color:rgba(255,160,160,0.8);margin-bottom:6px;">${esc(S.jsErr)}</div>` : ''}
       <div style="margin-bottom:10px;"></div>
@@ -683,11 +1165,21 @@ function refreshScreen() {
 
 function renderButtons() {
   const N = SCREENS.length, Rx = 46, Ry = 45;
+  // The ember calls: when it is THIS device's turn, the games glyph burns warm.
+  const gg = (S.view || {}).game;
+  const myH = (((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '').toLowerCase();
+  const myTurn = gg && gg.status === 'open' && myH && myH !== 'observer' && gg.holder.toLowerCase() === myH;
+  // Ring rotation: with an odd count, a half-step start plants one button at exactly 90° —
+  // dead centre bottom, on top of the surface toggle (it ate the zoom button under signals).
+  // Odd counts start AT top centre instead: evenly spaced, mirror-symmetric about the
+  // vertical axis, and the bottom-centre slot (the toggle's home) falls between buttons.
+  const off = N % 2 === 1 ? 0 : 0.5;
   $('screenbtns').innerHTML = SCREENS.map((key, i) => {
-    const ang = (-90 + (i + 0.5) * (360 / N)) * Math.PI / 180;
+    const ang = (-90 + (i + off) * (360 / N)) * Math.PI / 180;
     const on = key === S.activeScreen;
-    return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
-      <span class="ic" style="color:${on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};">${GLYPHS[key]}</span></button>`;
+    const warm = key === 'games' && myTurn;
+    return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${warm ? 'radial-gradient(circle, rgba(255,178,102,0.4), transparent 66%)' : on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
+      <span class="ic" style="color:${warm ? '#ffcf9e' : on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};${warm ? 'animation:iconpulse 1.2s ease-in-out infinite;' : ''}">${GLYPHS[key]}</span></button>`;
   }).join('');
 }
 
@@ -699,17 +1191,54 @@ function renderChrome() {
   $('holobtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
   $('modetoggle').style.display = street ? 'none' : 'flex';
-  // The door reddens while someone is waiting to be recognised. Colour AND rate, so it reads
-  // as urgency rather than decoration, and so it is legible without colour vision.
-  const waiting = (S.view && S.view.guests_waiting) || 0;
+  // The glyph greets while someone is new (ADR-0026): a warmer colour and a livelier pulse —
+  // "someone new has joined", never urgency. Rate AND colour, so it stays legible without
+  // colour vision.
+  const chromeHuman = ((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '';
+  const claimsForMe = ((S.view && S.view.claims_waiting) || []).filter(c =>
+    chromeHuman && c.handle.toLowerCase() === chromeHuman.toLowerCase()
+    && !((S.dismissedClaims || {})[c.node_id])).length;
+  const arriving = ((S.view && S.view.arrivals) || []).length + claimsForMe;
   const wb = $('welcomebtn');
   if (wb) {
     wb.style.display = street ? 'none' : 'flex';
-    wb.style.color = waiting > 0 ? '#ff6e6e' : '';
-    wb.title = waiting > 0 ? `${waiting} waiting to be recognised` : 'welcome';
+    wb.style.color = arriving > 0 ? '#9fe8c0' : '';
+    wb.title = arriving > 0 ? `${arriving} new arrival${arriving === 1 ? '' : 's'} today` : 'welcome';
     const dot = $('welcomedot'), arc = $('welcomearc');
-    if (dot) dot.style.animation = `iconpulse ${waiting > 0 ? '0.9s' : '2.6s'} ease-in-out infinite`;
-    if (arc) arc.style.opacity = waiting > 0 ? '0.95' : '0.6';
+    if (dot) dot.style.animation = `iconpulse ${arriving > 0 ? '1.4s' : '2.6s'} ease-in-out infinite`;
+    if (arc) arc.style.opacity = arriving > 0 ? '0.95' : '0.6';
+  }
+  // The visitor's compass shows whenever this device reads as a guest (or is held) — and
+  // never on the device screen itself, where the path it points to already is.
+  const mem = ((S.device || {}).membership || {});
+  const gb = $('guestbar');
+  if (gb) {
+    const guesty = (mem.state === 'guest' || mem.state === 'held') && S.activeScreen !== 'device' && !street;
+    gb.style.display = guesty ? 'flex' : 'none';
+    const gt = $('guestbartext');
+    if (gt) gt.textContent = mem.state === 'held'
+      ? 'HELD — TAP TO SEE WHEN TO TRY AGAIN'
+      : 'VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP';
+  }
+  // The recurring identification ask: ~25s after a visitor settles, then every 3 minutes
+  // until the path is begun. Never over the device screen (the path lives there), never
+  // while the human is typing, gone the moment membership lands.
+  const gn = $('guestnudge');
+  if (gn) {
+    const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (mem.state !== 'guest' || street) {
+      gn.style.display = 'none';
+      S.guestSince = 0;
+    } else {
+      if (!S.guestSince) { S.guestSince = Date.now(); }
+      const wait = S.guestNudgeLastAt ? 180000 : 25000;
+      const since = S.guestNudgeLastAt || S.guestSince;
+      const due = Date.now() - since > wait;
+      if (due && S.activeScreen !== 'device' && !typing && gn.style.display !== 'flex') {
+        gn.style.display = 'flex';
+        S.guestNudgeLastAt = Date.now();
+      }
+    }
   }
   const showBadge = !S.linkOk || !!S.jsErr;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
@@ -759,6 +1288,61 @@ window.sphereScreen = (k) => { S.activeScreen = k; S.holoHidden = false; renderB
 window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidden = false; renderButtons(); renderChrome(); refreshScreen(); };
 // Toggle the live roster against the record of members not seen in over a day.
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
+window.sphereRosterToggle = (id) => { S.rosterOpen = S.rosterOpen || {}; S.rosterOpen[id] = !S.rosterOpen[id]; refreshScreen(); };
+// Inline handlers resolve on window, never module scope — every act the HTML strings call
+// must live here (the badge's bare `S.gameNav=` threw ReferenceError on click).
+window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
+// Values interpolated into inline handlers must never carry quotes — JSON.stringify emits
+// double quotes, which TERMINATE a double-quoted attribute (the MINE button's SyntaxError).
+// Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
+window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
+window.sphereSponsor = (nodeId, handle) => toApp('sponsor', { node_id: nodeId, handle });
+window.sphereRedeemInvite = () => {
+  const el = document.getElementById('invitepaste');
+  const text = (el && el.value || '').trim();
+  if (!text) return;
+  toApp('inviteRedeem', { payload: text });
+  if (el) { el.value = ''; el.blur(); }
+};
+window.sphereClaimDismiss = (id) => { (S.dismissedClaims = S.dismissedClaims || {})[id] = 1; refreshScreen(); };
+// confirm() is silent inside WKWebView (no UI delegate) — the close is a two-tap arm, like SEVER.
+window.sphereGameClose = () => {
+  if (S.closeArmed) { S.closeArmed = false; toApp('game', { act: 'close' }); }
+  else { S.closeArmed = true; setTimeout(() => { if (S.closeArmed) { S.closeArmed = false; try { refreshScreen(); } catch (_) {} } }, 4000); }
+  refreshScreen();
+};
+// ---- the games (Riddle of the Mesh / The Campfire) ----
+window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
+// NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
+// a payload "kind" would overwrite the message kind and the bridge would drop the act.
+window.sphereGameBegin = (kind) => { S.gameBeginAt = Date.now(); toApp('game', { act: 'begin', game_kind: kind }); S.gameNav = 'live'; refreshScreen(); };
+window.sphereGamePassTo = (id) => { S.gamePassTo = id; refreshScreen(); };
+window.sphereGameSubmit = () => {
+  const inp = document.getElementById('gameinput');
+  const text = (inp && inp.value || '').trim();
+  if (!text) return;
+  const g = (S.view || {}).game || {};
+  toApp('game', { act: g.kind === 'riddle' ? 'guess' : 'line', text, to: S.gamePassTo || '' });
+  if (inp) { inp.value = ''; inp.blur(); }
+  S.gamePassTo = '';
+  // The door may take seconds to judge under load. Leaving the question live read as "answer
+  // again" — Betty answered three times and each duplicate became a recorded guess. Mark the
+  // move in flight; the input area renders JUDGING… until the state moves or the wait expires.
+  S.gameActAt = Date.now();
+  S.gameActEntries = (g.entries || []).length;
+  S.gameActHolder = g.holder || '';
+  refreshScreen();
+};
+// One ticker drives every countdown on the page (turn clocks, roster badges).
+setInterval(() => {
+  document.querySelectorAll('[data-deadline]').forEach(el => {
+    const d = parseInt(el.dataset.deadline, 10) || 0;
+    const r = Math.max(0, d - Math.floor(Date.now() / 1000));
+    el.textContent = String(Math.floor(r / 60)).padStart(2, '0') + ':' + String(r % 60).padStart(2, '0');
+    if (r === 0) el.style.color = '#ff8fa3';
+    else if (r < 60) el.style.color = '#ffb266';
+  });
+}, 1000);
 // Recognise a guest, or hold them off. "not now" is a 5-minute retry window, not a ban — the mesh
 // cannot tell a hostile stranger from a housemate on a new phone.
 window.sphereStanding = (act, nodeId) => { toApp('standing', { act, node_id: nodeId }); };
@@ -778,8 +1362,8 @@ window.sphereSubmitThreadAnswer = (id) => {
   if (text) toApp('answerThread', { id, text });
   refreshScreen();
 };
-window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device') refreshScreen(); };
-window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
+window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device' || S.activeScreen === 'games') refreshScreen(); };
+window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device' || S.activeScreen === 'welcome') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
 function renderInviteQR() {
   const box = $('inviteqr'); if (!box || !S.invite) return;
   let svg = '';
@@ -790,8 +1374,19 @@ function renderInviteQR() {
     svg = `<div style="padding:12px;border-radius:14px;background:rgba(238,242,251,0.92);display:inline-block;">${qr.createSvgTag({cellSize: 3, margin: 0})}</div>`;
   }
   // The pasteable payload always renders — the QR is a convenience, not the channel.
-  box.innerHTML = svg + `<div class="m" style="max-width:340px;margin-top:8px;font-size:8px;line-height:1.5;color:rgba(150,180,255,0.5);word-break:break-all;user-select:all;">${esc(S.invite)}</div>`;
+  // SEND TO MESSAGES hands the QR image to a blank Messages compose (native side renders
+  // the PNG and opens the sheet) — for inviting someone who isn't in the room to scan.
+  box.innerHTML = svg + `
+    <div style="margin-top:10px;">
+      <button onclick="sphereShareInvite()" class="glybtn" style="height:30px;padding:0 14px;border-radius:9px;display:inline-flex;align-items:center;gap:8px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.3 8.9 8.9 0 0 1-3.2-.6L4 20l1-4.1a8.1 8.1 0 0 1-1.5-4.6A8.38 8.38 0 0 1 12 3a8.38 8.38 0 0 1 9 8.5z"/></svg>
+        <span class="m" style="font-size:9px;letter-spacing:0.14em;">SEND TO MESSAGES</span>
+      </button>
+    </div>
+    <div class="m" style="max-width:340px;margin-top:8px;font-size:8px;line-height:1.5;color:rgba(150,180,255,0.5);word-break:break-all;user-select:all;">${esc(S.invite)}</div>`;
 }
+// Inline onclick resolves on window, not module scope — S.invite must travel through here.
+window.sphereShareInvite = () => { if (S.invite) toApp('shareInvite', { payload: S.invite }); };
 window.sphereUnenroll = () => {
   if (!S.unenrollArmed) {
     S.unenrollArmed = true; refreshScreen();
@@ -838,13 +1433,31 @@ function servingRow(d) {
     <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">I AM</span>
     <input id="servedHumanInput" value="" placeholder="your name" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
     <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-    <button onclick="sphereCorrectServing(0)" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
+    <button onclick="sphereCancelServing()" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
   </div>`;
 }
 window.sphereCorrectServing = (on) => { S.correctServing = !!on; refreshScreen(); };
 
 // Set who this device is serving (ADR-0016) — the handle its reports attribute to.
-window.setServedHuman = () => { const el = document.getElementById('servedHumanInput'); const v = el && el.value.trim(); if (v) { toApp('setHuman', { name: v }); S.correctServing = false; refreshScreen(); } };
+// Commit and cancel BOTH clear + blur the input: a leftover value (or WKWebView's habit of
+// leaving focus on the input after a button click) would trip the typing-guard and freeze
+// the device screen's renders permanently — taps still fired, but nothing ever repainted.
+window.setServedHuman = () => {
+  const el = document.getElementById('servedHumanInput');
+  const v = el && el.value.trim();
+  if (v) {
+    toApp('setHuman', { name: v });
+    el.value = ''; el.blur();
+    S.correctServing = false;
+    refreshScreen();
+  }
+};
+window.sphereCancelServing = () => {
+  const el = document.getElementById('servedHumanInput');
+  if (el) { el.value = ''; el.blur(); }
+  S.correctServing = false;
+  refreshScreen();
+};
 window.onerror = (msg, src, line) => {
   // Cross-origin scripts (CDN three.js/qrcode) report opaquely as "Script error." with no
   // detail — that is noise, not diagnosis; only badge errors that carry information.
@@ -858,8 +1471,25 @@ window.sphereUpdate = (view) => {
   try { renderCallouts(); } catch (e) { S.jsErr = 'callouts: ' + e.message; }
   try { refreshScreen(); } catch (e) { S.jsErr = 'screen ' + S.activeScreen + ': ' + e.message; }
   renderChrome();
+  renderButtons();   // the games glyph burns warm the moment the ember reaches this device
+  // First data after launch: turn the globe so home is under the camera. Once — after that
+  // the globe is the human's to spin.
+  if (!S.centeredOnce) { try { centerOnSelf(); S.centeredOnce = true; } catch (e) {} }
   if (S.mode === 'street') toApp('nodes', { nodes: collectNodes() });
 };
+// Aim the self node (or the mesh anchor when self carries no fix) at the camera — the launch
+// view is "the world with home in front of you", menus tucked away.
+function centerOnSelf() {
+  if (!G.group || !G.anchorDirs.length) return;
+  const P = peers();
+  let i = P.findIndex(p => p.local && (p.located || p.hasAnchor));
+  if (i < 0) i = P.findIndex(p => p.located);
+  if (i < 0 || !G.anchorDirs[i]) return;
+  const saved = G.diveDir;
+  G.diveDir = G.anchorDirs[i].clone();
+  G.group.quaternion.copy(diveAimQ());
+  G.diveDir = saved;
+}
 window.sphereLinkDown = (msg) => { S.linkOk = false; S.linkErr = msg || ''; renderChrome(); };
 // The native map finished its own flight and the human surfaced back to orbit.
 // Reverse of the dive: called at the crossfade point of the ascent (25% street zoom-out
@@ -935,6 +1565,25 @@ window.sphereDive = (i) => {
 window.sphereDiveFrontier = (i) => {
   const F = frontierNodes(); const f = F[i]; if (!f || !f.located) return;
   beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, G.frontierDirs[i] || latLon(f.lat, f.lon));
+};
+// The visitor nudge: SAY WHO I AM lands on the device screen with the name box focused —
+// the shortest possible distance between "the mesh doesn't know you" and fixing it.
+window.sphereGuestNudgeGo = () => {
+  const gn = $('guestnudge'); if (gn) gn.style.display = 'none';
+  window.sphereScreen('device');
+  if (typeof sphereCorrectServing === 'function') sphereCorrectServing(1);
+  setTimeout(() => { const i = document.getElementById('servedHumanInput'); if (i) i.focus(); }, 120);
+};
+window.sphereGuestNudgeLater = () => {
+  const gn = $('guestnudge'); if (gn) gn.style.display = 'none';
+  S.guestNudgeLastAt = Date.now();   // the ask returns in three minutes
+};
+// A visitor's knock, shown where it came from — the welcome card's SHOW ON GLOBE dives to the
+// arrival's self-reported position so the household can verify with their eyes (a "new phone"
+// knocking from a foreign datacenter is a question, not a welcome).
+window.sphereVisitorDive = (lat, lon, name) => {
+  if (!lat && !lon) return;
+  beginDive({ lat, lon, name: 'visitor ' + name, color: 0xffb266 }, latLon(lat, lon));
 };
 function collectNodes() {
   const P = peers(), F = frontierNodes();

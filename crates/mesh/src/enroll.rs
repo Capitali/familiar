@@ -50,7 +50,7 @@ pub const DENY_RETRY_SECS: i64 = 5 * 60;
 
 /// A node's attestation that it accepts the Three Laws — the covenant it asks to join under.
 /// Retained on approval so a node can be held to what it accepted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attestation {
     pub laws_version: u32,
     /// The node's own words accepting the covenant (free-form, but must be non-empty).
@@ -107,6 +107,8 @@ pub enum StatusOutcome {
     Unknown,
 }
 
+/// The short display code kept on a legacy pending record (first 6 of the node id).
+#[cfg(test)]
 fn short_code(node_id: &str) -> String {
     node_id.chars().take(6).collect()
 }
@@ -144,37 +146,34 @@ pub(crate) fn submit_request(dir: &Path, raw: &[u8], sig_hex: &str, now: i64) ->
     // Spent denial — clear it so the record does not accumulate.
     let _ = allow_retry(dir, &req.node.node_id);
 
-    let pending = Pending {
-        node: req.node.clone(),
-        attestation: req.attestation.clone(),
-        received_at: now,
-        code: short_code(&req.node.node_id),
-    };
-
-    // Auto-admit if the human has set a standing auto-accept, or opened a timed invite window. A node
-    // that attests the Laws (verified above: it signed a non-empty covenant statement with the key
-    // its id fingerprints) is admitted without a second approval. This stays a *deliberate* switch,
-    // not implied by `allow_mesh` — a headless node may serve the mesh yet route each enrollment to a
-    // human for approval (the authority proxy). Opening auto-peering is its own human decision.
-    let auto = crate::config::load(dir)
-        .map(|c| c.auto_accept_enrollments)
-        .unwrap_or(false);
-    if auto || invite_open(dir, now) {
-        let grant = mint_grant(dir, &cred, &req.node, now)?;
-        remove_pending(dir, &req.node.node_id)?;
-        return Ok(Submitted::Granted(Box::new(grant)));
-    }
-
-    write_json(dir, PENDING_DIR, &req.node.node_id, &pending)?;
-    Ok(Submitted::Pending(pending))
+    // The two-filter door (ADR-0026): a node that attests the Laws (verified above — it signed a
+    // non-empty covenant statement with the key its id fingerprints) has satisfied the DEVICE
+    // CONTRACT filter, and that is all a knock needs. It is admitted as a **guest** — a real
+    // cert, so its reads succeed and return the projection — and stays one until the HUMAN
+    // IDENTITY filter is satisfied by evidence (`/mesh/introduce`, the rules engine). Nothing
+    // pends, no window is consulted, and `auto_accept_enrollments` is not read: there is no
+    // switch, because reaching a door was never the thing that admitted anyone — evidence is.
+    let grant = mint_grant(dir, &cred, &req.node, Some(&req.attestation), now)?;
+    remove_pending(dir, &req.node.node_id)?;
+    Ok(Submitted::Granted(Box::new(grant)))
 }
 
-/// A node polling for a decision on its request.
+/// A node polling for a decision on its request. Under the two-filter door nothing pends — but
+/// a pending filed by the OLD door (its knock was signature-verified when it was filed) would
+/// otherwise wait forever, so the poll upgrades it to a guest grant on the spot. That unhangs
+/// every joiner the old door left stuck, the moment this code deploys.
 pub(crate) fn enroll_status(dir: &Path, node_id: &str) -> Result<StatusOutcome> {
     if let Some(grant) = load_grant(dir, node_id)? {
         return Ok(StatusOutcome::Granted(Box::new(grant)));
     }
-    if pending_path(dir, node_id).exists() {
+    if let Some(p) = load_pending(dir, node_id)? {
+        if let Some(cred) = group::load(dir)? {
+            if let Ok(grant) = mint_grant(dir, &cred, &p.node, Some(&p.attestation), p.received_at)
+            {
+                remove_pending(dir, node_id)?;
+                return Ok(StatusOutcome::Granted(Box::new(grant)));
+            }
+        }
         return Ok(StatusOutcome::Pending);
     }
     Ok(StatusOutcome::Unknown)
@@ -186,7 +185,7 @@ pub fn approve(dir: &Path, node_id: &str, now: i64) -> Result<Grant> {
     let cred = group::load(dir)?.ok_or_else(|| Error::Untrusted("no group enrolled".into()))?;
     let pending = load_pending(dir, node_id)?
         .ok_or_else(|| Error::Malformed(format!("no pending request for {node_id}")))?;
-    let grant = mint_grant(dir, &cred, &pending.node, now)?;
+    let grant = mint_grant(dir, &cred, &pending.node, Some(&pending.attestation), now)?;
     remove_pending(dir, node_id)?;
     Ok(grant)
 }
@@ -205,6 +204,8 @@ pub fn deny(dir: &Path, node_id: &str, now: i64) -> Result<bool> {
             at: now,
         },
     )?;
+    // Dual-write (ADR-0026 Phase 2): the hold window lives on the record too.
+    let _ = crate::record::record_hold(dir, node_id, now + DENY_RETRY_SECS, now);
     let path = pending_path(dir, node_id);
     if path.exists() {
         std::fs::remove_file(&path)?;
@@ -242,11 +243,44 @@ pub fn denied_for(dir: &Path, node_id: &str, now: i64) -> i64 {
 /// Let a denied node ask again immediately — the undo for a mis-tap.
 pub fn allow_retry(dir: &Path, node_id: &str) -> Result<bool> {
     let path = dir.join(DENIED_DIR).join(format!("{node_id}.json"));
+    let _ = crate::record::clear_hold(dir, node_id);
     if path.exists() {
         std::fs::remove_file(&path)?;
         return Ok(true);
     }
     Ok(false)
+}
+
+/// Every grant this node has minted — the migration's primary source (ADR-0026 Phase 2).
+pub(crate) fn list_grants(dir: &Path) -> Vec<Grant> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir.join(GRANTED_DIR)) {
+        for e in entries.flatten() {
+            if let Ok(s) = std::fs::read_to_string(e.path()) {
+                if let Ok(g) = serde_json::from_str::<Grant>(&s) {
+                    out.push(g);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.membership.node_id.cmp(&b.membership.node_id));
+    out
+}
+
+/// Every live denial — folded into `held_until` by the migration.
+pub(crate) fn list_denials(dir: &Path) -> Vec<Denial> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir.join(DENIED_DIR)) {
+        for e in entries.flatten() {
+            if let Ok(s) = std::fs::read_to_string(e.path()) {
+                if let Ok(d) = serde_json::from_str::<Denial>(&s) {
+                    out.push(d);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    out
 }
 
 /// All pending requests, oldest first.
@@ -266,22 +300,19 @@ pub fn list_pending(dir: &Path) -> Result<Vec<Pending>> {
     Ok(out)
 }
 
-/// Open a pairing/invite window until `until` (unix secs): requests that arrive before then are
-/// auto-approved. Use for "authorize this expansion once" so many devices don't need many taps.
+/// RETIRED as a door mechanism (ADR-0026: the two-filter door consults no windows — every valid
+/// knock lands a guest). Kept so callers that open a "window" (auto-formation, older CLIs) keep
+/// working as a harmless recorded intent; nothing reads it on the admission path any more.
 pub fn open_invite(dir: &Path, until: i64) -> Result<()> {
     write_raw(dir, INVITE_FILE, &until.to_string())
 }
 
-/// When the invite window closes (0 / absent = no window).
+/// When the invite window closes (0 / absent = no window). See [`open_invite`] — retired.
 pub fn invite_until(dir: &Path) -> i64 {
     std::fs::read_to_string(dir.join(INVITE_FILE))
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
-}
-
-fn invite_open(dir: &Path, now: i64) -> bool {
-    now < invite_until(dir)
 }
 
 // ---- the JOIN side: a node requesting to join another familiar by covenant ----------
@@ -376,9 +407,12 @@ fn persist_covenant(dir: &Path, grant: &Grant) -> Result<()> {
     group::save_credential(dir, &cred)
 }
 
-/// A minimal blocking HTTP/1.1 client — dependency-free (std `TcpStream`), matching the crate's
-/// no-crates ethos. Sends `Connection: close` and reads the response to EOF, then splits head/body.
-/// Sufficient for the small JSON bodies the enroll endpoints return on a LAN/tailnet.
+/// A minimal blocking HTTP/1.1 client **over TLS**. The mesh port has been TLS-only since
+/// ADR-0009 Phase 1, and this client spoke plaintext to it for a while — every Rust-native join
+/// failed at the first byte while the device clients (which had TLS) worked, so the breakage was
+/// invisible from the fleet. Same posture as the async transport's dials, via the shared config:
+/// encrypt to whoever answers; the request's own signature carries the authenticity.
+/// Sends `Connection: close` and reads the response to EOF, then splits head/body.
 fn http(
     host: &str,
     port: u16,
@@ -397,6 +431,14 @@ fn http(
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
 
+    // SNI wants a name; a bare IP falls back to the same constant the async dial uses.
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
+        .unwrap_or_else(|_| rustls::pki_types::ServerName::try_from("familiar-mesh").unwrap());
+    let mut conn =
+        rustls::ClientConnection::new(crate::transport::opportunistic_tls_config(), server_name)
+            .map_err(|e| Error::Malformed(format!("tls: {e}")))?;
+    let mut tls = rustls::Stream::new(&mut conn, &mut stream);
+
     let mut req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
@@ -405,11 +447,21 @@ fn http(
         req.push_str(&format!("{k}: {v}\r\n"));
     }
     req.push_str("\r\n");
-    stream.write_all(req.as_bytes())?;
-    stream.write_all(body)?;
+    tls.write_all(req.as_bytes())?;
+    tls.write_all(body)?;
 
+    // Read to EOF by hand: a peer that drops without a TLS close_notify surfaces as
+    // `UnexpectedEof`, which after `Connection: close` is just how this conversation ends.
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf)?;
+    let mut chunk = [0u8; 4096];
+    loop {
+        match tls.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && !buf.is_empty() => break,
+            Err(e) => return Err(Error::Io(e)),
+        }
+    }
     let sep = buf
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -432,14 +484,35 @@ fn mint_grant(
     dir: &Path,
     cred: &group::GroupCredential,
     node: &NodeIdentity,
+    attestation: Option<&Attestation>,
     now: i64,
 ) -> Result<Grant> {
-    let membership = cred.mint_membership(
-        &node.node_id,
-        &node.pubkey,
-        now,
-        group::DEFAULT_CERT_TTL_SECS,
-    )?;
+    // Two ways to hold the door (ADR-0026 §6): the group secret (the founding doors), or a
+    // minting warrant — the group key's deliberate act empowering this member node, so certs
+    // it mints verify by chain (cert → warrant → group key) with no secret anywhere near it.
+    let membership = if cred.can_mint() {
+        cred.mint_membership(
+            &node.node_id,
+            &node.pubkey,
+            now,
+            group::DEFAULT_CERT_TTL_SECS,
+        )?
+    } else if let Some(w) = group::load_warrant(dir, now) {
+        let key = NodeKey::load_or_mint(dir, "familiar")?;
+        group::mint_membership_warranted(
+            &key,
+            &w,
+            &node.node_id,
+            &node.pubkey,
+            now,
+            group::DEFAULT_CERT_TTL_SECS,
+        )?
+    } else {
+        return Err(Error::Untrusted(
+            "this node holds no group secret and no warrant — it relays knocks, it cannot admit"
+                .into(),
+        ));
+    };
     let grant = Grant {
         membership,
         group_id: cred.group_id.clone(),
@@ -447,31 +520,38 @@ fn mint_grant(
         group_label: cred.label.clone(),
     };
     write_json(dir, GRANTED_DIR, &node.node_id, &grant)?;
-    // Admission is automatic (ADR-0015); DISCLOSURE is not (ADR-0020) — a fresh member reads as
-    // a guest until a human grants standing. That decision needs a human to actually be ASKED,
-    // or a new member sits unnoticed forever (the 2026-07-29 installer sat in the roster and
-    // nobody was asked anything). So admitting files a question on this node; devices reading
-    // their worldview from here surface it, routing addresses it to whoever is present, and the
-    // question system's own cadence (re-asking, rest periods) is the escalation. Origin "need":
-    // a stranger awaiting a human decision IS an unmet need for human authority. Best-effort —
-    // a failure to file must never fail the admission itself. Nothing ever auto-grants; an
-    // unanswered question leaves the member a guest, which is the safe resting state.
+    // Dual-write (ADR-0026 Phase 2): the record mirrors the grant — and RETAINS the
+    // attestation the legacy flow used to drop with its pending record.
+    let _ = crate::record::upsert_enrolled(dir, &node.node_id, attestation, now);
+    // No question is filed (ADR-0026: nothing waits on an answer — a guest is the stable
+    // resting state, not a pending decision). The arrival is an informational observation:
+    // it reaches the feed and the welcome list, and asks nothing of anyone. Best-effort — a
+    // failure to record it must never fail the admission.
     let short: String = node.node_id.chars().take(8).collect();
     let label = if node.label.trim().is_empty() {
         short.clone()
     } else {
         node.label.trim().to_string()
     };
-    let _ = familiar_kernel::question::add(
-        dir,
-        &format!(
-            "A new device joined the mesh: “{label}” ({short}). Who does it belong to? \
-It reads as a guest until someone grants it standing."
-        ),
-        "need",
+    let obs = familiar_kernel::observation::Observation::new(
+        format!("device:{label}"),
+        "joined the mesh",
+        "as a guest — reading the projection until an identity is established",
+        "mesh",
+        "mesh",
         now,
+        1.0,
     );
+    let _ = familiar_kernel::observation::record(dir, obs);
     Ok(grant)
+}
+
+/// Whether this door has minted a grant for `node_id` — the covenant filter held here, even if
+/// the attestation text predates the record store (the legacy flow deleted it on approval).
+pub(crate) fn has_grant(dir: &Path, node_id: &str) -> bool {
+    dir.join(GRANTED_DIR)
+        .join(format!("{node_id}.json"))
+        .exists()
 }
 
 fn pending_path(dir: &Path, node_id: &str) -> std::path::PathBuf {
@@ -560,99 +640,98 @@ mod tests {
     }
 
     #[test]
-    fn request_pends_then_approval_grants_a_verifiable_cert() {
-        let (host, joiner) = setup("approve");
+    fn a_valid_knock_lands_a_guest_grant_immediately() {
+        // The two-filter door (ADR-0026): no window, no switch, no queue. A verified,
+        // covenant-attesting knock gets a real cert on the spot — and reads as a GUEST until
+        // an identity is established by evidence.
+        let (host, joiner) = setup("knock");
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
 
-        // Submit → pending (no invite window).
-        match submit_request(&host, &raw, &sig, NOW).unwrap() {
-            Submitted::Pending(p) => assert_eq!(p.node.node_id, joiner.node_id()),
-            _ => panic!("expected pending"),
-        }
-        assert!(matches!(
-            enroll_status(&host, &joiner.node_id()).unwrap(),
-            StatusOutcome::Pending
-        ));
-        assert_eq!(list_pending(&host).unwrap().len(), 1);
-
-        // Human approves → a grant whose cert verifies under the group key.
-        let grant = approve(&host, &joiner.node_id(), NOW).unwrap();
+        let grant = match submit_request(&host, &raw, &sig, NOW).unwrap() {
+            Submitted::Granted(g) => g,
+            _ => panic!("a valid knock must land a guest grant"),
+        };
         let cred = group::load(&host).unwrap().unwrap();
         let gk = cred.verifying_key().unwrap();
         group::verify_membership(&grant.membership, &gk, &cred.group_id, NOW, &[]).unwrap();
-        assert_eq!(grant.membership.node_id, joiner.node_id());
-        assert!(list_pending(&host).unwrap().is_empty());
+        assert!(list_pending(&host).unwrap().is_empty(), "nothing pends");
 
-        // The joiner can now poll and receive the grant.
-        assert!(matches!(
-            enroll_status(&host, &joiner.node_id()).unwrap(),
-            StatusOutcome::Granted(_)
-        ));
+        // The record holds the two-filter state: contract attested, identity missing.
+        let rec = crate::record::load(&host, &joiner.node_id()).unwrap().unwrap();
+        assert!(rec.attestation.is_some(), "the attestation is retained");
+        assert_eq!(rec.missing_filters(), vec!["identity"]);
+        assert_eq!(
+            crate::standing::standing_of(&host, &joiner.node_id()),
+            crate::standing::Standing::Guest,
+            "a fresh knock reads the projection"
+        );
     }
 
     #[test]
-    fn admission_asks_who_the_new_device_belongs_to() {
-        // ADR-0020: admission is automatic, disclosure is not — and the standing decision needs a
-        // human to actually be ASKED. Every path that mints a grant must file the question; the
-        // 2026-07-29 installer sat in the roster precisely because nothing did.
-        let (host, joiner) = setup("asks");
-        open_invite(&host, NOW + 300).unwrap();
+    fn admission_records_an_arrival_and_asks_nothing() {
+        // ADR-0026: no decision is pending at the door, so no question is filed — the arrival
+        // is an informational observation feeding the welcome list.
+        let (host, joiner) = setup("arrival");
         let (raw, sig) = signed_request(&joiner, NOW, "nq");
         assert!(matches!(
             submit_request(&host, &raw, &sig, NOW).unwrap(),
             Submitted::Granted(_)
         ));
         let qs = familiar_kernel::question::load(&host).unwrap();
-        let q = qs
-            .iter()
-            .find(|q| q.text.contains("Kali-Jeff") && q.text.contains("standing"))
-            .expect("admitting a device must file a who-is-this question");
-        assert_eq!(
-            q.origin, "need",
-            "a stranger awaiting a decision outranks the root question"
+        assert!(
+            !qs.iter().any(|q| q.text.contains("standing") || q.text.contains("belong")),
+            "the who-does-it-belong-to question is retired"
         );
-        // Idempotent per node: a second admission of the same device must not ask twice.
-        let n = qs.iter().filter(|x| x.text == q.text).count();
-        assert_eq!(n, 1);
+        let obs = familiar_kernel::observation::load(&host).unwrap();
+        assert!(
+            obs.iter().any(|o| o.action == "joined the mesh"),
+            "the arrival must reach the feed"
+        );
     }
 
     #[test]
-    fn a_denial_holds_for_five_minutes_then_lets_them_ask_again() {
+    fn a_hold_blocks_the_next_knock_until_the_window_lapses() {
+        // A hold (deny) is a correction cool-off: a held stranger's knock is ignored outright —
+        // not queued, not granted — until the short window lapses.
         let (host, joiner) = setup("deny_window");
-        let (raw, sig) = signed_request(&joiner, NOW, "d1");
-        assert!(matches!(
-            submit_request(&host, &raw, &sig, NOW).unwrap(),
-            Submitted::Pending(_)
-        ));
+        deny(&host, &joiner.node_id(), NOW).unwrap();
 
-        assert!(
-            deny(&host, &joiner.node_id(), NOW).unwrap(),
-            "a pending record was there"
-        );
-        assert!(
-            list_pending(&host).unwrap().is_empty(),
-            "denying clears the pending"
-        );
-
-        // Inside the window: ignored outright, not re-queued — the whole point, so a retry loop
-        // cannot train a human to dismiss the ask reflexively.
-        let (raw2, sig2) = signed_request(&joiner, NOW + 10, "d2");
-        match submit_request(&host, &raw2, &sig2, NOW + 10).unwrap() {
+        let (raw, sig) = signed_request(&joiner, NOW + 10, "d1");
+        match submit_request(&host, &raw, &sig, NOW + 10).unwrap() {
             Submitted::Denied { retry_in } => assert!((1..=DENY_RETRY_SECS).contains(&retry_in)),
             _ => panic!("expected Denied inside the retry window"),
         }
-        assert!(
-            list_pending(&host).unwrap().is_empty(),
-            "a denied retry must not re-queue"
-        );
 
-        // After the window: they may ask again, and it pends normally.
-        let (raw3, sig3) = signed_request(&joiner, NOW + DENY_RETRY_SECS + 1, "d3");
+        // After the window: the knock lands a guest grant like any other.
+        let (raw2, sig2) = signed_request(&joiner, NOW + DENY_RETRY_SECS + 11, "d2");
         assert!(matches!(
-            submit_request(&host, &raw3, &sig3, NOW + DENY_RETRY_SECS + 1).unwrap(),
-            Submitted::Pending(_)
+            submit_request(&host, &raw2, &sig2, NOW + DENY_RETRY_SECS + 11).unwrap(),
+            Submitted::Granted(_)
         ));
-        assert_eq!(list_pending(&host).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_legacy_pending_upgrades_to_a_guest_grant_on_poll() {
+        // A pending filed by the OLD door would wait forever now that nothing approves. Its
+        // knock was signature-verified when filed, so the poll upgrades it on the spot.
+        let (host, joiner) = setup("legacy_pending");
+        let pending = Pending {
+            node: joiner.identity(),
+            attestation: Attestation {
+                laws_version: LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: NOW,
+            },
+            received_at: NOW,
+            code: short_code(&joiner.node_id()),
+        };
+        write_json(&host, PENDING_DIR, &joiner.node_id(), &pending).unwrap();
+
+        match enroll_status(&host, &joiner.node_id()).unwrap() {
+            StatusOutcome::Granted(g) => assert_eq!(g.membership.node_id, joiner.node_id()),
+            _ => panic!("a stuck pending must upgrade to a guest grant"),
+        }
+        assert!(list_pending(&host).unwrap().is_empty());
     }
 
     #[test]
@@ -675,21 +754,16 @@ mod tests {
     }
 
     #[test]
-    fn invite_window_auto_approves() {
-        let (host, joiner) = setup("invite");
-        open_invite(&host, NOW + 300).unwrap();
+    fn the_door_consults_no_windows_and_no_switches() {
+        // Neither an open invite window nor auto_accept matters any more: the same knock lands
+        // the same guest grant with the window long closed and the switch never set.
+        let (host, joiner) = setup("no_windows");
+        open_invite(&host, NOW - 1000).unwrap(); // long closed
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
         match submit_request(&host, &raw, &sig, NOW).unwrap() {
             Submitted::Granted(g) => assert_eq!(g.membership.node_id, joiner.node_id()),
-            _ => panic!("invite window should auto-approve"),
+            _ => panic!("every valid knock lands a guest grant"),
         }
-        // After the window closes, a new joiner pends again.
-        let other = NodeKey::load_or_mint(&fresh("invite_other"), "phone").unwrap();
-        let (raw2, sig2) = signed_request(&other, NOW + 400, "n2");
-        assert!(matches!(
-            submit_request(&host, &raw2, &sig2, NOW + 400).unwrap(),
-            Submitted::Pending(_)
-        ));
     }
 
     #[test]
@@ -705,15 +779,64 @@ mod tests {
     }
 
     #[test]
-    fn deny_removes_a_pending_request() {
-        let (host, joiner) = setup("deny");
+    fn a_warranted_covenant_node_holds_the_door_and_an_unwarranted_one_cannot() {
+        // ADR-0026 §6 / the kill-the-lighthouse property: a member node with a warrant admits
+        // knocks locally — no group secret anywhere near it — and its grants verify by chain.
+        let (founder_dir, joiner) = setup("warrant_door");
+        let founder_cred = group::load(&founder_dir).unwrap().unwrap();
+
+        // The door: a covenant (secret-less) member node.
+        let door_dir = fresh("warrant_door_node");
+        let door = NodeKey::load_or_mint(&door_dir, "mac-door").unwrap();
+        let door_id = door.identity();
+        let m = founder_cred
+            .mint_membership(&door_id.node_id, &door_id.pubkey, NOW, DEFAULT_CERT_TTL_SECS)
+            .unwrap();
+        group::save_credential(
+            &door_dir,
+            &group::GroupCredential::covenant(
+                founder_cred.group_id.clone(),
+                founder_cred.group_pubkey.clone(),
+                "river".into(),
+                m,
+            ),
+        )
+        .unwrap();
+
+        // Unwarranted: the door cannot admit — it relays (the transport's job), never errs open.
+        let (raw, sig) = signed_request(&joiner, NOW, "wd1");
+        assert!(matches!(
+            submit_request(&door_dir, &raw, &sig, NOW),
+            Err(Error::Untrusted(_))
+        ));
+
+        // Warranted: the same knock lands a guest grant whose cert verifies by chain.
+        let w = group::issue_warrant(&founder_cred, &door_id.node_id, &door_id.pubkey, NOW, 3600)
+            .unwrap();
+        group::install_warrant(&door_dir, &w, NOW).unwrap();
+        let grant = match submit_request(&door_dir, &raw, &sig, NOW + 1).unwrap() {
+            Submitted::Granted(g) => g,
+            _ => panic!("a warranted door admits"),
+        };
+        assert!(grant.membership.warrant.is_some(), "the cert carries its chain");
+        let gk = founder_cred.verifying_key().unwrap();
+        group::verify_membership(&grant.membership, &gk, &founder_cred.group_id, NOW + 2, &[])
+            .unwrap();
+    }
+
+    #[test]
+    fn a_granted_guest_keeps_its_grant_through_a_hold() {
+        // A hold narrows what happens NEXT (no establishment, no fresh knock) — it never
+        // retracts the guest floor: the projection is safe by construction (ADR-0020/0026).
+        let (host, joiner) = setup("hold_keeps");
         let (raw, sig) = signed_request(&joiner, NOW, "n1");
         submit_request(&host, &raw, &sig, NOW).unwrap();
-        assert!(deny(&host, &joiner.node_id(), NOW).unwrap());
-        assert!(!deny(&host, &joiner.node_id(), NOW).unwrap()); // already gone
+        deny(&host, &joiner.node_id(), NOW + 5).unwrap();
         assert!(matches!(
             enroll_status(&host, &joiner.node_id()).unwrap(),
-            StatusOutcome::Unknown
+            StatusOutcome::Granted(_)
         ));
+        let rec = crate::record::load(&host, &joiner.node_id()).unwrap().unwrap();
+        assert_eq!(rec.held_until, Some(NOW + 5 + DENY_RETRY_SECS));
     }
 }

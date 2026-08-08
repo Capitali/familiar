@@ -6,6 +6,8 @@ import WatchConnectivity
 struct FamiliarAgentApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
+    // APNs: the token callback lands on the app delegate (PushRegistration.swift).
+    @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
 
     init() {
         // Must register before launch finishes (SPEC.md R12) — can't wait for a view's
@@ -15,15 +17,18 @@ struct FamiliarAgentApp: App {
     }
 
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(model) }
-            .onChange(of: scenePhase) { phase in
-                if phase == .background { BackgroundSync.scheduleNext() }
-            }
+        WindowGroup {
+            RootView(pushDelegate: pushDelegate).environmentObject(model)
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { BackgroundSync.scheduleNext() }
+        }
     }
 }
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    let pushDelegate: PushDelegate
     var body: some View {
         Group {
             if model.enrolled {
@@ -35,7 +40,14 @@ struct RootView: View {
                 EnrollView().background(Fam.bg.ignoresSafeArea()).preferredColorScheme(.dark)
             }
         }
-        .onAppear { model.syncWatch() }
+        .onAppear {
+            model.syncWatch()
+            if model.enrolled { PushRegistration.request(model, delegate: pushDelegate) }
+        }
+        .onChange(of: model.enrolled) { enrolled in
+            // A device that just became a member registers for the ember's push right away.
+            if enrolled { PushRegistration.request(model, delegate: pushDelegate) }
+        }
     }
 }
 
@@ -81,12 +93,20 @@ struct EnrollView: View {
                                 Text("Looking for the mesh…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
                         }.padding(.horizontal, 22)
                     } else {
-                        // Auto-discovery found nothing — offer to retry or use an invite.
-                        Text("Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see.")
+                        // Severed by the human: the device waits for an explicit ask — it must
+                        // never quietly rejoin (there was no way to leave, or to test arriving).
+                        Text(model.severedByHuman
+                             ? "Severed, by your hand. This device holds its key but sends nothing — it rejoins only when you ask."
+                             : "Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see.")
                             .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                             .multilineTextAlignment(.center).padding(.horizontal, 28)
-                        Button { model.autoEnrollTried = false; model.autoEnroll() } label: {
-                            Label("Try again", systemImage: "arrow.clockwise")
+                        Button {
+                            model.severedByHuman = false
+                            model.autoEnrollTried = false
+                            model.autoEnroll()
+                        } label: {
+                            Label(model.severedByHuman ? "Join the mesh" : "Try again",
+                                  systemImage: model.severedByHuman ? "point.3.connected.trianglepath.dotted" : "arrow.clockwise")
                                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: 0x0a1330))
                                 .frame(maxWidth: .infinity).padding(.vertical, 15)
                                 .background(RoundedRectangle(cornerRadius: 14).fill(LinearGradient(colors: [Color(hex: 0x8fb4ff), Color(hex: 0x3f7bff)], startPoint: .top, endPoint: .bottom)))
@@ -233,6 +253,7 @@ struct StatusView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var watch = PhoneWatchLink.shared
     @State private var showJoinQR = false
+    @State private var joinQRHandoff = false
     var body: some View {
         Form {
             Section("Connected") {
@@ -290,14 +311,25 @@ struct StatusView: View {
         .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented(); model.startDiscoveryIfConsented() }
         .sheet(isPresented: $showJoinQR) {
             VStack(spacing: 16) {
-                Text("Join \(model.groupLabel)").font(.headline)
-                if let payload = model.addressPayload, let img = QRKit.image(from: payload) {
+                Text(joinQRHandoff ? "Hand off to my new device" : "Join \(model.groupLabel)").font(.headline)
+                // Re-minted per render: an invite token is single-use and lives ten minutes, so
+                // the QR on screen is always spendable (ADR-0026). Handoff names this device's
+                // own human — the scanner becomes theirs, no third person involved.
+                if let payload = model.invitePayload(handoff: joinQRHandoff), let img = QRKit.image(from: payload) {
                     Image(uiImage: img)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: 320, maxHeight: 320)
-                    Text("Scan with another device to join this familiar").font(.footnote).foregroundStyle(.secondary)
+                    Text(joinQRHandoff
+                         ? "Scan on the new device — it joins as \(model.attributedHuman)"
+                         : "Scan with another device to join this familiar")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if case .member = model.membership, model.attributedHuman != "observer" {
+                        Toggle("This is my own new device", isOn: $joinQRHandoff)
+                            .frame(maxWidth: 320)
+                            .font(.footnote)
+                    }
                 } else {
                     Text("No address yet.").foregroundStyle(.secondary)
                 }

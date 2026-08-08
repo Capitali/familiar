@@ -10,6 +10,7 @@ path.**
 |---|---|---|
 | [Authentication & mesh membership](auth-and-membership.md) | Identity, the covenant, the membership cert, per-request verification | ✅ |
 | [Finding & joining a mesh](finding-and-joining.md) | Rendezvous → the door → auto-enroll → grant (no QR) | ✅ |
+| [Joining & the welcome](join-and-welcome.md) | The two filters → guest → evidence → member; the welcome as a greeting (ADR-0026) | 🔜 |
 | [Worldview read](worldview-read.md) | A client reading the mesh's live state for its console | ✅ |
 | [Observation ingest](observation-ingest.md) | Device sensing → derived observations → the familiar's store | ✅ |
 | [Gossip & federation](gossip-federation.md) | Peer briefs exchange tools / patterns / observations; the mesh converges | ✅ |

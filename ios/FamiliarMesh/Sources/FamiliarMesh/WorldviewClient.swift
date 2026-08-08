@@ -157,6 +157,41 @@ public struct GateStates: Codable, Equatable {
 /// a Glass-like console: the three constitutional meters, the peer roster, the recent feed, the
 /// familiar's own theories, the boundary gates, and a coarse tick/uptime. The later fields are
 /// optional so an older familiar that predates them still decodes.
+/// One row of the welcome screen's greeting: who arrived in the last day, as what, how their
+/// identity was established ("InviteToken", "RotationProof", …), and when. A guest projection
+/// carries these with the names taken out — the mesh greets; the shape is real.
+public struct ArrivalView: Codable, Equatable {
+    public var node_id: String
+    public var label: String
+    /// "member" | "guest".
+    public var state: String
+    /// The established handle (empty for a guest, or an unnamed household device).
+    public var handle: String
+    /// The evidence class that established them (empty for a guest).
+    public var via: String
+    public var at: Int64
+    /// Where the knock came from — verification evidence for the welcome (absent from older
+    /// doors and projected away for guest readers).
+    public var lat: Double?
+    public var lon: Double?
+    public var addr: String?
+    public var build: String?
+}
+
+/// A guest whose refused introduction claimed an existing human — waiting for that human's own
+/// device to vouch (ADR-0026 E2, over the mesh). Member view only. If `handle` is this device's
+/// human, the console asks THEM: "this device says it is yours — vouch?"
+public struct ClaimView: Codable, Equatable {
+    public var node_id: String
+    public var label: String
+    public var handle: String
+    /// The claiming device's key — what a voucher names; the door re-verifies by fingerprint.
+    public var pubkey: String
+    public var since: Int64
+    /// True = the handle is established here (vouch flow); false/absent = a new name (sponsor).
+    public var known: Bool?
+}
+
 public struct Worldview: Codable, Equatable {
     public var group_label: String
     public var node_id: String
@@ -170,6 +205,15 @@ public struct Worldview: Codable, Equatable {
     public var guests_waiting: Int?
     /// Node ids at full standing — lets a console tell a recognised member from a waiting guest.
     public var standing_full: [String]?
+    /// **Who is new** (ADR-0026): arrivals within the last 24 hours — what the welcome screen
+    /// greets. Informational only; nothing here frames a decision. Absent on older familiars.
+    public var arrivals: [ArrivalView]?
+    /// Guests claiming an existing human, awaiting that human's own device (E2 over the mesh).
+    /// Absent on older familiars and in guest projections.
+    public var claims_waiting: [ClaimView]?
+    /// The live mesh game, when one is burning. Just the glance the shell needs — the web
+    /// layer renders the full state from raw JSON. Absent when no fire is lit.
+    public var game: GameGlance?
     public var presence: Double
     public var withdrawn: Bool
     public var service: Double

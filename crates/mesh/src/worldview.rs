@@ -123,6 +123,62 @@ pub struct PeerView {
     pub patterns_offered: usize,
 }
 
+/// One row of the welcome screen: who arrived, in what state, established how, when.
+/// "welcome to these new members" — a greeting, never a gate (ADR-0026 §4).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArrivalView {
+    pub node_id: String,
+    pub label: String,
+    /// "member" | "guest" — a visitor looking around appears too, with no pending-decision framing.
+    pub state: String,
+    /// The established handle, when there is one. Projected away for guest readers.
+    #[serde(default)]
+    pub handle: String,
+    /// How the identity was established ("invite_token", "rotation_proof", …) — empty for a guest.
+    #[serde(default)]
+    pub via: String,
+    pub at: i64,
+    /// Where the knock came from — the visitor's self-reported position and the address the
+    /// door saw, so a human can VERIFY who they are welcoming ("betty's new phone" should not
+    /// be knocking from a Beijing datacenter). Zero/empty when unknown. Projected away for
+    /// guest readers — origin is the household's evidence, not a fellow visitor's.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
+    #[serde(default)]
+    pub addr: String,
+    /// "iOS 26.6 · v69" — what the knocking device says it runs. Identity evidence too.
+    #[serde(default)]
+    pub build: String,
+    /// When the door last heard from this arrival (peer roster), 0 when never — so the
+    /// welcome can say "seen 4m ago" beside the moment they first arrived.
+    #[serde(default)]
+    pub last_seen: i64,
+}
+
+/// The arrivals window — the same 24-hour judgement ADR-0021 uses for the live roster split.
+pub const ARRIVAL_WINDOW_SECS: i64 = 24 * 60 * 60;
+
+/// A guest's claim awaiting the claimed human's own device (ADR-0026 E2, over the mesh): "this
+/// device says it belongs to `handle`". Shown ONLY to member readers; a device of that handle
+/// can mint a voucher from it in one tap — the automatic path for "old user, new device" that
+/// needs no invite paste and no QR. Carries the subject's pubkey because a voucher names a key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimView {
+    pub node_id: String,
+    pub label: String,
+    pub handle: String,
+    /// The claiming device's public key (hex) — what a voucher vouches for; the door re-verifies
+    /// it against the record by fingerprint, so a tampered value only fails the vouch.
+    pub pubkey: String,
+    pub since: i64,
+    /// True when the claimed handle is already ESTABLISHED here: the card asks that human's
+    /// own devices to vouch. False = a NEW name: the card asks any member to welcome them.
+    #[serde(default)]
+    pub known: bool,
+}
+
 /// The compact snapshot returned to a member device — enough to render a Glass-like console: the
 /// three constitutional meters, the peer roster, and the recent observation feed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +205,18 @@ pub struct Worldview {
     /// without a second round trip. Node ids only — no names, and absent from a guest projection.
     #[serde(default)]
     pub standing_full: Vec<String>,
+    /// **Who is new** (ADR-0026 / ADR-0021's third view): arrivals within the last 24 hours —
+    /// what the welcome screen greets. Informational only; nothing here frames a decision.
+    #[serde(default)]
+    pub arrivals: Vec<ArrivalView>,
+    /// Guests whose refused introductions CLAIMED an existing human — waiting for that human's
+    /// own device to vouch (E2 over the mesh). Members only; projected away for guest readers.
+    #[serde(default)]
+    pub claims_waiting: Vec<ClaimView>,
+    /// The live mesh game, when one is burning (Riddle of the Mesh / The Campfire). Members
+    /// only; a guest's projection carries no game — the fire is inside the house.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<crate::game::GameView>,
     pub presence: f64,
     pub withdrawn: bool,
     pub service: f64,
@@ -337,6 +405,49 @@ pub(crate) fn read_worldview(
         req.lat,
         req.lon,
     );
+    // The same evidence, on the record that REPLICATES — the peer row above lives only at
+    // this door, and a welcome rendered by a sibling door needs the origin too (the card
+    // flapped between rich and bare as console failover alternated doors). Best-effort,
+    // throttled inside note_origin. "background" is the iOS sync task's label, not a name.
+    let _ = crate::record::note_origin(
+        dir,
+        &req.node.node_id,
+        crate::record::OriginEvidence {
+            label: if req.node.label == "background" { String::new() } else { req.node.label.clone() },
+            addr: peer_ip.split(':').next().unwrap_or("").to_string(),
+            build: match (req.os_version.is_empty(), req.client_version.is_empty()) {
+                (false, false) => format!("{} · v{}", req.os_version, req.client_version),
+                (false, true) => req.os_version.clone(),
+                (true, false) => format!("v{}", req.client_version),
+                (true, true) => String::new(),
+            },
+            lat: req.lat,
+            lon: req.lon,
+            at: now,
+        },
+    );
+
+    // A certified reader with NO record gets its guest record RESTORED: the cert it just
+    // proved is the receipt of a covenant it once attested (a cert is only ever minted upon
+    // attestation), so filter 1 is satisfied by evidence in hand. Without this, a device
+    // whose record was lost (a purge, a fresh door) reads forever as an invisible ghost —
+    // absent from the welcome, unvouchable, unnameable. First filter from the cert; the
+    // second (identity) it earns like anyone.
+    if crate::record::find_by_key(dir, &req.node.node_id).is_none() {
+        let attestation = crate::enroll::Attestation {
+            laws_version: crate::enroll::LAWS_VERSION,
+            statement: format!(
+                "{} (record restored from the member's cert at read; originally attested at {})",
+                crate::enroll::COVENANT_STATEMENT,
+                req.membership.issued
+            ),
+            ts: req.membership.issued,
+        };
+        let rec =
+            crate::record::MembershipRecord::guest(&req.node.node_id, &req.node.node_id, attestation, now);
+        let _ = crate::record::save(dir, &rec);
+        let _ = crate::record::record_pubkey(dir, &req.node.node_id, &req.node.pubkey, now);
+    }
 
     let mut view = assemble_worldview(dir, &cred, now)?;
     // "You are here" belongs to the *requester*, not to us. classify() marks this serving
@@ -439,7 +550,10 @@ pub fn assemble_worldview(
     cred: &crate::group::GroupCredential,
     now: i64,
 ) -> Result<Worldview> {
-    let obs = familiar_kernel::observation::load(dir).map_err(Error::Io)?;
+    // The recent window only: presence/service/capacity signals and the recent-observations
+    // strip all work over minutes-to-hours of history. A full load of the whole log per
+    // request saturated the door once the log passed ~20k rows.
+    let obs = familiar_kernel::observation::load_recent(dir, 4000).map_err(Error::Io)?;
     let presence = familiar_kernel::presence::presence_signal(&obs, now);
     let service = familiar_kernel::service::service_signal(&obs);
     let capacity = familiar_kernel::capacities::capacities_signal(&obs);
@@ -568,6 +682,130 @@ pub fn assemble_worldview(
         .count();
     let frontier = frontier_devices(&obs, &members);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
+
+    // Who is new: every record whose admission (or, for a guest, first sighting) falls within
+    // the last 24 hours. Newest first. Severed records are not arrivals.
+    // Origin evidence rides along from the peer roster: where the knock came from (address,
+    // self-reported position, OS/build) so the welcome is made with eyes open.
+    let arrival_peers = crate::transport::load_peers(dir);
+    let mut arrivals: Vec<ArrivalView> = crate::record::load_all(dir)
+        .into_iter()
+        .filter_map(|r| {
+            let state = crate::record::derive_state(&r);
+            let (word, at) = match &state {
+                crate::record::RecordState::Member => {
+                    ("member", r.admitted.as_ref().map(|a| a.at).unwrap_or(r.first_seen))
+                }
+                crate::record::RecordState::Guest => ("guest", r.first_seen),
+                crate::record::RecordState::Severed { .. } => return None,
+            };
+            if now - at > ARRIVAL_WINDOW_SECS || at > now + 60 {
+                return None;
+            }
+            // Label and origin prefer this door's live peer row, then the origin evidence
+            // replicated on the record — so a door the visitor never read through still
+            // renders the same welcome, not a bare node-id (the card flapped between the
+            // two as console failover alternated doors).
+            let origin = r.origin.clone();
+            let label = members
+                .iter()
+                .find(|m| m.node_id == r.device_id || r.keys.contains(&m.node_id))
+                .map(|m| m.label.clone())
+                .or_else(|| {
+                    origin
+                        .as_ref()
+                        .map(|o| o.label.clone())
+                        .filter(|l| !l.is_empty())
+                })
+                .unwrap_or_else(|| r.device_id.chars().take(8).collect());
+            let (handle, via) = match &r.identity.established {
+                Some(e) => (e.handle.clone(), format!("{:?}", e.class)),
+                None => (String::new(), String::new()),
+            };
+            let peer = arrival_peers
+                .iter()
+                .find(|p| p.node_id == r.device_id || r.keys.contains(&p.node_id));
+            let (lat, lon, addr, build, last_seen) = match peer {
+                Some(p) => (
+                    p.lat,
+                    p.lon,
+                    p.addr.split(':').next().unwrap_or("").to_string(),
+                    match (p.os_version.is_empty(), p.familiar_version.is_empty()) {
+                        (false, false) => format!("{} · v{}", p.os_version, p.familiar_version),
+                        (false, true) => p.os_version.clone(),
+                        (true, false) => format!("v{}", p.familiar_version),
+                        (true, true) => String::new(),
+                    },
+                    // The record's last_seen replicates (max-merge) — it may be fresher than
+                    // this door's own sighting when the device reads through a sibling.
+                    p.last_seen.max(r.last_seen),
+                ),
+                None => match &origin {
+                    Some(o) => (o.lat, o.lon, o.addr.clone(), o.build.clone(), r.last_seen),
+                    None => (0.0, 0.0, String::new(), String::new(), 0),
+                },
+            };
+            Some(ArrivalView {
+                node_id: r.device_id,
+                label,
+                state: word.into(),
+                handle,
+                via,
+                at,
+                lat,
+                lon,
+                addr,
+                build,
+                last_seen,
+            })
+        })
+        .collect();
+    arrivals.sort_by_key(|a| std::cmp::Reverse(a.at));
+
+    // Claims awaiting the claimed human's own device (E2 over the mesh): guests whose refused
+    // introduction named someone — surfaced so that human's device can vouch in one tap.
+    let established_handles: Vec<String> = crate::record::load_all(dir)
+        .iter()
+        .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+        .filter_map(|r| r.identity.established.as_ref().map(|e| e.handle.to_lowercase()))
+        .filter(|h| !h.is_empty())
+        .collect();
+    let mut claims_waiting: Vec<ClaimView> = crate::record::load_all(dir)
+        .into_iter()
+        .filter_map(|r| {
+            if crate::record::derive_state(&r) != crate::record::RecordState::Guest {
+                return None;
+            }
+            let claim = r.identity.claim.as_ref()?;
+            if claim.handle.trim().is_empty() || r.pubkey.is_empty() {
+                return None;
+            }
+            let label = members
+                .iter()
+                .find(|m| m.node_id == r.device_id || r.keys.contains(&m.node_id))
+                .map(|m| m.label.clone())
+                .unwrap_or_else(|| r.device_id.chars().take(8).collect());
+            Some(ClaimView {
+                known: established_handles.contains(&claim.handle.to_lowercase()),
+                node_id: r.device_id,
+                label,
+                handle: claim.handle.clone(),
+                pubkey: r.pubkey.clone(),
+                since: claim.ts,
+            })
+        })
+        .collect();
+    claims_waiting.sort_by_key(|c| std::cmp::Reverse(c.since));
+
+    // The live game: tick the clock lazily on every read (the mesh has no game loop, only
+    // readers and actors) and persist any expiry it caused before rendering the view.
+    let game = crate::game::load(dir).map(|mut g| {
+        if crate::game::tick(&mut g, now) {
+            let _ = crate::game::save(dir, &g);
+        }
+        crate::game::view(&g)
+    });
+
     let goals = goal_views(dir);
 
     Ok(Worldview {
@@ -580,7 +818,22 @@ pub fn assemble_worldview(
         question,
         question_owner,
         guests_waiting,
-        standing_full: roll.full.clone(),
+        // Record-truth: when the records are the authority (read_records), the standing list
+        // the consoles reconcile against must come from THEM — the legacy roll drifts (a
+        // vouch minted at one door reached the other as a record, and the stale roll left the
+        // iPad reading as a visitor while both doors' records said member).
+        standing_full: if crate::config::load(dir).map(|c| c.read_records).unwrap_or(false) {
+            crate::record::load_all(dir)
+                .iter()
+                .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+                .flat_map(|r| r.keys.clone())
+                .collect()
+        } else {
+            roll.full.clone()
+        },
+        arrivals,
+        claims_waiting,
+        game,
         presence: presence.measure,
         withdrawn: presence.withdrawn,
         service: service.measure,
@@ -969,7 +1222,9 @@ mod tests {
             present_via: String::new(),
             lat: 0.0,
             lon: 0.0,
+            geo_device: false,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: String::new(),
         }
     }
@@ -1115,6 +1370,61 @@ mod tests {
             serde_json::to_vec(&roll).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn an_arrival_appears_in_the_welcome_window_and_is_projected_for_guests() {
+        // ADR-0026 §4: who is new, last 24 hours, greeted — and a guest reader sees the
+        // arrivals' SHAPE (kinds, times, states) with the names taken out.
+        let (host, cred, device) = setup("arrivals");
+
+        // A stranger knocks: instantly a guest, instantly an arrival.
+        let stranger = NodeKey::load_or_mint(&fresh("arrivals_stranger"), "Kali-Jeff").unwrap();
+        let req = crate::enroll::EnrollRequest {
+            node: stranger.identity(),
+            attestation: crate::enroll::Attestation {
+                laws_version: crate::enroll::LAWS_VERSION,
+                statement: "I accept the Three Laws.".into(),
+                ts: NOW,
+            },
+            nonce: "arr1".into(),
+            ts: NOW,
+        };
+        let raw = serde_json::to_vec(&req).unwrap();
+        let sig = stranger.sign(&raw);
+        crate::enroll::submit_request(&host, &raw, &sig, NOW).unwrap();
+
+        // A full-standing reader sees the arrivals as they are.
+        grant_full_standing(&host, &device.node_id());
+        let (raw, sig) = signed_request(&cred, &device, NOW, "arrv1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(
+            view.arrivals.iter().any(|a| a.node_id == stranger.node_id() && a.state == "guest"),
+            "the knocking stranger is an arrival: {:?}",
+            view.arrivals
+        );
+        assert!(
+            view.arrivals.iter().any(|a| a.state == "member"),
+            "the founder is an arrival too (founding admits)"
+        );
+
+        // A guest reader: same list shape, no names.
+        let guest_dev = NodeKey::load_or_mint(&fresh("arrivals_guestdev"), "visitor").unwrap();
+        let (raw, sig) = signed_request(&cred, &guest_dev, NOW, "arrv2");
+        let gview = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(!gview.arrivals.is_empty());
+        for a in &gview.arrivals {
+            assert!(
+                a.label.starts_with("peer-"),
+                "an arrival label reached a guest unprojected: {:?}",
+                a.label
+            );
+            assert!(
+                a.handle.is_empty() || a.handle == "someone",
+                "an arrival handle leaked to a guest: {:?}",
+                a.handle
+            );
+        }
     }
 
     #[test]

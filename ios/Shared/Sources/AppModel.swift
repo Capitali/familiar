@@ -8,8 +8,26 @@ import FamiliarMesh
 /// the group secret.
 @MainActor
 final class AppModel: ObservableObject {
+    /// Where this device stands under the two-filter door (ADR-0026). `enrolled` below stays the
+    /// coarse "holds a cert, can read" flag every view already leans on; this is the finer truth:
+    /// a guest is a stable, honest state, and `path` is the door's own words for what admission
+    /// still needs — shown verbatim, because the refusal text IS the UI copy.
+    enum MembershipState: Equatable {
+        case none
+        case knocking
+        case guest(path: String)
+        case held(retryIn: Int64)
+        case member(handle: String)
+    }
+    @Published var membership: MembershipState = .none
+
+    /// The default path-to-admission copy, before the door has said anything more specific.
+    static let admissionPath = "Covenant accepted — you're reading as a guest. To be admitted: " +
+        "introduce yourself while on the mesh's network, scan an invite from a member, or hand " +
+        "off from your old device."
+
     @Published var enrolled = false
-    @Published var enrolling = false          // a handshake is in flight (waiting for approval)
+    @Published var enrolling = false          // a handshake is in flight (knock → guest)
     @Published var groupLabel = ""
     @Published var host = ""
     @Published var log: [String] = []
@@ -37,6 +55,10 @@ final class AppModel: ObservableObject {
     /// The bound owner of a personal device. Rung 1 of the ladder, and usually the whole answer
     /// on a phone — no camera, no model, no prompt.
     @AppStorage("identity.deviceOwner") var deviceOwner = ""
+    /// The human severed this device (SEVER, twice) — it must not rejoin on its own. Cleared
+    /// only by the explicit "Join the mesh" act on the join screen. Persisted: a relaunch
+    /// after a severing is still severed.
+    @AppStorage("enroll.severedByHuman") var severedByHuman = false
 
     var deviceRole: DeviceRole { DeviceRole(rawValue: deviceRoleRaw) ?? .shared }
 
@@ -66,6 +88,11 @@ final class AppModel: ObservableObject {
 
     /// The human said who they are. Authoritative, and it also settles the binding on a personal
     /// device so the next launch starts at rung 1 instead of asking again.
+    ///
+    /// On a **guest** device this is also how an E4 introduction begins (ADR-0019 as amended by
+    /// ADR-0026): the same act presents the name to the door, so the local ladder and the mesh's
+    /// identity filter learn one fact from one answer. The door still decides — provenance is
+    /// what IT observed, and its refusal text becomes the guest screen's copy.
     func confirmPresentHuman(_ name: String) {
         let handle = Self.slugHandle(name)
         guard !handle.isEmpty else { return }
@@ -74,6 +101,9 @@ final class AppModel: ObservableObject {
         if deviceRole == .personal, deviceOwner.isEmpty { deviceOwner = handle }
         refreshPresence()
         note("identified \(handle) (asked)")
+        if case .guest = membership {
+            Task { await self.introduceMesh(handle) }
+        }
     }
 
     /// A 1:1 face check finished. `handle` non-nil means it agreed with the prior; nil means it
@@ -224,25 +254,12 @@ final class AppModel: ObservableObject {
         return lan + lighthouse + tail
     }
 
-    /// Consecutive read failures per address, since the last success. In memory only: an address
-    /// that fails because the device moved networks deserves a clean slate at next launch.
-    private var hostFailures: [String: Int] = [:]
-
     /// Drop any invalid candidates (self-heal a poisoned stored list) and keep `host` valid.
-    ///
-    /// Also drops the undialable ones. This runs at load, which matters: the bad addresses are
-    /// *persisted*, so devices already holding them (one iPad had 33) heal on the next launch
-    /// instead of waiting to fail their way out one timeout at a time.
     private func sanitizeHosts() {
         let before = hosts
-        hosts = hosts.filter { Self.isValidHost($0) && Self.isDialable($0) }
-        if !hosts.contains(Self.rendezvousHost) { hosts.append(Self.rendezvousHost) }
-        if !Self.isValidHost(host) || !hosts.contains(host) { host = hosts.first ?? "" }
-        if hosts != before {
-            let n = before.count - hosts.count
-            if n > 0 { note("forgot \(n) address\(n > 1 ? "es" : "") that can't be dialled") }
-            saveEnrollment()
-        }
+        hosts = hosts.filter { Self.isValidHost($0) }
+        if !Self.isValidHost(host) { host = hosts.first ?? "" }
+        if hosts != before { saveEnrollment() }
     }
 
     /// `h` answered — make it the standing preference (front of the candidate list).
@@ -258,81 +275,17 @@ final class AppModel: ObservableObject {
     /// don't hold yet, after the current preference. This is how a device that enrolled on the LAN
     /// learns the tailnet path and can reach the mesh from cellular without re-enrolling.
     private func learnHosts(_ advertised: [String]?) {
-        let fresh = (advertised ?? [])
-            .filter { Self.isValidHost($0) && Self.isDialable($0) && !hosts.contains($0) }
+        let fresh = (advertised ?? []).filter { Self.isValidHost($0) && !hosts.contains($0) }
         guard !fresh.isEmpty else { return }
-        // Learning a peer's LAN address (advertised in the worldview) lets a running device switch
-        // its reads to it without a relaunch. New candidates go to the BACK, unproven.
-        //
-        // This used to re-sort the whole list into read preference on every learn, and that single
-        // line was the flap: `promoteHost` had just moved the host that actually answered to the
-        // front, and the re-sort immediately threw that away and put an untried address there
-        // instead. With the mesh minting a new address every time the uplink's public IP changed,
-        // the two functions fought each other on a loop — reads alternated between two hosts whose
-        // rosters disagree, so the welcome list cycled between "nobody is waiting" and everyone,
-        // and the door chime replayed on every crossing. What answered stays in front; only what
-        // fails moves.
-        hosts.append(contentsOf: Self.readOrderedCandidates(fresh))
-        trimHosts()
+        // Learning a peer's LAN address (advertised in the worldview) lets a running device
+        // switch its reads to it without a relaunch — re-sort to the read preference (home → lighthouse
+        // → tailnet) so the freshest, most-local path wins.
+        hosts.append(contentsOf: fresh)
+        hosts = Self.readOrderedCandidates(hosts)
         if !hosts.contains(host), let first = hosts.first { host = first }
         saveEnrollment()
         note("learned address\(fresh.count > 1 ? "es" : ""): \(fresh.joined(separator: ", "))")
     }
-
-    /// Is this an address a device can actually dial? Private, link-local or tailnet — plus the
-    /// lighthouse, which is public but *self-asserted* rather than observed.
-    ///
-    /// The mirror of `worldview::is_gossipable_addr` on the Rust side, kept here as well because a
-    /// peer running an older build still gossips NAT exits, and this list is persisted: one bad
-    /// address learned once outlives the release that fixed the sender. A public address observed
-    /// of a NAT'd peer is where it connected FROM, never where it listens.
-    static func isDialable(_ h: String) -> Bool {
-        if h == rendezvousHost { return true }
-        let bare = h.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
-        let hostPart = bare.contains(".") ? (bare.split(separator: ":").first.map(String.init) ?? bare) : bare
-        let p = hostPart.split(separator: ".")
-        if p.count == 4, let a = Int(p[0]), let b = Int(p[1]),
-           p.allSatisfy({ Int($0).map { (0...255).contains($0) } ?? false }) {
-            if a == 10 || a == 127 { return true }
-            if a == 172, (16...31).contains(b) { return true }
-            if a == 192, b == 168 { return true }
-            if a == 169, b == 254 { return true }
-            if a == 100, (64...127).contains(b) { return true }   // tailnet
-            return false
-        }
-        // v6: loopback, unique-local (fc00::/7), link-local (fe80::/10).
-        let low = hostPart.lowercased()
-        if low == "::1" { return true }
-        if low.hasPrefix("fc") || low.hasPrefix("fd") || low.hasPrefix("fe8")
-            || low.hasPrefix("fe9") || low.hasPrefix("fea") || low.hasPrefix("feb") { return true }
-        // A name (mDNS, a DNS entry someone configured) is asserted, not observed — keep it.
-        return !hostPart.isEmpty && Int(p.first.map(String.init) ?? "x") == nil
-    }
-
-    /// Keep the candidate list bounded and drop what has repeatedly refused to answer.
-    ///
-    /// Unbounded growth is not a tidiness problem: every candidate costs a 10s timeout on the way
-    /// to a working one, so a long list of dead addresses reads to a human as an app that has
-    /// stopped working. The lighthouse and the host currently in use are never evicted — the
-    /// lighthouse is the one address guaranteed to be reachable from anywhere (ADR-0018).
-    private func trimHosts() {
-        var kept: [String] = []
-        for h in hosts where kept.count < Self.maxCandidateHosts {
-            let dead = (hostFailures[h] ?? 0) >= Self.forgetHostAfterFailures
-            if dead && h != Self.rendezvousHost && h != host { continue }
-            kept.append(h)
-        }
-        // Whatever else happens, the always-on door stays a candidate.
-        if !kept.contains(Self.rendezvousHost) { kept.append(Self.rendezvousHost) }
-        let dropped = hosts.filter { !kept.contains($0) }
-        guard !dropped.isEmpty else { hosts = kept; return }
-        hosts = kept
-        for d in dropped { hostFailures[d] = nil }
-        note("forgot \(dropped.count) unreachable address\(dropped.count > 1 ? "es" : "")")
-    }
-
-    static let maxCandidateHosts = 12
-    static let forgetHostAfterFailures = 3
 
     /// The familiar told us the group's trusted TLS pins — adopt any we don't hold, so a later
     /// failover to a sibling (the lighthouse) passes the pin check (ADR-0012). This is how a
@@ -418,6 +371,9 @@ final class AppModel: ObservableObject {
         }
         refreshPresence()
         enrolled = storedGrant() != nil && !host.isEmpty
+        // Fine-grained truth arrives with the first worldview read; until then an enrolled
+        // device is at least a guest, and the copy names the path (ADR-0026).
+        membership = enrolled ? .guest(path: Self.admissionPath) : .none
         #if os(iOS)
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
@@ -444,11 +400,25 @@ final class AppModel: ObservableObject {
 
     /// The sphere's device screen state — consents + identity, as JSON for the web layer.
     func deviceStateJSON() -> String {
+        // The two-filter state, in words the console shows verbatim (ADR-0026): which state,
+        // and — for a guest — the door's own path-to-admission copy.
+        let membershipDict: [String: Any]
+        switch membership {
+        case .none: membershipDict = ["state": "none", "path": ""]
+        case .knocking: membershipDict = ["state": "knocking", "path": ""]
+        case .guest(let path): membershipDict = ["state": "guest", "path": path]
+        case .held(let s): membershipDict = ["state": "held", "path": "held — try again in \(s)s"]
+        case .member(let handle): membershipDict = ["state": "member", "path": "", "handle": handle]
+        }
         let d: [String: Any] = [
             "label": PlatformDevice.name,
+            // This device's own node id — the console needs it to know "is it MY turn",
+            // "is this claim for MY human", distinct from the daemon's id in the worldview.
+            "node_id": node.nodeId,
             "build": Self.appBuild,
             "host": host,
             "hosts": hosts,
+            "membership": membershipDict,
             "attempts": attemptLog,
             "servedHuman": servedHuman,
             // What the ladder currently believes, so the console can SHOW the belief instead of
@@ -462,6 +432,11 @@ final class AppModel: ObservableObject {
             "deviceRole": deviceRole.rawValue,
             "deviceOwner": deviceOwner,
             "oracle": ConsultRunner.state,
+            // The app's recent working notes — the door's verbatim replies to this device's own
+            // acts (game moves, vouches, invites). The console shows the newest one; without
+            // this, a refused BEGIN looked like a dead button (the door's words landed in a
+            // log no screen ever read).
+            "notes": Array(log.prefix(5)),
             "consents": [
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "faceRecognition": faceRecognitionEnabled,
@@ -561,6 +536,7 @@ final class AppModel: ObservableObject {
     /// the Three Laws and shows its confirmation code; the human approves at the familiar. Falls
     /// back to the QR/paste path when the rendezvous is unreachable or lists nothing.
     func autoEnroll() {
+        guard !severedByHuman else { autoEnrollTried = true; return }
         guard !enrolled, !enrolling, !autoEnrollTried else { return }
         autoEnrollTried = true
         let node = self.node
@@ -600,6 +576,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// An invite token that arrived with the payload this device scanned — held until it is
+    /// spent by a successful introduction (a refusal does not spend it), so an unnamed token
+    /// can wait for the human to say who they are.
+    private var pendingInvite: InviteToken?
+
     func requestJoin(from json: String) {
         guard let p = EnrollmentPayload.parse(json) else {
             note("✗ could not read that invite")
@@ -611,10 +592,12 @@ final class AppModel: ObservableObject {
         groupLabel = p.label
         tlsPin = p.tlspin
         tlsPins = p.pins ?? (p.tlspin.map { [$0] } ?? [])   // seed the group's pin set
+        pendingInvite = p.invite   // E3 evidence, if the payload carried one (ADR-0026)
         ensureRendezvous()   // now that we're pinning, trust the lighthouse too (same session)
         saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
-        note("requesting to join “\(p.label)” — accepting the Three Laws…")
+        membership = .knocking
+        note("joining “\(p.label)” — accepting the Three Laws…")
         let node = self.node
         Task { await self.runHandshake(candidates: self.hosts, port: p.port, node: node) }
     }
@@ -626,20 +609,24 @@ final class AppModel: ObservableObject {
         for host in candidates {
             let enroller = EnrollmentClient(host: host, port: port)
             do {
-                var grant = try await enroller.requestJoin(node: node)     // non-nil if auto-approved
+                // Under the two-filter door (ADR-0026) a knock lands a guest cert immediately.
+                // The polling loop stays for one release: an OLD familiar still pends, and its
+                // poll seam upgrades the pending to a guest grant the moment it redeploys.
+                var grant = try await enroller.requestJoin(node: node)
                 promoteHost(host)
-                if grant == nil { note("waiting for the mesh to admit this device…") }
+                if grant == nil { note("waiting for the mesh to answer the knock…") }
                 var tries = 0
                 while grant == nil, tries < 150 {                          // ~5 min of polling
                     try await Task.sleep(nanoseconds: 2_000_000_000)
                     grant = try await enroller.pollGrant(nodeId: node.nodeId)
                     tries += 1
                 }
-                guard let g = grant else { enrolling = false; note("… no approval yet — tap to retry"); return }
+                guard let g = grant else { enrolling = false; membership = .none; note("… no answer yet — tap to retry"); return }
                 saveGrant(g)
                 enrolling = false
                 enrolled = true
-                note("✓ admitted to “\(g.group_label)” — the covenant is in force")
+                membership = .guest(path: Self.admissionPath)
+                note("✓ the covenant is in force — reading “\(g.group_label)” as a guest")
                 // Hand the paired Apple Watch this familiar's address so it can enrol itself by
                 // covenant (address only — the watch mints its own key + gets its own grant).
                 #if os(iOS)
@@ -648,9 +635,17 @@ final class AppModel: ObservableObject {
                 startFixBaseline()
                 startSensingIfConsented()
                 startDiscoveryIfConsented()
+                // The payload carried an invite (E3): identity filter, same motion. A NAMED
+                // token admits outright; an unnamed one asks the human to say who they are
+                // first, and the door's refusal text becomes the guest screen's copy.
+                if let tok = pendingInvite {
+                    let claim: IdentityClaim? = servedHuman == "observer" ? nil : IdentityClaim(handle: servedHuman)
+                    _ = await introduce(claim: claim, evidence: .invite(tok))
+                }
                 return
             } catch EnrollmentClient.EnrollError.denied {
                 enrolling = false
+                membership = .none
                 note("✗ the mesh declined this device")
                 return
             } catch {
@@ -658,7 +653,171 @@ final class AppModel: ObservableObject {
             }
         }
         enrolling = false
+        membership = .none
         note("… couldn't reach the mesh at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
+    }
+
+    // MARK: the identity filter (ADR-0026)
+
+    /// Present evidence at `POST /mesh/introduce`. On yes the device is a member and both sides
+    /// hear it; on not-yet the door's words become the guest screen's path-to-admission copy.
+    /// One move in the mesh game (begin / guess / line / pass / close), signed and sent to
+    /// the door. The judge's reply lands in the activity feed verbatim.
+    // ---- APNs (the ember reaches a locked phone) ------------------------------------------
+    /// The OS-issued device token, hex — held until the device is enrolled with a door.
+    private var apnsToken: String?
+
+    /// The app delegate got a token from the OS. Keep it and hand it to the door.
+    func apnsTokenArrived(_ hex: String) {
+        apnsToken = hex
+        Task { await sendApnsToken() }
+    }
+
+    /// Post the token to this device's door (idempotent — the door keeps one row per node).
+    /// Called on token arrival and safe to call again after enrollment or a door change.
+    func sendApnsToken() async {
+        guard enrolled, !host.isEmpty, let tok = apnsToken else { return }
+        do {
+            let said = try await PushTokenClient(node: node)
+                .register(token: tok, host: host, port: enrollPort)
+            note("push: \(said)")
+        } catch {
+            note("push registration failed at door \(host): \(error.localizedDescription)")
+        }
+    }
+
+    func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "") async {
+        // Never bail silently: a dead-looking button is worse than an error. The note surfaces
+        // on the games screen (deviceStateJSON.notes), door named, so a refusal is legible.
+        guard !host.isEmpty else {
+            note("\(act): no door to act through — this device has no enrolled host")
+            return
+        }
+        do {
+            switch try await GameClient(node: node).act(act, kind: kind, text: text, to: to,
+                                                        host: host, port: enrollPort) {
+            case .said(let words): note(words.isEmpty ? "the move landed" : words)
+            case .refused(let why): note("door \(host) refused \(act): \(why)")
+            case .error(let e): note("\(act) failed at door \(host): \(e)")
+            }
+        } catch {
+            note("\(act) failed at door \(host): \(error.localizedDescription)")
+        }
+        await refreshWorldview()
+    }
+
+    /// An enrolled visitor redeeming a pasted invite (the visitor path card's REDEEM box).
+    /// Accepts the full enrollment payload OR a bare invite token (the CLI prints the latter).
+    func redeemInvite(_ text: String) async {
+        guard let data = text.data(using: .utf8) else { return }
+        var token: InviteToken?
+        if let payload = try? JSONDecoder().decode(EnrollmentPayload.self, from: data) {
+            token = payload.invite
+        }
+        if token == nil {
+            token = try? JSONDecoder().decode(InviteToken.self, from: data)
+        }
+        guard let tok = token else {
+            note("that didn't read as an invite — paste exactly what the member sent")
+            return
+        }
+        pendingInvite = tok
+        let name = attributedHuman != "observer" ? attributedHuman : tok.expected_handle
+        note("redeeming the invite…")
+        await introduceMesh(name)
+    }
+
+    /// A member welcoming a NEW human in by name — the sponsor's half of vouchFor.
+    func sponsorFor(nodeId: String, handle: String) async -> String? {
+        guard !host.isEmpty else { return "no host" }
+        do {
+            switch try await SponsorClient(node: node).sponsor(subject: nodeId, handle: handle,
+                                                               host: host, port: enrollPort) {
+            case .welcomed(let h):
+                note("✓ welcomed \(h) into the mesh")
+                await refreshWorldview()
+                return nil
+            case .refused(let why):
+                note("welcome refused: \(why)")
+                return why
+            case .error(let e):
+                note("welcome failed: \(e)")
+                return e
+            }
+        } catch {
+            note("welcome failed: \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
+    /// One tap on the claimed human's own device (ADR-0026 E2 over the mesh): mint a voucher
+    /// for the waiting device's key and deliver it to the door. The rules engine does the rest —
+    /// the new device's next poll finds itself a member. Returns the door's words on refusal.
+    func vouchFor(nodeId: String, pubkey: String, handle: String) async -> String? {
+        guard !host.isEmpty else { return "no host" }
+        do {
+            let voucher = try DeviceVoucher.mint(node: node, handle: handle, subjectPubkey: pubkey)
+            switch try await VouchClient(node: node).vouch(voucher, host: host, port: enrollPort) {
+            case .admitted(let h):
+                note("✓ vouched — their device is now \(h.isEmpty ? "a member" : h)'s")
+                await refreshWorldview()
+                return nil
+            case .refused(let why):
+                note("vouch refused: \(why)")
+                return why
+            case .error(let e):
+                note("vouch failed: \(e)")
+                return e
+            }
+        } catch {
+            note("vouch failed: \(error.localizedDescription)")
+            return error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    private func introduce(claim: IdentityClaim?, evidence: Evidence) async -> Bool {
+        guard storedGrant() != nil, !host.isEmpty else { return false }
+        let client = AdmissionClient(node: node)
+        do {
+            switch try await client.introduce(claim: claim, evidence: evidence, host: host, port: enrollPort) {
+            case .member(let handle):
+                pendingInvite = nil
+                membership = .member(handle: handle)
+                wasRecognised = true          // the worldview edge must not chime twice
+                Chime.accepted()
+                note(handle.isEmpty ? "✓ admitted to the mesh" : "✓ admitted — established as \(handle)")
+                await refreshWorldview()
+                return true
+            case .notYet(let path):
+                membership = .guest(path: path)
+                note("… still a guest — \(path)")
+            case .held(let s):
+                membership = .held(retryIn: s)
+                note("… held — try again in \(s)s")
+            case .error(let m):
+                note("✗ introduce failed: \(m)")
+            }
+        } catch {
+            note("✗ introduce failed: \(Self.brief(error))")
+        }
+        return false
+    }
+
+    /// The wire half of an introduction: the E4 interaction, or the claim a held unnamed invite
+    /// was waiting for. Fired by `confirmPresentHuman` on a guest; callable directly by a join
+    /// screen that carries the human's own words.
+    func introduceMesh(_ handle: String, statement: String = "") async {
+        let claim = IdentityClaim(handle: handle)
+        let evidence: Evidence
+        if let tok = pendingInvite {
+            evidence = .invite(tok)
+        } else {
+            let words = statement.isEmpty ? "introduced from \(PlatformDevice.name)" : statement
+            evidence = .introduction(handle: handle, statement: words,
+                                     ts: Int64(Date().timeIntervalSince1970))
+        }
+        _ = await introduce(claim: claim, evidence: evidence)
     }
 
     /// Activate the watch link and, if we're enrolled, (re)hand the watch our address — so a watch
@@ -674,7 +833,25 @@ final class AppModel: ObservableObject {
 
     /// The address payload this device enrolled with — an *address*, not a secret. An enrolled
     /// member shows this as a QR so a new device can scan it and join the same familiar.
-    var addressPayload: String? {
+    var addressPayload: String? { payload(invite: nil) }
+
+    /// The QR an admitted member renders (ADR-0026): the address plus a fresh ten-minute,
+    /// single-use, member-signed invite token — so the scanning device knocks and is admitted in
+    /// one motion, no third person, no waiting. `handoff: true` names this device's own human
+    /// (old user / new device — the deliberate act is this render+scan); `false` leaves the
+    /// token unnamed, and the newcomer introduces themselves. A device that cannot mint yet (a
+    /// guest) falls back to the plain address payload, which still lands the scanner as a guest.
+    func invitePayload(handoff: Bool) -> String? {
+        var token: InviteToken?
+        if case .member = membership, let g = storedGrant() {
+            let mine = attributedHuman
+            let named = handoff && mine != "observer" ? mine : ""
+            token = try? InviteToken.mint(node: node, membership: g.membership, expectedHandle: named)
+        }
+        return payload(invite: token)
+    }
+
+    private func payload(invite: InviteToken?) -> String? {
         guard !host.isEmpty else { return nil }
         // Carry the group's TLS pins too, so a device enrolling from THIS device's invite trusts
         // every member's cert (the lighthouse included) and can fail over off-LAN (ADR-0012).
@@ -685,12 +862,23 @@ final class AppModel: ObservableObject {
         let hostList = hosts.contains(Self.rendezvousHost) ? hosts : hosts + [Self.rendezvousHost]
         let p = EnrollmentPayload(label: groupLabel, host: host, port: enrollPort,
                                   hosts: hostList.isEmpty ? nil : hostList,
-                                  tlspin: tlsPin, pins: pinSet.isEmpty ? nil : pinSet)
+                                  tlspin: tlsPin, pins: pinSet.isEmpty ? nil : pinSet,
+                                  invite: invite)
         guard let data = try? JSONEncoder().encode(p) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     func unenroll() {
+        // Tell the mesh this identity is RELEASED before forgetting how to reach it — the
+        // record travels as a self-Disestablish correction, so the roster stops naming who
+        // left and the next human on this hardware introduces themselves fresh. Best-effort:
+        // leaving must never wait on the network.
+        if !host.isEmpty {
+            let releaseHost = host, releasePort = enrollPort, releaseNode = node
+            Task.detached {
+                await ReleaseClient(node: releaseNode).release(host: releaseHost, port: releasePort)
+            }
+        }
         KeychainStore.delete(account: grantAccount)
         KeychainStore.delete(account: enrollAccount)
         host = ""
@@ -702,7 +890,25 @@ final class AppModel: ObservableObject {
         discovery = nil
         #endif
         enrolled = false
-        note("unenrolled — nothing is sent")
+        membership = .none
+        pendingInvite = nil
+        // A severing is a human's deliberate act — the device must NOT quietly rejoin the
+        // moment the join screen appears (it did: auto-enroll fired instantly and the mesh,
+        // still holding this key's record, handed the old identity straight back — there was
+        // no way to leave, and no way to test arriving). Severed stays severed until the
+        // human explicitly asks to join again.
+        severedByHuman = true
+        autoEnrollTried = true   // the join screen shows the explicit button, not the spinner
+        // And a severed device forgets whom it served: the serving relationship ended with
+        // the membership. Without this, "MINE — IAN'S" pre-filled from the old life before
+        // the new one had said a single name.
+        servedHuman = "observer"
+        deviceOwner = ""
+        deviceRoleRaw = DeviceRole.suggested.rawValue
+        answeredClaim = nil
+        faceClaim = nil
+        refreshPresence()
+        note("severed by your hand — this device will not rejoin until you ask it to")
     }
 
     private var lastTailnetProbe: Date?
@@ -738,20 +944,31 @@ final class AppModel: ObservableObject {
         guard let tailnet = hosts.first(where: { Self.isTailnet($0) }) else { return }  // none known
         if let last = lastTailnetProbe, Date().timeIntervalSince(last) < 30 { return }
         lastTailnetProbe = Date()
-        if await Self.probeHello(host: tailnet, port: enrollPort) {
+        // Same DOOR only: each door serves its own worldview (its theories, its feed), so a
+        // tailnet address that answers as a DIFFERENT node is a different door, not a better
+        // path — promoting it swapped the whole console between doors every probe cycle (the
+        // theories screen flickered between wildhorse's and the lighthouse's). A path upgrade
+        // must keep the node identity fixed.
+        guard let reading = worldview?.node_id else { return }
+        if let heard = await Self.helloNodeId(host: tailnet, port: enrollPort), heard == reading {
             promoteHost(tailnet)   // data now flows peer-to-peer over Tailscale; the badge flips
             note("↔ Tailscale confirmed — data over \(tailnet)")
         }
     }
 
-    /// A cheap liveness probe of a candidate path — GET /mesh/hello. True iff it answers 200.
-    static func probeHello(host: String, port: Int) async -> Bool {
-        guard let url = URL(string: "https://\(host):\(port)/mesh/hello") else { return false }
+    /// Who answers at a candidate path — GET /mesh/hello's node_id, or nil if unreachable.
+    static func helloNodeId(host: String, port: Int) async -> String? {
+        guard let url = URL(string: "https://\(host):\(port)/mesh/hello") else { return nil }
         var r = URLRequest(url: url)
         r.timeoutInterval = 4
-        guard let (_, resp) = try? await MeshTLS.session.data(for: r) else { return false }
-        return ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200
+        guard let (data, resp) = try? await MeshTLS.session.data(for: r),
+              ((resp as? HTTPURLResponse)?.statusCode ?? 0) == 200,
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        return obj["node_id"] as? String
     }
+
 
     /// Heartbeat this device's status to the lighthouse (ADR-0017) — status flows through the always-
     /// on hub so the mesh sees this device whatever path it's on. The connectivity mode is classified
@@ -793,11 +1010,14 @@ final class AppModel: ObservableObject {
     }
 
     /// Guests waiting as of the previous successful read — nil until the first one, so launch is
-    /// silent. The chime is an arrival, not a standing condition.
-    /// Which guests this device has already announced. Identities, not a count — see the door
-    /// chime in `refreshWorldview`. Session-scoped: a relaunch is allowed to re-announce, because
-    /// after a relaunch nobody has necessarily heard it yet.
-    private var guestsSeenWaiting: Set<String>?
+    /// silent. The chime is an arrival, not a standing condition. (Fallback for old familiars;
+    /// the arrivals list below is the real signal.)
+    private var lastGuestsWaiting: Int?
+    /// Arrival ids as of the previous read — nil until the first, so launch greets nobody twice.
+    private var knownArrivalIds: Set<String>?
+    private var knownClaimIds: Set<String>?
+    private var wasMyTurn = false
+    private var preferredReadFails = 0
     /// Whether this device stood at full standing as of the previous read. nil until the first,
     /// so launching already-recognised is silent.
     private var wasRecognised: Bool?
@@ -821,32 +1041,55 @@ final class AppModel: ObservableObject {
         return "local"
     }
 
-    /// Recognise a guest, or hold them off (ADR-0020). Any active member may decide, so the
-    /// decision is signed and sent to the node this device reads from rather than written locally —
-    /// a phone has no roll to edit. The host settles it; we report back what it said.
-    ///
-    /// First decision wins: an `alreadyDecided` answer is surfaced, not retried.
+    /// A member's deliberate act about another device (ADR-0026 §5): corrections — sever,
+    /// disestablish ("that's not Betty"), hold, restore — signed and sent to the node this
+    /// device reads from; the record travels from there. Approval is gone: admission is
+    /// rules-based, so there is nothing to grant. The old console acts still arrive here for
+    /// one release and are translated honestly: "deny" is a hold; "grant" falls through to the
+    /// legacy standing alias, which an old familiar still honors.
     func decideStanding(_ subject: String, act: String) async {
         guard let g = storedGrant(), !host.isEmpty else {
-            note("✗ can't decide standing — not enrolled yet")
+            note("✗ not enrolled yet")
             return
         }
-        let client = StandingClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
-        do {
-            switch try await client.cast(subject: subject, act: act, host: host, port: enrollPort) {
-            case .decided(let said):
-                // Only for a grant: holding someone off is not a moment to celebrate.
-                if act == "grant" { Chime.accepted() }
-                note("✓ \(subject.prefix(8)) — \(said)")
-            case .alreadyDecided(let said):
-                note("· \(subject.prefix(8)) — someone already decided (\(said))")
-            case .refused(let why):
-                note("✗ standing refused: \(why)")
-            }
-        } catch {
-            note("✗ standing vote failed: \(Self.brief(error))")
+        let mapped: String?
+        switch act {
+        case "deny": mapped = "hold"
+        case "sever", "disestablish", "hold", "restore": mapped = act
+        default: mapped = nil
         }
-        await refreshWorldview()   // reflect the new roll immediately
+        if let mact = mapped {
+            let client = CorrectionClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
+            do {
+                switch try await client.correct(subject: subject, act: mact,
+                                                reason: "from the console",
+                                                host: host, port: enrollPort) {
+                case .applied(let state):
+                    note("✓ \(subject.prefix(8)) — \(mact) (now \(state))")
+                case .refused(let why):
+                    note("✗ \(mact) refused: \(why)")
+                }
+            } catch {
+                note("✗ correction failed: \(Self.brief(error))")
+            }
+        } else {
+            // Legacy "grant" against an old familiar — the one-release alias.
+            let client = StandingClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
+            do {
+                switch try await client.cast(subject: subject, act: act, host: host, port: enrollPort) {
+                case .decided(let said):
+                    if act == "grant" { Chime.accepted() }
+                    note("✓ \(subject.prefix(8)) — \(said)")
+                case .alreadyDecided(let said):
+                    note("· \(subject.prefix(8)) — someone already decided (\(said))")
+                case .refused(let why):
+                    note("✗ standing refused: \(why)")
+                }
+            } catch {
+                note("✗ standing vote failed: \(Self.brief(error))")
+            }
+        }
+        await refreshWorldview()   // reflect the record immediately
     }
 
     /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
@@ -885,6 +1128,11 @@ final class AppModel: ObservableObject {
     func refreshWorldview() async {
         // One read per candidate address at most — the preferred host first, failing over to the
         // others so a device off-LAN (cellular + tailnet) still reads the worldview.
+        // Every round RE-STARTS at the preferred door: a fallback read is data, not a
+        // defection. Each door serves its own worldview, so swapping doors on every hiccup
+        // flapped the whole console (roster nesting, theories) between two houses' truths.
+        if let preferred = hosts.first { host = preferred }
+        let preferred = host
         var attempts: [String] = []   // per-host diagnostic, surfaced if every candidate fails
         for _ in 0..<max(1, hosts.count) {
             let tried = host
@@ -903,51 +1151,115 @@ final class AppModel: ObservableObject {
                 let (view, raw) = try await WorldviewClient(session: session)
                     .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                                   lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
-                // Were WE just let in? The moment this device's own id appears on the roll it had
-                // been absent from. Being accepted should be felt on the accepted device, not only
-                // announced on the one that granted it. Edge-triggered and silent on the first
-                // read, like the door chime — a device that was already recognised at launch has
-                // not just been accepted.
-                let roll = Set(view.standing_full ?? [])
-                let recognisedNow = roll.contains(node.nodeId)
+                // Someone new has JOINED (ADR-0026: the welcome is a greeting, not a gate).
+                // Edge-triggered on arrival ids, and deliberately silent on the FIRST read after
+                // launch — otherwise every launch announces yesterday's arrivals. Falls back to
+                // the old guests-waiting edge against a familiar that predates arrivals.
+                if let arr = view.arrivals {
+                    let ids = Set(arr.map { $0.node_id })
+                    if let known = knownArrivalIds {
+                        let fresh = arr.filter { !known.contains($0.node_id) && $0.node_id != node.nodeId }
+                        if !fresh.isEmpty {
+                            Chime.guestWaiting()
+                            let names = fresh.map { $0.handle.isEmpty ? $0.label : $0.handle }
+                            note("welcome \(names.joined(separator: ", ")) — new to the mesh")
+                        }
+                        // ACCUMULATE, never replace: a read that momentarily lost an arrival
+                        // (door failover, a freshness-boundary flicker) made the same visitor
+                        // read as "new" again on the next poll — the join chime rang on loop
+                        // for one static guest, live, 2026-08-08. Once greeted, greeted.
+                        knownArrivalIds = known.union(ids)
+                    } else {
+                        knownArrivalIds = ids
+                    }
+                } else {
+                    let waiting = view.guests_waiting ?? 0
+                    if let before = lastGuestsWaiting, waiting > before {
+                        Chime.guestWaiting()
+                        note("someone new is at the door")
+                    }
+                    lastGuestsWaiting = waiting
+                }
+
+                // Someone's new device is claiming THIS device's human (E2 over the mesh) —
+                // the second person is us. Edge-triggered like arrivals, silent on first read.
+                if let claims = view.claims_waiting {
+                    let mine = claims.filter {
+                        $0.handle.caseInsensitiveCompare(attributedHuman) == .orderedSame
+                    }
+                    let ids = Set(mine.map { $0.node_id })
+                    if let known = knownClaimIds, case .member = membership {
+                        let fresh = mine.filter { !known.contains($0.node_id) }
+                        if !fresh.isEmpty {
+                            Chime.guestWaiting()
+                            let names = fresh.map { $0.label }.joined(separator: ", ")
+                            note("\(names) says it is yours — confirm on the welcome screen")
+                        }
+                    }
+                    knownClaimIds = ids
+                }
+
+                // The ember reached this device (the mesh games): edge-triggered chime, so a
+                // player who wandered off hears their turn arrive.
+                // The turn belongs to the HUMAN: chime when the holder handle is this
+                // device's human — whichever of their devices they're nearest.
+                let myHandle = attributedHuman.lowercased()
+                let myTurn = view.game.map {
+                    $0.status == "open" && myHandle != "observer" && !myHandle.isEmpty
+                        && $0.holder.lowercased() == myHandle
+                } ?? false
+                if myTurn && !wasMyTurn {
+                    Chime.guestWaiting()
+                    note(view.game?.kind == "campfire"
+                         ? "🔥 the ember has reached you — add your line"
+                         : "🧩 your turn — the riddle waits on you")
+                }
+                #if os(iOS)
+                // The wrist is a device of the holder too (the law of the fire): flame on the
+                // rising edge, cleared on the falling one.
+                if myTurn != wasMyTurn {
+                    PhoneWatchLink.shared.sendEmber(myTurn, kind: view.game?.kind ?? "riddle")
+                }
+                #endif
+                wasMyTurn = myTurn
+
+                // Were WE just admitted? The moment this device's own id appears on the roll it
+                // had been absent from — an admission completed elsewhere (another door, a
+                // correction restored). Being accepted should be felt on the accepted device.
+                // Edge-triggered and silent on the first read; an introduce() on THIS device
+                // already chimed and pre-set the edge.
+                let recognisedNow = (view.standing_full ?? []).contains(node.nodeId)
                 if let was = wasRecognised, !was, recognisedNow {
                     Chime.accepted()
-                    note("✓ recognised — reading the mesh in full")
+                    note("✓ admitted — reading the mesh in full")
                 }
                 wasRecognised = recognisedNow
-
-                // Someone new at the door — deliberately silent on the FIRST read after launch,
-                // otherwise every launch announces guests who have been waiting since yesterday.
-                //
-                // The edge is on WHO is waiting, not how many. A count is the wrong thing to
-                // compare because the number comes from whichever host answered, and hosts
-                // disagree — reading 0 from one and 7 from another replayed the chime on every
-                // crossing, which is exactly the sound a door makes when it is being told about the
-                // same people over and over. Comparing identities makes an already-known guest
-                // silent no matter who reports them.
-                //
-                // Derived here rather than read from a server field on purpose: the door this
-                // device reads from may be running an older build, and a missing field would read
-                // as "nobody waiting" — a silent door is the worse failure.
-                let waitingNow = recognisedNow
-                    ? Set((view.members ?? []).map(\.node_id)
-                        .filter { $0 != node.nodeId && !roll.contains($0) })
-                    : []   // a guest is not told who else is waiting, and does not ring the door
-                if let before = guestsSeenWaiting {
-                    if !waitingNow.subtracting(before).isEmpty {
-                        Chime.guestWaiting()
-                        note("someone new is waiting to be recognised")
+                // Keep the fine state honest against what the mesh actually serves: a device
+                // the roll knows is a member; one it doesn't reads projected, whatever we
+                // believed. The door's copy is kept when we already have specific words.
+                if recognisedNow {
+                    if case .member = membership {} else { membership = .member(handle: "") }
+                } else if enrolled {
+                    if case .guest = membership {} else if case .held = membership {} else {
+                        membership = .guest(path: Self.admissionPath)
                     }
-                    // Union, not replacement: a host that cannot see a guest is not evidence the
-                    // guest left, and forgetting them would re-announce them on the next crossing.
-                    guestsSeenWaiting = before.union(waitingNow)
-                } else {
-                    guestsSeenWaiting = waitingNow   // first read after launch is always silent
                 }
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
-                promoteHost(host)
+                // Loyalty with hysteresis: only a preferred door that keeps failing loses its
+                // place. Five consecutive misses ≈ 15s of silence — a real outage, not a hiccup.
+                if tried == preferred {
+                    preferredReadFails = 0
+                    promoteHost(host)
+                } else {
+                    preferredReadFails += 1
+                    if preferredReadFails >= 5 {
+                        preferredReadFails = 0
+                        promoteHost(host)
+                        note("↪ reading from \(host) — \(preferred) stopped answering")
+                    }
+                }
                 learnPins(view.pins)     // trust the group's pins before learning new hosts
                 learnHosts(view.hosts)
                 let readHost = host
@@ -972,9 +1284,7 @@ final class AppModel: ObservableObject {
                 default: cause = "\((error as NSError).code)"
                 }
                 attempts.append("\(tried)→\(cause)")
-                hostFailures[tried, default: 0] += 1
                 if failoverHost() == nil { break }
-                trimHosts()
             }
         }
         // Every candidate failed — surface the full picture so the cause is diagnosable at a glance:

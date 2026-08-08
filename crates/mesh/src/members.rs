@@ -114,6 +114,12 @@ pub struct Member {
     pub lat: f64,
     #[serde(default)]
     pub lon: f64,
+    /// The fix above is this device's OWN GPS, reported by a full member — the only kind of
+    /// fix a console may treat as the mesh's ground truth (its clustering anchor). False for
+    /// brief-carried positions (which may themselves be inherited) and for guests: a visitor's
+    /// self-reported origin is welcome-card evidence, never a place to hang the household.
+    #[serde(default)]
+    pub geo_device: bool,
     /// Sub-devices attached to this one through the same human — e.g. a phone/iPad that has a
     /// paired watch reporting to the mesh carries "⌚ watch" here. Lets the roster badge a device
     /// with its companions without walking the edge graph. Empty for devices with nothing attached.
@@ -123,6 +129,12 @@ pub struct Member {
     /// heartbeat (ADR-0017). Empty when unknown. Rendered as a connectivity badge on the roster.
     #[serde(default)]
     pub connectivity: String,
+    /// The node this member runs ON — a Mac console shell carries the node_id of the daemon on
+    /// the same machine. They stay two real members (separate keys; see PlatformDevice.name's
+    /// load-bearing " console" suffix), but the roster may nest this one under its host instead
+    /// of showing an unexplained sibling. Empty for members that stand on their own machine.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub attached_to: String,
 }
 
 /// Liveness thresholds, per member kind: a gossip peer beacons every ~30s, so two missed
@@ -149,7 +161,10 @@ pub const ONLINE_WINDOW_SECS: i64 = 600;
 /// The window for a device to still read **"online"** in the roster — tighter than
 /// [`ONLINE_WINDOW_SECS`] (which still governs session continuity), so a phone that drops
 /// off the network (airplane mode) visibly decays within minutes, not ten.
-pub const DEVICE_FRESH_SECS: i64 = 180;
+// 7 minutes: a phone stops polling the moment its screen locks, and normal handling gaps
+// (pocket, table, conversation) run minutes — 180s churned the roster online↔away on every
+// lock (watched live, four flips in four minutes). Devices decay honestly, just not twitchily.
+pub const DEVICE_FRESH_SECS: i64 = 420;
 /// A device agent older than this has departed — dropped from the roster.
 const AGENT_FRESH_SECS: i64 = 6 * 3600;
 
@@ -175,6 +190,7 @@ fn is_device_actor(actor: &str) -> bool {
 /// human `ian`, gossip `mesh:*`) are ignored so a gossip peer isn't misclassified as a device.
 fn device_reports(
     obs: &[familiar_kernel::observation::Observation],
+    now: i64,
 ) -> HashMap<String, (String, String, i64)> {
     let mut latest: HashMap<String, (String, String, i64)> = HashMap::new();
     for o in obs {
@@ -183,6 +199,14 @@ fn device_reports(
         };
         if !is_device_actor(&o.actor) {
             continue; // not a device-sensor report (peer cycle / human / gossip presence)
+        }
+        // Stale reports don't classify: a weeks-old row from a since-retired relay path once
+        // tagged a DOOR as "watch:ian" forever, merging it into the watch's dedup lineage and
+        // flapping the lighthouse roster every time their last_seens leapfrogged. What a node
+        // IS deserves fresh evidence; the sticky peer actor carries identity across quiet
+        // spells, not this map.
+        if now - o.ts > AGENT_FRESH_SECS {
+            continue;
         }
         let e = latest
             .entry(node.to_string())
@@ -336,8 +360,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             .map(|n| n.identity().label)
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| cred.membership.node_id.chars().take(8).collect());
-        let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
-        let first = obs.iter().map(|o| o.ts).min().unwrap_or(now);
+        let obs = familiar_kernel::observation::load_recent(dir, 4000).unwrap_or_default();
+        let first = familiar_kernel::observation::first_ts(dir)
+            .ok()
+            .flatten()
+            .unwrap_or(now);
         let last = obs.iter().map(|o| o.ts).max().unwrap_or(now);
         let tools = familiar_kernel::tool::load(dir)
             .map(|t| t.len())
@@ -390,13 +417,17 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: sp_via,
             lat: self_lat,
             lon: self_lon,
+            // The daemon is not a GPS device; consoles anchor on this row by its kind
+            // (self_node / the "· host" relationship), not by fix provenance.
+            geo_device: false,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: "local".into(),
         });
     }
 
-    let obs = familiar_kernel::observation::load(dir).unwrap_or_default();
-    let reports = device_reports(&obs);
+    let obs = familiar_kernel::observation::load_recent(dir, 4000).unwrap_or_default();
+    let reports = device_reports(&obs, now);
     // The graduated trust tier per actor (monitor → throttle → marginalize → sever), from the shared
     // refusal log. Surfaced so the roster/map can badge a peer whose standing has slipped.
     let refusals = familiar_kernel::corruption::load(dir).unwrap_or_default();
@@ -427,12 +458,21 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
 
     for p in &peers {
         let ip = p.addr.split(':').next().unwrap_or("").to_string();
-        let is_device = reports.contains_key(&p.node_id);
+        let is_device = reports.contains_key(&p.node_id) || !p.actor.is_empty();
         let (kind, os, actor, relationship) = if let Some((actor, _, _)) = reports.get(&p.node_id) {
             (
                 MemberKind::DevicePeer,
                 os_from_actor(actor),
                 actor.clone(),
+                "reads worldview".to_string(),
+            )
+        } else if !p.actor.is_empty() {
+            // The sticky actor: identity survives report-quiet spells (the watch-fold and the
+            // hardware label both key on it).
+            (
+                MemberKind::DevicePeer,
+                os_from_actor(&p.actor),
+                p.actor.clone(),
                 "reads worldview".to_string(),
             )
         } else {
@@ -477,13 +517,30 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let status = status_of(kind, now - p.last_seen);
         // The human at that node: what its brief shared, else the device's actor namespace
         // (`ipad:ian` → "ian" — the device is inherently a human's console).
-        let human = if !p.human.is_empty() {
-            p.human.clone()
-        } else {
-            actor
+        // Whose device this IS: the record's ESTABLISHED handle is the identity truth and
+        // outranks every cached claim — after a release/disestablish the cached brief kept
+        // whispering the old name ("iPhone ian" while bob was present). A record that exists
+        // with NO establishment names nobody, honestly; only devices without records at all
+        // fall back to what they said about themselves.
+        let record = crate::record::find_by_key(dir, &p.node_id);
+        // Full membership gates fix provenance below: a guest's roster row may still carry the
+        // position it reported (shown honestly on its own pin), but only a member's own GPS is
+        // marked geo_device — the mark that lets a console anchor the unlocated on it.
+        let full_member = record
+            .as_ref()
+            .map(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+            .unwrap_or(false);
+        let human = match record {
+            Some(r) => r
+                .identity
+                .established
+                .map(|e| e.handle)
+                .unwrap_or_default(),
+            None if !p.human.is_empty() => p.human.clone(),
+            None => actor
                 .split_once(':')
                 .map(|(_, h)| h.to_string())
-                .unwrap_or_default()
+                .unwrap_or_default(),
         };
         // Cumulative online time, live session included while it's still fresh.
         let live = if status == "online" && p.session_start > 0 {
@@ -554,7 +611,9 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_confidence: claimed.3,
             lat: p.lat,
             lon: p.lon,
+            geo_device: p.geo_device && full_member,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: p.connectivity.clone(),
         });
     }
@@ -579,7 +638,16 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let agent_presence = derive_presence(&obs, now, |o| o.source == src);
         out.push(Member {
             node_id: node.clone(),
-            label: actor.clone(),
+            // A friendly label, not the raw actor — "watch:ian" beside the prominent human
+            // name read as a stutter ("watch:ian Ian"). The namespace names the hardware;
+            // the human column names the human.
+            label: match ns {
+                "watch" => "Apple Watch".to_string(),
+                "phone" | "iphone" => "iPhone".to_string(),
+                "ipad" => "iPad".to_string(),
+                "mac" => "Mac".to_string(),
+                _ => actor.clone(),
+            },
             kind: MemberKind::DeviceAgent,
             os: os_from_actor(actor),
             os_version: String::new(),
@@ -617,14 +685,135 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: agent_presence.2,
             lat: 0.0,
             lon: 0.0,
+            geo_device: false,
             attached: Vec::new(),
+            attached_to: String::new(),
             connectivity: String::new(),
         });
     }
 
     out = dedup_devices(out);
     attach_companions(&mut out, &obs);
+    attach_consoles(&mut out, &transport::reachable_hosts());
+    attach_watches(&mut out);
     out
+}
+
+/// A watch rides its paired phone (the design of record): TOGETHER, it is the ⌚ badge on the
+/// phone's row — its own row folds into the host card like a console's does. Apart — its own
+/// address, different from the phone's (cellular, foreign wifi) — it stands alone in the
+/// mesh. "Together" is judged the same honest way consoles nest: no address of its own
+/// (presence relayed through the pairing) or the same address as the phone.
+fn attach_watches(out: &mut [Member]) {
+    let ip_of = |addr: &str| addr.split(':').next().unwrap_or("").to_string();
+    let mut links: Vec<(usize, usize)> = Vec::new();
+    for (wi, w) in out.iter().enumerate() {
+        if w.actor.split(':').next() != Some("watch") {
+            continue;
+        }
+        let human = w.actor.split(':').nth(1).unwrap_or("");
+        if human.is_empty() {
+            continue;
+        }
+        let wip = ip_of(&w.addr);
+        // Together = same place, judged by address: exact match (a shared NAT seen from the
+        // lighthouse), or the same private /24 (the home LAN, where every device holds its
+        // own address). A watch on cellular carries an address matching neither.
+        let together = |a: &str, b: &str| -> bool {
+            if a == b {
+                return true;
+            }
+            let p = |s: &str| s.rsplitn(2, '.').nth(1).map(|x| x.to_string());
+            let private = |s: &str| {
+                s.starts_with("192.168.") || s.starts_with("10.")
+                    || s.starts_with("172.16.") || s.starts_with("172.17.")
+                    || s.starts_with("172.18.") || s.starts_with("172.19.")
+                    || s.starts_with("172.2") || s.starts_with("172.30.") || s.starts_with("172.31.")
+            };
+            private(a) && private(b) && p(a).is_some() && p(a) == p(b)
+        };
+        let host = out.iter().enumerate().find(|(hi, h)| {
+            *hi != wi
+                && matches!(h.actor.split(':').next(), Some("phone") | Some("iphone"))
+                && h.actor.split(':').nth(1) == Some(human)
+                && (wip.is_empty() || together(&wip, &ip_of(&h.addr)))
+        });
+        if let Some((hi, _)) = host {
+            links.push((wi, hi));
+        }
+    }
+    for (wi, hi) in links {
+        out[wi].attached_to = out[hi].node_id.clone();
+        if !out[hi].attached.iter().any(|a| a == "⌚ watch") {
+            out[hi].attached.push("⌚ watch".to_string());
+        }
+    }
+}
+
+/// A Mac console shell (`mac:*`) and the daemon on the same machine are two real members —
+/// separate keys, and the console can quit while the daemon runs on (the " console" label
+/// suffix is load-bearing; see the Swift side's PlatformDevice.name). What the roster was
+/// missing is the RELATIONSHIP: mark the console `attached_to` its host node and badge the
+/// host, so the UI can nest one under the other instead of showing an unexplained sibling.
+///
+/// The link is structural first — the console's address is the host machine's address (a full
+/// peer's addr, or one of this host's own addresses for the self node) — with the label
+/// convention ("<machine> console" vs "<machine>") as the fallback when addresses are absent
+/// or stale. Pure over the member list + this host's own addresses, so it's directly testable.
+fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
+    let ip_of = |addr: &str| addr.split(':').next().unwrap_or("").to_string();
+    // A console that has pushed observations recently classifies as a DevicePeer with a `mac:*`
+    // actor; one that has merely been gossiping sits as a GossipPeer with an EMPTY actor, and
+    // only its label ("<machine> console" — PlatformDevice.name) says what it is. Accept both,
+    // and never let a console be another console's host.
+    let is_console = |m: &Member| {
+        m.kind != MemberKind::SelfNode
+            && (m.actor.split(':').next() == Some("mac")
+                || m.label.to_lowercase().ends_with(" console"))
+    };
+    let mut links: Vec<(usize, usize)> = Vec::new();
+    for (ci, c) in out.iter().enumerate() {
+        if !is_console(c) {
+            continue;
+        }
+        let cip = ip_of(&c.addr);
+        let on_self_host =
+            !cip.is_empty() && (cip == "127.0.0.1" || self_hosts.contains(&cip));
+        let stem = c.label.to_lowercase();
+        let stem = stem.strip_suffix(" console").unwrap_or("").trim().to_string();
+        // The label pass accepts ANY non-console member as the machine — from a sibling door's
+        // view the wildhorse daemon classifies as a DevicePeer (it reports observations there),
+        // and nesting must hold from EVERY door or the roster flaps whenever a console fails
+        // over. The label convention is machine-specific, so it decides first regardless of
+        // kind; the structural (address) pass stays restricted to full nodes, because behind
+        // one NAT many machines share a recorded public address.
+        let full_node = |h: &Member| {
+            matches!(h.kind, MemberKind::SelfNode | MemberKind::GossipPeer) && !is_console(h)
+        };
+        let host = out
+            .iter()
+            .enumerate()
+            .find(|(hi, h)| {
+                *hi != ci && !is_console(h) && !stem.is_empty() && h.label.to_lowercase() == stem
+            })
+            .or_else(|| {
+                out.iter().enumerate().find(|(hi, h)| {
+                    *hi != ci
+                        && full_node(h)
+                        && ((h.kind == MemberKind::SelfNode && on_self_host)
+                            || (!cip.is_empty() && ip_of(&h.addr) == cip))
+                })
+            });
+        if let Some((hi, _)) = host {
+            links.push((ci, hi));
+        }
+    }
+    for (ci, hi) in links {
+        out[ci].attached_to = out[hi].node_id.clone();
+        if !out[hi].attached.iter().any(|a| a == "🖥 console") {
+            out[hi].attached.push("🖥 console".to_string());
+        }
+    }
 }
 
 /// Collapse repeated identities of the same physical device into one roster row. A device that is
@@ -642,6 +831,25 @@ fn dedup_devices(members: Vec<Member>) -> Vec<Member> {
             "phone" | "iphone" | "ipad" | "mac" | "watch" | "tv"
         )
     };
+    // One node, one row: a watch (or phone) can appear both as an actor-carrying agent row
+    // and an actorless peer row for the SAME node_id — adopt the actor onto the actorless
+    // twin first, so the grouping below folds them into one member.
+    let node_actor: HashMap<String, String> = members
+        .iter()
+        .filter(|m| !m.actor.is_empty() && is_device_ns(&m.actor))
+        .map(|m| (m.node_id.clone(), m.actor.clone()))
+        .collect();
+    let members: Vec<Member> = members
+        .into_iter()
+        .map(|mut m| {
+            if m.actor.is_empty() {
+                if let Some(a) = node_actor.get(&m.node_id) {
+                    m.actor = a.clone();
+                }
+            }
+            m
+        })
+        .collect();
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Vec<Member>> = HashMap::new();
     for m in members {
@@ -669,7 +877,7 @@ fn dedup_devices(members: Vec<Member>) -> Vec<Member> {
             .map(|m| m.label.clone())
             .find(|l| !l.is_empty() && !l.contains(':'));
         // Freshest identity represents the device now.
-        g.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        g.sort_by_key(|m| std::cmp::Reverse(m.last_seen));
         let mut rep = g.remove(0);
         rep.total_online_secs = total;
         if rep.label.contains(':') || rep.label.is_empty() {
@@ -704,7 +912,7 @@ fn attach_companions(out: &mut [Member], obs: &[familiar_kernel::observation::Ob
             .iter()
             .filter(|o| (o.source == src || o.actor == m.actor) && o.action == "reports")
             .collect();
-        recent.sort_by(|a, b| b.ts.cmp(&a.ts));
+        recent.sort_by_key(|o| std::cmp::Reverse(o.ts));
         let (mut heart, mut motion, mut gyro, mut gps) = (None, None, None, None);
         for o in recent {
             let obj = o.object.as_str();
@@ -1027,6 +1235,94 @@ mod tests {
         assert!(d.contains("walking"), "motion in summary: {d}");
         assert!(d.contains("gyro turning"), "gyro in summary: {d}");
         assert!(d.contains("gps 48.6,-93.4"), "gps in summary: {d}");
+    }
+
+    #[test]
+    fn a_mac_console_nests_under_the_machine_it_runs_on() {
+        let mk = |node: &str, label: &str, actor: &str, kind: &str, addr: &str| -> Member {
+            serde_json::from_value(serde_json::json!({
+                "node_id": node, "label": label, "kind": kind, "actor": actor, "addr": addr,
+                "os": "", "detail": "", "first_seen": 0, "last_seen": 0, "online": true,
+            }))
+            .unwrap()
+        };
+        // Seen from a third node (the lighthouse): wildhorse's daemon is a gossip peer and its
+        // console a device peer, both reporting the same machine address.
+        let mut out = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("1c99", "wildhorse", "", "gossip_peer", "192.168.108.10"),
+            mk("a24d", "Wildhorse console", "mac:ian", "device_peer", "192.168.108.10"),
+            mk("d5c3", "iPhone", "phone:ian", "device_peer", "192.168.108.188"),
+        ];
+        attach_consoles(&mut out, &[]);
+        assert_eq!(
+            out[2].attached_to, "1c99",
+            "the console is attached to the daemon on its machine (label stem match)"
+        );
+        assert!(
+            out[1].attached.iter().any(|a| a == "🖥 console"),
+            "the machine's daemon is badged with its console"
+        );
+        assert!(
+            out[3].attached_to.is_empty(),
+            "a phone stands on its own — no attachment"
+        );
+
+        // Seen from the Mac itself: the daemon is the self node ("localhost"), the console's
+        // address is one of this host's own. No label dependence — structural match.
+        let mut own = vec![
+            mk("1c99", "TheRiver", "", "self_node", "localhost"),
+            mk("a24d", "Renamed Thing", "mac:ian", "device_peer", "192.168.108.10"),
+        ];
+        attach_consoles(&mut own, &["192.168.108.10".to_string()]);
+        assert_eq!(
+            own[1].attached_to, "1c99",
+            "on the host itself the console attaches to the self node by address"
+        );
+
+        // A console whose machine is nowhere on the roster stays a sibling — no false nesting.
+        let mut alone = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("a24d", "Codex console", "mac:ian", "device_peer", "10.0.0.7"),
+        ];
+        attach_consoles(&mut alone, &[]);
+        assert!(
+            alone[1].attached_to.is_empty(),
+            "no host on the roster — the console stands alone rather than guessing"
+        );
+
+        // The live shape on wildhorse: a console that has only been gossiping (no recent
+        // observation reports) classifies as a GossipPeer with an EMPTY actor — only the
+        // "<machine> console" label says what it is. It must still nest, and must never be
+        // taken as another console's host.
+        let mut quiet = vec![
+            mk("1c99", "TheRiver", "", "self_node", "localhost"),
+            mk("a24d", "Wildhorse console", "", "gossip_peer", "192.168.108.10"),
+            mk("aaaa", "Codex console", "", "gossip_peer", "192.168.108.10"),
+        ];
+        attach_consoles(&mut quiet, &["192.168.108.10".to_string()]);
+        assert_eq!(
+            quiet[1].attached_to, "1c99",
+            "a quiet console (gossip peer, empty actor) still nests by its label + address"
+        );
+        assert_eq!(
+            quiet[2].attached_to, "1c99",
+            "the second console attaches to the machine, never to the first console"
+        );
+
+        // From a SIBLING door's view the machine's daemon classifies as a DevicePeer (it
+        // reports observations there) — nesting must hold from every door, or the roster
+        // flaps whenever a console reads through its fallback.
+        let mut sibling = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("1c99", "Wildhorse", "familiar:wildhorse", "device_peer", "129.224.211.111"),
+            mk("a24d", "Wildhorse console", "mac:ian", "device_peer", "129.224.211.111"),
+        ];
+        attach_consoles(&mut sibling, &[]);
+        assert_eq!(
+            sibling[2].attached_to, "1c99",
+            "the console nests under its machine even when the machine reads as a device peer"
+        );
     }
 
     #[test]

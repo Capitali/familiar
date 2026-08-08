@@ -36,7 +36,9 @@ pub const REVOKED_FILE: &str = "mesh/revoked.json";
 /// Default membership lifetime: 90 days. Expiry forces periodic re-minting (rotation).
 pub const DEFAULT_CERT_TTL_SECS: i64 = 90 * 24 * 60 * 60;
 
-/// A membership certificate — the group key's signature binding a node to the group.
+/// A membership certificate — a signature binding a node to the group. Signed either by the
+/// group key directly (the founding doors), or — since ADR-0026 §6 — by a **warranted member
+/// node's** key, with the warrant attached so any peer can walk cert → warrant → group key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Membership {
     pub node_id: String,
@@ -45,8 +47,172 @@ pub struct Membership {
     pub issued: i64,
     pub expiry: i64,
     pub group_id: String,
-    /// ed25519 signature by the group key over the canonical cert body (hex, 64 bytes).
+    /// ed25519 signature over the canonical cert body (hex, 64 bytes) — by the group key, or
+    /// by the warranted minter's node key when `warrant` is present.
     pub cert: String,
+    /// The minting warrant, when this cert was minted by a member node rather than the group
+    /// key. Absent (and skipped on the wire) for group-key certs, so old certs and old
+    /// clients are untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warrant: Option<MintWarrant>,
+}
+
+/// The group key's signature authorising ONE member node to mint memberships (ADR-0026 §6).
+/// What distributes is rule *evaluation*, not policy: a warranted door runs the same rules
+/// engine as every other, and every cert it mints names it. Issued deliberately, revocable by
+/// expiry (short-ish TTLs beat revocation lists for a fleet this size).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MintWarrant {
+    /// The member node this warrant empowers.
+    pub node_id: String,
+    /// That node's public key (hex, 32 bytes) — certs it mints verify under this.
+    pub node_pubkey: String,
+    pub group_id: String,
+    pub issued: i64,
+    pub expiry: i64,
+    /// ed25519 by the GROUP key over the canonical warrant body (hex, 64 bytes).
+    pub sig: String,
+}
+
+/// Where a node stores the warrant issued to it.
+pub const WARRANT_FILE: &str = "mesh/warrant.json";
+
+/// Default warrant lifetime: 30 days — long enough that renewal is rare, short enough that a
+/// lost device's warrant dies on its own.
+pub const DEFAULT_WARRANT_TTL_SECS: i64 = 30 * 24 * 60 * 60;
+
+#[derive(Serialize)]
+struct WarrantBody<'a> {
+    node_id: &'a str,
+    node_pubkey: &'a str,
+    group_id: &'a str,
+    issued: i64,
+    expiry: i64,
+}
+
+impl MintWarrant {
+    fn body_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&WarrantBody {
+            node_id: &self.node_id,
+            node_pubkey: &self.node_pubkey,
+            group_id: &self.group_id,
+            issued: self.issued,
+            expiry: self.expiry,
+        })?)
+    }
+
+    /// Verify this warrant under the group public key: signature, expiry, group, and the
+    /// node_id ↔ pubkey binding (a warrant cannot rename a node).
+    pub fn verify(&self, group_key: &VerifyingKey, group_id: &str, now: i64) -> Result<()> {
+        if self.group_id != group_id {
+            return Err(Error::Untrusted("warrant: wrong group".into()));
+        }
+        if now >= self.expiry {
+            return Err(Error::Untrusted("warrant: expired".into()));
+        }
+        let pk = exactly_32(&hex_decode(&self.node_pubkey)?, "warrant node pubkey")?;
+        if fingerprint(&pk) != self.node_id {
+            return Err(Error::Untrusted(
+                "warrant: node_id ≠ pubkey fingerprint".into(),
+            ));
+        }
+        let sig_bytes = crate::node::exactly_64(&hex_decode(&self.sig)?, "warrant sig")?;
+        let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+        group_key
+            .verify(&self.body_bytes()?, &sig)
+            .map_err(|_| Error::Untrusted("warrant: group signature did not verify".into()))
+    }
+}
+
+/// Issue a minting warrant to a member node. Only a secret-holding credential can (the group
+/// key signs it) — this is the deliberate act that turns a peer into a door.
+pub fn issue_warrant(
+    cred: &GroupCredential,
+    node_id: &str,
+    node_pubkey: &str,
+    now: i64,
+    ttl_secs: i64,
+) -> Result<MintWarrant> {
+    let signing = cred.group_signing_key()?;
+    let issued = now;
+    let expiry = now + ttl_secs;
+    let body = serde_json::to_vec(&WarrantBody {
+        node_id,
+        node_pubkey,
+        group_id: &cred.group_id,
+        issued,
+        expiry,
+    })?;
+    let sig = signing.sign(&body);
+    Ok(MintWarrant {
+        node_id: node_id.to_string(),
+        node_pubkey: node_pubkey.to_string(),
+        group_id: cred.group_id.clone(),
+        issued,
+        expiry,
+        sig: hex_encode(&sig.to_bytes()),
+    })
+}
+
+/// Install a warrant on this node (it must verify for this node and this group first — a
+/// warrant for someone else on disk would be a confusing lie).
+pub fn install_warrant(dir: &Path, warrant: &MintWarrant, now: i64) -> Result<()> {
+    let cred = load(dir)?.ok_or_else(|| Error::Untrusted("no group enrolled".into()))?;
+    warrant.verify(&cred.verifying_key()?, &cred.group_id, now)?;
+    if warrant.node_id != cred.membership.node_id {
+        return Err(Error::Untrusted(format!(
+            "warrant names {}, this node is {}",
+            warrant.node_id, cred.membership.node_id
+        )));
+    }
+    write_json_public(&dir.join(WARRANT_FILE), warrant)
+}
+
+/// This node's installed warrant, if it verifies right now. Expired or invalid → `None`, so a
+/// dead warrant quietly stops the door rather than serving bad certs.
+pub fn load_warrant(dir: &Path, now: i64) -> Option<MintWarrant> {
+    let w: MintWarrant =
+        serde_json::from_str(&fs::read_to_string(dir.join(WARRANT_FILE)).ok()?).ok()?;
+    let cred = load(dir).ok()??;
+    let gk = cred.verifying_key().ok()?;
+    w.verify(&gk, &cred.group_id, now).ok()?;
+    Some(w)
+}
+
+/// Mint a membership as a **warranted member node**: the cert is signed with this node's own
+/// key and carries the warrant, so any peer verifies it without the group secret existing
+/// anywhere near this door.
+pub fn mint_membership_warranted(
+    node: &NodeKey,
+    warrant: &MintWarrant,
+    subject_node_id: &str,
+    subject_pubkey: &str,
+    now: i64,
+    ttl_secs: i64,
+) -> Result<Membership> {
+    if node.node_id() != warrant.node_id {
+        return Err(Error::Untrusted(
+            "warrant does not name this node — cannot mint with it".into(),
+        ));
+    }
+    let issued = now;
+    let expiry = now + ttl_secs;
+    let body = serde_json::to_vec(&CertBody {
+        node_id: subject_node_id,
+        node_pubkey: subject_pubkey,
+        issued,
+        expiry,
+        group_id: &warrant.group_id,
+    })?;
+    Ok(Membership {
+        node_id: subject_node_id.to_string(),
+        node_pubkey: subject_pubkey.to_string(),
+        issued,
+        expiry,
+        group_id: warrant.group_id.clone(),
+        cert: node.sign(&body),
+        warrant: Some(warrant.clone()),
+    })
 }
 
 /// The deterministic body that gets signed — kept as its own struct so `verify` can
@@ -155,6 +321,10 @@ impl GroupCredential {
 /// Create a brand-new group: generate the group keypair, mint this node's membership, and
 /// persist the credential (0600). Returns the credential (its `join_key()` is what you copy
 /// to peers). `now` is caller-supplied (unix secs) so this stays deterministic/testable.
+///
+/// Founding is also the first admission (ADR-0026 E4, provenance `Founding`): the founder's
+/// own record is written established + admitted, so a one-node mesh is a mesh of one member
+/// rather than a mesh of one guest. Best-effort — a record failure must not fail the founding.
 pub fn create_group(
     dir: &Path,
     node: &NodeKey,
@@ -163,7 +333,22 @@ pub fn create_group(
     ttl_secs: i64,
 ) -> Result<GroupCredential> {
     let secret: [u8; 32] = crate::os_random()?;
-    enroll(dir, node, &secret, label, now, ttl_secs)
+    let cred = enroll(dir, node, &secret, label, now, ttl_secs)?;
+    let id = node.identity();
+    let _ = crate::record::admit(
+        dir,
+        &id.node_id,
+        None,
+        crate::record::Establishment {
+            handle: String::new(), // the founding human names themself on their own console
+            class: crate::record::EvidenceClass::LocalIntroduction,
+            artifact: "founding".into(),
+            at: now,
+        },
+        &id.node_id,
+        now,
+    );
+    Ok(cred)
 }
 
 /// Join an existing group from a join key (the group secret, hex). Mints this node's own
@@ -339,13 +524,16 @@ fn mint_with(
         expiry,
         group_id: group_id.to_string(),
         cert: hex_encode(&sig.to_bytes()),
+        warrant: None,
     })
 }
 
-/// Verify a peer's membership certificate against a group public key. Checks: the group's
-/// signature over the canonical body; that `node_id` is the fingerprint of the certified
-/// `node_pubkey` (self-consistency); expiry; and the revocation list. On success the caller
-/// may trust `node_pubkey` as a group member.
+/// Verify a peer's membership certificate against a group public key. Checks: the signature
+/// chain over the canonical body — the group key directly, or (warranted certs, ADR-0026 §6)
+/// cert → warranted minter's key → warrant → group key; that `node_id` is the fingerprint of
+/// the certified `node_pubkey` (self-consistency); expiry; and the revocation list — for the
+/// subject AND, on a warranted cert, for the minting door (severing a door kills the certs
+/// only it vouched for). On success the caller may trust `node_pubkey` as a group member.
 pub fn verify_membership(
     m: &Membership,
     group_key: &VerifyingKey,
@@ -371,9 +559,23 @@ pub fn verify_membership(
     }
     let sig_bytes = crate::node::exactly_64(&hex_decode(&m.cert)?, "cert")?;
     let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
-    group_key
-        .verify(&m.body_bytes()?, &sig)
-        .map_err(|_| Error::Untrusted("membership: group signature did not verify".into()))
+    match &m.warrant {
+        None => group_key
+            .verify(&m.body_bytes()?, &sig)
+            .map_err(|_| Error::Untrusted("membership: group signature did not verify".into())),
+        Some(w) => {
+            w.verify(group_key, group_id, now)?;
+            if revoked.iter().any(|r| r == &w.node_id) {
+                return Err(Error::Untrusted("membership: minting door revoked".into()));
+            }
+            let wk_bytes = exactly_32(&hex_decode(&w.node_pubkey)?, "warrant pubkey")?;
+            let wk = VerifyingKey::from_bytes(&wk_bytes)
+                .map_err(|_| Error::Untrusted("membership: bad warrant pubkey".into()))?;
+            wk.verify(&m.body_bytes()?, &sig).map_err(|_| {
+                Error::Untrusted("membership: minter signature did not verify".into())
+            })
+        }
+    }
 }
 
 /// Verify a membership is **internally consistent** against a caller-supplied group public key,
@@ -401,9 +603,20 @@ pub fn verify_membership_consistent(
         .map_err(|_| Error::Untrusted("membership: bad group pubkey".into()))?;
     let sig_bytes = crate::node::exactly_64(&hex_decode(&m.cert)?, "cert")?;
     let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
-    group_key
-        .verify(&m.body_bytes()?, &sig)
-        .map_err(|_| Error::Untrusted("membership: group signature did not verify".into()))
+    match &m.warrant {
+        None => group_key
+            .verify(&m.body_bytes()?, &sig)
+            .map_err(|_| Error::Untrusted("membership: group signature did not verify".into())),
+        Some(w) => {
+            w.verify(&group_key, &m.group_id, now)?;
+            let wk_bytes = exactly_32(&hex_decode(&w.node_pubkey)?, "warrant pubkey")?;
+            let wk = VerifyingKey::from_bytes(&wk_bytes)
+                .map_err(|_| Error::Untrusted("membership: bad warrant pubkey".into()))?;
+            wk.verify(&m.body_bytes()?, &sig).map_err(|_| {
+                Error::Untrusted("membership: minter signature did not verify".into())
+            })
+        }
+    }
 }
 
 /// Load the group credential, if this node has enrolled.
@@ -532,6 +745,108 @@ mod tests {
     }
 
     const NOW: i64 = 1_770_000_000;
+
+    /// ADR-0026 §6: a warranted member's certs verify by chain — and every link is guarded.
+    #[test]
+    fn a_warranted_member_mints_verifiable_certs_and_every_chain_link_guards() {
+        let dir = tmp("warrant");
+        let founder = NodeKey::load_or_mint(&dir, "founder").unwrap();
+        let cred = create_group(&dir, &founder, "river", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let gk = cred.verifying_key().unwrap();
+
+        // The door-to-be, and the newcomer it will admit.
+        let door = NodeKey::load_or_mint(&tmp("warrant_door"), "mac").unwrap();
+        let door_id = door.identity();
+        let newcomer = NodeKey::load_or_mint(&tmp("warrant_new"), "phone").unwrap();
+        let new_id = newcomer.identity();
+
+        let w = issue_warrant(&cred, &door_id.node_id, &door_id.pubkey, NOW, 3600).unwrap();
+        let m =
+            mint_membership_warranted(&door, &w, &new_id.node_id, &new_id.pubkey, NOW, 3600)
+                .unwrap();
+
+        // The chain verifies — full check and the consistency check devices use.
+        verify_membership(&m, &gk, &cred.group_id, NOW + 10, &[]).unwrap();
+        verify_membership_consistent(&m, &cred.group_pubkey, NOW + 10).unwrap();
+
+        // An EXPIRED warrant kills the cert even while the cert itself is unexpired.
+        assert!(verify_membership(&m, &gk, &cred.group_id, NOW + 3601, &[]).is_err());
+
+        // A SEVERED door kills the certs only it vouched for.
+        assert!(verify_membership(
+            &m,
+            &gk,
+            &cred.group_id,
+            NOW + 10,
+            std::slice::from_ref(&door_id.node_id)
+        )
+        .is_err());
+
+        // A warrant signed by a stranger's key is refused.
+        let stranger_dir = tmp("warrant_stranger");
+        let stranger = NodeKey::load_or_mint(&stranger_dir, "s").unwrap();
+        let foreign = create_group(&stranger_dir, &stranger, "x", NOW, 3600).unwrap();
+        let forged = issue_warrant(&foreign, &door_id.node_id, &door_id.pubkey, NOW, 3600).unwrap();
+        let mut m2 = m.clone();
+        m2.warrant = Some(forged);
+        assert!(verify_membership(&m2, &gk, &cred.group_id, NOW + 10, &[]).is_err());
+
+        // A node cannot mint with a warrant naming someone else.
+        assert!(mint_membership_warranted(
+            &newcomer,
+            &w,
+            &new_id.node_id,
+            &new_id.pubkey,
+            NOW,
+            3600
+        )
+        .is_err());
+
+        // And a warranted cert whose body was tampered with fails like any forgery.
+        let mut m3 = m.clone();
+        m3.expiry += 1;
+        assert!(verify_membership(&m3, &gk, &cred.group_id, NOW + 10, &[]).is_err());
+    }
+
+    #[test]
+    fn a_warrant_installs_only_on_the_node_it_names() {
+        // The issuing side.
+        let a_dir = tmp("winstall_a");
+        let a = NodeKey::load_or_mint(&a_dir, "a").unwrap();
+        let cred_a = create_group(&a_dir, &a, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        // The target: a covenant (secret-less) member node.
+        let b_dir = tmp("winstall_b");
+        let b = NodeKey::load_or_mint(&b_dir, "b").unwrap();
+        let b_id = b.identity();
+        let b_membership = cred_a
+            .mint_membership(&b_id.node_id, &b_id.pubkey, NOW, DEFAULT_CERT_TTL_SECS)
+            .unwrap();
+        save_credential(
+            &b_dir,
+            &GroupCredential::covenant(
+                cred_a.group_id.clone(),
+                cred_a.group_pubkey.clone(),
+                "g".into(),
+                b_membership,
+            ),
+        )
+        .unwrap();
+
+        let w = issue_warrant(&cred_a, &b_id.node_id, &b_id.pubkey, NOW, 3600).unwrap();
+        install_warrant(&b_dir, &w, NOW + 1).unwrap();
+        assert!(load_warrant(&b_dir, NOW + 2).is_some());
+        assert!(
+            load_warrant(&b_dir, NOW + 3601).is_none(),
+            "a dead warrant quietly stops the door"
+        );
+
+        // A warrant naming a different node refuses to install here.
+        let other = NodeKey::load_or_mint(&tmp("winstall_other"), "o").unwrap();
+        let oid = other.identity();
+        let wrong = issue_warrant(&cred_a, &oid.node_id, &oid.pubkey, NOW, 3600).unwrap();
+        assert!(install_warrant(&b_dir, &wrong, NOW + 1).is_err());
+    }
 
     #[test]
     fn create_join_and_cross_verify() {

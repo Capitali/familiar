@@ -1,6 +1,8 @@
 import SwiftUI
 import WebKit
 import MapKit
+import MessageUI
+import CoreImage
 import FamiliarMesh
 
 // The Metal Sphere console on iPhone/iPad — the SAME web bundle the Mac console renders
@@ -50,7 +52,29 @@ struct SphereConsoleIOS: View {
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
             bridge.onUnenroll = { [weak model] in model?.unenroll() }
+            bridge.onVouch = { [weak model] nodeId, pubkey, handle in
+                Task { _ = await model?.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle) }
+            }
+            bridge.onSponsor = { [weak model] nodeId, handle in
+                Task { _ = await model?.sponsorFor(nodeId: nodeId, handle: handle) }
+            }
+            bridge.onInviteRedeem = { [weak model] payload in
+                Task { await model?.redeemInvite(payload) }
+            }
+            bridge.onGame = { [weak model] act, kind, text, to in
+                Task { await model?.gameAct(act, kind: kind, text: text, to: to) }
+            }
+            bridge.onDeviceRole = { [weak model] roleRaw, owner in
+                guard let role = DeviceRole(rawValue: roleRaw) else { return }
+                model?.setDeviceBinding(role: role, owner: owner)
+                model.map { bridge.pushDevice($0.deviceStateJSON()) }
+            }
             bridge.onSetHuman = { [weak model] name in
+                // Both halves, exactly like the Mac bridge: confirmPresentHuman is the presence
+                // claim the device screen's PRESENT row actually renders (ADR-0019) — without it
+                // the name lands only in servedHuman and the row keeps saying "no one
+                // identified", which read as the input not taking.
+                model?.confirmPresentHuman(name)
                 model?.setServedHuman(name)
                 model.map { bridge.pushDevice($0.deviceStateJSON()) }
             }
@@ -58,7 +82,9 @@ struct SphereConsoleIOS: View {
             bridge.onStanding = { [weak model] node, act in
                 Task { await model?.decideStanding(node, act: act) }
             }
-            bridge.onInvite = { [weak model] in model?.addressPayload }
+            // A member's QR carries a fresh single-use invite token (ADR-0026) — the scanner
+            // is admitted in one motion. A guest's falls back to the plain address.
+            bridge.onInvite = { [weak model] in model?.invitePayload(handoff: false) }
             bridge.pushDevice(model.deviceStateJSON())
         }
         .onReceive(model.$worldviewJSON) { json in
@@ -118,6 +144,11 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onStanding: ((String, String) -> Void)?
     var onUnenroll: (() -> Void)?
     var onSetHuman: ((String) -> Void)?
+    var onVouch: ((String, String, String) -> Void)?
+    var onSponsor: ((String, String) -> Void)?
+    var onInviteRedeem: ((String) -> Void)?
+    var onGame: ((String, String?, String, String) -> Void)?
+    var onDeviceRole: ((String, String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -269,6 +300,29 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "consent":
                 if let key = body["key"] as? String { self.onConsent?(key, body["on"] as? Bool ?? false) }
+            case "inviteRedeem":
+                if let payload = body["payload"] as? String { self.onInviteRedeem?(payload) }
+            case "sponsor":
+                if let nodeId = body["node_id"] as? String,
+                   let handle = body["handle"] as? String {
+                    self.onSponsor?(nodeId, handle)
+                }
+            case "vouch":
+                if let nodeId = body["node_id"] as? String,
+                   let pubkey = body["pubkey"] as? String,
+                   let handle = body["handle"] as? String {
+                    self.onVouch?(nodeId, pubkey, handle)
+                }
+            case "deviceRole":
+                if let roleRaw = body["role"] as? String {
+                    self.onDeviceRole?(roleRaw, body["owner"] as? String ?? "")
+                }
+            case "game":
+                // game_kind, not "kind" — the routing key would be overwritten (see Mac bridge).
+                if let act = body["act"] as? String {
+                    self.onGame?(act, body["game_kind"] as? String,
+                                 body["text"] as? String ?? "", body["to"] as? String ?? "")
+                }
             case "setHuman":
                 if let name = body["name"] as? String, !name.isEmpty { self.onSetHuman?(name) }
             case "invite":
@@ -278,6 +332,13 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                     self.web?.evaluateJavaScript(
                         "window.sphereInvite && window.sphereInvite(\(quoted))",
                         completionHandler: nil)
+                }
+            case "shareInvite":
+                // The invite QR handed to a blank Messages compose — for inviting someone who
+                // isn't in the room to scan. The payload is a 10-minute single-use pass carrying
+                // no secret, so an image in a message is an acceptable channel.
+                if let payload = body["payload"] as? String, !payload.isEmpty {
+                    self.composeInviteMessage(payload)
                 }
             case "unenroll":
                 self.onUnenroll?()
@@ -295,6 +356,45 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             default: break
             }
         }
+    }
+}
+
+// MARK: - invite → Messages
+
+extension SphereBridgeIOS: MFMessageComposeViewControllerDelegate {
+    /// Open a blank Messages compose with the invite QR attached (image first; the raw
+    /// payload as the body only when attachments are unavailable, so the invite always
+    /// travels in exactly one form).
+    func composeInviteMessage(_ payload: String) {
+        guard MFMessageComposeViewController.canSendText() else { return }
+        let compose = MFMessageComposeViewController()
+        compose.messageComposeDelegate = self
+        if MFMessageComposeViewController.canSendAttachments(),
+           let png = Self.qrPNG(payload) {
+            compose.addAttachmentData(png, typeIdentifier: "public.png",
+                                      filename: "familiar-invite.png")
+        } else {
+            compose.body = payload
+        }
+        var top = web?.window?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        top?.present(compose, animated: true)
+    }
+
+    private static func qrPNG(_ text: String) -> Data? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let img = filter.outputImage else { return nil }
+        // The generator emits 1pt modules — scale up or Messages shows a smudge.
+        let scaled = img.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+        guard let cg = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cg).pngData()
+    }
+
+    nonisolated func messageComposeViewController(_ controller: MFMessageComposeViewController,
+                                                  didFinishWith result: MessageComposeResult) {
+        Task { @MainActor in controller.dismiss(animated: true) }
     }
 }
 

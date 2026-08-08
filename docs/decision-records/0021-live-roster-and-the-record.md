@@ -1,6 +1,7 @@
 # ADR-0021 — The roster answers who is here; the record answers who has been
 
-- **Status:** accepted (implemented in the console 2026-07-29)
+- **Status:** accepted (implemented in the console 2026-07-29) — **amended 2026-08-01**: the
+  split gains a third view; see the amendment at the end.
 - **Date:** 2026-07-30
 - **Relates to:** [ADR-0017](0017-federated-status-and-connectivity.md) (the status directory and
   its 5-minute TTL — the mechanism this rests on and the source of the second confusion below),
@@ -86,3 +87,20 @@ speech. It is one constant, `STALE_SECS`, and moving it is cheap.
 - Publish the membership roll from the minting door so "who belongs" becomes answerable from a peer,
   and the history can distinguish *departed* from *never met*.
 - Consider a per-member cadence so an intermittent-by-design node is not treated as stale.
+
+---
+
+## Amendment, 2026-08-01 — the split gains a third view: who is new
+
+This record split one confused question into two honest ones — *who is here* (the live roster)
+and *who has been* (the history). [ADR-0026](0026-two-filter-admission.md) adds the third leg of
+the same split: **who is new**. The welcome screen becomes an arrivals view over the same
+24-hour judgement (`STALE_SECS`, one constant, shared): every record whose admission, first
+sighting, or new-human registry entry falls within the last day, rendered as a greeting —
+*"welcome to these new members"* — with the handle, the device kind, how the identity was
+established, and when. It carries no buttons and frames no decision, because under ADR-0026
+there is no decision pending at the door.
+
+The follow-on above — publish the membership roll so "who belongs" becomes answerable from a
+peer — is delivered by ADR-0026's replicated record rather than by a separate publication: the
+record travels, so the history can finally distinguish *departed* from *never met*.

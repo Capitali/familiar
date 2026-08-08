@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: 8GHXL328AR
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "44"
+    CURRENT_PROJECT_VERSION: "70"
 packages:
   FamiliarMesh:
     path: FamiliarMesh
@@ -43,6 +43,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        # APNs (the ember reaches a locked phone) — aps-environment; automatic signing
+        # registers the push capability on the App ID from this.
+        CODE_SIGN_ENTITLEMENTS: App/Support/Familiar.entitlements
         # FamiliarCore.xcframework's simulator slice is arm64-only (tools/build-core.sh, this
         # Mac's own architecture) — exclude x86_64 for the simulator SDK so linking doesn't look
         # for symbols in an architecture the framework was never built for.
@@ -87,7 +90,7 @@ targets:
         INFOPLIST_FILE: MacApp/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "44"
+        CURRENT_PROJECT_VERSION: "70"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: MacApp/Support/Familiar.entitlements
         CODE_SIGN_STYLE: Automatic
