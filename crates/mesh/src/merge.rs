@@ -648,6 +648,7 @@ fn merge_one(
                 last_worked_at: 0,
                 answers: Vec::new(),
                 origin: "mesh".into(),
+                origin_human: String::new(),
                 // Attribute to the originating node so corruption-awareness still governs it and its
                 // outcome can be traced home. A peer's theory, tested on our execution.
                 actor: origin_actor.clone(),
@@ -1439,6 +1440,7 @@ mod tests {
                 status: "open".into(),
                 answers: Vec::new(),
                 origin: "llm".into(),
+                origin_human: String::new(),
                 actor: "familiar".into(),
             },
         )

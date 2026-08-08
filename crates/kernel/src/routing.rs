@@ -33,8 +33,10 @@ pub struct PresentHuman {
 }
 
 /// The human named by an actor namespace: `phone:ian` → `ian`, a bare `ian` → `ian`.
-/// Device-shaped actors with no human (`phone:`) name nobody.
-fn human_of(actor: &str) -> String {
+/// Device-shaped actors with no human (`phone:`) name nobody. `pub` for the same reason
+/// [`subject_and_strength`] is: one parse, used everywhere (thread's confirm flip
+/// matches an answerer against `origin_human` with exactly this rule).
+pub fn human_of(actor: &str) -> String {
     match actor.split_once(':') {
         Some((_, h)) => h.to_string(),
         None => actor.to_string(),

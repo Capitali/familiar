@@ -721,6 +721,7 @@ fn maybe_theorize(
             last_worked_at: 0,
             answers: Vec::new(),
             origin: "llm".to_string(),
+            origin_human: String::new(),
             actor: "familiar".to_string(),
         },
     )?;
@@ -1531,6 +1532,7 @@ fn adopt_device_theories(
             last_worked_at: 0,
             answers: Vec::new(),
             origin: "device".into(),
+            origin_human: String::new(),
             // Attribute to the reasoning device so corruption-awareness governs it.
             actor: o.actor.clone(),
         };
@@ -2799,6 +2801,7 @@ mod tests {
                 last_worked_at: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
+                origin_human: String::new(),
                 actor: "familiar".into(),
             },
         )
@@ -2885,6 +2888,7 @@ mod tests {
                 last_worked_at: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
+                origin_human: String::new(),
                 actor: "familiar".into(),
             },
         )
@@ -2928,6 +2932,7 @@ mod tests {
                 last_worked_at: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
+                origin_human: String::new(),
                 actor: "familiar".into(),
             },
         )
@@ -3287,6 +3292,7 @@ mod tests {
             last_worked_at: 0,
             answers: Vec::new(),
             origin: "llm".into(),
+            origin_human: String::new(),
             actor: "familiar".into(),
         };
         let existing = vec![held];
@@ -3424,6 +3430,7 @@ mod tests {
                 last_worked_at: 0,
                 answers: Vec::new(),
                 origin: "familiar".into(),
+                origin_human: String::new(),
                 actor: "familiar".into(),
             },
         )
@@ -3594,6 +3601,7 @@ mod tests {
                 last_worked_at: 0,
                 answers: Vec::new(),
                 origin: "familiar".into(),
+                origin_human: String::new(),
                 actor: "familiar".into(),
             },
         )
@@ -3788,6 +3796,7 @@ mod tests {
                     last_worked_at: 0,
                     answers: Vec::new(),
                     origin: "observer".into(),
+                    origin_human: String::new(),
                     actor: actor.into(),
                 },
             )

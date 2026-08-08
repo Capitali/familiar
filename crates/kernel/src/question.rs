@@ -57,6 +57,17 @@ pub struct Question {
     /// an ordinary observation in the shared worldview, public to the whole mesh.
     #[serde(default)]
     pub owner: String,
+    /// The human this question is **about** — whose need it serves and whom it must reach
+    /// (ADR-0022). Distinct from `owner`: the owner is whoever is being asked *now*; the
+    /// subject is the person the question exists for, and it waits for them rather than
+    /// landing on whoever holds the room. Empty means anyone may answer it.
+    #[serde(default)]
+    pub subject: String,
+    /// The thread this question serves, when it is a theory's confirm-question — the
+    /// subject's answer attaches there as evidence (`thread::add_answer_from`) and can
+    /// make a theorized need a stated one. Empty for standalone questions.
+    #[serde(default)]
+    pub thread_id: String,
 }
 
 impl Question {
@@ -73,6 +84,8 @@ impl Question {
             answered: false,
             dismiss_notes: Vec::new(),
             owner: String::new(),
+            subject: String::new(),
+            thread_id: String::new(),
         }
     }
 
@@ -133,6 +146,28 @@ pub fn add(dir: &Path, text: &str, origin: &str, now: i64) -> io::Result<String>
     let q = Question::new(&id, text, origin, now);
     qs.push(q.clone());
     append(dir, &q)?;
+    Ok(id)
+}
+
+/// [`add`], for a question that exists FOR someone: a confirm-question for a need the
+/// factory theorized about `subject`, serving `thread_id`. The subject waits for its
+/// person (see the coordination policy) instead of landing on whoever holds the room.
+/// Returns the id used.
+pub fn add_addressed(
+    dir: &Path,
+    text: &str,
+    origin: &str,
+    subject: &str,
+    thread_id: &str,
+    now: i64,
+) -> io::Result<String> {
+    let id = add(dir, text, origin, now)?;
+    let subject = subject.trim().to_lowercase();
+    let thread_id = thread_id.trim().to_string();
+    update(dir, &id, |q| {
+        q.subject = subject.clone();
+        q.thread_id = thread_id.clone();
+    })?;
     Ok(id)
 }
 

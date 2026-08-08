@@ -206,9 +206,17 @@ pub(crate) fn ingest_observations(
             o.confidence.clamp(0.0, 1.0),
         );
         // A device's answer aimed at a thread ("thread:<id>" context) attaches as that
-        // thread's evidence — the same non-dead-end path as a local console answer.
+        // thread's evidence — the same non-dead-end path as a local console answer. The
+        // device's actor names who answered: when it is the human the thread is about,
+        // the theorized need becomes a stated one (thread::add_answer_from).
         if let Some(thread_id) = obs.context.strip_prefix("thread:") {
-            let _ = familiar_kernel::thread::add_answer(dir, thread_id, &obs.object, env.ts);
+            let _ = familiar_kernel::thread::add_answer_from(
+                dir,
+                thread_id,
+                &obs.object,
+                &obs.actor,
+                env.ts,
+            );
         }
         // A confirmed face recognition ("recognized face:<name>") is the production trigger
         // identity::remember() never had before — the device already ran its own

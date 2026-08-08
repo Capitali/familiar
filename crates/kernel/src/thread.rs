@@ -40,6 +40,12 @@ pub struct Thread {
     pub answers: Vec<String>,
     /// llm | observer
     pub origin: String,
+    /// The human this thread is *about* — set when the factory theorizes a need for a
+    /// specific person (ADR-0022). Origin stays `"llm"` until that person themselves
+    /// answers (see [`add_answer_from`]): a theorized need is a hypothesis about someone,
+    /// and only their own words make it a stated one. Empty = not person-specific.
+    #[serde(default)]
+    pub origin_human: String,
     /// Who authored the directive — the actor whose reputation governs whether it is
     /// pursued (corruption awareness, Brick 20). `"familiar"` for its own theories;
     /// `"ian"` (or another human) for observer answers. Empty = unattributed (always
@@ -93,6 +99,32 @@ pub fn add_answer(dir: &Path, id: &str, text: &str, now: i64) -> io::Result<bool
     store::update_by_id(dir, THREADS_FILE, id, &t)
 }
 
+/// [`add_answer`] with the answerer's identity. When the answerer is the human the thread is
+/// about (`origin_human`), the thread's origin flips `llm → observer` and the actor
+/// becomes that human: the theorized need is now a stated one, counted by
+/// `unmet_needs` and carried in the human's own words. Deterministic on purpose — no
+/// model judges whether an answer "counts"; any non-empty reply from the subject does
+/// (consent by observation: their reaction is the signal, and even "no, that's wrong"
+/// is the human stating what they need). An answer from anyone else attaches as
+/// ordinary evidence and flips nothing. NOTE: the Mac console's `/local/answer`
+/// hardcodes its actor, so confirms from other humans arrive via their own signed
+/// devices (mesh::observe), which carry real `phone:<name>` actors.
+pub fn add_answer_from(dir: &Path, id: &str, text: &str, by: &str, now: i64) -> io::Result<bool> {
+    if !add_answer(dir, id, text, now)? {
+        return Ok(false);
+    }
+    let Some(mut t) = store::load_by_id::<Thread>(dir, THREADS_FILE, id)? else {
+        return Ok(false);
+    };
+    let answerer = crate::routing::human_of(by).trim().to_lowercase();
+    if !t.origin_human.is_empty() && t.origin == "llm" && answerer == t.origin_human {
+        t.origin = "observer".into();
+        t.actor = t.origin_human.clone();
+        store::update_by_id(dir, THREADS_FILE, id, &t)?;
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +146,7 @@ mod tests {
             last_worked_at: 0,
             answers: Vec::new(),
             origin: "llm".into(),
+            origin_human: String::new(),
             actor: "familiar".into(),
         };
         append(&p, &t).unwrap();
@@ -127,6 +160,56 @@ mod tests {
         let t2 = &load(&p).unwrap()[0];
         assert_eq!(t2.answers, vec!["mornings mean before 10am"]);
         assert_eq!(t2.last_worked_at, 300, "answering is active work");
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    fn need_thread(id: &str) -> Thread {
+        Thread {
+            id: id.into(),
+            question: "Betty — would warmer evening light help?".into(),
+            theory: "Betty may want softer light after dark.".into(),
+            direction: "dim the lights after 20:00".into(),
+            created_at: 100,
+            status: "open".into(),
+            status_at: 100,
+            last_worked_at: 0,
+            answers: Vec::new(),
+            origin: "llm".into(),
+            origin_human: "betty".into(),
+            actor: "familiar".into(),
+        }
+    }
+
+    #[test]
+    fn a_confirm_answer_from_the_subject_makes_the_need_stated() {
+        let p = std::env::temp_dir().join("substrate_thread_confirm_test");
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        append(&p, &need_thread("thread-0001")).unwrap();
+        // Her device speaks for her — the namespace parse finds the human.
+        add_answer_from(&p, "thread-0001", "yes — after eight, please", "phone:betty", 200).unwrap();
+        let t = &load(&p).unwrap()[0];
+        assert_eq!(t.origin, "observer", "her words make the need a stated one");
+        assert_eq!(t.actor, "betty", "the need now belongs to its human");
+        assert_eq!(t.answers, vec!["yes — after eight, please"]);
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn an_answer_from_someone_else_flips_nothing() {
+        let p = std::env::temp_dir().join("substrate_thread_noflip_test");
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        append(&p, &need_thread("thread-0001")).unwrap();
+        add_answer_from(&p, "thread-0001", "she does like it dim", "ian", 200).unwrap();
+        let t = &load(&p).unwrap()[0];
+        assert_eq!(t.origin, "llm", "another voice is evidence, not confirmation");
+        assert_eq!(t.actor, "familiar");
+        assert_eq!(
+            t.answers,
+            vec!["she does like it dim"],
+            "but the evidence still travels with the thread"
+        );
         let _ = fs::remove_dir_all(&p);
     }
 }

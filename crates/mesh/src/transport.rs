@@ -1516,7 +1516,9 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     // answer is the console channel: recorded, and the open question retired.
     if let Some(thread_id) = v.get("thread").and_then(|s| s.as_str()) {
         let now = now_secs();
-        let _ = familiar_kernel::thread::add_answer(dir, thread_id, t, now);
+        // The local console's actor is fixed ("ian"); confirms from other humans arrive
+        // via their own signed devices (mesh::observe), which carry real actors.
+        let _ = familiar_kernel::thread::add_answer_from(dir, thread_id, t, "ian", now);
         let obs = familiar_kernel::observation::Observation::new(
             "ian",
             "answered",
