@@ -31,6 +31,10 @@ commands:
   presence       report the presence signal (Law II)
   capacities     report the capacities signal (Law II / HUMANITY.md)
   theories       list the familiar's questions + theories (threads)
+  dossier        what the familiar holds about one person, read by its subject
+                 (ADR-0022): `dossier <handle>` — presence shape, standing evidence,
+                 needs (stated vs theorized); `dossier withdraw <handle>` removes their
+                 contributions, clears the face link, and prints an honest receipt
   sense          perceive the host (environment, interfaces, capabilities)
   reach          assess what the familiar could extend into — discover devices and
                  classify each (agent-capable / protocol-controllable / observable)
@@ -96,6 +100,7 @@ fn main() -> ExitCode {
         Some("presence") => cmd_presence(rest),
         Some("capacities") => cmd_capacities(rest),
         Some("theories") => cmd_theories(rest),
+        Some("dossier") => cmd_dossier(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
@@ -1918,6 +1923,123 @@ fn cmd_theories(args: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("theories: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The subject-facing view (ADR-0022 constraint 3): a record kept about someone that
+/// they cannot see is surveillance, whatever its purpose. Deliberately CLI-only — the
+/// worldview federates to every member device, and a person's shape is theirs to read,
+/// not the room's to browse.
+fn cmd_dossier(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let now = now_secs();
+    // Positionals: skip flags AND their values (mirrors how `flags()` consumes them).
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            if !args[i].contains('=')
+                && args.get(i + 1).is_some_and(|v| !v.starts_with("--"))
+            {
+                i += 1; // the flag's value
+            }
+        } else {
+            positional.push(&args[i]);
+        }
+        i += 1;
+    }
+    let half_life = familiar_kernel::parameters::Parameters::load_or_default(&dir)
+        .sane()
+        .dossier_half_life_days
+        * 86_400;
+    match positional.as_slice() {
+        [w, handle] if w.as_str() == "withdraw" => {
+            match familiar_kernel::dossier::withdraw(&dir, handle, now) {
+                Ok(r) => {
+                    println!("{} contributions removed; face link cleared: {}.", r.contributions_removed, r.face_unlinked);
+                    println!("Your weight no longer feeds any pattern, and no later fold will rebuild one about you.");
+                    println!("The honest boundary: aggregate structure that no longer identifies you survives; nothing that points at you does.");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("dossier withdraw: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [handle] => {
+            let d = match familiar_kernel::dossier::read(&dir, handle, now, half_life) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("dossier: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match &d.identity {
+                Some(i) => println!(
+                    "{} ({}) — {} · first seen {} · {} interactions",
+                    i.name, i.handle, i.relation, i.first_seen, i.interactions
+                ),
+                None => println!("({handle} — no identity on record)"),
+            }
+            if d.withdrawn {
+                println!("WITHDRAWN — this person removed themselves; no pattern is kept and none will be rebuilt.");
+                return ExitCode::SUCCESS;
+            }
+            println!("\npresence by hour (UTC) — share of decayed weight, · none:");
+            let max = d
+                .presence_hours
+                .iter()
+                .map(|s| s.share)
+                .fold(0.0_f64, f64::max);
+            for s in &d.presence_hours {
+                let bar_len = if max > 0.0 {
+                    ((s.share / max) * 24.0).round() as usize
+                } else {
+                    0
+                };
+                println!(
+                    "  {} {:24} {}",
+                    s.slot,
+                    "#".repeat(bar_len),
+                    if s.count > 0 {
+                        format!("share {:.2} · confidence {:.2} · {} sightings", s.share, s.confidence, s.count)
+                    } else {
+                        "·".to_string()
+                    }
+                );
+            }
+            if !d.standing.is_empty() {
+                println!("\nusually identified by:");
+                for s in &d.standing {
+                    println!(
+                        "  {:9} share {:.2} · confidence {:.2} · {} sightings",
+                        s.slot, s.share, s.confidence, s.count
+                    );
+                }
+            }
+            if d.needs.is_empty() {
+                println!("\nneeds: none on record");
+            } else {
+                println!("\nneeds:");
+                for n in &d.needs {
+                    println!(
+                        "  [{}] {} — {}",
+                        if n.stated { "stated" } else { "theorized" },
+                        n.status,
+                        n.text
+                    );
+                }
+            }
+            println!("\nin a sentence: {}", familiar_kernel::dossier::coarse_summary(&d));
+            println!("this record is yours: `familiar dossier withdraw {handle}` removes you from it.");
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("usage: familiar dossier <handle> | familiar dossier withdraw <handle>");
             ExitCode::FAILURE
         }
     }
