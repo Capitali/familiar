@@ -1361,7 +1361,14 @@ fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
     }
     let ws = familiar_workspace();
     let sandbox = boundary.map(|b| b.sandbox_execution).unwrap_or(true);
-    let limits = if sandbox {
+    let limits = if t.origin == "declared" {
+        // A declared actuator command is a bounded act by nature — a BLE connect and one
+        // write. Even when the human runs artifacts unsandboxed, this stays on the 60s
+        // tool budget: a TCC-blocked CoreBluetooth wait otherwise hangs the whole tick
+        // for the unsandboxed 300s, every poll (seen live, 2026-08-08 — the launchd
+        // agent lacking a Bluetooth grant stalled 5 of every 5 minutes).
+        exec::Limits::tool_run()
+    } else if sandbox {
         // A real tool does real work — sampling CPU over a few seconds, an nmap sweep — which
         // the tick's tight candidate budget (5s/10s) could only ever time out. `tool_run` is
         // the generous-but-bounded budget so a legitimate tool actually finishes.
