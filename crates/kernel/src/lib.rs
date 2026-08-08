@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod activity;
+pub mod actuator;
 pub mod boundary;
 pub mod candidate;
 pub mod capabilities;
