@@ -145,6 +145,21 @@ pub fn fold(dir: &Path, half_life_secs: i64) -> io::Result<usize> {
                 half_life_secs,
             )?;
             contribute(dir, &who, "standing", via, strength, o.ts, half_life_secs)?;
+            // A hand on a control surface is a habit in the making: "lights=dim at hour
+            // 20" accumulates as its own kind (ADR-0032 — the value rides in the slot,
+            // so a new kind needed no schema change). The familiar's own acts never
+            // reach here (actor "familiar" is excluded above): it cannot self-pattern.
+            if o.action == "adjusted" && o.object.contains('=') {
+                contribute(
+                    dir,
+                    &who,
+                    "habit",
+                    &format!("{}@h{hour:02}", o.object),
+                    strength,
+                    o.ts,
+                    half_life_secs,
+                )?;
+            }
         }
         read += batch.len();
         cursor = batch.last().map(|(seq, _)| *seq).unwrap_or(cursor);
@@ -186,6 +201,26 @@ fn contribute(
     Ok(())
 }
 
+/// Depreciate one slot: the human waved this off (or a theory leaning on it was
+/// reverted), so its weight is cut — but the count is kept, because a wrong guess still
+/// teaches (ADR-0022: dismissal is depreciation, not erasure). Returns whether the slot
+/// existed to depreciate.
+pub fn depreciate(
+    dir: &Path,
+    handle: &str,
+    kind: &str,
+    slot: &str,
+    factor: f64,
+) -> io::Result<bool> {
+    let id = ctb_id(&handle.trim().to_lowercase(), kind, slot);
+    let Some(mut c) = store::load_by_id::<Contribution>(dir, DOSSIER_FILE, &id)? else {
+        return Ok(false);
+    };
+    c.weight *= factor.clamp(0.0, 1.0);
+    store::upsert_by_id(dir, DOSSIER_FILE, &id, &c)?;
+    Ok(true)
+}
+
 /// One slot of a pattern as presented: its share of the pattern's decayed weight, and
 /// how much belief the sighting count actually supports.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -218,6 +253,8 @@ pub struct Dossier {
     pub presence_hours: Vec<SlotView>,
     /// Evidence tiers, strongest first.
     pub standing: Vec<SlotView>,
+    /// Observed control-surface habits (`lights=dim@h20`), strongest first.
+    pub habits: Vec<SlotView>,
     /// Open threads about or from this person, plus unanswered questions addressed to them.
     pub needs: Vec<NeedView>,
     pub withdrawn: bool,
@@ -304,6 +341,7 @@ pub fn read(dir: &Path, handle: &str, now: i64, half_life_secs: i64) -> io::Resu
             .find(|p| p.handle == handle),
         presence_hours,
         standing: view("standing"),
+        habits: view("habit"),
         needs,
         withdrawn: withdrawn(dir, &handle),
     })
@@ -340,6 +378,16 @@ pub fn coarse_summary(d: &Dossier) -> String {
     }
     if let Some(via) = d.standing.first() {
         parts.push(format!("identified mostly by {}", via.slot));
+    }
+    // At most one habit clause — the strongest, spoken in day-parts like presence.
+    if let Some(h) = d.habits.iter().find(|h| h.count > 0) {
+        if let Some((setting, hour)) = h.slot.rsplit_once("@h") {
+            parts.push(format!(
+                "tends to set {} {}",
+                setting,
+                day_part(&format!("h{hour}"))
+            ));
+        }
     }
     if parts.is_empty() {
         "not yet known well enough to say".to_string()
@@ -526,6 +574,79 @@ mod tests {
             "the tombstone outranks the log: {after:?}"
         );
         assert!(read(&p, "betty", 400, HL).unwrap().withdrawn);
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn an_adjustment_folds_into_a_habit_slot_by_hour() {
+        let p = dir("substrate_dossier_habit");
+        let t20 = 20 * 3600;
+        let mut o = obs("ian", "adjusted", "lights=dim", t20);
+        o.context = "was:bright via:poll".into();
+        observation::record(&p, o).unwrap();
+        fold(&p, HL).unwrap();
+        let c: Contribution = store::load_by_id(&p, DOSSIER_FILE, "ctb|ian|habit|lights=dim@h20")
+            .unwrap()
+            .unwrap();
+        assert_eq!(c.count, 1);
+        assert!(
+            (c.weight - 0.5).abs() < 0.01,
+            "the adjusted rung's strength"
+        );
+        let d = read(&p, "ian", t20 + 60, HL).unwrap();
+        assert_eq!(d.habits.len(), 1);
+        assert!(
+            coarse_summary(&d).contains("tends to set lights=dim in the evening"),
+            "{}",
+            coarse_summary(&d)
+        );
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn depreciation_halves_a_habit_but_keeps_its_count() {
+        let p = dir("substrate_dossier_depreciate");
+        let t20 = 20 * 3600;
+        observation::record(&p, obs("ian", "adjusted", "lights=dim", t20)).unwrap();
+        fold(&p, HL).unwrap();
+        assert!(depreciate(&p, "ian", "habit", "lights=dim@h20", 0.5).unwrap());
+        let c: Contribution = store::load_by_id(&p, DOSSIER_FILE, "ctb|ian|habit|lights=dim@h20")
+            .unwrap()
+            .unwrap();
+        assert!((c.weight - 0.25).abs() < 0.01, "halved, not erased");
+        assert_eq!(
+            c.count, 1,
+            "a wrong guess still teaches — the count survives"
+        );
+        assert!(!depreciate(&p, "ian", "habit", "no=such@h00", 0.5).unwrap());
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn the_familiars_own_actuation_feeds_no_habit() {
+        let p = dir("substrate_dossier_selfact");
+        observation::record(&p, obs("familiar", "actuated", "lights=dim", 100)).unwrap();
+        observation::record(&p, obs("someone", "adjusted", "lights=dim", 200)).unwrap();
+        fold(&p, HL).unwrap();
+        let all: Vec<Contribution> = store::load_prefix(&p, DOSSIER_FILE, "ctb|").unwrap();
+        assert!(
+            all.is_empty(),
+            "its own hand cannot self-pattern, and 'someone' is nobody: {all:?}"
+        );
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn withdrawal_takes_the_habits_too() {
+        let p = dir("substrate_dossier_habit_withdraw");
+        observation::record(&p, obs("ian", "adjusted", "lights=dim", 20 * 3600)).unwrap();
+        fold(&p, HL).unwrap();
+        let receipt = withdraw(&p, "ian", 100_000).unwrap();
+        assert!(
+            receipt.contributions_removed >= 3,
+            "presence, standing, habit — all go"
+        );
+        assert!(read(&p, "ian", 100_000, HL).unwrap().habits.is_empty());
         let _ = fs::remove_dir_all(&p);
     }
 

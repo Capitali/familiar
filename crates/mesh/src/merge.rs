@@ -763,8 +763,15 @@ fn tool_manifests(dir: &Path) -> Vec<ToolManifest> {
     tool::load(dir)
         .unwrap_or_default()
         .into_iter()
+        // A declared actuator wrapper commands THIS node's device via THIS host's paths
+        // (ADR-0032) — like a personal-need thread, it has no honest meaning on a peer
+        // and is never offered.
+        .filter(|t| t.origin != "declared")
         .filter_map(|t| {
             let body = std::fs::read(&t.script_path).ok()?;
+            if familiar_kernel::review::reaches_device_control(&String::from_utf8_lossy(&body)) {
+                return None;
+            }
             Some(ToolManifest {
                 tool_id: t.id,
                 name: t.name,
@@ -1528,6 +1535,69 @@ mod tests {
             !raw.contains("softer light"),
             "and its text appears nowhere in the brief at all"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_declared_actuator_tool_never_federates() {
+        // A declared wrapper commands THIS node's device via THIS host's paths — on a
+        // peer it is meaningless at best (ADR-0032). A portable tool still travels.
+        let dir = tmp("no_declared_tool_on_wire");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        open_mesh_boundary(&dir);
+        let ws = dir.join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let mk = |name: &str, body: &str| {
+            let p = ws.join(name);
+            fs::write(&p, body).unwrap();
+            p.display().to_string()
+        };
+        let tool_row = |id: &str, origin: &str, path: String| familiar_kernel::tool::Tool {
+            id: id.into(),
+            name: id.into(),
+            purpose: "p".into(),
+            keywords: "k".into(),
+            script_path: path,
+            created_at: 1,
+            uses: 0,
+            last_used: 0,
+            last_exit_ok: true,
+            last_status: String::new(),
+            origin: origin.into(),
+            origin_verified_at: 0,
+        };
+        familiar_kernel::tool::append(
+            &dir,
+            &tool_row(
+                "tool-act-lights-dim",
+                "declared",
+                mk("act.sh", "#!/bin/sh\n# familiar:actuate lights dim\ncat /tmp/x\n"),
+            ),
+        )
+        .unwrap();
+        familiar_kernel::tool::append(
+            &dir,
+            &tool_row("tool-0002", "", mk("portable.sh", "#!/bin/sh\nsysctl -n hw.ncpu\n")),
+        )
+        .unwrap();
+        let cfg = MeshConfig::default(); // share_tools defaults on — the sharing-est case
+        build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
+        let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
+        let brief: MeshBrief = serde_json::from_str(&raw).unwrap();
+        let names: Vec<&str> = brief
+            .body
+            .capability
+            .tools
+            .iter()
+            .map(|t| t.tool_id.as_str())
+            .collect();
+        assert!(names.contains(&"tool-0002"), "portable tools still travel: {names:?}");
+        assert!(
+            !names.contains(&"tool-act-lights-dim"),
+            "a declared actuator stays home: {names:?}"
+        );
+        assert!(!raw.contains("familiar:actuate"), "not even its marker crosses");
         let _ = fs::remove_dir_all(&dir);
     }
 

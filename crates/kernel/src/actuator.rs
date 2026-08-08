@@ -108,8 +108,14 @@ pub fn parse_state(output: &str) -> Option<RawState> {
         }
     }
     match (on, pct) {
-        (Some(on), Some(p)) => Some(RawState { on, brightness_pct: p }),
-        (Some(on), None) => Some(RawState { on, brightness_pct: 0.0 }),
+        (Some(on), Some(p)) => Some(RawState {
+            on,
+            brightness_pct: p,
+        }),
+        (Some(on), None) => Some(RawState {
+            on,
+            brightness_pct: 0.0,
+        }),
         _ => None,
     }
 }
@@ -189,7 +195,12 @@ pub fn is_negative(text: &str) -> bool {
         return true;
     }
     t.split(|c: char| !c.is_alphanumeric() && c != '\'')
-        .any(|w| matches!(w, "no" | "not" | "don't" | "dont" | "stop" | "undo" | "revert" | "wrong"))
+        .any(|w| {
+            matches!(
+                w,
+                "no" | "not" | "don't" | "dont" | "stop" | "undo" | "revert" | "wrong"
+            )
+        })
 }
 
 #[cfg(test)]
@@ -215,9 +226,21 @@ mod tests {
                 ("bright".to_string(), "cmd-bright".to_string()),
             ]),
             buckets: vec![
-                BucketRule { name: "off".into(), off: true, max_brightness_pct: None },
-                BucketRule { name: "dim".into(), off: false, max_brightness_pct: Some(40.0) },
-                BucketRule { name: "bright".into(), off: false, max_brightness_pct: None },
+                BucketRule {
+                    name: "off".into(),
+                    off: true,
+                    max_brightness_pct: None,
+                },
+                BucketRule {
+                    name: "dim".into(),
+                    off: false,
+                    max_brightness_pct: Some(40.0),
+                },
+                BucketRule {
+                    name: "bright".into(),
+                    off: false,
+                    max_brightness_pct: None,
+                },
             ],
             keywords: "lamp led".into(),
         }
@@ -256,18 +279,34 @@ mod tests {
         assert!(s.on);
         assert!((s.brightness_pct - 20.0).abs() < 0.01);
         assert_eq!(bucket_of(&lights(), &s), "dim");
-        assert!(parse_state("no state reply").is_none(), "unreadable is unknown, never guessed");
+        assert!(
+            parse_state("no state reply").is_none(),
+            "unreadable is unknown, never guessed"
+        );
     }
 
     #[test]
     fn bucket_rules_first_match_wins_and_the_last_is_the_fallback() {
         let a = lights();
-        let off = RawState { on: false, brightness_pct: 0.0 };
-        let mid = RawState { on: true, brightness_pct: 40.0 };
-        let full = RawState { on: true, brightness_pct: 90.0 };
+        let off = RawState {
+            on: false,
+            brightness_pct: 0.0,
+        };
+        let mid = RawState {
+            on: true,
+            brightness_pct: 40.0,
+        };
+        let full = RawState {
+            on: true,
+            brightness_pct: 90.0,
+        };
         assert_eq!(bucket_of(&a, &off), "off");
         assert_eq!(bucket_of(&a, &mid), "dim", "at the threshold is within it");
-        assert_eq!(bucket_of(&a, &full), "bright", "the fallback catches the rest");
+        assert_eq!(
+            bucket_of(&a, &full),
+            "bright",
+            "the fallback catches the rest"
+        );
     }
 
     #[test]
@@ -275,9 +314,15 @@ mod tests {
         assert!(is_negative("No, too dark"));
         assert!(is_negative("please put it back"));
         assert!(is_negative("don't do that"));
-        assert!(!is_negative("nothing better than this"), "'nothing' is not 'no'");
+        assert!(
+            !is_negative("nothing better than this"),
+            "'nothing' is not 'no'"
+        );
         assert!(!is_negative("yes, lovely"), "assent stands");
-        assert!(!is_negative(""), "silence is not a no — the poller reads hands, not words");
+        assert!(
+            !is_negative(""),
+            "silence is not a no — the poller reads hands, not words"
+        );
     }
 
     #[test]

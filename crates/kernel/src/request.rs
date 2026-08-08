@@ -104,6 +104,53 @@ pub fn set_feedback(dir: &Path, answer_id: &str, feedback: &str) -> io::Result<b
     store::update_by_id(dir, ANSWERS_FILE, answer_id, &a)
 }
 
+/// The feedback intake, completing the chain `Answer.tool_id → set_feedback →
+/// tool::mark_unhealthy` that was built for exactly this and never wired: an observation
+/// shaped `<any actor> / feedback / helpful|refine / answer:<id>` (from a device via the
+/// observe seam, or the local console) records the reaction, and a **refine** retires the
+/// *authored* tool behind the answer so it is re-authored, not reused. A **declared**
+/// actuator tool is never retired this way — it ran correctly, the *decision* was wrong,
+/// and reaction-to-acts has its own machinery (ADR-0032); retiring it would silently
+/// disable the surface, including its own revert path. A no-op for any other shape, so
+/// callers run this unconditionally over incoming observations.
+pub fn maybe_apply_feedback(
+    dir: &Path,
+    action: &str,
+    object: &str,
+    context: &str,
+) -> io::Result<Option<String>> {
+    if action != "feedback" {
+        return Ok(None);
+    }
+    let Some(answer_id) = context.trim().strip_prefix("answer:") else {
+        return Ok(None);
+    };
+    let verdict = object.trim().to_lowercase();
+    if !matches!(verdict.as_str(), "helpful" | "refine") {
+        return Ok(None);
+    }
+    if !set_feedback(dir, answer_id, &verdict)? {
+        return Ok(None);
+    }
+    if verdict != "refine" {
+        return Ok(Some(String::new()));
+    }
+    let tool_id = store::load_by_id::<Answer>(dir, ANSWERS_FILE, answer_id)?
+        .map(|a| a.tool_id)
+        .unwrap_or_default();
+    if tool_id.is_empty() {
+        return Ok(Some(String::new()));
+    }
+    let declared = crate::tool::load(dir)?
+        .iter()
+        .any(|t| t.id == tool_id && t.origin == "declared");
+    if declared {
+        return Ok(Some(String::new()));
+    }
+    crate::tool::mark_unhealthy(dir, &tool_id)?;
+    Ok(Some(tool_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +208,77 @@ mod tests {
         let a = &load_answers(&t.0).unwrap()[0];
         assert_eq!(a.confidence, Confidence::Known);
         assert_eq!(a.feedback, "helpful");
+    }
+
+    fn answer_with_tool(dir: &std::path::Path, ans: &str, tool_id: &str) {
+        append_answer(
+            dir,
+            &Answer {
+                id: ans.into(),
+                request_id: "req-0001".into(),
+                body: "b".into(),
+                confidence: Confidence::Known,
+                evidence: String::new(),
+                created_at: 101,
+                feedback: String::new(),
+                tool_id: tool_id.into(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn tool_row(id: &str, origin: &str) -> crate::tool::Tool {
+        crate::tool::Tool {
+            id: id.into(),
+            name: "n".into(),
+            purpose: "p".into(),
+            keywords: "k".into(),
+            script_path: "/dev/null".into(),
+            created_at: 1,
+            uses: 0,
+            last_used: 0,
+            last_exit_ok: true,
+            last_status: String::new(),
+            origin: origin.into(),
+            origin_verified_at: 0,
+        }
+    }
+
+    #[test]
+    fn a_refine_reaction_retires_the_authored_tool_behind_the_answer() {
+        // The chain Answer.tool_id → set_feedback → mark_unhealthy, finally producing.
+        let t = Temp::new("feedback_chain");
+        answer_with_tool(&t.0, "ans-0001", "tool-0007");
+        crate::tool::append(&t.0, &tool_row("tool-0007", "")).unwrap();
+        let retired = maybe_apply_feedback(&t.0, "feedback", "refine", "answer:ans-0001").unwrap();
+        assert_eq!(retired.as_deref(), Some("tool-0007"));
+        let tl = &crate::tool::load(&t.0).unwrap()[0];
+        assert!(
+            !tl.last_exit_ok,
+            "refine retires the authored tool from reuse"
+        );
+        assert_eq!(load_answers(&t.0).unwrap()[0].feedback, "refine");
+    }
+
+    #[test]
+    fn a_declared_actuator_tool_survives_a_refine() {
+        // It ran correctly; the DECISION was wrong — and retiring it would kill the
+        // revert path too. Reaction-to-acts has its own machinery (ADR-0032).
+        let t = Temp::new("feedback_declared");
+        answer_with_tool(&t.0, "ans-0001", "tool-act-lights-dim");
+        crate::tool::append(&t.0, &tool_row("tool-act-lights-dim", "declared")).unwrap();
+        let retired = maybe_apply_feedback(&t.0, "feedback", "refine", "answer:ans-0001").unwrap();
+        assert_eq!(
+            retired.as_deref(),
+            Some(""),
+            "feedback recorded, nothing retired"
+        );
+        assert!(crate::tool::load(&t.0).unwrap()[0].last_exit_ok);
+        // And non-feedback shapes are a clean no-op.
+        assert!(
+            maybe_apply_feedback(&t.0, "told the familiar", "hi", "console")
+                .unwrap()
+                .is_none()
+        );
     }
 }

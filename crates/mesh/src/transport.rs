@@ -1689,6 +1689,9 @@ fn local_observe(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         .clamp(0.0, 1.0);
     let now = now_secs();
     let _ = familiar_kernel::identity::maybe_learn_from_observation(dir, action, object, now);
+    // A local verdict on an answer ("feedback / refine / answer:<id>") retires the
+    // responsible authored tool — the same seam the signed device path runs.
+    let _ = familiar_kernel::request::maybe_apply_feedback(dir, action, object, context);
     let obs = familiar_kernel::observation::Observation::new(
         actor, action, object, context, "local", now, confidence,
     );
@@ -3059,6 +3062,14 @@ fn push_tool(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
             "network-reaching tools are not federated",
         );
     }
+    // Same defense in depth for device control: a pushed tool that would drive a surface
+    // here was declared (or authored) against another node's world — refuse it.
+    if familiar_kernel::review::reaches_device_control(&String::from_utf8_lossy(&script_body)) {
+        return text(
+            StatusCode::FORBIDDEN,
+            "device-control tools are not federated",
+        );
+    }
     if known_tool_shas(dir).contains(&push.manifest.script_sha256) {
         return text(StatusCode::OK, "already known");
     }
@@ -3333,6 +3344,13 @@ async fn push_missing_tools(
         // meaningless there at best and intrusive on that peer's network at worst. Keep such tools
         // local; only portable tools (local computation, text/host introspection) federate.
         if familiar_kernel::review::reaches_network(&String::from_utf8_lossy(&body)) {
+            continue;
+        }
+        // Likewise a tool that drives a control surface — it commands this node's own
+        // declared device (ADR-0032); on a peer it is meaningless or worse.
+        if t.origin == "declared"
+            || familiar_kernel::review::reaches_device_control(&String::from_utf8_lossy(&body))
+        {
             continue;
         }
         let sha = sha256_hex(&body);

@@ -35,6 +35,9 @@ commands:
                  (ADR-0022): `dossier <handle>` — presence shape, standing evidence,
                  needs (stated vs theorized); `dossier withdraw <handle>` removes their
                  contributions, clears the face link, and prints an honest receipt
+  actuate        drive a declared control surface by hand (ADR-0032):
+                 `actuate <surface> state` reads it; `actuate <surface> <label>` acts —
+                 gated by allow_actuate + allow_execute; surfaces come from actuators.json
   sense          perceive the host (environment, interfaces, capabilities)
   reach          assess what the familiar could extend into — discover devices and
                  classify each (agent-capable / protocol-controllable / observable)
@@ -101,6 +104,7 @@ fn main() -> ExitCode {
         Some("capacities") => cmd_capacities(rest),
         Some("theories") => cmd_theories(rest),
         Some("dossier") => cmd_dossier(rest),
+        Some("actuate") => cmd_actuate(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
@@ -1957,6 +1961,50 @@ fn cmd_theories(args: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("theories: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The human's hand on a declared surface — same wrapper tools, same review, same gates
+/// as the familiar's own loop (cmd_discover pattern: boundary check up front).
+fn cmd_actuate(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            if !args[i].contains('=') && args.get(i + 1).is_some_and(|v| !v.starts_with("--")) {
+                i += 1;
+            }
+        } else {
+            positional.push(&args[i]);
+        }
+        i += 1;
+    }
+    let [surface, label] = positional.as_slice() else {
+        eprintln!("usage: familiar actuate <surface> <state|label>  (surfaces: actuators.json)");
+        return ExitCode::FAILURE;
+    };
+    let b = boundary::load(&dir).unwrap_or_else(|_| boundary::Boundary::closed());
+    let action = guard::Action::new(guard::ActionKind::Actuate, surface.as_str());
+    let v = guard::evaluate(&action, &b);
+    if v.decision != Decision::Allow {
+        eprintln!("{}", v.rationale);
+        return ExitCode::FAILURE;
+    }
+    match familiar_cycle::actuate_by_hand(&dir, surface, label, now_secs()) {
+        Ok(Ok(out)) => {
+            println!("{out}");
+            ExitCode::SUCCESS
+        }
+        Ok(Err(msg)) => {
+            eprintln!("actuate: {msg}");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("actuate: {e}");
             ExitCode::FAILURE
         }
     }

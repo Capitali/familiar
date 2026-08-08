@@ -218,6 +218,14 @@ pub(crate) fn ingest_observations(
                 env.ts,
             );
         }
+        // A device's verdict on an answer ("feedback / refine / answer:<id>") completes the
+        // retire-the-tool chain — a "refine" stops the responsible authored tool being reused.
+        let _ = familiar_kernel::request::maybe_apply_feedback(
+            dir,
+            &obs.action,
+            &obs.object,
+            &obs.context,
+        );
         // A confirmed face recognition ("recognized face:<name>") is the production trigger
         // identity::remember() never had before — the device already ran its own
         // confirm-before-keep flow; this is where that confirmation reaches the registry.

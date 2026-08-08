@@ -141,6 +141,16 @@ fn run_gated(dir: &Path, scoped: &Boundary, script: &str, _now: i64) -> io::Resu
                 .to_string(),
         );
     }
+    // A delegated loop never drives a device at all — allow_actuate is dropped from every
+    // scope (ADR-0032): acting on a surface is the core's reaction-honoring loop.
+    if familiar_kernel::review::reaches_device_control(script) {
+        return Ok(
+            "REFUSED by your scoped boundary — that drives a control surface, which a \
+             delegated agent never does (allow_actuate is never scoped to an agent). \
+             Propose only what's within your granted capability."
+                .to_string(),
+        );
+    }
     let work = dir.join("agent").join("work");
     fs::create_dir_all(&work)?;
     let path = work.join("step.sh");
@@ -314,6 +324,29 @@ mod tests {
         );
         assert!(out.to_lowercase().contains("network"));
         // nothing was written to run
+        assert!(!dir.join("agent").join("work").join("step.sh").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_device_control_step_is_declined_without_the_actuate_gate() {
+        // allow_actuate is dropped from every agent scope (ADR-0032) — a delegated step
+        // that would drive a device is refused unconditionally, before it runs.
+        let dir = std::env::temp_dir().join(format!("familiar_agent_act_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let mut scoped = Boundary::closed();
+        scoped.allow_execute = true;
+        scoped.allow_network = true; // even a broad scope never carries actuation
+        let out = run_gated(
+            &dir,
+            &scoped,
+            "#!/bin/sh\ncd ~/Development/motorlights && .venv/bin/python motorlights.py off\n",
+            0,
+        )
+        .unwrap();
+        assert!(out.contains("REFUSED"), "{out}");
+        assert!(out.contains("control surface"), "{out}");
         assert!(!dir.join("agent").join("work").join("step.sh").exists());
         let _ = fs::remove_dir_all(&dir);
     }

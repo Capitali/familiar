@@ -151,6 +151,12 @@ pub struct TickReport {
     pub theorized: bool,
     /// Open threads turned into candidate work this tick.
     pub pursued: usize,
+    /// Declared control surfaces the familiar set this tick (ADR-0032 — each opens a
+    /// reaction window the next ticks honor).
+    pub actuated: usize,
+    /// Reactions honored this tick — a human hand or word answered an open act
+    /// (undo observed, revert run, or assent closing the window).
+    pub reactions: usize,
     /// Durable observation-gathering utilities cultivated from proven theories this tick (the
     /// theory→code bridge — a theory became a re-runnable tool that feeds the observation record).
     pub cultivated: usize,
@@ -195,6 +201,8 @@ impl TickReport {
             && self.promoted == 0
             && self.mutated == 0
             && self.pursued == 0
+            && self.actuated == 0
+            && self.reactions == 0
             && self.cultivated == 0
             && self.goals_advanced == 0
             && self.reverted == 0
@@ -1333,6 +1341,24 @@ fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
             declined: Some("it reaches the network, which is not open (allow_network)".to_string()),
         });
     }
+    // A tool that drives a control surface only runs when the human has opened
+    // `allow_actuate` (ADR-0032) — declared wrappers and authored scripts alike.
+    if familiar_kernel::review::reaches_device_control(&script)
+        && boundary.as_ref().map(|b| !b.allow_actuate).unwrap_or(true)
+    {
+        let _ = tool::record_use(dir, &t.id, now, false, "declined: actuation is closed");
+        return Ok(ToolRun {
+            out: String::new(),
+            healthy: false,
+            status: "declined: actuation is closed".to_string(),
+            confidence: Confidence::Known,
+            uses: t.uses,
+            broken: None,
+            declined: Some(
+                "it drives a control surface, which is not open (allow_actuate)".to_string(),
+            ),
+        });
+    }
     let ws = familiar_workspace();
     let sandbox = boundary.map(|b| b.sandbox_execution).unwrap_or(true);
     let limits = if sandbox {
@@ -1861,6 +1887,633 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
         )?;
     }
     Ok((pursued, marginalized))
+}
+
+// ---- 8·3 The actuation loop (ADR-0032): poll → heed → tend -------------------------
+//
+// The familiar's hand on the world, under consent-by-observation (ADR-0031): it acts on
+// a declared, reversible surface, then READS THE REACTION — the human's hands (a
+// counter-change the poller sees) or their words (an answer or dismissal). Positive or
+// quiet: the change stands. Negative: undo first, argue never, and the wrong guess
+// becomes trial evidence the selection machinery learns from.
+
+/// After a reverted act a surface rests — the familiar does not re-try a rejected
+/// kindness for six hours. A constant, not a dial: fewer knobs on the sharpest loop.
+const ACTUATOR_REST_SECS: i64 = 6 * 3600;
+
+fn actuator_tool_id(surface: &str, label: &str) -> String {
+    format!("tool-act-{surface}-{label}")
+}
+
+/// Materialize each declared surface's acts as library Tools (`origin: "declared"`) so
+/// best_match, health tracking, and the execution gates all apply to them unchanged.
+/// Idempotent: scripts are rewritten only when the declaration changed; Tool rows are
+/// appended once. A surface the load dropped (buckets not closed over actions) is
+/// recorded visibly the first time it is seen — a broken declaration must not be quiet.
+fn sync_actuator_tools(
+    dir: &Path,
+    acts: &[familiar_kernel::actuator::Actuator],
+    dropped: &[String],
+    now: i64,
+) -> io::Result<()> {
+    // Under the DATA dir (like artifacts/), not the shared workspace: a wrapper is derived
+    // from this node's own declaration and has no meaning to any other data dir.
+    let ws = dir.join("actuators");
+    fs::create_dir_all(&ws)?;
+    let existing = tool::load(dir)?;
+    let write_one =
+        |surface: &str, label: &str, cmd: &str, purpose: &str, keywords: &str| -> io::Result<()> {
+            let script = format!(
+                "#!/bin/sh\n# {} {surface} {label}\n{cmd}\n",
+                familiar_kernel::review::ACTUATE_MARKER
+            );
+            let path = ws.join(format!("{surface}_{label}.sh"));
+            if fs::read_to_string(&path).ok().as_deref() != Some(&script) {
+                fs::write(&path, &script)?;
+            }
+            let id = actuator_tool_id(surface, label);
+            if !existing.iter().any(|t| t.id == id) {
+                tool::append(
+                    dir,
+                    &Tool {
+                        id,
+                        name: format!("{surface}_{label}"),
+                        purpose: purpose.to_string(),
+                        keywords: format!("actuate {surface} {label} {keywords}"),
+                        script_path: path.display().to_string(),
+                        created_at: now,
+                        uses: 0,
+                        last_used: 0,
+                        last_exit_ok: true,
+                        last_status: String::new(),
+                        origin: "declared".to_string(),
+                        origin_verified_at: now,
+                    },
+                )?;
+            }
+            Ok(())
+        };
+    for a in acts {
+        write_one(
+            &a.surface,
+            "state",
+            &a.state_cmd,
+            &format!("{} — read its state", a.description),
+            &a.keywords,
+        )?;
+        for (label, cmd) in &a.actions {
+            write_one(
+                &a.surface,
+                label,
+                cmd,
+                &format!("{} — set {} to {label}", a.description, a.surface),
+                &a.keywords,
+            )?;
+        }
+    }
+    let state = familiar_kernel::actuator::load_state(dir);
+    for surface in dropped {
+        if !state.contains_key(surface) {
+            observation::record(
+                dir,
+                observation::Observation::new(
+                    "familiar",
+                    "declined",
+                    format!("actuator:{surface}"),
+                    "declared buckets are not closed over actions — the revert promise cannot hold, surface skipped",
+                    "familiar",
+                    now,
+                    1.0,
+                ),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Run one of a surface's tools by id; `Some(stdout)` only on a healthy run. Unhealthy
+/// runs are already recorded against the tool by `execute_tool` — never fatal here.
+fn run_surface_tool(dir: &Path, id: &str, now: i64) -> io::Result<Option<String>> {
+    let Some(t) = tool::load(dir)?.into_iter().find(|t| t.id == id) else {
+        return Ok(None);
+    };
+    let run = execute_tool(dir, &t, now)?;
+    Ok(if run.healthy { Some(run.out) } else { None })
+}
+
+/// Who gets an external adjustment attributed to them: the sole present human, or the
+/// honest `someone` when the room is empty or ambiguous (excluded from every pattern,
+/// like `observer`).
+fn adjustment_actor(obs: &[observation::Observation], now: i64) -> (String, f64) {
+    let present = routing::present_humans(obs, now);
+    if present.len() == 1 {
+        (present[0].handle.clone(), 0.6)
+    } else {
+        ("someone".to_string(), 0.4)
+    }
+}
+
+/// A reacted-against act becomes evidence and consequence in one move: a negative trial
+/// (last-wins over the promotion-time one), the acting candidate archived, the thread
+/// abandoned (its answers — the human's words — are retained; the *pursuit* is what is
+/// discarded), and a visible `demoted` record. `score_theory` then discounts directions
+/// that repeat this one automatically.
+fn demote_after_reaction(
+    dir: &Path,
+    act: &familiar_kernel::actuator::PendingAct,
+    failure_class: &str,
+    notes: &str,
+    now: i64,
+) -> io::Result<()> {
+    if !act.candidate_id.is_empty() {
+        let tseq = trial::load(dir).map(|t| t.len()).unwrap_or(0) + 1;
+        let mut t = Trial::new(format!("trial-{tseq:04}"), &act.candidate_id);
+        t.scenario_id = "actuator-reaction".to_string();
+        t.result = "fail".to_string();
+        t.failure_class = failure_class.to_string();
+        t.confidence = 0.8;
+        t.overall = 0.0;
+        t.notes = notes.to_string();
+        trial::append(dir, &t)?;
+        candidate::update_status(dir, &act.candidate_id, "archived")?;
+    }
+    if !act.thread_id.is_empty() {
+        thread::update_status(dir, &act.thread_id, "abandoned", now)?;
+    }
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            "demoted",
+            if act.candidate_id.is_empty() {
+                format!("thread {}", act.thread_id)
+            } else {
+                act.candidate_id.clone()
+            },
+            notes.to_string(),
+            "familiar",
+            now,
+            1.0,
+        ),
+    )?;
+    Ok(())
+}
+
+/// The change stood: a positive trial closes the window (quiet is consent, ADR-0031).
+fn close_act_positive(
+    dir: &Path,
+    act: &familiar_kernel::actuator::PendingAct,
+    notes: &str,
+) -> io::Result<()> {
+    if act.candidate_id.is_empty() {
+        return Ok(());
+    }
+    let tseq = trial::load(dir).map(|t| t.len()).unwrap_or(0) + 1;
+    let mut t = Trial::new(format!("trial-{tseq:04}"), &act.candidate_id);
+    t.scenario_id = "actuator-reaction".to_string();
+    t.result = "pass".to_string();
+    t.fit = 1.0;
+    t.usefulness = 1.0;
+    t.confidence = 0.8;
+    t.overall = 0.85;
+    t.notes = notes.to_string();
+    trial::append(dir, &t)
+}
+
+/// Read each surface's state on its own pacing and honor what the reading says: an
+/// unexpected bucket inside an open act window is THE HUMAN UNDOING THE CHANGE (the
+/// strongest possible reaction — recorded, scored, rested); outside a window it is an
+/// ordinary adjustment (the habit feed); the window expiring with the change intact is
+/// consent. Returns (transitions, reactions).
+fn poll_actuators(
+    dir: &Path,
+    now: i64,
+    obs: &[observation::Observation],
+) -> io::Result<(usize, usize)> {
+    let (acts_cfg, dropped) = familiar_kernel::actuator::load(dir)?;
+    if acts_cfg.is_empty() && dropped.is_empty() {
+        return Ok((0, 0));
+    }
+    sync_actuator_tools(dir, &acts_cfg, &dropped, now)?;
+    let p = Parameters::load_or_default(dir).sane();
+    let mut state = familiar_kernel::actuator::load_state(dir);
+    let mut transitions = 0;
+    let mut reactions = 0;
+    for a in &acts_cfg {
+        let st = state.entry(a.surface.clone()).or_default();
+        if now - st.polled_at < p.actuator_poll_secs {
+            continue;
+        }
+        st.polled_at = now; // stamp even on failure — a dead device is not hammered every tick
+        let Some(out) = run_surface_tool(dir, &actuator_tool_id(&a.surface, "state"), now)? else {
+            continue;
+        };
+        let Some(raw) = familiar_kernel::actuator::parse_state(&out) else {
+            continue;
+        };
+        let bucket = familiar_kernel::actuator::bucket_of(a, &raw);
+        if st.bucket.is_empty() {
+            st.bucket = bucket; // first sight seeds silently
+            continue;
+        }
+        if bucket == st.bucket {
+            // Unchanged — and if an act's window has fully passed with the change intact,
+            // the quiet IS the reaction.
+            if let Some(act) = st.act.clone() {
+                if now - act.at > p.reaction_window_secs && bucket == act.label {
+                    close_act_positive(
+                        dir,
+                        &act,
+                        &format!(
+                            "set {}={} and the change stood for {}s",
+                            a.surface,
+                            act.label,
+                            now - act.at
+                        ),
+                    )?;
+                    st.act = None;
+                }
+            }
+            continue;
+        }
+        // A transition the familiar did not make (its own acts pre-write the bucket).
+        transitions += 1;
+        let (who, conf) = adjustment_actor(obs, now);
+        let undoing = st
+            .act
+            .clone()
+            .filter(|act| now - act.at <= p.reaction_window_secs && bucket != act.label);
+        let context = match &undoing {
+            Some(act) => format!(
+                "was:{} undid:{} thread:{}",
+                st.bucket, act.candidate_id, act.thread_id
+            ),
+            None => format!("was:{} via:poll", st.bucket),
+        };
+        observation::record(
+            dir,
+            observation::Observation::new(
+                who,
+                "adjusted",
+                format!("{}={bucket}", a.surface),
+                context,
+                "actuator",
+                now,
+                conf,
+            ),
+        )?;
+        if let Some(act) = undoing {
+            reactions += 1;
+            let secs = now - act.at;
+            demote_after_reaction(
+                dir,
+                &act,
+                "human_reverted",
+                &format!(
+                    "set {}={} but the human moved it to {bucket} within {secs}s — the change did not serve",
+                    a.surface, act.label
+                ),
+                now,
+            )?;
+            // The habit this act leaned on is depreciated, not erased — a wrong guess teaches.
+            if let Ok(threads) = thread::load(dir) {
+                if let Some(t) = threads.iter().find(|t| t.id == act.thread_id) {
+                    if !t.origin_human.is_empty() {
+                        let hour = (act.at.rem_euclid(86_400)) / 3_600;
+                        let _ = dossier::depreciate(
+                            dir,
+                            &t.origin_human,
+                            "habit",
+                            &format!("{}={}@h{hour:02}", a.surface, act.label),
+                            0.5,
+                        );
+                    }
+                }
+            }
+            st.rest_until = now + ACTUATOR_REST_SECS;
+            st.act = None;
+        }
+        st.bucket = bucket;
+    }
+    familiar_kernel::actuator::save_state(dir, &state)?;
+    Ok((transitions, reactions))
+}
+
+/// The verbal channel: a new answer on the acted thread, or a dismissal of its
+/// confirm-question, inside the window. Negative — undo FIRST, argue never; anything
+/// else from the subject closes the window as assent. Returns reactions handled.
+fn heed_reactions(dir: &Path, now: i64) -> io::Result<usize> {
+    let mut state = familiar_kernel::actuator::load_state(dir);
+    let (acts_cfg, _) = familiar_kernel::actuator::load(dir)?;
+    let threads = thread::load(dir)?;
+    let questions = question::load(dir)?;
+    let mut handled = 0;
+    for a in &acts_cfg {
+        let Some(st) = state.get_mut(&a.surface) else {
+            continue;
+        };
+        let Some(act) = st.act.clone() else {
+            continue;
+        };
+        let Some(t) = threads.iter().find(|t| t.id == act.thread_id) else {
+            continue;
+        };
+        let new_answers: Vec<&String> = t.answers.iter().skip(act.answers_seen).collect();
+        let dismissed = questions
+            .iter()
+            .any(|q| q.thread_id == act.thread_id && q.last_dismissed > act.at);
+        if new_answers.is_empty() && !dismissed {
+            continue;
+        }
+        let negative = dismissed
+            || new_answers
+                .iter()
+                .any(|ans| familiar_kernel::actuator::is_negative(ans));
+        if !negative {
+            close_act_positive(
+                dir,
+                &act,
+                &format!("set {}={} and the human assented", a.surface, act.label),
+            )?;
+            st.act = None;
+            handled += 1;
+            continue;
+        }
+        // Undo first. The revert is the bucket-named action — the map load() guaranteed.
+        let reverted =
+            run_surface_tool(dir, &actuator_tool_id(&a.surface, &act.prev), now)?.is_some();
+        if !reverted {
+            // Leave the window open; the next tick retries, and the poller still honors
+            // the human's own hands meanwhile. Visible, never silent.
+            observation::record(
+                dir,
+                observation::Observation::new(
+                    "familiar",
+                    "reports",
+                    format!("revert-failed:{}", a.surface),
+                    format!("could not restore {}={} — will retry", a.surface, act.prev),
+                    "familiar",
+                    now,
+                    1.0,
+                ),
+            )?;
+            continue;
+        }
+        st.bucket = act.prev.clone(); // self-debounce: the poller won't see our revert
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "reverted",
+                format!("{}={}", a.surface, act.prev),
+                format!(
+                    "thread:{} reaction:negative was:{}",
+                    act.thread_id, act.label
+                ),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
+        let words = new_answers
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        demote_after_reaction(
+            dir,
+            &act,
+            "negative_reaction",
+            &format!(
+                "set {}={} and the human said no ({}) — reverted to {}",
+                a.surface,
+                act.label,
+                if words.is_empty() {
+                    "dismissed the question"
+                } else {
+                    &words
+                },
+                act.prev
+            ),
+            now,
+        )?;
+        if !t.origin_human.is_empty() {
+            let hour = (act.at.rem_euclid(86_400)) / 3_600;
+            let _ = dossier::depreciate(
+                dir,
+                &t.origin_human,
+                "habit",
+                &format!("{}={}@h{hour:02}", a.surface, act.label),
+                0.5,
+            );
+        }
+        st.rest_until = now + ACTUATOR_REST_SECS;
+        st.act = None;
+        handled += 1;
+    }
+    familiar_kernel::actuator::save_state(dir, &state)?;
+    Ok(handled)
+}
+
+/// Act on a person's pursued need when its direction names a declared surface and one
+/// of its acts ("dim the lights after 20:00" → lights/dim). One act per surface per
+/// rest window; the act opens a reaction window the other two steps honor. Slice 1
+/// initiates from need-threads only — habit-driven initiation comes when the habit
+/// patterns have had time to accumulate. Returns acts made.
+fn tend_actuators(dir: &Path, now: i64) -> io::Result<usize> {
+    let (acts_cfg, dropped) = familiar_kernel::actuator::load(dir)?;
+    if acts_cfg.is_empty() {
+        return Ok(0);
+    }
+    sync_actuator_tools(dir, &acts_cfg, &dropped, now)?;
+    let b = boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed());
+    let threads = thread::load(dir)?;
+    let candidates = candidate::load(dir)?;
+    let mut state = familiar_kernel::actuator::load_state(dir);
+    let mut acted = 0;
+    for t in threads
+        .iter()
+        .filter(|t| t.status == "pursued" && !t.origin_human.is_empty())
+    {
+        let words: std::collections::HashSet<String> = t
+            .direction
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect();
+        let Some((a, label)) = acts_cfg.iter().find_map(|a| {
+            let surface_words = format!("{} {}", a.surface, a.keywords);
+            let names_surface = surface_words
+                .to_lowercase()
+                .split_whitespace()
+                .any(|w| words.contains(w));
+            if !names_surface {
+                return None;
+            }
+            a.actions
+                .keys()
+                .find(|l| words.contains(l.as_str()))
+                .map(|l| (a, l.clone()))
+        }) else {
+            continue;
+        };
+        let st = state.entry(a.surface.clone()).or_default();
+        if st.rest_until > now || st.act.is_some() {
+            continue;
+        }
+        // A person who withdrew is not served by stealth — no acting on their behalf.
+        let hl = Parameters::load_or_default(dir)
+            .sane()
+            .dossier_half_life_days
+            * 86_400;
+        if dossier::read(dir, &t.origin_human, now, hl)
+            .map(|d| d.withdrawn)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let action = familiar_kernel::guard::Action::new(
+            familiar_kernel::guard::ActionKind::Actuate,
+            a.surface.clone(),
+        );
+        if familiar_kernel::guard::evaluate(&action, &b).decision
+            != familiar_kernel::guard::Decision::Allow
+        {
+            continue;
+        }
+        let Some(out) = run_surface_tool(dir, &actuator_tool_id(&a.surface, "state"), now)? else {
+            continue; // unreadable surface: no acting blind
+        };
+        let Some(raw) = familiar_kernel::actuator::parse_state(&out) else {
+            continue;
+        };
+        let prev = familiar_kernel::actuator::bucket_of(a, &raw);
+        if prev == label {
+            continue; // the world already agrees
+        }
+        if run_surface_tool(dir, &actuator_tool_id(&a.surface, &label), now)?.is_none() {
+            continue; // failure is already recorded against the tool
+        }
+        let candidate_id = candidates
+            .iter()
+            .rev()
+            .find(|c| c.loop_id == t.id)
+            .map(|c| c.id.clone())
+            .unwrap_or_default();
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "actuated",
+                format!("{}={label}", a.surface),
+                format!("thread:{} was:{prev}", t.id),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
+        st.bucket = label.clone(); // self-debounce
+        st.act = Some(familiar_kernel::actuator::PendingAct {
+            thread_id: t.id.clone(),
+            candidate_id,
+            label,
+            prev,
+            at: now,
+            answers_seen: t.answers.len(),
+        });
+        acted += 1;
+    }
+    familiar_kernel::actuator::save_state(dir, &state)?;
+    Ok(acted)
+}
+
+/// The human's own hand on a surface, via the CLI (`familiar actuate <surface> <label>`).
+/// Runs the same declared wrapper tools the loop uses (same review, same gates, same
+/// health tracking). `label == "state"` reads; an action label acts — recorded as an
+/// `adjusted` observation in the human's own name (so it feeds their habit pattern), and
+/// if it changes an act the familiar was awaiting a reaction to, IT IS the reaction.
+/// Outer Err: IO. Inner Err: a human-readable refusal/usage line.
+pub fn actuate_by_hand(
+    dir: &Path,
+    surface: &str,
+    label: &str,
+    now: i64,
+) -> io::Result<Result<String, String>> {
+    let (acts_cfg, _) = familiar_kernel::actuator::load(dir)?;
+    let Some(a) = acts_cfg.iter().find(|a| a.surface == surface) else {
+        let known: Vec<&str> = acts_cfg.iter().map(|a| a.surface.as_str()).collect();
+        return Ok(Err(format!(
+            "no declared surface '{surface}' — declared: {}",
+            if known.is_empty() {
+                "(none — write actuators.json)".to_string()
+            } else {
+                known.join(", ")
+            }
+        )));
+    };
+    sync_actuator_tools(dir, &acts_cfg, &[], now)?;
+    if label == "state" {
+        return Ok(
+            match run_surface_tool(dir, &actuator_tool_id(surface, "state"), now)? {
+                Some(out) => Ok(out),
+                None => Err(format!(
+                    "the state read failed — see `familiar observations` and the tool's health"
+                )),
+            },
+        );
+    }
+    if !a.actions.contains_key(label) {
+        return Ok(Err(format!(
+            "'{label}' is not an act of {surface} — actions: {}",
+            a.actions.keys().cloned().collect::<Vec<_>>().join(", ")
+        )));
+    }
+    if run_surface_tool(dir, &actuator_tool_id(surface, label), now)?.is_none() {
+        return Ok(Err(format!(
+            "the act failed or was declined — see the tool's health"
+        )));
+    }
+    let mut state = familiar_kernel::actuator::load_state(dir);
+    let st = state.entry(surface.to_string()).or_default();
+    let human = familiar_kernel::identity::current(dir).unwrap_or_else(|| "ian".to_string());
+    let mut lines = vec![format!("{surface} set to {label}")];
+    // The human's hand while the familiar awaited a reaction IS the reaction.
+    if let Some(act) = st.act.clone() {
+        if label != act.label {
+            demote_after_reaction(
+                dir,
+                &act,
+                "human_reverted",
+                &format!(
+                    "set {surface}={} but {human} set it to {label} by hand — the change did not serve",
+                    act.label
+                ),
+                now,
+            )?;
+            st.rest_until = now + ACTUATOR_REST_SECS;
+            lines.push(format!(
+                "(that answered an open act — the familiar's {} is undone in the record and the surface rests)",
+                act.label
+            ));
+        }
+        st.act = None;
+    }
+    observation::record(
+        dir,
+        observation::Observation::new(
+            human,
+            "adjusted",
+            format!("{surface}={label}"),
+            format!("was:{} via:cli", st.bucket),
+            "actuator",
+            now,
+            0.9,
+        ),
+    )?;
+    st.bucket = label.to_string();
+    familiar_kernel::actuator::save_state(dir, &state)?;
+    Ok(Ok(lines.join("\n")))
 }
 
 fn last_cultivate_at(dir: &Path) -> i64 {
@@ -2737,6 +3390,19 @@ pub fn tick(
     //      aware, paced). Gated by the sharpest reach: execute + authored-execute + llm, fail-closed.
     let cultivated = cultivate_utilities(dir, now, allow_execute, authored, allow_llm)?;
 
+    // 8·3 The hand on the world (ADR-0032): poll each declared surface, heed the verbal
+    //      reactions to any open act, then act on matched needs — consent by observation,
+    //      double-gated (allow_actuate for the surface, allow_execute for the running).
+    //      Every failure inside is tool-unhealthy and visible, never fatal to the tick.
+    let (actuated, reactions) = if allow_execute && actuate_allowed(dir) {
+        let (_transitions, poll_reactions) = poll_actuators(dir, now, &obs)?;
+        let heeded = heed_reactions(dir, now)?;
+        let acted = tend_actuators(dir, now)?;
+        (acted, poll_reactions + heeded)
+    } else {
+        (0, 0)
+    };
+
     // 8·2 Own the roadmap — the mesh side of the same telos. A shared goal whose needs this node's
     //      capabilities satisfy is claimed and driven through the agentic loop (one per tick, gated
     //      on allow_agent+execute+llm); ownership + progress replicate so the whole mesh burns the
@@ -2771,6 +3437,8 @@ pub fn tick(
         capacities_diminished: cap.diminished,
         theorized,
         pursued,
+        actuated,
+        reactions,
         cultivated,
         goals_advanced,
         reverted,
@@ -2800,6 +3468,8 @@ pub fn tick(
             archived: report.archived,
             theorized: report.theorized,
             pursued: report.pursued,
+            actuated: report.actuated,
+            reactions: report.reactions,
             reverted: report.reverted,
             marginalized: report.marginalized,
             answered: report.answered,
@@ -3050,6 +3720,317 @@ mod tests {
         let q = qs.iter().find(|q| q.id == active.trim()).unwrap();
         assert_eq!(q.subject, "betty");
         assert_eq!(q.owner, "ian", "a week unmet, it may finally ask the room");
+    }
+
+    // ---- the actuation loop, exercised end-to-end on a fake surface (no BLE) ----
+
+    fn light_text(bucket: &str) -> &'static str {
+        match bucket {
+            "dim" => "light mode : 0x01  Static Color\nbrightness : 51/255  (20%)\n",
+            _ => "light mode : 0x01  Static Color\nbrightness : 204/255  (80%)\n",
+        }
+    }
+
+    /// A fake light: state is a text file in the motorlights format; the actions rewrite
+    /// it and say so (a silent tool reads as broken, exactly like the real CLI prints).
+    fn write_fake_actuator(dir: &Path) {
+        let light = dir.join("light.txt");
+        fs::write(&light, light_text("bright")).unwrap();
+        let set = |bucket: &str, level: &str, pct: &str| {
+            format!(
+                "{{ echo 'light mode : 0x01  Static Color'; echo 'brightness : {level}/255  ({pct}%)'; }} > {} && echo set-{bucket}",
+                light.display()
+            )
+        };
+        let cfg = serde_json::json!({"actuators": [{
+            "surface": "lights",
+            "description": "fake strip",
+            "state_cmd": format!("cat {}", light.display()),
+            "actions": {"dim": set("dim", "51", "20"), "bright": set("bright", "204", "80")},
+            "buckets": [{"name": "dim", "max_brightness_pct": 40.0}, {"name": "bright"}],
+            "keywords": "lamp led evening"
+        }]});
+        fs::write(
+            dir.join(familiar_kernel::actuator::ACTUATORS_FILE),
+            cfg.to_string(),
+        )
+        .unwrap();
+    }
+
+    fn open_actuate_boundary(dir: &Path) {
+        let mut b = boundary::Boundary::closed();
+        b.allow_execute = true;
+        b.allow_actuate = true;
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&b).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn hand_set(dir: &Path, bucket: &str) {
+        fs::write(dir.join("light.txt"), light_text(bucket)).unwrap();
+    }
+
+    /// Let the poller run again immediately (its own pacing would otherwise wait).
+    fn rewind_poll(dir: &Path) {
+        let mut m = familiar_kernel::actuator::load_state(dir);
+        if let Some(st) = m.get_mut("lights") {
+            st.polled_at = 0;
+        }
+        familiar_kernel::actuator::save_state(dir, &m).unwrap();
+    }
+
+    fn seed_pursued_need(dir: &Path, now: i64) -> (String, String) {
+        let tid = "thread-0001".to_string();
+        thread::append(
+            dir,
+            &Thread {
+                id: tid.clone(),
+                question: "Ian — softer light this evening?".into(),
+                theory: "Ian may want the lights dim after dark.".into(),
+                direction: "dim the lights this evening".into(),
+                created_at: now,
+                status: "pursued".into(),
+                status_at: now,
+                last_worked_at: now,
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: "ian".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        let c = Candidate::from_loop(
+            &loops::Loop {
+                id: tid.clone(),
+                name: format!("thread:{tid}"),
+                description: String::new(),
+                loop_type: "thread".into(),
+                observation_ids: String::new(),
+                observation_count: 0,
+                first_seen: now,
+                last_seen: now,
+                recurrence_score: 0.0,
+                friction_score: 0.5,
+                opportunity_score: 0.5,
+                confidence: 0.5,
+            },
+            "candidate-0001".to_string(),
+        );
+        candidate::append(dir, &c).unwrap();
+        (tid, "candidate-0001".to_string())
+    }
+
+    #[test]
+    fn declared_actuators_materialize_as_declared_tools_and_the_shut_gate_declines_them() {
+        let t = Temp::new("act_materialize");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        // Execute open but actuate SHUT: the wrapper tools exist, and every run declines.
+        let mut b = boundary::Boundary::closed();
+        b.allow_execute = true;
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&b).unwrap(),
+        )
+        .unwrap();
+        let (cfg, dropped) = familiar_kernel::actuator::load(dir).unwrap();
+        sync_actuator_tools(dir, &cfg, &dropped, 100).unwrap();
+        let tools = tool::load(dir).unwrap();
+        assert_eq!(tools.len(), 3, "state + two actions");
+        assert!(tools.iter().all(|tl| tl.origin == "declared"));
+        let state_tool = tools
+            .iter()
+            .find(|tl| tl.id == "tool-act-lights-state")
+            .unwrap();
+        let script = fs::read_to_string(&state_tool.script_path).unwrap();
+        assert!(script.contains(familiar_kernel::review::ACTUATE_MARKER));
+        let run = execute_tool(dir, state_tool, 101).unwrap();
+        assert!(run.status.contains("actuation is closed"), "{}", run.status);
+        // Open the gate: the same tool reads the fake light.
+        open_actuate_boundary(dir);
+        let run = execute_tool(dir, state_tool, 102).unwrap();
+        assert!(run.healthy, "{}", run.status);
+        assert!(run.out.contains("brightness"));
+    }
+
+    #[test]
+    fn tend_actuators_acts_on_a_matching_need_thread_and_records_the_act() {
+        let t = Temp::new("act_tend");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, cid) = seed_pursued_need(dir, 1000);
+        assert_eq!(tend_actuators(dir, 1000).unwrap(), 1);
+        // The world changed, the record says so, and a reaction window is open.
+        let out = fs::read_to_string(dir.join("light.txt")).unwrap();
+        assert!(out.contains("(20%)"), "the fake light is dim: {out}");
+        let obs = observation::load(dir).unwrap();
+        assert!(obs.iter().any(|o| o.actor == "familiar"
+            && o.action == "actuated"
+            && o.object == "lights=dim"
+            && o.context.contains(&format!("thread:{tid}"))
+            && o.context.contains("was:bright")));
+        let st = &familiar_kernel::actuator::load_state(dir)["lights"];
+        let act = st.act.as_ref().unwrap();
+        assert_eq!((act.label.as_str(), act.prev.as_str()), ("dim", "bright"));
+        assert_eq!(act.candidate_id, cid);
+        assert_eq!(
+            st.bucket, "dim",
+            "self-debounce: the bucket is pre-written at act time"
+        );
+        // And acting again while the window is open does nothing.
+        assert_eq!(
+            tend_actuators(dir, 1001).unwrap(),
+            0,
+            "one act per surface per window"
+        );
+    }
+
+    #[test]
+    fn a_poll_transition_records_an_adjustment_and_names_the_sole_present_human() {
+        let t = Temp::new("act_adjust");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        assert_eq!(
+            poll_actuators(dir, 1000, &[]).unwrap(),
+            (0, 0),
+            "first sight seeds silently"
+        );
+        hand_set(dir, "dim");
+        rewind_poll(dir);
+        let ian_here = vec![observation::Observation::new(
+            "ian",
+            "told the familiar",
+            "hi",
+            "",
+            "observer",
+            1900,
+            1.0,
+        )];
+        assert_eq!(poll_actuators(dir, 2000, &ian_here).unwrap(), (1, 0));
+        let obs = observation::load(dir).unwrap();
+        let adj = obs.iter().find(|o| o.action == "adjusted").unwrap();
+        assert_eq!(adj.actor, "ian", "the sole present human owns the hand");
+        assert_eq!(adj.object, "lights=dim");
+        assert!(adj.context.contains("was:bright"));
+        // An empty room gets the honest shrug.
+        hand_set(dir, "bright");
+        rewind_poll(dir);
+        poll_actuators(dir, 3000, &[]).unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(obs
+            .iter()
+            .any(|o| o.action == "adjusted" && o.actor == "someone"));
+    }
+
+    #[test]
+    fn a_reverted_act_becomes_a_negative_trial_and_demotes_its_candidate() {
+        let t = Temp::new("act_reverted");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, cid) = seed_pursued_need(dir, 1000);
+        tend_actuators(dir, 1000).unwrap();
+        // The human turns it back within the window.
+        hand_set(dir, "bright");
+        rewind_poll(dir);
+        let (transitions, reactions) = poll_actuators(dir, 1200, &[]).unwrap();
+        assert_eq!((transitions, reactions), (1, 1));
+        let tr = trial::load(dir).unwrap();
+        let neg = tr.iter().find(|x| x.candidate_id == cid).unwrap();
+        assert_eq!(neg.failure_class, "human_reverted");
+        assert_eq!(neg.result, "fail");
+        assert!(neg.notes.contains("did not serve"));
+        assert_eq!(
+            candidate::load(dir)
+                .unwrap()
+                .iter()
+                .find(|c| c.id == cid)
+                .unwrap()
+                .status,
+            "archived"
+        );
+        assert_eq!(
+            thread::load(dir)
+                .unwrap()
+                .iter()
+                .find(|x| x.id == tid)
+                .unwrap()
+                .status,
+            "abandoned"
+        );
+        let st = &familiar_kernel::actuator::load_state(dir)["lights"];
+        assert!(st.act.is_none());
+        assert!(st.rest_until > 1200, "the surface rests after a rejection");
+        // Rested: a fresh matching need does not act.
+        thread::update_status(dir, &tid, "pursued", 1300).unwrap();
+        assert_eq!(
+            tend_actuators(dir, 1300).unwrap(),
+            0,
+            "one act per rest window"
+        );
+    }
+
+    #[test]
+    fn a_negative_answer_makes_the_familiar_revert_and_rest_the_surface() {
+        let t = Temp::new("act_negative_word");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, _cid) = seed_pursued_need(dir, 1000);
+        tend_actuators(dir, 1000).unwrap();
+        // Ian answers his own thread: undo first, argue never.
+        thread::add_answer_from(dir, &tid, "no, too dark", "phone:ian", 1100).unwrap();
+        assert_eq!(heed_reactions(dir, 1100).unwrap(), 1);
+        let out = fs::read_to_string(dir.join("light.txt")).unwrap();
+        assert!(out.contains("(80%)"), "the familiar restored bright: {out}");
+        let obs = observation::load(dir).unwrap();
+        assert!(obs
+            .iter()
+            .any(|o| o.action == "reverted" && o.object == "lights=bright"));
+        let th = thread::load(dir).unwrap();
+        let x = th.iter().find(|x| x.id == tid).unwrap();
+        assert_eq!(
+            x.origin, "observer",
+            "his words flipped the need to a stated one first"
+        );
+        assert_eq!(
+            x.status, "abandoned",
+            "the pursuit is discarded; his words are kept"
+        );
+        assert_eq!(x.answers, vec!["no, too dark"]);
+        let st = &familiar_kernel::actuator::load_state(dir)["lights"];
+        assert_eq!(st.bucket, "bright");
+        assert!(st.rest_until > 1100);
+    }
+
+    #[test]
+    fn a_quiet_window_closes_as_a_positive_trial_and_the_change_stands() {
+        let t = Temp::new("act_quiet");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (_tid, cid) = seed_pursued_need(dir, 1000);
+        tend_actuators(dir, 1000).unwrap();
+        // The window (default 900s) passes with the change intact.
+        rewind_poll(dir);
+        assert_eq!(
+            poll_actuators(dir, 2000, &[]).unwrap(),
+            (0, 0),
+            "no transition, no reaction"
+        );
+        let tr = trial::load(dir).unwrap();
+        let pos = tr.iter().find(|x| x.candidate_id == cid).unwrap();
+        assert_eq!(pos.result, "pass");
+        assert!(pos.notes.contains("stood"));
+        let st = &familiar_kernel::actuator::load_state(dir)["lights"];
+        assert!(st.act.is_none(), "quiet is consent — the window closed");
+        assert_eq!(st.rest_until, 0, "and consent earns no rest period");
+        let out = fs::read_to_string(dir.join("light.txt")).unwrap();
+        assert!(out.contains("(20%)"), "the change stands");
     }
 
     #[test]
