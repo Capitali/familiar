@@ -117,10 +117,29 @@
   <!-- The visitor's compass: while this device is a guest, one warm, ever-present pill that
        leads to the path — the two-filter state is never something the human should have to
        infer from a projection looking oddly anonymous. -->
-  <button id="guestbar" onclick="sphereScreen('device')" style="display:none;position:absolute;bottom:88px;left:50%;transform:translateX(-50%);z-index:8;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,178,102,0.14);border:1px solid rgba(255,178,102,0.45);cursor:pointer;backdrop-filter:blur(8px);">
+  <button id="guestbar" onclick="sphereScreen('device')" style="display:none;position:absolute;bottom:88px;left:50%;transform:translateX(-50%);z-index:8;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,178,102,0.14);border:1px solid rgba(255,178,102,0.45);cursor:pointer;backdrop-filter:blur(8px);animation:gatepulse 2.6s ease-in-out infinite;">
     <span style="width:8px;height:8px;border-radius:50%;background:#ffb266;box-shadow:0 0 10px #ffb266;animation:gatepulse 1.8s ease-in-out infinite;"></span>
     <span id="guestbartext" class="m" style="font-size:9.5px;letter-spacing:0.14em;color:#ffcf9e;">VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP</span>
   </button>
+  <!-- The recurring ask (a visitor should be INVITED to identify, often — not left to idle
+       anonymous): a centered overlay that returns every few minutes until the path is begun.
+       Dismissible, never while typing, never on the device screen where the path already is. -->
+  <div id="guestnudge" style="display:none;position:absolute;inset:0;z-index:40;align-items:center;justify-content:center;background:rgba(4,8,20,0.55);backdrop-filter:blur(6px);">
+    <div style="max-width:420px;margin:20px;padding:22px 24px;border-radius:18px;background:rgba(20,34,60,0.92);border:1px solid rgba(255,178,102,0.5);box-shadow:0 0 40px rgba(255,178,102,0.15);">
+      <div class="m" style="font-size:9px;letter-spacing:0.2em;color:#ffb266;margin-bottom:10px;">THE MESH DOESN'T KNOW YOU YET</div>
+      <div style="font-size:14px;line-height:1.55;color:rgba(230,240,252,0.95);margin-bottom:8px;">
+        You're reading this mesh as a <b>visitor</b> — real shape, none of the names.
+        Membership takes one step: say who you are.
+      </div>
+      <div class="m" style="font-size:10.5px;line-height:1.6;color:rgba(200,220,250,0.75);margin-bottom:14px;">
+        ① say your name &nbsp;·&nbsp; ② or have a member vouch for you &nbsp;·&nbsp; ③ or redeem an invite
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button onclick="sphereGuestNudgeGo()" class="glybtn" style="height:38px;padding:0 16px;border-radius:10px;background:rgba(255,178,102,0.16);border:1px solid rgba(255,178,102,0.5);color:#ffcf9e;"><span class="m" style="font-size:9px;letter-spacing:0.14em;">SAY WHO I AM</span></button>
+        <button onclick="sphereGuestNudgeLater()" class="glybtn" style="height:38px;padding:0 14px;border-radius:10px;"><span class="m" style="font-size:9px;letter-spacing:0.14em;">NOT YET</span></button>
+      </div>
+    </div>
+  </div>
   <button id="modetoggle" class="glybtn" title="surface" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:7;width:56px;height:56px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:32px;height:32px;overflow:visible;">
       <path d="M8 40 L18 8 M30 8 L40 40" stroke-width="1.6" opacity="0.7"/>
@@ -1136,6 +1155,26 @@ function renderChrome() {
       ? 'HELD — TAP TO SEE WHEN TO TRY AGAIN'
       : 'VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP';
   }
+  // The recurring identification ask: ~25s after a visitor settles, then every 3 minutes
+  // until the path is begun. Never over the device screen (the path lives there), never
+  // while the human is typing, gone the moment membership lands.
+  const gn = $('guestnudge');
+  if (gn) {
+    const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (mem.state !== 'guest' || street) {
+      gn.style.display = 'none';
+      S.guestSince = 0;
+    } else {
+      if (!S.guestSince) { S.guestSince = Date.now(); }
+      const wait = S.guestNudgeLastAt ? 180000 : 25000;
+      const since = S.guestNudgeLastAt || S.guestSince;
+      const due = Date.now() - since > wait;
+      if (due && S.activeScreen !== 'device' && !typing && gn.style.display !== 'flex') {
+        gn.style.display = 'flex';
+        S.guestNudgeLastAt = Date.now();
+      }
+    }
+  }
   const showBadge = !S.linkOk || !!S.jsErr;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
   const lm = $('linkmsg');
@@ -1450,6 +1489,18 @@ window.sphereDive = (i) => {
 window.sphereDiveFrontier = (i) => {
   const F = frontierNodes(); const f = F[i]; if (!f || !f.located) return;
   beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, G.frontierDirs[i] || latLon(f.lat, f.lon));
+};
+// The visitor nudge: SAY WHO I AM lands on the device screen with the name box focused —
+// the shortest possible distance between "the mesh doesn't know you" and fixing it.
+window.sphereGuestNudgeGo = () => {
+  const gn = $('guestnudge'); if (gn) gn.style.display = 'none';
+  window.sphereScreen('device');
+  if (typeof sphereCorrectServing === 'function') sphereCorrectServing(1);
+  setTimeout(() => { const i = document.getElementById('servedHumanInput'); if (i) i.focus(); }, 120);
+};
+window.sphereGuestNudgeLater = () => {
+  const gn = $('guestnudge'); if (gn) gn.style.display = 'none';
+  S.guestNudgeLastAt = Date.now();   // the ask returns in three minutes
 };
 // A visitor's knock, shown where it came from — the welcome card's SHOW ON GLOBE dives to the
 // arrival's self-reported position so the household can verify with their eyes (a "new phone"
