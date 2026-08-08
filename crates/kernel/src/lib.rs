@@ -17,6 +17,7 @@ pub mod capabilities;
 pub mod capacities;
 pub mod corruption;
 pub mod dialog;
+pub mod dossier;
 pub mod goal;
 pub mod guard;
 pub mod humanity;
