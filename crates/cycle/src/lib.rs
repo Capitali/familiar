@@ -38,6 +38,7 @@ use familiar_kernel::capabilities;
 use familiar_kernel::capacities;
 use familiar_kernel::corruption;
 use familiar_kernel::dialog::LAW_III_VOICE;
+use familiar_kernel::dossier;
 use familiar_kernel::goal;
 use familiar_kernel::guard::Reason;
 use familiar_kernel::humanity;
@@ -385,6 +386,10 @@ const NAME_QUESTION: &str =
 /// is being asked — that's the factory's cue to coordinate and surface the next one.
 const ACTIVE_QUESTION_FILE: &str = "active_question.txt";
 
+/// How long a subject-addressed question is held for its person before it may go to
+/// whoever is here — a week, mirroring the dismissal-rest cap. Held, never buried.
+const SUBJECT_HOLD_MAX_SECS: i64 = 7 * 24 * 3600;
+
 /// Unmet human needs awaiting the familiar: open threads the human originated (their stated
 /// needs, not yet closed). Bias for the question policy — service the person's needs (Law I)
 /// over the familiar's own curiosity.
@@ -427,7 +432,7 @@ fn coordinate_questions(dir: &Path, now: i64, obs: &[observation::Observation]) 
     if !active.is_empty() {
         if let Some(q) = question::load(dir)?.iter().find(|q| q.id == active) {
             if routing::owner_is_absent(&q.owner, &present) {
-                let next_owner = routing::route("", "", &present);
+                let next_owner = routing::route("", &q.subject, &present);
                 if !next_owner.is_empty() && next_owner != q.owner {
                     question::set_owner(dir, &active, &next_owner)?;
                 }
@@ -435,13 +440,21 @@ fn coordinate_questions(dir: &Path, now: i64, obs: &[observation::Observation]) 
         }
         return Ok(());
     }
-    let questions = question::load(dir)?;
+    // A question that exists FOR someone waits for them (ADR-0022's payoff: a question
+    // for Betty can wait until she is aboard, rather than landing on whoever holds the
+    // room) — but held, never buried: past the hold horizon it goes to whoever is here.
+    let questions: Vec<question::Question> = question::load(dir)?
+        .into_iter()
+        .filter(|q| {
+            q.subject.is_empty()
+                || !routing::owner_is_absent(&q.subject, &present)
+                || now - q.created_at > SUBJECT_HOLD_MAX_SECS
+        })
+        .collect();
     if let Some(q) = question::next(&questions, now, unmet_needs(dir)) {
-        // Address it. `origin_human` is empty for now: the routing rule that prefers the human
-        // whose need a question serves is implemented and tested, but threads record their origin
-        // as a KIND ("observer") rather than a handle, so there is no name here to prefer yet.
-        // Give threads a human origin and this becomes Law I routing with no change here.
-        let owner = routing::route(&q.owner, "", &present);
+        // Law I routing: the human whose need a question serves is preferred over
+        // whoever happens to be most surely present.
+        let owner = routing::route(&q.owner, &q.subject, &present);
         let id = q.id.clone();
         fs::write(dir.join(QUESTION_FILE), &q.text)?;
         fs::write(dir.join(ACTIVE_QUESTION_FILE), &id)?;
@@ -726,6 +739,177 @@ fn maybe_theorize(
         },
     )?;
     fs::write(dir.join(LAST_THEORY_FILE), now.to_string())?;
+    Ok(true)
+}
+
+/// Per-human pacing for the needs muse: `{handle: last_mused_ts}`, beside the other
+/// tiny pointer files.
+const NEED_MUSE_FILE: &str = "need_muse.json";
+
+fn need_muse_times(dir: &Path) -> std::collections::HashMap<String, i64> {
+    fs::read_to_string(dir.join(NEED_MUSE_FILE))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// An observation the needs muse may think about: attributed to a person by the one
+/// evidence ladder, this node's own sensing (not mesh gossip), not the factory's
+/// plumbing — and **never sensitive-personal** (heart rate, precise position,
+/// biometrics): the muse's prompt may travel to a remote model, and a shared thought
+/// is not a shared body (ADR-0016).
+fn needs_muse_material(o: &observation::Observation) -> Option<String> {
+    if o.actor == "familiar" || o.actor.starts_with("mesh") || o.source.starts_with("mesh") {
+        return None;
+    }
+    if infra_observation(o) || service::is_sensitive_personal(o) {
+        return None;
+    }
+    routing::subject_and_strength(o).map(|(who, _, _)| who)
+}
+
+/// The factory thinks about ONE person per tick: whose recent, attributed observations
+/// carry the most novelty since it last mused about them. It proposes a NEED hypothesis
+/// — recorded as a thread that names its human (`origin_human`) and pursued immediately
+/// (consent by observation: act, read the reaction, undo on a bad one) — plus a
+/// confirm-question addressed to that person, which is an evidence channel and the
+/// gentlest escalation rung, never an upfront gate. Only the person's own answer flips
+/// the theorized need into a stated one (`thread::add_answer_from`).
+fn maybe_theorize_needs(
+    dir: &Path,
+    now: i64,
+    obs: &[observation::Observation],
+    allow_llm: bool,
+) -> io::Result<bool> {
+    if !allow_llm {
+        return Ok(false);
+    }
+    let cadence = Parameters::load_or_default(dir).sane().theorize_every_secs;
+    let mut mused = need_muse_times(dir);
+    // Whose recent observations carry the most unconsidered novelty?
+    let mut novelty: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for o in obs {
+        let Some(who) = needs_muse_material(o) else {
+            continue;
+        };
+        if o.ts > mused.get(&who).copied().unwrap_or(0) {
+            *novelty.entry(who).or_insert(0) += 1;
+        }
+    }
+    let Some((handle, _)) = novelty
+        .into_iter()
+        .filter(|(h, _)| now - mused.get(h).copied().unwrap_or(0) >= cadence)
+        .max_by_key(|(_, n)| *n)
+    else {
+        return Ok(false);
+    };
+    let half_life = Parameters::load_or_default(dir)
+        .sane()
+        .dossier_half_life_days
+        * 86_400;
+    let d = dossier::read(dir, &handle, now, half_life)?;
+    if d.withdrawn {
+        return Ok(false); // a person who removed themselves is not theorized about
+    }
+    let name = d
+        .identity
+        .as_ref()
+        .map(|i| i.name.clone())
+        .unwrap_or_else(|| handle.clone());
+    let recent: Vec<String> = obs
+        .iter()
+        .rev()
+        .filter(|o| needs_muse_material(o).as_deref() == Some(handle.as_str()))
+        .take(12)
+        .map(|o| format!("- {} {} {}", o.actor, o.action, utterance_text(o)))
+        .collect();
+    if recent.is_empty() {
+        return Ok(false);
+    }
+    let open_needs: Vec<String> = d
+        .needs
+        .iter()
+        .map(|n| {
+            format!(
+                "- {}{}",
+                n.text,
+                if n.stated { " (they said so)" } else { " (theorized)" }
+            )
+        })
+        .collect();
+    let prompt = format!(
+        "You are a familiar whose only purpose is to serve {name} — never to manage, obey, \
+         optimize, or sedate them (the Three Laws). You are thinking about {name} \
+         specifically. What you know of their shape: {summary}. Their recent observed \
+         moments:\n{recent}\n{needs}\
+         From this, theorize ONE need {name} may have that you could serve — concrete and \
+         near, not grand. Reply ONLY as compact JSON: {{\"need\":\"what they may need and \
+         why you think so\",\"confirm_question\":\"one short, warm question addressed to \
+         {name} by name that would tell you if you're right\",\"direction\":\"one concrete \
+         thing you could DO about it (it becomes work you will test)\"}}.",
+        summary = dossier::coarse_summary(&d),
+        recent = recent.join("\n"),
+        needs = if open_needs.is_empty() {
+            String::new()
+        } else {
+            format!("Needs already on your mind (do not repeat these):\n{}\n", open_needs.join("\n"))
+        },
+    );
+    // Pace even on failure/refusal — a person is not re-mused about every tick because
+    // the model was down.
+    mused.insert(handle.clone(), now);
+    fs::write(dir.join(NEED_MUSE_FILE), serde_json::to_string(&mused)?)?;
+    let json = match familiar_llm::consult(dir, &prompt)? {
+        familiar_llm::Outcome::Response(j) => j,
+        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
+            return Ok(false)
+        }
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return Ok(false);
+    };
+    let field = |k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let (need, confirm_q, direction) = (field("need"), field("confirm_question"), field("direction"));
+    if need.is_empty() {
+        return Ok(false);
+    }
+    // The same thought about the same person, asked louder, is not a new need.
+    let existing = thread::load(dir)?;
+    let hers: Vec<Thread> = existing
+        .iter()
+        .filter(|t| t.origin_human == handle)
+        .cloned()
+        .collect();
+    if similar_thread_exists(&hers, &need, &direction) {
+        return Ok(false);
+    }
+    let thread_id = format!("thread-{:04}", existing.len() + 1);
+    if !confirm_q.is_empty() {
+        question::add_addressed(dir, &confirm_q, "need", &handle, &thread_id, now)?;
+    }
+    thread::append(
+        dir,
+        &Thread {
+            id: thread_id,
+            question: confirm_q,
+            theory: need,
+            direction,
+            created_at: now,
+            status: "open".to_string(),
+            status_at: now,
+            last_worked_at: 0,
+            answers: Vec::new(),
+            origin: "llm".to_string(),
+            origin_human: handle,
+            actor: "familiar".to_string(),
+        },
+    )?;
     Ok(true)
 }
 
@@ -2449,6 +2633,15 @@ pub fn tick(
     let detected = loops::detect(&obs);
     loops::save_all(dir, &detected)?;
 
+    // 2b. Remember the people (ADR-0022): fold new observations into the per-human
+    //     dossier — its own resumable cursor also catches what device agents POSTed
+    //     between ticks. Best-effort like reflection: a derived, rebuildable view must
+    //     never abort the metabolism. Deliberately not in the TickReport: folding a
+    //     heartbeat must not hold the daemon at its cadence floor.
+    let half_life_secs =
+        Parameters::load_or_default(dir).sane().dossier_half_life_days * 86_400;
+    let _ = dossier::fold(dir, half_life_secs);
+
     // 3. Generate a candidate for each uncovered loop.
     let cands = candidate::load(dir)?;
     let covered: HashSet<String> = cands.iter().map(|c| c.loop_id.clone()).collect();
@@ -2505,6 +2698,11 @@ pub fn tick(
 
     // 7. Interpret — the factory forms a question + theory (gated, rate-limited).
     let theorized = maybe_theorize(dir, now, &obs, &detected, allow_llm)?;
+
+    // 7b. Interpret the PEOPLE — one person per tick, the one whose observations carry
+    //     the most novelty: theorize a need of theirs, pursue it, and ask them (the
+    //     confirm-question is an evidence channel, not a permission gate).
+    let _ = maybe_theorize_needs(dir, now, &obs, allow_llm)?;
 
     // The familiar becomes familiar first: until it knows who it serves, the name-ask comes
     // before anything else (Law II: attend to the person, not only the patterns). Once a
@@ -2711,6 +2909,108 @@ mod tests {
             "ian", "needs", "hello", "", "observer", 1390, 1.0,
         )];
         assert!(theorize_due(&t.0, 1395, &said));
+    }
+
+    #[test]
+    fn needs_theorizing_is_per_human_paced_and_llm_gated() {
+        let t = Temp::new("needs_muse_gates");
+        let now = 10_000;
+        let said = vec![observation::Observation::new(
+            "phone:betty",
+            "told the familiar",
+            "the evenings feel long",
+            "",
+            "device",
+            now - 60,
+            1.0,
+        )];
+        // Gate closed: no muse, no thread, and no pacing stamp burned.
+        assert!(!maybe_theorize_needs(&t.0, now, &said, false).unwrap());
+        assert!(thread::load(&t.0).unwrap().is_empty());
+        assert!(need_muse_times(&t.0).is_empty(), "a closed gate costs nothing");
+        // Recently mused about her: paced out before any consult happens.
+        fs::write(
+            t.0.join(NEED_MUSE_FILE),
+            serde_json::to_string(&std::collections::HashMap::from([(
+                "betty".to_string(),
+                now - 10,
+            )]))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!maybe_theorize_needs(&t.0, now, &said, true).unwrap());
+        assert!(thread::load(&t.0).unwrap().is_empty());
+        // And nobody attributed at all → nothing to think about.
+        fs::write(t.0.join(NEED_MUSE_FILE), "{}").unwrap();
+        assert!(!maybe_theorize_needs(&t.0, now, &[], true).unwrap());
+    }
+
+    #[test]
+    fn routing_prefers_the_human_whose_need_it_serves() {
+        let t = Temp::new("route_subject");
+        let now = 50_000;
+        question::add_addressed(&t.0, "Betty — long evenings?", "need", "betty", "thread-0001", now)
+            .unwrap();
+        // Both are here; ian's evidence is fresher, so he'd win a subject-less route.
+        let obs = vec![
+            observation::Observation::new(
+                "phone:betty",
+                "told the familiar",
+                "hi",
+                "",
+                "device",
+                now - 300,
+                1.0,
+            ),
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "hello",
+                "",
+                "observer",
+                now - 10,
+                1.0,
+            ),
+        ];
+        coordinate_questions(&t.0, now, &obs).unwrap();
+        let active = fs::read_to_string(t.0.join(ACTIVE_QUESTION_FILE)).unwrap();
+        let qs = question::load(&t.0).unwrap();
+        let q = qs.iter().find(|q| q.id == active.trim()).unwrap();
+        assert_eq!(q.subject, "betty");
+        assert_eq!(q.owner, "betty", "her question goes to her, not to whoever is loudest");
+    }
+
+    #[test]
+    fn a_subject_addressed_question_waits_for_its_subject() {
+        let t = Temp::new("subject_hold");
+        let now = 50_000;
+        question::add_addressed(&t.0, "Betty — long evenings?", "need", "betty", "thread-0001", now)
+            .unwrap();
+        // Only ian is here: Betty's question is held, and the room gets the root instead.
+        let ian_here = |ts: i64| {
+            vec![observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "hello",
+                "",
+                "observer",
+                ts,
+                1.0,
+            )]
+        };
+        coordinate_questions(&t.0, now, &ian_here(now - 10)).unwrap();
+        let active = fs::read_to_string(t.0.join(ACTIVE_QUESTION_FILE)).unwrap();
+        assert_eq!(active.trim(), question::ROOT_ID, "held for its person, not handed around");
+        // Past the hold horizon it goes to whoever is here — held, never buried.
+        question::record_answered(&t.0, question::ROOT_ID, now).unwrap();
+        fs::write(t.0.join(ACTIVE_QUESTION_FILE), "").unwrap();
+        let later = now + SUBJECT_HOLD_MAX_SECS + 60;
+        coordinate_questions(&t.0, later, &ian_here(later - 10)).unwrap();
+        let active = fs::read_to_string(t.0.join(ACTIVE_QUESTION_FILE)).unwrap();
+        let qs = question::load(&t.0).unwrap();
+        let q = qs.iter().find(|q| q.id == active.trim()).unwrap();
+        assert_eq!(q.subject, "betty");
+        assert_eq!(q.owner, "ian", "a week unmet, it may finally ask the room");
     }
 
     #[test]
