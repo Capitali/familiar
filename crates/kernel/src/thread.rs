@@ -106,9 +106,9 @@ pub fn add_answer(dir: &Path, id: &str, text: &str, now: i64) -> io::Result<bool
 /// model judges whether an answer "counts"; any non-empty reply from the subject does
 /// (consent by observation: their reaction is the signal, and even "no, that's wrong"
 /// is the human stating what they need). An answer from anyone else attaches as
-/// ordinary evidence and flips nothing. NOTE: the Mac console's `/local/answer`
-/// hardcodes its actor, so confirms from other humans arrive via their own signed
-/// devices (mesh::observe), which carry real `phone:<name>` actors.
+/// ordinary evidence and flips nothing. The local console speaks as whoever the node
+/// currently serves (`identity::current`); other humans' confirms arrive via their own
+/// signed devices (mesh::observe), which carry real `phone:<name>` actors.
 pub fn add_answer_from(dir: &Path, id: &str, text: &str, by: &str, now: i64) -> io::Result<bool> {
     if !add_answer(dir, id, text, now)? {
         return Ok(false);

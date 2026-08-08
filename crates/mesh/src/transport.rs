@@ -1511,16 +1511,20 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     if t.is_empty() {
         return text(StatusCode::BAD_REQUEST, "empty");
     }
+    // Whoever this node currently serves speaks here (identity::current — set by a face
+    // match or the Mac's "serving X" act); the old hardcoded "ian" survives only as the
+    // fallback for a node that hasn't yet learned who it serves. Confirms from OTHER
+    // humans still arrive via their own signed devices (mesh::observe), real actors.
+    let actor =
+        familiar_kernel::identity::current(dir).unwrap_or_else(|| "ian".to_string());
     // An answer aimed at a specific THREAD attaches as that thread's evidence and travels
     // with its pursuit (kernel::thread::add_answer) — never a dead end. An untargeted
     // answer is the console channel: recorded, and the open question retired.
     if let Some(thread_id) = v.get("thread").and_then(|s| s.as_str()) {
         let now = now_secs();
-        // The local console's actor is fixed ("ian"); confirms from other humans arrive
-        // via their own signed devices (mesh::observe), which carry real actors.
-        let _ = familiar_kernel::thread::add_answer_from(dir, thread_id, t, "ian", now);
+        let _ = familiar_kernel::thread::add_answer_from(dir, thread_id, t, &actor, now);
         let obs = familiar_kernel::observation::Observation::new(
-            "ian",
+            actor,
             "answered",
             t,
             format!("thread:{thread_id}"),
@@ -1532,7 +1536,7 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         return text(StatusCode::OK, "ok");
     }
     let obs = familiar_kernel::observation::Observation::new(
-        "ian",
+        actor,
         "told the familiar",
         t,
         "console",
@@ -4166,6 +4170,49 @@ mod tests {
 
     fn body_status(resp: &Response<Full<Bytes>>) -> StatusCode {
         resp.status()
+    }
+
+    #[test]
+    fn local_answer_speaks_as_the_current_identity_not_a_hardcoded_name() {
+        let dir = fresh_dir("local_answer_actor");
+        familiar_kernel::identity::remember(&dir, "Betty", 100).unwrap();
+        familiar_kernel::identity::set_current(&dir, "betty").unwrap();
+        familiar_kernel::thread::append(
+            &dir,
+            &familiar_kernel::thread::Thread {
+                id: "thread-0001".into(),
+                question: "Betty — long evenings?".into(),
+                theory: "Betty may want softer light.".into(),
+                direction: "dim the lights".into(),
+                created_at: 100,
+                status: "open".into(),
+                status_at: 100,
+                last_worked_at: 0,
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: "betty".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        let resp = local_answer(&dir, br#"{"thread":"thread-0001","text":"yes please"}"#);
+        assert_eq!(body_status(&resp), StatusCode::OK);
+        let t = &familiar_kernel::thread::load(&dir).unwrap()[0];
+        assert_eq!(t.origin, "observer", "betty's own console answer confirms her need");
+        assert_eq!(t.actor, "betty");
+        let obs = familiar_kernel::observation::load(&dir).unwrap();
+        assert!(
+            obs.iter().any(|o| o.actor == "betty" && o.action == "answered"),
+            "the observation speaks in her name, not a baked-in one"
+        );
+        // A node that hasn't learned who it serves still answers — as the fallback.
+        let dir2 = fresh_dir("local_answer_fallback");
+        let resp = local_answer(&dir2, br#"{"text":"hello there"}"#);
+        assert_eq!(body_status(&resp), StatusCode::OK);
+        let obs2 = familiar_kernel::observation::load(&dir2).unwrap();
+        assert!(obs2.iter().any(|o| o.actor == "ian"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
     }
 
     // ---- the two-filter door over the wire (ADR-0026, Phase 3) ----
