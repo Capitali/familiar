@@ -2457,9 +2457,10 @@ pub fn actuate_by_hand(
         return Ok(
             match run_surface_tool(dir, &actuator_tool_id(surface, "state"), now)? {
                 Some(out) => Ok(out),
-                None => Err(format!(
+                None => Err(
                     "the state read failed — see `familiar observations` and the tool's health"
-                )),
+                        .to_string(),
+                ),
             },
         );
     }
@@ -2470,9 +2471,9 @@ pub fn actuate_by_hand(
         )));
     }
     if run_surface_tool(dir, &actuator_tool_id(surface, label), now)?.is_none() {
-        return Ok(Err(format!(
-            "the act failed or was declined — see the tool's health"
-        )));
+        return Ok(Err(
+            "the act failed or was declined — see the tool's health".to_string(),
+        ));
     }
     let mut state = familiar_kernel::actuator::load_state(dir);
     let st = state.entry(surface.to_string()).or_default();

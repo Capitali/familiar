@@ -77,15 +77,19 @@ The act→react loop already exists structurally — thread → candidate → tr
 
 ## What is deliberately not yet built
 
-- **Real actuators.** No control surface is wired; "act" today means the internal
-  trial machinery. The first candidate is deliberately modest and reversible (the
-  BLE-controlled light strip — local, low-stakes, observable reaction).
-- **Reaction observations scored into trials.** "The human turned it back" as trial
-  evidence, and automatic revert on a negative reaction, land with the first actuator —
-  building the revert path *with* the actuator, never after it.
-- **Habit patterns** (`ctb|<handle>|habit|<surface>@h<hour>`) — the dossier kind that
-  learns "lights at 30% after 8pm". The slot grammar anticipates it; nothing writes it
-  yet.
+*(All three landed the same day as [ADR-0032](0032-declared-actuators-and-the-reaction-loop.md),
+which is their concrete design: declared actuators, reaction trials with auto-revert,
+and habit folding. Kept as written for the record of what this ADR consciously
+deferred.)*
+
+- **Real actuators.** ~~No control surface is wired~~ — built: the declared-actuator
+  seam, first surface the BLE light strip (ADR-0032).
+- **Reaction observations scored into trials.** ~~Land with the first actuator~~ —
+  built with it: `human_reverted` / `negative_reaction` trials, event-driven demotion,
+  undo-first reverts (ADR-0032).
+- **Habit patterns** (`ctb|<handle>|habit|<surface>=<bucket>@h<hour>`) — built: folded
+  from attributed `adjusted` observations; habit-driven *initiation* remains future
+  work (ADR-0032 follow-on).
 
 ## Consequences
 

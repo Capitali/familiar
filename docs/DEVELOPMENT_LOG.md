@@ -6,6 +6,72 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-08 (later) — The hand on the world: declared actuators + the reaction loop (ADR-0032)
+
+### What changed
+
+- **`allow_actuate`** — new boundary gate, default closed, covering acting AND polling
+  (a BLE state query is a connection into a device). Dropped from every agent scope like
+  self-upgrade/outreach; plumbed through guard (`ActionKind::Actuate`), worldview
+  `GateStates.actuate`, `local_gate`, and both Mac console spots.
+- **`kernel::actuator`** — declaration is the consent: the human writes `actuators.json`
+  (surface, `state_cmd`, `actions`, ordered `buckets`); **the bucket set is the revert
+  map** (every bucket names the action restoring it — a surface violating this is
+  dropped loudly). `parse_state` speaks the motorlights text contract; the SP548E can't
+  even show *off* in state, so off is an act, not a verifiable bucket. `is_negative` is
+  deterministic whole-word — no model judges a reaction.
+- **Cycle step 8·3, poll → heed → tend** (gated on actuate+execute): declared acts
+  materialize as `origin:"declared"` library tools (wrappers under the DATA dir, marker
+  `# familiar:actuate`); `reaches_device_control` requires the gate at the same two
+  sites as `reaches_network`; declared tools never federate (manifest + push + inbound
+  push all fence). The poller self-debounces by pre-writing the expected bucket at act
+  time — it structurally cannot see the familiar's own hand; external transitions become
+  `adjusted` observations attributed to the sole present human (else `someone`, excluded
+  like `observer` — new 0.5 rung in `subject_and_strength`). A transition inside a
+  reaction window IS the undo: negative trial (`human_reverted`, last-wins), candidate
+  archived, thread abandoned (words kept), habit depreciated (halved, count kept),
+  surface rested 6h. A negative *answer* or dismissal → undo FIRST (revert = the
+  bucket-named action), then the same evidence. Quiet window / assent → positive trial,
+  no rest. `tend` acts on pursued need-threads whose direction names surface+act, one
+  act per surface per window. TickReport/ActivityTick gain `actuated`/`reactions`.
+- **Habits** — `ctb|<handle>|habit|lights=dim@h20` folds from `adjusted` observations
+  (the dossier kind the slot grammar anticipated); `dossier::depreciate` halves weight,
+  keeps count; `familiar dossier` shows habits and the coarse summary speaks them
+  ("tends to set lights=dim in the evening").
+- **`familiar actuate <surface> <state|label>`** — the human's hand through the same
+  tools; feeds their own habit pattern, and answers an open reaction window if one waits.
+- **The dormant feedback chain finally produces**: `feedback / refine / answer:<id>`
+  (device observe seam or `/local/observe`) → `set_feedback` → `mark_unhealthy` for the
+  authored tool behind the answer; declared tools exempt (they ran correctly — the
+  *decision* was wrong, and retiring one would kill its own revert path).
+- **`/local/answer` speaks as the current identity** (`identity::current`, fallback
+  "ian") — a Betty confirm from the local console now flips her own thread.
+- Params: `actuator_poll_secs` (300, envelope 60..900), `reaction_window_secs` (900,
+  envelope 120..7200), both Law-argued in `review()`.
+
+### Checks run
+
+- `cargo test --workspace` green; nine end-to-end cycle tests drive the whole loop on a
+  **fake light** (a text file in motorlights format — no BLE in CI); kernel 156+, mesh
+  151 incl. `a_declared_actuator_tool_never_federates`, agent decline test.
+- Live CLI walkthrough (fake surface): `actuate lights state` reads; `actuate lights
+  dim` acts and records `ian adjusted lights=dim`; a tick folds it; `dossier ian` says
+  "tends to set lights=dim in the evening".
+- Test-isolation fix worth knowing: declared wrappers live under the **data dir**
+  (`<dir>/actuators/`), not the shared `familiar_workspace()` — parallel tests (and
+  multiple data dirs) were clobbering one another's wrappers.
+
+### Next
+
+- **The BLE/TCC manual step (not yet done — needs the physical strip):** write the real
+  `actuators.json` pointing at `~/Development/motorlights`, run `familiar actuate lights
+  state` once interactively to trigger the Bluetooth prompt, then exercise under launchd
+  (`launchctl kickstart`); grant python Bluetooth in System Settings if blocked; flip
+  the strip via the BanlanX app and confirm an `adjusted` observation on the next poll.
+- Habit-driven initiation (act from a strong pattern, not only a need-thread) — after
+  the patterns accumulate depth. Duration-weighted reaction scoring. A second declared
+  surface to test the format against something that isn't a light.
+
 ## 2026-08-08 — The dossier lands; the muse turns toward the people (ADR-0022, ADR-0031)
 
 ### What changed

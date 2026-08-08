@@ -1572,13 +1572,20 @@ mod tests {
             &tool_row(
                 "tool-act-lights-dim",
                 "declared",
-                mk("act.sh", "#!/bin/sh\n# familiar:actuate lights dim\ncat /tmp/x\n"),
+                mk(
+                    "act.sh",
+                    "#!/bin/sh\n# familiar:actuate lights dim\ncat /tmp/x\n",
+                ),
             ),
         )
         .unwrap();
         familiar_kernel::tool::append(
             &dir,
-            &tool_row("tool-0002", "", mk("portable.sh", "#!/bin/sh\nsysctl -n hw.ncpu\n")),
+            &tool_row(
+                "tool-0002",
+                "",
+                mk("portable.sh", "#!/bin/sh\nsysctl -n hw.ncpu\n"),
+            ),
         )
         .unwrap();
         let cfg = MeshConfig::default(); // share_tools defaults on — the sharing-est case
@@ -1592,12 +1599,18 @@ mod tests {
             .iter()
             .map(|t| t.tool_id.as_str())
             .collect();
-        assert!(names.contains(&"tool-0002"), "portable tools still travel: {names:?}");
+        assert!(
+            names.contains(&"tool-0002"),
+            "portable tools still travel: {names:?}"
+        );
         assert!(
             !names.contains(&"tool-act-lights-dim"),
             "a declared actuator stays home: {names:?}"
         );
-        assert!(!raw.contains("familiar:actuate"), "not even its marker crosses");
+        assert!(
+            !raw.contains("familiar:actuate"),
+            "not even its marker crosses"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

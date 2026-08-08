@@ -13,6 +13,23 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The first actuator, and the reaction loop (ADR-0032).** The familiar gains a hand on
+  the world, shaped by consent-by-observation: the human declares control surfaces in
+  `actuators.json` (declaration is the consent — an undeclared device has no path to
+  actuation), where every state bucket names the action that restores it, so any change
+  the familiar makes it can unmake. A new `allow_actuate` gate (default closed, never
+  scoped to agents, never federated) governs acting and polling both. Each tick the
+  familiar polls its surfaces, acts on a person's pursued need when the direction names a
+  surface and an act ("dim the lights this evening"), and then *reads the reaction*: the
+  human's hand undoing it or a negative word makes the familiar revert first and argue
+  never — recorded as a negative trial that demotes the candidate, abandons the pursuit
+  (keeping the human's words), depreciates the habit it leaned on, and rests the surface;
+  a quiet window is consent and the change stands. External adjustments feed per-human
+  **habit patterns** (`lights=dim@h20`) in the dossier, shown by `familiar dossier` and
+  spoken in its summary. `familiar actuate` is the human's own hand through the same
+  gated tools. First declared surface: the BLE LED strip via `~/Development/motorlights`.
+  *Validated by nine end-to-end cycle tests against a fake surface (no BLE in CI) + a
+  live CLI walkthrough; the physical-strip TCC step is documented in the dev log.*
 - **The dossier, and needs theorized per human (ADR-0022, ADR-0031).** The familiar now
   remembers each person well enough to serve them: every observation that names a human
   feeds a contribution-scored pattern (presence by hour, how they are usually identified)
