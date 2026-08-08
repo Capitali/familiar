@@ -165,6 +165,11 @@ pub fn build_outbox(
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|t| t.status == "open" && !t.direction.trim().is_empty())
+                // A theory about a PERSON never federates: its text is a hypothesis about
+                // someone's needs, and the dossier's law extends to anything derived from
+                // it (ADR-0022 — node-local, never a brief). It isn't delegatable work
+                // anyway: only the node that knows the human can read their reaction.
+                .filter(|t| t.origin_human.is_empty())
                 .take(THEORY_SHARE_CAP)
                 .map(|t| crate::brief::TheoryRequest {
                     origin: self_node.clone(),
@@ -1473,6 +1478,55 @@ mod tests {
         assert!(
             brief2.body.knowledge.theory_requests.is_empty(),
             "an executor delegates nothing"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_personal_need_thread_never_federates() {
+        // A theorist offers its engineering theories — but a theory about a PERSON stays
+        // home: its text is a hypothesis about someone's needs (ADR-0022, node-local).
+        let dir = tmp("no_personal_theory_on_wire");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let mut bnd = boundary::Boundary::closed();
+        bnd.allow_mesh = true;
+        bnd.allow_execute = false; // a theorist — the sharing-est configuration there is
+        fs::write(
+            dir.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&bnd).unwrap(),
+        )
+        .unwrap();
+        familiar_kernel::thread::append(
+            &dir,
+            &familiar_kernel::thread::Thread {
+                id: "thread-0001".into(),
+                question: "Betty — would warmer evening light help?".into(),
+                theory: "Betty may want softer light after dark.".into(),
+                direction: "dim the lights after 20:00".into(),
+                status_at: 0,
+                last_worked_at: 0,
+                created_at: NOW,
+                status: "open".into(),
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: "betty".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+
+        let cfg = MeshConfig::default();
+        build_outbox(&dir, &cred, &cfg, NOW + 1).unwrap();
+        let raw = fs::read_to_string(dir.join(OUTBOX_FILE)).unwrap();
+        let brief: MeshBrief = serde_json::from_str(&raw).unwrap();
+        assert!(
+            brief.body.knowledge.theory_requests.is_empty(),
+            "a hypothesis about a person is not delegatable work"
+        );
+        assert!(
+            !raw.contains("softer light"),
+            "and its text appears nowhere in the brief at all"
         );
         let _ = fs::remove_dir_all(&dir);
     }
