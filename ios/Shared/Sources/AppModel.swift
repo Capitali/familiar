@@ -1164,8 +1164,14 @@ final class AppModel: ObservableObject {
                             let names = fresh.map { $0.handle.isEmpty ? $0.label : $0.handle }
                             note("welcome \(names.joined(separator: ", ")) — new to the mesh")
                         }
+                        // ACCUMULATE, never replace: a read that momentarily lost an arrival
+                        // (door failover, a freshness-boundary flicker) made the same visitor
+                        // read as "new" again on the next poll — the join chime rang on loop
+                        // for one static guest, live, 2026-08-08. Once greeted, greeted.
+                        knownArrivalIds = known.union(ids)
+                    } else {
+                        knownArrivalIds = ids
                     }
-                    knownArrivalIds = ids
                 } else {
                     let waiting = view.guests_waiting ?? 0
                     if let before = lastGuestsWaiting, waiting > before {

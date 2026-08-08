@@ -328,6 +328,11 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
         if !a.handle.is_empty() {
             a.handle = "someone".into();
         }
+        // Origin is the household's verification evidence, never a fellow visitor's to see.
+        a.lat = 0.0;
+        a.lon = 0.0;
+        a.addr.clear();
+        a.build.clear();
     }
 
     for m in view.members.iter_mut() {

@@ -170,6 +170,12 @@ public struct ArrivalView: Codable, Equatable {
     /// The evidence class that established them (empty for a guest).
     public var via: String
     public var at: Int64
+    /// Where the knock came from — verification evidence for the welcome (absent from older
+    /// doors and projected away for guest readers).
+    public var lat: Double?
+    public var lon: Double?
+    public var addr: String?
+    public var build: String?
 }
 
 /// A guest whose refused introduction claimed an existing human — waiting for that human's own

@@ -138,6 +138,19 @@ pub struct ArrivalView {
     #[serde(default)]
     pub via: String,
     pub at: i64,
+    /// Where the knock came from — the visitor's self-reported position and the address the
+    /// door saw, so a human can VERIFY who they are welcoming ("betty's new phone" should not
+    /// be knocking from a Beijing datacenter). Zero/empty when unknown. Projected away for
+    /// guest readers — origin is the household's evidence, not a fellow visitor's.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
+    #[serde(default)]
+    pub addr: String,
+    /// "iOS 26.6 · v69" — what the knocking device says it runs. Identity evidence too.
+    #[serde(default)]
+    pub build: String,
 }
 
 /// The arrivals window — the same 24-hour judgement ADR-0021 uses for the live roster split.
@@ -608,6 +621,9 @@ pub fn assemble_worldview(
 
     // Who is new: every record whose admission (or, for a guest, first sighting) falls within
     // the last 24 hours. Newest first. Severed records are not arrivals.
+    // Origin evidence rides along from the peer roster: where the knock came from (address,
+    // self-reported position, OS/build) so the welcome is made with eyes open.
+    let arrival_peers = crate::transport::load_peers(dir);
     let mut arrivals: Vec<ArrivalView> = crate::record::load_all(dir)
         .into_iter()
         .filter_map(|r| {
@@ -631,6 +647,23 @@ pub fn assemble_worldview(
                 Some(e) => (e.handle.clone(), format!("{:?}", e.class)),
                 None => (String::new(), String::new()),
             };
+            let peer = arrival_peers
+                .iter()
+                .find(|p| p.node_id == r.device_id || r.keys.contains(&p.node_id));
+            let (lat, lon, addr, build) = match peer {
+                Some(p) => (
+                    p.lat,
+                    p.lon,
+                    p.addr.split(':').next().unwrap_or("").to_string(),
+                    match (p.os_version.is_empty(), p.familiar_version.is_empty()) {
+                        (false, false) => format!("{} · v{}", p.os_version, p.familiar_version),
+                        (false, true) => p.os_version.clone(),
+                        (true, false) => format!("v{}", p.familiar_version),
+                        (true, true) => String::new(),
+                    },
+                ),
+                None => (0.0, 0.0, String::new(), String::new()),
+            };
             Some(ArrivalView {
                 node_id: r.device_id,
                 label,
@@ -638,6 +671,10 @@ pub fn assemble_worldview(
                 handle,
                 via,
                 at,
+                lat,
+                lon,
+                addr,
+                build,
             })
         })
         .collect();

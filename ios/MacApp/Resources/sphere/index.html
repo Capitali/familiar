@@ -581,6 +581,16 @@ function refreshScreen() {
               : esc((a.handle ? a.handle + ' — ' : '') + (viaWord[a.via] || 'established'))}
             · arrived ${dstr(a.at)}
           </div>
+          ${(a.addr || a.build || a.lat || a.lon) ? `
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
+            <span class="m" style="font-size:9px;color:rgba(255,207,158,0.75);">
+              knocking from ${(a.lat || a.lon) ? `${(+a.lat).toFixed(2)}°, ${(+a.lon).toFixed(2)}°` : 'an unreported position'}${a.addr ? ` · ${esc(a.addr)}` : ''}${a.build ? ` · ${esc(a.build)}` : ''}
+            </span>
+            ${(a.lat || a.lon) ? `<button onclick="sphereVisitorDive(${+a.lat}, ${+a.lon}, '${a.node_id.replace(/[^0-9a-f]/gi,'').slice(0,8)}')" class="glybtn" style="height:24px;padding:0 10px;border-radius:7px;"><span class="m" style="font-size:8px;letter-spacing:0.12em;">SHOW ON GLOBE</span></button>` : ''}
+          </div>
+          <div class="m" style="font-size:8.5px;color:rgba(160,195,255,0.45);margin-top:4px;">
+            verify before you welcome: does the place, address and build match the person you expect?
+          </div>` : ''}
         </div>`).join(''));
 
   } else if (k === 'games') {
@@ -1440,6 +1450,13 @@ window.sphereDive = (i) => {
 window.sphereDiveFrontier = (i) => {
   const F = frontierNodes(); const f = F[i]; if (!f || !f.located) return;
   beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, G.frontierDirs[i] || latLon(f.lat, f.lon));
+};
+// A visitor's knock, shown where it came from — the welcome card's SHOW ON GLOBE dives to the
+// arrival's self-reported position so the household can verify with their eyes (a "new phone"
+// knocking from a foreign datacenter is a question, not a welcome).
+window.sphereVisitorDive = (lat, lon, name) => {
+  if (!lat && !lon) return;
+  beginDive({ lat, lon, name: 'visitor ' + name, color: 0xffb266 }, latLon(lat, lon));
 };
 function collectNodes() {
   const P = peers(), F = frontierNodes();
