@@ -333,6 +333,8 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
         a.lon = 0.0;
         a.addr.clear();
         a.build.clear();
+        // Same for activity: when another arrival was last heard from is household evidence.
+        a.last_seen = 0;
     }
 
     for m in view.members.iter_mut() {

@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import MapKit
 import CoreLocation
+import CoreImage
 import FamiliarMesh
 
 // The Metal Sphere console (imported from Claude Design "Familiar Metal Sphere.dc.html"):
@@ -367,6 +368,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 if (body["to"] as? String) == "globe" { self.backToGlobe() }
             case "invite":
                 self.fetchInvite()
+            case "shareInvite":
+                // The invite QR handed to a blank Messages compose — for inviting someone who
+                // isn't in the room to scan. The payload is a 10-minute single-use pass carrying
+                // no secret, so an image in a message is an acceptable channel.
+                if let payload = body["payload"] as? String, !payload.isEmpty {
+                    self.composeInviteMessage(payload)
+                }
             case "answerThread":
                 if let id = body["id"] as? String, let text = body["text"] as? String, !text.isEmpty {
                     self.post("local/answer", ["text": text, "thread": id])
@@ -536,6 +544,35 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             break
         }
         Task { await poll() }   // reflect the act right away
+    }
+}
+
+// MARK: - invite → Messages
+
+extension SphereBridge {
+    /// Open a blank Messages compose with the invite QR attached — the image when the QR
+    /// renders, the raw payload as text otherwise, so the invite travels in exactly one form.
+    func composeInviteMessage(_ payload: String) {
+        guard let service = NSSharingService(named: .composeMessage) else { return }
+        var items: [Any] = [payload]
+        if let png = Self.qrPNG(payload) {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("familiar-invite.png")
+            if (try? png.write(to: url)) != nil { items = [url] }
+        }
+        guard service.canPerform(withItems: items) else { return }
+        service.perform(withItems: items)
+    }
+
+    private static func qrPNG(_ text: String) -> Data? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let img = filter.outputImage else { return nil }
+        // The generator emits 1pt modules — scale up or Messages shows a smudge.
+        let scaled = img.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+        guard let cg = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
+        return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
     }
 }
 

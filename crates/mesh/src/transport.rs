@@ -3754,6 +3754,15 @@ pub fn freshest_device_fix(dir: &Path) -> Option<(f64, f64)> {
     load_peers(dir)
         .into_iter()
         .filter(|p| p.geo_device && (p.lat != 0.0 || p.lon != 0.0))
+        // Only a FULL member's own fix can locate the mesh. `geo_device` is member-gated at
+        // registration now, but a roster written before that gate may still carry a guest's
+        // mark — and one guest knocking from Beijing once relocated the lighthouse (and,
+        // through its brief, every unlocated node on every map) to Beijing.
+        .filter(|p| {
+            crate::record::find_by_key(dir, &p.node_id)
+                .map(|r| crate::record::derive_state(&r) == crate::record::RecordState::Member)
+                .unwrap_or(false)
+        })
         .max_by_key(|p| p.last_seen)
         .map(|p| (p.lat, p.lon))
 }
@@ -3957,6 +3966,13 @@ pub(crate) fn register_device_peer(
     // let it become the roster label (it would relabel the phone "background" on a background read).
     // Treated as empty, so the real device name from a foreground read stands.
     let label = if label == "background" { "" } else { label };
+    // A reported fix is adopted as the device's own GPS (`geo_device`) only when the reporter
+    // is a full member. A guest's self-reported position is still stored on its OWN row (the
+    // welcome card shows where the knock came from), but never earns the mark that lets
+    // `self_geo`/consoles treat it as the mesh's location.
+    let member_fix = crate::record::find_by_key(dir, node_id)
+        .map(|r| crate::record::derive_state(&r) == crate::record::RecordState::Member)
+        .unwrap_or(false);
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
         .ok()
@@ -4006,7 +4022,7 @@ pub(crate) fn register_device_peer(
             if lat != 0.0 || lon != 0.0 {
                 existing.lat = lat;
                 existing.lon = lon;
-                existing.geo_device = true;
+                existing.geo_device = member_fix;
             }
         }
         None => peers.push(PeerRecord {
@@ -4029,7 +4045,7 @@ pub(crate) fn register_device_peer(
             human: String::new(),
             lat,
             lon,
-            geo_device: lat != 0.0 || lon != 0.0,
+            geo_device: member_fix && (lat != 0.0 || lon != 0.0),
             status: String::new(),
             connectivity: String::new(),
         }),
@@ -4194,6 +4210,46 @@ mod tests {
         let raw = serde_json::to_vec(&req).unwrap();
         let sig = guest.sign(&raw);
         (raw, sig)
+    }
+
+    /// The Beijing bug: a GUEST's self-reported fix must never become the mesh's location.
+    /// A visitor knocking from afar still shows its origin on its own roster row (the
+    /// welcome card renders it), but only after admission does a reported GPS earn
+    /// `geo_device` — the mark `self_geo` and every console's clustering anchor trust.
+    /// Before this gate, one visitor reading through the lighthouse dragged the lighthouse's
+    /// position — and with it every unlocated node on every map — to Beijing.
+    #[test]
+    fn a_guests_fix_never_locates_the_mesh_a_members_does() {
+        let (dir, _host, cred, guest) = door_and_guest("geo");
+        let gid = guest.node_id();
+
+        // The guest reads the worldview, reporting a fix from Beijing.
+        register_device_peer(&dir, &gid, "visitor-phone", "1.2.3.4", "0.1", "iOS 26", 39.9, 116.4)
+            .unwrap();
+        let p = load_peers(&dir).into_iter().find(|p| p.node_id == gid).unwrap();
+        assert_eq!((p.lat, p.lon), (39.9, 116.4), "origin stays visible on the guest's own row");
+        assert!(!p.geo_device, "a guest's fix is not a device fix the mesh may inherit");
+        assert_eq!(freshest_device_fix(&dir), None, "the mesh must not relocate to a visitor");
+        assert_eq!(self_geo(&dir), None, "self_geo stays an honest unknown");
+
+        // Admission changes the answer: a member device's own GPS locates the mesh.
+        crate::record::admit(
+            &dir,
+            &gid,
+            None,
+            crate::record::Establishment {
+                handle: "jeff".into(),
+                class: crate::record::EvidenceClass::DeviceVoucher,
+                artifact: "test".into(),
+                at: now_secs(),
+            },
+            &cred.membership.node_id,
+            now_secs(),
+        )
+        .unwrap();
+        register_device_peer(&dir, &gid, "visitor-phone", "1.2.3.4", "0.1", "iOS 26", 48.6, -93.4)
+            .unwrap();
+        assert_eq!(freshest_device_fix(&dir), Some((48.6, -93.4)));
     }
 
     #[test]

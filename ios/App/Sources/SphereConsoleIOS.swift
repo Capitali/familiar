@@ -1,6 +1,8 @@
 import SwiftUI
 import WebKit
 import MapKit
+import MessageUI
+import CoreImage
 import FamiliarMesh
 
 // The Metal Sphere console on iPhone/iPad — the SAME web bundle the Mac console renders
@@ -331,6 +333,13 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                         "window.sphereInvite && window.sphereInvite(\(quoted))",
                         completionHandler: nil)
                 }
+            case "shareInvite":
+                // The invite QR handed to a blank Messages compose — for inviting someone who
+                // isn't in the room to scan. The payload is a 10-minute single-use pass carrying
+                // no secret, so an image in a message is an acceptable channel.
+                if let payload = body["payload"] as? String, !payload.isEmpty {
+                    self.composeInviteMessage(payload)
+                }
             case "unenroll":
                 self.onUnenroll?()
             case "standing":
@@ -347,6 +356,45 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             default: break
             }
         }
+    }
+}
+
+// MARK: - invite → Messages
+
+extension SphereBridgeIOS: MFMessageComposeViewControllerDelegate {
+    /// Open a blank Messages compose with the invite QR attached (image first; the raw
+    /// payload as the body only when attachments are unavailable, so the invite always
+    /// travels in exactly one form).
+    func composeInviteMessage(_ payload: String) {
+        guard MFMessageComposeViewController.canSendText() else { return }
+        let compose = MFMessageComposeViewController()
+        compose.messageComposeDelegate = self
+        if MFMessageComposeViewController.canSendAttachments(),
+           let png = Self.qrPNG(payload) {
+            compose.addAttachmentData(png, typeIdentifier: "public.png",
+                                      filename: "familiar-invite.png")
+        } else {
+            compose.body = payload
+        }
+        var top = web?.window?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        top?.present(compose, animated: true)
+    }
+
+    private static func qrPNG(_ text: String) -> Data? {
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        filter.setValue(Data(text.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let img = filter.outputImage else { return nil }
+        // The generator emits 1pt modules — scale up or Messages shows a smudge.
+        let scaled = img.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
+        guard let cg = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cg).pngData()
+    }
+
+    nonisolated func messageComposeViewController(_ controller: MFMessageComposeViewController,
+                                                  didFinishWith result: MessageComposeResult) {
+        Task { @MainActor in controller.dismiss(animated: true) }
     }
 }
 

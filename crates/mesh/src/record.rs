@@ -156,8 +156,36 @@ pub struct MembershipRecord {
     /// human's device needs it to vouch without a QR crossing between machines.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub pubkey: String,
+    /// Where this device last knocked from, captured by whichever door heard it and carried
+    /// WITH the record (record-sync) — so every door's welcome shows the same evidence. The
+    /// welcome card once flapped between "iPhone, knocking from 39.91°…" and a bare node-id
+    /// as console failover alternated between the door the visitor read through (which had a
+    /// peer row) and a door that had only the replicated record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<OriginEvidence>,
     pub first_seen: i64,
     pub last_seen: i64,
+}
+
+/// Origin evidence for the welcome: what the knocking device called itself, the address the
+/// door saw, what it says it runs, and its self-reported position. Evidence for a human's
+/// verification — never a fix the mesh inherits (see `transport::freshest_device_fix`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OriginEvidence {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub addr: String,
+    /// "iOS 26.6 · v70" — OS and client build, as the device reports them.
+    #[serde(default)]
+    pub build: String,
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
+    /// When this evidence was captured (door clock) — newest wins on merge.
+    #[serde(default)]
+    pub at: i64,
 }
 
 impl MembershipRecord {
@@ -179,6 +207,7 @@ impl MembershipRecord {
             attestation: Some(attestation),
             note: String::new(),
             pubkey: String::new(),
+            origin: None,
             first_seen: now,
             last_seen: now,
         }
@@ -298,6 +327,15 @@ pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRe
             b.pubkey.clone()
         } else {
             a.pubkey.clone()
+        },
+        // Newest capture wins; ties break on the address so the pick is deterministic.
+        origin: match (&a.origin, &b.origin) {
+            (Some(x), Some(y)) => Some(if (x.at, &x.addr) >= (y.at, &y.addr) {
+                x.clone()
+            } else {
+                y.clone()
+            }),
+            (x, y) => x.clone().or_else(|| y.clone()),
         },
         first_seen: a.first_seen.min(b.first_seen),
         last_seen: a.last_seen.max(b.last_seen),
@@ -848,6 +886,7 @@ fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i6
         attestation: None,
         note: String::new(),
         pubkey: String::new(),
+        origin: None,
         first_seen: now,
         last_seen: now,
     });
@@ -855,6 +894,41 @@ fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i6
     r.last_seen = r.last_seen.max(now);
     r.state = derive_state(&r);
     save(dir, &r)
+}
+
+/// How long a captured origin stays "fresh enough" that an identical re-report skips the
+/// write — a console polls every few seconds, and rewriting (and re-syncing) the record on
+/// that metronome would turn welcome evidence into store churn.
+const ORIGIN_REFRESH_SECS: i64 = 3600;
+
+/// Capture where a device is knocking from, on the record that REPLICATES — best-effort
+/// welcome evidence, never load-bearing. A sparser report never blanks a richer capture.
+pub fn note_origin(dir: &Path, node_id: &str, mut o: OriginEvidence) -> Result<()> {
+    let Some(r) = find_by_key(dir, node_id) else {
+        return Ok(()); // origin attaches to a record; a stranger with none keeps none
+    };
+    if let Some(prev) = &r.origin {
+        let same = prev.label == o.label
+            && prev.addr == o.addr
+            && prev.build == o.build
+            && prev.lat == o.lat
+            && prev.lon == o.lon;
+        if same && o.at - prev.at < ORIGIN_REFRESH_SECS {
+            return Ok(());
+        }
+        if o.label.is_empty() {
+            o.label = prev.label.clone();
+        }
+        if o.build.is_empty() {
+            o.build = prev.build.clone();
+        }
+        if o.lat == 0.0 && o.lon == 0.0 {
+            o.lat = prev.lat;
+            o.lon = prev.lon;
+        }
+    }
+    let at = o.at;
+    upsert(dir, &r.device_id, at, |r| r.origin = Some(o))
 }
 
 /// A device renouncing its own identity (the leaving half of E2's symmetry): a device can
@@ -1956,6 +2030,38 @@ mod tests {
             },
             NOW,
         )
+    }
+
+    /// Origin evidence replicates with the record and the NEWEST capture wins the merge —
+    /// so a door the visitor never read through still renders the same welcome card
+    /// (label, address, build, position) as the door that heard the knock.
+    #[test]
+    fn origin_evidence_merges_newest_capture_wins_either_fold_order() {
+        let mut a = base_record("dev-origin");
+        let mut b = base_record("dev-origin");
+        a.origin = Some(OriginEvidence {
+            label: "iPhone".into(),
+            addr: "139.178.130.73".into(),
+            build: "iOS 26.6 · v70".into(),
+            lat: 39.91,
+            lon: 116.38,
+            at: NOW + 100,
+        });
+        b.origin = Some(OriginEvidence {
+            label: "iPhone".into(),
+            addr: "10.0.0.9".into(),
+            build: "iOS 26.5 · v69".into(),
+            lat: 0.0,
+            lon: 0.0,
+            at: NOW,
+        });
+        let ab = merge_records(&a, &b);
+        let ba = merge_records(&b, &a);
+        assert_eq!(ab.origin, ba.origin, "merge is commutative");
+        assert_eq!(ab.origin.as_ref().unwrap().addr, "139.178.130.73");
+        // One replica without origin at all never erases the other's evidence.
+        let bare = base_record("dev-origin");
+        assert_eq!(merge_records(&bare, &a).origin, a.origin);
     }
 
     #[test]

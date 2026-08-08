@@ -151,6 +151,10 @@ pub struct ArrivalView {
     /// "iOS 26.6 · v69" — what the knocking device says it runs. Identity evidence too.
     #[serde(default)]
     pub build: String,
+    /// When the door last heard from this arrival (peer roster), 0 when never — so the
+    /// welcome can say "seen 4m ago" beside the moment they first arrived.
+    #[serde(default)]
+    pub last_seen: i64,
 }
 
 /// The arrivals window — the same 24-hour judgement ADR-0021 uses for the live roster split.
@@ -401,6 +405,27 @@ pub(crate) fn read_worldview(
         req.lat,
         req.lon,
     );
+    // The same evidence, on the record that REPLICATES — the peer row above lives only at
+    // this door, and a welcome rendered by a sibling door needs the origin too (the card
+    // flapped between rich and bare as console failover alternated doors). Best-effort,
+    // throttled inside note_origin. "background" is the iOS sync task's label, not a name.
+    let _ = crate::record::note_origin(
+        dir,
+        &req.node.node_id,
+        crate::record::OriginEvidence {
+            label: if req.node.label == "background" { String::new() } else { req.node.label.clone() },
+            addr: peer_ip.split(':').next().unwrap_or("").to_string(),
+            build: match (req.os_version.is_empty(), req.client_version.is_empty()) {
+                (false, false) => format!("{} · v{}", req.os_version, req.client_version),
+                (false, true) => req.os_version.clone(),
+                (true, false) => format!("v{}", req.client_version),
+                (true, true) => String::new(),
+            },
+            lat: req.lat,
+            lon: req.lon,
+            at: now,
+        },
+    );
 
     // A certified reader with NO record gets its guest record RESTORED: the cert it just
     // proved is the receipt of a covenant it once attested (a cert is only ever minted upon
@@ -638,10 +663,21 @@ pub fn assemble_worldview(
             if now - at > ARRIVAL_WINDOW_SECS || at > now + 60 {
                 return None;
             }
+            // Label and origin prefer this door's live peer row, then the origin evidence
+            // replicated on the record — so a door the visitor never read through still
+            // renders the same welcome, not a bare node-id (the card flapped between the
+            // two as console failover alternated doors).
+            let origin = r.origin.clone();
             let label = members
                 .iter()
                 .find(|m| m.node_id == r.device_id || r.keys.contains(&m.node_id))
                 .map(|m| m.label.clone())
+                .or_else(|| {
+                    origin
+                        .as_ref()
+                        .map(|o| o.label.clone())
+                        .filter(|l| !l.is_empty())
+                })
                 .unwrap_or_else(|| r.device_id.chars().take(8).collect());
             let (handle, via) = match &r.identity.established {
                 Some(e) => (e.handle.clone(), format!("{:?}", e.class)),
@@ -650,7 +686,7 @@ pub fn assemble_worldview(
             let peer = arrival_peers
                 .iter()
                 .find(|p| p.node_id == r.device_id || r.keys.contains(&p.node_id));
-            let (lat, lon, addr, build) = match peer {
+            let (lat, lon, addr, build, last_seen) = match peer {
                 Some(p) => (
                     p.lat,
                     p.lon,
@@ -661,8 +697,14 @@ pub fn assemble_worldview(
                         (true, false) => format!("v{}", p.familiar_version),
                         (true, true) => String::new(),
                     },
+                    // The record's last_seen replicates (max-merge) — it may be fresher than
+                    // this door's own sighting when the device reads through a sibling.
+                    p.last_seen.max(r.last_seen),
                 ),
-                None => (0.0, 0.0, String::new(), String::new()),
+                None => match &origin {
+                    Some(o) => (o.lat, o.lon, o.addr.clone(), o.build.clone(), r.last_seen),
+                    None => (0.0, 0.0, String::new(), String::new(), 0),
+                },
             };
             Some(ArrivalView {
                 node_id: r.device_id,
@@ -675,6 +717,7 @@ pub fn assemble_worldview(
                 lon,
                 addr,
                 build,
+                last_seen,
             })
         })
         .collect();
@@ -1087,6 +1130,7 @@ mod tests {
             present_via: String::new(),
             lat: 0.0,
             lon: 0.0,
+            geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),
             connectivity: String::new(),

@@ -114,6 +114,12 @@ pub struct Member {
     pub lat: f64,
     #[serde(default)]
     pub lon: f64,
+    /// The fix above is this device's OWN GPS, reported by a full member — the only kind of
+    /// fix a console may treat as the mesh's ground truth (its clustering anchor). False for
+    /// brief-carried positions (which may themselves be inherited) and for guests: a visitor's
+    /// self-reported origin is welcome-card evidence, never a place to hang the household.
+    #[serde(default)]
+    pub geo_device: bool,
     /// Sub-devices attached to this one through the same human — e.g. a phone/iPad that has a
     /// paired watch reporting to the mesh carries "⌚ watch" here. Lets the roster badge a device
     /// with its companions without walking the edge graph. Empty for devices with nothing attached.
@@ -411,6 +417,9 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: sp_via,
             lat: self_lat,
             lon: self_lon,
+            // The daemon is not a GPS device; consoles anchor on this row by its kind
+            // (self_node / the "· host" relationship), not by fix provenance.
+            geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),
             connectivity: "local".into(),
@@ -513,7 +522,15 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         // whispering the old name ("iPhone ian" while bob was present). A record that exists
         // with NO establishment names nobody, honestly; only devices without records at all
         // fall back to what they said about themselves.
-        let human = match crate::record::find_by_key(dir, &p.node_id) {
+        let record = crate::record::find_by_key(dir, &p.node_id);
+        // Full membership gates fix provenance below: a guest's roster row may still carry the
+        // position it reported (shown honestly on its own pin), but only a member's own GPS is
+        // marked geo_device — the mark that lets a console anchor the unlocated on it.
+        let full_member = record
+            .as_ref()
+            .map(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+            .unwrap_or(false);
+        let human = match record {
             Some(r) => r
                 .identity
                 .established
@@ -594,6 +611,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_confidence: claimed.3,
             lat: p.lat,
             lon: p.lon,
+            geo_device: p.geo_device && full_member,
             attached: Vec::new(),
             attached_to: String::new(),
             connectivity: p.connectivity.clone(),
@@ -667,6 +685,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: agent_presence.2,
             lat: 0.0,
             lon: 0.0,
+            geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),
             connectivity: String::new(),

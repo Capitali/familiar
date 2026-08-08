@@ -348,16 +348,25 @@ pub fn apply_act(
             }
             // The starter takes the first turn: they're demonstrably present.
             players.sort_by_key(|p| p.handle != actor);
-            let used = state.as_ref().map(|s| s.riddles_used.clone()).unwrap_or_default();
+            let mut used = state.as_ref().map(|s| s.riddles_used.clone()).unwrap_or_default();
             let riddle = match kind {
                 GameKind::Riddle => {
                     let bank = riddle_bank();
-                    let fresh: Vec<usize> =
+                    let mut fresh: Vec<usize> =
                         (0..bank.len()).filter(|i| !used.contains(i)).collect();
                     if fresh.is_empty() {
-                        return Err(Error::Untrusted(
-                            "the riddle bank is spent — the familiar needs new cards".into(),
-                        ));
+                        // The bank is finite and the fire is not: a spent bank RE-OPENS
+                        // rather than refusing the game forever. (Refusing looked like a
+                        // broken loop live, 2026-08-08: the third quick riddle found all 16
+                        // cards spent, every begin errored, and each console's BEGIN bounced
+                        // to the last game's results.) Only the most recent card sits out
+                        // one round, so the reshuffle never repeats back-to-back.
+                        let last = used.last().copied();
+                        used.clear();
+                        fresh = (0..bank.len()).filter(|i| Some(*i) != last).collect();
+                        if fresh.is_empty() {
+                            fresh = (0..bank.len()).collect(); // a one-card bank must repeat
+                        }
                     }
                     let pick = fresh[(now as usize) % fresh.len()];
                     Some((pick, bank[pick].clone()))
@@ -687,6 +696,50 @@ mod tests {
         assert_eq!(s.status, "done");
         assert_eq!(s.winner, "h2", "the HUMAN wins, from whichever device answered");
         assert_eq!(s.players.iter().find(|p| p.handle == "h2").unwrap().score, 1);
+    }
+
+    /// The live break of 2026-08-08: all 16 cards spent, and every BEGIN errored — each
+    /// console bounced to the last game's results forever. A spent bank re-opens instead,
+    /// holding out only the most recent card so a reshuffle never repeats back-to-back.
+    #[test]
+    fn a_spent_riddle_bank_reopens_instead_of_refusing_the_game() {
+        let bank_len = riddle_bank().len();
+        // A finished game whose riddles_used says the whole bank has been asked.
+        let mut state = Some(GameState {
+            kind: GameKind::Riddle,
+            id: "riddle-1000".into(),
+            started_by: "h0".into(),
+            started: 1000,
+            status: "done".into(),
+            turn_secs: 900,
+            holder: "h0".into(),
+            holder_since: 1000,
+            players: players(2),
+            entries: Vec::new(),
+            riddle: None,
+            riddles_used: (0..bank_len).collect(),
+            winner: "h0".into(),
+            verdict: "solved".into(),
+            seq: 2,
+            updated: 1100,
+        });
+        let begin = GameAct {
+            act: "begin".into(),
+            kind: Some(GameKind::Riddle),
+            text: String::new(),
+            to: String::new(),
+            turn_secs: None,
+        };
+        apply_act(&mut state, &begin, "h0", "d0", &players(2), 2000).unwrap();
+        let s = state.as_ref().unwrap();
+        assert_eq!(s.status, "open", "the fire lights again on a spent bank");
+        assert!(s.riddle.is_some(), "a card was dealt from the re-opened bank");
+        assert_eq!(s.riddles_used.len(), 1, "the cycle restarted fresh");
+        assert_ne!(
+            s.riddles_used[0],
+            bank_len - 1,
+            "the card most recently asked sits out the first round of the new cycle"
+        );
     }
 
     #[test]
