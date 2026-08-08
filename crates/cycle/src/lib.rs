@@ -2851,6 +2851,11 @@ pub fn camera_allowed(dir: &Path) -> bool {
     boundary_allows(dir, familiar_kernel::guard::ActionKind::Camera)
 }
 
+/// Resolve whether the boundary permits driving a declared control surface (ADR-0032).
+pub fn actuate_allowed(dir: &Path) -> bool {
+    boundary_allows(dir, familiar_kernel::guard::ActionKind::Actuate)
+}
+
 /// Resolve whether the boundary permits executing *LLM-authored* artifacts.
 pub fn authored_execute_allowed(dir: &Path) -> bool {
     use familiar_kernel::boundary;

@@ -536,6 +536,7 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     case "allow_motion": g.allow_motion = open
                     case "allow_network_discovery": g.allow_network_discovery = open
                     case "allow_face_recognition": g.allow_face_recognition = open
+                    case "allow_actuate": g.allow_actuate = open
                     default: break
                     }
                 }

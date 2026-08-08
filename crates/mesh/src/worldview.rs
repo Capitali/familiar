@@ -111,6 +111,9 @@ pub struct GateStates {
     /// The ADR-0013 seam: may the familiar speak to non-members?
     #[serde(default)]
     pub outreach: bool,
+    /// The ADR-0032 seam: may the familiar drive a declared control surface?
+    #[serde(default)]
+    pub actuate: bool,
 }
 
 /// A federated peer as last seen.
@@ -628,6 +631,7 @@ pub fn assemble_worldview(
         agent: b.allow_agent,
         tool_install: b.allow_tool_install,
         outreach: b.allow_outreach,
+        actuate: b.allow_actuate,
     };
     let tick = familiar_kernel::activity::load(dir)
         .map(|a| a.len() as u64)
@@ -1520,6 +1524,21 @@ mod tests {
         let json = serde_json::to_string(&view).unwrap();
         let back: Worldview = serde_json::from_str(&json).unwrap();
         assert!(back.gates.microphone && back.gates.face_recognition);
+    }
+
+    #[test]
+    fn the_actuate_gate_round_trips_through_the_worldview() {
+        let (host, cred, device) = setup("actuate_gate");
+        let mut b = familiar_kernel::boundary::Boundary::closed();
+        b.allow_mesh = true;
+        b.allow_actuate = true;
+        std::fs::write(host.join("boundary.json"), serde_json::to_vec(&b).unwrap()).unwrap();
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(view.gates.actuate);
+        let json = serde_json::to_string(&view).unwrap();
+        let back: Worldview = serde_json::from_str(&json).unwrap();
+        assert!(back.gates.actuate, "the wire format carries it");
     }
 
     #[test]

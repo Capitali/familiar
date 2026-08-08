@@ -1635,6 +1635,7 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         "allow_tool_install" => b.allow_tool_install = open,
         "allow_self_upgrade" => b.allow_self_upgrade = open,
         "allow_outreach" => b.allow_outreach = open,
+        "allow_actuate" => b.allow_actuate = open,
         _ => return text(StatusCode::BAD_REQUEST, "unknown gate"),
     }
     if b.phase == "closed" && open {
