@@ -107,6 +107,11 @@ pub struct MeshConfig {
     /// it back is the rollback — the legacy stores keep being dual-written either way.
     #[serde(default)]
     pub read_records: bool,
+    /// Areas of knowledge this mesh DECLARES to its siblings (ADR-0033 §4) — free-text
+    /// topics ("weather", "energy", "birds"). Declaration, never inventory: an empty list is
+    /// a full citizen of the federation that shares nothing, and that is fine.
+    #[serde(default)]
+    pub declared_areas: Vec<String>,
 }
 
 impl Default for MeshConfig {
@@ -130,6 +135,7 @@ impl Default for MeshConfig {
             rendezvous_hosts: Vec::new(),
             advertise_pins: Vec::new(),
             read_records: false,
+            declared_areas: Vec::new(),
         }
     }
 }

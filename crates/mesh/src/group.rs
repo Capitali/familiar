@@ -299,6 +299,15 @@ impl GroupCredential {
         Ok(SigningKey::from_bytes(&bytes))
     }
 
+    /// Sign bytes **as the mesh itself** (ADR-0033: the group keypair is the mesh key).
+    /// Only a holder of the group secret — the lighthouse, a founding node — can; a
+    /// covenant-joined device cannot speak as the mesh, which is exactly the boundary
+    /// federation needs.
+    pub fn sign_as_mesh(&self, body: &[u8]) -> Result<String> {
+        use ed25519_dalek::Signer;
+        Ok(hex_encode(&self.group_signing_key()?.sign(body).to_bytes()))
+    }
+
     /// Mint a fresh membership certificate for another node in this group (an invite).
     pub fn mint_membership(
         &self,

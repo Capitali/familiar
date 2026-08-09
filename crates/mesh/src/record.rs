@@ -1692,7 +1692,7 @@ pub fn doctor(dir: &Path, now: i64) -> DoctorReport {
     }
 }
 
-fn verify_hex_sig(pubkey_hex: &str, body: &[u8], sig_hex: &str, what: &str) -> Result<()> {
+pub(crate) fn verify_hex_sig(pubkey_hex: &str, body: &[u8], sig_hex: &str, what: &str) -> Result<()> {
     let pk = exactly_32(&hex_decode(pubkey_hex)?, "pubkey")?;
     let key = VerifyingKey::from_bytes(&pk)
         .map_err(|_| Error::Untrusted(format!("{what}: bad pubkey")))?;

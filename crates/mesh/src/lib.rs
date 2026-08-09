@@ -32,6 +32,7 @@ pub mod brief;
 pub mod config;
 pub mod consult;
 pub mod enroll;
+pub mod federation;
 pub mod grants;
 pub mod group;
 pub mod members;
