@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: 8GHXL328AR
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "73"
+    CURRENT_PROJECT_VERSION: "74"
 packages:
   FamiliarMesh:
     path: FamiliarMesh
@@ -90,7 +90,7 @@ targets:
         INFOPLIST_FILE: MacApp/Support/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "73"
+        CURRENT_PROJECT_VERSION: "74"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: MacApp/Support/Familiar.entitlements
         CODE_SIGN_STYLE: Automatic
