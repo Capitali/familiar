@@ -385,11 +385,6 @@ fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool 
     now - last >= interval
 }
 
-/// The familiar's standing name-ask. It does not assume a name; when it doesn't know who
-/// it serves, it chooses to learn — and says plainly that the name will be kept.
-const NAME_QUESTION: &str =
-    "Before we go further — what may I call you? I'll keep your name; names matter to me.";
-
 /// The id of the question currently on screen and awaiting a response. Empty when nothing
 /// is being asked — that's the factory's cue to coordinate and surface the next one.
 const ACTIVE_QUESTION_FILE: &str = "active_question.txt";
@@ -3375,16 +3370,10 @@ pub fn tick(
     //     confirm-question is an evidence channel, not a permission gate).
     let _ = maybe_theorize_needs(dir, now, &obs, allow_llm)?;
 
-    // The familiar becomes familiar first: until it knows who it serves, the name-ask comes
-    // before anything else (Law II: attend to the person, not only the patterns). Once a
-    // name is confirmed, that never fires again — and the factory coordinates its questions
-    // (root + theories + needs) through the registry, surfacing one at a time under the
-    // Three Laws.
-    if familiar_kernel::identity::current(dir).is_none() {
-        fs::write(dir.join(QUESTION_FILE), NAME_QUESTION)?;
-    } else {
-        coordinate_questions(dir, now, &obs)?;
-    }
+    // The factory coordinates its questions (root + theories + needs) through the
+    // registry, surfacing one at a time under the Three Laws. Identification is no longer
+    // the dialog's job — the presence ladder, the join door, and the guest nudge carry it.
+    coordinate_questions(dir, now, &obs)?;
 
     // 8. Act — turn open threads into candidate work (executed on a later tick),
     //    skipping (and marginalizing) directives from flagged corruptors.

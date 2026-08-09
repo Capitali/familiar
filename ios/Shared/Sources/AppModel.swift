@@ -297,18 +297,6 @@ final class AppModel: ObservableObject {
         saveEnrollment()
     }
 
-    /// The current host went quiet — rotate to the next candidate. Returns the new preference,
-    /// or nil when there is nowhere else to try.
-    private func failoverHost() -> String? {
-        guard hosts.count > 1 else { return nil }
-        let tired = hosts.removeFirst()
-        hosts.append(tired)
-        host = hosts[0]
-        saveEnrollment()
-        note("… \(tired) unreachable — trying \(host)")
-        return host
-    }
-
     private(set) var node: NodeKey
     // Device sensing is platform-shaped: CoreMotion and the Bonjour survey are iOS-only, and the
     // Mac shell runs its own (MacSensing/MacFaceSensing/MacNetworkDiscovery) and feeds this core
@@ -1018,6 +1006,10 @@ final class AppModel: ObservableObject {
     private var knownClaimIds: Set<String>?
     private var wasMyTurn = false
     private var preferredReadFails = 0
+    /// Consecutive reads that served this device the guest projection. Demotion waits for
+    /// three — a single projected read (a fallback door's stale roll, a mid-merge worldview)
+    /// must not flap the welcome screen between member and visitor.
+    private var unrecognisedReads = 0
     /// Whether this device stood at full standing as of the previous read. nil until the first,
     /// so launching already-recognised is silent.
     private var wasRecognised: Bool?
@@ -1134,8 +1126,15 @@ final class AppModel: ObservableObject {
         if let preferred = hosts.first { host = preferred }
         let preferred = host
         var attempts: [String] = []   // per-host diagnostic, surfaced if every candidate fails
-        for _ in 0..<max(1, hosts.count) {
-            let tried = host
+        // Walk a SNAPSHOT of the candidates. Fallback used to rotate-and-persist the
+        // preference order itself, so ONE dropped read re-homed the console to another door
+        // for good — and each door serves its own truth, so the welcome screen flapped
+        // member/visitor. Trying the next door is for this round only; only the five-miss
+        // hysteresis below may change the preference.
+        let candidates = hosts.isEmpty ? [host] : hosts
+        for candidate in candidates {
+            host = candidate
+            let tried = candidate
             guard let session = worldviewSession() else {
                 worldviewError = "no session: grant=\(storedGrant() != nil) host=\(host.isEmpty ? "empty" : host)"
                 return
@@ -1238,10 +1237,14 @@ final class AppModel: ObservableObject {
                 // the roll knows is a member; one it doesn't reads projected, whatever we
                 // believed. The door's copy is kept when we already have specific words.
                 if recognisedNow {
+                    unrecognisedReads = 0
                     if case .member = membership {} else { membership = .member(handle: "") }
                 } else if enrolled {
-                    if case .guest = membership {} else if case .held = membership {} else {
-                        membership = .guest(path: Self.admissionPath)
+                    unrecognisedReads += 1
+                    if unrecognisedReads >= 3 {
+                        if case .guest = membership {} else if case .held = membership {} else {
+                            membership = .guest(path: Self.admissionPath)
+                        }
                     }
                 }
                 worldview = view
@@ -1284,7 +1287,6 @@ final class AppModel: ObservableObject {
                 default: cause = "\((error as NSError).code)"
                 }
                 attempts.append("\(tried)→\(cause)")
-                if failoverHost() == nil { break }
             }
         }
         // Every candidate failed — surface the full picture so the cause is diagnosable at a glance:
@@ -1370,7 +1372,8 @@ final class AppModel: ObservableObject {
     private func deliver(_ batch: [ObsRecord]) async {
         // Same failover walk as the worldview read: an observation should reach the familiar by
         // any address that answers, not only the one that worked at enrollment.
-        for _ in 0..<max(1, hosts.count) {
+        for candidate in (hosts.isEmpty ? [host] : hosts) {
+            host = candidate
             guard let session = makeSession() else { return }
             do {
                 let n = try await ObservationClient(session: session).send(batch)
@@ -1379,8 +1382,7 @@ final class AppModel: ObservableObject {
                 note("→ sent \(n): " + batch.map { $0.object }.joined(separator: ", "))
                 return
             } catch {
-                note("… send failed: \(error)")
-                if failoverHost() == nil { return }
+                note("… send failed via \(candidate): \(error)")
             }
         }
     }

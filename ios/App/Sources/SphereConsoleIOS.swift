@@ -26,15 +26,28 @@ struct SphereConsoleIOS: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(bridge.mode != .street)
             if bridge.mode == .street {
+                // Back to orbit, plus the sat/street toggle: the glyph shows the surface a
+                // tap would switch TO.
                 VStack {
                     Spacer()
-                    Button(action: { bridge.backToGlobe() }) {
-                        OrbitGlyphShared()
-                            .frame(width: 56, height: 56)
-                            .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
-                            .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                    HStack(spacing: 14) {
+                        Button(action: { bridge.backToGlobe() }) {
+                            OrbitGlyphShared()
+                                .frame(width: 56, height: 56)
+                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        Button(action: { bridge.toggleImagery() }) {
+                            Image(systemName: bridge.streetImagery == .mutedStandard ? "globe.americas.fill" : "map")
+                                .font(.system(size: 20, weight: .light))
+                                .foregroundColor(Color(red: 0.81, green: 0.88, blue: 1.0))
+                                .frame(width: 56, height: 56)
+                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(.bottom, 16)
                 }
             }
@@ -134,6 +147,14 @@ struct OrbitGlyphShared: View {
 final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler, MKMapViewDelegate, WKNavigationDelegate {
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
+    // The dived-in surface's imagery. Satellite is the default at EVERY zoom — the dive must
+    // never silently trade the satellite globe for a vector street map. Street view is a
+    // choice, made with the glyph beside the orbit button.
+    @Published var streetImagery: MKMapType = .hybridFlyover
+    func toggleImagery() {
+        streetImagery = streetImagery == .mutedStandard ? .hybridFlyover : .mutedStandard
+        map?.mapType = streetImagery
+    }
 
     weak var web: WKWebView?
     weak var map: MKMapView?
@@ -442,7 +463,7 @@ struct MeshMapViewIOS: UIViewRepresentable {
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.overrideUserInterfaceStyle = .dark
-        map.mapType = .mutedStandard
+        map.mapType = bridge.streetImagery
         map.pointOfInterestFilter = .includingAll
         map.delegate = bridge
         bridge.map = map

@@ -189,6 +189,22 @@ const isStale = (p) => {
   const ls = p.m.last_seen || 0;
   return p.status !== 'online' && (!ls || nowS() - ls > STALE_SECS);
 };
+// The globe is a NOW view: an offline host that has been silent on the mesh for three hours
+// drops off the map entirely (the roster's history keeps the record). Three hours — not the
+// roster's 24 — because a lit dot on the globe claims presence in a way a table row does not;
+// the grace period keeps a napping laptop from flapping on and off the map. Self always shows.
+const GLOBE_STALE_SECS = 3 * 3600;
+const globeVisible = (p) => {
+  if (p.local) return true;
+  const ls = p.m.last_seen || 0;
+  return p.status === 'online' || (ls > 0 && nowS() - ls <= GLOBE_STALE_SECS);
+};
+// Frontier possibilities age by the same rule — but one that never reported a sighting stays
+// (a possibility with no timestamp cannot be judged silent).
+const frontierVisible = (fn) => {
+  const ls = (fn.f && fn.f.last_seen) || 0;
+  return !ls || nowS() - ls <= GLOBE_STALE_SECS;
+};
 // Date AND time for the history table — the whole point of it is when, precisely.
 const dtstr = (ts) => ts > 0 ? new Date(ts*1000).toISOString().slice(0,16).replace('T',' ') + 'UTC' : '—';
 
@@ -210,6 +226,14 @@ const seenCell = (p, bigPx, timePx) => p.seenSub
   ? `<div class="m" style="font-size:${Math.round(timePx * 0.6)}px;color:rgba(160,195,255,0.6);margin-bottom:3px;">${esc(p.seenSub)}</div><div class="m" style="font-size:${timePx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`
   : `<div style="font-size:${bigPx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`;
 const FRONTIER_COLOR = '#7d93a8';
+// The lighthouse is infrastructure, not a housemate — same test the roster uses to keep it
+// off the card grid (no human, and the label says what it is).
+const isLighthouse = (p) => !(p.m.human || '') && /lighthouse/i.test(p.name || '');
+// Arc palettes: peer-to-peer is the mesh's live body, bright white-blue; the spoke that runs
+// to the lighthouse leans teal — infrastructure should read differently at a glance.
+const ARC_MEMBER = { core: 0xe4f6ff, glow: 0x4d93ff, branch: 0x8fd0ff, sparks: true, gain: 1 };
+const ARC_LIGHTHOUSE = { core: 0xd8fff0, glow: 0x2fbf8f, branch: 0x8fe8c8, sparks: true, gain: 1 };
+const ARC_FRONTIER = { core: 0x7d93a8, glow: 0x51677a, branch: 0x62788c, sparks: false, gain: 0.3 };
 
 // What KIND of path is this address? Reading a bare 100.x or 192.168.x and knowing what it means
 // is knowledge nobody should have to carry in their head.
@@ -465,7 +489,7 @@ function refreshScreen() {
     // The lighthouse is infrastructure, not a housemate: it keeps its globe dot and its node
     // dive, but takes no card in the roster of who is here.
     const pairs = P.map((p, i) => [p, i])
-      .filter(([p]) => !(!(p.m.human || '') && /lighthouse/i.test(p.name || '')));
+      .filter(([p]) => !isLighthouse(p));
     const past = pairs.filter(([p]) => isStale(p));
     const live = pairs.filter(([p]) => !isStale(p));
     // A member that runs ON another machine (a Mac's console shell — m.attached_to carries the
@@ -675,6 +699,10 @@ function refreshScreen() {
             verify before you welcome: does the place, address and build match the person you expect?
           </div>` : ''}
         </div>`).join(''));
+    // Every poll rebuilds this subtree with an empty #inviteqr — re-hydrate the minted
+    // invite (QR + SEND TO MESSAGES) or it vanishes on the next tick (the device screen
+    // does the same).
+    if (S.invite) renderInviteQR();
 
   } else if (k === 'games') {
     // The mesh games. The screens say — prominently — which seams each game exercises,
@@ -1248,8 +1276,12 @@ function renderChrome() {
 }
 
 function renderCallouts() {
-  const P = peers(), F = frontierNodes();
-  $('callouts').innerHTML = P.map((p, i) => `
+  // The globe renders only the mesh's NOW (globeVisible / frontierVisible) — but the callout
+  // onclicks carry the ORIGINAL peers() index (like the roster grid does), because
+  // sphereDive/sphereNode index into the unfiltered list.
+  const pairs = peers().map((p, i) => [p, i]).filter(([p]) => globeVisible(p));
+  const F = frontierNodes().filter(frontierVisible);
+  $('callouts').innerHTML = pairs.map(([p, i]) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;">
       <div style="position:absolute;left:0;top:0;width:11px;height:11px;transform:translate(-50%,-50%);">
         <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
@@ -1272,7 +1304,10 @@ function renderCallouts() {
         <span class="m" style="font-size:8.5px;color:rgba(210,222,235,0.7);">${esc(fn.name)}</span>
       </div>
     </div>`).join('');
-  G.anchorDirs = P.map(p => latLon(p.lat, p.lon));
+  // anchorPeers/anchorDirs are DENSE and parallel to the rendered callouts — the projection
+  // loop zips [data-callout] elements with [...anchorDirs, ...frontierDirs] by position.
+  G.anchorPeers = pairs.map(([p]) => p);
+  G.anchorDirs = pairs.map(([p]) => latLon(p.lat, p.lon));
   G.frontierDirs = F.map(f => latLon(f.lat, f.lon));
   rebuildArcs();
 }
@@ -1481,7 +1516,7 @@ window.sphereUpdate = (view) => {
 // view is "the world with home in front of you", menus tucked away.
 function centerOnSelf() {
   if (!G.group || !G.anchorDirs.length) return;
-  const P = peers();
+  const P = G.anchorPeers || [];   // parallel to anchorDirs (the globe-visible subset)
   let i = P.findIndex(p => p.local && (p.located || p.hasAnchor));
   if (i < 0) i = P.findIndex(p => p.located);
   if (i < 0 || !G.anchorDirs[i]) return;
@@ -1513,7 +1548,7 @@ $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
 $('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------
-const G = { anchorDirs: [], frontierDirs: [], arcs: [], frontierArcs: [], streetA: 0 };
+const G = { anchorPeers: [], anchorDirs: [], frontierDirs: [], arcs: [], frontierArcs: [], streetA: 0 };
 const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (lon + 180) * Math.PI / 180; return new THREE.Vector3(-Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)).normalize(); };
 
 // The choreographed dive. Phase 0: the globe ROTATES to center the target (no zoom).
@@ -1557,14 +1592,16 @@ function beginDive(target, dir) {
   G.handedOff = false;
 }
 window.sphereDive = (i) => {
+  // `i` indexes the FULL peers() list (roster and callouts both pass it); anchorDirs holds
+  // only the globe-visible subset, so aim from the peer's own coordinate, not by index.
   const P = peers(); const p = P[i]; if (!p) return;
   if (!p.located && !p.hasAnchor) { window.sphereScreen('network'); return; }
   S.focusIdx = i;
-  beginDive(p, G.anchorDirs[i]);
+  beginDive(p, latLon(p.lat, p.lon));
 };
 window.sphereDiveFrontier = (i) => {
   const F = frontierNodes(); const f = F[i]; if (!f || !f.located) return;
-  beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, G.frontierDirs[i] || latLon(f.lat, f.lon));
+  beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, latLon(f.lat, f.lon));
 };
 // The visitor nudge: SAY WHO I AM lands on the device screen with the name box focused —
 // the shortest possible distance between "the mesh doesn't know you" and fixing it.
@@ -1586,7 +1623,7 @@ window.sphereVisitorDive = (lat, lon, name) => {
   beginDive({ lat, lon, name: 'visitor ' + name, color: 0xffb266 }, latLon(lat, lon));
 };
 function collectNodes() {
-  const P = peers(), F = frontierNodes();
+  const P = peers().filter(globeVisible), F = frontierNodes().filter(frontierVisible);
   return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, sublabel: p.m.addr || '', color: p.color, frontier: false, self: p.local }))
     .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })));
 }
@@ -1761,18 +1798,19 @@ function rebuildArcs() {
   if (!G.arcGroup) return;
   G.arcGroup.clear();
   G.arcs = []; G.frontierArcs = [];
-  const P = peers();
+  const P = G.anchorPeers || [];
   const selfIdx = P.findIndex(p => p.local);
   if (selfIdx < 0 || !G.anchorDirs.length) return;
   const from = G.anchorDirs[selfIdx];
-  // Members: the mesh's live body — bright, white-blue, sparking.
+  // Members: the mesh's live body — bright, white-blue, sparking. The lighthouse spoke is
+  // the same body in a teal cast: peer-to-lighthouse must read apart from peer-to-peer.
   for (let i = 0; i < G.anchorDirs.length; i++) {
     if (i === selfIdx) continue;
-    G.arcs.push(mkArc(from.clone(), G.anchorDirs[i].clone(), { core: 0xe4f6ff, glow: 0x4d93ff, branch: 0x8fd0ff, sparks: true, gain: 1 }));
+    G.arcs.push(mkArc(from.clone(), G.anchorDirs[i].clone(), P[i] && isLighthouse(P[i]) ? ARC_LIGHTHOUSE : ARC_MEMBER));
   }
   // Frontier: discovered, not yet contributing — dimmer, slate, one faint spark.
   for (const d of G.frontierDirs) {
-    G.frontierArcs.push(mkArc(from.clone(), d.clone(), { core: 0x7d93a8, glow: 0x51677a, branch: 0x62788c, sparks: false, gain: 0.3 }));
+    G.frontierArcs.push(mkArc(from.clone(), d.clone(), ARC_FRONTIER));
   }
 }
 const arcTmp = new THREE.Vector3();
