@@ -92,6 +92,13 @@ pub struct Boundary {
     /// completed by the familiar alone: binding queues for the human, permanently.
     #[serde(default)]
     pub allow_outreach: bool,
+    /// May the familiar **drive a human-declared control surface** — set the lights, run the
+    /// state query, revert its own change (ADR-0032)? Which surfaces exist at all is a separate,
+    /// stronger consent: the human writes `actuators.json`; an undeclared device has no path to
+    /// actuation whatever this gate says. One gate covers acting AND polling — a BLE state query
+    /// is already a connection into a device, not free perception. Fail-closed, human-opened.
+    #[serde(default)]
+    pub allow_actuate: bool,
     /// Run executed artifacts under the resource sandbox (`ulimit`/wall-timeout)?
     /// Default **true** (safe). When the human sets it false, artifacts run without
     /// resource confinement — bound then by the constitution (the pre-execution review
@@ -135,6 +142,7 @@ impl Boundary {
             allow_agent: false,
             allow_self_upgrade: false,
             allow_outreach: false,
+            allow_actuate: false,
             sandbox_execution: true,
             fs_read: Vec::new(),
             fs_write: Vec::new(),
@@ -158,6 +166,7 @@ impl Boundary {
             && !self.allow_agent
             && !self.allow_self_upgrade
             && !self.allow_outreach
+            && !self.allow_actuate
             && self.fs_read.is_empty()
             && self.fs_write.is_empty()
     }
@@ -264,6 +273,9 @@ pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
         // Speaking to strangers in the familiar's voice is likewise never delegated —
         // an agent loop cannot make utterances the outreach ledger must answer for.
         allow_outreach: false,
+        // A delegated loop never drives a device: acting on a control surface is the core's
+        // own reaction-honoring loop (ADR-0032), not something a sub-plan may improvise.
+        allow_actuate: false,
         sandbox_execution: b.sandbox_execution,
         fs_read: intersect_paths(&b.fs_read, &s.fs_read),
         fs_write: intersect_paths(&b.fs_write, &s.fs_write),
@@ -413,6 +425,31 @@ mod tests {
             flip(&mut b);
             assert!(!b.is_closed());
         }
+    }
+
+    #[test]
+    fn actuate_defaults_closed_and_a_scoped_agent_never_gets_it() {
+        let closed = Boundary::closed();
+        assert!(!closed.allow_actuate);
+        // An old policy file predating the gate stays closed (fail-safe partial parse).
+        let t = Temp::new("actuate_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        assert!(!load(&t.0).unwrap().allow_actuate);
+        // Opening it alone means the boundary is no longer closed.
+        let mut b = Boundary::closed();
+        b.allow_actuate = true;
+        assert!(!b.is_closed());
+        // And like self-upgrade/outreach, no delegated loop ever receives it —
+        // even a full-boundary scope.
+        let eff = scoped_boundary(&b, &CapabilityScope::from_boundary(&b));
+        assert!(
+            !eff.allow_actuate,
+            "driving a device is the core's reaction-honoring loop, never an agent's"
+        );
     }
 
     #[test]

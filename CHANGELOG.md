@@ -13,6 +13,51 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The Changeling — the third mesh game (ADR-0034).** One human writes a true line about
+  their day; the familiar forges two false ones in the same voice (the LLM seam, with a
+  deterministic bank as the floor — a dead model never kills a live fire); everyone else
+  votes for the human line. The door that takes the truth becomes the round's **keeper**:
+  the truth's index lives only in its door-local file, and replicated state carries a
+  salted sha256 **commitment** any door can verify at the reveal — because full game
+  state is readable off any door's port, secrecy had to be cryptographic, not cosmetic.
+  Four lazy-clock phases (witness/forge/vote/reveal) where a silent witness loses only
+  the round, a cold forge blames no human, and a silent keeper's round is voided by
+  whichever door reads next. Solo mode — "two never happened" — has the familiar write
+  three lines about the mesh's own record, one true, two forged: audit-through-play.
+  `GameKind::Unknown` now absorbs future kinds safely; **every door must run this build
+  before the first changeling is lit** (older doors drop whole record-syncs otherwise).
+  LLM consults are now serialized in-process; `game.json` lands by temp+rename.
+  *Validated by 40+ new unit tests across game/changeling/llm + both app platforms building.*
+- **The first actuator, and the reaction loop (ADR-0032).** The familiar gains a hand on
+  the world, shaped by consent-by-observation: the human declares control surfaces in
+  `actuators.json` (declaration is the consent — an undeclared device has no path to
+  actuation), where every state bucket names the action that restores it, so any change
+  the familiar makes it can unmake. A new `allow_actuate` gate (default closed, never
+  scoped to agents, never federated) governs acting and polling both. Each tick the
+  familiar polls its surfaces, acts on a person's pursued need when the direction names a
+  surface and an act ("dim the lights this evening"), and then *reads the reaction*: the
+  human's hand undoing it or a negative word makes the familiar revert first and argue
+  never — recorded as a negative trial that demotes the candidate, abandons the pursuit
+  (keeping the human's words), depreciates the habit it leaned on, and rests the surface;
+  a quiet window is consent and the change stands. External adjustments feed per-human
+  **habit patterns** (`lights=dim@h20`) in the dossier, shown by `familiar dossier` and
+  spoken in its summary. `familiar actuate` is the human's own hand through the same
+  gated tools. First declared surface: the BLE LED strip via `~/Development/motorlights`.
+  *Validated by nine end-to-end cycle tests against a fake surface (no BLE in CI) + a
+  live CLI walkthrough; the physical-strip TCC step is documented in the dev log.*
+- **The dossier, and needs theorized per human (ADR-0022, ADR-0031).** The familiar now
+  remembers each person well enough to serve them: every observation that names a human
+  feeds a contribution-scored pattern (presence by hour, how they are usually identified)
+  with lazy exponential decay and Laplace-humble confidence — patterns not tape,
+  node-local, never federated, subject-readable (`familiar dossier <handle>`) and
+  withdrawable with an honest receipt and a refold-proof tombstone. On that substrate the
+  muse turns toward the people: once per person per cadence it theorizes ONE concrete
+  need from their attributed observations (sensitive-personal readings never enter the
+  prompt), records it as a thread that names its human, pursues it immediately — consent
+  by observation (ADR-0031): act on the reversible, read the reaction, undo on a bad
+  one — and files a confirm-question that waits for its person (Law I routing, held up
+  to a week). Only that person's own answer flips a theorized need into a stated one.
+  *Validated by unit tests across kernel/cycle/mesh + a live seeded-daemon walkthrough.*
 - **Network discovery moved to the periphery.** The device/reach survey no longer runs from the
   core's own metabolism — `sense::devices()` is off the tick loop and the every-15-ticks reach
   sweep is off the daemon loop, so the core stops flooding its own loop/theory pipeline with

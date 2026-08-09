@@ -30,6 +30,12 @@ const FLOOR_MIN: u64 = 15; // a faster floor busy-loops — wasteful (Law I)
 const FLOOR_MAX: u64 = 600;
 const CEIL_MIN: u64 = 60;
 const CEIL_MAX: u64 = 3_600; // a slower ceiling risks missing the served's withdrawal (Law II)
+const DOSSIER_HL_MIN: i64 = 7; // forgetting a person's shape in under a week degrades service (Law I)
+const DOSSIER_HL_MAX: i64 = 365; // holding a stale year-old picture is surplus data about a person (Law I)
+const POLL_MIN: i64 = 60; // faster spends 10–30s BLE connects on nothing — wasteful (Law I)
+const POLL_MAX: i64 = 900; // slower than the reaction window's half can't read a reaction it promised to honor (Law II)
+const REACTION_MIN: i64 = 120; // a shorter window can't even fit one poll — the promise becomes noise (Law II)
+const REACTION_MAX: i64 = 7_200; // past two hours a change isn't "reacted to", it's lived with (Law I)
 
 /// Bounds for the **self-tuned** per-tick LLM budget (see `llm_calls_per_tick`). Public
 /// because the cycle's regulator clamps to them. Floor 1 so the familiar never stalls its
@@ -68,6 +74,17 @@ pub struct Parameters {
     /// The last self-adjustment direction for `llm_calls_per_tick`: -1 down, 0 steady, +1
     /// up. Surfaced in the Glass as a trend arrow so the regulation is legible.
     pub llm_calls_trend: i8,
+    /// How fast a dossier pattern forgets (days for a contribution's weight to halve —
+    /// ADR-0022 contribution scoring). Shorter and the familiar forgets the person's
+    /// shape; longer and it carries a stale surplus picture of them.
+    pub dossier_half_life_days: i64,
+    /// How often a declared control surface's state is read (seconds; ADR-0032). Each
+    /// poll may be a 10–30s BLE connect, so this is deliberately minutes, not ticks.
+    pub actuator_poll_secs: i64,
+    /// How long after the familiar acts it watches for the human's reaction (seconds).
+    /// Within this window a counter-change is "the human undid it" (negative evidence);
+    /// past it, quiet is consent and the change stands (ADR-0031).
+    pub reaction_window_secs: i64,
     /// Provenance: who last set these — `"observer"` (the human, via the Glass) or
     /// `"familiar"` (a self-adjustment/revert).
     pub last_set_by: String,
@@ -81,6 +98,9 @@ impl Default for Parameters {
             interval_ceiling_secs: 960,
             llm_calls_per_tick: 4,
             llm_calls_trend: 0,
+            dossier_half_life_days: 30,
+            actuator_poll_secs: 300,
+            reaction_window_secs: 900,
             last_set_by: "default".to_string(),
         }
     }
@@ -119,6 +139,9 @@ impl Parameters {
             .clamp(self.interval_floor_secs, 3_600);
         self.llm_calls_per_tick = self.llm_calls_per_tick.clamp(LLM_CALLS_MIN, LLM_CALLS_MAX);
         self.llm_calls_trend = self.llm_calls_trend.clamp(-1, 1);
+        self.dossier_half_life_days = self.dossier_half_life_days.clamp(1, 3_650);
+        self.actuator_poll_secs = self.actuator_poll_secs.clamp(30, 3_600);
+        self.reaction_window_secs = self.reaction_window_secs.clamp(60, 86_400);
         self
     }
 
@@ -176,6 +199,53 @@ impl Parameters {
                 },
             });
             p.interval_ceiling_secs = ceil;
+        }
+
+        let hl = p
+            .dossier_half_life_days
+            .clamp(DOSSIER_HL_MIN, DOSSIER_HL_MAX);
+        if hl != p.dossier_half_life_days {
+            reverts.push(Revert {
+                field: "dossier_half_life_days",
+                from: p.dossier_half_life_days.to_string(),
+                to: hl.to_string(),
+                reason: if p.dossier_half_life_days < DOSSIER_HL_MIN {
+                    "forgetting a person's shape in under a week degrades service (Law I)"
+                } else {
+                    "a stale picture of a person is surplus data carried without benefit (Law I)"
+                },
+            });
+            p.dossier_half_life_days = hl;
+        }
+
+        let poll = p.actuator_poll_secs.clamp(POLL_MIN, POLL_MAX);
+        if poll != p.actuator_poll_secs {
+            reverts.push(Revert {
+                field: "actuator_poll_secs",
+                from: p.actuator_poll_secs.to_string(),
+                to: poll.to_string(),
+                reason: if p.actuator_poll_secs < POLL_MIN {
+                    "polling a device faster than a minute spends its connects on nothing (Law I)"
+                } else {
+                    "polling slower than the reaction window can't honor the reaction it promised (Law II)"
+                },
+            });
+            p.actuator_poll_secs = poll;
+        }
+
+        let rw = p.reaction_window_secs.clamp(REACTION_MIN, REACTION_MAX);
+        if rw != p.reaction_window_secs {
+            reverts.push(Revert {
+                field: "reaction_window_secs",
+                from: p.reaction_window_secs.to_string(),
+                to: rw.to_string(),
+                reason: if p.reaction_window_secs < REACTION_MIN {
+                    "a window shorter than one poll cannot read a reaction at all (Law II)"
+                } else {
+                    "past two hours a change isn't reacted to, it's lived with (Law I)"
+                },
+            });
+            p.reaction_window_secs = rw;
         }
 
         if !reverts.is_empty() {

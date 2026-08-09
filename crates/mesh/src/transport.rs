@@ -1096,6 +1096,39 @@ async fn handle(
                 }
             }
         }
+        (Method::GET, "/local/federation-invite") => {
+            // A mesh invite (ADR-0033) — a member's deliberate act that opens the door to
+            // another MESH. Trusted screen only, like /local/invite.
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                local_federation_invite(&dir)
+            }
+        }
+        (Method::POST, "/mesh/federate") => {
+            match collect(req).await {
+                Ok(b) => recv_federate(&dir, &b),
+                Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+            }
+        }
+        (Method::POST, "/mesh/federate-act") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            match collect(req).await {
+                Ok(b) => recv_federate_act(&dir, &b, &sig),
+                Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+            }
+        }
+        (Method::POST, "/mesh/worldview-sibling") => {
+            match collect(req).await {
+                Ok(b) => recv_sibling_worldview(&dir, &b, &ctx.seen),
+                Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+            }
+        }
         (Method::GET, "/local/invite") => {
             // The enrollment payload (contains the group secret — trusted screen only), for
             // the local console to render as a QR. Loopback-gated like every /local seam.
@@ -1511,14 +1544,20 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     if t.is_empty() {
         return text(StatusCode::BAD_REQUEST, "empty");
     }
+    // Whoever this node currently serves speaks here (identity::current — set by a face
+    // match or the Mac's "serving X" act); the old hardcoded "ian" survives only as the
+    // fallback for a node that hasn't yet learned who it serves. Confirms from OTHER
+    // humans still arrive via their own signed devices (mesh::observe), real actors.
+    let actor =
+        familiar_kernel::identity::current(dir).unwrap_or_else(|| "ian".to_string());
     // An answer aimed at a specific THREAD attaches as that thread's evidence and travels
     // with its pursuit (kernel::thread::add_answer) — never a dead end. An untargeted
     // answer is the console channel: recorded, and the open question retired.
     if let Some(thread_id) = v.get("thread").and_then(|s| s.as_str()) {
         let now = now_secs();
-        let _ = familiar_kernel::thread::add_answer(dir, thread_id, t, now);
+        let _ = familiar_kernel::thread::add_answer_from(dir, thread_id, t, &actor, now);
         let obs = familiar_kernel::observation::Observation::new(
-            "ian",
+            actor,
             "answered",
             t,
             format!("thread:{thread_id}"),
@@ -1530,7 +1569,7 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         return text(StatusCode::OK, "ok");
     }
     let obs = familiar_kernel::observation::Observation::new(
-        "ian",
+        actor,
         "told the familiar",
         t,
         "console",
@@ -1543,6 +1582,170 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     let _ = std::fs::write(dir.join("question.txt"), "");
     let _ = std::fs::write(dir.join("active_question.txt"), "");
     text(StatusCode::OK, "ok")
+}
+
+/// The addresses another mesh should knock at, ports attached: reachable (tailnet, LAN)
+/// first, then human-asserted and rendezvous addresses. Entries already carrying a port are
+/// kept verbatim.
+pub fn federation_hosts(dir: &Path) -> Vec<String> {
+    let cfg = config::load(dir).unwrap_or_default();
+    let port = cfg.gossip_port;
+    let mut hosts = reachable_hosts();
+    for h in cfg.advertise_hosts.iter().chain(cfg.rendezvous_hosts.iter()) {
+        if !hosts.contains(h) {
+            hosts.push(h.clone());
+        }
+    }
+    hosts
+        .into_iter()
+        .map(|h| if h.contains(':') { h } else { format!("{h}:{port}") })
+        .collect()
+}
+
+/// `GET /local/federation-invite` → mint a mesh invite (ADR-0033 §2): the pasteable payload
+/// one mesh's operator hands another's. Member-signed, single-use, ten minutes, no secrets.
+fn local_federation_invite(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, &cred.label) else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "no node key");
+    };
+    match crate::federation::mint_mesh_invite(
+        &node,
+        &cred.membership,
+        &cred,
+        federation_hosts(dir),
+        now_secs(),
+    )
+    .and_then(|i| i.encode())
+    {
+        Ok(payload) => text(
+            StatusCode::OK,
+            serde_json::json!({"invite": payload, "handle": cred.label}).to_string(),
+        ),
+        Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /mesh/federate` → another mesh's lighthouse redeems a mesh invite: verify, spend,
+/// store the sender as a PENDING sibling (the welcome tap is a human act), answer with our
+/// own signed introduction (ADR-0033 §2).
+fn recv_federate(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    let freq: crate::federation::FederateRequest = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad federate request"),
+    };
+    match crate::federation::receive_introduction(dir, &cred, &freq, federation_hosts(dir), now_secs())
+    {
+        Ok(answer) => match serde_json::to_string(&answer) {
+            Ok(j) => text(StatusCode::OK, j),
+            Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+/// `POST /mesh/federate-act` → a member's tap, travelled: welcome a pending sibling mesh, or
+/// sever a standing one. Signed-member envelope, same shape as a standing vote — and the
+/// membership must be of THIS mesh (a foreign member cannot decide our federation).
+fn recv_federate_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let act: crate::federation::FederateAct = match serde_json::from_slice(bytes) {
+        Ok(a) => a,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad federate act"),
+    };
+    if act.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    if act.group_pubkey != cred.group_pubkey {
+        return text(StatusCode::FORBIDDEN, "not this mesh's member");
+    }
+    let now = now_secs();
+    if crate::group::verify_membership_consistent(&act.membership, &act.group_pubkey, now).is_err()
+    {
+        return text(StatusCode::FORBIDDEN, "membership does not verify");
+    }
+    let result = match act.act.as_str() {
+        "welcome" => crate::federation::welcome_sibling(
+            dir,
+            &act.subject_group_id,
+            &act.membership.node_id,
+            now,
+        )
+        .map(|s| format!("welcomed {}", s.handle)),
+        "sever" => crate::federation::sever_sibling(dir, &act.subject_group_id, &act.reason, now)
+            .map(|s| format!("severed {}", s.handle)),
+        other => {
+            return text(
+                StatusCode::BAD_REQUEST,
+                format!("federate act {other}? — welcome | sever"),
+            )
+        }
+    };
+    match result {
+        Ok(word) => text(StatusCode::OK, word),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+/// `POST /mesh/worldview-sibling` → a sibling mesh reads at the sibling rung of the
+/// projection ladder (ADR-0033 §3). Signed by its mesh key, verified against the sibling
+/// record we hold; pending and severed fail closed; same replay discipline as a member read.
+fn recv_sibling_worldview(
+    dir: &Path,
+    bytes: &[u8],
+    seen: &std::sync::Mutex<crate::observe::IngestGuard>,
+) -> Response<Full<Bytes>> {
+    if !familiar_kernel::boundary::load(dir)
+        .map(|b| b.allow_mesh)
+        .unwrap_or(false)
+    {
+        return text(StatusCode::FORBIDDEN, "mesh gate closed");
+    }
+    let req: crate::federation::SiblingViewRequest = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad sibling read"),
+    };
+    if req.verify().is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Some(mut sib) = crate::federation::standing_sibling_by_pubkey(dir, &req.group_pubkey)
+    else {
+        return text(StatusCode::FORBIDDEN, "no standing here");
+    };
+    let now = now_secs();
+    if (now - req.ts).abs() > crate::observe::REPLAY_WINDOW_SECS {
+        return text(StatusCode::FORBIDDEN, "stale or future timestamp");
+    }
+    {
+        let mut g = seen.lock().unwrap_or_else(|p| p.into_inner());
+        if !g.remember_nonce(&req.group_id, &req.nonce, now) {
+            return text(StatusCode::CONFLICT, "replayed nonce");
+        }
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    sib.last_seen = now;
+    let _ = crate::federation::save_sibling(dir, &sib);
+    match crate::worldview::assemble_worldview(dir, &cred, now) {
+        Ok(mut view) => {
+            crate::standing::to_sibling_view(&mut view, &req.group_id, &cred.label);
+            match serde_json::to_string(&view) {
+                Ok(j) => text(StatusCode::OK, j),
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+        Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 /// `GET /local/invite` → the invite payload a new device scans/pastes: every address the mesh
@@ -1633,6 +1836,7 @@ fn local_gate(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         "allow_tool_install" => b.allow_tool_install = open,
         "allow_self_upgrade" => b.allow_self_upgrade = open,
         "allow_outreach" => b.allow_outreach = open,
+        "allow_actuate" => b.allow_actuate = open,
         _ => return text(StatusCode::BAD_REQUEST, "unknown gate"),
     }
     if b.phase == "closed" && open {
@@ -1682,6 +1886,9 @@ fn local_observe(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         .clamp(0.0, 1.0);
     let now = now_secs();
     let _ = familiar_kernel::identity::maybe_learn_from_observation(dir, action, object, now);
+    // A local verdict on an answer ("feedback / refine / answer:<id>") retires the
+    // responsible authored tool — the same seam the signed device path runs.
+    let _ = familiar_kernel::request::maybe_apply_feedback(dir, action, object, context);
     let obs = familiar_kernel::observation::Observation::new(
         actor, action, object, context, "local", now, confidence,
     );
@@ -2518,6 +2725,56 @@ fn absorb_game_notifying(dir: &Path, g: &crate::game::GameState) {
     let before = crate::game::load(dir).map(|s| (s.id.clone(), s.holder.clone()));
     let _ = crate::game::absorb(dir, g);
     notify_if_turn_changed(dir, before);
+    // Votes completing on ANOTHER door reach the keeper as this sync — its next duty
+    // (reveal), or a solo forge re-claim, runs off-path now rather than on the next poll.
+    spawn_changeling_touch(dir, None);
+}
+
+/// Run the changeling keeper's next duty off the request path (ADR-0034). Forging may
+/// consult the LLM for up to two minutes; no hyper worker ever waits on it. The runtime
+/// handle is captured first so the result can call for the new holder (APNs) and cross
+/// to the sibling doors immediately — the same no-seesaw law as the act path.
+pub(crate) fn spawn_changeling_touch(dir: &Path, truth: Option<String>) {
+    let Some(g) = crate::game::load(dir) else {
+        return;
+    };
+    if g.status != "open" || g.kind != crate::game::GameKind::Changeling {
+        return;
+    }
+    let duty = (g.phase == "forging" && g.keeper.is_empty() && (truth.is_some() || g.solo))
+        || g.phase == "reveal-wait";
+    if !duty {
+        return;
+    }
+    let rt = tokio::runtime::Handle::try_current().ok();
+    let dir = dir.to_path_buf();
+    std::thread::spawn(move || {
+        let Ok(key) = crate::node::NodeKey::load_or_mint(&dir, "familiar") else {
+            return;
+        };
+        let my = key.identity().node_id;
+        let before = crate::game::load(&dir).map(|s| (s.id.clone(), s.holder.clone()));
+        if !matches!(
+            crate::changeling::touch(&dir, &my, truth, now_secs()),
+            Ok(true)
+        ) {
+            return;
+        }
+        if let Some(rt) = rt {
+            let dir2 = dir.clone();
+            rt.spawn(async move {
+                notify_if_turn_changed(&dir2, before);
+                let doors: Vec<String> = load_peers(&dir2)
+                    .into_iter()
+                    .filter(|p| !p.interactive && !p.addr.is_empty() && p.status != "abandoned")
+                    .map(|p| p.addr)
+                    .collect();
+                for addr in doors {
+                    sync_records_with(&dir2, &addr).await;
+                }
+            });
+        }
+    });
 }
 
 /// `POST /mesh/game/act` → verify the member and apply the move. The reply body is the
@@ -2578,6 +2835,12 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
             }
             // The turn may have crossed to a human whose phone is locked — call for them.
             notify_if_turn_changed(dir, before);
+            // A witness's truth (or a solo begin) lights the forge — the keeper's work
+            // runs off this request path; the truth text exists only in this act.
+            spawn_changeling_touch(
+                dir,
+                (env.act.act == "line").then(|| env.act.text.clone()),
+            );
             // The ember must not wait for the next gossip round to cross doors: two humans
             // acting through two doors saw a ~30s holder seesaw as each door's periodic sync
             // swung the other's view. Push records to the sibling doors NOW, best-effort —
@@ -3052,6 +3315,14 @@ fn push_tool(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
             "network-reaching tools are not federated",
         );
     }
+    // Same defense in depth for device control: a pushed tool that would drive a surface
+    // here was declared (or authored) against another node's world — refuse it.
+    if familiar_kernel::review::reaches_device_control(&String::from_utf8_lossy(&script_body)) {
+        return text(
+            StatusCode::FORBIDDEN,
+            "device-control tools are not federated",
+        );
+    }
     if known_tool_shas(dir).contains(&push.manifest.script_sha256) {
         return text(StatusCode::OK, "already known");
     }
@@ -3326,6 +3597,13 @@ async fn push_missing_tools(
         // meaningless there at best and intrusive on that peer's network at worst. Keep such tools
         // local; only portable tools (local computation, text/host introspection) federate.
         if familiar_kernel::review::reaches_network(&String::from_utf8_lossy(&body)) {
+            continue;
+        }
+        // Likewise a tool that drives a control surface — it commands this node's own
+        // declared device (ADR-0032); on a peer it is meaningless or worse.
+        if t.origin == "declared"
+            || familiar_kernel::review::reaches_device_control(&String::from_utf8_lossy(&body))
+        {
             continue;
         }
         let sha = sha256_hex(&body);
@@ -4163,6 +4441,49 @@ mod tests {
 
     fn body_status(resp: &Response<Full<Bytes>>) -> StatusCode {
         resp.status()
+    }
+
+    #[test]
+    fn local_answer_speaks_as_the_current_identity_not_a_hardcoded_name() {
+        let dir = fresh_dir("local_answer_actor");
+        familiar_kernel::identity::remember(&dir, "Betty", 100).unwrap();
+        familiar_kernel::identity::set_current(&dir, "betty").unwrap();
+        familiar_kernel::thread::append(
+            &dir,
+            &familiar_kernel::thread::Thread {
+                id: "thread-0001".into(),
+                question: "Betty — long evenings?".into(),
+                theory: "Betty may want softer light.".into(),
+                direction: "dim the lights".into(),
+                created_at: 100,
+                status: "open".into(),
+                status_at: 100,
+                last_worked_at: 0,
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: "betty".into(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        let resp = local_answer(&dir, br#"{"thread":"thread-0001","text":"yes please"}"#);
+        assert_eq!(body_status(&resp), StatusCode::OK);
+        let t = &familiar_kernel::thread::load(&dir).unwrap()[0];
+        assert_eq!(t.origin, "observer", "betty's own console answer confirms her need");
+        assert_eq!(t.actor, "betty");
+        let obs = familiar_kernel::observation::load(&dir).unwrap();
+        assert!(
+            obs.iter().any(|o| o.actor == "betty" && o.action == "answered"),
+            "the observation speaks in her name, not a baked-in one"
+        );
+        // A node that hasn't learned who it serves still answers — as the fallback.
+        let dir2 = fresh_dir("local_answer_fallback");
+        let resp = local_answer(&dir2, br#"{"text":"hello there"}"#);
+        assert_eq!(body_status(&resp), StatusCode::OK);
+        let obs2 = familiar_kernel::observation::load(&dir2).unwrap();
+        assert!(obs2.iter().any(|o| o.actor == "ian"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
     }
 
     // ---- the two-filter door over the wire (ADR-0026, Phase 3) ----

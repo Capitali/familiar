@@ -31,6 +31,13 @@ commands:
   presence       report the presence signal (Law II)
   capacities     report the capacities signal (Law II / HUMANITY.md)
   theories       list the familiar's questions + theories (threads)
+  dossier        what the familiar holds about one person, read by its subject
+                 (ADR-0022): `dossier <handle>` — presence shape, standing evidence,
+                 needs (stated vs theorized); `dossier withdraw <handle>` removes their
+                 contributions, clears the face link, and prints an honest receipt
+  actuate        drive a declared control surface by hand (ADR-0032):
+                 `actuate <surface> state` reads it; `actuate <surface> <label>` acts —
+                 gated by allow_actuate + allow_execute; surfaces come from actuators.json
   sense          perceive the host (environment, interfaces, capabilities)
   reach          assess what the familiar could extend into — discover devices and
                  classify each (agent-capable / protocol-controllable / observable)
@@ -96,6 +103,8 @@ fn main() -> ExitCode {
         Some("presence") => cmd_presence(rest),
         Some("capacities") => cmd_capacities(rest),
         Some("theories") => cmd_theories(rest),
+        Some("dossier") => cmd_dossier(rest),
+        Some("actuate") => cmd_actuate(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
@@ -1282,6 +1291,173 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        // ---- federation (ADR-0033): meshes are peers too ---------------------------------------
+        Some("federate") => {
+            let sub = args.get(1).map(String::as_str);
+            match sub {
+                Some("invite") => {
+                    // `mesh federate invite` — mint the pasteable payload one mesh's operator
+                    // hands another's. Member-signed, single-use, ten minutes, no secrets.
+                    let cred = match familiar_mesh::group::load(&dir) {
+                        Ok(Some(c)) => c,
+                        _ => {
+                            eprintln!("mesh: no group here — create or join one first");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &cred.label)
+                    {
+                        Ok(n) => n,
+                        Err(e) => {
+                            eprintln!("mesh: no node key — {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let hosts = familiar_mesh::transport::federation_hosts(&dir);
+                    match familiar_mesh::federation::mint_mesh_invite(
+                        &node,
+                        &cred.membership,
+                        &cred,
+                        hosts,
+                        now_secs(),
+                    )
+                    .and_then(|i| i.encode())
+                    {
+                        Ok(payload) => {
+                            println!(
+                                "mesh invite for “{}” — single use, expires in 10 minutes.\n\
+                                 Hand it to the other mesh's operator; they run:\n\
+                                 \n  familiar mesh federate join {payload}\n",
+                                cred.label
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("join") => {
+                    // `mesh federate join <payload>` — redeem another mesh's invite: introduce
+                    // ourselves at their door, adopt their answer as a standing sibling.
+                    let Some(payload) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate join <invite-payload>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::federation::federate_with(&dir, payload) {
+                        Ok(s) => {
+                            println!(
+                                "✓ “{}” stands as a sibling here. Their door holds us pending — \
+                                 a member there still has to welcome us.",
+                                s.handle
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("welcome") => {
+                    // `mesh federate welcome <group_id>` — the human's tap: a pending
+                    // introduction stands as a sibling. Same trust class as /local/standing:
+                    // a human at this machine's own console is the authority.
+                    let Some(gid) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate welcome <group_id>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::federation::welcome_sibling(&dir, gid, "cli", now_secs())
+                    {
+                        Ok(s) => {
+                            println!("✓ “{}” stands as a sibling — it now reads at the sibling rung", s.handle);
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("sever") => {
+                    // `mesh federate sever <group_id> [--reason R]` — standing withdrawal,
+                    // not attack: the record stays, with its reason.
+                    let Some(gid) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate sever <group_id> [--reason R]");
+                        return ExitCode::FAILURE;
+                    };
+                    let reason = f.get("reason").cloned().unwrap_or_default();
+                    match familiar_mesh::federation::sever_sibling(&dir, gid, &reason, now_secs())
+                    {
+                        Ok(s) => {
+                            println!("✓ “{}” severed — its reads fail closed; `federate welcome` restores", s.handle);
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("read") => {
+                    // `mesh federate read <group_id>` — read a sibling's worldview at the
+                    // sibling rung (the projection drill, end to end).
+                    let Some(gid) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate read <group_id>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::federation::read_sibling_worldview(&dir, gid) {
+                        Ok(json) => {
+                            match serde_json::from_str::<serde_json::Value>(&json) {
+                                Ok(v) => {
+                                    println!(
+                                        "sibling “{}” — {} members, {} observations, declares: {}",
+                                        v.get("group_label").and_then(|s| s.as_str()).unwrap_or("?"),
+                                        v.get("members").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0),
+                                        v.get("observation_count").and_then(|n| n.as_u64()).unwrap_or(0),
+                                        v.get("declared_areas")
+                                            .and_then(|a| a.as_array())
+                                            .map(|a| a.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+                                            .filter(|s| !s.is_empty())
+                                            .unwrap_or_else(|| "nothing yet".into()),
+                                    );
+                                }
+                                Err(_) => println!("{json}"),
+                            }
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("list") | None => {
+                    let sibs = familiar_mesh::federation::load_siblings(&dir);
+                    if sibs.is_empty() {
+                        println!("federation: no siblings — `mesh federate invite` opens the door");
+                    } else {
+                        println!("siblings ({}):", sibs.len());
+                        for s in sibs {
+                            println!(
+                                "  {}  “{}”  {}  areas: {}{}",
+                                short_id(&s.group_id),
+                                s.handle,
+                                s.state,
+                                if s.declared_areas.is_empty() { "—".into() } else { s.declared_areas.join(", ") },
+                                if s.note.is_empty() { String::new() } else { format!("  ({})", s.note) },
+                            );
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Some(other) => {
+                    eprintln!("mesh: federate {other}? — invite | join | welcome | sever | read | list");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // ---- standing (ADR-0020): membership decides reading; standing decides seeing ---------
         Some("standing") => {
             let sub = args.get(1).map(String::as_str);
@@ -1382,7 +1558,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             };
             match familiar_mesh::record::apply_correction(&dir, &c, now) {
                 Ok(r) => {
-                    println!("✓ {act} {node_id} — record now: {:?}", familiar_mesh::record::derive_state(&r));
+                    println!(
+                        "✓ {act} {node_id} — record now: {:?}",
+                        familiar_mesh::record::derive_state(&r)
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1427,12 +1606,21 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 eprintln!("mesh: no node key");
                 return ExitCode::FAILURE;
             };
-            match familiar_mesh::record::mint_invite_token(&node, &cred.membership, &handle, now_secs()) {
+            match familiar_mesh::record::mint_invite_token(
+                &node,
+                &cred.membership,
+                &handle,
+                now_secs(),
+            ) {
                 Ok(t) => {
                     eprintln!(
                         "single use, expires in {} min{}",
                         familiar_mesh::record::INVITE_TOKEN_TTL_SECS / 60,
-                        if handle.is_empty() { String::new() } else { format!(", names “{handle}”") }
+                        if handle.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", names “{handle}”")
+                        }
                     );
                     println!("{}", serde_json::to_string(&t).unwrap_or_default());
                     ExitCode::SUCCESS
@@ -1450,10 +1638,18 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             // stores are left untouched and stay authoritative until `read_records` flips.
             match familiar_mesh::record::migrate(&dir, now_secs()) {
                 Ok(r) => {
-                    println!("✓ folded the legacy stores into mesh/records/ ({} records)", r.records);
-                    println!("  from grants: {}   from pending: {}   from peers: {}", r.from_granted, r.from_pending, r.from_peers);
+                    println!(
+                        "✓ folded the legacy stores into mesh/records/ ({} records)",
+                        r.records
+                    );
+                    println!(
+                        "  from grants: {}   from pending: {}   from peers: {}",
+                        r.from_granted, r.from_pending, r.from_peers
+                    );
                     println!("  established from the roll: {}   severed from revoked.json: {}   holds: {}", r.established_from_roll, r.severed_from_revoked, r.held_from_denials);
-                    println!("  next: `familiar mesh doctor` — flip read_records only on a clean report");
+                    println!(
+                        "  next: `familiar mesh doctor` — flip read_records only on a clean report"
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1471,7 +1667,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 println!("doctor: nothing to compare — no grants, peers, roll or records here");
                 return ExitCode::SUCCESS;
             }
-            println!("{:<18} {:>7} {:>7} {:>8} {:>8}  ok", "node", "roll", "record", "revoked", "severed");
+            println!(
+                "{:<18} {:>7} {:>7} {:>8} {:>8}  ok",
+                "node", "roll", "record", "revoked", "severed"
+            );
             for row in &report.rows {
                 println!(
                     "{:<18} {:>7} {:>7} {:>8} {:>8}  {}",
@@ -1491,13 +1690,21 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 );
             }
             if report.candidates_pending > 0 {
-                println!("candidates ripening (not folded, transient): {}", report.candidates_pending);
+                println!(
+                    "candidates ripening (not folded, transient): {}",
+                    report.candidates_pending
+                );
             }
             if report.divergent == 0 {
-                println!("✓ every answer agrees — safe to set read_records true in mesh/config.json");
+                println!(
+                    "✓ every answer agrees — safe to set read_records true in mesh/config.json"
+                );
                 ExitCode::SUCCESS
             } else {
-                eprintln!("✗ {} divergent — do NOT flip read_records; fix and re-run", report.divergent);
+                eprintln!(
+                    "✗ {} divergent — do NOT flip read_records; fix and re-run",
+                    report.divergent
+                );
                 ExitCode::FAILURE
             }
         }
@@ -1552,7 +1759,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             };
             match familiar_mesh::group::install_warrant(&dir, &w, now_secs()) {
                 Ok(()) => {
-                    println!("✓ warrant installed — this node can now admit knocks (expires {})", w.expiry);
+                    println!(
+                        "✓ warrant installed — this node can now admit knocks (expires {})",
+                        w.expiry
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -1918,6 +2128,176 @@ fn cmd_theories(args: &[String]) -> ExitCode {
         }
         Err(e) => {
             eprintln!("theories: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The human's hand on a declared surface — same wrapper tools, same review, same gates
+/// as the familiar's own loop (cmd_discover pattern: boundary check up front).
+fn cmd_actuate(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            if !args[i].contains('=') && args.get(i + 1).is_some_and(|v| !v.starts_with("--")) {
+                i += 1;
+            }
+        } else {
+            positional.push(&args[i]);
+        }
+        i += 1;
+    }
+    let [surface, label] = positional.as_slice() else {
+        eprintln!("usage: familiar actuate <surface> <state|label>  (surfaces: actuators.json)");
+        return ExitCode::FAILURE;
+    };
+    let b = boundary::load(&dir).unwrap_or_else(|_| boundary::Boundary::closed());
+    let action = guard::Action::new(guard::ActionKind::Actuate, surface.as_str());
+    let v = guard::evaluate(&action, &b);
+    if v.decision != Decision::Allow {
+        eprintln!("{}", v.rationale);
+        return ExitCode::FAILURE;
+    }
+    match familiar_cycle::actuate_by_hand(&dir, surface, label, now_secs()) {
+        Ok(Ok(out)) => {
+            println!("{out}");
+            ExitCode::SUCCESS
+        }
+        Ok(Err(msg)) => {
+            eprintln!("actuate: {msg}");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("actuate: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The subject-facing view (ADR-0022 constraint 3): a record kept about someone that
+/// they cannot see is surveillance, whatever its purpose. Deliberately CLI-only — the
+/// worldview federates to every member device, and a person's shape is theirs to read,
+/// not the room's to browse.
+fn cmd_dossier(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let now = now_secs();
+    // Positionals: skip flags AND their values (mirrors how `flags()` consumes them).
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            if !args[i].contains('=') && args.get(i + 1).is_some_and(|v| !v.starts_with("--")) {
+                i += 1; // the flag's value
+            }
+        } else {
+            positional.push(&args[i]);
+        }
+        i += 1;
+    }
+    let half_life = familiar_kernel::parameters::Parameters::load_or_default(&dir)
+        .sane()
+        .dossier_half_life_days
+        * 86_400;
+    match positional.as_slice() {
+        [w, handle] if w.as_str() == "withdraw" => {
+            match familiar_kernel::dossier::withdraw(&dir, handle, now) {
+                Ok(r) => {
+                    println!(
+                        "{} contributions removed; face link cleared: {}.",
+                        r.contributions_removed, r.face_unlinked
+                    );
+                    println!("Your weight no longer feeds any pattern, and no later fold will rebuild one about you.");
+                    println!("The honest boundary: aggregate structure that no longer identifies you survives; nothing that points at you does.");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("dossier withdraw: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [handle] => {
+            let d = match familiar_kernel::dossier::read(&dir, handle, now, half_life) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("dossier: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match &d.identity {
+                Some(i) => println!(
+                    "{} ({}) — {} · first seen {} · {} interactions",
+                    i.name, i.handle, i.relation, i.first_seen, i.interactions
+                ),
+                None => println!("({handle} — no identity on record)"),
+            }
+            if d.withdrawn {
+                println!("WITHDRAWN — this person removed themselves; no pattern is kept and none will be rebuilt.");
+                return ExitCode::SUCCESS;
+            }
+            println!("\npresence by hour (UTC) — share of decayed weight, · none:");
+            let max = d
+                .presence_hours
+                .iter()
+                .map(|s| s.share)
+                .fold(0.0_f64, f64::max);
+            for s in &d.presence_hours {
+                let bar_len = if max > 0.0 {
+                    ((s.share / max) * 24.0).round() as usize
+                } else {
+                    0
+                };
+                println!(
+                    "  {} {:24} {}",
+                    s.slot,
+                    "#".repeat(bar_len),
+                    if s.count > 0 {
+                        format!(
+                            "share {:.2} · confidence {:.2} · {} sightings",
+                            s.share, s.confidence, s.count
+                        )
+                    } else {
+                        "·".to_string()
+                    }
+                );
+            }
+            if !d.standing.is_empty() {
+                println!("\nusually identified by:");
+                for s in &d.standing {
+                    println!(
+                        "  {:9} share {:.2} · confidence {:.2} · {} sightings",
+                        s.slot, s.share, s.confidence, s.count
+                    );
+                }
+            }
+            if d.needs.is_empty() {
+                println!("\nneeds: none on record");
+            } else {
+                println!("\nneeds:");
+                for n in &d.needs {
+                    println!(
+                        "  [{}] {} — {}",
+                        if n.stated { "stated" } else { "theorized" },
+                        n.status,
+                        n.text
+                    );
+                }
+            }
+            println!(
+                "\nin a sentence: {}",
+                familiar_kernel::dossier::coarse_summary(&d)
+            );
+            println!(
+                "this record is yours: `familiar dossier withdraw {handle}` removes you from it."
+            );
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("usage: familiar dossier <handle> | familiar dossier withdraw <handle>");
             ExitCode::FAILURE
         }
     }

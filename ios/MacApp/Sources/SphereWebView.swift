@@ -26,16 +26,28 @@ struct SphereConsole: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(bridge.mode != .street)
             if bridge.mode == .street {
-                // Wordless exit, in the house glyph language — back up to orbit.
+                // Wordless exit, in the house glyph language — back up to orbit. Beside it,
+                // the sat/street toggle: the glyph shows the surface a tap would switch TO.
                 VStack {
                     Spacer()
-                    Button(action: { bridge.backToGlobe() }) {
-                        OrbitGlyph()
-                            .frame(width: 56, height: 56)
-                            .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
-                            .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                    HStack(spacing: 14) {
+                        Button(action: { bridge.backToGlobe() }) {
+                            OrbitGlyph()
+                                .frame(width: 56, height: 56)
+                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        Button(action: { bridge.toggleImagery() }) {
+                            Image(systemName: bridge.streetImagery == .mutedStandard ? "globe.americas.fill" : "map")
+                                .font(.system(size: 20, weight: .light))
+                                .foregroundColor(Color(red: 0.81, green: 0.88, blue: 1.0))
+                                .frame(width: 56, height: 56)
+                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(.bottom, 16)
                 }
             }
@@ -85,6 +97,14 @@ struct OrbitGlyph: View {
 final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CLLocationManagerDelegate, MKMapViewDelegate {
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
+    // The dived-in surface's imagery. Satellite is the default at EVERY zoom — the dive must
+    // never silently trade the satellite globe for a vector street map. Street view is a
+    // choice, made with the glyph beside the orbit button.
+    @Published var streetImagery: MKMapType = .hybridFlyover
+    func toggleImagery() {
+        streetImagery = streetImagery == .mutedStandard ? .hybridFlyover : .mutedStandard
+        map?.mapType = streetImagery
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -412,8 +432,9 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     let kind = body["game_kind"] as? String
                     let text = body["text"] as? String ?? ""
                     let to = body["to"] as? String ?? ""
+                    let solo = body["solo"] as? Bool ?? false
                     Task {
-                        await self.model.gameAct(act, kind: kind, text: text, to: to)
+                        await self.model.gameAct(act, kind: kind, text: text, to: to, solo: solo)
                         await self.poll()
                     }
                 }
@@ -448,6 +469,16 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                    let handle = body["handle"] as? String {
                     Task {
                         _ = await self.model.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle)
+                        await self.poll()
+                    }
+                }
+            case "federateAct":
+                // The member's federation tap (ADR-0033): welcome a pending sibling mesh, or
+                // sever a standing one. The same class of act as vouch — a human decides.
+                if let gid = body["group_id"] as? String,
+                   let act = body["act"] as? String {
+                    Task {
+                        await self.model.federateAct(act, subjectGroupId: gid)
                         await self.poll()
                     }
                 }
@@ -536,6 +567,7 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     case "allow_motion": g.allow_motion = open
                     case "allow_network_discovery": g.allow_network_discovery = open
                     case "allow_face_recognition": g.allow_face_recognition = open
+                    case "allow_actuate": g.allow_actuate = open
                     default: break
                     }
                 }
@@ -616,7 +648,7 @@ struct MeshMapView: NSViewRepresentable {
     func makeNSView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.appearance = NSAppearance(named: .darkAqua)
-        map.mapType = .mutedStandard
+        map.mapType = bridge.streetImagery
         map.showsCompass = false
         map.showsZoomControls = false
         map.pointOfInterestFilter = .includingAll

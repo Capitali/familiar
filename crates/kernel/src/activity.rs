@@ -28,6 +28,12 @@ pub struct ActivityTick {
     pub archived: usize,
     pub theorized: bool,
     pub pursued: usize,
+    /// Declared control surfaces set this tick (ADR-0032).
+    #[serde(default)]
+    pub actuated: usize,
+    /// Reactions to acts honored this tick (a human hand or word answered).
+    #[serde(default)]
+    pub reactions: usize,
     /// Human-set parameters the familiar reverted this tick (co-ownership, Brick 19).
     #[serde(default)]
     pub reverted: usize,
@@ -121,6 +127,8 @@ mod tests {
             archived: 0,
             theorized: false,
             pursued: 0,
+            actuated: 0,
+            reactions: 0,
             reverted: 0,
             marginalized: 0,
             answered: 0,

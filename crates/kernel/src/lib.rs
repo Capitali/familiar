@@ -11,12 +11,14 @@
 #![forbid(unsafe_code)]
 
 pub mod activity;
+pub mod actuator;
 pub mod boundary;
 pub mod candidate;
 pub mod capabilities;
 pub mod capacities;
 pub mod corruption;
 pub mod dialog;
+pub mod dossier;
 pub mod goal;
 pub mod guard;
 pub mod humanity;

@@ -30,11 +30,15 @@ use crate::worldview::Worldview;
 
 pub const STANDING_FILE: &str = "standing.json";
 
-/// What a reader is allowed to see.
+/// What a reader is allowed to see — the projection ladder (ADR-0033): each rung shows
+/// strictly more, and every rung is *real* — never a fake view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Standing {
     /// The household: the real worldview.
     Full,
+    /// A federated mesh reading with its mesh key: the guest projection plus our handle
+    /// and what we declare (ADR-0033 §3). Granted by the welcome tap, never automatically.
+    Sibling,
     /// Everyone else: same shape, no identities.
     Guest,
 }
@@ -388,8 +392,54 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
         // reach + open service kinds + last_seen stay.
     }
 
+    // That this mesh federates is shape; WITH WHOM is the household's business. Handles
+    // pseudonymize (stable per reader-visible id), declarations and welcomers are withheld.
+    for s in view.siblings.iter_mut() {
+        s.handle = pseudonym(&s.group_id);
+        s.group_id = pseudonym(&s.group_id);
+        s.declared_areas.clear();
+        s.offered_tools.clear();
+        s.welcomed_by = String::new();
+        s.lat = 0.0;
+        s.lon = 0.0;
+    }
+    // What we declare is a promise to siblings, not a guest's to read.
+    view.declared_areas.clear();
+
     // Addresses and pins are how a device reaches the mesh — a guest is a member and still needs
     // them, so they are NOT scrubbed here. They are not personal data; they are the door.
+}
+
+/// Rewrite a worldview into its **sibling projection** (ADR-0033 §3): the guest projection
+/// plus our handle and what we declare. What a sibling never sees, at any trust level:
+/// names, humans, faces, addresses, per-node positions, free text. `reader_group_id` is the
+/// sibling mesh's id — it sees its own entry as itself; other siblings stay pseudonymized
+/// (who else we federate with is the household's business).
+pub fn to_sibling_view(view: &mut Worldview, reader_group_id: &str, our_handle: &str) {
+    // Keep the reader's own sibling entry aside — it knows itself, and hiding it would make
+    // the console look broken (same rule as a guest seeing its own node).
+    let own = view
+        .siblings
+        .iter()
+        .find(|s| s.group_id == reader_group_id)
+        .cloned();
+    let declared = view.declared_areas.clone();
+    to_guest_view(view, reader_group_id);
+    // The sibling rung adds back, deliberately and only: our handle, our declaration, and
+    // the reader's own standing here.
+    if !our_handle.trim().is_empty() {
+        view.group_label = our_handle.to_string();
+    }
+    view.declared_areas = declared;
+    if let Some(own) = own {
+        if let Some(slot) = view
+            .siblings
+            .iter_mut()
+            .find(|s| s.group_id == pseudonym(&own.group_id))
+        {
+            *slot = own;
+        }
+    }
 }
 
 fn anon_member(m: &mut Member, is_reader: bool, dlat: f64, dlon: f64) {

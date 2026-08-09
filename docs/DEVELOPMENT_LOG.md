@@ -6,6 +6,164 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-09 — The Changeling: the third fire, and the familiar's first seat at it (ADR-0034)
+
+### What changed
+
+- **game.rs** — `GameKind::{Changeling, Unknown #[serde(other)]}`; the phase machine
+  (witness → forging → voting → reveal-wait) with per-phase lazy clocks; acts `vote`
+  (upsert by handle, last-before-reveal counts, ABSTAIN by clock or explicit pass);
+  scoring (+1 found truth, +1/fooled voter to the witness; the familiar scoreless);
+  witness rotation, solo (3 rounds, familiar witnesses about the record); chronicle
+  entries carry each round through the reset; `save()` now temp+rename (ADR-0029 §2).
+- **changeling.rs (new)** — the keeper: claims the forge in state (LWW settles races,
+  stale results discarded by a re-check guard), forges via `familiar_llm::consult`
+  with deterministic banks as floor/CI path, writes `{id, round, truth_idx, salt}`
+  door-local BEFORE publishing, publishes only the sha256 commitment; reveals on its
+  next touch once ballots complete; solo truths drawn from shareable observations only.
+- **llm** — `CONSULT_LOCK`: consults serialize in-process (cycle + forge share one
+  prompt.txt); proven by a two-thread test.
+- **transport/worldview/push** — `spawn_changeling_touch` off the request path from
+  acts, both record-sync absorbs, and worldview polls; push text learned the kind.
+- **Sphere + Swift** — third menu card, info page, four live phase screens (vote cards
+  A/B/C with re-vote until reveal), roster badge phases (🎭 TRUTH/VOTE/EMBER), chime
+  and Watch lines; `solo` threaded sphere → bridges → AppModel → GameClient; GameGlance
+  gains `phase`. Both platforms build.
+
+### Checks run
+
+- 173 mesh + 5 llm tests green (18 new changeling rules tests incl. full-state secrecy,
+  6 keeper tests, the consult-serialization proof); FamiliarMac + FamiliarAgent build.
+
+### Next — READ BEFORE LIGHTING
+
+- **Upgrade every door first**: a changeling in a record-sync makes PRE-0034 doors drop
+  the whole sync (no `Unknown` fallback there). Ship all device doors + **redeploy the
+  lighthouse** (still outstanding from ADR-0033) before the first `begin changeling`.
+- The scripted two-door walkthrough and the household play test (ADR-0028: testers
+  playing IS the test) — riddle/campfire regression first, then multiplayer changeling,
+  then a solo game.
+
+## 2026-08-08 (later) — The hand on the world: declared actuators + the reaction loop (ADR-0032)
+
+### What changed
+
+- **`allow_actuate`** — new boundary gate, default closed, covering acting AND polling
+  (a BLE state query is a connection into a device). Dropped from every agent scope like
+  self-upgrade/outreach; plumbed through guard (`ActionKind::Actuate`), worldview
+  `GateStates.actuate`, `local_gate`, and both Mac console spots.
+- **`kernel::actuator`** — declaration is the consent: the human writes `actuators.json`
+  (surface, `state_cmd`, `actions`, ordered `buckets`); **the bucket set is the revert
+  map** (every bucket names the action restoring it — a surface violating this is
+  dropped loudly). `parse_state` speaks the motorlights text contract; the SP548E can't
+  even show *off* in state, so off is an act, not a verifiable bucket. `is_negative` is
+  deterministic whole-word — no model judges a reaction.
+- **Cycle step 8·3, poll → heed → tend** (gated on actuate+execute): declared acts
+  materialize as `origin:"declared"` library tools (wrappers under the DATA dir, marker
+  `# familiar:actuate`); `reaches_device_control` requires the gate at the same two
+  sites as `reaches_network`; declared tools never federate (manifest + push + inbound
+  push all fence). The poller self-debounces by pre-writing the expected bucket at act
+  time — it structurally cannot see the familiar's own hand; external transitions become
+  `adjusted` observations attributed to the sole present human (else `someone`, excluded
+  like `observer` — new 0.5 rung in `subject_and_strength`). A transition inside a
+  reaction window IS the undo: negative trial (`human_reverted`, last-wins), candidate
+  archived, thread abandoned (words kept), habit depreciated (halved, count kept),
+  surface rested 6h. A negative *answer* or dismissal → undo FIRST (revert = the
+  bucket-named action), then the same evidence. Quiet window / assent → positive trial,
+  no rest. `tend` acts on pursued need-threads whose direction names surface+act, one
+  act per surface per window. TickReport/ActivityTick gain `actuated`/`reactions`.
+- **Habits** — `ctb|<handle>|habit|lights=dim@h20` folds from `adjusted` observations
+  (the dossier kind the slot grammar anticipated); `dossier::depreciate` halves weight,
+  keeps count; `familiar dossier` shows habits and the coarse summary speaks them
+  ("tends to set lights=dim in the evening").
+- **`familiar actuate <surface> <state|label>`** — the human's hand through the same
+  tools; feeds their own habit pattern, and answers an open reaction window if one waits.
+- **The dormant feedback chain finally produces**: `feedback / refine / answer:<id>`
+  (device observe seam or `/local/observe`) → `set_feedback` → `mark_unhealthy` for the
+  authored tool behind the answer; declared tools exempt (they ran correctly — the
+  *decision* was wrong, and retiring one would kill its own revert path).
+- **`/local/answer` speaks as the current identity** (`identity::current`, fallback
+  "ian") — a Betty confirm from the local console now flips her own thread.
+- Params: `actuator_poll_secs` (300, envelope 60..900), `reaction_window_secs` (900,
+  envelope 120..7200), both Law-argued in `review()`.
+
+### Checks run
+
+- `cargo test --workspace` green; nine end-to-end cycle tests drive the whole loop on a
+  **fake light** (a text file in motorlights format — no BLE in CI); kernel 156+, mesh
+  151 incl. `a_declared_actuator_tool_never_federates`, agent decline test.
+- Live CLI walkthrough (fake surface): `actuate lights state` reads; `actuate lights
+  dim` acts and records `ian adjusted lights=dim`; a tick folds it; `dossier ian` says
+  "tends to set lights=dim in the evening".
+- Test-isolation fix worth knowing: declared wrappers live under the **data dir**
+  (`<dir>/actuators/`), not the shared `familiar_workspace()` — parallel tests (and
+  multiple data dirs) were clobbering one another's wrappers.
+
+### Next
+
+- **The BLE/TCC manual step (not yet done — needs the physical strip):** write the real
+  `actuators.json` pointing at `~/Development/motorlights`, run `familiar actuate lights
+  state` once interactively to trigger the Bluetooth prompt, then exercise under launchd
+  (`launchctl kickstart`); grant python Bluetooth in System Settings if blocked; flip
+  the strip via the BanlanX app and confirm an `adjusted` observation on the next poll.
+- Habit-driven initiation (act from a strong pattern, not only a need-thread) — after
+  the patterns accumulate depth. Duration-weighted reaction scoring. A second declared
+  surface to test the format against something that isn't a light.
+
+## 2026-08-08 — The dossier lands; the muse turns toward the people (ADR-0022, ADR-0031)
+
+### What changed
+
+- **`kernel::dossier`** — ADR-0022 implemented on the accumulator primitives the store
+  already carried (`upsert_by_id` / `load_prefix` / `delete_prefix` / `load_since_seq`,
+  key shape `ctb|<handle>|<kind>|<slot>`): presence-by-UTC-hour and standing-evidence
+  patterns as decayed weighted contributions (lazy exponential, `dossier_half_life_days`
+  co-owned parameter, envelope 7..365d), Laplace-humble per-slot confidence, a resumable
+  fold cursor, and withdrawal (`familiar dossier withdraw <handle>`) that reports a real
+  receipt and leaves a `wdr|<handle>` tombstone no refold can override. Fold exclusions
+  are design: `familiar`, `mesh:*` actors/sources (no mesh-wide picture of a person),
+  withdrawn subjects. Attribution rides `routing::subject_and_strength` — the one
+  ladder, deliberately not forked a third time.
+- **Needs theorizing (`cycle::maybe_theorize_needs`)** — once per person per theorize
+  cadence, the muse thinks about the ONE human whose attributed observations carry the
+  most novelty: a need hypothesis grounded in their coarse dossier sentence (never the
+  raw distribution; sensitive-personal readings never enter the prompt), recorded as a
+  thread carrying the new `Thread.origin_human`, pursued immediately, plus a
+  confirm-question (`Question.subject`/`thread_id`, origin `"need"`) addressed to them.
+- **Consent by observation (ADR-0031)** — Ian's direction, now in the record: for
+  reversible low-stakes service the familiar acts and reads the reaction; the direct
+  query is the final gate. Hence: no confirm gate on pursuit; the person's own answer
+  (`thread::add_answer_from`, matched via now-pub `routing::human_of`) flips a
+  theorized need to a stated one (`origin: observer`), lighting up `unmet_needs` and
+  the `"need"` question rank — the pathway that had zero producers.
+- **Law I routing lands** — `coordinate_questions` finally passes a name to
+  `routing::route` (the ":440" comment's promise): a subject-addressed question waits
+  for its person up to `SUBJECT_HOLD_MAX_SECS` (7d), then may ask the room.
+- **Privacy fence first** — `merge.rs` theorist path no longer federates threads with
+  `origin_human` set (a hypothesis about a person is not delegatable work), landed
+  before any producer existed. `familiar dossier` is deliberately CLI-only; no
+  Worldview field, so the guest projection needed no change.
+
+### Checks run
+
+- `cargo test --workspace` green (kernel 141 incl. 7 new dossier tests; cycle 41 incl.
+  needs-muse pacing/gating, subject-hold, Law I routing; mesh incl.
+  `a_personal_need_thread_never_federates` asserting the text is absent from the brief).
+- Live walkthrough: seeded `phone:betty`/`watch:betty`/`ian` observations → `tick` →
+  `familiar dossier betty` shows the h20 bar, humble 0.33 confidence; `withdraw` prints
+  a 3-row receipt; cursor rewind + re-tick does not resurrect her; ian untouched.
+
+### Next
+
+- **Reaction evidence + auto-revert**: score "the human undid it" into trials — built
+  WITH the first actuator, never after it. First actuator candidate: the BLE light
+  strip (reversible, local, observable reaction).
+- **Habit patterns**: `ctb|<handle>|habit|<surface>@h<hour>` — slot grammar already
+  anticipates the kind.
+- The Mac console's `/local/answer` still hardcodes actor `"ian"` — a Betty confirm via
+  the Mac won't flip her thread (device-signed answers do). Fine until the console
+  knows its holder.
+
 ## 2026-07-24 — Console polish + retiring the marble era
 
 ### What changed

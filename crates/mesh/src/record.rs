@@ -828,7 +828,81 @@ pub fn save(dir: &Path, record: &MembershipRecord) -> Result<()> {
         d.join(format!("{}.json", record.device_id)),
         serde_json::to_vec_pretty(record)?,
     )?;
+    invalidate_snapshot(dir);
     Ok(())
+}
+
+// A worldview request consults the records several times (standing, arrivals, claims,
+// vouch-handles), and every consult was a full directory parse — ~0.5s per read once the
+// household grew past a handful of devices (the "next windowing/caching pass" ADR-0029
+// anticipated). The snapshot below parses the directory once and revalidates by a cheap
+// stat-only fingerprint (name/len/mtime per entry), so cross-process writers (the CLI, a
+// second door on the same volume) are still seen without any coordination.
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+
+fn snapshot_cache() -> &'static Mutex<HashMap<PathBuf, (u64, Arc<Vec<MembershipRecord>>)>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, Arc<Vec<MembershipRecord>>)>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn invalidate_snapshot(dir: &Path) {
+    snapshot_cache().lock().unwrap().remove(dir);
+}
+
+/// A stat-only fingerprint of the records directory: any add, remove, or rewrite of a record
+/// file changes it. Never reads file contents.
+fn dir_fingerprint(d: &Path) -> u64 {
+    fn mix(mut h: u64, bytes: &[u8]) -> u64 {
+        for b in bytes {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        }
+        h
+    }
+    let Ok(entries) = std::fs::read_dir(d) else {
+        return 0;
+    };
+    // read_dir order is platform-arbitrary; sum per-entry hashes so an unchanged directory
+    // always fingerprints the same regardless of enumeration order.
+    let mut acc: u64 = 0;
+    for e in entries.flatten() {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        h = mix(h, e.file_name().to_string_lossy().as_bytes());
+        if let Ok(md) = e.metadata() {
+            h = mix(h, &md.len().to_le_bytes());
+            if let Ok(mt) = md.modified() {
+                if let Ok(dur) = mt.duration_since(std::time::UNIX_EPOCH) {
+                    h = mix(h, &dur.as_nanos().to_le_bytes());
+                }
+            }
+        }
+        acc = acc.wrapping_add(h);
+    }
+    acc
+}
+
+/// The current set of records, parsed at most once per directory change. Shared, immutable;
+/// callers that only search should iterate this rather than cloning.
+pub fn snapshot(dir: &Path) -> Arc<Vec<MembershipRecord>> {
+    let d = dir.join(RECORDS_DIR);
+    let fp = dir_fingerprint(&d);
+    {
+        let cache = snapshot_cache().lock().unwrap();
+        if let Some((cached_fp, recs)) = cache.get(dir) {
+            if *cached_fp == fp {
+                return recs.clone();
+            }
+        }
+    }
+    let recs = Arc::new(load_all_uncached(dir));
+    snapshot_cache()
+        .lock()
+        .unwrap()
+        .insert(dir.to_path_buf(), (fp, recs.clone()));
+    recs
 }
 
 /// Load one device's record.
@@ -840,8 +914,13 @@ pub fn load(dir: &Path, device_id: &str) -> Result<Option<MembershipRecord>> {
     }
 }
 
-/// Every record this node holds.
+/// Every record this node holds. Served from [`snapshot`]; hot paths that only search
+/// should use the snapshot directly and skip this clone.
 pub fn load_all(dir: &Path) -> Vec<MembershipRecord> {
+    snapshot(dir).as_ref().clone()
+}
+
+fn load_all_uncached(dir: &Path) -> Vec<MembershipRecord> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir.join(RECORDS_DIR)) {
         for e in entries.flatten() {
@@ -857,14 +936,13 @@ pub fn load_all(dir: &Path) -> Vec<MembershipRecord> {
 }
 
 /// Find the record that holds `node_id` — as its device_id (the Phase 2 window keys records by
-/// current node_id) or anywhere in its key history.
+/// current node_id) or anywhere in its key history. Snapshot-served: no file I/O on a warm hit.
 pub fn find_by_key(dir: &Path, node_id: &str) -> Option<MembershipRecord> {
-    if let Ok(Some(r)) = load(dir, node_id) {
-        return Some(r);
-    }
-    load_all(dir)
-        .into_iter()
-        .find(|r| r.keys.iter().any(|k| k == node_id))
+    let snap = snapshot(dir);
+    snap.iter()
+        .find(|r| r.device_id == node_id)
+        .or_else(|| snap.iter().find(|r| r.keys.iter().any(|k| k == node_id)))
+        .cloned()
 }
 
 // ---- dual-write seams + the ONE migration (Phase 2) ---------------------------------
@@ -1614,7 +1692,7 @@ pub fn doctor(dir: &Path, now: i64) -> DoctorReport {
     }
 }
 
-fn verify_hex_sig(pubkey_hex: &str, body: &[u8], sig_hex: &str, what: &str) -> Result<()> {
+pub(crate) fn verify_hex_sig(pubkey_hex: &str, body: &[u8], sig_hex: &str, what: &str) -> Result<()> {
     let pk = exactly_32(&hex_decode(pubkey_hex)?, "pubkey")?;
     let key = VerifyingKey::from_bytes(&pk)
         .map_err(|_| Error::Untrusted(format!("{what}: bad pubkey")))?;

@@ -26,15 +26,28 @@ struct SphereConsoleIOS: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(bridge.mode != .street)
             if bridge.mode == .street {
+                // Back to orbit, plus the sat/street toggle: the glyph shows the surface a
+                // tap would switch TO.
                 VStack {
                     Spacer()
-                    Button(action: { bridge.backToGlobe() }) {
-                        OrbitGlyphShared()
-                            .frame(width: 56, height: 56)
-                            .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
-                            .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                    HStack(spacing: 14) {
+                        Button(action: { bridge.backToGlobe() }) {
+                            OrbitGlyphShared()
+                                .frame(width: 56, height: 56)
+                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        Button(action: { bridge.toggleImagery() }) {
+                            Image(systemName: bridge.streetImagery == .mutedStandard ? "globe.americas.fill" : "map")
+                                .font(.system(size: 20, weight: .light))
+                                .foregroundColor(Color(red: 0.81, green: 0.88, blue: 1.0))
+                                .frame(width: 56, height: 56)
+                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                     .padding(.bottom, 16)
                 }
             }
@@ -55,14 +68,17 @@ struct SphereConsoleIOS: View {
             bridge.onVouch = { [weak model] nodeId, pubkey, handle in
                 Task { _ = await model?.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle) }
             }
+            bridge.onFederate = { [weak model] act, gid in
+                Task { await model?.federateAct(act, subjectGroupId: gid) }
+            }
             bridge.onSponsor = { [weak model] nodeId, handle in
                 Task { _ = await model?.sponsorFor(nodeId: nodeId, handle: handle) }
             }
             bridge.onInviteRedeem = { [weak model] payload in
                 Task { await model?.redeemInvite(payload) }
             }
-            bridge.onGame = { [weak model] act, kind, text, to in
-                Task { await model?.gameAct(act, kind: kind, text: text, to: to) }
+            bridge.onGame = { [weak model] act, kind, text, to, solo in
+                Task { await model?.gameAct(act, kind: kind, text: text, to: to, solo: solo) }
             }
             bridge.onDeviceRole = { [weak model] roleRaw, owner in
                 guard let role = DeviceRole(rawValue: roleRaw) else { return }
@@ -134,6 +150,14 @@ struct OrbitGlyphShared: View {
 final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler, MKMapViewDelegate, WKNavigationDelegate {
     enum Mode { case globe, street }
     @Published var mode: Mode = .globe
+    // The dived-in surface's imagery. Satellite is the default at EVERY zoom — the dive must
+    // never silently trade the satellite globe for a vector street map. Street view is a
+    // choice, made with the glyph beside the orbit button.
+    @Published var streetImagery: MKMapType = .hybridFlyover
+    func toggleImagery() {
+        streetImagery = streetImagery == .mutedStandard ? .hybridFlyover : .mutedStandard
+        map?.mapType = streetImagery
+    }
 
     weak var web: WKWebView?
     weak var map: MKMapView?
@@ -145,9 +169,10 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onUnenroll: (() -> Void)?
     var onSetHuman: ((String) -> Void)?
     var onVouch: ((String, String, String) -> Void)?
+    var onFederate: ((String, String) -> Void)?
     var onSponsor: ((String, String) -> Void)?
     var onInviteRedeem: ((String) -> Void)?
-    var onGame: ((String, String?, String, String) -> Void)?
+    var onGame: ((String, String?, String, String, Bool) -> Void)?
     var onDeviceRole: ((String, String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
@@ -313,6 +338,11 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                    let handle = body["handle"] as? String {
                     self.onVouch?(nodeId, pubkey, handle)
                 }
+            case "federateAct":
+                if let gid = body["group_id"] as? String,
+                   let act = body["act"] as? String {
+                    self.onFederate?(act, gid)
+                }
             case "deviceRole":
                 if let roleRaw = body["role"] as? String {
                     self.onDeviceRole?(roleRaw, body["owner"] as? String ?? "")
@@ -321,7 +351,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 // game_kind, not "kind" — the routing key would be overwritten (see Mac bridge).
                 if let act = body["act"] as? String {
                     self.onGame?(act, body["game_kind"] as? String,
-                                 body["text"] as? String ?? "", body["to"] as? String ?? "")
+                                 body["text"] as? String ?? "", body["to"] as? String ?? "",
+                                 body["solo"] as? Bool ?? false)
                 }
             case "setHuman":
                 if let name = body["name"] as? String, !name.isEmpty { self.onSetHuman?(name) }
@@ -442,7 +473,7 @@ struct MeshMapViewIOS: UIViewRepresentable {
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.overrideUserInterfaceStyle = .dark
-        map.mapType = .mutedStandard
+        map.mapType = bridge.streetImagery
         map.pointOfInterestFilter = .includingAll
         map.delegate = bridge
         bridge.map = map

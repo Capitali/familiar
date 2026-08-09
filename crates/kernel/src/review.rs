@@ -123,6 +123,34 @@ pub fn reaches_network(script: &str) -> bool {
     ])
 }
 
+/// The marker a declared-actuator wrapper script carries (`# familiar:actuate <surface>
+/// <label>`), so classification never depends on guessing what a vendor CLI is called.
+pub const ACTUATE_MARKER: &str = "familiar:actuate";
+
+/// Does this script drive a *device* — a control surface in the physical world?
+///
+/// The sibling of [`reaches_network`], gating execution on `allow_actuate` (ADR-0032): a
+/// script that commands a device runs only when the human has opened the actuate gate,
+/// wherever the script came from — the declared wrappers carry [`ACTUATE_MARKER`], and the
+/// keyword family stops the plain ways an *authored* script would reach a device driver
+/// while the gate is shut. Reading about devices (a config file, a roster) is not flagged;
+/// only command paths are.
+pub fn reaches_device_control(script: &str) -> bool {
+    let s = script.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
+    s.contains(ACTUATE_MARKER)
+        || has(&[
+            // the declared BLE strip's own CLI + the BLE stacks an authored script would use
+            "motorlights",
+            "sp548e",
+            "bleak",
+            "gatttool",
+            "blueutil",
+            "bluetoothctl",
+            "corebluetooth",
+        ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +171,22 @@ mod tests {
         assert!(!reaches_network("arp -a -n"));
         assert!(!reaches_network("sysctl -n hw.ncpu"));
         assert!(!reaches_network("ps aux | head"));
+    }
+
+    #[test]
+    fn reaches_device_control_flags_the_marker_and_ble_tools_not_local_perception() {
+        // The declared wrapper's marker is the primary signal.
+        assert!(reaches_device_control(
+            "#!/bin/sh\n# familiar:actuate lights dim\ncat /tmp/light.txt\n"
+        ));
+        // The plain ways an authored script would reach a device driver.
+        assert!(reaches_device_control("python motorlights.py off"));
+        assert!(reaches_device_control("blueutil --power 0"));
+        assert!(reaches_device_control("gatttool -b AA:BB -w"));
+        // Reading ABOUT devices is not driving them.
+        assert!(!reaches_device_control("cat actuators.json"));
+        assert!(!reaches_device_control("#!/bin/sh\nsysctl -n hw.ncpu\n"));
+        assert!(!reaches_device_control("system_profiler SPUSBDataType"));
     }
 
     #[test]

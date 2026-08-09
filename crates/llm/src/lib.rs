@@ -19,6 +19,13 @@ use familiar_kernel::guard::{self, Action, ActionKind, Decision};
 /// per-request network timeout, so the adapter times out first when it can.
 pub const DEFAULT_ADAPTER_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// One consult at a time per process. The adapter contract is a shared
+/// `llm/prompt.txt` → `llm/response.json` pair, so two concurrent consults would cross
+/// their prompts and answers. The daemon is one process running several consulting
+/// threads (the cycle, the mesh's changeling forge); this serializes them. A CLI
+/// consult racing the daemon cross-process remains possible — pre-existing, unchanged.
+static CONSULT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The result of a consult attempt.
 pub enum Outcome {
     /// The guard refused (boundary closed, or adapter missing/failed). No reach occurred.
@@ -44,6 +51,8 @@ pub fn consult(dir: &Path, prompt: &str) -> io::Result<Outcome> {
 /// `Refused`. Exit code 2 is the adapter contract for "every provider
 /// rate-limited" and maps to [`Outcome::RateLimited`].
 pub fn consult_with(dir: &Path, prompt: &str, timeout: Duration) -> io::Result<Outcome> {
+    // Poison-tolerant: a panicked consult must not silence the LLM forever.
+    let _serial = CONSULT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let b = boundary::load(dir)?;
     let verdict = guard::evaluate(&Action::new(ActionKind::Llm, "llm-provider"), &b);
     if verdict.decision != Decision::Allow {
@@ -140,6 +149,31 @@ mod tests {
             Outcome::RateLimited(why) => assert!(why.contains("rate-limited")),
             Outcome::Refused(why) => panic!("exit 2 must be RateLimited, got Refused({why})"),
             Outcome::Response(_) => panic!("exit 2 must not be a response"),
+        }
+    }
+
+    #[test]
+    fn consults_serialize_within_the_process() {
+        // The adapter contract is one shared prompt.txt → response.json pair; two threads
+        // consulting at once must not cross their prompts. The adapter echoes the prompt
+        // back after a pause — interleaving would hand at least one caller the other's words.
+        let t = open_dir_with_adapter(
+            "serial",
+            "#!/bin/sh\ncp \"$(dirname \"$0\")/prompt.txt\" /tmp/familiar_llm_serial_$$ \n\
+             sleep 1\ncp /tmp/familiar_llm_serial_$$ \"$(dirname \"$0\")/response.json\"\n\
+             rm -f /tmp/familiar_llm_serial_$$\n",
+        );
+        let dir_a = t.0.clone();
+        let dir_b = t.0.clone();
+        let a = std::thread::spawn(move || consult(&dir_a, "prompt-alpha").unwrap());
+        let b = std::thread::spawn(move || consult(&dir_b, "prompt-beta").unwrap());
+        let (ra, rb) = (a.join().unwrap(), b.join().unwrap());
+        match (ra, rb) {
+            (Outcome::Response(x), Outcome::Response(y)) => {
+                assert_eq!(x, "prompt-alpha", "each caller got back its own words");
+                assert_eq!(y, "prompt-beta", "each caller got back its own words");
+            }
+            _ => panic!("both serialized consults must succeed"),
         }
     }
 

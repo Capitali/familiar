@@ -27,12 +27,29 @@ pub const STRIKES_OUT: u32 = 2;
 /// Default turn clocks — snappy enough to feel like a game, long enough for a household.
 pub const RIDDLE_TURN_SECS: i64 = 15 * 60;
 pub const CAMPFIRE_TURN_SECS: i64 = 60 * 60;
+/// The changeling's clock — one value serves the witness's writing, each voter's ballot,
+/// and the keeper's reveal grace (past which ANY door voids the round).
+pub const CHANGELING_TURN_SECS: i64 = 15 * 60;
+/// How long a forge may glow before the round returns to the witness (no strike — the
+/// door failed, not a human). Longer than the LLM adapter's own 120s deadline.
+pub const CHANGELING_FORGE_SECS: i64 = 180;
+/// Solo ("two never happened") is always three rounds — enough to mean something, short
+/// enough for a nightcap.
+pub const CHANGELING_SOLO_ROUNDS: u32 = 3;
+/// The ballot the clock casts for a silent voter.
+pub const ABSTAIN: u8 = 255;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GameKind {
     Riddle,
     Campfire,
+    Changeling,
+    /// A kind this build does not know. It parses (so one new game can never again break a
+    /// door's whole RecordSync — the hazard Changeling itself created for older doors),
+    /// absorbs, and otherwise sits inert: tick ignores it, begin refuses it.
+    #[serde(other)]
+    Unknown,
 }
 
 /// A player is a HUMAN (Ian's law of the fire: games are played between humans). The handle
@@ -67,6 +84,17 @@ pub struct Entry {
     /// Riddle only: whether the judge called this guess correct.
     #[serde(default)]
     pub correct: bool,
+}
+
+/// One changeling ballot. Public in state on purpose: the vote is not the secret — only
+/// the truth's index is, and that never rides the wire until the keeper reveals it.
+/// Consoles hide *choices* until the reveal cosmetically; the record does not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Vote {
+    pub handle: String,
+    /// 0..2, or [`ABSTAIN`].
+    pub choice: u8,
+    pub ts: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +132,46 @@ pub struct GameState {
     /// The judge's own words on how it decided — shown verbatim on the console.
     #[serde(default)]
     pub verdict: String,
+    // ---- the changeling's round machinery (all defaulted: absent = not a changeling) ----
+    /// "" | "witness" | "forging" | "voting" | "reveal-wait".
+    #[serde(default)]
+    pub phase: String,
+    /// 1-based round counter; 0 on other kinds.
+    #[serde(default)]
+    pub round: u32,
+    #[serde(default)]
+    pub rounds_total: u32,
+    /// The round's witness HANDLE; "" = the familiar itself (solo).
+    #[serde(default)]
+    pub witness: String,
+    /// node_id of the door that claimed this round's forge — the only door holding the
+    /// truth's index (in its door-local file, never in this state).
+    #[serde(default)]
+    pub keeper: String,
+    /// hex sha256("{id}|{round}|{salt}|{truth_idx}") — the keeper's promise, checkable by
+    /// any door once the salt is revealed. The salt itself stays door-local until then:
+    /// over a 3-value domain, a commitment WITH its salt would be brute-forced in three
+    /// hashes, and `GET /mesh/records` serves this whole state to anyone at the port.
+    #[serde(default)]
+    pub commit: String,
+    /// The open round's three shuffled, anonymous lines. Exactly one is human.
+    #[serde(default)]
+    pub lines: Vec<String>,
+    /// This round's ballots.
+    #[serde(default)]
+    pub votes: Vec<Vote>,
+    /// None while the truth is secret; Some(idx) only once the keeper reveals.
+    #[serde(default)]
+    pub truth: Option<u8>,
+    /// Published at reveal so any door can verify [`GameState::commit`].
+    #[serde(default)]
+    pub reveal_salt: String,
+    /// When the last ballot landed (0 = still voting) — anchors the keeper's reveal grace.
+    #[serde(default)]
+    pub votes_done_at: i64,
+    /// "two never happened": the familiar witnesses about the mesh's own record.
+    #[serde(default)]
+    pub solo: bool,
     pub seq: u64,
     pub updated: i64,
 }
@@ -122,6 +190,9 @@ pub struct GameAct {
     pub to: String,
     #[serde(default)]
     pub turn_secs: Option<i64>,
+    /// begin (changeling): light "two never happened" even with other humans present.
+    #[serde(default)]
+    pub solo: bool,
 }
 
 // ---- the riddle bank ----------------------------------------------------------------
@@ -250,6 +321,14 @@ pub fn tick(state: &mut GameState, now: i64) -> bool {
     if state.status != "open" {
         return false;
     }
+    match state.kind {
+        // An unknown kind absorbed from a newer door sits inert — never ticked, never
+        // expired; the newer doors run its clock.
+        GameKind::Unknown => return false,
+        // The changeling has phases, not just turns — its own machine.
+        GameKind::Changeling => return changeling_tick(state, now),
+        GameKind::Riddle | GameKind::Campfire => {}
+    }
     // turn_secs is clamped ≥ 60 at begin, so this loop always terminates.
     while now - state.holder_since >= state.turn_secs {
         let overdue = state.holder.clone();
@@ -277,6 +356,8 @@ pub fn tick(state: &mut GameState, now: i64) -> bool {
                     settle_campfire(state);
                     return true;
                 }
+                // Both branch out above this loop.
+                GameKind::Changeling | GameKind::Unknown => unreachable!(),
             };
             break;
         }
@@ -305,13 +386,327 @@ fn settle_campfire(state: &mut GameState) {
     state.status = "done".into();
     if let Some((idx, why)) = line_of_the_story(&state.entries) {
         state.winner = state.entries[idx].node_id.clone();
-        state.verdict = format!(
-            "line of the story: “{}” — {}",
-            state.entries[idx].text, why
-        );
+        state.verdict = format!("line of the story: “{}” — {}", state.entries[idx].text, why);
     } else {
         state.verdict = "the fire went out before anyone spoke".into();
     }
+}
+
+// ---- the changeling's round machinery ------------------------------------------------
+
+/// A/B/C for a line index — the console's language and the chronicle's.
+fn letter(i: u8) -> char {
+    (b'A' + i.min(2)) as char
+}
+
+/// Living players who may vote this round: everyone but the witness (solo: everyone —
+/// the witness is the familiar, which holds no seat).
+fn voters(s: &GameState) -> Vec<String> {
+    s.players
+        .iter()
+        .filter(|p| !p.eliminated && p.handle != s.witness)
+        .map(|p| p.handle.clone())
+        .collect()
+}
+
+/// The next living voter without a ballot, scanning player order — "who the mesh waits on".
+fn next_unvoted_voter(s: &GameState) -> Option<String> {
+    voters(s)
+        .into_iter()
+        .find(|h| !s.votes.iter().any(|v| &v.handle == h))
+}
+
+/// The keeper's forge landed: publish the three anonymous lines and the commitment, open
+/// the ballot. Called by the mesh layer once the truth's index is safely door-local.
+pub fn publish_round(s: &mut GameState, lines: [String; 3], commit: &str, now: i64) {
+    s.lines = lines.to_vec();
+    s.commit = commit.to_string();
+    s.votes.clear();
+    s.truth = None;
+    s.reveal_salt.clear();
+    s.votes_done_at = 0;
+    s.phase = "voting".into();
+    if let Some(v) = next_unvoted_voter(s) {
+        s.holder = v;
+    }
+    s.holder_since = now;
+    s.updated = now;
+    s.seq += 1;
+}
+
+/// Every ballot is in — the round waits on the keeper's hand.
+fn complete_voting(s: &mut GameState, now: i64) {
+    s.votes_done_at = now;
+    s.phase = "reveal-wait".into();
+    // Anchor the badge on whoever the reveal is *about* (multiplayer: the witness;
+    // solo: the lone human) — cosmetic, no clock rides on the holder here.
+    if !s.witness.is_empty() {
+        s.holder = s.witness.clone();
+    }
+    s.holder_since = now;
+}
+
+/// The keeper opens its hand: the truth and its salt are published (any door can verify
+/// the commitment), the round is scored, chronicled, and the fire moves on.
+pub fn reveal_round(s: &mut GameState, truth_idx: u8, salt: &str, now: i64) {
+    s.truth = Some(truth_idx);
+    s.reveal_salt = salt.to_string();
+    let mut found: Vec<String> = Vec::new();
+    let mut fooled: Vec<String> = Vec::new();
+    for v in s.votes.clone() {
+        if v.choice == ABSTAIN {
+            continue; // silence scores no one
+        }
+        if v.choice == truth_idx {
+            found.push(v.handle.clone());
+            if let Some(p) = s.players.iter_mut().find(|p| p.handle == v.handle) {
+                p.score += 1;
+            }
+        } else {
+            fooled.push(v.handle.clone());
+            // One point to the witness per fooled voter. The familiar (solo witness,
+            // handle "") holds no seat and scores nothing — it plays to lose gracefully.
+            if let Some(p) = s.players.iter_mut().find(|p| p.handle == s.witness) {
+                p.score += 1;
+            }
+        }
+    }
+    let truth_line = s.lines.get(truth_idx as usize).cloned().unwrap_or_default();
+    let outcome = match (found.is_empty(), fooled.is_empty()) {
+        (false, true) => format!("{} saw it plainly", found.join(", ")),
+        (true, false) => format!("the changelings took {}", fooled.join(", ")),
+        (false, false) => format!(
+            "{} saw it; the changelings took {}",
+            found.join(", "),
+            fooled.join(", ")
+        ),
+        (true, true) => "nobody voted — the truth kept its own company".into(),
+    };
+    chronicle(
+        s,
+        format!(
+            "round {} — the truth was line {}: “{}”. {}.",
+            s.round,
+            letter(truth_idx),
+            truth_line,
+            outcome
+        ),
+        now,
+    );
+    advance_round(s, now);
+    s.updated = now;
+    s.seq += 1;
+}
+
+/// A round that ends without its truth (silent keeper, lighter's close): no scores —
+/// the mesh does not guess — and the fire moves on.
+pub fn void_round(s: &mut GameState, why: &str, now: i64) {
+    chronicle(s, format!("round {} — {why}", s.round), now);
+    advance_round(s, now);
+    s.updated = now;
+    s.seq += 1;
+}
+
+/// The familiar's chronicle entry: history that survives the per-round reset.
+fn chronicle(s: &mut GameState, text: String, now: i64) {
+    s.entries.push(Entry {
+        node_id: String::new(),
+        label: "the familiar".into(),
+        text,
+        ts: now,
+        correct: false,
+    });
+}
+
+/// Clear the round table and seat the next witness — or settle the game.
+fn advance_round(s: &mut GameState, now: i64) {
+    s.lines.clear();
+    s.votes.clear();
+    s.commit.clear();
+    s.keeper.clear();
+    s.reveal_salt.clear();
+    s.truth = None;
+    s.votes_done_at = 0;
+    if s.round >= s.rounds_total {
+        settle_changeling(s);
+        return;
+    }
+    s.round += 1;
+    if s.solo {
+        s.phase = "forging".into(); // the familiar witnesses; a door claims the forge
+        s.holder_since = now;
+    } else {
+        s.witness = next_holder(&s.players, &s.witness).unwrap_or_default();
+        if s.witness.is_empty() {
+            settle_changeling(s);
+            return;
+        }
+        s.phase = "witness".into();
+        s.holder = s.witness.clone();
+        s.holder_since = now;
+    }
+}
+
+/// Final settle: highest score takes it; a tie keeps the mesh's counsel. Solo: the human
+/// wins by seeing the truth in at least two of the three rounds.
+fn settle_changeling(s: &mut GameState) {
+    s.status = "done".into();
+    s.phase.clear();
+    let scores: Vec<String> = s
+        .players
+        .iter()
+        .map(|p| format!("{} {}", p.handle, p.score))
+        .collect();
+    if s.solo {
+        let n = s.players.first().map(|p| p.score).unwrap_or(0);
+        if n >= 2 {
+            s.winner = s
+                .players
+                .first()
+                .map(|p| p.handle.clone())
+                .unwrap_or_default();
+            s.verdict = format!(
+                "you saw the truth {n} of {} times — the changelings failed",
+                s.rounds_total
+            );
+        } else {
+            s.winner.clear();
+            s.verdict = format!(
+                "you saw the truth {n} of {} times — the changelings walked among us unseen",
+                s.rounds_total
+            );
+        }
+        return;
+    }
+    let best = s.players.iter().map(|p| p.score).max().unwrap_or(0);
+    let leaders: Vec<&Player> = s.players.iter().filter(|p| p.score == best).collect();
+    if leaders.len() == 1 {
+        s.winner = leaders[0].handle.clone();
+        s.verdict = format!(
+            "{} read the fire best — {}",
+            leaders[0].handle,
+            scores.join(" · ")
+        );
+    } else {
+        s.winner.clear();
+        s.verdict = format!(
+            "a tie at the fire — the mesh keeps its own counsel ({})",
+            scores.join(" · ")
+        );
+    }
+}
+
+/// The changeling's clock, phase by phase. Pure over (state, now), so every door reaches
+/// the same expiry decisions independently — including voiding a silent keeper's round.
+fn changeling_tick(s: &mut GameState, now: i64) -> bool {
+    let mut changed = false;
+    loop {
+        match s.phase.as_str() {
+            "witness" => {
+                if now - s.holder_since < s.turn_secs {
+                    break;
+                }
+                changed = true;
+                let overdue = s.witness.clone();
+                if let Some(p) = s.players.iter_mut().find(|p| p.handle == overdue) {
+                    p.strikes += 1;
+                    if p.strikes >= STRIKES_OUT {
+                        p.eliminated = true;
+                    }
+                }
+                if s.players.iter().filter(|p| !p.eliminated).count() < 2 {
+                    chronicle(s, "the fire ran out of humans".into(), now);
+                    settle_changeling(s);
+                    break;
+                }
+                match next_holder(&s.players, &overdue) {
+                    Some(next) => {
+                        s.witness = next.clone();
+                        s.holder = next;
+                        s.holder_since += s.turn_secs; // debt paid turn by turn
+                        if s.holder_since > now {
+                            s.holder_since = now;
+                        }
+                    }
+                    None => {
+                        settle_changeling(s);
+                        break;
+                    }
+                }
+            }
+            "forging" => {
+                if now - s.holder_since < CHANGELING_FORGE_SECS {
+                    break;
+                }
+                changed = true;
+                // The door failed, not a human: no strike, ever.
+                s.keeper.clear();
+                s.commit.clear();
+                s.lines.clear();
+                if s.solo {
+                    s.holder_since = now; // the next door to touch re-claims the forge
+                } else {
+                    s.phase = "witness".into();
+                    s.holder = s.witness.clone();
+                    s.holder_since = now; // "the forge went cold — speak your line again"
+                }
+                break;
+            }
+            "voting" => {
+                if now - s.holder_since < s.turn_secs {
+                    break;
+                }
+                changed = true;
+                let overdue = s.holder.clone();
+                if let Some(p) = s.players.iter_mut().find(|p| p.handle == overdue) {
+                    p.strikes += 1;
+                    if p.strikes >= STRIKES_OUT {
+                        p.eliminated = true;
+                    }
+                }
+                if !s.votes.iter().any(|v| v.handle == overdue) {
+                    s.votes.push(Vote {
+                        handle: overdue,
+                        choice: ABSTAIN,
+                        ts: now,
+                    });
+                }
+                match next_unvoted_voter(s) {
+                    Some(next) => {
+                        s.holder = next;
+                        s.holder_since += s.turn_secs;
+                        if s.holder_since > now {
+                            s.holder_since = now;
+                        }
+                    }
+                    None => {
+                        complete_voting(s, now);
+                        // fall through to reveal-wait on the next loop pass
+                    }
+                }
+            }
+            "reveal-wait" => {
+                if s.votes_done_at > 0 && now - s.votes_done_at >= s.turn_secs {
+                    void_round(s, "the keeper went silent — the round is voided", now);
+                    changed = true;
+                    if s.status != "open" {
+                        break;
+                    }
+                    continue; // the next round's clocks start from the void
+                }
+                break;
+            }
+            _ => break,
+        }
+        if s.status != "open" {
+            break;
+        }
+    }
+    if changed {
+        s.updated = now;
+        s.seq += 1;
+    }
+    changed
 }
 
 /// Apply one member act. `actor` is the verified signer's node_id; the transport has already
@@ -319,8 +714,8 @@ fn settle_campfire(state: &mut GameState) {
 pub fn apply_act(
     state: &mut Option<GameState>,
     act: &GameAct,
-    actor: &str,        // the HUMAN handle acting (any of their devices)
-    actor_label: &str,  // the acting device's label — entries attribute device AND human
+    actor: &str,       // the HUMAN handle acting (any of their devices)
+    actor_label: &str, // the acting device's label — entries attribute device AND human
     players_at_begin: &[Player],
     now: i64,
 ) -> Result<String> {
@@ -334,7 +729,14 @@ pub fn apply_act(
                     "a game is already burning — finish or close it first".into(),
                 ));
             }
-            let kind = act.kind.ok_or_else(|| Error::Untrusted("which game?".into()))?;
+            let kind = act
+                .kind
+                .ok_or_else(|| Error::Untrusted("which game?".into()))?;
+            if kind == GameKind::Unknown {
+                return Err(Error::Untrusted(
+                    "this door does not know that game — update the familiar first".into(),
+                ));
+            }
             if actor.is_empty() {
                 return Err(Error::Untrusted(
                     "the fire knows humans — say who you are before lighting a game".into(),
@@ -346,9 +748,22 @@ pub fn apply_act(
                     "no players — no established humans are present to invite".into(),
                 ));
             }
+            let solo = kind == GameKind::Changeling && (act.solo || players.len() == 1);
+            if kind == GameKind::Changeling && !solo && players.len() < 2 {
+                return Err(Error::Untrusted(
+                    "the changeling needs at least two humans — or begin solo".into(),
+                ));
+            }
+            if solo {
+                // "Two never happened" is one human against the record — the lighter alone.
+                players.retain(|p| p.handle == actor);
+            }
             // The starter takes the first turn: they're demonstrably present.
             players.sort_by_key(|p| p.handle != actor);
-            let mut used = state.as_ref().map(|s| s.riddles_used.clone()).unwrap_or_default();
+            let mut used = state
+                .as_ref()
+                .map(|s| s.riddles_used.clone())
+                .unwrap_or_default();
             let riddle = match kind {
                 GameKind::Riddle => {
                     let bank = riddle_bank();
@@ -371,13 +786,16 @@ pub fn apply_act(
                     let pick = fresh[(now as usize) % fresh.len()];
                     Some((pick, bank[pick].clone()))
                 }
-                GameKind::Campfire => None,
+                GameKind::Campfire | GameKind::Changeling | GameKind::Unknown => None,
             };
-            let turn_secs = act.turn_secs.unwrap_or(match kind {
-                GameKind::Riddle => RIDDLE_TURN_SECS,
-                GameKind::Campfire => CAMPFIRE_TURN_SECS,
-            })
-            .clamp(60, 24 * 3600);
+            let turn_secs = act
+                .turn_secs
+                .unwrap_or(match kind {
+                    GameKind::Riddle => RIDDLE_TURN_SECS,
+                    GameKind::Campfire => CAMPFIRE_TURN_SECS,
+                    GameKind::Changeling | GameKind::Unknown => CHANGELING_TURN_SECS,
+                })
+                .clamp(60, 24 * 3600);
             let mut riddles_used = used;
             if let Some((idx, _)) = &riddle {
                 riddles_used.push(*idx);
@@ -392,7 +810,8 @@ pub fn apply_act(
                     correct: false,
                 });
             }
-            *state = Some(GameState {
+            let players_n = players.len() as u32;
+            let mut s = GameState {
                 kind,
                 id: format!("{kind:?}-{now}").to_lowercase(),
                 started_by: actor.to_string(),
@@ -407,9 +826,34 @@ pub fn apply_act(
                 riddles_used,
                 winner: String::new(),
                 verdict: String::new(),
+                phase: String::new(),
+                round: 0,
+                rounds_total: 0,
+                witness: String::new(),
+                keeper: String::new(),
+                commit: String::new(),
+                lines: Vec::new(),
+                votes: Vec::new(),
+                truth: None,
+                reveal_salt: String::new(),
+                votes_done_at: 0,
+                solo,
                 seq: 1,
                 updated: now,
-            });
+            };
+            if kind == GameKind::Changeling {
+                s.round = 1;
+                if solo {
+                    s.rounds_total = CHANGELING_SOLO_ROUNDS;
+                    s.witness = String::new(); // the familiar witnesses about the record
+                    s.phase = "forging".into(); // a door claims the forge on its next touch
+                } else {
+                    s.rounds_total = players_n;
+                    s.witness = actor.to_string(); // the lighter is demonstrably present
+                    s.phase = "witness".into();
+                }
+            }
+            *state = Some(s);
             Ok("the game is lit".into())
         }
         "guess" | "line" => {
@@ -425,6 +869,35 @@ pub fn apply_act(
                 return Err(Error::Untrusted(format!(
                     "one line, 1–{MAX_LINE_CHARS} characters"
                 )));
+            }
+            if s.kind == GameKind::Changeling {
+                // The witness's truth. It is NOT pushed as an entry and NOT stored in
+                // state — replicated state is readable off any door's port, and the
+                // truth must exist only inside the shuffled lines. The transport layer
+                // (which still holds the act's text) claims the forge with it.
+                if act.act != "line" {
+                    return Err(Error::Untrusted(
+                        "the changeling has no guesses — vote when the lines appear".into(),
+                    ));
+                }
+                match s.phase.as_str() {
+                    "witness" => {}
+                    "forging" => return Err(Error::Untrusted("the forge is already lit".into())),
+                    _ => {
+                        return Err(Error::Untrusted(
+                            "not your round to witness — the fire is elsewhere".into(),
+                        ))
+                    }
+                }
+                if s.witness != actor {
+                    return Err(Error::Untrusted("not your round to witness".into()));
+                }
+                s.phase = "forging".into();
+                s.keeper.clear();
+                s.holder_since = now; // the forge clock starts
+                s.updated = now;
+                s.seq += 1;
+                return Ok("your truth is in the forge — the changelings are coming".into());
             }
             let reply;
             let correct = match (&s.kind, &s.riddle) {
@@ -483,6 +956,60 @@ pub fn apply_act(
             s.seq += 1;
             Ok(reply)
         }
+        "vote" => {
+            let s = state
+                .as_mut()
+                .filter(|s| s.status == "open")
+                .ok_or_else(|| Error::Untrusted("no game burning".into()))?;
+            if s.kind != GameKind::Changeling {
+                return Err(Error::Untrusted("this game has no ballots".into()));
+            }
+            if s.phase != "voting" {
+                return Err(Error::Untrusted(
+                    "the lines are not on the table — wait for the forge".into(),
+                ));
+            }
+            if actor == s.witness {
+                return Err(Error::Untrusted(
+                    "the witness knows the truth — witnesses do not vote".into(),
+                ));
+            }
+            if !s.players.iter().any(|p| p.handle == actor && !p.eliminated) {
+                return Err(Error::Untrusted("you have no seat at this fire".into()));
+            }
+            let choice: u8 = act
+                .text
+                .trim()
+                .parse()
+                .ok()
+                .filter(|c| *c <= 2)
+                .ok_or_else(|| Error::Untrusted("vote 0, 1 or 2 — the line you believe".into()))?;
+            match s.votes.iter_mut().find(|v| v.handle == actor) {
+                Some(v) => {
+                    v.choice = choice;
+                    v.ts = now;
+                }
+                None => s.votes.push(Vote {
+                    handle: actor.to_string(),
+                    choice,
+                    ts: now,
+                }),
+            }
+            if s.holder == actor {
+                match next_unvoted_voter(s) {
+                    Some(next) => {
+                        s.holder = next;
+                        s.holder_since = now;
+                    }
+                    None => complete_voting(s, now),
+                }
+            } else if next_unvoted_voter(s).is_none() {
+                complete_voting(s, now);
+            }
+            s.updated = now;
+            s.seq += 1;
+            Ok("your vote is cast — you may change it until the reveal".into())
+        }
         "pass" => {
             let s = state
                 .as_mut()
@@ -490,6 +1017,39 @@ pub fn apply_act(
                 .ok_or_else(|| Error::Untrusted("no game burning".into()))?;
             if s.holder != actor {
                 return Err(Error::Untrusted("not your turn — watch the ember".into()));
+            }
+            if s.kind == GameKind::Changeling {
+                match s.phase.as_str() {
+                    "voting" => {
+                        // An explicit abstention — the honest "I cannot tell".
+                        match s.votes.iter_mut().find(|v| v.handle == actor) {
+                            Some(v) => {
+                                v.choice = ABSTAIN;
+                                v.ts = now;
+                            }
+                            None => s.votes.push(Vote {
+                                handle: actor.to_string(),
+                                choice: ABSTAIN,
+                                ts: now,
+                            }),
+                        }
+                        match next_unvoted_voter(s) {
+                            Some(next) => {
+                                s.holder = next;
+                                s.holder_since = now;
+                            }
+                            None => complete_voting(s, now),
+                        }
+                        s.updated = now;
+                        s.seq += 1;
+                        return Ok("abstained — silence scores no one".into());
+                    }
+                    _ => {
+                        return Err(Error::Untrusted(
+                            "the round waits for your truth — or let the clock decide".into(),
+                        ))
+                    }
+                }
             }
             let next = if act.to.is_empty() {
                 next_holder(&s.players, actor)
@@ -527,6 +1087,23 @@ pub fn apply_act(
                         s.riddle.as_ref().map(|r| r.hint.as_str()).unwrap_or("—")
                     );
                 }
+                GameKind::Changeling => {
+                    // The open round dies untold (no scores); the tally so far stands.
+                    chronicle(
+                        s,
+                        format!("round {} — closed by its lighter's hand", s.round),
+                        now,
+                    );
+                    settle_changeling(s);
+                    if !s.verdict.is_empty() {
+                        s.verdict = format!("closed by its lighter's hand — {}", s.verdict);
+                    }
+                }
+                GameKind::Unknown => {
+                    return Err(Error::Untrusted(
+                        "this door does not know that game — update the familiar first".into(),
+                    ))
+                }
             }
             s.updated = now;
             s.seq += 1;
@@ -561,7 +1138,12 @@ pub fn save(dir: &Path, state: &GameState) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_vec_pretty(state)?)?;
+    // Temp + rename (ADR-0029 §2): this file is read-modify-written concurrently by the
+    // act handler, the worldview tick, and record-sync absorb — a torn read would parse
+    // as "no game burning" and a fresh begin could smother a live fire.
+    let tmp = dir.join(format!("{GAME_FILE}.tmp"));
+    std::fs::write(&tmp, serde_json::to_vec_pretty(state)?)?;
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -605,6 +1187,30 @@ pub struct GameView {
     pub winner: String,
     #[serde(default)]
     pub verdict: String,
+    // ---- changeling (straight copies — for this kind the STATE is already secret-free;
+    // the truth's index lives only in the keeper door's local file until the reveal) ----
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub round: u32,
+    #[serde(default)]
+    pub rounds_total: u32,
+    #[serde(default)]
+    pub witness: String,
+    #[serde(default)]
+    pub lines: Vec<String>,
+    #[serde(default)]
+    pub votes: Vec<Vote>,
+    #[serde(default)]
+    pub truth: Option<u8>,
+    /// The keeper's promise — consoles may verify it once the salt is revealed.
+    #[serde(default)]
+    pub commit: String,
+    /// "" until the keeper opens its hand.
+    #[serde(default)]
+    pub reveal_salt: String,
+    #[serde(default)]
+    pub solo: bool,
 }
 
 pub fn view(state: &GameState) -> GameView {
@@ -629,6 +1235,16 @@ pub fn view(state: &GameState) -> GameView {
             .unwrap_or_default(),
         winner: state.winner.clone(),
         verdict: state.verdict.clone(),
+        phase: state.phase.clone(),
+        round: state.round,
+        rounds_total: state.rounds_total,
+        witness: state.witness.clone(),
+        lines: state.lines.clone(),
+        votes: state.votes.clone(),
+        truth: state.truth,
+        commit: state.commit.clone(),
+        reveal_salt: state.reveal_salt.clone(),
+        solo: state.solo,
     }
 }
 
@@ -673,14 +1289,31 @@ mod tests {
             text: text.into(),
             to: String::new(),
             turn_secs: None,
+            solo: false,
         };
-        apply_act(&mut state, &act("begin", "", Some(GameKind::Riddle)), "h0", "d0", &players(3), 1000).unwrap();
+        apply_act(
+            &mut state,
+            &act("begin", "", Some(GameKind::Riddle)),
+            "h0",
+            "d0",
+            &players(3),
+            1000,
+        )
+        .unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.holder, "h0", "the starter's HUMAN takes the first turn");
         let answer = s.riddle.as_ref().unwrap().answers[0].clone();
 
         // A wrong guess is kept and the ember moves round-robin.
-        apply_act(&mut state, &act("guess", "definitely wrong", None), "h0", "d0", &[], 1010).unwrap();
+        apply_act(
+            &mut state,
+            &act("guess", "definitely wrong", None),
+            "h0",
+            "d0",
+            &[],
+            1010,
+        )
+        .unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.holder, "h1", "the ember passes human to human");
         assert_eq!(s.entries.len(), 1);
@@ -691,11 +1324,25 @@ mod tests {
 
         // node1 passes; node2 solves.
         apply_act(&mut state, &act("pass", "", None), "h1", "d1", &[], 1030).unwrap();
-        apply_act(&mut state, &act("guess", &answer, None), "h2", "d2-second-device", &[], 1040).unwrap();
+        apply_act(
+            &mut state,
+            &act("guess", &answer, None),
+            "h2",
+            "d2-second-device",
+            &[],
+            1040,
+        )
+        .unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "done");
-        assert_eq!(s.winner, "h2", "the HUMAN wins, from whichever device answered");
-        assert_eq!(s.players.iter().find(|p| p.handle == "h2").unwrap().score, 1);
+        assert_eq!(
+            s.winner, "h2",
+            "the HUMAN wins, from whichever device answered"
+        );
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h2").unwrap().score,
+            1
+        );
     }
 
     /// The live break of 2026-08-08: all 16 cards spent, and every BEGIN errored — each
@@ -720,6 +1367,18 @@ mod tests {
             riddles_used: (0..bank_len).collect(),
             winner: "h0".into(),
             verdict: "solved".into(),
+            phase: String::new(),
+            round: 0,
+            rounds_total: 0,
+            witness: String::new(),
+            keeper: String::new(),
+            commit: String::new(),
+            lines: Vec::new(),
+            votes: Vec::new(),
+            truth: None,
+            reveal_salt: String::new(),
+            votes_done_at: 0,
+            solo: false,
             seq: 2,
             updated: 1100,
         });
@@ -729,11 +1388,15 @@ mod tests {
             text: String::new(),
             to: String::new(),
             turn_secs: None,
+            solo: false,
         };
         apply_act(&mut state, &begin, "h0", "d0", &players(2), 2000).unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "open", "the fire lights again on a spent bank");
-        assert!(s.riddle.is_some(), "a card was dealt from the re-opened bank");
+        assert!(
+            s.riddle.is_some(),
+            "a card was dealt from the re-opened bank"
+        );
         assert_eq!(s.riddles_used.len(), 1, "the cycle restarted fresh");
         assert_ne!(
             s.riddles_used[0],
@@ -747,8 +1410,18 @@ mod tests {
         let mut state: Option<GameState> = None;
         apply_act(
             &mut state,
-            &GameAct { act: "begin".into(), kind: Some(GameKind::Riddle), text: String::new(), to: String::new(), turn_secs: Some(60) },
-            "h0", "d0", &players(2), 0,
+            &GameAct {
+                act: "begin".into(),
+                kind: Some(GameKind::Riddle),
+                text: String::new(),
+                to: String::new(),
+                turn_secs: Some(60),
+                solo: false,
+            },
+            "h0",
+            "d0",
+            &players(2),
+            0,
         )
         .unwrap();
         let s = state.as_mut().unwrap();
@@ -757,28 +1430,94 @@ mod tests {
         tick(s, 60 * 4 + 1);
         assert_eq!(s.status, "done");
         assert!(!s.winner.is_empty(), "somebody is left standing");
-        assert!(s.players.iter().any(|p| p.eliminated), "somebody struck out");
+        assert!(
+            s.players.iter().any(|p| p.eliminated),
+            "somebody struck out"
+        );
     }
 
     #[test]
     fn the_campfire_gathers_lines_and_the_novel_line_takes_it() {
         let mut state: Option<GameState> = None;
-        let line = |t: &str| GameAct { act: "line".into(), kind: None, text: t.into(), to: String::new(), turn_secs: None };
+        let line = |t: &str| GameAct {
+            act: "line".into(),
+            kind: None,
+            text: t.into(),
+            to: String::new(),
+            turn_secs: None,
+            solo: false,
+        };
         apply_act(
             &mut state,
-            &GameAct { act: "begin".into(), kind: Some(GameKind::Campfire), text: String::new(), to: String::new(), turn_secs: None },
-            "h0", "d0", &players(2), 0,
+            &GameAct {
+                act: "begin".into(),
+                kind: Some(GameKind::Campfire),
+                text: String::new(),
+                to: String::new(),
+                turn_secs: None,
+                solo: false,
+            },
+            "h0",
+            "d0",
+            &players(2),
+            0,
         )
         .unwrap();
-        assert_eq!(state.as_ref().unwrap().entries.len(), 1, "the familiar opens the story");
-        apply_act(&mut state, &line("The dog walked to the river and waited."), "h0", "d0", &[], 10).unwrap();
-        apply_act(&mut state, &line("A zeppelin descended, silver and impossible."), "h1", "d1", &[], 20).unwrap();
-        apply_act(&mut state, &line("The dog walked back from the river."), "h0", "d0", &[], 30).unwrap();
+        assert_eq!(
+            state.as_ref().unwrap().entries.len(),
+            1,
+            "the familiar opens the story"
+        );
+        apply_act(
+            &mut state,
+            &line("The dog walked to the river and waited."),
+            "h0",
+            "d0",
+            &[],
+            10,
+        )
+        .unwrap();
+        apply_act(
+            &mut state,
+            &line("A zeppelin descended, silver and impossible."),
+            "h1",
+            "d1",
+            &[],
+            20,
+        )
+        .unwrap();
+        apply_act(
+            &mut state,
+            &line("The dog walked back from the river."),
+            "h0",
+            "d0",
+            &[],
+            30,
+        )
+        .unwrap();
         // Starter closes; the zeppelin line is the most novel.
-        apply_act(&mut state, &GameAct { act: "close".into(), kind: None, text: String::new(), to: String::new(), turn_secs: None }, "h0", "d0", &[], 40).unwrap();
+        apply_act(
+            &mut state,
+            &GameAct {
+                act: "close".into(),
+                kind: None,
+                text: String::new(),
+                to: String::new(),
+                turn_secs: None,
+                solo: false,
+            },
+            "h0",
+            "d0",
+            &[],
+            40,
+        )
+        .unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "done");
-        assert_eq!(s.winner, "h1", "novelty takes the line of the story — credited to the human");
+        assert_eq!(
+            s.winner, "h1",
+            "novelty takes the line of the story — credited to the human"
+        );
         assert!(s.verdict.contains("zeppelin"));
     }
 
@@ -787,8 +1526,18 @@ mod tests {
         let mut state: Option<GameState> = None;
         apply_act(
             &mut state,
-            &GameAct { act: "begin".into(), kind: Some(GameKind::Riddle), text: String::new(), to: String::new(), turn_secs: None },
-            "h0", "d0", &players(2), 0,
+            &GameAct {
+                act: "begin".into(),
+                kind: Some(GameKind::Riddle),
+                text: String::new(),
+                to: String::new(),
+                turn_secs: None,
+                solo: false,
+            },
+            "h0",
+            "d0",
+            &players(2),
+            0,
         )
         .unwrap();
         let v = view(state.as_ref().unwrap());
@@ -810,8 +1559,18 @@ mod tests {
         let mut state: Option<GameState> = None;
         apply_act(
             &mut state,
-            &GameAct { act: "begin".into(), kind: Some(GameKind::Campfire), text: String::new(), to: String::new(), turn_secs: None },
-            "h0", "d0", &players(2), 100,
+            &GameAct {
+                act: "begin".into(),
+                kind: Some(GameKind::Campfire),
+                text: String::new(),
+                to: String::new(),
+                turn_secs: None,
+                solo: false,
+            },
+            "h0",
+            "d0",
+            &players(2),
+            100,
         )
         .unwrap();
         let older = state.clone().unwrap();
@@ -837,9 +1596,376 @@ mod tests {
         fresh.updated = 300;
         absorb(&dir, &done).unwrap();
         absorb(&dir, &fresh).unwrap();
-        assert_eq!(load(&dir).unwrap().id, "campfire-9999", "the fresh fire survives the tombstone");
+        assert_eq!(
+            load(&dir).unwrap().id,
+            "campfire-9999",
+            "the fresh fire survives the tombstone"
+        );
         absorb(&dir, &done).unwrap(); // the tombstone echoing back must not re-smother it
         assert_eq!(load(&dir).unwrap().id, "campfire-9999");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- the changeling ----------------------------------------------------------------
+
+    fn c_act(a: &str, text: &str) -> GameAct {
+        GameAct {
+            act: a.into(),
+            kind: (a == "begin").then_some(GameKind::Changeling),
+            text: text.into(),
+            to: String::new(),
+            turn_secs: None,
+            solo: false,
+        }
+    }
+
+    /// begin (h0 witnesses) → truth line → the keeper publishes → votes → reveal.
+    fn changeling_to_voting(state: &mut Option<GameState>, now: i64) {
+        apply_act(state, &c_act("begin", ""), "h0", "d0", &players(3), now).unwrap();
+        apply_act(
+            state,
+            &c_act("line", "I fixed the pump before coffee."),
+            "h0",
+            "d0",
+            &[],
+            now + 5,
+        )
+        .unwrap();
+        let s = state.as_mut().unwrap();
+        assert_eq!(
+            s.phase, "forging",
+            "the truth lights the forge — and is not stored"
+        );
+        publish_round(
+            s,
+            [
+                "I fixed the pump before coffee.".into(),
+                "The kettle boiled twice this morning.".into(),
+                "A heron stood on the rail at dawn.".into(),
+            ],
+            "test-commit",
+            now + 10,
+        );
+    }
+
+    #[test]
+    fn a_changeling_runs_witness_forge_vote_and_reveal() {
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        let s = state.as_mut().unwrap();
+        assert_eq!(s.phase, "voting");
+        assert_eq!(s.holder, "h1", "the first voter holds the ember");
+        assert!(
+            s.entries.is_empty(),
+            "the truth was never pushed as an entry"
+        );
+        // h1 finds the truth (line 0); h2 is fooled by line 2.
+        let mut st = Some(s.clone());
+        apply_act(&mut st, &c_act("vote", "0"), "h1", "d1", &[], 1020).unwrap();
+        apply_act(&mut st, &c_act("vote", "2"), "h2", "d2", &[], 1030).unwrap();
+        let s = st.as_mut().unwrap();
+        assert_eq!(
+            s.phase, "reveal-wait",
+            "every ballot in — the keeper is owed"
+        );
+        reveal_round(s, 0, "salt", 1040);
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h1").unwrap().score,
+            1,
+            "found it"
+        );
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h0").unwrap().score,
+            1,
+            "one point per fooled voter"
+        );
+        assert_eq!(s.round, 2, "the fire moves on");
+        assert_eq!(s.witness, "h1", "the witness rotates");
+        assert_eq!(s.phase, "witness");
+        assert!(s.lines.is_empty() && s.votes.is_empty() && s.commit.is_empty());
+        assert!(
+            s.entries
+                .last()
+                .unwrap()
+                .text
+                .contains("the truth was line A"),
+            "the chronicle keeps the round: {}",
+            s.entries.last().unwrap().text
+        );
+    }
+
+    #[test]
+    fn the_commitment_never_reveals_the_truth() {
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        // The FULL replicated state — not merely the view — is what any port-knocker can
+        // read. In the voting phase it must hold three lines and a promise, nothing more.
+        let s = state.as_ref().unwrap();
+        let json = serde_json::to_string(s).unwrap();
+        assert!(s.truth.is_none());
+        assert!(s.reveal_salt.is_empty());
+        assert!(json.contains("test-commit"));
+        assert_eq!(
+            s.lines.iter().filter(|l| l.contains("pump")).count(),
+            1,
+            "the truth exists only as one anonymous line among three"
+        );
+        // And the view carries exactly the same nothing.
+        let v = view(s);
+        assert!(v.truth.is_none() && v.reveal_salt.is_empty());
+    }
+
+    #[test]
+    fn the_last_vote_before_the_reveal_is_the_one_that_counts() {
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        apply_act(&mut state, &c_act("vote", "1"), "h1", "d1", &[], 1020).unwrap();
+        apply_act(&mut state, &c_act("vote", "0"), "h1", "d1", &[], 1025).unwrap(); // changed mind
+        apply_act(&mut state, &c_act("vote", "2"), "h2", "d2", &[], 1030).unwrap();
+        let s = state.as_mut().unwrap();
+        assert_eq!(s.votes.iter().find(|v| v.handle == "h1").unwrap().choice, 0);
+        reveal_round(s, 0, "salt", 1040);
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h1").unwrap().score,
+            1
+        );
+    }
+
+    #[test]
+    fn a_witness_timeout_hands_the_round_to_the_next_witness() {
+        let mut state: Option<GameState> = None;
+        apply_act(
+            &mut state,
+            &c_act("begin", ""),
+            "h0",
+            "d0",
+            &players(3),
+            1000,
+        )
+        .unwrap();
+        let s = state.as_mut().unwrap();
+        assert_eq!((s.phase.as_str(), s.witness.as_str()), ("witness", "h0"));
+        tick(s, 1000 + CHANGELING_TURN_SECS);
+        assert_eq!(
+            s.witness, "h1",
+            "the silent witness loses the round, not the game"
+        );
+        assert_eq!(s.players[0].strikes, 1);
+        assert_eq!(s.phase, "witness");
+    }
+
+    #[test]
+    fn a_voter_timeout_becomes_an_abstention_and_the_round_completes() {
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        apply_act(&mut state, &c_act("vote", "0"), "h1", "d1", &[], 1020).unwrap();
+        let s = state.as_mut().unwrap();
+        assert_eq!(s.holder, "h2", "the ember waits on the last ballot");
+        tick(s, 1020 + CHANGELING_TURN_SECS + CHANGELING_TURN_SECS);
+        assert_eq!(s.phase, "reveal-wait", "the clock voted for the silent");
+        let v2 = s.votes.iter().find(|v| v.handle == "h2").unwrap();
+        assert_eq!(v2.choice, ABSTAIN);
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h2").unwrap().strikes,
+            1
+        );
+        // Abstention scores no one at the reveal.
+        reveal_round(s, 0, "salt", 5000);
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h2").unwrap().score,
+            0
+        );
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h0").unwrap().score,
+            0
+        );
+    }
+
+    #[test]
+    fn a_cold_forge_returns_the_round_to_the_witness_without_a_strike() {
+        let mut state: Option<GameState> = None;
+        apply_act(
+            &mut state,
+            &c_act("begin", ""),
+            "h0",
+            "d0",
+            &players(2),
+            1000,
+        )
+        .unwrap();
+        apply_act(
+            &mut state,
+            &c_act("line", "a true thing"),
+            "h0",
+            "d0",
+            &[],
+            1010,
+        )
+        .unwrap();
+        let s = state.as_mut().unwrap();
+        s.keeper = "door-a".into(); // a door claimed, then died
+        tick(s, 1010 + CHANGELING_FORGE_SECS);
+        assert_eq!(
+            s.phase, "witness",
+            "the forge went cold — speak your line again"
+        );
+        assert!(s.keeper.is_empty() && s.commit.is_empty() && s.lines.is_empty());
+        assert_eq!(s.players[0].strikes, 0, "the door failed, not the human");
+        // Solo: the forge re-opens for any door to claim instead.
+        let mut solo: Option<GameState> = None;
+        let mut b = c_act("begin", "");
+        b.solo = true;
+        apply_act(&mut solo, &b, "h0", "d0", &players(1), 2000).unwrap();
+        let s = solo.as_mut().unwrap();
+        s.keeper = "door-a".into();
+        tick(s, 2000 + CHANGELING_FORGE_SECS);
+        assert_eq!(s.phase, "forging", "the solo forge re-opens");
+        assert!(s.keeper.is_empty());
+    }
+
+    #[test]
+    fn a_silent_keeper_voids_the_round_but_never_wedges_the_game() {
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        apply_act(&mut state, &c_act("vote", "0"), "h1", "d1", &[], 1020).unwrap();
+        apply_act(&mut state, &c_act("vote", "1"), "h2", "d2", &[], 1030).unwrap();
+        let s = state.as_mut().unwrap();
+        assert_eq!(s.phase, "reveal-wait");
+        tick(s, 1030 + s.turn_secs);
+        assert_eq!(s.round, 2, "voided, advanced — no scores, no wedge");
+        assert_eq!(s.phase, "witness");
+        assert!(s.players.iter().all(|p| p.score == 0));
+        assert!(s
+            .entries
+            .last()
+            .unwrap()
+            .text
+            .contains("keeper went silent"));
+    }
+
+    #[test]
+    fn a_solo_changeling_runs_three_rounds_and_the_familiar_writes_the_verdict() {
+        let mut state: Option<GameState> = None;
+        let mut b = c_act("begin", "");
+        b.solo = true;
+        apply_act(&mut state, &b, "h0", "d0", &players(1), 1000).unwrap();
+        let s = state.as_mut().unwrap();
+        assert!(s.solo);
+        assert_eq!(
+            (s.rounds_total, s.witness.as_str(), s.phase.as_str()),
+            (3, "", "forging")
+        );
+        for round in 1..=3u32 {
+            assert_eq!(s.round, round);
+            publish_round(
+                s,
+                ["line a".into(), "line b".into(), "line c".into()],
+                "c",
+                2000 + round as i64,
+            );
+            assert_eq!(s.holder, "h0", "the lone human votes");
+            let mut st = Some(s.clone());
+            apply_act(
+                &mut st,
+                &c_act("vote", "1"),
+                "h0",
+                "d0",
+                &[],
+                2010 + round as i64,
+            )
+            .unwrap();
+            *s = st.unwrap();
+            // Truth on line 1 for two rounds (found), line 0 once (fooled).
+            reveal_round(
+                s,
+                if round < 3 { 1 } else { 0 },
+                "salt",
+                2020 + round as i64,
+            );
+        }
+        assert_eq!(s.status, "done");
+        assert_eq!(s.winner, "h0", "two of three — the changelings failed");
+        assert!(s.verdict.contains("2 of 3"), "{}", s.verdict);
+    }
+
+    #[test]
+    fn close_by_the_lighter_voids_the_open_round_and_keeps_the_scores() {
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        apply_act(&mut state, &c_act("vote", "0"), "h1", "d1", &[], 1020).unwrap();
+        {
+            let s = state.as_mut().unwrap();
+            if let Some(p) = s.players.iter_mut().find(|p| p.handle == "h1") {
+                p.score = 2; // earned in earlier rounds (fixture)
+            }
+        }
+        apply_act(&mut state, &c_act("close", ""), "h0", "d0", &[], 1030).unwrap();
+        let s = state.as_ref().unwrap();
+        assert_eq!(s.status, "done");
+        assert!(
+            s.verdict.starts_with("closed by its lighter's hand"),
+            "{}",
+            s.verdict
+        );
+        assert_eq!(s.winner, "h1", "the tally so far stands");
+    }
+
+    #[test]
+    fn an_unknown_game_kind_parses_absorbs_and_stays_inert() {
+        // A newer door lights a game this build has never heard of.
+        let raw = r#"{"kind":"seance","id":"seance-1","started_by":"h0","started":100,
+            "status":"open","turn_secs":900,"holder":"h0","holder_since":100,
+            "players":[],"entries":[],"seq":1,"updated":100}"#;
+        let mut g: GameState = serde_json::from_str(raw).unwrap();
+        assert_eq!(g.kind, GameKind::Unknown, "it parses — the sync survives");
+        assert!(
+            !tick(&mut g, 1_000_000),
+            "and it is never ticked into strikes"
+        );
+        let dir =
+            std::env::temp_dir().join(format!("familiar_game_unknown_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        absorb(&dir, &g).unwrap();
+        assert_eq!(
+            load(&dir).unwrap().kind,
+            GameKind::Unknown,
+            "absorbed, inert"
+        );
+        // And a begin for it is refused in words, not a panic.
+        let mut state = Some(g);
+        let err = apply_act(
+            &mut state,
+            &GameAct {
+                act: "begin".into(),
+                kind: Some(GameKind::Unknown),
+                text: String::new(),
+                to: String::new(),
+                turn_secs: None,
+                solo: false,
+            },
+            "h0",
+            "d0",
+            &players(1),
+            2_000_000,
+        );
+        assert!(err.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_game_state_lands_by_temp_and_rename() {
+        let dir = std::env::temp_dir().join(format!("familiar_game_atomic_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state: Option<GameState> = None;
+        changeling_to_voting(&mut state, 1000);
+        save(&dir, state.as_ref().unwrap()).unwrap();
+        assert!(
+            !dir.join(format!("{GAME_FILE}.tmp")).exists(),
+            "no tmp left behind"
+        );
+        assert_eq!(load(&dir).unwrap().phase, "voting");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

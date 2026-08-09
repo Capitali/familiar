@@ -19,6 +19,7 @@ enum MacBoundary {
         var allow_motion = false
         var allow_network_discovery = false
         var allow_face_recognition = false
+        var allow_actuate = false
     }
 
     /// Fail-closed, exactly like the Rust side: a missing or unreadable file means every gate
@@ -45,6 +46,7 @@ enum MacBoundary {
         raw["allow_motion"] = gates.allow_motion
         raw["allow_network_discovery"] = gates.allow_network_discovery
         raw["allow_face_recognition"] = gates.allow_face_recognition
+        raw["allow_actuate"] = gates.allow_actuate
         guard let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted]) else { return }
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url)

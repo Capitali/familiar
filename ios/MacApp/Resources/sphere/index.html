@@ -189,6 +189,22 @@ const isStale = (p) => {
   const ls = p.m.last_seen || 0;
   return p.status !== 'online' && (!ls || nowS() - ls > STALE_SECS);
 };
+// The globe is a NOW view: an offline host that has been silent on the mesh for three hours
+// drops off the map entirely (the roster's history keeps the record). Three hours — not the
+// roster's 24 — because a lit dot on the globe claims presence in a way a table row does not;
+// the grace period keeps a napping laptop from flapping on and off the map. Self always shows.
+const GLOBE_STALE_SECS = 3 * 3600;
+const globeVisible = (p) => {
+  if (p.local) return true;
+  const ls = p.m.last_seen || 0;
+  return p.status === 'online' || (ls > 0 && nowS() - ls <= GLOBE_STALE_SECS);
+};
+// Frontier possibilities age by the same rule — but one that never reported a sighting stays
+// (a possibility with no timestamp cannot be judged silent).
+const frontierVisible = (fn) => {
+  const ls = (fn.f && fn.f.last_seen) || 0;
+  return !ls || nowS() - ls <= GLOBE_STALE_SECS;
+};
 // Date AND time for the history table — the whole point of it is when, precisely.
 const dtstr = (ts) => ts > 0 ? new Date(ts*1000).toISOString().slice(0,16).replace('T',' ') + 'UTC' : '—';
 
@@ -210,6 +226,24 @@ const seenCell = (p, bigPx, timePx) => p.seenSub
   ? `<div class="m" style="font-size:${Math.round(timePx * 0.6)}px;color:rgba(160,195,255,0.6);margin-bottom:3px;">${esc(p.seenSub)}</div><div class="m" style="font-size:${timePx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`
   : `<div style="font-size:${bigPx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`;
 const FRONTIER_COLOR = '#7d93a8';
+// Sibling meshes (ADR-0033): one entity, one dot, one arc — violet, beside the member
+// white-blue, the lighthouse teal, and the frontier slate.
+const SIBLING_COLOR = '#c9a2ff';
+// The lighthouse is infrastructure, not a housemate — same test the roster uses to keep it
+// off the card grid (no human, and the label says what it is).
+const isLighthouse = (p) => !(p.m.human || '') && /lighthouse/i.test(p.name || '');
+// Arc palettes: peer-to-peer is the mesh's live body, bright white-blue; the spoke that runs
+// to the lighthouse leans teal — infrastructure should read differently at a glance.
+const ARC_MEMBER = { core: 0xe4f6ff, glow: 0x4d93ff, branch: 0x8fd0ff, sparks: true, gain: 1 };
+const ARC_LIGHTHOUSE = { core: 0xd8fff0, glow: 0x2fbf8f, branch: 0x8fe8c8, sparks: true, gain: 1 };
+const ARC_FRONTIER = { core: 0x7d93a8, glow: 0x51677a, branch: 0x62788c, sparks: false, gain: 0.3 };
+const ARC_SIBLING = { core: 0xead9ff, glow: 0x8a5fd6, branch: 0xc9a2ff, sparks: true, gain: 0.7 };
+// Standing sibling meshes that declared a location — the globe's federation layer.
+function siblingNodes() {
+  return ((S.view || {}).siblings || [])
+    .filter(s => s.state === 'sibling' && (s.lat || s.lon))
+    .map(s => ({ s, name: s.handle, lat: s.lat, lon: s.lon }));
+}
 
 // What KIND of path is this address? Reading a bare 100.x or 192.168.x and knowing what it means
 // is knowledge nobody should have to carry in their head.
@@ -465,7 +499,7 @@ function refreshScreen() {
     // The lighthouse is infrastructure, not a housemate: it keeps its globe dot and its node
     // dive, but takes no card in the roster of who is here.
     const pairs = P.map((p, i) => [p, i])
-      .filter(([p]) => !(!(p.m.human || '') && /lighthouse/i.test(p.name || '')));
+      .filter(([p]) => !isLighthouse(p));
     const past = pairs.filter(([p]) => isStale(p));
     const live = pairs.filter(([p]) => !isStale(p));
     // A member that runs ON another machine (a Mac's console shell — m.attached_to carries the
@@ -509,7 +543,7 @@ function refreshScreen() {
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
           ${(v.game && v.game.status === 'open' && emberIds.has(p.m.node_id))
-            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">${cdText(v.game.holder_since + v.game.turn_secs)}</span></span>` : ''}
+            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : v.game.kind === 'changeling' ? (v.game.phase === 'voting' ? '🎭 VOTE' : v.game.phase === 'witness' ? '🎭 TRUTH' : '🎭 EMBER') : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">${cdText(v.game.holder_since + v.game.turn_secs)}</span></span>` : ''}
           ${connBadge(p.m.connectivity)}`;
     const closedCard = ([p, i]) => `
       <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:13px 17px;border-radius:14px;background:${p.local?'rgba(90,175,255,0.08)':'rgba(20,44,80,0.16)'};border:1px solid ${p.local?'rgba(174,231,255,0.2)':'rgba(120,190,255,0.12)'};display:flex;align-items:center;gap:9px;">
@@ -645,7 +679,33 @@ function refreshScreen() {
         </div>
         <div id="inviteqr" style="margin-top:10px;"></div>
       </div>` : '';
-    el.innerHTML = inviteHtml + claimsHtml + (arrivals.length === 0
+    // Federation (ADR-0033): a pending mesh introduction is a card with one honest button —
+    // the member's tap IS the vouch. Standing siblings get a quiet line; sever stays a CLI act.
+    const sibs = (v.siblings || []);
+    const federationHtml = (amMember ? sibs.filter(s => s.state === 'pending').map(s => `
+      <div style="padding:14px 16px;border-radius:14px;background:rgba(60,40,80,0.28);border:1px solid rgba(201,162,255,0.35);margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-size:16px;font-weight:600;">${esc(s.handle)}</span>
+          ${chip('A MESH INTRODUCES ITSELF', '#c9a2ff')}
+          <span class="m" style="font-size:9px;color:rgba(201,162,255,0.55);">${esc(s.group_id.slice(0,8))}</span>
+        </div>
+        <div class="m" style="font-size:9.5px;color:rgba(215,195,240,0.75);margin-bottom:10px;">
+          another mesh asks to stand beside this one — it would read the shape of this mesh and none of the names.
+          ${s.declared_areas && s.declared_areas.length ? 'it declares: ' + esc(s.declared_areas.join(', ')) : 'it declares nothing yet'}
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="sphereFederate('welcome','${s.group_id.replace(/[^a-z0-9-]/gi,'')}')"
+                  style="padding:9px 16px;border-radius:10px;background:rgba(201,162,255,0.16);border:1px solid rgba(201,162,255,0.5);color:#e2d2ff;cursor:pointer;font-size:12px;">
+            Welcome this mesh
+          </button>
+          <span class="m" style="font-size:9px;color:rgba(180,165,210,0.5);align-self:center;">or leave it pending — pending reads nothing</span>
+        </div>
+      </div>`).join('') : '') +
+      (sibs.some(s => s.state === 'sibling') ? `
+      <div class="m" style="font-size:9.5px;color:rgba(201,162,255,0.65);margin:2px 0 12px 2px;">
+        standing beside this mesh: ${sibs.filter(s => s.state === 'sibling').map(s => esc(s.handle)).join(' · ')}
+      </div>` : '');
+    el.innerHTML = inviteHtml + federationHtml + claimsHtml + (arrivals.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
            Nobody new in the last day. The next arrival will be greeted here.
          </div>`
@@ -675,6 +735,10 @@ function refreshScreen() {
             verify before you welcome: does the place, address and build match the person you expect?
           </div>` : ''}
         </div>`).join(''));
+    // Every poll rebuilds this subtree with an empty #inviteqr — re-hydrate the minted
+    // invite (QR + SEND TO MESSAGES) or it vanishes on the next tick (the device screen
+    // does the same).
+    if (S.invite) renderInviteQR();
 
   } else if (k === 'games') {
     // The mesh games. The screens say — prominently — which seams each game exercises,
@@ -713,10 +777,11 @@ function refreshScreen() {
         </div>`;
       el.innerHTML = `<div style="max-width:640px;display:flex;flex-direction:column;gap:14px;">
         <div class="m" style="font-size:10.5px;color:rgba(160,195,255,0.6);margin-bottom:2px;">
-          Two fires to light. Playing them exercises the mesh on purpose — every move is a signed member act, and the familiar referees.
+          Three fires to light. Playing them exercises the mesh on purpose — every move is a signed member act, and the familiar referees.
         </div>
         ${gameCard('riddle', 'Riddle of the Mesh', 'the familiar asks; the ember passes; one right answer takes it', GLYPHS.theories)}
         ${gameCard('campfire', 'The Campfire', 'one story, one line each, the ember chooses whose turn it is', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.6s ease-in-out infinite;"/><circle cx="24" cy="33" r="3" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.4s ease-in-out infinite;"/></svg>`)}
+        ${gameCard('changeling', 'The Changeling', 'one true line, two forgeries — find the human', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M24 8c8 0 13 6 13 14 0 9-5 16-13 18C16 38 11 31 11 22 11 14 16 8 24 8z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.5"/><circle cx="18.5" cy="21" r="2.2" fill="currentColor" style="animation:gatepulse 2.2s ease-in-out infinite;"/><circle cx="29.5" cy="21" r="2.2" fill="currentColor" style="animation:gatepulse 2.2s ease-in-out infinite 0.6s;"/><path d="M17 30q7 5 14 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="transform-box:fill-box;transform-origin:center;animation:eqb 3s ease-in-out infinite;"/></svg>`)}
         ${g && g.status === 'done' ? `
           <div style="padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.18);border:1px solid rgba(120,190,255,0.13);">
             <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:7px;">LAST GAME</div>
@@ -726,8 +791,53 @@ function refreshScreen() {
         ${doorLine()}
       </div>`;
 
-    } else if (nav === 'info-riddle' || nav === 'info-campfire') {
+    } else if (nav === 'info-riddle' || nav === 'info-campfire' || nav === 'info-changeling') {
       const riddle = nav === 'info-riddle';
+      const chg = nav === 'info-changeling';
+      if (chg) {
+        el.innerHTML = `<div style="max-width:640px;">
+          <div style="font-size:21px;font-weight:600;margin-bottom:8px;">The Changeling</div>
+          <div style="font-size:13px;line-height:1.55;color:rgba(220,232,250,0.85);margin-bottom:4px;">
+            Each round one of you is the witness: write ONE true line about your day. The familiar forges two false lines in your voice, shuffles the three, and everyone else votes for the human one. Find the truth and score; slip a changeling past someone and the witness scores. Alone at the fire? Begin solo — the familiar writes three lines about what the mesh itself observed, one true, two forged: catch it lying about its own record.
+          </div>
+          ${tests([
+            'the LLM seam, with a deterministic floor — the forge prefers the model and never depends on it',
+            'secret-keeping beyond the riddle — the truth never enters replicated state at all',
+            'the keeper door &amp; its cryptographic promise — a sha256 commitment any door can verify at the reveal',
+            'ballots as signed member acts, converging across doors',
+            'the lazy clock in four phases — witness, forge, vote, reveal; a crashed door can never wedge the fire',
+          ])}
+          <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">HOW THE FAMILIAR JUDGES</div>
+          ${rules([
+            'the door that takes your true line becomes the round’s KEEPER — it alone knows which line is true, in a file that never leaves it',
+            'the shared record carries only a salted commitment; at the reveal the salt is published and every door checks the promise',
+            'find the truth: +1 to you · a changeling fools a voter: +1 to the witness · abstain and the round scores no one',
+            'your last vote before the reveal is the one that counts — change your mind freely',
+          ])}
+          <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">LAGGING PLAYERS</div>
+          ${rules([
+            'each phase carries a countdown (default 15 minutes) — visible on the roster badge',
+            'a silent witness loses the round, not the game — and takes a strike',
+            'a silent voter abstains by clock, and takes a strike; two strikes and you spectate',
+            'a cold forge blames nobody: the round returns to the witness, no strike',
+            'a silent keeper’s round is VOIDED by whichever door reads next — the fire cannot wedge',
+          ])}
+          <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">RULES</div>
+          ${rules([
+            'as many rounds as players — everyone witnesses once (solo: three rounds)',
+            'one line, 240 characters, true — the fun is in how ordinary the truth sounds',
+            'witnesses do not vote: they know',
+            'anyone may light it; only its lighter may close it early — the tally so far stands',
+          ])}
+          <div style="display:flex;gap:12px;margin-top:20px;">
+            ${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK', false)}
+            ${g && g.status === 'open'
+              ? glybtn("sphereGameNav('live')", DIVE_GLYPH, 'A GAME IS BURNING — JOIN THE VIEW', true)
+              : glybtn("sphereGameBegin('changeling')", BEGIN_GLYPH, 'BEGIN', true) + glybtn("sphereGameBegin('changeling', true)", BEGIN_GLYPH, 'BEGIN SOLO', false)}
+          </div>
+        </div>`;
+        return;
+      }
       el.innerHTML = `<div style="max-width:640px;">
         <div style="font-size:21px;font-weight:600;margin-bottom:8px;">${riddle ? 'Riddle of the Mesh' : 'The Campfire'}</div>
         <div style="font-size:13px;line-height:1.55;color:rgba(220,232,250,0.85);margin-bottom:4px;">
@@ -818,7 +928,8 @@ function refreshScreen() {
       const playerRow = (p) => `
         <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;background:${p.node_id === g.holder && open ? 'rgba(255,178,102,0.1)' : 'rgba(20,44,80,0.18)'};${p.eliminated ? 'opacity:0.4;' : ''}">
           <span style="font-size:12px;font-weight:500;flex:1;">${esc(cap(p.handle || p.label))}${(p.devices && p.devices.length > 1) ? ` <span class="m" style="font-size:8.5px;color:rgba(160,195,255,0.55);">${p.devices.length} devices</span>` : ''}</span>
-          ${p.handle === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
+          ${p.handle === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : g.kind === 'changeling' ? '🎭' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
+          ${g.kind === 'changeling' && open && g.phase === 'voting' && (g.votes || []).some(vv => vv.handle === p.handle) ? `<span class="m" style="font-size:9px;color:#9fe8c0;">✓ voted</span>` : ''}
           ${p.score ? `<span class="m" style="font-size:9px;color:#9fe8c0;">★ ${p.score}</span>` : ''}
           ${p.strikes ? `<span class="m" style="font-size:9px;color:#ff8fa3;">${'✕'.repeat(p.strikes)}</span>` : ''}
           ${p.eliminated ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(255,143,163,0.8);">OUT</span>` : ''}
@@ -831,7 +942,7 @@ function refreshScreen() {
       el.innerHTML = `<div style="max-width:680px;">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
           <button onclick="sphereGameNav('menu')" class="glybtn" style="width:34px;height:34px;flex-shrink:0;">${BACK_GLYPH}</button>
-          <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : 'The Campfire'}</span>
+          <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : g.kind === 'changeling' ? (g.solo ? 'The Changeling — two never happened' : 'The Changeling') : 'The Campfire'}${g.kind === 'changeling' && g.round ? ` <span class="m" style="font-size:9px;color:rgba(160,195,255,0.6);">round ${g.round}/${g.rounds_total}</span>` : ''}</span>
           ${open ? `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#ffb266;">${esc(cap(holderP ? (holderP.handle || holderP.label) : g.holder))}'S TURN · ${cd(deadline)}</span>`
                  : `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#9fe8c0;">FINISHED</span>`}
         </div>
@@ -846,6 +957,48 @@ function refreshScreen() {
             <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#7ff0c0;margin-bottom:5px;">THE FAMILIAR'S VERDICT</div>
             <div class="m" style="font-size:11.5px;line-height:1.5;color:rgba(210,245,225,0.9);">${esc(g.verdict)}</div>
           </div>` : ''}
+        ${g.kind === 'changeling' && open ? (() => {
+          const iAmWitness = myHuman2 && (g.witness || '').toLowerCase() === myHuman2;
+          const iPlay = g.players.some(p => !p.eliminated && p.handle.toLowerCase() === myHuman2);
+          const myVote = (g.votes || []).find(vv => vv.handle.toLowerCase() === myHuman2);
+          if (g.phase === 'witness') {
+            return iAmWitness ? '' : `
+              <div style="padding:14px 16px;border-radius:13px;background:rgba(120,90,200,0.1);border:1px solid rgba(160,130,255,0.25);margin-bottom:12px;">
+                <div class="m" style="font-size:10.5px;color:rgba(210,200,250,0.85);">${esc(cap(g.witness))} is writing one true thing about their day…</div>
+              </div>`;
+          }
+          if (g.phase === 'forging') {
+            return `
+              <div style="padding:16px;border-radius:14px;background:rgba(120,90,200,0.1);border:1px solid rgba(160,130,255,0.3);margin-bottom:12px;display:flex;align-items:center;gap:12px;">
+                <div style="width:22px;height:22px;color:#bfa8ff;animation:iconpulse 1.1s ease-in-out infinite;"><svg viewBox="0 0 48 48" fill="currentColor"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z"/></svg></div>
+                <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(210,200,250,0.85);">THE FAMILIAR IS AT THE FORGE — the changelings are coming</span>
+              </div>`;
+          }
+          if (g.phase === 'voting' && (g.lines || []).length === 3) {
+            const canVote = iPlay && !iAmWitness;
+            const card = (line, i) => `
+              <div ${canVote ? `onclick="sphereGameVote(${i})"` : ''} style="padding:14px 16px;border-radius:13px;margin-bottom:9px;${canVote ? 'cursor:pointer;' : ''}background:${myVote && myVote.choice === i ? 'rgba(61,220,151,0.13)' : 'rgba(20,44,80,0.24)'};border:1px solid ${myVote && myVote.choice === i ? 'rgba(61,220,151,0.5)' : 'rgba(120,190,255,0.18)'};display:flex;gap:12px;align-items:flex-start;">
+                <span class="m" style="font-size:11px;font-weight:600;color:#aee7ff;flex-shrink:0;">${'ABC'[i]}</span>
+                <span style="font-size:13.5px;line-height:1.5;color:rgba(228,240,252,0.92);flex:1;">${esc(line)}</span>
+                ${myVote && myVote.choice === i ? '<span class="m" style="font-size:9px;color:#9fe8c0;flex-shrink:0;">YOUR VOTE</span>' : ''}
+              </div>`;
+            return `
+              <div style="margin-bottom:12px;">
+                <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#7ff0c0;margin-bottom:9px;">
+                  ${iAmWitness ? 'THE VOTES ARE COMING IN — your truth hides among the changelings' : g.solo ? 'WHICH OF THESE DID THE MESH TRULY SEE?' : 'THREE LINES, ONE HUMAN TRUTH — WHICH IS IT?'}
+                </div>
+                ${g.lines.map(card).join('')}
+                ${canVote ? `<div class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${myVote ? 'you may change your mind until the reveal' : 'tap the line you believe'}</div>` : ''}
+              </div>`;
+          }
+          if (g.phase === 'reveal-wait') {
+            return `
+              <div style="padding:14px 16px;border-radius:13px;background:rgba(61,220,151,0.08);border:1px solid rgba(61,220,151,0.25);margin-bottom:12px;">
+                <div class="m" style="font-size:10px;letter-spacing:0.14em;color:rgba(160,240,200,0.85);">ALL VOTES ARE IN — the keeper opens its hand</div>
+              </div>`;
+          }
+          return '';
+        })() : ''}
         <div style="display:grid;grid-template-columns:1fr minmax(150px,200px);gap:14px;align-items:start;">
           <div>${g.entries.length ? g.entries.map(entryRow).join('') : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.5);padding:8px 0;">${g.kind === 'riddle' ? 'no guesses yet' : ''}</div>`}</div>
           <div style="display:flex;flex-direction:column;gap:6px;">
@@ -865,11 +1018,11 @@ function refreshScreen() {
             <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(255,207,158,0.85);">THE DOOR IS JUDGING — your answer is in</span>
           </div>` : '';
         })() || ''}
-        ${mine && !(S.gameActAt) ? `
+        ${mine && !(S.gameActAt) && (g.kind !== 'changeling' || g.phase === 'witness') ? `
           <div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);">
-            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : g.kind === 'changeling' ? 'YOUR TRUE LINE — the familiar will forge two lies around it' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
             <div style="display:flex;gap:9px;">
-              <input id="gameinput" placeholder="${g.kind === 'riddle' ? 'one guess…' : 'one line of the story…'}" maxlength="240" spellcheck="true"
+              <input id="gameinput" placeholder="${g.kind === 'riddle' ? 'one guess…' : g.kind === 'changeling' ? 'one true thing from your day…' : 'one line of the story…'}" maxlength="240" spellcheck="true"
                 onkeydown="if(event.key==='Enter'){sphereGameSubmit();}"
                 style="flex:1;background:rgba(16,34,60,0.5);border:1px solid rgba(255,178,102,0.3);border-radius:10px;color:#e8f0fc;font-size:13px;padding:10px 12px;"/>
               <button onclick="sphereGameSubmit()" class="glybtn" style="width:46px;height:42px;border-radius:10px;">${SEND_GLYPH}</button>
@@ -1248,8 +1401,13 @@ function renderChrome() {
 }
 
 function renderCallouts() {
-  const P = peers(), F = frontierNodes();
-  $('callouts').innerHTML = P.map((p, i) => `
+  // The globe renders only the mesh's NOW (globeVisible / frontierVisible) — but the callout
+  // onclicks carry the ORIGINAL peers() index (like the roster grid does), because
+  // sphereDive/sphereNode index into the unfiltered list.
+  const pairs = peers().map((p, i) => [p, i]).filter(([p]) => globeVisible(p));
+  const F = frontierNodes().filter(frontierVisible);
+  const SB = siblingNodes();
+  $('callouts').innerHTML = pairs.map(([p, i]) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;">
       <div style="position:absolute;left:0;top:0;width:11px;height:11px;transform:translate(-50%,-50%);">
         <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
@@ -1271,9 +1429,24 @@ function renderCallouts() {
       <div style="position:absolute;left:10px;top:-26px;padding:4px 7px;border-radius:8px;background:rgba(9,15,32,0.45);border:1px solid rgba(125,147,168,0.22);backdrop-filter:blur(10px);">
         <span class="m" style="font-size:8.5px;color:rgba(210,222,235,0.7);">${esc(fn.name)}</span>
       </div>
+    </div>`).join('') + SB.map((sn) => `
+    <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;opacity:0.85;">
+      <div style="position:absolute;left:0;top:0;width:9px;height:9px;transform:translate(-50%,-50%);">
+        <span style="position:absolute;inset:0;border-radius:50%;background:${SIBLING_COLOR};box-shadow:0 0 10px ${SIBLING_COLOR};"></span>
+        <span style="position:absolute;inset:0;border-radius:50%;background:${SIBLING_COLOR};animation:ping 3.4s ease-out infinite;"></span>
+      </div>
+      <div style="position:absolute;left:12px;top:-30px;padding:5px 8px;border-radius:9px;background:rgba(20,12,32,0.5);border:1px solid rgba(201,162,255,0.28);backdrop-filter:blur(10px);">
+        <span class="m" style="font-size:8.5px;color:rgba(226,210,255,0.85);">${esc(sn.name)}</span>
+        <span class="m" style="font-size:7px;letter-spacing:0.1em;color:rgba(201,162,255,0.6);margin-left:5px;">SIBLING MESH</span>
+      </div>
     </div>`).join('');
-  G.anchorDirs = P.map(p => latLon(p.lat, p.lon));
+  // anchorPeers/anchorDirs are DENSE and parallel to the rendered callouts — the projection
+  // loop zips [data-callout] elements with [...anchorDirs, ...frontierDirs, ...siblingDirs]
+  // by position, in exactly this render order.
+  G.anchorPeers = pairs.map(([p]) => p);
+  G.anchorDirs = pairs.map(([p]) => latLon(p.lat, p.lon));
   G.frontierDirs = F.map(f => latLon(f.lat, f.lon));
+  G.siblingDirs = SB.map(sn => latLon(sn.lat, sn.lon));
   rebuildArcs();
 }
 
@@ -1315,13 +1488,17 @@ window.sphereGameClose = () => {
 window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
 // NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
 // a payload "kind" would overwrite the message kind and the bridge would drop the act.
-window.sphereGameBegin = (kind) => { S.gameBeginAt = Date.now(); toApp('game', { act: 'begin', game_kind: kind }); S.gameNav = 'live'; refreshScreen(); };
+window.sphereGameBegin = (kind, solo) => { S.gameBeginAt = Date.now(); toApp('game', { act: 'begin', game_kind: kind, solo: !!solo }); S.gameNav = 'live'; refreshScreen(); };
+// A changeling ballot: tap the line you believe. Re-votes are allowed until the reveal,
+// so no in-flight lock — the highlight moves when the door's state comes back.
+window.sphereGameVote = (i) => { toApp('game', { act: 'vote', text: String(i) }); };
 window.sphereGamePassTo = (id) => { S.gamePassTo = id; refreshScreen(); };
 window.sphereGameSubmit = () => {
   const inp = document.getElementById('gameinput');
   const text = (inp && inp.value || '').trim();
   if (!text) return;
   const g = (S.view || {}).game || {};
+  // riddle → guess; campfire AND the changeling's witness truth → line.
   toApp('game', { act: g.kind === 'riddle' ? 'guess' : 'line', text, to: S.gamePassTo || '' });
   if (inp) { inp.value = ''; inp.blur(); }
   S.gamePassTo = '';
@@ -1387,6 +1564,8 @@ function renderInviteQR() {
 }
 // Inline onclick resolves on window, not module scope — S.invite must travel through here.
 window.sphereShareInvite = () => { if (S.invite) toApp('shareInvite', { payload: S.invite }); };
+// The federation tap (ADR-0033): welcome a pending sibling mesh. Travels signed via the app.
+window.sphereFederate = (act, gid) => toApp('federateAct', { act, group_id: gid });
 window.sphereUnenroll = () => {
   if (!S.unenrollArmed) {
     S.unenrollArmed = true; refreshScreen();
@@ -1481,7 +1660,7 @@ window.sphereUpdate = (view) => {
 // view is "the world with home in front of you", menus tucked away.
 function centerOnSelf() {
   if (!G.group || !G.anchorDirs.length) return;
-  const P = peers();
+  const P = G.anchorPeers || [];   // parallel to anchorDirs (the globe-visible subset)
   let i = P.findIndex(p => p.local && (p.located || p.hasAnchor));
   if (i < 0) i = P.findIndex(p => p.located);
   if (i < 0 || !G.anchorDirs[i]) return;
@@ -1513,7 +1692,7 @@ $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
 $('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------
-const G = { anchorDirs: [], frontierDirs: [], arcs: [], frontierArcs: [], streetA: 0 };
+const G = { anchorPeers: [], anchorDirs: [], frontierDirs: [], siblingDirs: [], arcs: [], frontierArcs: [], siblingArcs: [], streetA: 0 };
 const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (lon + 180) * Math.PI / 180; return new THREE.Vector3(-Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)).normalize(); };
 
 // The choreographed dive. Phase 0: the globe ROTATES to center the target (no zoom).
@@ -1557,14 +1736,16 @@ function beginDive(target, dir) {
   G.handedOff = false;
 }
 window.sphereDive = (i) => {
+  // `i` indexes the FULL peers() list (roster and callouts both pass it); anchorDirs holds
+  // only the globe-visible subset, so aim from the peer's own coordinate, not by index.
   const P = peers(); const p = P[i]; if (!p) return;
   if (!p.located && !p.hasAnchor) { window.sphereScreen('network'); return; }
   S.focusIdx = i;
-  beginDive(p, G.anchorDirs[i]);
+  beginDive(p, latLon(p.lat, p.lon));
 };
 window.sphereDiveFrontier = (i) => {
   const F = frontierNodes(); const f = F[i]; if (!f || !f.located) return;
-  beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, G.frontierDirs[i] || latLon(f.lat, f.lon));
+  beginDive({ lat: f.lat, lon: f.lon, name: f.name, color: FRONTIER_COLOR }, latLon(f.lat, f.lon));
 };
 // The visitor nudge: SAY WHO I AM lands on the device screen with the name box focused —
 // the shortest possible distance between "the mesh doesn't know you" and fixing it.
@@ -1586,9 +1767,10 @@ window.sphereVisitorDive = (lat, lon, name) => {
   beginDive({ lat, lon, name: 'visitor ' + name, color: 0xffb266 }, latLon(lat, lon));
 };
 function collectNodes() {
-  const P = peers(), F = frontierNodes();
+  const P = peers().filter(globeVisible), F = frontierNodes().filter(frontierVisible);
   return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, sublabel: p.m.addr || '', color: p.color, frontier: false, self: p.local }))
-    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })));
+    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })))
+    .concat(siblingNodes().map(sn => ({ lat: sn.lat, lon: sn.lon, label: sn.name, sublabel: 'sibling mesh', color: SIBLING_COLOR, frontier: false, self: false })));
 }
 function handoff(p) {
   S.mode = 'street'; renderChrome();
@@ -1728,7 +1910,7 @@ function initThree() {
       const rect = canvas.getBoundingClientRect();
       camera.getWorldDirection(camDir);
       const els = co.querySelectorAll('[data-callout]');
-      const dirs = [...G.anchorDirs, ...G.frontierDirs];
+      const dirs = [...G.anchorDirs, ...G.frontierDirs, ...G.siblingDirs];
       for (let i = 0; i < dirs.length; i++) {
         const el = els[i]; if (!el) continue;
         worldNorm.copy(dirs[i]).applyQuaternion(group.quaternion).normalize();
@@ -1760,25 +1942,30 @@ function mkArc(a, b, palette) {
 function rebuildArcs() {
   if (!G.arcGroup) return;
   G.arcGroup.clear();
-  G.arcs = []; G.frontierArcs = [];
-  const P = peers();
+  G.arcs = []; G.frontierArcs = []; G.siblingArcs = [];
+  const P = G.anchorPeers || [];
   const selfIdx = P.findIndex(p => p.local);
   if (selfIdx < 0 || !G.anchorDirs.length) return;
   const from = G.anchorDirs[selfIdx];
-  // Members: the mesh's live body — bright, white-blue, sparking.
+  // Members: the mesh's live body — bright, white-blue, sparking. The lighthouse spoke is
+  // the same body in a teal cast: peer-to-lighthouse must read apart from peer-to-peer.
   for (let i = 0; i < G.anchorDirs.length; i++) {
     if (i === selfIdx) continue;
-    G.arcs.push(mkArc(from.clone(), G.anchorDirs[i].clone(), { core: 0xe4f6ff, glow: 0x4d93ff, branch: 0x8fd0ff, sparks: true, gain: 1 }));
+    G.arcs.push(mkArc(from.clone(), G.anchorDirs[i].clone(), P[i] && isLighthouse(P[i]) ? ARC_LIGHTHOUSE : ARC_MEMBER));
   }
   // Frontier: discovered, not yet contributing — dimmer, slate, one faint spark.
   for (const d of G.frontierDirs) {
-    G.frontierArcs.push(mkArc(from.clone(), d.clone(), { core: 0x7d93a8, glow: 0x51677a, branch: 0x62788c, sparks: false, gain: 0.3 }));
+    G.frontierArcs.push(mkArc(from.clone(), d.clone(), ARC_FRONTIER));
+  }
+  // Siblings: meshes standing beside this one — violet, the federation layer (ADR-0033).
+  for (const d of (G.siblingDirs || [])) {
+    G.siblingArcs.push(mkArc(from.clone(), d.clone(), ARC_SIBLING));
   }
 }
 const arcTmp = new THREE.Vector3();
 function animateArcs(t) {
   const on = (S.mode === 'globe' && !G.diving) ? 1 : 0;
-  for (const arc of [...G.arcs, ...G.frontierArcs]) {
+  for (const arc of [...G.arcs, ...G.frontierArcs, ...(G.siblingArcs || [])]) {
     const N2 = arc.N, gain = arc.gain;
     const fl = 0.6 + 0.4 * Math.sin(t * arc.jrate + arc.seed) * Math.sin(t * 2.3 + arc.seed * 1.7);
     const crackle = (Math.sin(t * 30 + arc.seed) > 0.86) ? 0.35 : 1.0;

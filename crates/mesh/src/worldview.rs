@@ -111,6 +111,9 @@ pub struct GateStates {
     /// The ADR-0013 seam: may the familiar speak to non-members?
     #[serde(default)]
     pub outreach: bool,
+    /// The ADR-0032 seam: may the familiar drive a declared control surface?
+    #[serde(default)]
+    pub actuate: bool,
 }
 
 /// A federated peer as last seen.
@@ -263,6 +266,32 @@ pub struct Worldview {
     /// (the lighthouse) works — pinned to the group, not one node (ADR-0012).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pins: Vec<String>,
+    /// The meshes standing beside this one (ADR-0033) — pending introductions included, so
+    /// the welcome screen can offer the tap. One entry per mesh; its internals are its own.
+    #[serde(default)]
+    pub siblings: Vec<SiblingView>,
+    /// Areas of knowledge THIS mesh declares to its siblings — shown to members (it is their
+    /// declaration) and to sibling readers (it is what they were promised). Declaration,
+    /// never inventory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_areas: Vec<String>,
+}
+
+/// A sibling mesh as the console renders it — one entity, one dot, one arc (ADR-0033 §5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiblingView {
+    pub handle: String,
+    pub group_id: String,
+    /// "pending" | "sibling" | "severed"
+    pub state: String,
+    /// Self-declared location; 0,0 = chose not to declare.
+    pub lat: f64,
+    pub lon: f64,
+    pub declared_areas: Vec<String>,
+    pub offered_tools: Vec<String>,
+    pub welcomed_by: String,
+    pub first_seen: i64,
+    pub last_seen: i64,
 }
 
 /// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
@@ -628,6 +657,7 @@ pub fn assemble_worldview(
         agent: b.allow_agent,
         tool_install: b.allow_tool_install,
         outreach: b.allow_outreach,
+        actuate: b.allow_actuate,
     };
     let tick = familiar_kernel::activity::load(dir)
         .map(|a| a.len() as u64)
@@ -805,6 +835,9 @@ pub fn assemble_worldview(
         }
         crate::game::view(&g)
     });
+    // The changeling keeper settles on any console poll (ADR-0034) — a reveal owed by
+    // this door, or a solo forge claim, runs off-path; a no-op costs one small read.
+    crate::transport::spawn_changeling_touch(dir, None);
 
     let goals = goal_views(dir);
 
@@ -848,6 +881,24 @@ pub fn assemble_worldview(
         uptime_secs,
         humanity,
         members,
+        siblings: crate::federation::load_siblings(dir)
+            .into_iter()
+            .map(|s| SiblingView {
+                handle: s.handle,
+                group_id: s.group_id,
+                state: s.state,
+                lat: s.lat,
+                lon: s.lon,
+                declared_areas: s.declared_areas,
+                offered_tools: s.offered_tools,
+                welcomed_by: s.welcomed_by,
+                first_seen: s.first_seen,
+                last_seen: s.last_seen,
+            })
+            .collect(),
+        declared_areas: crate::config::load(dir)
+            .map(|c| c.declared_areas)
+            .unwrap_or_default(),
         services: discovered_services(&obs),
         frontier,
         edges,
@@ -1520,6 +1571,21 @@ mod tests {
         let json = serde_json::to_string(&view).unwrap();
         let back: Worldview = serde_json::from_str(&json).unwrap();
         assert!(back.gates.microphone && back.gates.face_recognition);
+    }
+
+    #[test]
+    fn the_actuate_gate_round_trips_through_the_worldview() {
+        let (host, cred, device) = setup("actuate_gate");
+        let mut b = familiar_kernel::boundary::Boundary::closed();
+        b.allow_mesh = true;
+        b.allow_actuate = true;
+        std::fs::write(host.join("boundary.json"), serde_json::to_vec(&b).unwrap()).unwrap();
+        let (raw, sig) = signed_request(&cred, &device, NOW, "v1");
+        let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
+        assert!(view.gates.actuate);
+        let json = serde_json::to_string(&view).unwrap();
+        let back: Worldview = serde_json::from_str(&json).unwrap();
+        assert!(back.gates.actuate, "the wire format carries it");
     }
 
     #[test]

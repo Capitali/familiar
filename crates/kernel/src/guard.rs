@@ -77,6 +77,12 @@ pub enum ActionKind {
     /// sharper reach than a one-shot `Llm` consult because the agent runs a loop. Every action
     /// the agent then proposes is itself weighed here against the agent's *scoped* boundary.
     Agent,
+    /// Drive a human-declared control surface — set it, query its state, revert a change
+    /// (ADR-0032). Declaration is the consent: which surfaces exist at all is the human's
+    /// `actuators.json`, and an undeclared device has no path here. *Which* act, and when,
+    /// is what this weighs — under the gate, and under the reversibility/affects-person
+    /// ladder like every act.
+    Actuate,
 }
 
 /// The guard's outcome.
@@ -244,6 +250,7 @@ pub fn evaluate(action: &Action, boundary: &Boundary) -> Verdict {
         FaceRecognition => bool_scope(boundary.allow_face_recognition),
         Mesh => bool_scope(boundary.allow_mesh),
         Agent => bool_scope(boundary.allow_agent),
+        Actuate => bool_scope(boundary.allow_actuate),
     };
 
     if matches!(scope, Scope::Out) {
@@ -350,6 +357,7 @@ mod tests {
             allow_agent: false,
             allow_self_upgrade: false,
             allow_outreach: false,
+            allow_actuate: false,
             sandbox_execution: true,
             fs_read: vec!["/Users/ian/".into()],
             fs_write: vec!["/Users/ian/Development/familiar/familiar_data/".into()],
@@ -372,6 +380,7 @@ mod tests {
             ActionKind::FaceRecognition,
             ActionKind::Mesh,
             ActionKind::Agent,
+            ActionKind::Actuate,
             ActionKind::ReadFile,
             ActionKind::WriteFile,
         ] {
@@ -382,6 +391,20 @@ mod tests {
                 "{kind:?} should be refused when closed"
             );
         }
+    }
+
+    #[test]
+    fn an_open_actuate_gate_allows_a_declared_reversible_act() {
+        // The declared-actuator shape (ADR-0032): reversible, not person-affecting —
+        // declaration answered the consent question; the reaction channel keeps it answered.
+        let mut b = Boundary::closed();
+        b.allow_actuate = true;
+        let v = evaluate(&Action::new(ActionKind::Actuate, "lights"), &b);
+        assert_eq!(v.decision, Decision::Allow);
+        // An irreversible act on the same surface still queues for the human.
+        let mut irr = Action::new(ActionKind::Actuate, "lights");
+        irr.reversible = false;
+        assert_eq!(evaluate(&irr, &b).decision, Decision::SeekConsent);
     }
 
     #[test]

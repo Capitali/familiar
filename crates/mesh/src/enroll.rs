@@ -413,7 +413,7 @@ fn persist_covenant(dir: &Path, grant: &Grant) -> Result<()> {
 /// invisible from the fleet. Same posture as the async transport's dials, via the shared config:
 /// encrypt to whoever answers; the request's own signature carries the authenticity.
 /// Sends `Connection: close` and reads the response to EOF, then splits head/body.
-fn http(
+pub(crate) fn http(
     host: &str,
     port: u16,
     method: &str,

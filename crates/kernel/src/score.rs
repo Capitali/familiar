@@ -179,6 +179,7 @@ mod tests {
             last_worked_at: 0,
             answers: Vec::new(),
             origin: "llm".into(),
+            origin_human: String::new(),
             actor: "familiar".into(),
         }
     }

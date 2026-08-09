@@ -33,8 +33,10 @@ pub struct PresentHuman {
 }
 
 /// The human named by an actor namespace: `phone:ian` → `ian`, a bare `ian` → `ian`.
-/// Device-shaped actors with no human (`phone:`) name nobody.
-fn human_of(actor: &str) -> String {
+/// Device-shaped actors with no human (`phone:`) name nobody. `pub` for the same reason
+/// [`subject_and_strength`] is: one parse, used everywhere (thread's confirm flip
+/// matches an answerer against `origin_human` with exactly this rule).
+pub fn human_of(actor: &str) -> String {
     match actor.split_once(':') {
         Some((_, h)) => h.to_string(),
         None => actor.to_string(),
@@ -66,6 +68,10 @@ pub fn subject_and_strength(o: &Observation) -> Option<(String, f64, &'static st
         )
     } else if o.source == "observer" || o.action == "answered" || o.action == "told the familiar" {
         (human_of(&o.actor), 0.9, "dialogue")
+    } else if o.action == "adjusted" {
+        // A hand on a control surface (ADR-0032's poller): attributed only when the room
+        // held exactly one person, so it lands between motion and dialogue in strength.
+        (human_of(&o.actor), 0.5, "adjusted")
     } else if o.action == "reports" && o.object == "presence" {
         (human_of(&o.actor), 0.4, "activity")
     } else if o.action == "reports" {
@@ -74,7 +80,9 @@ pub fn subject_and_strength(o: &Observation) -> Option<(String, f64, &'static st
         return None;
     };
     let who = who.trim().to_lowercase();
-    if who.is_empty() || who == "observer" {
+    // `observer` is the absence of a name; `someone` is the poller's honest shrug when
+    // the room was empty or ambiguous. Neither is a person to route to or pattern.
+    if who.is_empty() || who == "observer" || who == "someone" {
         return None;
     }
     Some((who, strength, via))
@@ -293,5 +301,18 @@ mod tests {
     fn presence_here_is_tighter_than_the_withdrawal_horizon() {
         // Being askable is a stricter test than not-having-abandoned-us.
         assert!(HERE_WINDOW_SECS < presence::WITHDRAWAL_HORIZON_SECS);
+    }
+
+    #[test]
+    fn an_attributed_adjustment_counts_but_someone_does_not() {
+        // A hand on a control surface, attributed to its sole present human (ADR-0032):
+        // between motion (0.6 for a device report) and the beacon tier.
+        let o = ob("ian", "adjusted", "lights=dim", "actuator", NOW);
+        let (who, strength, via) = subject_and_strength(&o).unwrap();
+        assert_eq!((who.as_str(), via), ("ian", "adjusted"));
+        assert!((strength - 0.5).abs() < f64::EPSILON);
+        // The poller's honest shrug names nobody — like `observer`, excluded.
+        let anon = ob("someone", "adjusted", "lights=dim", "actuator", NOW);
+        assert!(subject_and_strength(&anon).is_none());
     }
 }
