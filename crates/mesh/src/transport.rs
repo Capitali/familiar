@@ -126,6 +126,11 @@ pub struct PeerRecord {
     pub lat: f64,
     #[serde(default)]
     pub lon: f64,
+    /// When this fix was last set (unix secs) — the LAST-KNOWN-location clock (C4). Persists on
+    /// the row for as long as the node lives in the roster, so a device that has gone quiet still
+    /// shows where it last was and WHEN. 0 = never located.
+    #[serde(default)]
+    pub location_at: i64,
     /// True when the fix came from a device's own GPS (worldview read) rather than a peer's
     /// brief. Only device fixes seed `self_geo` — a brief-carried position may itself be
     /// inherited or stale, and trusting it circularly spread one bad fix mesh-wide.
@@ -705,6 +710,7 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
                 // still shows at its true location on this door instead of unlocated.
                 lat: st.lat,
                 lon: st.lon,
+                location_at: if st.lat != 0.0 || st.lon != 0.0 { st.updated_at } else { 0 },
                 ..Default::default()
             });
             changed = true;
@@ -728,6 +734,7 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
             if (st.lat != 0.0 || st.lon != 0.0) && p.lat == 0.0 && p.lon == 0.0 {
                 p.lat = st.lat;
                 p.lon = st.lon;
+                p.location_at = st.updated_at; // last-known-location clock (C4)
                 changed = true;
             }
         }
@@ -4191,6 +4198,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
         human: brief.body.capability.human.clone(),
         lat: brief.body.capability.lat,
         lon: brief.body.capability.lon,
+        location_at: if brief.body.capability.lat != 0.0 || brief.body.capability.lon != 0.0 { now } else { 0 },
         geo_device: false,
         status: String::new(),
         connectivity: String::new(),
@@ -4230,13 +4238,15 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                 };
             // A brief without a fix (0/0) never erases a position we already know — and a
             // device-reported fix (real GPS) is never downgraded by a brief-carried one.
-            let (lat, lon, geo_device) =
+            let (lat, lon, geo_device, location_at) =
                 if existing.geo_device && (existing.lat != 0.0 || existing.lon != 0.0) {
-                    (existing.lat, existing.lon, true)
+                    (existing.lat, existing.lon, true, existing.location_at)
                 } else if rec.lat != 0.0 || rec.lon != 0.0 {
-                    (rec.lat, rec.lon, false)
+                    (rec.lat, rec.lon, false, now)
                 } else {
-                    (existing.lat, existing.lon, existing.geo_device)
+                    // No new fix — KEEP the last-known place and its time (C4): a quiet node
+                    // still shows where it last was, not a blank.
+                    (existing.lat, existing.lon, existing.geo_device, existing.location_at)
                 };
             *existing = PeerRecord {
                 addr: addr_keep,
@@ -4245,6 +4255,7 @@ fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
                 total_online_secs,
                 lat,
                 lon,
+                location_at,
                 geo_device,
                 ..rec
             };
@@ -4334,6 +4345,7 @@ pub(crate) fn register_device_peer(
                 existing.lat = lat;
                 existing.lon = lon;
                 existing.geo_device = member_fix;
+                existing.location_at = now; // stamp the last-known-location clock (C4)
             }
         }
         None => peers.push(PeerRecord {
@@ -4356,6 +4368,7 @@ pub(crate) fn register_device_peer(
             human: String::new(),
             lat,
             lon,
+            location_at: if lat != 0.0 || lon != 0.0 { now } else { 0 },
             geo_device: member_fix && (lat != 0.0 || lon != 0.0),
             status: String::new(),
             connectivity: String::new(),
@@ -4492,6 +4505,7 @@ mod tests {
                 status: "open".into(),
                 status_at: 100,
                 last_worked_at: 0,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
                 origin_human: "betty".into(),
@@ -5099,6 +5113,7 @@ mod tests {
             human: String::new(),
             lat: 0.0,
             lon: 0.0,
+            location_at: 0,
             geo_device: false,
             status: String::new(),
             connectivity: String::new(),

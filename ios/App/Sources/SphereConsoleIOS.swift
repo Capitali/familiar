@@ -288,14 +288,17 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
 
     // Same choreography as the Mac console: surface at matched altitude, descend with the
     // crossfade; the ascent mirrors it (25% street out, crossfade, satellite out).
-    func surfaceStreet(lat: Double, lon: Double) {
+    func surfaceStreet(lat: Double, lon: Double, fromKm: Double = 220, zoomMs: Double = 2400) {
         mode = .street
         guard let map else { return }
         let target = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-        map.camera = MKMapCamera(lookingAtCenter: target, fromDistance: 220_000, pitch: 0, heading: 0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        // Start at the altitude the globe handed off at (C2), so the descent is continuous.
+        map.camera = MKMapCamera(lookingAtCenter: target, fromDistance: fromKm * 1000, pitch: 0, heading: 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             let close = MKMapCamera(lookingAtCenter: target, fromDistance: 900, pitch: 35, heading: 0)
-            UIView.animate(withDuration: 2.4) { self?.map?.camera = close }
+            UIView.animate(withDuration: max(0.8, zoomMs / 1000), delay: 0, options: [.curveEaseOut]) {
+                self?.map?.camera = close
+            }
         }
         startProjecting()
     }

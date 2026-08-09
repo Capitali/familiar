@@ -39,7 +39,18 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
     func startFixBaseline() {
         location.requestAlwaysAuthorization()
         location.startMonitoringSignificantLocationChanges()
+        // Significant-change monitoring is cell-based and only fires on ~500m moves, so a
+        // stationary phone could sit forever without ever delivering a usable fix — which is why
+        // Leif read as unlocated in Arizona (C3). Ask for one precise fix right now, and keep a
+        // low-frequency refresh so a device that has moved re-places itself.
+        location.requestLocation()
+        fixTimer?.invalidate()
+        fixTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.location.requestLocation()
+        }
     }
+
+    private var fixTimer: Timer?
 
     func start(location wantLocation: Bool, motion wantMotion: Bool) {
         derivedLocationObs = wantLocation
@@ -98,8 +109,13 @@ final class SensingCoordinator: NSObject, CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
         if m.authorizationStatus == .authorizedAlways || m.authorizationStatus == .authorizedWhenInUse {
             m.startMonitoringSignificantLocationChanges()
+            m.requestLocation()   // a fix the moment permission is granted, not on the next 500m move (C3)
         }
     }
+
+    // requestLocation() requires this delegate method; a one-shot failure is transient (the timer
+    // and significant-change monitoring will try again), so we swallow it rather than surface it.
+    func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {}
 
     // MARK: derivation
 

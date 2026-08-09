@@ -352,6 +352,10 @@ function peers(all) {
       m, name: m.label, lat, lon, located, hasAnchor: !!anchor, status: st,
       color: statusColor(st, m.kind), local: m.kind === 'self_node',
       kindWord: { self_node: 'SELF', gossip_peer: 'PEER', device_peer: 'DEVICE', device_agent: 'AGENT' }[m.kind] || 'NODE',
+      // Last-known location + when it was known (C4) — persists in the roster even after the
+      // device goes quiet, so "where were they last, and how long ago" is always answerable.
+      locationAt: m.location_at || 0,
+      locationAgo: (m.location_at > 0) ? (nowS() - m.location_at) : -1,
       ...seenParts(st, m.last_seen),
       session: m.session_start > 0 ? dur(nowS() - m.session_start) : '—',
       total: m.total_online_secs > 0 ? dur(m.total_online_secs) : '—',
@@ -1103,6 +1107,7 @@ function refreshScreen() {
       ${row('PRESENT', p.present.text)}
       ${row('SERVES', (m.human || '') + (m.interactive ? ' · interactive' : ''))}
       ${row('POSITION', p.located ? p.lat.toFixed(4)+'°, '+p.lon.toFixed(4)+'°' : p.hasAnchor ? '≈ near mesh' : '—')}
+      ${p.located && p.locationAt > 0 ? row('LAST FIX', p.locationAgo < 90 ? 'just now' : dur(p.locationAgo) + ' ago · ' + dtstr(p.locationAt)) : ''}
       ${row('ADDRESS', m.addr)}
       ${row('OFFERS', (m.tools||0) + ' tools · ' + (m.patterns||0) + ' patterns')}
       ${row('ROLE', m.relationship)}
@@ -1379,7 +1384,10 @@ function renderChrome() {
   $('screenbtns').style.display = street ? 'none' : 'block';
   $('holobtn').style.display = street ? 'none' : 'flex';
   $('loading').style.display = S.loading ? 'flex' : 'none';
-  $('modetoggle').style.display = street ? 'none' : 'flex';
+  // Hidden in street mode, and hidden when nothing is located — a zoom glyph with nowhere to
+  // dive is a dead button (C1).
+  const anyLocated = peers().some(p => p.located);
+  $('modetoggle').style.display = (street || !anyLocated) ? 'none' : 'flex';
   // The glyph greets while someone is new (ADR-0026): a warmer colour and a livelier pulse —
   // "someone new has joined", never urgency. Rate AND colour, so it stays legible without
   // colour vision.
@@ -1781,7 +1789,19 @@ window.sphereBackToGlobe = () => {
 };
 
 $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
-$('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
+$('modetoggle').onclick = () => window.sphereZoomToFocus();
+// The bottom-centre zoom glyph dives to a LOCATED node — never blindly to S.focusIdx, which
+// defaults to self: an unlocated self routed sphereDive to the network screen (C1). Prefer the
+// current focus if located, then self, then the first located node; if nothing is located there
+// is nothing to dive to, so stay on the globe rather than surprising the user with another page.
+window.sphereZoomToFocus = () => {
+  const P = peers();
+  let i = (P[S.focusIdx] && P[S.focusIdx].located) ? S.focusIdx : -1;
+  if (i < 0) i = P.findIndex(p => p.local && p.located);
+  if (i < 0) i = P.findIndex(p => p.located);
+  if (i < 0) return;
+  window.sphereDive(i);
+};
 
 // ---------- three.js globe ----------
 const G = { anchorPeers: [], anchorDirs: [], frontierDirs: [], siblingDirs: [], arcs: [], frontierArcs: [], siblingArcs: [], streetA: 0 };
@@ -1867,7 +1887,13 @@ function collectNodes() {
 }
 function handoff(p) {
   S.mode = 'street'; renderChrome();
-  toApp('street', { lat: p.lat, lon: p.lon, label: p.name || p.label, color: p.color, nodes: collectNodes() });
+  // The map must START at the SAME apparent altitude the globe has right now (C2), or the
+  // handoff jumps from ~thousands of km on the globe to the map's close-in default. The globe
+  // camera sits `len` sphere-radii from centre; radius 1 ≈ 6371 km, so altitude ≈ (len-1)·6371.
+  const len = (G.camera && G.camera.position) ? G.camera.position.length() : 3.5;
+  const fromKm = Math.max(1.5, (len - 1) * 6371);
+  toApp('street', { lat: p.lat, lon: p.lon, label: p.name || p.label, color: p.color,
+                    fromKm, zoomMs: Math.round(ZOOM_MS * 0.75), nodes: collectNodes() });
   // synchronized crossfade: satellite out over the middle 50% of the zoom; arcs surface with the map
   const fade = (ZOOM_MS * 0.5 / 1000) + 's';
   for (const id of ['space','globe','vignette']) { const e = $(id); e.style.transition = 'opacity ' + fade; e.style.opacity = '0'; }

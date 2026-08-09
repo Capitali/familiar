@@ -34,6 +34,12 @@ pub struct Thread {
     /// Last time this thread was actively worked (pursued, evidence added, answered).
     #[serde(default)]
     pub last_worked_at: i64,
+    /// How many times this theory has RE-OCCURRED — the muse arrived at the same idea again
+    /// (C5). A one-off theory stays at 0 and processes quietly; only a theory that keeps
+    /// resurfacing (or one that progressed to pursued/answered) has earned a human's attention.
+    /// This is what lets connectivity noise churn in the background without cluttering the view.
+    #[serde(default)]
+    pub reinforced: u32,
     /// The human's answers to this thread's question — evidence the pursuit carries.
     /// Empty until someone answers; each answer stamps `last_worked_at`.
     #[serde(default)]
@@ -77,6 +83,34 @@ pub fn update_status(dir: &Path, id: &str, status: &str, now: i64) -> io::Result
         t.last_worked_at = now;
     }
     store::update_by_id(dir, THREADS_FILE, id, &t)
+}
+
+/// The muse arrived at this theory again — reinforce it rather than spawn a near-duplicate
+/// (C5). Bumps the recurrence count and stamps it worked, so a theory that keeps resurfacing
+/// climbs toward the maturity threshold while a one-off stays quiet. Returns true if found.
+pub fn reinforce(dir: &Path, id: &str, now: i64) -> io::Result<bool> {
+    let Some(mut t) = store::load_by_id::<Thread>(dir, THREADS_FILE, id)? else {
+        return Ok(false);
+    };
+    t.reinforced = t.reinforced.saturating_add(1);
+    t.last_worked_at = now;
+    store::update_by_id(dir, THREADS_FILE, id, &t)
+}
+
+/// How many recurrences (or a progression to pursued/answered) a theory needs before it is
+/// worth a human's eyes (C5). Below this it churns in the background; connectivity noise never
+/// clears it because each variant reinforces the same thread rather than adding a new one.
+pub const MATURITY_THRESHOLD: u32 = 3;
+
+/// Whether a theory has earned a place in the human-facing view (C5): it has recurred enough,
+/// or it progressed into work / an answer. Abandoned and marginalized theories never surface.
+pub fn is_mature(t: &Thread) -> bool {
+    if matches!(t.status.as_str(), "abandoned" | "marginalized") {
+        return false;
+    }
+    t.reinforced >= MATURITY_THRESHOLD
+        || matches!(t.status.as_str(), "pursued" | "answered")
+        || !t.answers.is_empty()
 }
 
 /// The human answered this thread's question. The answer is appended as evidence, the
@@ -144,6 +178,7 @@ mod tests {
             status: "open".into(),
             status_at: 100,
             last_worked_at: 0,
+            reinforced: 0,
             answers: Vec::new(),
             origin: "llm".into(),
             origin_human: String::new(),
@@ -173,6 +208,7 @@ mod tests {
             status: "open".into(),
             status_at: 100,
             last_worked_at: 0,
+            reinforced: 0,
             answers: Vec::new(),
             origin: "llm".into(),
             origin_human: "betty".into(),

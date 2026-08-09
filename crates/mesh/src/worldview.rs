@@ -630,9 +630,13 @@ pub fn assemble_worldview(
     let trials = familiar_kernel::trial::load(dir).unwrap_or_default();
     let theory_quality =
         familiar_kernel::score::theory_record(&threads, &candidates, &trials, 0.0).quality;
+    // Only MATURE theories reach the console (C5): a theory that keeps recurring (reinforced)
+    // or that progressed to pursued/answered has earned attention; one-off connectivity noise
+    // churns in the background and never clutters the view.
     let theories: Vec<TheoryView> = threads
         .iter()
         .rev()
+        .filter(|t| familiar_kernel::thread::is_mature(t))
         .take(THEORY_CAP)
         .map(|t| TheoryView {
             id: t.id.clone(),
@@ -1284,6 +1288,7 @@ mod tests {
             present_via: String::new(),
             lat: 0.0,
             lon: 0.0,
+            location_at: 0,
             geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),

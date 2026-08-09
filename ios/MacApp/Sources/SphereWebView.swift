@@ -320,15 +320,19 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
 
     // The globe reached the crossfade point — surface Apple Maps at matching altitude and
     // descend in step with the fade, ending in pure-street close detail.
-    func surfaceStreet(lat: Double, lon: Double) {
+    func surfaceStreet(lat: Double, lon: Double, fromKm: Double = 220, zoomMs: Double = 2400) {
         mode = .street
         guard let map else { return }
         let target = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-        map.camera = MKMapCamera(lookingAtCenter: target, fromDistance: 220_000, pitch: 0, heading: 0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak map] in
+        // Start at the altitude the GLOBE handed off at (C2), so the map picks up the descent
+        // seamlessly instead of snapping to a fixed close-in altitude — the two zooms read as
+        // one continuous flight to the target's true coordinates.
+        map.camera = MKMapCamera(lookingAtCenter: target, fromDistance: fromKm * 1000, pitch: 0, heading: 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak map] in
             let close = MKMapCamera(lookingAtCenter: target, fromDistance: 900, pitch: 35, heading: 0)
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 2.4
+                ctx.duration = max(0.8, zoomMs / 1000)
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 ctx.allowsImplicitAnimation = true
                 map?.camera = close
             }
@@ -395,7 +399,9 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             case "street":
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
                 self.surfaceStreet(lat: body["lat"] as? Double ?? 0,
-                                   lon: body["lon"] as? Double ?? 0)
+                                   lon: body["lon"] as? Double ?? 0,
+                                   fromKm: body["fromKm"] as? Double ?? 220,
+                                   zoomMs: body["zoomMs"] as? Double ?? 2400)
             case "nodes":
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
             case "surface":

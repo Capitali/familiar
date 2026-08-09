@@ -371,7 +371,9 @@ fn infra_loop(l: &loops::Loop) -> bool {
 /// overlap (Jaccard, words > 3 chars) over theory+direction — the muse asking
 /// the same thing twice in different words wastes the human's attention, which
 /// is the coin service is priced in (Law I).
-fn similar_thread_exists(existing: &[Thread], theory: &str, direction: &str) -> bool {
+/// The id of an existing open/pursued thread this theory duplicates (Jaccard ≥ 0.5), if any —
+/// so the caller can REINFORCE the survivor instead of spawning a near-duplicate (C5).
+fn similar_thread_id(existing: &[Thread], theory: &str, direction: &str) -> Option<String> {
     let words = |s: &str| -> std::collections::HashSet<String> {
         s.to_lowercase()
             .split(|c: char| !c.is_alphanumeric())
@@ -381,12 +383,12 @@ fn similar_thread_exists(existing: &[Thread], theory: &str, direction: &str) -> 
     };
     let candidate = words(&format!("{theory} {direction}"));
     if candidate.is_empty() {
-        return false;
+        return None;
     }
     existing
         .iter()
         .filter(|t| t.status == "open" || t.status == "pursued")
-        .any(|t| {
+        .find(|t| {
             let held = words(&format!("{} {}", t.theory, t.direction));
             if held.is_empty() {
                 return false;
@@ -395,6 +397,11 @@ fn similar_thread_exists(existing: &[Thread], theory: &str, direction: &str) -> 
             let union = candidate.union(&held).count() as f64;
             inter / union >= 0.5
         })
+        .map(|t| t.id.clone())
+}
+
+fn similar_thread_exists(existing: &[Thread], theory: &str, direction: &str) -> bool {
+    similar_thread_id(existing, theory, direction).is_some()
 }
 
 fn theorize_due(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool {
@@ -749,7 +756,11 @@ fn maybe_theorize(
     // A musing that substantially repeats a standing thread is not a new thought —
     // it is the same thought asked louder. Hold it; the standing thread carries it.
     let existing = thread::load(dir)?;
-    if similar_thread_exists(&existing, &theory, &direction) {
+    if let Some(id) = similar_thread_id(&existing, &theory, &direction) {
+        // The muse reached the same idea again — reinforce the survivor (C5) so a recurring
+        // theory climbs toward maturity, instead of spawning yet another near-duplicate that
+        // clutters the view. A one-off never crosses the threshold and stays out of sight.
+        let _ = thread::reinforce(dir, &id, now);
         fs::write(dir.join(LAST_THEORY_FILE), now.to_string())?;
         return Ok(false);
     }
@@ -771,6 +782,7 @@ fn maybe_theorize(
             status: "open".to_string(),
             status_at: now,
             last_worked_at: 0,
+            reinforced: 0,
             answers: Vec::new(),
             origin: "llm".to_string(),
             origin_human: String::new(),
@@ -933,7 +945,8 @@ fn maybe_theorize_needs(
         .filter(|t| t.origin_human == handle)
         .cloned()
         .collect();
-    if similar_thread_exists(&hers, &need, &direction) {
+    if let Some(id) = similar_thread_id(&hers, &need, &direction) {
+        let _ = thread::reinforce(dir, &id, now); // recurrence reinforces the survivor (C5)
         return Ok(false);
     }
     let thread_id = format!("thread-{:04}", existing.len() + 1);
@@ -951,6 +964,7 @@ fn maybe_theorize_needs(
             status: "open".to_string(),
             status_at: now,
             last_worked_at: 0,
+            reinforced: 0,
             answers: Vec::new(),
             origin: "llm".to_string(),
             origin_human: handle,
@@ -1786,6 +1800,7 @@ fn adopt_device_theories(
             status: "open".into(),
             status_at: now,
             last_worked_at: 0,
+            reinforced: 0,
             answers: Vec::new(),
             origin: "device".into(),
             origin_human: String::new(),
@@ -3844,6 +3859,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: now,
                 last_worked_at: now,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
                 origin_human: "ian".into(),
@@ -4169,6 +4185,7 @@ mod tests {
                 status: "open".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
                 origin_human: String::new(),
@@ -4256,6 +4273,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
                 origin_human: String::new(),
@@ -4300,6 +4318,7 @@ mod tests {
                 status: "open".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "llm".into(),
                 origin_human: String::new(),
@@ -4660,6 +4679,7 @@ mod tests {
             status: "pursued".into(),
             status_at: 1,
             last_worked_at: 0,
+            reinforced: 0,
             answers: Vec::new(),
             origin: "llm".into(),
             origin_human: String::new(),
@@ -4798,6 +4818,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "familiar".into(),
                 origin_human: String::new(),
@@ -4969,6 +4990,7 @@ mod tests {
                 status: "pursued".into(),
                 status_at: 0,
                 last_worked_at: 0,
+                reinforced: 0,
                 answers: Vec::new(),
                 origin: "familiar".into(),
                 origin_human: String::new(),
@@ -5164,6 +5186,7 @@ mod tests {
                     status: "open".into(),
                     status_at: 0,
                     last_worked_at: 0,
+                    reinforced: 0,
                     answers: Vec::new(),
                     origin: "observer".into(),
                     origin_human: String::new(),

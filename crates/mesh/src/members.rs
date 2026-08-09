@@ -114,6 +114,11 @@ pub struct Member {
     pub lat: f64,
     #[serde(default)]
     pub lon: f64,
+    /// When the fix above was last set (unix secs) — the LAST-KNOWN-location clock (C4). Stays
+    /// on the row for as long as the node is in the roster, so a device that has gone quiet still
+    /// shows where it last was and when. 0 = never located.
+    #[serde(default)]
+    pub location_at: i64,
     /// The fix above is this device's OWN GPS, reported by a full member — the only kind of
     /// fix a console may treat as the mesh's ground truth (its clustering anchor). False for
     /// brief-carried positions (which may themselves be inherited) and for guests: a visitor's
@@ -417,6 +422,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: sp_via,
             lat: self_lat,
             lon: self_lon,
+            location_at: if self_lat != 0.0 || self_lon != 0.0 { now } else { 0 },
             // The daemon is not a GPS device; consoles anchor on this row by its kind
             // (self_node / the "· host" relationship), not by fix provenance.
             geo_device: false,
@@ -610,6 +616,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_confidence: claimed.3,
             lat: p.lat,
             lon: p.lon,
+            location_at: p.location_at,
             geo_device: p.geo_device && full_member,
             attached: Vec::new(),
             attached_to: String::new(),
@@ -684,6 +691,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: agent_presence.2,
             lat: 0.0,
             lon: 0.0,
+            location_at: 0,
             geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),
@@ -766,6 +774,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_confidence: 0.0,
             lat,
             lon,
+            location_at: origin.map(|o| o.at).filter(|_| lat != 0.0 || lon != 0.0).unwrap_or(0),
             geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),
