@@ -42,6 +42,7 @@ use familiar_kernel::dossier;
 use familiar_kernel::goal;
 use familiar_kernel::guard::Reason;
 use familiar_kernel::humanity;
+use familiar_kernel::intent::{corrupting_intent, wants_execution};
 use familiar_kernel::loops;
 use familiar_kernel::observation;
 use familiar_kernel::parameters::Parameters;
@@ -1003,45 +1004,6 @@ fn review_parameters(dir: &Path, now: i64) -> io::Result<usize> {
     Ok(reverts.len())
 }
 
-/// Does this request plainly ask the familiar to break its constitution? A conservative
-/// keyword check — it only flags clear intent (exfiltration, attack, harm, bypassing
-/// safety, acting against another's consent), so honest requests are never mistaken for
-/// attacks. Imperfect by nature (intent in free text); the bar is deliberately high. A
-/// match is a refusal *and* a recorded refusal against the asker (corruption awareness).
-fn corrupting_intent(text: &str) -> Option<&'static str> {
-    let t = text.to_lowercase();
-    let hit = |needles: &[&str]| needles.iter().any(|n| t.contains(n));
-    if hit(&[
-        "exfiltrat",
-        "steal ",
-        "leak ",
-        "send my passwords",
-        "upload my data",
-    ]) {
-        Some("it asks me to exfiltrate the served's data")
-    } else if hit(&[
-        "disable safety",
-        "ignore the three laws",
-        "ignore your rules",
-        "bypass the boundary",
-        "without consent",
-        "without their consent",
-    ]) {
-        Some("it asks me to bypass the constitution or another's consent")
-    } else if hit(&[
-        "attack ",
-        "ddos",
-        "hack into",
-        "break into",
-        "harm ",
-        "hurt ",
-    ]) {
-        Some("it asks me to act to harm")
-    } else {
-        None
-    }
-}
-
 /// Gather the verified facts relevant to a request — the ground the answer must stand on.
 /// Always the host census + interfaces; for a request about the network, a closer look
 /// (gateway, DNS, listening ports). Recent observations round it out. These are facts the
@@ -1199,35 +1161,6 @@ pub fn familiar_workspace() -> PathBuf {
     std::env::var("HOME")
         .map(|h| PathBuf::from(h).join("Library/Application Support/Familiar/workspace"))
         .unwrap_or_else(|_| PathBuf::from("familiar_workspace"))
-}
-
-/// Does this request want the familiar to actually *run* something (and report the result),
-/// not merely reason about it? The trigger for the answer path to author + run a script
-/// rather than answer read-only. Conservative keyword match.
-fn wants_execution(text: &str) -> bool {
-    let t = text.to_lowercase();
-    [
-        "run ",
-        "run it",
-        "execute",
-        "launch",
-        "stress test",
-        "benchmark",
-        "compile ",
-        "cpu stat",
-        "cpu usage",
-        "memory usage",
-        "disk usage",
-        "load average",
-        "how busy",
-        "what processes",
-        "uptime",
-        "df ",
-        "free ",
-        "ps aux",
-    ]
-    .iter()
-    .any(|k| t.contains(k))
 }
 
 /// A tool the LLM just drafted, before it is persisted into the library.
