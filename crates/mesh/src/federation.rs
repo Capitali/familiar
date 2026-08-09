@@ -340,6 +340,31 @@ pub fn load_siblings(dir: &Path) -> Vec<SiblingRecord> {
     out
 }
 
+/// Resolve a human-typed reference to a sibling: the full group_id, a unique id prefix, or
+/// the handle (case-insensitive, unique). The consoles show short ids; a human should be
+/// able to act on what they can see.
+pub fn resolve_sibling(dir: &Path, wanted: &str) -> Option<SiblingRecord> {
+    let w = wanted.trim();
+    if w.is_empty() {
+        return None;
+    }
+    let all = load_siblings(dir);
+    if let Some(s) = all.iter().find(|s| s.group_id == w) {
+        return Some(s.clone());
+    }
+    let by_prefix: Vec<&SiblingRecord> = all.iter().filter(|s| s.group_id.starts_with(w)).collect();
+    if by_prefix.len() == 1 {
+        return Some(by_prefix[0].clone());
+    }
+    let wl = w.to_lowercase();
+    let by_handle: Vec<&SiblingRecord> =
+        all.iter().filter(|s| s.handle.to_lowercase() == wl).collect();
+    if by_handle.len() == 1 {
+        return Some(by_handle[0].clone());
+    }
+    None
+}
+
 /// The sibling that holds this mesh key, if it stands (state == "sibling") — the read-auth
 /// lookup for `/mesh/worldview-sibling`. Fail closed: pending and severed do not read.
 pub fn standing_sibling_by_pubkey(dir: &Path, group_pubkey: &str) -> Option<SiblingRecord> {
@@ -443,7 +468,7 @@ pub fn receive_introduction(
 /// The member's tap: a pending sibling stands. Idempotent; welcoming a severed sibling is the
 /// deliberate restore.
 pub fn welcome_sibling(dir: &Path, group_id: &str, welcomed_by: &str, now: i64) -> Result<SiblingRecord> {
-    let mut s = load_sibling(dir, group_id)
+    let mut s = resolve_sibling(dir, group_id)
         .ok_or_else(|| Error::Untrusted("welcome: no such introduction".into()))?;
     if s.state != "sibling" {
         s.state = "sibling".into();
@@ -468,7 +493,7 @@ pub fn welcome_sibling(dir: &Path, group_id: &str, welcomed_by: &str, now: i64) 
 
 /// Standing withdrawal — the record stays, with its reason (ADR-0033 §6).
 pub fn sever_sibling(dir: &Path, group_id: &str, reason: &str, now: i64) -> Result<SiblingRecord> {
-    let mut s = load_sibling(dir, group_id)
+    let mut s = resolve_sibling(dir, group_id)
         .ok_or_else(|| Error::Untrusted("sever: no such sibling".into()))?;
     s.state = "severed".into();
     s.note = reason.to_string();
@@ -637,7 +662,7 @@ pub fn federate_with(dir: &Path, invite_payload: &str) -> Result<SiblingRecord> 
 /// Read a sibling mesh's worldview at the sibling rung — signed with OUR mesh key, presented
 /// at THEIR door. Returns the raw worldview JSON (the caller renders). Blocking; TLS.
 pub fn read_sibling_worldview(dir: &Path, group_id: &str) -> Result<String> {
-    let sib = load_sibling(dir, group_id)
+    let sib = resolve_sibling(dir, group_id)
         .ok_or_else(|| Error::Untrusted("no such sibling here".into()))?;
     let Some(cred) = crate::group::load(dir).ok().flatten() else {
         return Err(Error::Untrusted("no group enrolled here".into()));
