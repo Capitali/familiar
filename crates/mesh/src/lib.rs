@@ -41,6 +41,7 @@ pub mod node;
 pub mod observe;
 pub mod outreach;
 pub mod push;
+pub mod changeling;
 pub mod game;
 pub mod record;
 pub mod rendezvous;

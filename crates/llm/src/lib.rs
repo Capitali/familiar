@@ -19,6 +19,13 @@ use familiar_kernel::guard::{self, Action, ActionKind, Decision};
 /// per-request network timeout, so the adapter times out first when it can.
 pub const DEFAULT_ADAPTER_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// One consult at a time per process. The adapter contract is a shared
+/// `llm/prompt.txt` → `llm/response.json` pair, so two concurrent consults would cross
+/// their prompts and answers. The daemon is one process running several consulting
+/// threads (the cycle, the mesh's changeling forge); this serializes them. A CLI
+/// consult racing the daemon cross-process remains possible — pre-existing, unchanged.
+static CONSULT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The result of a consult attempt.
 pub enum Outcome {
     /// The guard refused (boundary closed, or adapter missing/failed). No reach occurred.
@@ -44,6 +51,8 @@ pub fn consult(dir: &Path, prompt: &str) -> io::Result<Outcome> {
 /// `Refused`. Exit code 2 is the adapter contract for "every provider
 /// rate-limited" and maps to [`Outcome::RateLimited`].
 pub fn consult_with(dir: &Path, prompt: &str, timeout: Duration) -> io::Result<Outcome> {
+    // Poison-tolerant: a panicked consult must not silence the LLM forever.
+    let _serial = CONSULT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let b = boundary::load(dir)?;
     let verdict = guard::evaluate(&Action::new(ActionKind::Llm, "llm-provider"), &b);
     if verdict.decision != Decision::Allow {

@@ -7,6 +7,7 @@ description = "Peer federation over the tailnet — cryptographically group-veri
 
 [dependencies]
 familiar-kernel.workspace = true
+familiar-llm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # The crypto floor: ed25519 node/group keys, SHA-256 fingerprints, OS randomness.

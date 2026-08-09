@@ -2725,6 +2725,56 @@ fn absorb_game_notifying(dir: &Path, g: &crate::game::GameState) {
     let before = crate::game::load(dir).map(|s| (s.id.clone(), s.holder.clone()));
     let _ = crate::game::absorb(dir, g);
     notify_if_turn_changed(dir, before);
+    // Votes completing on ANOTHER door reach the keeper as this sync — its next duty
+    // (reveal), or a solo forge re-claim, runs off-path now rather than on the next poll.
+    spawn_changeling_touch(dir, None);
+}
+
+/// Run the changeling keeper's next duty off the request path (ADR-0034). Forging may
+/// consult the LLM for up to two minutes; no hyper worker ever waits on it. The runtime
+/// handle is captured first so the result can call for the new holder (APNs) and cross
+/// to the sibling doors immediately — the same no-seesaw law as the act path.
+pub(crate) fn spawn_changeling_touch(dir: &Path, truth: Option<String>) {
+    let Some(g) = crate::game::load(dir) else {
+        return;
+    };
+    if g.status != "open" || g.kind != crate::game::GameKind::Changeling {
+        return;
+    }
+    let duty = (g.phase == "forging" && g.keeper.is_empty() && (truth.is_some() || g.solo))
+        || g.phase == "reveal-wait";
+    if !duty {
+        return;
+    }
+    let rt = tokio::runtime::Handle::try_current().ok();
+    let dir = dir.to_path_buf();
+    std::thread::spawn(move || {
+        let Ok(key) = crate::node::NodeKey::load_or_mint(&dir, "familiar") else {
+            return;
+        };
+        let my = key.identity().node_id;
+        let before = crate::game::load(&dir).map(|s| (s.id.clone(), s.holder.clone()));
+        if !matches!(
+            crate::changeling::touch(&dir, &my, truth, now_secs()),
+            Ok(true)
+        ) {
+            return;
+        }
+        if let Some(rt) = rt {
+            let dir2 = dir.clone();
+            rt.spawn(async move {
+                notify_if_turn_changed(&dir2, before);
+                let doors: Vec<String> = load_peers(&dir2)
+                    .into_iter()
+                    .filter(|p| !p.interactive && !p.addr.is_empty() && p.status != "abandoned")
+                    .map(|p| p.addr)
+                    .collect();
+                for addr in doors {
+                    sync_records_with(&dir2, &addr).await;
+                }
+            });
+        }
+    });
 }
 
 /// `POST /mesh/game/act` → verify the member and apply the move. The reply body is the
@@ -2785,6 +2835,12 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
             }
             // The turn may have crossed to a human whose phone is locked — call for them.
             notify_if_turn_changed(dir, before);
+            // A witness's truth (or a solo begin) lights the forge — the keeper's work
+            // runs off this request path; the truth text exists only in this act.
+            spawn_changeling_touch(
+                dir,
+                (env.act.act == "line").then(|| env.act.text.clone()),
+            );
             // The ember must not wait for the next gossip round to cross doors: two humans
             // acting through two doors saw a ~30s holder seesaw as each door's periodic sync
             // swung the other's view. Push records to the sibling doors NOW, best-effort —

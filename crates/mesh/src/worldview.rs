@@ -835,6 +835,9 @@ pub fn assemble_worldview(
         }
         crate::game::view(&g)
     });
+    // The changeling keeper settles on any console poll (ADR-0034) — a reveal owed by
+    // this door, or a solo forge claim, runs off-path; a no-op costs one small read.
+    crate::transport::spawn_changeling_touch(dir, None);
 
     let goals = goal_views(dir);
 

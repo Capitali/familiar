@@ -198,12 +198,13 @@ pub fn spawn_notify_turn(dir: &Path, holder: &str, kind: &str) {
     if tokens.is_empty() {
         return;
     }
-    let game_name = match kind {
-        "campfire" => "the campfire",
-        _ => "riddle of the mesh",
+    let body = match kind {
+        "campfire" => "the campfire — your turn at the fire",
+        "changeling" => "the changeling — three lines, one human truth. Come look",
+        _ => "riddle of the mesh — your turn at the fire",
     };
     let payload = format!(
-        r#"{{"aps":{{"alert":{{"title":"🔥 the ember is yours","body":"{game_name} — your turn at the fire"}},"sound":"default","interruption-level":"time-sensitive"}},"ember":"{kind}"}}"#
+        r#"{{"aps":{{"alert":{{"title":"🔥 the ember is yours","body":"{body}"}},"sound":"default","interruption-level":"time-sensitive"}},"ember":"{kind}"}}"#
     );
     let now = crate::transport::now_secs();
     handle.spawn(async move {
