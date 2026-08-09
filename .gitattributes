@@ -1,0 +1,14 @@
+# Key material never rides this repository in plaintext (SECURITY.md: "Private keys
+# in the repository (git-crypt)"; issue #3 — a .p8 once landed at the root in the clear).
+#
+# Two layers: .gitignore keeps keys out of the tree by default; these git-crypt filters
+# are the backstop, so anything force-added anyway lands encrypted, never plaintext.
+# The filters are dormant until `git-crypt init` has been run once on the machine.
+#
+# secrets/ is the one sanctioned home for a credential that must ride the repo —
+# anything placed there commits encrypted.
+secrets/** filter=git-crypt diff=git-crypt
+*.p8 filter=git-crypt diff=git-crypt
+*.pem filter=git-crypt diff=git-crypt
+key.env filter=git-crypt diff=git-crypt
+.gitattributes !filter !diff

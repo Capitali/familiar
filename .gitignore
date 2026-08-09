@@ -13,8 +13,13 @@
 xcuserdata/
 *.xcuserstate
 DerivedData/
-# Apple API/auth private keys (App Store Connect, APNs) — never committed.
+# Apple API/auth private keys (App Store Connect, APNs) and PEM key material — never
+# committed in plaintext. If one must ride the repo, it goes under secrets/ where
+# git-crypt encrypts it (see .gitattributes and SECURITY.md).
 *.p8
+*.pem
+key.env
+!secrets/**
 lab-runs/
 # LLM adapter runtime state — spend ledger + health probe, not source.
 llm/spend.json
