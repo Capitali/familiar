@@ -28,6 +28,12 @@ use std::path::Path;
 
 /// Where device records live, one JSON file per `device_id`.
 pub const RECORDS_DIR: &str = "mesh/records";
+
+/// How long a visitor who never establishes an identity is kept before being fully purged
+/// (ADR-0026: the guest state is stable, but "stable" was becoming "forever"). Two hours —
+/// long enough to look around, redeem an invite, and be welcomed; short enough that a place
+/// the household never chose to know doesn't accumulate. They can always try again later.
+pub const GUEST_PURGE_SECS: i64 = 2 * 3600;
 /// Spent invite tokens — a token id that has a file here has been used.
 const SPENT_INVITES_DIR: &str = "mesh/spent_invites";
 
@@ -933,6 +939,46 @@ fn load_all_uncached(dir: &Path) -> Vec<MembershipRecord> {
     }
     out.sort_by(|a, b| a.device_id.cmp(&b.device_id));
     out
+}
+
+/// How long until this guest is purged (B10), or `None` for a member/established record or one
+/// that isn't a guest at all. Negative once overdue (the sweep runs on the tick, not per-read).
+pub fn guest_purge_in(r: &MembershipRecord, now: i64) -> Option<i64> {
+    if derive_state(r) == RecordState::Member || r.identity.established.is_some() {
+        return None;
+    }
+    if !matches!(r.state, RecordState::Guest) {
+        return None;
+    }
+    Some(r.first_seen + GUEST_PURGE_SECS - now)
+}
+
+/// Fully purge visitors who never established an identity and have sat past [`GUEST_PURGE_SECS`]
+/// (B10). Clears the record and its admission files and peer row, so nothing about a place the
+/// household never chose to know lingers. Members and any established identity are never touched.
+/// Returns the purged device_ids (for the caller to log / observe). Idempotent.
+pub fn purge_stale_guests(dir: &Path, now: i64) -> Vec<String> {
+    let mut purged = Vec::new();
+    for r in snapshot(dir).iter() {
+        match guest_purge_in(r, now) {
+            Some(remaining) if remaining <= 0 => {}
+            _ => continue,
+        }
+        // The record file itself.
+        let f = dir
+            .join(RECORDS_DIR)
+            .join(format!("{}.json", r.device_id));
+        let _ = std::fs::remove_file(&f);
+        // Admission scaffolding (grant / pending / denied) and the live peer row, so the next
+        // read re-mints a FRESH guest with a fresh clock rather than resurrecting this one.
+        crate::enroll::forget_admission_files(dir, &r.device_id);
+        let _ = crate::transport::remove_peer(dir, &r.device_id);
+        purged.push(r.device_id.clone());
+    }
+    if !purged.is_empty() {
+        invalidate_snapshot(dir);
+    }
+    purged
 }
 
 /// Find the record that holds `node_id` — as its device_id (the Phase 2 window keys records by

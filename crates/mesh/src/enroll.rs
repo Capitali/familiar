@@ -240,6 +240,14 @@ pub fn denied_for(dir: &Path, node_id: &str, now: i64) -> i64 {
     DENY_RETRY_SECS - elapsed
 }
 
+/// Remove a node's admission scaffolding — grant, pending request, denial — as part of a full
+/// guest purge (B10). Best-effort and idempotent; a missing file is success.
+pub fn forget_admission_files(dir: &Path, node_id: &str) {
+    for sub in [GRANTED_DIR, PENDING_DIR, DENIED_DIR] {
+        let _ = std::fs::remove_file(dir.join(sub).join(format!("{node_id}.json")));
+    }
+}
+
 /// Let a denied node ask again immediately — the undo for a mis-tap.
 pub fn allow_retry(dir: &Path, node_id: &str) -> Result<bool> {
     let path = dir.join(DENIED_DIR).join(format!("{node_id}.json"));

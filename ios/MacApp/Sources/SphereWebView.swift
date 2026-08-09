@@ -26,18 +26,25 @@ struct SphereConsole: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(bridge.mode != .street)
             if bridge.mode == .street {
-                // Wordless exit, in the house glyph language — back up to orbit. Beside it,
-                // the sat/street toggle: the glyph shows the surface a tap would switch TO.
+                // Wordless exit, in the house glyph language — back up to orbit, bottom-centre.
                 VStack {
                     Spacer()
-                    HStack(spacing: 14) {
-                        Button(action: { bridge.backToGlobe() }) {
-                            OrbitGlyph()
-                                .frame(width: 56, height: 56)
-                                .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
-                                .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
+                    Button(action: { bridge.backToGlobe() }) {
+                        OrbitGlyph()
+                            .frame(width: 56, height: 56)
+                            .background(Color(red: 0.035, green: 0.06, blue: 0.125).opacity(0.55), in: Circle())
+                            .overlay(Circle().stroke(Color(red: 0.52, green: 0.81, blue: 1.0).opacity(0.25), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 16)
+                }
+                // The sat/street toggle lives in the LOWER-RIGHT corner (B3): a deliberate
+                // choice the human makes, never a switch the dive performs. The glyph shows
+                // the surface a tap would switch TO.
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
                         Button(action: { bridge.toggleImagery() }) {
                             Image(systemName: bridge.streetImagery == .mutedStandard ? "globe.americas.fill" : "map")
                                 .font(.system(size: 20, weight: .light))
@@ -48,14 +55,21 @@ struct SphereConsole: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    .padding(.trailing, 20)
                     .padding(.bottom, 16)
                 }
             }
             // Invisible drag region: the window has no titlebar or visible edge, so the top
-            // strip (between the corner controls) moves the window. No chrome appears.
-            WindowDragRegion()
-                .frame(height: 36)
-                .padding(.horizontal, 90)
+            // strip moves the window. Two side strips with a centre GAP — a single centred
+            // strip swallowed the top-centre Dialogue glyph's clicks on macOS (B1), because
+            // performDrag consumes mouseDown and never forwards it. The gap is clear.
+            HStack(spacing: 0) {
+                WindowDragRegion()
+                Color.clear.frame(width: 200).allowsHitTesting(false)  // the Dialogue glyph's lane
+                WindowDragRegion()
+            }
+            .frame(height: 36)
+            .padding(.horizontal, 90)
         }
         .background(Color.black)
     }

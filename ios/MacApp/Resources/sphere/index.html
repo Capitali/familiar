@@ -40,6 +40,18 @@
   @keyframes blink{0%,90%,100%{transform:scaleY(1);}94%{transform:scaleY(0.08);}}
   @keyframes knob{0%,100%{transform:translateX(-7px);}50%{transform:translateX(7px);}}
   @keyframes gatepulse{0%,100%{transform:scale(0.92);opacity:0.85;}50%{transform:scale(1.08);opacity:1;}}
+  /* Idle ring glyphs breathe between blue and violet so they read as live controls against
+     the blue theme (B2). Also shifts the drop-shadow so the halo carries the colour. */
+  @keyframes glyphhue{0%,100%{color:#8fb4ff;filter:drop-shadow(0 0 7px rgba(120,200,255,0.6));}50%{color:#c69cff;filter:drop-shadow(0 0 9px rgba(180,150,255,0.7));}}
+  /* Riddle-win fanfare (B13): a central flash and a burst of sparks, one-shot on the win edge. */
+  @keyframes winflash{0%{opacity:0;transform:translate(-50%,-50%) scale(0.2);}18%{opacity:0.9;}100%{opacity:0;transform:translate(-50%,-50%) scale(2.6);}}
+  @keyframes winspark{0%{opacity:0;transform:translate(-50%,-50%) rotate(var(--a)) translateX(0) scale(1);}12%{opacity:1;}100%{opacity:0;transform:translate(-50%,-50%) rotate(var(--a)) translateX(var(--d)) scale(0.3);}}
+  @keyframes winbanner{0%{opacity:0;transform:translate(-50%,-50%) scale(0.7);}15%,78%{opacity:1;transform:translate(-50%,-50%) scale(1);}100%{opacity:0;transform:translate(-50%,-50%) scale(1.05);}}
+  /* The whole button ring lives inside the SAFE AREA, so no glyph is ever slid under the
+     status bar / notch / home indicator (B16, recurring). The ring's buttons are %-positioned
+     against THIS box, so insetting it shifts the ring inward and keeps it circular; the globe
+     behind stays full-bleed. */
+  #screenbtns{position:absolute;top:env(safe-area-inset-top);right:env(safe-area-inset-right);bottom:env(safe-area-inset-bottom);left:env(safe-area-inset-left);}
   .scrbtn{position:absolute;transform:translate(-50%,-50%);z-index:8;display:flex;align-items:center;justify-content:center;width:clamp(58px,7.6vmin,94px);height:clamp(58px,7.6vmin,94px);border:none;border-radius:50%;cursor:pointer;transition:background 0.3s,transform 0.2s;background:transparent;}
   .scrbtn span.ic{position:relative;display:block;width:clamp(30px,4.4vmin,54px);height:clamp(30px,4.4vmin,54px);filter:drop-shadow(0 0 7px rgba(120,200,255,0.6));}
   .glybtn{border:1px solid rgba(132,206,255,0.25);background:rgba(9,15,32,0.5);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);cursor:pointer;display:flex;align-items:center;justify-content:center;color:#cfe0ff;box-shadow:0 8px 24px rgba(0,0,0,0.4);border-radius:50%;transition:background 0.2s,color 0.2s;}
@@ -70,7 +82,7 @@
   <!-- daemon-down badge: appears only when the link is lost (otherwise no chrome) -->
   <!-- pointer-events:none + pushed below the ring: the badge INFORMS, it must never eat the
        dialogue glyph's clicks (the odd-count ring now parks a button at top centre). -->
-  <div id="linkdown" style="display:none;position:absolute;top:84px;left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;pointer-events:none;">
+  <div id="linkdown" style="display:none;position:absolute;top:calc(84px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;pointer-events:none;">
     <div style="width:34px;height:34px;border-radius:50%;background:rgba(60,10,16,0.6);border:1px solid rgba(255,110,110,0.5);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;">
       <svg viewBox="0 0 24 24" fill="none" stroke="#ff6e6e" stroke-width="1.8" stroke-linecap="round" style="width:18px;height:18px;"><path d="M12 3v10"/><circle cx="12" cy="18.5" r="1.2" fill="#ff6e6e" stroke="none"/></svg>
     </div>
@@ -98,7 +110,7 @@
   <!-- Welcome: the door. Pulses red while anyone is waiting to be recognised. Replaces the old
        device/sliders button, which duplicated the ring's Device screen; the capability gates it
        used to reach now live inside that screen, where this device's other settings already are. -->
-  <button id="welcomebtn" class="glybtn" title="welcome" onclick="sphereScreen('welcome')" style="position:absolute;top:20px;right:20px;z-index:9;width:46px;height:46px;">
+  <button id="welcomebtn" class="glybtn" title="welcome" onclick="sphereScreen('welcome')" style="position:absolute;top:calc(20px + env(safe-area-inset-top));right:calc(20px + env(safe-area-inset-right));z-index:9;width:46px;height:46px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:24px;height:24px;overflow:visible;">
       <!-- an open doorway with a threshold, and someone standing in it -->
       <path d="M14 42V12a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v30" stroke-width="2" opacity="0.55" stroke-linecap="round"/>
@@ -109,7 +121,7 @@
   </button>
 
   <!-- hologram show/hide (glyph) -->
-  <button id="holobtn" class="glybtn" title="hologram" style="position:absolute;top:20px;left:20px;z-index:9;width:46px;height:46px;">
+  <button id="holobtn" class="glybtn" title="hologram" style="position:absolute;top:calc(20px + env(safe-area-inset-top));left:calc(20px + env(safe-area-inset-left));z-index:9;width:46px;height:46px;">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;"><path d="M9 9L4 4M9 9V5.5M9 9H5.5M15 15l5 5M15 15v3.5M15 15h3.5"></path></svg>
   </button>
 
@@ -117,7 +129,7 @@
   <!-- The visitor's compass: while this device is a guest, one warm, ever-present pill that
        leads to the path — the two-filter state is never something the human should have to
        infer from a projection looking oddly anonymous. -->
-  <button id="guestbar" onclick="sphereScreen('device')" style="display:none;position:absolute;bottom:88px;left:50%;transform:translateX(-50%);z-index:8;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,178,102,0.14);border:1px solid rgba(255,178,102,0.45);cursor:pointer;backdrop-filter:blur(8px);animation:gatepulse 2.6s ease-in-out infinite;">
+  <button id="guestbar" onclick="sphereScreen('device')" style="display:none;position:absolute;bottom:calc(88px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:8;align-items:center;gap:9px;padding:10px 18px;border-radius:999px;background:rgba(255,178,102,0.14);border:1px solid rgba(255,178,102,0.45);cursor:pointer;backdrop-filter:blur(8px);animation:gatepulse 2.6s ease-in-out infinite;">
     <span style="width:8px;height:8px;border-radius:50%;background:#ffb266;box-shadow:0 0 10px #ffb266;animation:gatepulse 1.8s ease-in-out infinite;"></span>
     <span id="guestbartext" class="m" style="font-size:9.5px;letter-spacing:0.14em;color:#ffcf9e;">VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP</span>
   </button>
@@ -140,7 +152,7 @@
       </div>
     </div>
   </div>
-  <button id="modetoggle" class="glybtn" title="surface" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:7;width:56px;height:56px;">
+  <button id="modetoggle" class="glybtn" title="surface" style="position:absolute;bottom:calc(16px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:7;width:56px;height:56px;">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" style="width:32px;height:32px;overflow:visible;">
       <path d="M8 40 L18 8 M30 8 L40 40" stroke-width="1.6" opacity="0.7"/>
       <path d="M12 30 H36 M15 20 H33" stroke-width="1.3" opacity="0.5"/>
@@ -195,6 +207,9 @@ const isStale = (p) => {
 // the grace period keeps a napping laptop from flapping on and off the map. Self always shows.
 const GLOBE_STALE_SECS = 3 * 3600;
 const globeVisible = (p) => {
+  // A dot on the globe is a claim of WHERE — so a device with no real fix is off the map
+  // entirely (B12). The lighthouse's North-Pole post IS a real fix (|lat| ≥ 85), so it stays.
+  if (!p.located) return false;
   if (p.local) return true;
   const ls = p.m.last_seen || 0;
   return p.status === 'online' || (ls > 0 && nowS() - ls <= GLOBE_STALE_SECS);
@@ -322,12 +337,10 @@ function peers(all) {
   const anchor = ms.find(anchorable);
   return ms.map((m) => {
     const st = m.status || (m.online ? 'online' : 'offline');
-    let lat = m.lat || 0, lon = m.lon || 0, located = lat !== 0 || lon !== 0;
-    if (!located && anchor) {
-      const h = hash32(m.node_id);
-      lat = anchor.lat + ((h & 0xffff) / 65535 - 0.5) * 0.02;
-      lon = anchor.lon + (((h >>> 16) & 0xffff) / 65535 - 0.5) * 0.03;
-    }
+    const lat = m.lat || 0, lon = m.lon || 0, located = lat !== 0 || lon !== 0;
+    // No scatter-near-the-anchor for unlocated devices anymore (B12): a fabricated position
+    // is exactly the inaccuracy that put stale, place-less phones on the map. Unlocated nodes
+    // keep 0,0 and `located:false`, which the roster shows as "≈" and the globe drops.
     return {
       m, name: m.label, lat, lon, located, hasAnchor: !!anchor, status: st,
       color: statusColor(st, m.kind), local: m.kind === 'self_node',
@@ -1332,7 +1345,7 @@ function renderButtons() {
     const on = key === S.activeScreen;
     const warm = key === 'games' && myTurn;
     return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${warm ? 'radial-gradient(circle, rgba(255,178,102,0.4), transparent 66%)' : on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
-      <span class="ic" style="color:${warm ? '#ffcf9e' : on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};${warm ? 'animation:iconpulse 1.2s ease-in-out infinite;' : ''}">${GLYPHS[key]}</span></button>`;
+      <span class="ic" style="color:${warm ? '#ffcf9e' : on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};${warm ? 'animation:iconpulse 1.2s ease-in-out infinite;' : on ? '' : `animation:glyphhue 5.5s ease-in-out infinite;animation-delay:${(i * 0.42).toFixed(2)}s;`}">${GLYPHS[key]}</span></button>`;
   }).join('');
 }
 
@@ -1643,7 +1656,38 @@ window.onerror = (msg, src, line) => {
   if (String(msg).startsWith('Script error')) return;
   S.jsErr = msg + ' @' + line; renderChrome();
 };
+// Riddle-win fanfare (B13): a one-shot burst on the OPEN→DONE edge with a winner. The flag
+// resets whenever a game is open or absent, so the celebration fires once per win, never on
+// every poll of a finished game. (Sound rides the native side — Chime.fanfare on the same edge.)
+function celebrateWin(handle) {
+  const o = document.createElement('div');
+  o.style.cssText = 'position:fixed;inset:0;z-index:60;pointer-events:none;overflow:hidden;';
+  const flash = document.createElement('div');
+  flash.style.cssText = 'position:absolute;left:50%;top:42%;width:min(60vw,520px);height:min(60vw,520px);border-radius:50%;background:radial-gradient(circle,rgba(120,240,190,0.55),rgba(120,240,190,0) 68%);animation:winflash 1.6s ease-out forwards;';
+  o.appendChild(flash);
+  const hues = ['#9fe8c0', '#aee7ff', '#c9a2ff', '#ffe08a', '#7ff0c0'];
+  for (let i = 0; i < 28; i++) {
+    const s = document.createElement('div');
+    const a = (i * (360 / 28)) + (i % 3) * 7;
+    const d = 180 + (i % 5) * 60;
+    s.style.cssText = `position:absolute;left:50%;top:42%;width:9px;height:9px;border-radius:2px;background:${hues[i % hues.length]};--a:${a}deg;--d:${d}px;animation:winspark ${(1.5 + (i % 4) * 0.25).toFixed(2)}s ease-out forwards;box-shadow:0 0 8px currentColor;`;
+    o.appendChild(s);
+  }
+  const banner = document.createElement('div');
+  banner.className = 'm';
+  banner.style.cssText = 'position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);font-size:15px;letter-spacing:0.14em;color:#d6ffe9;text-shadow:0 0 16px rgba(120,240,190,0.8);animation:winbanner 2.8s ease-out forwards;white-space:nowrap;';
+  banner.textContent = '✦  ' + (handle ? handle.toUpperCase() + ' SOLVED IT' : 'SOLVED') + '  ✦';
+  o.appendChild(banner);
+  document.body.appendChild(o);
+  setTimeout(() => o.remove(), 2900);
+}
 window.sphereUpdate = (view) => {
+  const g0 = view && view.game;
+  if (g0 && g0.status === 'done' && g0.winner && g0.kind === 'riddle') {
+    if (!S.gameWonShown) { S.gameWonShown = true; try { celebrateWin(g0.winner); } catch (e) {} }
+  } else if (!g0 || g0.status === 'open') {
+    S.gameWonShown = false;
+  }
   S.view = view; S.linkOk = true;
   // A renderer error must never mask the data or hold the link badge — draw what we can,
   // and confess what failed (S.jsErr surfaces on the Device screen and under the badge).
@@ -1661,7 +1705,7 @@ window.sphereUpdate = (view) => {
 function centerOnSelf() {
   if (!G.group || !G.anchorDirs.length) return;
   const P = G.anchorPeers || [];   // parallel to anchorDirs (the globe-visible subset)
-  let i = P.findIndex(p => p.local && (p.located || p.hasAnchor));
+  let i = P.findIndex(p => p.local && p.located);
   if (i < 0) i = P.findIndex(p => p.located);
   if (i < 0 || !G.anchorDirs[i]) return;
   const saved = G.diveDir;
@@ -1739,7 +1783,8 @@ window.sphereDive = (i) => {
   // `i` indexes the FULL peers() list (roster and callouts both pass it); anchorDirs holds
   // only the globe-visible subset, so aim from the peer's own coordinate, not by index.
   const P = peers(); const p = P[i]; if (!p) return;
-  if (!p.located && !p.hasAnchor) { window.sphereScreen('network'); return; }
+  // No real fix → nothing to dive to; send them to the network screen instead (B12).
+  if (!p.located) { window.sphereScreen('network'); return; }
   S.focusIdx = i;
   beginDive(p, latLon(p.lat, p.lon));
 };
@@ -1768,7 +1813,7 @@ window.sphereVisitorDive = (lat, lon, name) => {
 };
 function collectNodes() {
   const P = peers().filter(globeVisible), F = frontierNodes().filter(frontierVisible);
-  return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, sublabel: p.m.addr || '', color: p.color, frontier: false, self: p.local }))
+  return P.filter(p => p.located).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, sublabel: p.m.addr || '', color: p.color, frontier: false, self: p.local }))
     .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })))
     .concat(siblingNodes().map(sn => ({ lat: sn.lat, lon: sn.lon, label: sn.name, sublabel: 'sibling mesh', color: SIBLING_COLOR, frontier: false, self: false })));
 }

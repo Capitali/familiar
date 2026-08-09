@@ -530,14 +530,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             .as_ref()
             .map(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
             .unwrap_or(false);
-        let human = match record {
-            Some(r) => r
-                .identity
-                .established
-                .map(|e| e.handle)
-                .unwrap_or_default(),
-            None if !p.human.is_empty() => p.human.clone(),
-            None => actor
+        // The established handle is the truth when it exists — but an un-established record must
+        // still fall back to what the device said about itself (B8): a guest iPhone with a
+        // record but no establishment was rendering NAMELESS forever, one ghost row per node.
+        let human = match record.as_ref().and_then(|r| r.identity.established.as_ref()) {
+            Some(e) if !e.handle.is_empty() => e.handle.clone(),
+            _ if !p.human.is_empty() => p.human.clone(),
+            _ => actor
                 .split_once(':')
                 .map(|(_, h)| h.to_string())
                 .unwrap_or_default(),
@@ -689,6 +688,88 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             attached: Vec::new(),
             attached_to: String::new(),
             connectivity: String::new(),
+        });
+    }
+
+    // Remote members (ADR-0033 federation, and any member admitted through a door this one
+    // can't reach — under CGNAT, both directions, that is most of them). They have a member
+    // record but no local peer row, so the peer loop above never seats them and they vanish
+    // from the roster on every door their device can't reach (B14). A member is never trapped
+    // on one machine — except, until now, on the roster. Build a seat from the record itself,
+    // marked "remote" rather than a fabricated online/offline, since this door genuinely cannot
+    // see their liveness (that can later ride the door-to-door record sync the records use).
+    let self_id = crate::node::NodeKey::load_or_mint(dir, "")
+        .map(|n| n.node_id())
+        .unwrap_or_default();
+    let emitted: std::collections::HashSet<String> =
+        out.iter().map(|m| m.node_id.clone()).collect();
+    for r in crate::record::snapshot(dir).iter() {
+        if crate::record::derive_state(r) != crate::record::RecordState::Member {
+            continue;
+        }
+        if r.device_id == self_id {
+            continue; // never re-emit self as a remote member
+        }
+        if emitted.contains(&r.device_id) || r.keys.iter().any(|k| emitted.contains(k)) {
+            continue; // it already got a real peer row on this door
+        }
+        let handle = r
+            .identity
+            .established
+            .as_ref()
+            .map(|e| e.handle.clone())
+            .unwrap_or_default();
+        let origin = r.origin.as_ref();
+        let label = origin
+            .map(|o| o.label.clone())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| r.device_id.chars().take(8).collect());
+        let (lat, lon) = origin.map(|o| (o.lat, o.lon)).unwrap_or((0.0, 0.0));
+        let joined = r
+            .admitted
+            .as_ref()
+            .map(|a| a.at)
+            .filter(|&t| t > 0)
+            .unwrap_or(r.first_seen);
+        let trust =
+            familiar_kernel::corruption::trust(&refusals, &format!("mesh:{}", r.device_id), now)
+                .label()
+                .to_string();
+        out.push(Member {
+            node_id: r.device_id.clone(),
+            label,
+            kind: MemberKind::DevicePeer,
+            os: String::new(),
+            os_version: String::new(),
+            actor: String::new(),
+            detail: r.note.clone(),
+            first_seen: joined,
+            last_seen: r.last_seen,
+            online: false,
+            familiar_version: String::new(),
+            tools: 0,
+            patterns: 0,
+            addr: origin.map(|o| o.addr.clone()).unwrap_or_default(),
+            relationship: "remote member — via the lighthouse".into(),
+            ai: false,
+            trust,
+            // A word the console tolerates (statusColor/isStale key on != "online"); it reads as
+            // present-in-the-mesh without claiming a liveness this door can't witness.
+            status: "remote".into(),
+            session_start: 0,
+            total_online_secs: 0,
+            interactive: true,
+            human: handle,
+            present_human: String::new(),
+            present_since: 0,
+            present_via: String::new(),
+            present_confidence: 0.0,
+            lat,
+            lon,
+            geo_device: false,
+            attached: Vec::new(),
+            attached_to: String::new(),
+            connectivity: "lighthouse".into(),
         });
     }
 

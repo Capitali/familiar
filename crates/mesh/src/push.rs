@@ -224,6 +224,52 @@ pub fn spawn_notify_turn(dir: &Path, holder: &str, kind: &str) {
     });
 }
 
+/// Announce a riddle WIN to every member device — the fanfare reaches the phones in pockets
+/// too (B13), not only the winner's. Best-effort; needs registered tokens and an APNs config.
+pub fn spawn_notify_win(dir: &Path, winner: &str, kind: &str) {
+    let Some(cfg) = load_config(dir) else { return };
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let member_ids: Vec<String> = crate::record::load_all(dir)
+        .into_iter()
+        .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
+        .map(|r| r.device_id)
+        .collect();
+    let tokens: Vec<PushToken> = load_tokens(dir)
+        .into_iter()
+        .filter(|t| member_ids.iter().any(|d| d == &t.node_id))
+        .collect();
+    if tokens.is_empty() {
+        return;
+    }
+    let title = "✦ the riddle is solved";
+    let body = if winner.is_empty() {
+        "someone took it".to_string()
+    } else {
+        format!("{winner} took it")
+    };
+    let payload = format!(
+        r#"{{"aps":{{"alert":{{"title":"{title}","body":"{body}"}},"sound":"default"}},"win":"{kind}"}}"#
+    );
+    let now = crate::transport::now_secs();
+    handle.spawn(async move {
+        let jwt = match provider_jwt(&cfg, now) {
+            Ok(j) => j,
+            Err(e) => {
+                eprintln!("apns: no provider token: {e}");
+                return;
+            }
+        };
+        for t in tokens {
+            let r = send_one(&cfg, &jwt, &t, &payload).await;
+            if !r.ends_with("200") {
+                eprintln!("apns: win push to {}({}) -> {}", &t.node_id[..8.min(t.node_id.len())], t.env, r);
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

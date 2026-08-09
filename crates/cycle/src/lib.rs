@@ -293,6 +293,11 @@ fn infra_triple(action: &str, object: &str) -> bool {
         // (network theories → network tools → network observations → network theories).
         | "gathered" | "cultivated-from" | "cultivated-tool" | "theorizes"
         | "can_run" | "declined_to_run" | "regulated_presence"
+        // Mesh lifecycle: the body joining, being admitted, vouching, welcoming, federating.
+        // These are the mesh's plumbing too — musing over them fixates the familiar on its own
+        // membership churn instead of the world it serves (B9).
+        | "joined the mesh" | "was established" | "vouched" | "welcomed" | "sponsored"
+        | "mesh_introduced" | "mesh_welcomed"
     )
     // A personal device reporting its wearer's own body — presence, position, vitals, motion,
     // biometric — is roster/presence material, not musings. Fed to the muse it fixates on the
@@ -307,6 +312,32 @@ fn infra_triple(action: &str, object: &str) -> bool {
             || object.starts_with("gyro:")
             || object.starts_with("motion:")
             || object.starts_with("face:")))
+}
+
+/// Does a sensor reading's object/context read as network-connectivity plumbing? Used to keep
+/// reachability text out of the muse's material (B9) — the loop that made the familiar theorize
+/// about nothing but the network. Content-based, so a non-network sensor still feeds the muse.
+fn is_connectivity_reading(object: &str, context: &str) -> bool {
+    let hay = format!("{} {}", object, context).to_lowercase();
+    const MARKERS: &[&str] = &[
+        "unreachable",
+        "connectivity",
+        "reachab",
+        "no reply",
+        "no response",
+        "did not respond",
+        "timed out",
+        "timeout",
+        "packet loss",
+        "no matching connection",
+        "network status",
+        "diagnostic",
+        "connection refused",
+        "host is down",
+        "ping ",
+        "icmp",
+    ];
+    MARKERS.iter().any(|m| hay.contains(m))
 }
 
 fn infra_observation(o: &observation::Observation) -> bool {
@@ -653,6 +684,11 @@ fn maybe_theorize(
         .iter()
         .rev()
         .filter(|o| o.action == "gathered" && !o.context.trim().is_empty())
+        // Connectivity readings are the loop's fuel: every cultivated sensor on this node is a
+        // network diagnostic, so their `context` is pure reachability text, and feeding it back
+        // is exactly what made the familiar theorize about nothing but the network (B9). Drop
+        // connectivity-shaped readings; a greenhouse or calendar sensor's readings still pass.
+        .filter(|o| !is_connectivity_reading(&o.object, &o.context))
         .filter(|o| seen_sensors.insert(o.object.clone()))
         .take(6)
         .map(|o| {
@@ -3417,6 +3453,23 @@ pub fn tick(
     //     laundered into local sensing. Best-effort: internal errors fold into the report,
     //     they never abort the tick.
     let mesh = familiar_mesh::federate(dir, now);
+
+    // Sweep visitors who never became members and have sat past two hours (B10). Runs on the
+    // tick cadence, best-effort; an identified guest is a member and is never touched.
+    for gone in familiar_mesh::record::purge_stale_guests(dir, now) {
+        let _ = observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "purged",
+                format!("visitor {} — never identified within two hours", &gone[..gone.len().min(8)]),
+                "mesh",
+                "mesh",
+                now,
+                1.0,
+            ),
+        );
+    }
 
     let report = TickReport {
         sensed,

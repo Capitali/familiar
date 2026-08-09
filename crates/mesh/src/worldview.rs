@@ -204,6 +204,11 @@ pub struct Worldview {
     /// the console's welcome glyph pulses on. Zero is the resting state, not an error.
     #[serde(default)]
     pub guests_waiting: usize,
+    /// For a GUEST reader who hasn't identified: seconds until this visitor is purged (B10), so
+    /// the console can warn them before the mesh forgets them. 0 for members and established
+    /// readers. Preserved through the guest projection (it is the reader's own business).
+    #[serde(default)]
+    pub guest_purge_in_secs: i64,
     /// Node ids at full standing, so a console can tell a recognised member from a waiting guest
     /// without a second round trip. Node ids only — no names, and absent from a guest projection.
     #[serde(default)]
@@ -498,6 +503,11 @@ pub(crate) fn read_worldview(
     // deny: full standing is granted by hand in `standing.json`.
     if crate::standing::standing_of(dir, &req.node.node_id) == crate::standing::Standing::Guest {
         crate::standing::to_guest_view(&mut view, &req.node.node_id);
+    }
+    // Tell a still-unidentified visitor how long until they're forgotten (B10), so the console
+    // can warn them before the purge. Their own business — it rides through the guest projection.
+    if let Some(rec) = crate::record::find_by_key(dir, &req.node.node_id) {
+        view.guest_purge_in_secs = crate::record::guest_purge_in(&rec, now).unwrap_or(0).max(0);
     }
     // Tell the console every address the MESH answers at: human-asserted first (a
     // lighthouse's NAT-hidden public IP or DNS name — `advertise_hosts`), then ours, then
@@ -851,6 +861,7 @@ pub fn assemble_worldview(
         question,
         question_owner,
         guests_waiting,
+        guest_purge_in_secs: 0, // set per-reader in read_worldview (B10)
         // Record-truth: when the records are the authority (read_records), the standing list
         // the consoles reconcile against must come from THEM — the legacy roll drifts (a
         // vouch minted at one door reached the other as a record, and the stale roll left the
