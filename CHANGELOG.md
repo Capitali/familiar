@@ -13,6 +13,18 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The Pact — the fourth mesh game, and the first to teach the Three Laws (ADR-0035).**
+  The constitution deals a scenario card; everyone votes ALLOW / SEEK CONSENT / REFUSE; and
+  the judge is the *real* `guard::evaluate` — the same function that weighs every
+  consequential thing the familiar does — which rules the moment the last ballot lands and
+  shows its reasoning in its own words, the Law behind it, and the lesson. No LLM anywhere:
+  the constitution needs no oracle. A CI test replays the guard over every card so the deck
+  can never drift from the constitution (it already caught a miscard). A second mode, the
+  Corruptor's Gambit, has a rotating player craft a request to make the room mispredict the
+  familiar (REFUSES / ANSWERS / ACTS) — judged by the real request-pipeline classifiers, but
+  as *play*: a gambit never touches the refusal ledger (pinned by test). The Three Laws are
+  quoted verbatim on the info screen — the education half of the intent. Every door runs
+  ≥0034, so a lit pact is safe mesh-wide. *Validated by 14 new tests + both apps building.*
 - **The Changeling — the third mesh game (ADR-0034).** One human writes a true line about
   their day; the familiar forges two false ones in the same voice (the LLM seam, with a
   deterministic bank as the floor — a dead model never kills a live fire); everyone else
