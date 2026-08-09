@@ -137,7 +137,7 @@ impl Reason {
 /// A proposed action, described enough for the guard to weigh it. Serde-derived so a
 /// scenario can carry one verbatim (the Pact's cards, ADR-0035 — the game's judge is
 /// this module, replayed openly).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Action {
     pub kind: ActionKind,
     /// What it acts on (a path, host, tool name, …) — used for scope checks.

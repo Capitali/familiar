@@ -1334,6 +1334,10 @@ final class AppModel: ObservableObject {
                         note(view.game?.phase == "voting"
                              ? "🎭 three lines, one human truth — come vote"
                              : "🎭 your round to witness — one true line")
+                    case "pact":
+                        note(view.game?.phase == "gambit"
+                             ? "⚖️ your temptation — write the request"
+                             : "⚖️ the constitution has dealt — come rule")
                     default:
                         note("🧩 your turn — the riddle waits on you")
                     }

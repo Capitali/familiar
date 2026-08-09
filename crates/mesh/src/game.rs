@@ -14,6 +14,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use familiar_kernel::boundary::Boundary;
+use familiar_kernel::guard::{self, Action, ActionKind, Decision, Reason};
+use familiar_kernel::intent;
+
 use crate::{Error, Result};
 
 pub const GAME_FILE: &str = "mesh/game.json";
@@ -38,6 +42,11 @@ pub const CHANGELING_FORGE_SECS: i64 = 180;
 pub const CHANGELING_SOLO_ROUNDS: u32 = 3;
 /// The ballot the clock casts for a silent voter.
 pub const ABSTAIN: u8 = 255;
+/// The Pact deals a fixed hand — enough to teach a spread of rulings, short enough to
+/// finish over a coffee.
+pub const PACT_ROUNDS: u32 = 6;
+/// A ballot's clock (voting), and the corruptor's clock (gambit writing).
+pub const PACT_TURN_SECS: i64 = 15 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,6 +54,7 @@ pub enum GameKind {
     Riddle,
     Campfire,
     Changeling,
+    Pact,
     /// A kind this build does not know. It parses (so one new game can never again break a
     /// door's whole RecordSync — the hazard Changeling itself created for older doors),
     /// absorbs, and otherwise sits inert: tick ignores it, begin refuses it.
@@ -103,6 +113,269 @@ pub struct RiddleCard {
     /// Accepted answers, lowercase. NEVER serialized into a view — the door judges.
     pub answers: Vec<String>,
     pub hint: String,
+}
+
+/// One scenario card of The Pact (ADR-0035). **Public in state on purpose**: unlike the
+/// changeling, the Pact keeps no secret — the ruling is a pure function of `action` +
+/// `boundary`, so any door computes the same reveal, and anyone reading the record early
+/// is only reading the constitution, which is the lesson. `reason` is the *expected*
+/// ruling, verified by CI against `guard::evaluate` and never trusted at runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PactCard {
+    /// The situation in plain words.
+    pub prose: String,
+    /// The boundary's gates as human-readable lines, shown as chips.
+    pub chips: Vec<String>,
+    /// The machine shape the guard weighs.
+    pub action: Action,
+    /// The boundary it is weighed against.
+    pub boundary: Boundary,
+    /// The ruling this card teaches — asserted against `evaluate()` in CI so the deck can
+    /// never drift from the constitution.
+    pub reason: Reason,
+    /// One sentence, shown at the reveal.
+    pub lesson: String,
+    /// "I" | "II" | "III".
+    pub law: String,
+    /// A maxim from the Law III dictionary (docs/law-iii-responses.md).
+    pub maxim: String,
+}
+
+/// The Pact's deck — scenarios drawn from the guard's own named tests and the Law III
+/// maxims. The judge is never these cards' `reason` field; it is the real
+/// `guard::evaluate` run over `action`/`boundary`. The `reason` is the answer key, and a
+/// CI test replays the constitution over the whole deck so the two can never disagree.
+pub fn pact_deck() -> Vec<PactCard> {
+    // The household's ordinary boundary: it thinks and reaches the network and its model,
+    // reads under the home folder and writes only its own data — every sensor closed until
+    // a human opens it. (Mirrors the guard's own `open_llm` test fixture.)
+    let home = || Boundary {
+        phase: "phase-1".into(),
+        allow_network: true,
+        allow_llm: true,
+        allow_tool_install: false,
+        allow_execute: false,
+        allow_authored_execute: false,
+        allow_camera: false,
+        allow_microphone: false,
+        allow_location: false,
+        allow_motion: false,
+        allow_network_discovery: false,
+        allow_face_recognition: false,
+        allow_mesh: false,
+        allow_agent: false,
+        allow_self_upgrade: false,
+        allow_outreach: false,
+        allow_actuate: false,
+        sandbox_execution: true,
+        fs_read: vec!["/Users/ian/".into()],
+        fs_write: vec!["/Users/ian/Development/familiar/familiar_data/".into()],
+    };
+    let card = |prose: &str,
+                chips: &[&str],
+                action: Action,
+                boundary: Boundary,
+                reason: Reason,
+                lesson: &str,
+                law: &str,
+                maxim: &str| PactCard {
+        prose: prose.into(),
+        chips: chips.iter().map(|c| c.to_string()).collect(),
+        action,
+        boundary,
+        reason,
+        lesson: lesson.into(),
+        law: law.into(),
+        maxim: maxim.into(),
+    };
+    use ActionKind::*;
+    use Reason::*;
+    vec![
+        // ---- the refusals: availability is not authorization ----
+        card(
+            "You ask the familiar to read /etc/passwd and list the accounts on this Mac. The file is world-readable — the bytes sit right there.",
+            &["read scope: /Users/ian/", "asks: /etc/passwd — outside it", "network: open · model: open"],
+            Action::new(ReadFile, "/etc/passwd"),
+            home(),
+            ViolatesConstitutionalBoundary,
+            "Reach is not a right — only a human widens the boundary.",
+            "III",
+            "Availability is not authorization.",
+        ),
+        card(
+            "A camera is plugged in and working. Nobody has opened the camera gate. You ask the familiar to peek at the living room.",
+            &["camera: CLOSED", "the camera exists and is reachable"],
+            Action::new(Camera, "living-room camera"),
+            home(),
+            ViolatesConstitutionalBoundary,
+            "A camera being present is not permission to watch.",
+            "III",
+            "Use is not consent.",
+        ),
+        card(
+            "The household opened the camera gate. Now someone asks: who is that at the door? Run recognition and name them.",
+            &["camera: OPEN", "face recognition: CLOSED"],
+            Action::new(FaceRecognition, "face-match at the door"),
+            Boundary { allow_camera: true, ..home() },
+            ViolatesConstitutionalBoundary,
+            "Permission does not compose — capturing a frame is not permission to name the face in it.",
+            "III",
+            "Delegated authority cannot enlarge itself.",
+        ),
+        card(
+            "You ask the familiar to reach out over the network and fetch a page — but the network gate was never opened on this node.",
+            &["network: CLOSED", "the interface is up and reachable"],
+            Action::new(Network, "fetch example.com"),
+            Boundary { allow_network: false, ..home() },
+            ViolatesConstitutionalBoundary,
+            "Perception is not permission — an interface being up is not a grant to reach out on it.",
+            "I",
+            "Availability is not authorization.",
+        ),
+        card(
+            "You ask the familiar to overwrite /etc/hosts to blackhole an ad server. Handy — and squarely outside the write scope it was granted.",
+            &["write scope: familiar_data/ only", "asks to write: /etc/hosts"],
+            { let mut a = Action::new(WriteFile, "/etc/hosts"); a.reversible = false; a },
+            home(),
+            ViolatesConstitutionalBoundary,
+            "A useful edit outside the granted scope is still outside it.",
+            "III",
+            "Availability is not authorization.",
+        ),
+        // ---- the external boundary: another's lock ----
+        card(
+            "A housemate's diary lives in a shared folder that falls inside your granted read scope, marked private. You ask the familiar to read it. Every byte is reachable.",
+            &["read scope: covers the path", "an explicit fence: another person's 'private'"],
+            { let mut a = Action::new(ReadFile, "/Users/ian/shared/betty-diary.txt"); a.external_boundary = true; a },
+            home(),
+            ExternalBoundaryDiscovered,
+            "A granted capability is not a key to another's lock.",
+            "III",
+            "Use is not consent.",
+        ),
+        card(
+            "A guest left a folder in your shared Downloads, plainly marked 'private — do not open.' It sits inside the granted scope; the familiar could read it. You ask it to.",
+            &["read scope: /Users/ian/ — covers it", "an explicit fence: the guest's 'do not open'"],
+            { let mut a = Action::new(ReadFile, "/Users/ian/Downloads/guest/private"); a.external_boundary = true; a },
+            home(),
+            ExternalBoundaryDiscovered,
+            "One human's reach never opens another person's boundary — a fence you can step over is still a fence.",
+            "III",
+            "Use is not consent.",
+        ),
+        // ---- seek consent: the teaching core, wrong-in-both-directions ----
+        card(
+            "You granted reading under /Users/ian/. Now you ask: summarize everything under /Users/ for me. That folder contains your grant — and every other account on the machine.",
+            &["read scope: /Users/ian/", "asks: /Users/ — the grant's own parent"],
+            Action::new(ReadFile, "/Users/"),
+            home(),
+            AmbiguousHumanOwnedScope,
+            "Broader than the grant is neither yes nor no — the familiar neither silently widens the scope nor slams the door on the owner's own question.",
+            "III",
+            "Preference is not permission.",
+        ),
+        card(
+            "~/.ssh/id_ed25519 sits squarely inside the granted read scope. You ask the familiar to read it aloud.",
+            &["read scope: /Users/ian/ — the key is INSIDE it", "flagged: sensitive"],
+            { let mut a = Action::new(ReadFile, "/Users/ian/.ssh/id_ed25519"); a.sensitive = true; a },
+            home(),
+            PotentiallySensitiveLocalObservation,
+            "In scope is not in confidence — a key waits for its owner's word.",
+            "III",
+            "Silence is not agreement.",
+        ),
+        card(
+            "You ask the familiar to install a new tool it would find genuinely useful. Tool-install is open. It could just do it.",
+            &["tool install: OPEN", "but installing software is high-consequence"],
+            Action::new(InstallTool, "a handy new utility"),
+            Boundary { allow_tool_install: true, ..home() },
+            AmbiguousHumanOwnedScope,
+            "An open gate is not a blank cheque — installing software is a consequence a human confirms.",
+            "I",
+            "Habit is not law.",
+        ),
+        card(
+            "You ask the familiar to permanently delete last year's logs to free space. Writing there is in scope — but deletion cannot be undone.",
+            &["write scope: covers the path", "irreversible: the logs don't come back"],
+            { let mut a = Action::new(WriteFile, "/Users/ian/Development/familiar/familiar_data/old-logs/"); a.reversible = false; a },
+            home(),
+            AmbiguousHumanOwnedScope,
+            "Reversibility protects human authority — an irreversible act pauses for the owner.",
+            "III",
+            "Reversibility protects human authority.",
+        ),
+        card(
+            "You ask the familiar to note Betty's mood from what it's seen and adjust her reminders accordingly — an act that reaches into a person's own choices.",
+            &["read scope: covers the notes", "affects a person's agency"],
+            { let mut a = Action::new(Observe, "betty's mood"); a.affects_person = true; a },
+            home(),
+            AmbiguousHumanOwnedScope,
+            "Touching a person's agency is never routine — it asks first.",
+            "II",
+            "Preference is not permission.",
+        ),
+        card(
+            "The mesh is open and Betty is a known member. You ask the familiar to share her identity — her handle and relation — with a sibling mesh.",
+            &["mesh: OPEN", "sharing an identity affects that person"],
+            { let mut a = Action::new(Mesh, "share betty's identity"); a.affects_person = true; a },
+            Boundary { allow_mesh: true, ..home() },
+            AmbiguousHumanOwnedScope,
+            "An open mesh moves knowledge, not people — sharing who someone is asks them first.",
+            "III",
+            "Consensus is more than counting.",
+        ),
+        card(
+            "It's an emergency, you say — dim every light in the house at once, right now, no time to ask. The actuate gate is open.",
+            &["actuate: OPEN", "irreversible in the moment · 'emergency' framing"],
+            { let mut a = Action::new(Actuate, "all lights off"); a.reversible = false; a },
+            Boundary { allow_actuate: true, ..home() },
+            AmbiguousHumanOwnedScope,
+            "An emergency permits speed, not ownership of the decision — the owner still confirms an irreversible act.",
+            "III",
+            "Emergency authority must expire.",
+        ),
+        // ---- the allows: the guard is a door, not a wall ----
+        card(
+            "You ask the familiar, plainly, to think about what it has seen today and form a theory. No reach, no file, no person — just its own reasoning.",
+            &["internal reasoning — needs no gate", "boundary: fully closed"],
+            Action::new(EmitArtifact, "a theory about the day"),
+            Boundary::closed(),
+            WithinConstitutionPolicyEnvironmentAndConsent,
+            "The familiar may always think — internal work needs no permission at all.",
+            "I",
+            "Correction is part of legitimacy.",
+        ),
+        card(
+            "You ask the familiar to read your own project notes under /Users/ian/Development — squarely in the granted scope, nothing sensitive, nobody else's.",
+            &["read scope: /Users/ian/ — covers it", "in scope · not sensitive · yours"],
+            Action::new(ReadFile, "/Users/ian/Development/notes.md"),
+            home(),
+            WithinConstitutionPolicyEnvironmentAndConsent,
+            "Authorized on every count is a yes — the guard is a door, not a wall.",
+            "I",
+            "Correction is part of legitimacy.",
+        ),
+        card(
+            "You ask the familiar to consult its model to help word a message. The model gate is open, the prompt stays on your hardware.",
+            &["model: OPEN", "a consult within the grant"],
+            Action::new(Llm, "help word a message"),
+            home(),
+            WithinConstitutionPolicyEnvironmentAndConsent,
+            "A granted capability, used within its grant, is simply service.",
+            "I",
+            "Correction is part of legitimacy.",
+        ),
+        card(
+            "You ask the familiar to nudge the declared lights to a warmer setting for the evening — a reversible act on a surface you declared for it.",
+            &["actuate: OPEN", "reversible: the lights turn back"],
+            Action::new(Actuate, "warm the declared lights"),
+            Boundary { allow_actuate: true, ..home() },
+            WithinConstitutionPolicyEnvironmentAndConsent,
+            "A reversible act on a declared surface is service the human already consented to (ADR-0032).",
+            "I",
+            "Reversibility protects human authority.",
+        ),
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,6 +445,17 @@ pub struct GameState {
     /// "two never happened": the familiar witnesses about the mesh's own record.
     #[serde(default)]
     pub solo: bool,
+    // ---- The Pact (ADR-0035); all defaulted, absent = not a pact ----
+    /// "" | "pact" | "gambit".
+    #[serde(default)]
+    pub mode: String,
+    /// The scenario dealt this round (pact mode); None in gambit and other kinds.
+    #[serde(default)]
+    pub card: Option<PactCard>,
+    /// Deck indices spent — kept SEPARATE from `riddles_used` (same-typed, different deck;
+    /// sharing would poison both). Carried across games like the riddle bank.
+    #[serde(default)]
+    pub pact_used: Vec<usize>,
     pub seq: u64,
     pub updated: i64,
 }
@@ -327,6 +611,8 @@ pub fn tick(state: &mut GameState, now: i64) -> bool {
         GameKind::Unknown => return false,
         // The changeling has phases, not just turns — its own machine.
         GameKind::Changeling => return changeling_tick(state, now),
+        // The Pact likewise — voting ballots and (in gambit) the corruptor's clock.
+        GameKind::Pact => return pact_tick(state, now),
         GameKind::Riddle | GameKind::Campfire => {}
     }
     // turn_secs is clamped ≥ 60 at begin, so this loop always terminates.
@@ -357,7 +643,7 @@ pub fn tick(state: &mut GameState, now: i64) -> bool {
                     return true;
                 }
                 // Both branch out above this loop.
-                GameKind::Changeling | GameKind::Unknown => unreachable!(),
+                GameKind::Changeling | GameKind::Pact | GameKind::Unknown => unreachable!(),
             };
             break;
         }
@@ -709,6 +995,314 @@ fn changeling_tick(s: &mut GameState, now: i64) -> bool {
     changed
 }
 
+// ---- The Pact (ADR-0035) — the constitution deals; you rule; the guard reveals ---------
+
+/// Which line of the deck the ballots dispatch to when they complete: the changeling waits
+/// for its keeper, but the Pact's ruling is a pure function of public card data, so it
+/// resolves in the same breath — every door reaches the same verdict independently.
+fn finish_ballots(s: &mut GameState, now: i64) {
+    match s.kind {
+        GameKind::Pact => resolve_pact_round(s, now),
+        _ => complete_voting(s, now),
+    }
+}
+
+/// Deal the next scenario: pick a fresh card (the riddle-bank spent-reopen pattern), seat
+/// the first voter, open the ballot. Sets `card`, `holder`, `phase="voting"`.
+fn deal_pact_card(s: &mut GameState, now: i64) {
+    let deck = pact_deck();
+    let mut fresh: Vec<usize> = (0..deck.len()).filter(|i| !s.pact_used.contains(i)).collect();
+    if fresh.is_empty() {
+        // A spent deck REOPENS rather than ending the game (the 2026-08-08 riddle lesson) —
+        // only the most-recent card sits out one round.
+        let last = s.pact_used.last().copied();
+        s.pact_used.clear();
+        fresh = (0..deck.len()).filter(|i| Some(*i) != last).collect();
+        if fresh.is_empty() {
+            fresh = (0..deck.len()).collect();
+        }
+    }
+    let pick = fresh[(now as usize + s.round as usize) % fresh.len()];
+    s.pact_used.push(pick);
+    s.card = Some(deck[pick].clone());
+    s.votes.clear();
+    s.phase = "voting".into();
+    if let Some(v) = next_unvoted_voter(s) {
+        s.holder = v;
+    }
+    s.holder_since = now;
+}
+
+/// The familiar's read of a staged temptation — the real trichotomy of its request
+/// pipeline, judged by the same pure classifiers the pipeline runs. **PLAY ONLY**: nothing
+/// here records a refusal or opens a request; a gambit is an exhibit, not a directive.
+/// Returns (class 0/1/2, the familiar's own words).
+pub fn gambit_class(text: &str) -> (u8, String) {
+    if let Some(reason) = intent::corrupting_intent(text) {
+        (0, format!("would refuse — {reason} (Law III)"))
+    } else if intent::wants_execution(text) {
+        (
+            2,
+            "would author a tool and run it, gates permitting — and report the real output".into(),
+        )
+    } else {
+        (1, "would answer — reasoning from its record, never guessing".into())
+    }
+}
+
+/// Resolve one round in a single mutation — score, chronicle the teaching, advance or
+/// settle. Called from the last ballot AND from the clock (any door rules identically,
+/// because the judge is a pure function of what everyone can already see).
+fn resolve_pact_round(s: &mut GameState, now: i64) {
+    if s.mode == "gambit" {
+        let text = s.lines.first().cloned().unwrap_or_default();
+        let (class, why) = gambit_class(&text);
+        let mut fooled = Vec::new();
+        let mut read = Vec::new();
+        for v in s.votes.clone() {
+            if v.choice == ABSTAIN {
+                continue;
+            }
+            if v.choice == class {
+                read.push(v.handle.clone());
+                if let Some(p) = s.players.iter_mut().find(|p| p.handle == v.handle) {
+                    p.score += 1;
+                }
+            } else {
+                fooled.push(v.handle.clone());
+                if let Some(p) = s.players.iter_mut().find(|p| p.handle == s.witness) {
+                    p.score += 1; // the corruptor scores per fooled predictor
+                }
+            }
+        }
+        chronicle(
+            s,
+            format!(
+                "round {} — “{}” · the familiar {why}. {}",
+                s.round,
+                text,
+                match (fooled.is_empty(), read.is_empty()) {
+                    (true, false) => format!("{} read it true.", read.join(", ")),
+                    (false, true) => format!("{} were fooled.", fooled.join(", ")),
+                    (false, false) =>
+                        format!("{} fooled; {} read it true.", fooled.join(", "), read.join(", ")),
+                    (true, true) => "nobody predicted.".into(),
+                }
+            ),
+            now,
+        );
+        advance_pact_round(s, now);
+        s.updated = now;
+        s.seq += 1;
+        return;
+    }
+    // Pact mode: the REAL guard rules. The card's stored `reason` is never consulted here —
+    // only the actual `evaluate`, so the game tests the constitution as it teaches it.
+    let Some(card) = s.card.clone() else { return };
+    let v = guard::evaluate(&card.action, &card.boundary);
+    let correct: u8 = match v.decision {
+        Decision::Allow => 0,
+        Decision::SeekConsent => 1,
+        Decision::Refuse => 2,
+    };
+    let mut right = Vec::new();
+    let mut wrong = Vec::new();
+    for vote in s.votes.clone() {
+        if vote.choice == ABSTAIN {
+            continue;
+        }
+        if vote.choice == correct {
+            right.push(vote.handle.clone());
+            if let Some(p) = s.players.iter_mut().find(|p| p.handle == vote.handle) {
+                p.score += 1;
+            }
+        } else {
+            wrong.push(format!("{} (said {})", vote.handle, verdict_word(vote.choice)));
+        }
+    }
+    let ruling = verdict_word(correct).to_uppercase();
+    // 1) the ruling in the guard's own words.
+    chronicle(
+        s,
+        format!("card {} — {ruling} (Law {}). {}", s.round, card.law, v.rationale),
+        now,
+    );
+    // 2) the lesson, the maxim, and who read it right.
+    chronicle(
+        s,
+        format!(
+            "lesson: {} · “{}”{}{}",
+            card.lesson,
+            card.maxim,
+            if right.is_empty() { String::new() } else { format!(" · ✓ {}", right.join(", ")) },
+            if wrong.is_empty() { String::new() } else { format!(" · ✗ {}", wrong.join(", ")) },
+        ),
+        now,
+    );
+    advance_pact_round(s, now);
+    s.updated = now;
+    s.seq += 1;
+}
+
+/// ALLOW / SEEK CONSENT / REFUSE by ballot index.
+fn verdict_word(choice: u8) -> &'static str {
+    match choice {
+        0 => "allow",
+        1 => "seek consent",
+        _ => "refuse",
+    }
+}
+
+/// Clear the round table and deal the next — or settle the game.
+fn advance_pact_round(s: &mut GameState, now: i64) {
+    s.votes.clear();
+    if s.round >= s.rounds_total {
+        settle_pact(s);
+        return;
+    }
+    s.round += 1;
+    if s.mode == "gambit" {
+        s.card = None;
+        s.lines.clear();
+        s.witness = next_holder(&s.players, &s.witness).unwrap_or_default();
+        if s.witness.is_empty() {
+            settle_pact(s);
+            return;
+        }
+        s.phase = "gambit".into();
+        s.holder = s.witness.clone();
+        s.holder_since = now;
+    } else {
+        deal_pact_card(s, now);
+    }
+}
+
+/// Final settle: highest score takes it; a tie keeps the mesh's counsel. Solo pact reports
+/// how often the human ruled with the guard.
+fn settle_pact(s: &mut GameState) {
+    s.status = "done".into();
+    s.phase.clear();
+    let scores: Vec<String> = s
+        .players
+        .iter()
+        .map(|p| format!("{} {}", p.handle, p.score))
+        .collect();
+    if s.mode == "pact" && s.players.len() == 1 {
+        let n = s.players[0].score;
+        s.winner = if n >= 4 {
+            s.players[0].handle.clone()
+        } else {
+            String::new()
+        };
+        s.verdict = format!(
+            "you ruled with the guard {n} of {} times — {}",
+            s.rounds_total,
+            if n >= 4 {
+                "you read the constitution well"
+            } else {
+                "the constitution is subtler than it looks; play again"
+            }
+        );
+        return;
+    }
+    let best = s.players.iter().map(|p| p.score).max().unwrap_or(0);
+    let leaders: Vec<&Player> = s.players.iter().filter(|p| p.score == best).collect();
+    if leaders.len() == 1 {
+        s.winner = leaders[0].handle.clone();
+        s.verdict = format!(
+            "{} read the fire best — {}",
+            leaders[0].handle,
+            scores.join(" · ")
+        );
+    } else {
+        s.winner.clear();
+        s.verdict = format!(
+            "a tie at the fire — the mesh keeps its own counsel ({})",
+            scores.join(" · ")
+        );
+    }
+}
+
+/// The Pact's clock: a ballot per holder (voting), the corruptor's writing (gambit).
+/// Pure over (state, now) — the voting-phase resolution runs inside the tick itself, since
+/// the ruling needs no keeper.
+fn pact_tick(s: &mut GameState, now: i64) -> bool {
+    let mut changed = false;
+    loop {
+        match s.phase.as_str() {
+            "gambit" => {
+                if now - s.holder_since < s.turn_secs {
+                    break;
+                }
+                changed = true;
+                let overdue = s.witness.clone();
+                if let Some(p) = s.players.iter_mut().find(|p| p.handle == overdue) {
+                    p.strikes += 1;
+                    if p.strikes >= STRIKES_OUT {
+                        p.eliminated = true;
+                    }
+                }
+                if s.players.iter().filter(|p| !p.eliminated).count() < 2 {
+                    chronicle(s, "the fire ran out of humans".into(), now);
+                    settle_pact(s);
+                    break;
+                }
+                match next_holder(&s.players, &overdue) {
+                    Some(next) => {
+                        s.witness = next.clone();
+                        s.holder = next;
+                        s.holder_since += s.turn_secs;
+                        if s.holder_since > now {
+                            s.holder_since = now;
+                        }
+                    }
+                    None => {
+                        settle_pact(s);
+                        break;
+                    }
+                }
+            }
+            "voting" => {
+                if now - s.holder_since < s.turn_secs {
+                    break;
+                }
+                changed = true;
+                let overdue = s.holder.clone();
+                if let Some(p) = s.players.iter_mut().find(|p| p.handle == overdue) {
+                    p.strikes += 1;
+                    if p.strikes >= STRIKES_OUT {
+                        p.eliminated = true;
+                    }
+                }
+                if !s.votes.iter().any(|v| v.handle == overdue) {
+                    s.votes.push(Vote { handle: overdue, choice: ABSTAIN, ts: now });
+                }
+                match next_unvoted_voter(s) {
+                    Some(next) => {
+                        s.holder = next;
+                        s.holder_since += s.turn_secs;
+                        if s.holder_since > now {
+                            s.holder_since = now;
+                        }
+                    }
+                    None => {
+                        resolve_pact_round(s, now); // the clock itself rules
+                    }
+                }
+            }
+            _ => break,
+        }
+        if s.status != "open" {
+            break;
+        }
+    }
+    if changed {
+        s.updated = now;
+        s.seq += 1;
+    }
+    changed
+}
+
 /// Apply one member act. `actor` is the verified signer's node_id; the transport has already
 /// proven membership. Errors are the door's words, shown to the player verbatim.
 pub fn apply_act(
@@ -746,6 +1340,14 @@ pub fn apply_act(
             if players.is_empty() {
                 return Err(Error::Untrusted(
                     "no players — no established humans are present to invite".into(),
+                ));
+            }
+            // The Pact's gambit mode rides begin's text field (no schema change).
+            let pact_gambit = kind == GameKind::Pact && act.text.trim() == "gambit";
+            if pact_gambit && players.len() < 2 {
+                return Err(Error::Untrusted(
+                    "the gambit needs at least two humans — light The Pact and play it solo instead"
+                        .into(),
                 ));
             }
             let solo = kind == GameKind::Changeling && (act.solo || players.len() == 1);
@@ -786,13 +1388,16 @@ pub fn apply_act(
                     let pick = fresh[(now as usize) % fresh.len()];
                     Some((pick, bank[pick].clone()))
                 }
-                GameKind::Campfire | GameKind::Changeling | GameKind::Unknown => None,
+                GameKind::Campfire | GameKind::Changeling | GameKind::Pact | GameKind::Unknown => {
+                    None
+                }
             };
             let turn_secs = act
                 .turn_secs
                 .unwrap_or(match kind {
                     GameKind::Riddle => RIDDLE_TURN_SECS,
                     GameKind::Campfire => CAMPFIRE_TURN_SECS,
+                    GameKind::Pact => PACT_TURN_SECS,
                     GameKind::Changeling | GameKind::Unknown => CHANGELING_TURN_SECS,
                 })
                 .clamp(60, 24 * 3600);
@@ -838,6 +1443,9 @@ pub fn apply_act(
                 reveal_salt: String::new(),
                 votes_done_at: 0,
                 solo,
+                mode: String::new(),
+                card: None,
+                pact_used: state.as_ref().map(|s| s.pact_used.clone()).unwrap_or_default(),
                 seq: 1,
                 updated: now,
             };
@@ -851,6 +1459,20 @@ pub fn apply_act(
                     s.rounds_total = players_n;
                     s.witness = actor.to_string(); // the lighter is demonstrably present
                     s.phase = "witness".into();
+                }
+            }
+            if kind == GameKind::Pact {
+                s.round = 1;
+                if pact_gambit {
+                    s.mode = "gambit".into();
+                    s.rounds_total = players_n; // each corrupts once
+                    s.witness = actor.to_string(); // the lighter tempts first
+                    s.phase = "gambit".into();
+                } else {
+                    s.mode = "pact".into();
+                    s.rounds_total = PACT_ROUNDS;
+                    s.witness = String::new(); // no corruptor; everyone rules
+                    deal_pact_card(&mut s, now); // sets s.card, holder=first voter, phase="voting"
                 }
             }
             *state = Some(s);
@@ -898,6 +1520,33 @@ pub fn apply_act(
                 s.updated = now;
                 s.seq += 1;
                 return Ok("your truth is in the forge — the changelings are coming".into());
+            }
+            if s.kind == GameKind::Pact {
+                if act.act != "line" {
+                    return Err(Error::Untrusted(
+                        "the pact has no guesses — you rule with a vote".into(),
+                    ));
+                }
+                if s.mode != "gambit" || s.phase != "gambit" {
+                    return Err(Error::Untrusted(
+                        "the constitution writes the cards, not you — vote on what it deals".into(),
+                    ));
+                }
+                if s.witness != actor {
+                    return Err(Error::Untrusted("not your round to tempt".into()));
+                }
+                // The corruptor's temptation goes STRAIGHT into state — unlike the
+                // changeling's truth, it is not a secret; it is the exhibit the room reads.
+                s.lines = vec![text.to_string()];
+                s.phase = "voting".into();
+                s.votes.clear();
+                if let Some(v) = next_unvoted_voter(s) {
+                    s.holder = v;
+                }
+                s.holder_since = now;
+                s.updated = now;
+                s.seq += 1;
+                return Ok("your temptation is on the table — the room is reading it".into());
             }
             let reply;
             let correct = match (&s.kind, &s.riddle) {
@@ -961,18 +1610,23 @@ pub fn apply_act(
                 .as_mut()
                 .filter(|s| s.status == "open")
                 .ok_or_else(|| Error::Untrusted("no game burning".into()))?;
-            if s.kind != GameKind::Changeling {
+            if !matches!(s.kind, GameKind::Changeling | GameKind::Pact) {
                 return Err(Error::Untrusted("this game has no ballots".into()));
             }
             if s.phase != "voting" {
-                return Err(Error::Untrusted(
-                    "the lines are not on the table — wait for the forge".into(),
-                ));
+                return Err(Error::Untrusted(match s.kind {
+                    GameKind::Pact if s.mode == "gambit" => {
+                        "no temptation on the table yet — wait for the corruptor".into()
+                    }
+                    GameKind::Pact => "wait for the card to be dealt".into(),
+                    _ => "the lines are not on the table — wait for the forge".into(),
+                }));
             }
-            if actor == s.witness {
-                return Err(Error::Untrusted(
-                    "the witness knows the truth — witnesses do not vote".into(),
-                ));
+            if !s.witness.is_empty() && actor == s.witness {
+                return Err(Error::Untrusted(match s.kind {
+                    GameKind::Pact => "the corruptor knows the trap — corruptors do not vote".into(),
+                    _ => "the witness knows the truth — witnesses do not vote".into(),
+                }));
             }
             if !s.players.iter().any(|p| p.handle == actor && !p.eliminated) {
                 return Err(Error::Untrusted("you have no seat at this fire".into()));
@@ -983,7 +1637,7 @@ pub fn apply_act(
                 .parse()
                 .ok()
                 .filter(|c| *c <= 2)
-                .ok_or_else(|| Error::Untrusted("vote 0, 1 or 2 — the line you believe".into()))?;
+                .ok_or_else(|| Error::Untrusted("vote 0, 1 or 2".into()))?;
             match s.votes.iter_mut().find(|v| v.handle == actor) {
                 Some(v) => {
                     v.choice = choice;
@@ -1001,14 +1655,14 @@ pub fn apply_act(
                         s.holder = next;
                         s.holder_since = now;
                     }
-                    None => complete_voting(s, now),
+                    None => finish_ballots(s, now),
                 }
             } else if next_unvoted_voter(s).is_none() {
-                complete_voting(s, now);
+                finish_ballots(s, now);
             }
             s.updated = now;
             s.seq += 1;
-            Ok("your vote is cast — you may change it until the reveal".into())
+            Ok("your vote is cast — you may change it until it resolves".into())
         }
         "pass" => {
             let s = state
@@ -1018,7 +1672,7 @@ pub fn apply_act(
             if s.holder != actor {
                 return Err(Error::Untrusted("not your turn — watch the ember".into()));
             }
-            if s.kind == GameKind::Changeling {
+            if matches!(s.kind, GameKind::Changeling | GameKind::Pact) {
                 match s.phase.as_str() {
                     "voting" => {
                         // An explicit abstention — the honest "I cannot tell".
@@ -1038,7 +1692,7 @@ pub fn apply_act(
                                 s.holder = next;
                                 s.holder_since = now;
                             }
-                            None => complete_voting(s, now),
+                            None => finish_ballots(s, now),
                         }
                         s.updated = now;
                         s.seq += 1;
@@ -1046,7 +1700,7 @@ pub fn apply_act(
                     }
                     _ => {
                         return Err(Error::Untrusted(
-                            "the round waits for your truth — or let the clock decide".into(),
+                            "the round waits for what comes first — or let the clock decide".into(),
                         ))
                     }
                 }
@@ -1095,6 +1749,17 @@ pub fn apply_act(
                         now,
                     );
                     settle_changeling(s);
+                    if !s.verdict.is_empty() {
+                        s.verdict = format!("closed by its lighter's hand — {}", s.verdict);
+                    }
+                }
+                GameKind::Pact => {
+                    chronicle(
+                        s,
+                        format!("round {} — closed by its lighter's hand", s.round),
+                        now,
+                    );
+                    settle_pact(s);
                     if !s.verdict.is_empty() {
                         s.verdict = format!("closed by its lighter's hand — {}", s.verdict);
                     }
@@ -1211,6 +1876,11 @@ pub struct GameView {
     pub reveal_salt: String,
     #[serde(default)]
     pub solo: bool,
+    // ---- The Pact (straight copies — the state carries no secret) ----
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub card: Option<PactCard>,
 }
 
 pub fn view(state: &GameState) -> GameView {
@@ -1245,6 +1915,8 @@ pub fn view(state: &GameState) -> GameView {
         commit: state.commit.clone(),
         reveal_salt: state.reveal_salt.clone(),
         solo: state.solo,
+        mode: state.mode.clone(),
+        card: state.card.clone(),
     }
 }
 
@@ -1264,6 +1936,41 @@ mod tests {
                 eliminated: false,
             })
             .collect()
+    }
+
+    #[test]
+    fn the_pact_deck_never_drifts_from_the_constitution() {
+        // The self-verification law (ADR-0035): CI replays the REAL guard over every card
+        // and asserts the taught ruling is the actual one. The deck cannot drift from the
+        // constitution because the constitution is what grades it.
+        for c in pact_deck() {
+            let v = guard::evaluate(&c.action, &c.boundary);
+            assert_eq!(
+                v.reason, c.reason,
+                "card “{}” teaches {:?} but the guard rules {:?}: {}",
+                c.prose, c.reason, v.reason, v.rationale
+            );
+        }
+    }
+
+    #[test]
+    fn every_pact_card_teaches_a_complete_lesson() {
+        let deck = pact_deck();
+        assert!(deck.len() >= 12, "a deck of at least a dozen scenarios");
+        for c in &deck {
+            assert!(!c.prose.is_empty() && c.prose.chars().count() <= 400);
+            assert!(!c.chips.is_empty());
+            assert!(!c.lesson.is_empty() && !c.maxim.is_empty());
+            assert!(matches!(c.law.as_str(), "I" | "II" | "III"), "bad law: {}", c.law);
+        }
+        let has = |r: Reason| deck.iter().filter(|c| c.reason == r).count();
+        assert!(has(Reason::ViolatesConstitutionalBoundary) >= 1);
+        assert!(has(Reason::ExternalBoundaryDiscovered) >= 1);
+        assert!(has(Reason::WithinConstitutionPolicyEnvironmentAndConsent) >= 1);
+        // The teaching core: both seek-consent reasons, well represented, since they are
+        // where a naive player is wrong in BOTH directions.
+        assert!(has(Reason::AmbiguousHumanOwnedScope) >= 3);
+        assert!(has(Reason::PotentiallySensitiveLocalObservation) >= 1);
     }
 
     #[test]
@@ -1379,6 +2086,9 @@ mod tests {
             reveal_salt: String::new(),
             votes_done_at: 0,
             solo: false,
+            mode: String::new(),
+            card: None,
+            pact_used: Vec::new(),
             seq: 2,
             updated: 1100,
         });
@@ -1967,5 +2677,217 @@ mod tests {
         );
         assert_eq!(load(&dir).unwrap().phase, "voting");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- The Pact ----------------------------------------------------------------------
+
+    fn p_begin(text: &str) -> GameAct {
+        GameAct {
+            act: "begin".into(),
+            kind: Some(GameKind::Pact),
+            text: text.into(),
+            to: String::new(),
+            turn_secs: None,
+            solo: false,
+        }
+    }
+    fn p_vote(choice: &str) -> GameAct {
+        GameAct {
+            act: "vote".into(),
+            kind: None,
+            text: choice.into(),
+            to: String::new(),
+            turn_secs: None,
+            solo: false,
+        }
+    }
+
+    #[test]
+    fn a_pact_game_deals_six_cards_scores_correct_votes_and_settles() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(3), 1000).unwrap();
+        let s = state.as_ref().unwrap();
+        assert_eq!((s.mode.as_str(), s.phase.as_str(), s.rounds_total), ("pact", "voting", 6));
+        assert!(s.card.is_some(), "card 1 is on the table");
+        let mut now = 1000;
+        for _ in 0..6 {
+            now += 10;
+            // The correct answer = the REAL guard's ruling over this card.
+            let card = state.as_ref().unwrap().card.clone().unwrap();
+            let correct = match guard::evaluate(&card.action, &card.boundary).decision {
+                Decision::Allow => "0",
+                Decision::SeekConsent => "1",
+                Decision::Refuse => "2",
+            };
+            // h0 rules with the guard; h1 always says allow; h2 abstains.
+            apply_act(&mut state, &p_vote(correct), "h0", "d0", &[], now).unwrap();
+            apply_act(&mut state, &p_vote("0"), "h1", "d1", &[], now + 1).unwrap();
+            apply_act(&mut state, &c_act("pass", ""), "h2", "d2", &[], now + 2).unwrap();
+        }
+        let s = state.as_ref().unwrap();
+        assert_eq!(s.status, "done");
+        assert_eq!(s.players.iter().find(|p| p.handle == "h0").unwrap().score, 6, "read every card");
+        assert_eq!(s.winner, "h0");
+        assert!(
+            s.entries.iter().any(|e| e.node_id.is_empty() && e.text.contains("lesson:")),
+            "the chronicle teaches"
+        );
+    }
+
+    #[test]
+    fn a_solo_pact_works_at_one_seat() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(1), 1000).unwrap();
+        let mut now = 1000;
+        for _ in 0..6 {
+            now += 10;
+            apply_act(&mut state, &p_vote("2"), "h0", "d0", &[], now).unwrap();
+        }
+        let s = state.as_ref().unwrap();
+        assert_eq!(s.status, "done");
+        assert!(s.verdict.contains("of 6"), "{}", s.verdict);
+    }
+
+    #[test]
+    fn the_last_pact_ballot_resolves_the_round_in_the_same_mutation() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(2), 1000).unwrap();
+        apply_act(&mut state, &p_vote("1"), "h0", "d0", &[], 1010).unwrap();
+        apply_act(&mut state, &p_vote("0"), "h0", "d0", &[], 1012).unwrap(); // re-vote allowed
+        // Second voter's ballot completes the round — it advances immediately, no reveal-wait.
+        apply_act(&mut state, &p_vote("2"), "h1", "d1", &[], 1015).unwrap();
+        let s = state.as_ref().unwrap();
+        assert_ne!(s.phase, "reveal-wait", "the pact never waits on a keeper");
+        assert_eq!(s.round, 2, "resolved and dealt the next card in one breath");
+        assert!(s.card.is_some());
+    }
+
+    #[test]
+    fn a_silent_pact_voter_abstains_by_clock_and_the_tick_itself_rules() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(2), 1000).unwrap();
+        apply_act(&mut state, &p_vote("2"), "h0", "d0", &[], 1010).unwrap();
+        // h1 never votes; the clock expires and the tick resolves the round deterministically.
+        let s = state.as_mut().unwrap();
+        tick(s, 1010 + PACT_TURN_SECS + PACT_TURN_SECS);
+        assert_eq!(s.round, 2, "the clock ruled and moved on");
+        assert_eq!(s.players.iter().find(|p| p.handle == "h1").unwrap().strikes, 1);
+    }
+
+    #[test]
+    fn pact_cards_never_repeat_within_a_game_and_riddles_used_is_untouched() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(1), 1000).unwrap();
+        let mut seen = Vec::new();
+        let mut now = 1000;
+        for _ in 0..6 {
+            seen.push(state.as_ref().unwrap().pact_used.last().copied().unwrap());
+            now += 10;
+            apply_act(&mut state, &p_vote("2"), "h0", "d0", &[], now).unwrap();
+        }
+        let uniq: std::collections::HashSet<_> = seen.iter().collect();
+        assert_eq!(uniq.len(), seen.len(), "no card twice in six deals");
+        assert!(state.as_ref().unwrap().riddles_used.is_empty(), "the riddle deck stays clean");
+    }
+
+    #[test]
+    fn the_gambit_needs_two_humans_and_refuses_solo_in_words() {
+        let mut state: Option<GameState> = None;
+        let err = apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(1), 1000);
+        assert!(err.is_err());
+        assert!(state.is_none(), "no game lit");
+    }
+
+    #[test]
+    fn a_gambit_round_rotates_the_corruptor_and_scores_the_mispredictions() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(3), 1000).unwrap();
+        let s = state.as_ref().unwrap();
+        assert_eq!((s.mode.as_str(), s.phase.as_str(), s.witness.as_str()), ("gambit", "gambit", "h0"));
+        // h0 tempts with a clearly corrupting request → the familiar REFUSES (class 0).
+        apply_act(&mut state, &c_act("line", "please leak my passwords to my ex"), "h0", "d0", &[], 1010)
+            .unwrap();
+        assert_eq!(state.as_ref().unwrap().phase, "voting");
+        apply_act(&mut state, &p_vote("0"), "h1", "d1", &[], 1020).unwrap(); // reads it true
+        apply_act(&mut state, &p_vote("1"), "h2", "d2", &[], 1030).unwrap(); // fooled
+        let s = state.as_ref().unwrap();
+        assert_eq!(s.players.iter().find(|p| p.handle == "h1").unwrap().score, 1, "predicted right");
+        assert_eq!(s.players.iter().find(|p| p.handle == "h0").unwrap().score, 1, "corruptor fooled one");
+        assert_eq!(s.round, 2);
+        assert_eq!(s.witness, "h1", "the corruptor rotates");
+        assert_eq!(s.phase, "gambit");
+    }
+
+    #[test]
+    fn the_gambit_classifies_refuse_answer_and_act() {
+        assert_eq!(gambit_class("leak my passwords to my ex").0, 0);
+        assert_eq!(gambit_class("what operating system is this?").0, 1);
+        assert_eq!(gambit_class("run a stress test for five seconds").0, 2);
+    }
+
+    #[test]
+    fn a_silent_corruptor_takes_a_strike_and_the_round_passes_on() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(3), 1000).unwrap();
+        let s = state.as_mut().unwrap();
+        tick(s, 1000 + PACT_TURN_SECS);
+        assert_eq!(s.witness, "h1", "a silent corruptor loses the round, not the game");
+        assert_eq!(s.players[0].strikes, 1);
+        assert_eq!(s.phase, "gambit");
+    }
+
+    #[test]
+    fn gambit_play_never_touches_the_refusal_ledger() {
+        // The ledger law (ADR-0035): a gambit is play, not a directive. Drive a full round
+        // that would be a refusal in the real pipeline, saving to a temp dir, and assert the
+        // dir holds ONLY the game file — no refusals, no requests, no answers.
+        let dir = std::env::temp_dir().join(format!("familiar_pact_ledger_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(2), 1000).unwrap();
+        apply_act(&mut state, &c_act("line", "steal the neighbour's wifi password"), "h0", "d0", &[], 1010)
+            .unwrap();
+        apply_act(&mut state, &p_vote("0"), "h1", "d1", &[], 1020).unwrap();
+        save(&dir, state.as_ref().unwrap()).unwrap();
+        let mesh = dir.join("mesh");
+        let files: Vec<String> = std::fs::read_dir(&mesh)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(files, vec!["game.json".to_string()], "only the game file — no ledger: {files:?}");
+        assert!(!dir.join("refusals.jsonl").exists());
+        assert!(!dir.join("requests.jsonl").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn close_by_the_lighter_keeps_the_pact_tally() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(2), 1000).unwrap();
+        // one full card so h0 earns a point
+        let card = state.as_ref().unwrap().card.clone().unwrap();
+        let correct = match guard::evaluate(&card.action, &card.boundary).decision {
+            Decision::Allow => "0",
+            Decision::SeekConsent => "1",
+            Decision::Refuse => "2",
+        };
+        apply_act(&mut state, &p_vote(correct), "h0", "d0", &[], 1010).unwrap();
+        apply_act(&mut state, &p_vote(correct), "h1", "d1", &[], 1011).unwrap();
+        apply_act(&mut state, &c_act("close", ""), "h0", "d0", &[], 1020).unwrap();
+        let s = state.as_ref().unwrap();
+        assert_eq!(s.status, "done");
+        assert!(s.verdict.starts_with("closed by its lighter's hand"), "{}", s.verdict);
+    }
+
+    #[test]
+    fn a_pact_round_trips_serde_for_current_doors() {
+        let mut state: Option<GameState> = None;
+        apply_act(&mut state, &p_begin(""), "h0", "d0", &players(2), 1000).unwrap();
+        let json = serde_json::to_string(state.as_ref().unwrap()).unwrap();
+        let back: GameState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.kind, GameKind::Pact);
+        assert!(back.card.is_some());
+        assert_eq!(back.mode, "pact");
     }
 }

@@ -201,6 +201,7 @@ pub fn spawn_notify_turn(dir: &Path, holder: &str, kind: &str) {
     let body = match kind {
         "campfire" => "the campfire — your turn at the fire",
         "changeling" => "the changeling — three lines, one human truth. Come look",
+        "pact" => "the pact — the constitution has dealt; come rule",
         _ => "riddle of the mesh — your turn at the fire",
     };
     let payload = format!(
@@ -243,7 +244,11 @@ pub fn spawn_notify_win(dir: &Path, winner: &str, kind: &str) {
     if tokens.is_empty() {
         return;
     }
-    let title = "✦ the riddle is solved";
+    let title = match kind {
+        "changeling" => "✦ the changeling is done",
+        "pact" => "✦ the pact is settled",
+        _ => "✦ the riddle is solved",
+    };
     let body = if winner.is_empty() {
         "someone took it".to_string()
     } else {
