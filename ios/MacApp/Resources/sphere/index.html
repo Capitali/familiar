@@ -74,6 +74,9 @@
   <div style="position:absolute;inset:0;z-index:2;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(150,215,255,0.026) 0px,rgba(150,215,255,0.026) 1px,transparent 1px,transparent 3px);mix-blend-mode:screen;animation:holoscan 11s linear infinite;"></div>
 
   <div id="callouts" style="position:absolute;inset:0;z-index:4;pointer-events:none;opacity:0;transition:opacity 0.5s;"></div>
+  <!-- Cluster bubbles (B4): when zoomed out, nearby nodes collapse into one counted circle here;
+       they separate back into individual callouts as the globe is zoomed in. -->
+  <div id="clusters" style="position:absolute;inset:0;z-index:5;pointer-events:none;"></div>
 
   <!-- electric arcs OVER the real map: the host projects node coordinates to screen points
        (streetArcPoints) and this canvas draws the same lightning language in 2D -->
@@ -253,6 +256,10 @@ const ARC_MEMBER = { core: 0xe4f6ff, glow: 0x4d93ff, branch: 0x8fd0ff, sparks: t
 const ARC_LIGHTHOUSE = { core: 0xd8fff0, glow: 0x2fbf8f, branch: 0x8fe8c8, sparks: true, gain: 1 };
 const ARC_FRONTIER = { core: 0x7d93a8, glow: 0x51677a, branch: 0x62788c, sparks: false, gain: 0.3 };
 const ARC_SIBLING = { core: 0xead9ff, glow: 0x8a5fd6, branch: 0xc9a2ff, sparks: true, gain: 0.7 };
+// Peer-to-peer links that DON'T touch this node — the real mesh body between other peers
+// (B20). Dimmer than the self spokes so the topology reads without overwhelming; the mesh is
+// a web, not a star.
+const ARC_PEER = { core: 0xbcd8ff, glow: 0x3f6fcf, branch: 0x7fb0e8, sparks: false, gain: 0.5 };
 // Standing sibling meshes that declared a location — the globe's federation layer.
 function siblingNodes() {
   return ((S.view || {}).siblings || [])
@@ -1577,7 +1584,23 @@ window.sphereSubmitThreadAnswer = (id) => {
   if (text) toApp('answerThread', { id, text });
   refreshScreen();
 };
-window.sphereDevice = (dev) => { S.device = dev; if (S.activeScreen === 'device' || S.activeScreen === 'games') refreshScreen(); };
+window.sphereDevice = (dev) => {
+  S.device = dev;
+  // A non-member's FIRST launch opens onto the identification path, not the bare globe (B5):
+  // a fresh guest lands on the device screen with the hologram up and the membership steps in
+  // front of them, instead of a world map they have no context for and no way into. Once — after
+  // that the console is theirs to explore; a member never sees this.
+  const mst = ((dev || {}).membership || {}).state;
+  if (!S.guidedOnce && (mst === 'guest' || mst === 'held')) {
+    S.guidedOnce = true;
+    S.activeScreen = 'device';
+    S.holoHidden = false;
+    try { renderButtons(); refreshScreen(); renderChrome(); } catch (e) {}
+    return;
+  }
+  if (mst === 'member') S.guidedOnce = true; // a member who later un-enrolls still gets guided
+  if (S.activeScreen === 'device' || S.activeScreen === 'games') refreshScreen();
+};
 window.sphereInvite = (payload) => { S.invite = payload; if (S.activeScreen === 'device' || S.activeScreen === 'welcome') { try { refreshScreen(); renderInviteQR(); } catch (e) { S.jsErr = 'invite: ' + e.message; renderChrome(); } } };
 function renderInviteQR() {
   const box = $('inviteqr'); if (!box || !S.invite) return;
@@ -1981,15 +2004,66 @@ function initThree() {
       camera.getWorldDirection(camDir);
       const els = co.querySelectorAll('[data-callout]');
       const dirs = [...G.anchorDirs, ...G.frontierDirs, ...G.siblingDirs];
+      // Project every front-facing marker to screen px first, then cluster (B4). The cluster
+      // radius grows the further out the camera is (dist 2.05 close … 6 far), so zoomed out the
+      // world collapses to a few counted circles and zooming in separates them again — the
+      // standard map behaviour. Zoomed in past the threshold, nothing clusters.
+      const dist = camera.position.length();
+      const clusterPx = dist > 2.45 ? Math.min(90, (dist - 2.2) * 46) : 0;
+      const pts = [];
       for (let i = 0; i < dirs.length; i++) {
         const el = els[i]; if (!el) continue;
         worldNorm.copy(dirs[i]).applyQuaternion(group.quaternion).normalize();
+        if (worldNorm.dot(camDir) >= -0.12) { el.style.display = 'none'; continue; } // backface
         worldPos.copy(worldNorm).multiplyScalar(1.02 * breath);
-        if (worldNorm.dot(camDir) >= -0.12) { el.style.display = 'none'; continue; }
         const proj = worldPos.clone().project(camera);
-        el.style.display = 'block';
-        el.style.transform = `translate(${((proj.x*0.5 + 0.5)*rect.width).toFixed(1)}px, ${((-proj.y*0.5 + 0.5)*rect.height).toFixed(1)}px)`;
+        pts.push({ el, x: (proj.x * 0.5 + 0.5) * rect.width, y: (-proj.y * 0.5 + 0.5) * rect.height });
       }
+      // Greedy screen-space clustering.
+      const clusters = [];
+      const taken = new Array(pts.length).fill(false);
+      for (let i = 0; i < pts.length; i++) {
+        if (taken[i]) continue;
+        const members = [pts[i]]; taken[i] = true;
+        if (clusterPx > 0) {
+          for (let j = i + 1; j < pts.length; j++) {
+            if (taken[j]) continue;
+            const dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
+            if (dx * dx + dy * dy <= clusterPx * clusterPx) { members.push(pts[j]); taken[j] = true; }
+          }
+        }
+        clusters.push(members);
+      }
+      const cc = $('clusters');
+      const bubbles = cc.querySelectorAll('[data-cluster]');
+      let bi = 0;
+      for (const members of clusters) {
+        if (members.length === 1) {
+          const p = members[0];
+          p.el.style.display = 'block';
+          p.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+          continue;
+        }
+        // A real cluster: hide its members, show one counted bubble at the centroid.
+        let cx = 0, cy = 0;
+        for (const m of members) { m.el.style.display = 'none'; cx += m.x; cy += m.y; }
+        cx /= members.length; cy /= members.length;
+        let b = bubbles[bi];
+        if (!b) {
+          b = document.createElement('div');
+          b.dataset.cluster = '1';
+          b.style.cssText = 'position:absolute;left:0;top:0;transform-origin:center;will-change:transform;';
+          cc.appendChild(b);
+        }
+        b.style.display = 'flex';
+        b.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px) translate(-50%,-50%)`;
+        b.innerHTML = `<div style="min-width:30px;height:30px;padding:0 8px;border-radius:16px;background:rgba(20,44,80,0.62);border:1px solid rgba(120,190,255,0.5);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;box-shadow:0 0 16px rgba(90,160,255,0.4);"><span class="m" style="font-size:12px;font-weight:600;color:#cfe4ff;">${members.length}</span></div>`;
+        bi++;
+      }
+      for (let k = bi; k < bubbles.length; k++) bubbles[k].style.display = 'none';
+    } else {
+      const cc = $('clusters');
+      if (cc) cc.querySelectorAll('[data-cluster]').forEach(b => b.style.display = 'none');
     }
     animateArcs(t);
   };
@@ -2030,6 +2104,20 @@ function rebuildArcs() {
   // Siblings: meshes standing beside this one — violet, the federation layer (ADR-0033).
   for (const d of (G.siblingDirs || [])) {
     G.siblingArcs.push(mkArc(from.clone(), d.clone(), ARC_SIBLING));
+  }
+  // Real peer-to-peer edges (B20): the mesh is a web, not a star. The worldview carries the
+  // ACTUAL links between peers (gossip / delegation / attribution); draw the ones that don't
+  // touch this node — its own links are the spokes above — so the body shows true p2p topology.
+  const idDir = {};
+  for (let i = 0; i < P.length; i++) if (P[i] && P[i].located) idDir[P[i].m.node_id] = G.anchorDirs[i];
+  const selfId = P[selfIdx] && P[selfIdx].m.node_id;
+  const seenEdge = {};
+  for (const e of ((S.view || {}).edges || [])) {
+    if (!e || e.from === selfId || e.to === selfId) continue;
+    const key = e.from < e.to ? e.from + '|' + e.to : e.to + '|' + e.from;
+    if (seenEdge[key]) continue; seenEdge[key] = 1;
+    const a = idDir[e.from], b = idDir[e.to];
+    if (a && b) G.arcs.push(mkArc(a.clone(), b.clone(), ARC_PEER));
   }
 }
 const arcTmp = new THREE.Vector3();
