@@ -213,7 +213,10 @@ fn forge_prompt(truth: &str, witness_label: &str, solo: bool, facts: &[String]) 
     let texture = if facts.is_empty() {
         String::new()
     } else {
-        format!("Mesh-public texture you may echo lightly: {}\n", facts.join("; "))
+        format!(
+            "Mesh-public texture you may echo lightly: {}\n",
+            facts.join("; ")
+        )
     };
     if solo {
         format!(
@@ -241,7 +244,12 @@ fn forge_prompt(truth: &str, witness_label: &str, solo: bool, facts: &[String]) 
 /// Forge the round: truth + two changelings, shuffled by a salted index. Returns the
 /// three lines, the truth's index, the salt, and the commitment. Deterministic given
 /// (id, round, salt); the salt is fresh randomness per forge.
-fn forge(dir: &Path, s: &GameState, truth: &str, use_llm: bool) -> ([String; 3], u8, String, String) {
+fn forge(
+    dir: &Path,
+    s: &GameState,
+    truth: &str,
+    use_llm: bool,
+) -> ([String; 3], u8, String, String) {
     let seed = format!("{}|{}", s.id, s.round);
     let bank = if s.solo { &BANK_MESH } else { &BANK_DAY };
     let witness_label = s
@@ -251,7 +259,10 @@ fn forge(dir: &Path, s: &GameState, truth: &str, use_llm: bool) -> ([String; 3],
         .map(|p| p.label.clone())
         .unwrap_or_else(|| s.witness.clone());
     let forged = if use_llm {
-        match familiar_llm::consult(dir, &forge_prompt(truth, &witness_label, s.solo, &public_facts(dir))) {
+        match familiar_llm::consult(
+            dir,
+            &forge_prompt(truth, &witness_label, s.solo, &public_facts(dir)),
+        ) {
             Ok(familiar_llm::Outcome::Response(raw)) => {
                 parse_forged(&raw).unwrap_or_else(|| bank_lines(bank, &seed))
             }
@@ -376,7 +387,8 @@ mod tests {
     use super::*;
 
     fn dir(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_changeling_{}_{name}", std::process::id()));
+        let p =
+            std::env::temp_dir().join(format!("familiar_changeling_{}_{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -399,7 +411,10 @@ mod tests {
         assert!(!verify("changeling-100", 1, "abce", 2, &commit));
         assert!(!verify("changeling-100", 1, "abcd", 1, &commit));
         assert!(!verify("changeling-100", 2, "abcd", 2, &commit));
-        assert!(!verify("changeling-100", 1, "abcd", 2, ""), "an empty promise proves nothing");
+        assert!(
+            !verify("changeling-100", 1, "abcd", 2, ""),
+            "an empty promise proves nothing"
+        );
     }
 
     #[test]
@@ -415,7 +430,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(!p.join(format!("{KEEPER_FILE}.tmp")).exists(), "no tmp left behind");
+        assert!(
+            !p.join(format!("{KEEPER_FILE}.tmp")).exists(),
+            "no tmp left behind"
+        );
         assert_eq!(load_secret(&p).unwrap().truth_idx, 2);
         let _ = std::fs::remove_dir_all(&p);
     }
@@ -440,7 +458,10 @@ mod tests {
         let t = solo_truth(&p, "seed").unwrap();
         assert_eq!(t, "the mesh saw host sees device:GiiweoPrime");
         let empty = dir("solo_truth_none");
-        assert!(solo_truth(&empty, "seed").is_none(), "nothing safe → no game, no leak");
+        assert!(
+            solo_truth(&empty, "seed").is_none(),
+            "nothing safe → no game, no leak"
+        );
         let _ = std::fs::remove_dir_all(&p);
         let _ = std::fs::remove_dir_all(&empty);
     }
@@ -512,7 +533,13 @@ mod tests {
         familiar_kernel::observation::record(
             &p,
             familiar_kernel::observation::Observation::new(
-                "host", "sees", "device:GiiweoPrime", "", "test", 100, 1.0,
+                "host",
+                "sees",
+                "device:GiiweoPrime",
+                "",
+                "test",
+                100,
+                1.0,
             ),
         )
         .unwrap();

@@ -6,6 +6,44 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-09 — The Changeling: the third fire, and the familiar's first seat at it (ADR-0034)
+
+### What changed
+
+- **game.rs** — `GameKind::{Changeling, Unknown #[serde(other)]}`; the phase machine
+  (witness → forging → voting → reveal-wait) with per-phase lazy clocks; acts `vote`
+  (upsert by handle, last-before-reveal counts, ABSTAIN by clock or explicit pass);
+  scoring (+1 found truth, +1/fooled voter to the witness; the familiar scoreless);
+  witness rotation, solo (3 rounds, familiar witnesses about the record); chronicle
+  entries carry each round through the reset; `save()` now temp+rename (ADR-0029 §2).
+- **changeling.rs (new)** — the keeper: claims the forge in state (LWW settles races,
+  stale results discarded by a re-check guard), forges via `familiar_llm::consult`
+  with deterministic banks as floor/CI path, writes `{id, round, truth_idx, salt}`
+  door-local BEFORE publishing, publishes only the sha256 commitment; reveals on its
+  next touch once ballots complete; solo truths drawn from shareable observations only.
+- **llm** — `CONSULT_LOCK`: consults serialize in-process (cycle + forge share one
+  prompt.txt); proven by a two-thread test.
+- **transport/worldview/push** — `spawn_changeling_touch` off the request path from
+  acts, both record-sync absorbs, and worldview polls; push text learned the kind.
+- **Sphere + Swift** — third menu card, info page, four live phase screens (vote cards
+  A/B/C with re-vote until reveal), roster badge phases (🎭 TRUTH/VOTE/EMBER), chime
+  and Watch lines; `solo` threaded sphere → bridges → AppModel → GameClient; GameGlance
+  gains `phase`. Both platforms build.
+
+### Checks run
+
+- 173 mesh + 5 llm tests green (18 new changeling rules tests incl. full-state secrecy,
+  6 keeper tests, the consult-serialization proof); FamiliarMac + FamiliarAgent build.
+
+### Next — READ BEFORE LIGHTING
+
+- **Upgrade every door first**: a changeling in a record-sync makes PRE-0034 doors drop
+  the whole sync (no `Unknown` fallback there). Ship all device doors + **redeploy the
+  lighthouse** (still outstanding from ADR-0033) before the first `begin changeling`.
+- The scripted two-door walkthrough and the household play test (ADR-0028: testers
+  playing IS the test) — riddle/campfire regression first, then multiplayer changeling,
+  then a solo game.
+
 ## 2026-08-08 (later) — The hand on the world: declared actuators + the reaction loop (ADR-0032)
 
 ### What changed

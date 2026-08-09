@@ -13,6 +13,21 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The Changeling — the third mesh game (ADR-0034).** One human writes a true line about
+  their day; the familiar forges two false ones in the same voice (the LLM seam, with a
+  deterministic bank as the floor — a dead model never kills a live fire); everyone else
+  votes for the human line. The door that takes the truth becomes the round's **keeper**:
+  the truth's index lives only in its door-local file, and replicated state carries a
+  salted sha256 **commitment** any door can verify at the reveal — because full game
+  state is readable off any door's port, secrecy had to be cryptographic, not cosmetic.
+  Four lazy-clock phases (witness/forge/vote/reveal) where a silent witness loses only
+  the round, a cold forge blames no human, and a silent keeper's round is voided by
+  whichever door reads next. Solo mode — "two never happened" — has the familiar write
+  three lines about the mesh's own record, one true, two forged: audit-through-play.
+  `GameKind::Unknown` now absorbs future kinds safely; **every door must run this build
+  before the first changeling is lit** (older doors drop whole record-syncs otherwise).
+  LLM consults are now serialized in-process; `game.json` lands by temp+rename.
+  *Validated by 40+ new unit tests across game/changeling/llm + both app platforms building.*
 - **The first actuator, and the reaction loop (ADR-0032).** The familiar gains a hand on
   the world, shaped by consent-by-observation: the human declares control surfaces in
   `actuators.json` (declaration is the consent — an undeclared device has no path to
