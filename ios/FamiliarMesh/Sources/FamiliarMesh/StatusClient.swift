@@ -25,12 +25,19 @@ public struct StatusClient {
         /// How the present human was established — "binding" | "face" | "asked" | "inherited"
         /// (ADR-0019). Empty when nobody is identified.
         public var present_confidence: Double
+        /// This device's own GPS fix, relayed so it shows at its TRUE location on every door
+        /// (B11/B19), not scattered onto whoever reads. 0,0 = no fix shared.
+        public var lat: Double
+        public var lon: Double
 
         public init(
             node_id: String, actor: String, label: String, present_human: String,
             connectivity: String, tailnet_addr: String = "", tailnet_up: Bool = false,
-            present_via: String = "", present_since: Int64 = 0, present_confidence: Double = 0
+            present_via: String = "", present_since: Int64 = 0, present_confidence: Double = 0,
+            lat: Double = 0, lon: Double = 0
         ) {
+            self.lat = lat
+            self.lon = lon
             self.node_id = node_id
             self.group_ref = ""
             self.actor = actor

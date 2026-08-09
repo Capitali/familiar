@@ -503,8 +503,12 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
 
     nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locs: [CLLocation]) {
         guard let loc = locs.last else { return }
-        let geo = ["lat": loc.coordinate.latitude, "lon": loc.coordinate.longitude]
+        let lat = loc.coordinate.latitude, lon = loc.coordinate.longitude
+        let geo = ["lat": lat, "lon": lon]
         Task { @MainActor in
+            // Relay this Mac's own fix in the status heartbeat (B19): without it, wildhorse read
+            // unlocated on every remote door and scattered onto whoever was looking.
+            self.model.setMyFix(lat: lat, lon: lon)
             let dir = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/Familiar/data/mesh")
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

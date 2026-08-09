@@ -773,6 +773,18 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         });
     }
 
+    // Test infrastructure sits at the North Pole, like the lighthouse — so it reads as
+    // infrastructure and never scatters onto a human's map or reads as "local to Phoenix"
+    // (B19). |lat| ≥ 85 is the pole convention the console's `anchorable` already honours.
+    for m in out.iter_mut() {
+        if m.label.eq_ignore_ascii_case("famtalker01") {
+            m.lat = 90.0;
+            m.lon = 0.0;
+            m.geo_device = true;
+            m.relationship = "test infrastructure — at the pole".into();
+        }
+    }
+
     out = dedup_devices(out);
     attach_companions(&mut out, &obs);
     attach_consoles(&mut out, &transport::reachable_hosts());

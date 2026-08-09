@@ -51,6 +51,14 @@ pub struct MemberStatus {
     /// How this member is currently reaching the mesh: "local" | "lighthouse" | "tailscale".
     #[serde(default)]
     pub connectivity: String,
+    /// The member device's own GPS fix (decimal degrees), if it consented to share location.
+    /// Relayed through the status directory (B11/B19) so a device reaching the mesh only via
+    /// the lighthouse still shows at its TRUE location on every door — not scattered onto
+    /// whoever's reading. 0,0 = no fix shared.
+    #[serde(default)]
+    pub lat: f64,
+    #[serde(default)]
+    pub lon: f64,
     /// The member's tailnet (100.64/10) address when Tailscale is up (Phases B/C). Empty otherwise.
     #[serde(default)]
     pub tailnet_addr: String,
@@ -174,6 +182,8 @@ mod tests {
             connectivity: "lighthouse".into(),
             tailnet_addr: String::new(),
             tailnet_up: false,
+            lat: 0.0,
+            lon: 0.0,
             updated_at: 0,
         };
         (

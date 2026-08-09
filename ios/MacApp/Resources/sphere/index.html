@@ -906,6 +906,22 @@ function refreshScreen() {
 
     } else {
       // live (or finished) game view
+      // The door refused the last act (B15) — a BEGIN that couldn't light (no players present,
+      // members only, a game already burning). Show the reason instead of the silent 12-second
+      // bounce to the finished game that read as "the changeling won't start".
+      const gnote = (S.device || {}).gameNote || '';
+      if (gnote && S.gameBeginAt && Date.now() - S.gameBeginAt < 12000) {
+        S.gameBeginAt = 0;
+        el.innerHTML = `<div style="max-width:520px;padding:40px 0;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <button onclick="sphereGameNav('menu')" class="glybtn" style="width:34px;height:34px;flex-shrink:0;">${BACK_GLYPH}</button>
+            <span style="font-size:16px;font-weight:600;">the fire didn't light</span>
+          </div>
+          <div style="padding:14px 16px;border-radius:13px;background:rgba(255,143,163,0.1);border:1px solid rgba(255,143,163,0.32);">
+            <div class="m" style="font-size:11.5px;line-height:1.55;color:rgba(255,205,215,0.92);">${esc(gnote)}</div>
+          </div></div>`;
+        return;
+      }
       if (!g) {
         // A begin's own poll race: the snapshot in flight when BEGIN was tapped arrives
         // game-less a beat later — bouncing to the menu PINNED the menu while every other
@@ -1364,7 +1380,11 @@ function renderChrome() {
   const claimsForMe = ((S.view && S.view.claims_waiting) || []).filter(c =>
     chromeHuman && c.handle.toLowerCase() === chromeHuman.toLowerCase()
     && !((S.dismissedClaims || {})[c.node_id])).length;
-  const arriving = ((S.view && S.view.arrivals) || []).length + claimsForMe;
+  // pendingClaims comes straight from AppModel's own edge (B7) and doesn't depend on the
+  // chromeHuman fallback, so a waiting acceptance flashes the glyph even when the presence
+  // claim has lapsed — the case where nothing used to announce it at all.
+  const pendingClaims = (S.device || {}).pendingClaims || 0;
+  const arriving = ((S.view && S.view.arrivals) || []).length + Math.max(claimsForMe, pendingClaims);
   const wb = $('welcomebtn');
   if (wb) {
     wb.style.display = street ? 'none' : 'flex';
@@ -1379,12 +1399,17 @@ function renderChrome() {
   const mem = ((S.device || {}).membership || {});
   const gb = $('guestbar');
   if (gb) {
-    const guesty = (mem.state === 'guest' || mem.state === 'held') && S.activeScreen !== 'device' && !street;
+    const introducing = !!(S.device || {}).introducing;
+    const guesty = (introducing || mem.state === 'guest' || mem.state === 'held') && S.activeScreen !== 'device' && !street;
     gb.style.display = guesty ? 'flex' : 'none';
     const gt = $('guestbartext');
-    if (gt) gt.textContent = mem.state === 'held'
-      ? 'HELD — TAP TO SEE WHEN TO TRY AGAIN'
-      : 'VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP';
+    // Join in flight (B6): while the introduction round-trips, the pill says so with an elapsed
+    // count, so the wait reads as progress rather than nothing having happened.
+    if (gt) gt.textContent = introducing
+      ? `JOINING THE MESH… ${((S.device || {}).introduceElapsed || 0)}s`
+      : mem.state === 'held'
+        ? 'HELD — TAP TO SEE WHEN TO TRY AGAIN'
+        : 'VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP';
   }
   // The recurring identification ask: ~25s after a visitor settles, then every 3 minutes
   // until the path is begun. Never over the device screen (the path lives there), never

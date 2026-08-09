@@ -493,6 +493,11 @@ async fn heartbeat_status(dir: &Path, cfg: &MeshConfig, cred: &crate::group::Gro
         connectivity: "local".into(),
         tailnet_addr: String::new(),
         tailnet_up: false,
+        // The daemon relays its OWN location (geo.json / freshest device fix) so it maps at its
+        // true place on every other door (B19) — this is what puts wildhorse where it actually
+        // is instead of scattered onto whoever is reading.
+        lat: self_geo(dir).map(|(la, _)| la).unwrap_or(0.0),
+        lon: self_geo(dir).map(|(_, lo)| lo).unwrap_or(0.0),
         updated_at: now,
     };
     let report = crate::status::StatusReport {
@@ -696,6 +701,10 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
                 first_seen: now,
                 human: st.present_human.clone(),
                 connectivity: st.connectivity.clone(),
+                // The relayed GPS fix (B11/B19), so a device met only through the lighthouse
+                // still shows at its true location on this door instead of unlocated.
+                lat: st.lat,
+                lon: st.lon,
                 ..Default::default()
             });
             changed = true;
@@ -711,6 +720,14 @@ fn apply_status_freshness(dir: &Path, statuses: &[crate::status::MemberStatus], 
             // is reaching the mesh, for the roster badge. Only a member reports its own mode.
             if !st.connectivity.is_empty() && st.connectivity != p.connectivity {
                 p.connectivity = st.connectivity.clone();
+                changed = true;
+            }
+            // Adopt a relayed fix when the local row has none — a device seen only via the
+            // lighthouse relays its GPS here so it maps at its true place (B11/B19). A locally
+            // witnessed fix (from this device's own read) is fresher and is not overwritten.
+            if (st.lat != 0.0 || st.lon != 0.0) && p.lat == 0.0 && p.lon == 0.0 {
+                p.lat = st.lat;
+                p.lon = st.lon;
                 changed = true;
             }
         }
@@ -3185,6 +3202,9 @@ fn status_directory_response(dir: &Path) -> Response<Full<Bytes>> {
             connectivity: p.connectivity.clone(),
             tailnet_addr: String::new(),
             tailnet_up: false,
+            // Relay the peer's known fix onward (B19), so a third door learns where it is too.
+            lat: p.lat,
+            lon: p.lon,
             updated_at: p.last_seen,
         });
     }
@@ -5124,6 +5144,8 @@ mod tests {
                 connectivity: "lighthouse".into(),
                 tailnet_addr: String::new(),
                 tailnet_up: false,
+                lat: 0.0,
+                lon: 0.0,
                 updated_at: at,
             };
 

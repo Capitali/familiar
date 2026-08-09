@@ -12,6 +12,9 @@ public struct GameGlance: Codable, Equatable {
     /// absent on other kinds and on older doors.
     public var phase: String?
     public var solo: Bool?
+    /// The winner's handle once a riddle is solved (status "done"); empty/absent otherwise.
+    /// Drives the win fanfare edge (B13).
+    public var winner: String?
 }
 
 /// `POST /mesh/game/act` — one signed move in the mesh game (begin / guess / line / pass /

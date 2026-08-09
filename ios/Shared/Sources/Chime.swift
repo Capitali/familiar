@@ -20,6 +20,11 @@ enum Chime {
     /// felt on the accepted device, not only announced elsewhere.
     static func accepted() { play("acceptance", "wav") }
 
+    /// A riddle was solved (B13) — the fanfare. It rides the acceptance cue (a bright, earned
+    /// sound; no new asset) and is edge-triggered on the win, so it rings once, not on every
+    /// poll of a finished game.
+    static func fanfare() { play("acceptance", "wav") }
+
     private static func play(_ name: String, _ ext: String) {
         guard let url = Bundle.main.url(forResource: name, withExtension: ext) else {
             return

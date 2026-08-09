@@ -20,6 +20,11 @@ final class AppModel: ObservableObject {
         case member(handle: String)
     }
     @Published var membership: MembershipState = .none
+    /// A join is in flight — the console shows progress instead of the static path card (B6).
+    @Published var introducing = false
+    var introduceStartedAt: TimeInterval = 0
+    /// The door's last verdict on a game act, shown on the games screen (B15). "" when clear.
+    @Published var gameNote = ""
 
     /// The default path-to-admission copy, before the door has said anything more specific.
     static let admissionPath = "Covenant accepted — you're reading as a guest. To be admitted: " +
@@ -94,6 +99,7 @@ final class AppModel: ObservableObject {
     /// identity filter learn one fact from one answer. The door still decides — provenance is
     /// what IT observed, and its refusal text becomes the guest screen's copy.
     func confirmPresentHuman(_ name: String) {
+        markInteraction()
         let handle = Self.slugHandle(name)
         guard !handle.isEmpty else { return }
         answeredClaim = .make(handle: handle, via: .asked)
@@ -409,6 +415,15 @@ final class AppModel: ObservableObject {
             "membership": membershipDict,
             "attempts": attemptLog,
             "servedHuman": servedHuman,
+            // Join in flight (B6): the console shows a progress indicator instead of snapping
+            // back to the static path card while the introduction round-trips.
+            "introducing": introducing,
+            "introduceElapsed": introducing ? Int(Date().timeIntervalSince1970 - introduceStartedAt) : 0,
+            // The door's last verdict on a game act (B15) — surfaced on the games screen so a
+            // refused BEGIN shows its reason instead of silently bouncing to the finished game.
+            "gameNote": gameNote,
+            // Claims waiting on this device's human (B7) — the welcome glyph flashes on it.
+            "pendingClaims": pendingClaimCount,
             // What the ladder currently believes, so the console can SHOW the belief instead of
             // asking (ADR-0019). An expired claim reports nobody rather than the last person seen.
             "presence": [
@@ -488,6 +503,7 @@ final class AppModel: ObservableObject {
     /// The human answered the familiar's question in the console — a served-facing observation, so
     /// presence and service register that a person is here and spoke.
     func submitConsoleAnswer() {
+        markInteraction()
         let t = consoleAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         emit(ObsRecord(actor: servedHuman, action: "told the familiar", object: t, context: "console", confidence: 1.0))
@@ -676,6 +692,7 @@ final class AppModel: ObservableObject {
 
     func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "",
                  solo: Bool = false) async {
+        markInteraction()
         // Never bail silently: a dead-looking button is worse than an error. The note surfaces
         // on the games screen (deviceStateJSON.notes), door named, so a refusal is legible.
         guard !host.isEmpty else {
@@ -686,11 +703,22 @@ final class AppModel: ObservableObject {
             switch try await GameClient(node: node).act(act, kind: kind, text: text, to: to,
                                                         solo: solo,
                                                         host: host, port: enrollPort) {
-            case .said(let words): note(words.isEmpty ? "the move landed" : words)
-            case .refused(let why): note("door \(host) refused \(act): \(why)")
-            case .error(let e): note("\(act) failed at door \(host): \(e)")
+            case .said(let words):
+                gameNote = ""
+                note(words.isEmpty ? "the move landed" : words)
+            case .refused(let why):
+                // Surface the refusal ON THE GAMES SCREEN (B15): a begin that the door refuses
+                // (no players present, members only, an already-burning game) used to vanish
+                // into a device-screen note while the games view silently bounced to the last
+                // finished game after its 12-second grace — reading as "the game won't start".
+                gameNote = why
+                note("door \(host) refused \(act): \(why)")
+            case .error(let e):
+                gameNote = e
+                note("\(act) failed at door \(host): \(e)")
             }
         } catch {
+            gameNote = Self.brief(error)
             note("\(act) failed at door \(host): \(error.localizedDescription)")
         }
         await refreshWorldview()
@@ -768,6 +796,12 @@ final class AppModel: ObservableObject {
     @discardableResult
     private func introduce(claim: IdentityClaim?, evidence: Evidence) async -> Bool {
         guard storedGrant() != nil, !host.isEmpty else { return false }
+        // Show the join is IN FLIGHT (B6): a name entered kicks off a round trip (evidence,
+        // maybe a vouch, a sync) that could take seconds; without this the console snapped back
+        // to the static path card and looked like nothing happened.
+        introducing = true
+        introduceStartedAt = Date().timeIntervalSince1970
+        defer { introducing = false }
         let client = AdmissionClient(node: node)
         do {
             switch try await client.introduce(claim: claim, evidence: evidence, host: host, port: enrollPort) {
@@ -969,34 +1003,75 @@ final class AppModel: ObservableObject {
         // and since when (ADR-0019). An expired claim reports nobody rather than the last person
         // we saw — "Jeff is here" and "Jeff was here an hour ago" must not arrive as the same fact.
         let claim = presence
-        let live = claim.isLive
+        var live = claim.isLive
+        var presentHuman = live ? claim.handle : ""
+        var presentVia = live ? claim.via.rawValue : ""
+        var presentSince = live ? Int64(claim.since.timeIntervalSince1970) : 0
+        var presentConfidence = live ? claim.confidence : 0
+        // Active use of the console IS presence (B17): if the ladder holds no live claim but the
+        // human is right here — served handle known, and they've acted within the last ten
+        // minutes — say so plainly ("I'm typing, I'm present") rather than reporting "unknown".
+        // A real face/asked claim, being stronger, always wins the branch above.
+        if !live, !servedHuman.isEmpty, servedHuman != "observer",
+           Date().timeIntervalSince1970 - lastInteractionAt < 600 {
+            live = true
+            presentHuman = servedHuman
+            presentVia = "interaction"
+            presentSince = Int64(lastInteractionAt)
+            presentConfidence = 0.5
+        }
         let status = StatusClient.Member(
             node_id: node.nodeId,
             actor: DeviceActor.current,
             label: PlatformDevice.name,
-            present_human: live ? claim.handle : "",
+            present_human: presentHuman,
             connectivity: Self.connectivityMode(readHost),
-            present_via: live ? claim.via.rawValue : "",
-            present_since: live ? Int64(claim.since.timeIntervalSince1970) : 0,
-            present_confidence: live ? claim.confidence : 0
+            present_via: presentVia,
+            present_since: presentSince,
+            present_confidence: presentConfidence,
+            lat: myLat,
+            lon: myLon
         )
         let client = StatusClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
-        // Do NOT swallow this. `send` reports a rejection as `false` and a transport failure as a
-        // throw, and `_ = try?` discarded both — so a device could be reading the worldview happily
-        // while being invisible to every OTHER device on the mesh, with nothing anywhere saying so.
-        // Logged on CHANGE only, since this runs on every poll tick.
-        do {
-            let ok = try await client.send(status, host: Self.rendezvousHost, port: enrollPort)
-            if ok != (lastStatusOK ?? false) {
-                note(ok ? "↑ status reaching the lighthouse" : "✗ lighthouse rejected this device's status")
+        // Heartbeat to the lighthouse (the mesh's meeting point) AND to the door we just read
+        // (B11): presence/session are computed from local evidence, so a device whose status
+        // only ever reached the lighthouse read "unknown / no GPS / — session" on every other
+        // door. Sending to the read door too lets that door's roster see us present. Deduped so
+        // we never send twice to the same address.
+        var doors = [Self.rendezvousHost]
+        if !readHost.isEmpty, readHost != Self.rendezvousHost { doors.append(readHost) }
+        var anyOK = false
+        var lastErr: Error?
+        for h in doors {
+            do {
+                if try await client.send(status, host: h, port: enrollPort) { anyOK = true }
+            } catch {
+                lastErr = error
             }
-            lastStatusOK = ok
-        } catch {
-            if lastStatusOK ?? true {
-                note("✗ status heartbeat failed: \(Self.brief(error))")
-            }
-            lastStatusOK = false
         }
+        if anyOK != (lastStatusOK ?? false) {
+            note(anyOK ? "↑ status reaching the mesh" : "✗ the mesh rejected this device's status")
+        }
+        if !anyOK, let e = lastErr, lastStatusOK ?? true {
+            note("✗ status heartbeat failed: \(Self.brief(e))")
+        }
+        lastStatusOK = anyOK
+    }
+
+    /// The wall-clock of the last deliberate human act at this console — a typed answer, a name,
+    /// a game move, a consent toggle. Feeds the interaction-presence signal (B17).
+    var lastInteractionAt: TimeInterval = 0
+    func markInteraction() { lastInteractionAt = Date().timeIntervalSince1970 }
+
+    /// This device's own last GPS fix, relayed in the status heartbeat so it shows at its TRUE
+    /// location on every door (B11/B19). Set by the platform shells (iOS CoreMotion coordinator,
+    /// Mac CoreLocation). 0,0 = no fix / location not consented.
+    var myLat = 0.0
+    var myLon = 0.0
+    func setMyFix(lat: Double, lon: Double) {
+        guard lat != 0 || lon != 0 else { return }
+        myLat = lat
+        myLon = lon
     }
 
     /// Guests waiting as of the previous successful read — nil until the first one, so launch is
@@ -1005,8 +1080,16 @@ final class AppModel: ObservableObject {
     private var lastGuestsWaiting: Int?
     /// Arrival ids as of the previous read — nil until the first, so launch greets nobody twice.
     private var knownArrivalIds: Set<String>?
-    private var knownClaimIds: Set<String>?
+    /// Claim edge keys, "node_id:since" — a fresh claim.ts re-triggers even for a device whose
+    /// node id we already knew (a rejoining phone). nil until the first read (launch-silent).
+    private var knownClaimKeys: Set<String>?
+    /// Live count of claims waiting on THIS device's human — the welcome glyph flashes on it,
+    /// so a waiting acceptance is visible even on the first read (B7).
+    @Published var pendingClaimCount = 0
     private var wasMyTurn = false
+    /// Whether the current finished game's win was already celebrated — reset when a game is
+    /// open or absent, so the fanfare rings once per win (B13).
+    private var wonGameShown = false
     private var preferredReadFails = 0
     /// Consecutive reads that served this device the guest projection. Demotion waits for
     /// three — a single projected read (a fallback door's stale roll, a mid-merge worldview)
@@ -1172,6 +1255,10 @@ final class AppModel: ObservableObject {
                 // `emit`; the worldview read carries no fix of its own here.
                 let fix: (lat: Double, lon: Double)? = nil
                 #endif
+                // Remember our own fix so the status heartbeat can relay it to every door
+                // (B11/B19) — otherwise a device seen only via the lighthouse reads unlocated,
+                // or scatters onto whoever is looking (Leif saw wildhorse "in Phoenix").
+                if let f = fix { setMyFix(lat: f.lat, lon: f.lon) }
                 let (view, raw) = try await WorldviewClient(session: session)
                     .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
                                   lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
@@ -1206,21 +1293,27 @@ final class AppModel: ObservableObject {
                 }
 
                 // Someone's new device is claiming THIS device's human (E2 over the mesh) —
-                // the second person is us. Edge-triggered like arrivals, silent on first read.
+                // the second person is us. A waiting acceptance must announce itself (B7): the
+                // old edge stayed silent for a REJOINING device (its node id was already known,
+                // so a fresh claim.ts moving forward was invisible) and only chimed while THIS
+                // console still read as a member. Now: key on (node_id, since) so a fresh claim
+                // re-triggers, drop the member guard, and keep a live count for the glyph to
+                // flash on. First read is still silent (seeded), but pendingClaimCount shows it.
                 if let claims = view.claims_waiting {
                     let mine = claims.filter {
                         $0.handle.caseInsensitiveCompare(attributedHuman) == .orderedSame
                     }
-                    let ids = Set(mine.map { $0.node_id })
-                    if let known = knownClaimIds, case .member = membership {
-                        let fresh = mine.filter { !known.contains($0.node_id) }
+                    pendingClaimCount = mine.count
+                    let keys = Set(mine.map { "\($0.node_id):\($0.since)" })
+                    if let known = knownClaimKeys {
+                        let fresh = mine.filter { !known.contains("\($0.node_id):\($0.since)") }
                         if !fresh.isEmpty {
                             Chime.guestWaiting()
                             let names = fresh.map { $0.label }.joined(separator: ", ")
                             note("\(names) says it is yours — confirm on the welcome screen")
                         }
                     }
-                    knownClaimIds = ids
+                    knownClaimKeys = keys
                 }
 
                 // The ember reached this device (the mesh games): edge-triggered chime, so a
@@ -1253,6 +1346,18 @@ final class AppModel: ObservableObject {
                 }
                 #endif
                 wasMyTurn = myTurn
+
+                // A riddle just SOLVED (B13): ring the fanfare once, on the win edge. Reset when
+                // a game is open or absent so a finished game doesn't re-ring every poll.
+                let riddleWon = view.game.map {
+                    $0.status == "done" && !($0.winner ?? "").isEmpty && $0.kind == "riddle"
+                } ?? false
+                if riddleWon && !wonGameShown {
+                    wonGameShown = true
+                    Chime.fanfare()
+                } else if !(view.game.map { $0.status == "done" } ?? false) {
+                    wonGameShown = false
+                }
 
                 // Were WE just admitted? The moment this device's own id appears on the roll it
                 // had been absent from — an admission completed elsewhere (another door, a
