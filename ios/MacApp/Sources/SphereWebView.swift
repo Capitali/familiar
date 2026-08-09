@@ -471,6 +471,16 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                         await self.poll()
                     }
                 }
+            case "federateAct":
+                // The member's federation tap (ADR-0033): welcome a pending sibling mesh, or
+                // sever a standing one. The same class of act as vouch — a human decides.
+                if let gid = body["group_id"] as? String,
+                   let act = body["act"] as? String {
+                    Task {
+                        await self.model.federateAct(act, subjectGroupId: gid)
+                        await self.poll()
+                    }
+                }
             default: break
             }
         }

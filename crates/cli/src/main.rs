@@ -1291,6 +1291,173 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        // ---- federation (ADR-0033): meshes are peers too ---------------------------------------
+        Some("federate") => {
+            let sub = args.get(1).map(String::as_str);
+            match sub {
+                Some("invite") => {
+                    // `mesh federate invite` — mint the pasteable payload one mesh's operator
+                    // hands another's. Member-signed, single-use, ten minutes, no secrets.
+                    let cred = match familiar_mesh::group::load(&dir) {
+                        Ok(Some(c)) => c,
+                        _ => {
+                            eprintln!("mesh: no group here — create or join one first");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &cred.label)
+                    {
+                        Ok(n) => n,
+                        Err(e) => {
+                            eprintln!("mesh: no node key — {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let hosts = familiar_mesh::transport::federation_hosts(&dir);
+                    match familiar_mesh::federation::mint_mesh_invite(
+                        &node,
+                        &cred.membership,
+                        &cred,
+                        hosts,
+                        now_secs(),
+                    )
+                    .and_then(|i| i.encode())
+                    {
+                        Ok(payload) => {
+                            println!(
+                                "mesh invite for “{}” — single use, expires in 10 minutes.\n\
+                                 Hand it to the other mesh's operator; they run:\n\
+                                 \n  familiar mesh federate join {payload}\n",
+                                cred.label
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("join") => {
+                    // `mesh federate join <payload>` — redeem another mesh's invite: introduce
+                    // ourselves at their door, adopt their answer as a standing sibling.
+                    let Some(payload) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate join <invite-payload>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::federation::federate_with(&dir, payload) {
+                        Ok(s) => {
+                            println!(
+                                "✓ “{}” stands as a sibling here. Their door holds us pending — \
+                                 a member there still has to welcome us.",
+                                s.handle
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("welcome") => {
+                    // `mesh federate welcome <group_id>` — the human's tap: a pending
+                    // introduction stands as a sibling. Same trust class as /local/standing:
+                    // a human at this machine's own console is the authority.
+                    let Some(gid) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate welcome <group_id>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::federation::welcome_sibling(&dir, gid, "cli", now_secs())
+                    {
+                        Ok(s) => {
+                            println!("✓ “{}” stands as a sibling — it now reads at the sibling rung", s.handle);
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("sever") => {
+                    // `mesh federate sever <group_id> [--reason R]` — standing withdrawal,
+                    // not attack: the record stays, with its reason.
+                    let Some(gid) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate sever <group_id> [--reason R]");
+                        return ExitCode::FAILURE;
+                    };
+                    let reason = f.get("reason").cloned().unwrap_or_default();
+                    match familiar_mesh::federation::sever_sibling(&dir, gid, &reason, now_secs())
+                    {
+                        Ok(s) => {
+                            println!("✓ “{}” severed — its reads fail closed; `federate welcome` restores", s.handle);
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("read") => {
+                    // `mesh federate read <group_id>` — read a sibling's worldview at the
+                    // sibling rung (the projection drill, end to end).
+                    let Some(gid) = args.get(2) else {
+                        eprintln!("mesh: usage: familiar mesh federate read <group_id>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::federation::read_sibling_worldview(&dir, gid) {
+                        Ok(json) => {
+                            match serde_json::from_str::<serde_json::Value>(&json) {
+                                Ok(v) => {
+                                    println!(
+                                        "sibling “{}” — {} members, {} observations, declares: {}",
+                                        v.get("group_label").and_then(|s| s.as_str()).unwrap_or("?"),
+                                        v.get("members").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0),
+                                        v.get("observation_count").and_then(|n| n.as_u64()).unwrap_or(0),
+                                        v.get("declared_areas")
+                                            .and_then(|a| a.as_array())
+                                            .map(|a| a.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+                                            .filter(|s| !s.is_empty())
+                                            .unwrap_or_else(|| "nothing yet".into()),
+                                    );
+                                }
+                                Err(_) => println!("{json}"),
+                            }
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("list") | None => {
+                    let sibs = familiar_mesh::federation::load_siblings(&dir);
+                    if sibs.is_empty() {
+                        println!("federation: no siblings — `mesh federate invite` opens the door");
+                    } else {
+                        println!("siblings ({}):", sibs.len());
+                        for s in sibs {
+                            println!(
+                                "  {}  “{}”  {}  areas: {}{}",
+                                short_id(&s.group_id),
+                                s.handle,
+                                s.state,
+                                if s.declared_areas.is_empty() { "—".into() } else { s.declared_areas.join(", ") },
+                                if s.note.is_empty() { String::new() } else { format!("  ({})", s.note) },
+                            );
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Some(other) => {
+                    eprintln!("mesh: federate {other}? — invite | join | welcome | sever | read | list");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // ---- standing (ADR-0020): membership decides reading; standing decides seeing ---------
         Some("standing") => {
             let sub = args.get(1).map(String::as_str);

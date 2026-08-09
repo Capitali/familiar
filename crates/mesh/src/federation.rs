@@ -496,14 +496,48 @@ pub fn adopt_answered_introduction(
     }
     let mut rec = record_from_intro(answer, "sibling", now);
     rec.welcomed_by = "invite".into();
-    if rec.hosts.is_empty() {
-        rec.hosts = invite.hosts.clone();
+    // The answer's advertised doors first, then the invite's — the redemption that just
+    // succeeded PROVED the invite's address reachable, which an interface-derived guess
+    // (a LAN IP that doesn't route from here) is not.
+    for h in &invite.hosts {
+        if !rec.hosts.contains(h) {
+            rec.hosts.push(h.clone());
+        }
     }
     if let Some(existing) = load_sibling(dir, &rec.group_id) {
         rec.first_seen = existing.first_seen;
     }
     save_sibling(dir, &rec)?;
     Ok(rec)
+}
+
+// ---- the member's tap, travelling ---------------------------------------------------
+
+/// Welcome a pending sibling, or sever a standing one — a member's deliberate act carried
+/// over the mesh (the console has no data dir; the act must travel to the door). Same
+/// signed-member envelope shape as a standing vote.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederateAct {
+    pub membership: Membership,
+    /// The group's public key (hex) — lets the door verify the cert without a roll; the door
+    /// additionally requires it to be its OWN group's key.
+    pub group_pubkey: String,
+    /// The sibling mesh being decided about.
+    pub subject_group_id: String,
+    /// "welcome" | "sever"
+    pub act: String,
+    /// Required for sever (standing withdrawal keeps its reason); ignored for welcome.
+    #[serde(default)]
+    pub reason: String,
+    pub nonce: String,
+    pub ts: i64,
+}
+
+impl FederateAct {
+    /// The member signed these exact bytes with the key its membership certifies.
+    pub fn verify_sig(&self, raw: &[u8], sig_hex: &str) -> Result<()> {
+        crate::record::verify_hex_sig(&self.membership.node_pubkey, raw, sig_hex, "federate act")
+    }
 }
 
 // ---- the sibling read ---------------------------------------------------------------
@@ -542,6 +576,99 @@ impl SiblingViewRequest {
     pub fn verify(&self) -> Result<()> {
         crate::record::verify_hex_sig(&self.group_pubkey, &self.body()?, &self.sig, "sibling read")
     }
+}
+
+// ---- the redeeming walk (blocking — the CLI path) -----------------------------------
+
+fn split_host_port(addr: &str) -> (String, u16) {
+    match addr.rsplit_once(':') {
+        Some((h, p)) => match p.parse::<u16>() {
+            Ok(port) => (h.to_string(), port),
+            Err(_) => (addr.to_string(), 47_100),
+        },
+        None => (addr.to_string(), 47_100),
+    }
+}
+
+/// Redeem a mesh invite against the inviting mesh's doors (the redeeming side of ADR-0033
+/// §2): introduce ourselves at each address until one answers, then adopt the answer as a
+/// standing sibling — pasting the invite was our human's deliberate act. Blocking; TLS.
+pub fn federate_with(dir: &Path, invite_payload: &str) -> Result<SiblingRecord> {
+    let invite = MeshInvite::decode(invite_payload)?;
+    let Some(cred) = crate::group::load(dir).ok().flatten() else {
+        return Err(Error::Untrusted("no group enrolled here".into()));
+    };
+    let now = crate::transport::now_secs();
+    let intro = our_introduction(
+        dir,
+        &cred,
+        crate::transport::federation_hosts(dir),
+        &invite.token_id,
+        now,
+    )?;
+    let body = serde_json::to_vec(&FederateRequest {
+        invite: invite.clone(),
+        introduction: intro,
+    })?;
+    let mut last_err = String::from("no hosts in the invite");
+    for addr in &invite.hosts {
+        let (host, port) = split_host_port(addr);
+        match crate::enroll::http(
+            &host,
+            port,
+            "POST",
+            "/mesh/federate",
+            &[("Content-Type", "application/json")],
+            &body,
+        ) {
+            Ok((200, resp)) => {
+                let answer: MeshIntroduction = serde_json::from_slice(&resp)?;
+                return adopt_answered_introduction(dir, &invite, &answer, now);
+            }
+            Ok((code, resp)) => {
+                last_err = format!("{addr}: HTTP {code} {}", String::from_utf8_lossy(&resp))
+            }
+            Err(e) => last_err = format!("{addr}: {e}"),
+        }
+    }
+    Err(Error::Untrusted(format!("no door answered — {last_err}")))
+}
+
+/// Read a sibling mesh's worldview at the sibling rung — signed with OUR mesh key, presented
+/// at THEIR door. Returns the raw worldview JSON (the caller renders). Blocking; TLS.
+pub fn read_sibling_worldview(dir: &Path, group_id: &str) -> Result<String> {
+    let sib = load_sibling(dir, group_id)
+        .ok_or_else(|| Error::Untrusted("no such sibling here".into()))?;
+    let Some(cred) = crate::group::load(dir).ok().flatten() else {
+        return Err(Error::Untrusted("no group enrolled here".into()));
+    };
+    let req = SiblingViewRequest::sign(&cred, crate::transport::now_secs())?;
+    let body = serde_json::to_vec(&req)?;
+    let mut last_err = String::from("the sibling record lists no hosts");
+    for addr in &sib.hosts {
+        let (host, port) = split_host_port(addr);
+        match crate::enroll::http(
+            &host,
+            port,
+            "POST",
+            "/mesh/worldview-sibling",
+            &[("Content-Type", "application/json")],
+            &body,
+        ) {
+            Ok((200, resp)) => {
+                // A fresh sighting of the sibling's door, worth keeping.
+                let mut s = sib.clone();
+                s.last_seen = crate::transport::now_secs();
+                let _ = save_sibling(dir, &s);
+                return Ok(String::from_utf8_lossy(&resp).into_owned());
+            }
+            Ok((code, resp)) => {
+                last_err = format!("{addr}: HTTP {code} {}", String::from_utf8_lossy(&resp))
+            }
+            Err(e) => last_err = format!("{addr}: {e}"),
+        }
+    }
+    Err(Error::Untrusted(format!("no door answered — {last_err}")))
 }
 
 #[cfg(test)]
@@ -677,6 +804,74 @@ mod tests {
             a_cred.membership.clone(),
         );
         assert!(our_introduction(a_dir.path(), &cov, vec![], "deadbeef", NOW).is_err());
+    }
+
+    #[test]
+    fn the_projection_ladder_shows_strictly_more_per_rung() {
+        let (a_dir, _an, a_cred) = mesh("river");
+        // Two siblings: cedar stands, willow is pending.
+        for (handle, gid, state) in
+            [("cedar", "gid-cedar", "sibling"), ("willow", "gid-willow", "pending")]
+        {
+            save_sibling(
+                a_dir.path(),
+                &SiblingRecord {
+                    handle: handle.into(),
+                    group_id: gid.into(),
+                    group_pubkey: format!("pk-{handle}"),
+                    hosts: vec![],
+                    lat: 44.0,
+                    lon: -93.0,
+                    declared_areas: vec!["weather".into()],
+                    offered_tools: vec![],
+                    state: state.into(),
+                    welcomed_by: "ian".into(),
+                    note: String::new(),
+                    first_seen: NOW,
+                    last_seen: NOW,
+                },
+            )
+            .unwrap();
+        }
+        let mut cfg = crate::config::load(a_dir.path()).unwrap_or_default();
+        cfg.declared_areas = vec!["energy".into(), "birds".into()];
+        // Config is human-owned plain text (no save API, deliberately) — write it as the human would.
+        std::fs::write(
+            a_dir.path().join(crate::config::CONFIG_FILE),
+            serde_json::to_string_pretty(&cfg).unwrap(),
+        )
+        .unwrap();
+
+        let full = crate::worldview::assemble_worldview(a_dir.path(), &a_cred, NOW).unwrap();
+        assert_eq!(full.siblings.len(), 2, "members see every sibling, pending included");
+        assert!(full.siblings.iter().any(|s| s.handle == "cedar"));
+        assert_eq!(full.declared_areas, vec!["energy", "birds"]);
+
+        // Guest rung: federation is shape, not names.
+        let mut guest = full.clone();
+        crate::standing::to_guest_view(&mut guest, "some-guest-node");
+        assert_eq!(guest.siblings.len(), 2, "that we federate is shape — the count stays");
+        assert!(
+            guest.siblings.iter().all(|s| s.handle != "cedar" && s.declared_areas.is_empty()),
+            "with whom is the household's business"
+        );
+        assert!(guest.declared_areas.is_empty());
+
+        // Sibling rung: our handle, our declaration, and the reader's own standing — no more.
+        let mut sib = full.clone();
+        crate::standing::to_sibling_view(&mut sib, "gid-cedar", &a_cred.label);
+        assert_eq!(sib.group_label, "river", "a sibling knows whose door it reads");
+        assert_eq!(sib.declared_areas, vec!["energy", "birds"]);
+        assert!(
+            sib.siblings.iter().any(|s| s.handle == "cedar" && s.group_id == "gid-cedar"),
+            "the reader sees itself as itself"
+        );
+        assert!(
+            !sib.siblings.iter().any(|s| s.handle == "willow"),
+            "other siblings stay pseudonymized"
+        );
+        // And the ladder is strict: names the household sees never reach the lower rungs.
+        assert!(sib.members.iter().all(|m| m.human.is_empty() || m.human == "someone"));
     }
 
     #[test]

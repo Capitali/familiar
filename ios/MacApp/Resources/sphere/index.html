@@ -226,6 +226,9 @@ const seenCell = (p, bigPx, timePx) => p.seenSub
   ? `<div class="m" style="font-size:${Math.round(timePx * 0.6)}px;color:rgba(160,195,255,0.6);margin-bottom:3px;">${esc(p.seenSub)}</div><div class="m" style="font-size:${timePx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`
   : `<div style="font-size:${bigPx}px;font-weight:300;line-height:0.85;color:#e4f2ff;">${esc(p.seen)}</div>`;
 const FRONTIER_COLOR = '#7d93a8';
+// Sibling meshes (ADR-0033): one entity, one dot, one arc — violet, beside the member
+// white-blue, the lighthouse teal, and the frontier slate.
+const SIBLING_COLOR = '#c9a2ff';
 // The lighthouse is infrastructure, not a housemate — same test the roster uses to keep it
 // off the card grid (no human, and the label says what it is).
 const isLighthouse = (p) => !(p.m.human || '') && /lighthouse/i.test(p.name || '');
@@ -234,6 +237,13 @@ const isLighthouse = (p) => !(p.m.human || '') && /lighthouse/i.test(p.name || '
 const ARC_MEMBER = { core: 0xe4f6ff, glow: 0x4d93ff, branch: 0x8fd0ff, sparks: true, gain: 1 };
 const ARC_LIGHTHOUSE = { core: 0xd8fff0, glow: 0x2fbf8f, branch: 0x8fe8c8, sparks: true, gain: 1 };
 const ARC_FRONTIER = { core: 0x7d93a8, glow: 0x51677a, branch: 0x62788c, sparks: false, gain: 0.3 };
+const ARC_SIBLING = { core: 0xead9ff, glow: 0x8a5fd6, branch: 0xc9a2ff, sparks: true, gain: 0.7 };
+// Standing sibling meshes that declared a location — the globe's federation layer.
+function siblingNodes() {
+  return ((S.view || {}).siblings || [])
+    .filter(s => s.state === 'sibling' && (s.lat || s.lon))
+    .map(s => ({ s, name: s.handle, lat: s.lat, lon: s.lon }));
+}
 
 // What KIND of path is this address? Reading a bare 100.x or 192.168.x and knowing what it means
 // is knowledge nobody should have to carry in their head.
@@ -669,7 +679,33 @@ function refreshScreen() {
         </div>
         <div id="inviteqr" style="margin-top:10px;"></div>
       </div>` : '';
-    el.innerHTML = inviteHtml + claimsHtml + (arrivals.length === 0
+    // Federation (ADR-0033): a pending mesh introduction is a card with one honest button —
+    // the member's tap IS the vouch. Standing siblings get a quiet line; sever stays a CLI act.
+    const sibs = (v.siblings || []);
+    const federationHtml = (amMember ? sibs.filter(s => s.state === 'pending').map(s => `
+      <div style="padding:14px 16px;border-radius:14px;background:rgba(60,40,80,0.28);border:1px solid rgba(201,162,255,0.35);margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-size:16px;font-weight:600;">${esc(s.handle)}</span>
+          ${chip('A MESH INTRODUCES ITSELF', '#c9a2ff')}
+          <span class="m" style="font-size:9px;color:rgba(201,162,255,0.55);">${esc(s.group_id.slice(0,8))}</span>
+        </div>
+        <div class="m" style="font-size:9.5px;color:rgba(215,195,240,0.75);margin-bottom:10px;">
+          another mesh asks to stand beside this one — it would read the shape of this mesh and none of the names.
+          ${s.declared_areas && s.declared_areas.length ? 'it declares: ' + esc(s.declared_areas.join(', ')) : 'it declares nothing yet'}
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="sphereFederate('welcome','${s.group_id.replace(/[^a-z0-9-]/gi,'')}')"
+                  style="padding:9px 16px;border-radius:10px;background:rgba(201,162,255,0.16);border:1px solid rgba(201,162,255,0.5);color:#e2d2ff;cursor:pointer;font-size:12px;">
+            Welcome this mesh
+          </button>
+          <span class="m" style="font-size:9px;color:rgba(180,165,210,0.5);align-self:center;">or leave it pending — pending reads nothing</span>
+        </div>
+      </div>`).join('') : '') +
+      (sibs.some(s => s.state === 'sibling') ? `
+      <div class="m" style="font-size:9.5px;color:rgba(201,162,255,0.65);margin:2px 0 12px 2px;">
+        standing beside this mesh: ${sibs.filter(s => s.state === 'sibling').map(s => esc(s.handle)).join(' · ')}
+      </div>` : '');
+    el.innerHTML = inviteHtml + federationHtml + claimsHtml + (arrivals.length === 0
       ? `<div class="m" style="font-size:12px;color:rgba(160,195,255,0.55);padding:8px 0;">
            Nobody new in the last day. The next arrival will be greeted here.
          </div>`
@@ -1281,6 +1317,7 @@ function renderCallouts() {
   // sphereDive/sphereNode index into the unfiltered list.
   const pairs = peers().map((p, i) => [p, i]).filter(([p]) => globeVisible(p));
   const F = frontierNodes().filter(frontierVisible);
+  const SB = siblingNodes();
   $('callouts').innerHTML = pairs.map(([p, i]) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;">
       <div style="position:absolute;left:0;top:0;width:11px;height:11px;transform:translate(-50%,-50%);">
@@ -1303,12 +1340,24 @@ function renderCallouts() {
       <div style="position:absolute;left:10px;top:-26px;padding:4px 7px;border-radius:8px;background:rgba(9,15,32,0.45);border:1px solid rgba(125,147,168,0.22);backdrop-filter:blur(10px);">
         <span class="m" style="font-size:8.5px;color:rgba(210,222,235,0.7);">${esc(fn.name)}</span>
       </div>
+    </div>`).join('') + SB.map((sn) => `
+    <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;opacity:0.85;">
+      <div style="position:absolute;left:0;top:0;width:9px;height:9px;transform:translate(-50%,-50%);">
+        <span style="position:absolute;inset:0;border-radius:50%;background:${SIBLING_COLOR};box-shadow:0 0 10px ${SIBLING_COLOR};"></span>
+        <span style="position:absolute;inset:0;border-radius:50%;background:${SIBLING_COLOR};animation:ping 3.4s ease-out infinite;"></span>
+      </div>
+      <div style="position:absolute;left:12px;top:-30px;padding:5px 8px;border-radius:9px;background:rgba(20,12,32,0.5);border:1px solid rgba(201,162,255,0.28);backdrop-filter:blur(10px);">
+        <span class="m" style="font-size:8.5px;color:rgba(226,210,255,0.85);">${esc(sn.name)}</span>
+        <span class="m" style="font-size:7px;letter-spacing:0.1em;color:rgba(201,162,255,0.6);margin-left:5px;">SIBLING MESH</span>
+      </div>
     </div>`).join('');
   // anchorPeers/anchorDirs are DENSE and parallel to the rendered callouts — the projection
-  // loop zips [data-callout] elements with [...anchorDirs, ...frontierDirs] by position.
+  // loop zips [data-callout] elements with [...anchorDirs, ...frontierDirs, ...siblingDirs]
+  // by position, in exactly this render order.
   G.anchorPeers = pairs.map(([p]) => p);
   G.anchorDirs = pairs.map(([p]) => latLon(p.lat, p.lon));
   G.frontierDirs = F.map(f => latLon(f.lat, f.lon));
+  G.siblingDirs = SB.map(sn => latLon(sn.lat, sn.lon));
   rebuildArcs();
 }
 
@@ -1422,6 +1471,8 @@ function renderInviteQR() {
 }
 // Inline onclick resolves on window, not module scope — S.invite must travel through here.
 window.sphereShareInvite = () => { if (S.invite) toApp('shareInvite', { payload: S.invite }); };
+// The federation tap (ADR-0033): welcome a pending sibling mesh. Travels signed via the app.
+window.sphereFederate = (act, gid) => toApp('federateAct', { act, group_id: gid });
 window.sphereUnenroll = () => {
   if (!S.unenrollArmed) {
     S.unenrollArmed = true; refreshScreen();
@@ -1548,7 +1599,7 @@ $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
 $('modetoggle').onclick = () => window.sphereDive(S.focusIdx);
 
 // ---------- three.js globe ----------
-const G = { anchorPeers: [], anchorDirs: [], frontierDirs: [], arcs: [], frontierArcs: [], streetA: 0 };
+const G = { anchorPeers: [], anchorDirs: [], frontierDirs: [], siblingDirs: [], arcs: [], frontierArcs: [], siblingArcs: [], streetA: 0 };
 const latLon = (lat, lon) => { const phi = (90 - lat) * Math.PI / 180, theta = (lon + 180) * Math.PI / 180; return new THREE.Vector3(-Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)).normalize(); };
 
 // The choreographed dive. Phase 0: the globe ROTATES to center the target (no zoom).
@@ -1625,7 +1676,8 @@ window.sphereVisitorDive = (lat, lon, name) => {
 function collectNodes() {
   const P = peers().filter(globeVisible), F = frontierNodes().filter(frontierVisible);
   return P.filter(p => p.located || p.hasAnchor).map(p => ({ lat: p.lat, lon: p.lon, label: p.name, sublabel: p.m.addr || '', color: p.color, frontier: false, self: p.local }))
-    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })));
+    .concat(F.filter(f => f.located).map(f => ({ lat: f.lat, lon: f.lon, label: f.name, sublabel: [f.ip, f.reach].filter(Boolean).join(' · '), color: FRONTIER_COLOR, frontier: true, self: false })))
+    .concat(siblingNodes().map(sn => ({ lat: sn.lat, lon: sn.lon, label: sn.name, sublabel: 'sibling mesh', color: SIBLING_COLOR, frontier: false, self: false })));
 }
 function handoff(p) {
   S.mode = 'street'; renderChrome();
@@ -1765,7 +1817,7 @@ function initThree() {
       const rect = canvas.getBoundingClientRect();
       camera.getWorldDirection(camDir);
       const els = co.querySelectorAll('[data-callout]');
-      const dirs = [...G.anchorDirs, ...G.frontierDirs];
+      const dirs = [...G.anchorDirs, ...G.frontierDirs, ...G.siblingDirs];
       for (let i = 0; i < dirs.length; i++) {
         const el = els[i]; if (!el) continue;
         worldNorm.copy(dirs[i]).applyQuaternion(group.quaternion).normalize();
@@ -1797,7 +1849,7 @@ function mkArc(a, b, palette) {
 function rebuildArcs() {
   if (!G.arcGroup) return;
   G.arcGroup.clear();
-  G.arcs = []; G.frontierArcs = [];
+  G.arcs = []; G.frontierArcs = []; G.siblingArcs = [];
   const P = G.anchorPeers || [];
   const selfIdx = P.findIndex(p => p.local);
   if (selfIdx < 0 || !G.anchorDirs.length) return;
@@ -1812,11 +1864,15 @@ function rebuildArcs() {
   for (const d of G.frontierDirs) {
     G.frontierArcs.push(mkArc(from.clone(), d.clone(), ARC_FRONTIER));
   }
+  // Siblings: meshes standing beside this one — violet, the federation layer (ADR-0033).
+  for (const d of (G.siblingDirs || [])) {
+    G.siblingArcs.push(mkArc(from.clone(), d.clone(), ARC_SIBLING));
+  }
 }
 const arcTmp = new THREE.Vector3();
 function animateArcs(t) {
   const on = (S.mode === 'globe' && !G.diving) ? 1 : 0;
-  for (const arc of [...G.arcs, ...G.frontierArcs]) {
+  for (const arc of [...G.arcs, ...G.frontierArcs, ...(G.siblingArcs || [])]) {
     const N2 = arc.N, gain = arc.gain;
     const fl = 0.6 + 0.4 * Math.sin(t * arc.jrate + arc.seed) * Math.sin(t * 2.3 + arc.seed * 1.7);
     const crackle = (Math.sin(t * 30 + arc.seed) > 0.86) ? 0.35 : 1.0;

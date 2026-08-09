@@ -68,6 +68,9 @@ struct SphereConsoleIOS: View {
             bridge.onVouch = { [weak model] nodeId, pubkey, handle in
                 Task { _ = await model?.vouchFor(nodeId: nodeId, pubkey: pubkey, handle: handle) }
             }
+            bridge.onFederate = { [weak model] act, gid in
+                Task { await model?.federateAct(act, subjectGroupId: gid) }
+            }
             bridge.onSponsor = { [weak model] nodeId, handle in
                 Task { _ = await model?.sponsorFor(nodeId: nodeId, handle: handle) }
             }
@@ -166,6 +169,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onUnenroll: (() -> Void)?
     var onSetHuman: ((String) -> Void)?
     var onVouch: ((String, String, String) -> Void)?
+    var onFederate: ((String, String) -> Void)?
     var onSponsor: ((String, String) -> Void)?
     var onInviteRedeem: ((String) -> Void)?
     var onGame: ((String, String?, String, String) -> Void)?
@@ -333,6 +337,11 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                    let pubkey = body["pubkey"] as? String,
                    let handle = body["handle"] as? String {
                     self.onVouch?(nodeId, pubkey, handle)
+                }
+            case "federateAct":
+                if let gid = body["group_id"] as? String,
+                   let act = body["act"] as? String {
+                    self.onFederate?(act, gid)
                 }
             case "deviceRole":
                 if let roleRaw = body["role"] as? String {

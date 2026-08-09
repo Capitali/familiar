@@ -1084,6 +1084,29 @@ final class AppModel: ObservableObject {
         await refreshWorldview()   // reflect the record immediately
     }
 
+    /// A member's federation tap (ADR-0033): welcome a pending sibling mesh, or sever a
+    /// standing one. Travels signed to the door, like a standing decision.
+    func federateAct(_ act: String, subjectGroupId: String, reason: String = "") async {
+        guard let g = storedGrant(), !host.isEmpty else {
+            note("✗ federation: not enrolled or no host")
+            return
+        }
+        let client = FederateClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey)
+        do {
+            switch try await client.cast(subjectGroupId: subjectGroupId, act: act,
+                                         reason: reason, host: host, port: enrollPort) {
+            case .done(let said):
+                if act == "welcome" { Chime.accepted() }
+                note("✓ federation — \(said)")
+            case .refused(let why):
+                note("✗ federation \(act) refused: \(why)")
+            }
+        } catch {
+            note("✗ federation \(act) failed: \(Self.brief(error))")
+        }
+        await refreshWorldview()
+    }
+
     /// Build the client session from the *granted* cert (not from any secret), or nil if not ready.
     func makeSession() -> ObservationClient.Session? {
         guard let g = storedGrant(), !host.isEmpty,

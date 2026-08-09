@@ -266,6 +266,32 @@ pub struct Worldview {
     /// (the lighthouse) works — pinned to the group, not one node (ADR-0012).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pins: Vec<String>,
+    /// The meshes standing beside this one (ADR-0033) — pending introductions included, so
+    /// the welcome screen can offer the tap. One entry per mesh; its internals are its own.
+    #[serde(default)]
+    pub siblings: Vec<SiblingView>,
+    /// Areas of knowledge THIS mesh declares to its siblings — shown to members (it is their
+    /// declaration) and to sibling readers (it is what they were promised). Declaration,
+    /// never inventory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_areas: Vec<String>,
+}
+
+/// A sibling mesh as the console renders it — one entity, one dot, one arc (ADR-0033 §5).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiblingView {
+    pub handle: String,
+    pub group_id: String,
+    /// "pending" | "sibling" | "severed"
+    pub state: String,
+    /// Self-declared location; 0,0 = chose not to declare.
+    pub lat: f64,
+    pub lon: f64,
+    pub declared_areas: Vec<String>,
+    pub offered_tools: Vec<String>,
+    pub welcomed_by: String,
+    pub first_seen: i64,
+    pub last_seen: i64,
 }
 
 /// A goal on the shared roadmap, as the console renders it. Mirrors `goal::Goal` minus the internals
@@ -852,6 +878,24 @@ pub fn assemble_worldview(
         uptime_secs,
         humanity,
         members,
+        siblings: crate::federation::load_siblings(dir)
+            .into_iter()
+            .map(|s| SiblingView {
+                handle: s.handle,
+                group_id: s.group_id,
+                state: s.state,
+                lat: s.lat,
+                lon: s.lon,
+                declared_areas: s.declared_areas,
+                offered_tools: s.offered_tools,
+                welcomed_by: s.welcomed_by,
+                first_seen: s.first_seen,
+                last_seen: s.last_seen,
+            })
+            .collect(),
+        declared_areas: crate::config::load(dir)
+            .map(|c| c.declared_areas)
+            .unwrap_or_default(),
         services: discovered_services(&obs),
         frontier,
         edges,

@@ -1096,6 +1096,39 @@ async fn handle(
                 }
             }
         }
+        (Method::GET, "/local/federation-invite") => {
+            // A mesh invite (ADR-0033) — a member's deliberate act that opens the door to
+            // another MESH. Trusted screen only, like /local/invite.
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                local_federation_invite(&dir)
+            }
+        }
+        (Method::POST, "/mesh/federate") => {
+            match collect(req).await {
+                Ok(b) => recv_federate(&dir, &b),
+                Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+            }
+        }
+        (Method::POST, "/mesh/federate-act") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            match collect(req).await {
+                Ok(b) => recv_federate_act(&dir, &b, &sig),
+                Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+            }
+        }
+        (Method::POST, "/mesh/worldview-sibling") => {
+            match collect(req).await {
+                Ok(b) => recv_sibling_worldview(&dir, &b, &ctx.seen),
+                Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+            }
+        }
         (Method::GET, "/local/invite") => {
             // The enrollment payload (contains the group secret — trusted screen only), for
             // the local console to render as a QR. Loopback-gated like every /local seam.
@@ -1549,6 +1582,170 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     let _ = std::fs::write(dir.join("question.txt"), "");
     let _ = std::fs::write(dir.join("active_question.txt"), "");
     text(StatusCode::OK, "ok")
+}
+
+/// The addresses another mesh should knock at, ports attached: reachable (tailnet, LAN)
+/// first, then human-asserted and rendezvous addresses. Entries already carrying a port are
+/// kept verbatim.
+pub fn federation_hosts(dir: &Path) -> Vec<String> {
+    let cfg = config::load(dir).unwrap_or_default();
+    let port = cfg.gossip_port;
+    let mut hosts = reachable_hosts();
+    for h in cfg.advertise_hosts.iter().chain(cfg.rendezvous_hosts.iter()) {
+        if !hosts.contains(h) {
+            hosts.push(h.clone());
+        }
+    }
+    hosts
+        .into_iter()
+        .map(|h| if h.contains(':') { h } else { format!("{h}:{port}") })
+        .collect()
+}
+
+/// `GET /local/federation-invite` → mint a mesh invite (ADR-0033 §2): the pasteable payload
+/// one mesh's operator hands another's. Member-signed, single-use, ten minutes, no secrets.
+fn local_federation_invite(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, &cred.label) else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "no node key");
+    };
+    match crate::federation::mint_mesh_invite(
+        &node,
+        &cred.membership,
+        &cred,
+        federation_hosts(dir),
+        now_secs(),
+    )
+    .and_then(|i| i.encode())
+    {
+        Ok(payload) => text(
+            StatusCode::OK,
+            serde_json::json!({"invite": payload, "handle": cred.label}).to_string(),
+        ),
+        Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// `POST /mesh/federate` → another mesh's lighthouse redeems a mesh invite: verify, spend,
+/// store the sender as a PENDING sibling (the welcome tap is a human act), answer with our
+/// own signed introduction (ADR-0033 §2).
+fn recv_federate(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    let freq: crate::federation::FederateRequest = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad federate request"),
+    };
+    match crate::federation::receive_introduction(dir, &cred, &freq, federation_hosts(dir), now_secs())
+    {
+        Ok(answer) => match serde_json::to_string(&answer) {
+            Ok(j) => text(StatusCode::OK, j),
+            Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        },
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+/// `POST /mesh/federate-act` → a member's tap, travelled: welcome a pending sibling mesh, or
+/// sever a standing one. Signed-member envelope, same shape as a standing vote — and the
+/// membership must be of THIS mesh (a foreign member cannot decide our federation).
+fn recv_federate_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
+    let act: crate::federation::FederateAct = match serde_json::from_slice(bytes) {
+        Ok(a) => a,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad federate act"),
+    };
+    if act.verify_sig(bytes, sig).is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    if act.group_pubkey != cred.group_pubkey {
+        return text(StatusCode::FORBIDDEN, "not this mesh's member");
+    }
+    let now = now_secs();
+    if crate::group::verify_membership_consistent(&act.membership, &act.group_pubkey, now).is_err()
+    {
+        return text(StatusCode::FORBIDDEN, "membership does not verify");
+    }
+    let result = match act.act.as_str() {
+        "welcome" => crate::federation::welcome_sibling(
+            dir,
+            &act.subject_group_id,
+            &act.membership.node_id,
+            now,
+        )
+        .map(|s| format!("welcomed {}", s.handle)),
+        "sever" => crate::federation::sever_sibling(dir, &act.subject_group_id, &act.reason, now)
+            .map(|s| format!("severed {}", s.handle)),
+        other => {
+            return text(
+                StatusCode::BAD_REQUEST,
+                format!("federate act {other}? — welcome | sever"),
+            )
+        }
+    };
+    match result {
+        Ok(word) => text(StatusCode::OK, word),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
+    }
+}
+
+/// `POST /mesh/worldview-sibling` → a sibling mesh reads at the sibling rung of the
+/// projection ladder (ADR-0033 §3). Signed by its mesh key, verified against the sibling
+/// record we hold; pending and severed fail closed; same replay discipline as a member read.
+fn recv_sibling_worldview(
+    dir: &Path,
+    bytes: &[u8],
+    seen: &std::sync::Mutex<crate::observe::IngestGuard>,
+) -> Response<Full<Bytes>> {
+    if !familiar_kernel::boundary::load(dir)
+        .map(|b| b.allow_mesh)
+        .unwrap_or(false)
+    {
+        return text(StatusCode::FORBIDDEN, "mesh gate closed");
+    }
+    let req: crate::federation::SiblingViewRequest = match serde_json::from_slice(bytes) {
+        Ok(r) => r,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad sibling read"),
+    };
+    if req.verify().is_err() {
+        return text(StatusCode::FORBIDDEN, "signature did not verify");
+    }
+    let Some(mut sib) = crate::federation::standing_sibling_by_pubkey(dir, &req.group_pubkey)
+    else {
+        return text(StatusCode::FORBIDDEN, "no standing here");
+    };
+    let now = now_secs();
+    if (now - req.ts).abs() > crate::observe::REPLAY_WINDOW_SECS {
+        return text(StatusCode::FORBIDDEN, "stale or future timestamp");
+    }
+    {
+        let mut g = seen.lock().unwrap_or_else(|p| p.into_inner());
+        if !g.remember_nonce(&req.group_id, &req.nonce, now) {
+            return text(StatusCode::CONFLICT, "replayed nonce");
+        }
+    }
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group");
+    };
+    sib.last_seen = now;
+    let _ = crate::federation::save_sibling(dir, &sib);
+    match crate::worldview::assemble_worldview(dir, &cred, now) {
+        Ok(mut view) => {
+            crate::standing::to_sibling_view(&mut view, &req.group_id, &cred.label);
+            match serde_json::to_string(&view) {
+                Ok(j) => text(StatusCode::OK, j),
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
+        Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 /// `GET /local/invite` → the invite payload a new device scans/pastes: every address the mesh
