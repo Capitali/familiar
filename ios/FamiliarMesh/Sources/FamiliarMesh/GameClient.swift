@@ -8,6 +8,10 @@ public struct GameGlance: Codable, Equatable {
     public var holder: String
     public var holder_since: Int64
     public var turn_secs: Int64
+    /// The changeling's phase ("witness" | "forging" | "voting" | "reveal-wait");
+    /// absent on other kinds and on older doors.
+    public var phase: String?
+    public var solo: Bool?
 }
 
 /// `POST /mesh/game/act` — one signed move in the mesh game (begin / guess / line / pass /
@@ -32,6 +36,7 @@ public struct GameClient {
 
     public func act(
         _ act: String, kind: String? = nil, text: String = "", to: String = "",
+        solo: Bool = false,
         host: String, port: Int,
         now: Int64 = Int64(Date().timeIntervalSince1970),
         nonce: String = ObservationClient.freshNonce()
@@ -45,6 +50,7 @@ public struct GameClient {
             "nonce": nonce,
         ]
         if let k = kind { obj["kind"] = k }
+        if solo { obj["solo"] = true }
         guard JSONSerialization.isValidJSONObject(obj),
               let body = try? JSONSerialization.data(withJSONObject: obj) else {
             return .error("could not encode the move")

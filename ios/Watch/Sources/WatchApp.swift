@@ -65,7 +65,8 @@ struct EmberView: View {
                     .shadow(color: .orange.opacity(flare ? 0.9 : 0.4), radius: flare ? 22 : 10)
                     .scaleEffect(flare ? 1.12 : 0.92)
                     .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: flare)
-                Text(kind == "campfire" ? "The ember is yours" : "Your turn")
+                Text(kind == "campfire" ? "The ember is yours"
+                     : kind == "changeling" ? "Find the human" : "Your turn")
                     .font(.headline)
                 Text("answer from any of your devices")
                     .font(.system(size: 11))

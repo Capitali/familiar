@@ -77,8 +77,8 @@ struct SphereConsoleIOS: View {
             bridge.onInviteRedeem = { [weak model] payload in
                 Task { await model?.redeemInvite(payload) }
             }
-            bridge.onGame = { [weak model] act, kind, text, to in
-                Task { await model?.gameAct(act, kind: kind, text: text, to: to) }
+            bridge.onGame = { [weak model] act, kind, text, to, solo in
+                Task { await model?.gameAct(act, kind: kind, text: text, to: to, solo: solo) }
             }
             bridge.onDeviceRole = { [weak model] roleRaw, owner in
                 guard let role = DeviceRole(rawValue: roleRaw) else { return }
@@ -172,7 +172,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onFederate: ((String, String) -> Void)?
     var onSponsor: ((String, String) -> Void)?
     var onInviteRedeem: ((String) -> Void)?
-    var onGame: ((String, String?, String, String) -> Void)?
+    var onGame: ((String, String?, String, String, Bool) -> Void)?
     var onDeviceRole: ((String, String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
@@ -351,7 +351,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 // game_kind, not "kind" — the routing key would be overwritten (see Mac bridge).
                 if let act = body["act"] as? String {
                     self.onGame?(act, body["game_kind"] as? String,
-                                 body["text"] as? String ?? "", body["to"] as? String ?? "")
+                                 body["text"] as? String ?? "", body["to"] as? String ?? "",
+                                 body["solo"] as? Bool ?? false)
                 }
             case "setHuman":
                 if let name = body["name"] as? String, !name.isEmpty { self.onSetHuman?(name) }

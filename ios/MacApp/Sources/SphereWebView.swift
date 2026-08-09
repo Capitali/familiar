@@ -432,8 +432,9 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                     let kind = body["game_kind"] as? String
                     let text = body["text"] as? String ?? ""
                     let to = body["to"] as? String ?? ""
+                    let solo = body["solo"] as? Bool ?? false
                     Task {
-                        await self.model.gameAct(act, kind: kind, text: text, to: to)
+                        await self.model.gameAct(act, kind: kind, text: text, to: to, solo: solo)
                         await self.poll()
                     }
                 }

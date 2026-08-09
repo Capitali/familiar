@@ -153,6 +153,31 @@ mod tests {
     }
 
     #[test]
+    fn consults_serialize_within_the_process() {
+        // The adapter contract is one shared prompt.txt → response.json pair; two threads
+        // consulting at once must not cross their prompts. The adapter echoes the prompt
+        // back after a pause — interleaving would hand at least one caller the other's words.
+        let t = open_dir_with_adapter(
+            "serial",
+            "#!/bin/sh\ncp \"$(dirname \"$0\")/prompt.txt\" /tmp/familiar_llm_serial_$$ \n\
+             sleep 1\ncp /tmp/familiar_llm_serial_$$ \"$(dirname \"$0\")/response.json\"\n\
+             rm -f /tmp/familiar_llm_serial_$$\n",
+        );
+        let dir_a = t.0.clone();
+        let dir_b = t.0.clone();
+        let a = std::thread::spawn(move || consult(&dir_a, "prompt-alpha").unwrap());
+        let b = std::thread::spawn(move || consult(&dir_b, "prompt-beta").unwrap());
+        let (ra, rb) = (a.join().unwrap(), b.join().unwrap());
+        match (ra, rb) {
+            (Outcome::Response(x), Outcome::Response(y)) => {
+                assert_eq!(x, "prompt-alpha", "each caller got back its own words");
+                assert_eq!(y, "prompt-beta", "each caller got back its own words");
+            }
+            _ => panic!("both serialized consults must succeed"),
+        }
+    }
+
+    #[test]
     fn hung_adapter_is_killed_at_the_deadline() {
         let t = open_dir_with_adapter("hang", "#!/bin/sh\nsleep 300\n");
         let started = std::time::Instant::now();

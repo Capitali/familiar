@@ -674,7 +674,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "") async {
+    func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "",
+                 solo: Bool = false) async {
         // Never bail silently: a dead-looking button is worse than an error. The note surfaces
         // on the games screen (deviceStateJSON.notes), door named, so a refusal is legible.
         guard !host.isEmpty else {
@@ -683,6 +684,7 @@ final class AppModel: ObservableObject {
         }
         do {
             switch try await GameClient(node: node).act(act, kind: kind, text: text, to: to,
+                                                        solo: solo,
                                                         host: host, port: enrollPort) {
             case .said(let words): note(words.isEmpty ? "the move landed" : words)
             case .refused(let why): note("door \(host) refused \(act): \(why)")
@@ -1232,9 +1234,16 @@ final class AppModel: ObservableObject {
                 } ?? false
                 if myTurn && !wasMyTurn {
                     Chime.guestWaiting()
-                    note(view.game?.kind == "campfire"
-                         ? "🔥 the ember has reached you — add your line"
-                         : "🧩 your turn — the riddle waits on you")
+                    switch view.game?.kind {
+                    case "campfire":
+                        note("🔥 the ember has reached you — add your line")
+                    case "changeling":
+                        note(view.game?.phase == "voting"
+                             ? "🎭 three lines, one human truth — come vote"
+                             : "🎭 your round to witness — one true line")
+                    default:
+                        note("🧩 your turn — the riddle waits on you")
+                    }
                 }
                 #if os(iOS)
                 // The wrist is a device of the holder too (the law of the fire): flame on the
