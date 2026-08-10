@@ -1305,8 +1305,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                             return ExitCode::FAILURE;
                         }
                     };
-                    let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &cred.label)
-                    {
+                    let node = match familiar_mesh::node::NodeKey::load_or_mint(&dir, &cred.label) {
                         Ok(n) => n,
                         Err(e) => {
                             eprintln!("mesh: no node key — {e}");
@@ -1368,10 +1367,12 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         eprintln!("mesh: usage: familiar mesh federate welcome <group_id>");
                         return ExitCode::FAILURE;
                     };
-                    match familiar_mesh::federation::welcome_sibling(&dir, gid, "cli", now_secs())
-                    {
+                    match familiar_mesh::federation::welcome_sibling(&dir, gid, "cli", now_secs()) {
                         Ok(s) => {
-                            println!("✓ “{}” stands as a sibling — it now reads at the sibling rung", s.handle);
+                            println!(
+                                "✓ “{}” stands as a sibling — it now reads at the sibling rung",
+                                s.handle
+                            );
                             ExitCode::SUCCESS
                         }
                         Err(e) => {
@@ -1384,12 +1385,13 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     // `mesh federate sever <group_id> [--reason R]` — standing withdrawal,
                     // not attack: the record stays, with its reason.
                     let Some(gid) = args.get(2) else {
-                        eprintln!("mesh: usage: familiar mesh federate sever <group_id> [--reason R]");
+                        eprintln!(
+                            "mesh: usage: familiar mesh federate sever <group_id> [--reason R]"
+                        );
                         return ExitCode::FAILURE;
                     };
                     let reason = f.get("reason").cloned().unwrap_or_default();
-                    match familiar_mesh::federation::sever_sibling(&dir, gid, &reason, now_secs())
-                    {
+                    match familiar_mesh::federation::sever_sibling(&dir, gid, &reason, now_secs()) {
                         Ok(s) => {
                             println!("✓ “{}” severed — its reads fail closed; `federate welcome` restores", s.handle);
                             ExitCode::SUCCESS
@@ -1413,12 +1415,23 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                                 Ok(v) => {
                                     println!(
                                         "sibling “{}” — {} members, {} observations, declares: {}",
-                                        v.get("group_label").and_then(|s| s.as_str()).unwrap_or("?"),
-                                        v.get("members").and_then(|m| m.as_array()).map(|a| a.len()).unwrap_or(0),
-                                        v.get("observation_count").and_then(|n| n.as_u64()).unwrap_or(0),
+                                        v.get("group_label")
+                                            .and_then(|s| s.as_str())
+                                            .unwrap_or("?"),
+                                        v.get("members")
+                                            .and_then(|m| m.as_array())
+                                            .map(|a| a.len())
+                                            .unwrap_or(0),
+                                        v.get("observation_count")
+                                            .and_then(|n| n.as_u64())
+                                            .unwrap_or(0),
                                         v.get("declared_areas")
                                             .and_then(|a| a.as_array())
-                                            .map(|a| a.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join(", "))
+                                            .map(|a| a
+                                                .iter()
+                                                .filter_map(|s| s.as_str())
+                                                .collect::<Vec<_>>()
+                                                .join(", "))
                                             .filter(|s| !s.is_empty())
                                             .unwrap_or_else(|| "nothing yet".into()),
                                     );
@@ -1445,15 +1458,25 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                                 short_id(&s.group_id),
                                 s.handle,
                                 s.state,
-                                if s.declared_areas.is_empty() { "—".into() } else { s.declared_areas.join(", ") },
-                                if s.note.is_empty() { String::new() } else { format!("  ({})", s.note) },
+                                if s.declared_areas.is_empty() {
+                                    "—".into()
+                                } else {
+                                    s.declared_areas.join(", ")
+                                },
+                                if s.note.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("  ({})", s.note)
+                                },
                             );
                         }
                     }
                     ExitCode::SUCCESS
                 }
                 Some(other) => {
-                    eprintln!("mesh: federate {other}? — invite | join | welcome | sever | read | list");
+                    eprintln!(
+                        "mesh: federate {other}? — invite | join | welcome | sever | read | list"
+                    );
                     ExitCode::FAILURE
                 }
             }

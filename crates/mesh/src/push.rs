@@ -82,7 +82,11 @@ fn save_tokens(dir: &Path, tokens: &[PushToken]) -> Result<()> {
 /// Remember (or refresh) a device's token. One row per node — a device re-registering with a
 /// new token (reinstall, OS refresh) simply replaces its old one.
 pub fn upsert_token(dir: &Path, node_id: &str, token: &str, env: &str, now: i64) -> Result<()> {
-    let env = if env == "production" { "production" } else { "sandbox" };
+    let env = if env == "production" {
+        "production"
+    } else {
+        "sandbox"
+    };
     let mut tokens = load_tokens(dir);
     tokens.retain(|t| t.node_id != node_id);
     tokens.push(PushToken {
@@ -164,7 +168,9 @@ async fn send_one(cfg: &ApnsConfig, jwt: &str, t: &PushToken, payload: &str) -> 
         .output()
         .await;
     match out {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().replace('\n', " | "),
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .replace('\n', " | "),
         Err(e) => format!("curl failed: {e}"),
     }
 }
@@ -219,7 +225,12 @@ pub fn spawn_notify_turn(dir: &Path, holder: &str, kind: &str) {
         for t in tokens {
             let r = send_one(&cfg, &jwt, &t, &payload).await;
             if !r.ends_with("200") {
-                eprintln!("apns: push to {}({}) -> {}", &t.node_id[..8.min(t.node_id.len())], t.env, r);
+                eprintln!(
+                    "apns: push to {}({}) -> {}",
+                    &t.node_id[..8.min(t.node_id.len())],
+                    t.env,
+                    r
+                );
             }
         }
     });
@@ -269,7 +280,12 @@ pub fn spawn_notify_win(dir: &Path, winner: &str, kind: &str) {
         for t in tokens {
             let r = send_one(&cfg, &jwt, &t, &payload).await;
             if !r.ends_with("200") {
-                eprintln!("apns: win push to {}({}) -> {}", &t.node_id[..8.min(t.node_id.len())], t.env, r);
+                eprintln!(
+                    "apns: win push to {}({}) -> {}",
+                    &t.node_id[..8.min(t.node_id.len())],
+                    t.env,
+                    r
+                );
             }
         }
     });

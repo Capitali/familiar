@@ -237,7 +237,9 @@ impl MeshIntroduction {
             }
         }
         if self.handle.trim().is_empty() {
-            return Err(Error::Untrusted("introduction: a mesh needs a handle".into()));
+            return Err(Error::Untrusted(
+                "introduction: a mesh needs a handle".into(),
+            ));
         }
         crate::record::verify_hex_sig(
             &self.group_pubkey,
@@ -306,15 +308,24 @@ pub struct SiblingRecord {
 }
 
 fn sibling_file(dir: &Path, group_id: &str) -> Result<std::path::PathBuf> {
-    if group_id.is_empty() || !group_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err(Error::Malformed("sibling: group id is not a clean id".into()));
+    if group_id.is_empty()
+        || !group_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(Error::Malformed(
+            "sibling: group id is not a clean id".into(),
+        ));
     }
     Ok(dir.join(SIBLINGS_DIR).join(format!("{group_id}.json")))
 }
 
 pub fn save_sibling(dir: &Path, s: &SiblingRecord) -> Result<()> {
     std::fs::create_dir_all(dir.join(SIBLINGS_DIR))?;
-    std::fs::write(sibling_file(dir, &s.group_id)?, serde_json::to_vec_pretty(s)?)?;
+    std::fs::write(
+        sibling_file(dir, &s.group_id)?,
+        serde_json::to_vec_pretty(s)?,
+    )?;
     Ok(())
 }
 
@@ -357,8 +368,10 @@ pub fn resolve_sibling(dir: &Path, wanted: &str) -> Option<SiblingRecord> {
         return Some(by_prefix[0].clone());
     }
     let wl = w.to_lowercase();
-    let by_handle: Vec<&SiblingRecord> =
-        all.iter().filter(|s| s.handle.to_lowercase() == wl).collect();
+    let by_handle: Vec<&SiblingRecord> = all
+        .iter()
+        .filter(|s| s.handle.to_lowercase() == wl)
+        .collect();
     if by_handle.len() == 1 {
         return Some(by_handle[0].clone());
     }
@@ -455,7 +468,10 @@ pub fn receive_introduction(
         familiar_kernel::observation::Observation::new(
             "mesh",
             "mesh_introduced",
-            format!("the mesh “{}” introduces itself — awaiting a member's welcome", rec.handle),
+            format!(
+                "the mesh “{}” introduces itself — awaiting a member's welcome",
+                rec.handle
+            ),
             "mesh",
             "mesh",
             now,
@@ -467,7 +483,12 @@ pub fn receive_introduction(
 
 /// The member's tap: a pending sibling stands. Idempotent; welcoming a severed sibling is the
 /// deliberate restore.
-pub fn welcome_sibling(dir: &Path, group_id: &str, welcomed_by: &str, now: i64) -> Result<SiblingRecord> {
+pub fn welcome_sibling(
+    dir: &Path,
+    group_id: &str,
+    welcomed_by: &str,
+    now: i64,
+) -> Result<SiblingRecord> {
     let mut s = resolve_sibling(dir, group_id)
         .ok_or_else(|| Error::Untrusted("welcome: no such introduction".into()))?;
     if s.state != "sibling" {
@@ -480,7 +501,10 @@ pub fn welcome_sibling(dir: &Path, group_id: &str, welcomed_by: &str, now: i64) 
             familiar_kernel::observation::Observation::new(
                 "mesh",
                 "mesh_welcomed",
-                format!("the mesh “{}” stands as a sibling — welcomed by {welcomed_by}", s.handle),
+                format!(
+                    "the mesh “{}” stands as a sibling — welcomed by {welcomed_by}",
+                    s.handle
+                ),
                 "mesh",
                 "mesh",
                 now,
@@ -722,10 +746,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!(
-            "familiar_fed_{}_{n}_{label}",
-            std::process::id()
-        ));
+        let p =
+            std::env::temp_dir().join(format!("familiar_fed_{}_{n}_{label}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         let node = NodeKey::load_or_mint(&p, label).unwrap();
@@ -749,17 +771,33 @@ mod tests {
         .unwrap();
         let payload = invite.encode().unwrap();
         let decoded = MeshInvite::decode(&payload).unwrap();
-        let b_intro =
-            our_introduction(b_dir.path(), &b_cred, vec!["203.0.113.2".into()], &decoded.token_id, NOW)
-                .unwrap();
-        let freq = FederateRequest { invite: decoded.clone(), introduction: b_intro };
+        let b_intro = our_introduction(
+            b_dir.path(),
+            &b_cred,
+            vec!["203.0.113.2".into()],
+            &decoded.token_id,
+            NOW,
+        )
+        .unwrap();
+        let freq = FederateRequest {
+            invite: decoded.clone(),
+            introduction: b_intro,
+        };
 
         // River's door: verify, spend, store pending, answer with river's introduction.
-        let a_answer =
-            receive_introduction(a_dir.path(), &a_cred, &freq, vec!["203.0.113.1".into()], NOW)
-                .unwrap();
+        let a_answer = receive_introduction(
+            a_dir.path(),
+            &a_cred,
+            &freq,
+            vec!["203.0.113.1".into()],
+            NOW,
+        )
+        .unwrap();
         let pending = load_sibling(a_dir.path(), &b_cred.group_id).unwrap();
-        assert_eq!(pending.state, "pending", "consent is a human tap, never automatic");
+        assert_eq!(
+            pending.state, "pending",
+            "consent is a human tap, never automatic"
+        );
         assert_eq!(pending.handle, "cedar");
 
         // Cedar adopts river's answer immediately — pasting the invite was cedar's act.
@@ -781,7 +819,10 @@ mod tests {
         let invite2 = mint_mesh_invite(&a_node, &a_cred.membership, &a_cred, vec![], NOW).unwrap();
         let b_intro2 =
             our_introduction(b_dir.path(), &b_cred, vec![], &invite2.token_id, NOW).unwrap();
-        let freq2 = FederateRequest { invite: invite2, introduction: b_intro2 };
+        let freq2 = FederateRequest {
+            invite: invite2,
+            introduction: b_intro2,
+        };
         assert!(receive_introduction(a_dir.path(), &a_cred, &freq2, vec![], NOW).is_err());
     }
 
@@ -789,11 +830,13 @@ mod tests {
     fn an_expired_or_foreign_invite_is_refused() {
         let (a_dir, a_node, a_cred) = mesh("river");
         let (b_dir, _bn, b_cred) = mesh("cedar");
-        let invite =
-            mint_mesh_invite(&a_node, &a_cred.membership, &a_cred, vec![], NOW).unwrap();
+        let invite = mint_mesh_invite(&a_node, &a_cred.membership, &a_cred, vec![], NOW).unwrap();
         let intro = our_introduction(b_dir.path(), &b_cred, vec![], &invite.token_id, NOW).unwrap();
         // Expired.
-        let freq = FederateRequest { invite: invite.clone(), introduction: intro.clone() };
+        let freq = FederateRequest {
+            invite: invite.clone(),
+            introduction: intro.clone(),
+        };
         assert!(receive_introduction(
             a_dir.path(),
             &a_cred,
@@ -807,18 +850,23 @@ mod tests {
         // A tampered introduction (handle swapped after signing) fails the mesh signature.
         let mut forged = intro;
         forged.handle = "definitely-cedar".into();
-        let freq3 = FederateRequest { invite, introduction: forged };
+        let freq3 = FederateRequest {
+            invite,
+            introduction: forged,
+        };
         assert!(receive_introduction(a_dir.path(), &a_cred, &freq3, vec![], NOW).is_err());
     }
 
     #[test]
     fn a_mesh_cannot_sibling_itself_and_a_covenant_node_cannot_speak_as_the_mesh() {
         let (a_dir, a_node, a_cred) = mesh("river");
-        let invite =
-            mint_mesh_invite(&a_node, &a_cred.membership, &a_cred, vec![], NOW).unwrap();
+        let invite = mint_mesh_invite(&a_node, &a_cred.membership, &a_cred, vec![], NOW).unwrap();
         let self_intro =
             our_introduction(a_dir.path(), &a_cred, vec![], &invite.token_id, NOW).unwrap();
-        let freq = FederateRequest { invite, introduction: self_intro };
+        let freq = FederateRequest {
+            invite,
+            introduction: self_intro,
+        };
         assert!(receive_introduction(a_dir.path(), &a_cred, &freq, vec![], NOW).is_err());
 
         // A covenant credential (no group secret) cannot sign an introduction.
@@ -835,9 +883,10 @@ mod tests {
     fn the_projection_ladder_shows_strictly_more_per_rung() {
         let (a_dir, _an, a_cred) = mesh("river");
         // Two siblings: cedar stands, willow is pending.
-        for (handle, gid, state) in
-            [("cedar", "gid-cedar", "sibling"), ("willow", "gid-willow", "pending")]
-        {
+        for (handle, gid, state) in [
+            ("cedar", "gid-cedar", "sibling"),
+            ("willow", "gid-willow", "pending"),
+        ] {
             save_sibling(
                 a_dir.path(),
                 &SiblingRecord {
@@ -868,16 +917,27 @@ mod tests {
         .unwrap();
 
         let full = crate::worldview::assemble_worldview(a_dir.path(), &a_cred, NOW).unwrap();
-        assert_eq!(full.siblings.len(), 2, "members see every sibling, pending included");
+        assert_eq!(
+            full.siblings.len(),
+            2,
+            "members see every sibling, pending included"
+        );
         assert!(full.siblings.iter().any(|s| s.handle == "cedar"));
         assert_eq!(full.declared_areas, vec!["energy", "birds"]);
 
         // Guest rung: federation is shape, not names.
         let mut guest = full.clone();
         crate::standing::to_guest_view(&mut guest, "some-guest-node");
-        assert_eq!(guest.siblings.len(), 2, "that we federate is shape — the count stays");
+        assert_eq!(
+            guest.siblings.len(),
+            2,
+            "that we federate is shape — the count stays"
+        );
         assert!(
-            guest.siblings.iter().all(|s| s.handle != "cedar" && s.declared_areas.is_empty()),
+            guest
+                .siblings
+                .iter()
+                .all(|s| s.handle != "cedar" && s.declared_areas.is_empty()),
             "with whom is the household's business"
         );
         assert!(guest.declared_areas.is_empty());
@@ -885,10 +945,15 @@ mod tests {
         // Sibling rung: our handle, our declaration, and the reader's own standing — no more.
         let mut sib = full.clone();
         crate::standing::to_sibling_view(&mut sib, "gid-cedar", &a_cred.label);
-        assert_eq!(sib.group_label, "river", "a sibling knows whose door it reads");
+        assert_eq!(
+            sib.group_label, "river",
+            "a sibling knows whose door it reads"
+        );
         assert_eq!(sib.declared_areas, vec!["energy", "birds"]);
         assert!(
-            sib.siblings.iter().any(|s| s.handle == "cedar" && s.group_id == "gid-cedar"),
+            sib.siblings
+                .iter()
+                .any(|s| s.handle == "cedar" && s.group_id == "gid-cedar"),
             "the reader sees itself as itself"
         );
         assert!(
@@ -896,7 +961,10 @@ mod tests {
             "other siblings stay pseudonymized"
         );
         // And the ladder is strict: names the household sees never reach the lower rungs.
-        assert!(sib.members.iter().all(|m| m.human.is_empty() || m.human == "someone"));
+        assert!(sib
+            .members
+            .iter()
+            .all(|m| m.human.is_empty() || m.human == "someone"));
     }
 
     #[test]

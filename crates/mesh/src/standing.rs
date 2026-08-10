@@ -187,11 +187,8 @@ pub fn revoke(dir: &Path, node_id: &str) -> std::io::Result<bool> {
     }
     roll.notes.remove(node_id.trim());
     save(dir, &roll)?;
-    let _ = crate::record::record_standing_revoke(
-        dir,
-        node_id.trim(),
-        crate::transport::now_secs(),
-    );
+    let _ =
+        crate::record::record_standing_revoke(dir, node_id.trim(), crate::transport::now_secs());
     Ok(true)
 }
 

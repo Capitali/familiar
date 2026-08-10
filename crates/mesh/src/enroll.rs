@@ -665,7 +665,9 @@ mod tests {
         assert!(list_pending(&host).unwrap().is_empty(), "nothing pends");
 
         // The record holds the two-filter state: contract attested, identity missing.
-        let rec = crate::record::load(&host, &joiner.node_id()).unwrap().unwrap();
+        let rec = crate::record::load(&host, &joiner.node_id())
+            .unwrap()
+            .unwrap();
         assert!(rec.attestation.is_some(), "the attestation is retained");
         assert_eq!(rec.missing_filters(), vec!["identity"]);
         assert_eq!(
@@ -687,7 +689,8 @@ mod tests {
         ));
         let qs = familiar_kernel::question::load(&host).unwrap();
         assert!(
-            !qs.iter().any(|q| q.text.contains("standing") || q.text.contains("belong")),
+            !qs.iter()
+                .any(|q| q.text.contains("standing") || q.text.contains("belong")),
             "the who-does-it-belong-to question is retired"
         );
         let obs = familiar_kernel::observation::load(&host).unwrap();
@@ -798,7 +801,12 @@ mod tests {
         let door = NodeKey::load_or_mint(&door_dir, "mac-door").unwrap();
         let door_id = door.identity();
         let m = founder_cred
-            .mint_membership(&door_id.node_id, &door_id.pubkey, NOW, DEFAULT_CERT_TTL_SECS)
+            .mint_membership(
+                &door_id.node_id,
+                &door_id.pubkey,
+                NOW,
+                DEFAULT_CERT_TTL_SECS,
+            )
             .unwrap();
         group::save_credential(
             &door_dir,
@@ -826,7 +834,10 @@ mod tests {
             Submitted::Granted(g) => g,
             _ => panic!("a warranted door admits"),
         };
-        assert!(grant.membership.warrant.is_some(), "the cert carries its chain");
+        assert!(
+            grant.membership.warrant.is_some(),
+            "the cert carries its chain"
+        );
         let gk = founder_cred.verifying_key().unwrap();
         group::verify_membership(&grant.membership, &gk, &founder_cred.group_id, NOW + 2, &[])
             .unwrap();
@@ -844,7 +855,9 @@ mod tests {
             enroll_status(&host, &joiner.node_id()).unwrap(),
             StatusOutcome::Granted(_)
         ));
-        let rec = crate::record::load(&host, &joiner.node_id()).unwrap().unwrap();
+        let rec = crate::record::load(&host, &joiner.node_id())
+            .unwrap()
+            .unwrap();
         assert_eq!(rec.held_until, Some(NOW + 5 + DENY_RETRY_SECS));
     }
 }

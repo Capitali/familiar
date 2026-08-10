@@ -447,7 +447,11 @@ pub(crate) fn read_worldview(
         dir,
         &req.node.node_id,
         crate::record::OriginEvidence {
-            label: if req.node.label == "background" { String::new() } else { req.node.label.clone() },
+            label: if req.node.label == "background" {
+                String::new()
+            } else {
+                req.node.label.clone()
+            },
             addr: peer_ip.split(':').next().unwrap_or("").to_string(),
             build: match (req.os_version.is_empty(), req.client_version.is_empty()) {
                 (false, false) => format!("{} · v{}", req.os_version, req.client_version),
@@ -477,8 +481,12 @@ pub(crate) fn read_worldview(
             ),
             ts: req.membership.issued,
         };
-        let rec =
-            crate::record::MembershipRecord::guest(&req.node.node_id, &req.node.node_id, attestation, now);
+        let rec = crate::record::MembershipRecord::guest(
+            &req.node.node_id,
+            &req.node.node_id,
+            attestation,
+            now,
+        );
         let _ = crate::record::save(dir, &rec);
         let _ = crate::record::record_pubkey(dir, &req.node.node_id, &req.node.pubkey, now);
     }
@@ -568,7 +576,10 @@ fn is_gossipable_addr(ip: &str) -> bool {
             let o = v4.octets();
             // Tailscale's CGNAT range is a real reachable path, and the doctrine (ADR-0012) already
             // sorts it last rather than excluding it.
-            v4.is_private() || v4.is_link_local() || v4.is_loopback() || o[0] == 100 && (64..=127).contains(&o[1])
+            v4.is_private()
+                || v4.is_link_local()
+                || v4.is_loopback()
+                || o[0] == 100 && (64..=127).contains(&o[1])
         }
         // Unique-local (fc00::/7) and link-local; a global v6 address is directly routable in
         // principle, but it is still an observed source address, so it gets the same treatment.
@@ -737,9 +748,10 @@ pub fn assemble_worldview(
         .filter_map(|r| {
             let state = crate::record::derive_state(&r);
             let (word, at) = match &state {
-                crate::record::RecordState::Member => {
-                    ("member", r.admitted.as_ref().map(|a| a.at).unwrap_or(r.first_seen))
-                }
+                crate::record::RecordState::Member => (
+                    "member",
+                    r.admitted.as_ref().map(|a| a.at).unwrap_or(r.first_seen),
+                ),
                 crate::record::RecordState::Guest => ("guest", r.first_seen),
                 crate::record::RecordState::Severed { .. } => return None,
             };
@@ -811,7 +823,12 @@ pub fn assemble_worldview(
     let established_handles: Vec<String> = crate::record::load_all(dir)
         .iter()
         .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
-        .filter_map(|r| r.identity.established.as_ref().map(|e| e.handle.to_lowercase()))
+        .filter_map(|r| {
+            r.identity
+                .established
+                .as_ref()
+                .map(|e| e.handle.to_lowercase())
+        })
         .filter(|h| !h.is_empty())
         .collect();
     let mut claims_waiting: Vec<ClaimView> = crate::record::load_all(dir)
@@ -870,7 +887,10 @@ pub fn assemble_worldview(
         // the consoles reconcile against must come from THEM — the legacy roll drifts (a
         // vouch minted at one door reached the other as a record, and the stale roll left the
         // iPad reading as a visitor while both doors' records said member).
-        standing_full: if crate::config::load(dir).map(|c| c.read_records).unwrap_or(false) {
+        standing_full: if crate::config::load(dir)
+            .map(|c| c.read_records)
+            .unwrap_or(false)
+        {
             crate::record::load_all(dir)
                 .iter()
                 .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
@@ -1201,23 +1221,53 @@ mod gossip_addr_tests {
     #[test]
     fn the_nat_exits_that_poisoned_the_ipad_are_refused() {
         let observed_junk = [
-            "129.224.211.181", "139.178.131.76", "129.222.46.137", "97.202.192.132",
-            "207.213.186.129", "207.213.186.177", "129.224.211.90", "24.111.157.40",
-            "107.115.39.17", "129.222.44.157", "129.222.44.228", "129.222.44.227",
-            "129.224.211.42", "139.178.129.14", "209.79.170.49", "207.213.186.50",
-            "139.178.130.73", "207.213.186.145", "107.115.39.18", "207.213.186.49",
-            "139.178.129.4", "207.213.186.178", "129.224.211.45", "107.115.39.82",
+            "129.224.211.181",
+            "139.178.131.76",
+            "129.222.46.137",
+            "97.202.192.132",
+            "207.213.186.129",
+            "207.213.186.177",
+            "129.224.211.90",
+            "24.111.157.40",
+            "107.115.39.17",
+            "129.222.44.157",
+            "129.222.44.228",
+            "129.222.44.227",
+            "129.224.211.42",
+            "139.178.129.14",
+            "209.79.170.49",
+            "207.213.186.50",
+            "139.178.130.73",
+            "207.213.186.145",
+            "107.115.39.18",
+            "207.213.186.49",
+            "139.178.129.4",
+            "207.213.186.178",
+            "129.224.211.45",
+            "107.115.39.82",
             "207.213.186.97",
         ];
         for ip in observed_junk {
-            assert!(!is_gossipable_addr(ip), "{ip} is a NAT exit and must never be gossiped");
+            assert!(
+                !is_gossipable_addr(ip),
+                "{ip} is a NAT exit and must never be gossiped"
+            );
         }
     }
 
     #[test]
     fn real_paths_still_gossip() {
-        for ip in ["192.168.108.10", "192.168.108.119", "10.0.0.5", "172.16.0.9",
-                   "100.78.40.47", "100.105.39.72", "100.101.24.40", "fd00::1", "::1"] {
+        for ip in [
+            "192.168.108.10",
+            "192.168.108.119",
+            "10.0.0.5",
+            "172.16.0.9",
+            "100.78.40.47",
+            "100.105.39.72",
+            "100.101.24.40",
+            "fd00::1",
+            "::1",
+        ] {
             assert!(is_gossipable_addr(ip), "{ip} is a genuinely dialable path");
         }
     }
@@ -1232,12 +1282,12 @@ mod gossip_addr_tests {
 
     #[test]
     fn boundaries_that_are_easy_to_get_wrong() {
-        assert!(is_gossipable_addr("100.64.0.1"));      // first tailnet address
+        assert!(is_gossipable_addr("100.64.0.1")); // first tailnet address
         assert!(is_gossipable_addr("100.127.255.254")); // last tailnet address
-        assert!(!is_gossipable_addr("100.63.0.1"));     // just below — public
-        assert!(!is_gossipable_addr("100.128.0.1"));    // just above — public
-        assert!(is_gossipable_addr("172.31.255.254"));  // last RFC1918 in the 172 block
-        assert!(!is_gossipable_addr("172.32.0.1"));     // just above — public
+        assert!(!is_gossipable_addr("100.63.0.1")); // just below — public
+        assert!(!is_gossipable_addr("100.128.0.1")); // just above — public
+        assert!(is_gossipable_addr("172.31.255.254")); // last RFC1918 in the 172 block
+        assert!(!is_gossipable_addr("172.32.0.1")); // just above — public
         assert!(!is_gossipable_addr(""));
         assert!(!is_gossipable_addr("cerbo.river.io")); // not an address at all
     }
@@ -1466,7 +1516,9 @@ mod tests {
         let (raw, sig) = signed_request(&cred, &device, NOW, "arrv1");
         let view = read_worldview(&host, &raw, &sig, NOW, &ring(), "192.168.1.9").unwrap();
         assert!(
-            view.arrivals.iter().any(|a| a.node_id == stranger.node_id() && a.state == "guest"),
+            view.arrivals
+                .iter()
+                .any(|a| a.node_id == stranger.node_id() && a.state == "guest"),
             "the knocking stranger is an arrival: {:?}",
             view.arrivals
         );
