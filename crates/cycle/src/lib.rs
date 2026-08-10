@@ -1354,10 +1354,15 @@ fn record_tool_rejected(dir: &Path, name: &str, run: &ToolRun, now: i64) -> io::
 fn trial_tool(dir: &Path, d: &DraftedTool, now: i64) -> io::Result<ToolRun> {
     let ws = familiar_workspace();
     fs::create_dir_all(&ws)?;
-    let path = ws.join(format!(".trial-{now}.sh"));
+    // The workspace is shared by every process (and every parallel test); two trials in
+    // the same second must not overwrite each other's transient script mid-run.
+    static TRIAL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TRIAL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tag = format!("{now}-{}-{seq}", std::process::id());
+    let path = ws.join(format!(".trial-{tag}.sh"));
     fs::write(&path, &d.script)?;
     let probe = Tool {
-        id: format!("trial-{now}"), // NOT persisted — record_use will no-op on it
+        id: format!("trial-{tag}"), // NOT persisted — record_use will no-op on it
         name: d.name.clone(),
         purpose: d.purpose.clone(),
         keywords: String::new(),

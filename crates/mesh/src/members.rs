@@ -422,7 +422,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_via: sp_via,
             lat: self_lat,
             lon: self_lon,
-            location_at: if self_lat != 0.0 || self_lon != 0.0 { now } else { 0 },
+            location_at: if self_lat != 0.0 || self_lon != 0.0 {
+                now
+            } else {
+                0
+            },
             // The daemon is not a GPS device; consoles anchor on this row by its kind
             // (self_node / the "· host" relationship), not by fix provenance.
             geo_device: false,
@@ -539,7 +543,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         // The established handle is the truth when it exists — but an un-established record must
         // still fall back to what the device said about itself (B8): a guest iPhone with a
         // record but no establishment was rendering NAMELESS forever, one ghost row per node.
-        let human = match record.as_ref().and_then(|r| r.identity.established.as_ref()) {
+        let human = match record
+            .as_ref()
+            .and_then(|r| r.identity.established.as_ref())
+        {
             Some(e) if !e.handle.is_empty() => e.handle.clone(),
             _ if !p.human.is_empty() => p.human.clone(),
             _ => actor
@@ -774,7 +781,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             present_confidence: 0.0,
             lat,
             lon,
-            location_at: origin.map(|o| o.at).filter(|_| lat != 0.0 || lon != 0.0).unwrap_or(0),
+            location_at: origin
+                .map(|o| o.at)
+                .filter(|_| lat != 0.0 || lon != 0.0)
+                .unwrap_or(0),
             geo_device: false,
             attached: Vec::new(),
             attached_to: String::new(),
@@ -825,12 +835,17 @@ fn attach_watches(out: &mut [Member]) {
             if a == b {
                 return true;
             }
-            let p = |s: &str| s.rsplitn(2, '.').nth(1).map(|x| x.to_string());
+            let p = |s: &str| s.rsplit_once('.').map(|(prefix, _)| prefix.to_string());
             let private = |s: &str| {
-                s.starts_with("192.168.") || s.starts_with("10.")
-                    || s.starts_with("172.16.") || s.starts_with("172.17.")
-                    || s.starts_with("172.18.") || s.starts_with("172.19.")
-                    || s.starts_with("172.2") || s.starts_with("172.30.") || s.starts_with("172.31.")
+                s.starts_with("192.168.")
+                    || s.starts_with("10.")
+                    || s.starts_with("172.16.")
+                    || s.starts_with("172.17.")
+                    || s.starts_with("172.18.")
+                    || s.starts_with("172.19.")
+                    || s.starts_with("172.2")
+                    || s.starts_with("172.30.")
+                    || s.starts_with("172.31.")
             };
             private(a) && private(b) && p(a).is_some() && p(a) == p(b)
         };
@@ -879,10 +894,13 @@ fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
             continue;
         }
         let cip = ip_of(&c.addr);
-        let on_self_host =
-            !cip.is_empty() && (cip == "127.0.0.1" || self_hosts.contains(&cip));
+        let on_self_host = !cip.is_empty() && (cip == "127.0.0.1" || self_hosts.contains(&cip));
         let stem = c.label.to_lowercase();
-        let stem = stem.strip_suffix(" console").unwrap_or("").trim().to_string();
+        let stem = stem
+            .strip_suffix(" console")
+            .unwrap_or("")
+            .trim()
+            .to_string();
         // The label pass accepts ANY non-console member as the machine — from a sibling door's
         // view the wildhorse daemon classifies as a DevicePeer (it reports observations there),
         // and nesting must hold from EVERY door or the roster flaps whenever a console fails
@@ -1353,8 +1371,20 @@ mod tests {
         let mut out = vec![
             mk("selflh", "lighthouse", "", "self_node", "localhost"),
             mk("1c99", "wildhorse", "", "gossip_peer", "192.168.108.10"),
-            mk("a24d", "Wildhorse console", "mac:ian", "device_peer", "192.168.108.10"),
-            mk("d5c3", "iPhone", "phone:ian", "device_peer", "192.168.108.188"),
+            mk(
+                "a24d",
+                "Wildhorse console",
+                "mac:ian",
+                "device_peer",
+                "192.168.108.10",
+            ),
+            mk(
+                "d5c3",
+                "iPhone",
+                "phone:ian",
+                "device_peer",
+                "192.168.108.188",
+            ),
         ];
         attach_consoles(&mut out, &[]);
         assert_eq!(
@@ -1374,7 +1404,13 @@ mod tests {
         // address is one of this host's own. No label dependence — structural match.
         let mut own = vec![
             mk("1c99", "TheRiver", "", "self_node", "localhost"),
-            mk("a24d", "Renamed Thing", "mac:ian", "device_peer", "192.168.108.10"),
+            mk(
+                "a24d",
+                "Renamed Thing",
+                "mac:ian",
+                "device_peer",
+                "192.168.108.10",
+            ),
         ];
         attach_consoles(&mut own, &["192.168.108.10".to_string()]);
         assert_eq!(
@@ -1385,7 +1421,13 @@ mod tests {
         // A console whose machine is nowhere on the roster stays a sibling — no false nesting.
         let mut alone = vec![
             mk("selflh", "lighthouse", "", "self_node", "localhost"),
-            mk("a24d", "Codex console", "mac:ian", "device_peer", "10.0.0.7"),
+            mk(
+                "a24d",
+                "Codex console",
+                "mac:ian",
+                "device_peer",
+                "10.0.0.7",
+            ),
         ];
         attach_consoles(&mut alone, &[]);
         assert!(
@@ -1399,7 +1441,13 @@ mod tests {
         // taken as another console's host.
         let mut quiet = vec![
             mk("1c99", "TheRiver", "", "self_node", "localhost"),
-            mk("a24d", "Wildhorse console", "", "gossip_peer", "192.168.108.10"),
+            mk(
+                "a24d",
+                "Wildhorse console",
+                "",
+                "gossip_peer",
+                "192.168.108.10",
+            ),
             mk("aaaa", "Codex console", "", "gossip_peer", "192.168.108.10"),
         ];
         attach_consoles(&mut quiet, &["192.168.108.10".to_string()]);
@@ -1417,8 +1465,20 @@ mod tests {
         // flaps whenever a console reads through its fallback.
         let mut sibling = vec![
             mk("selflh", "lighthouse", "", "self_node", "localhost"),
-            mk("1c99", "Wildhorse", "familiar:wildhorse", "device_peer", "129.224.211.111"),
-            mk("a24d", "Wildhorse console", "mac:ian", "device_peer", "129.224.211.111"),
+            mk(
+                "1c99",
+                "Wildhorse",
+                "familiar:wildhorse",
+                "device_peer",
+                "129.224.211.111",
+            ),
+            mk(
+                "a24d",
+                "Wildhorse console",
+                "mac:ian",
+                "device_peer",
+                "129.224.211.111",
+            ),
         ];
         attach_consoles(&mut sibling, &[]);
         assert_eq!(

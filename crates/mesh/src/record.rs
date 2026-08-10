@@ -255,12 +255,8 @@ pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRe
         .map(|c| c.ts)
         .max()
         .unwrap_or(i64::MIN);
-    let live_adm = |x: &Option<AdmissionFact>| {
-        x.as_ref().filter(|f| f.at > spent_before).cloned()
-    };
-    let live_est = |x: &Option<Establishment>| {
-        x.as_ref().filter(|e| e.at > spent_before).cloned()
-    };
+    let live_adm = |x: &Option<AdmissionFact>| x.as_ref().filter(|f| f.at > spent_before).cloned();
+    let live_est = |x: &Option<Establishment>| x.as_ref().filter(|e| e.at > spent_before).cloned();
 
     let admitted = match (live_adm(&a.admitted), live_adm(&b.admitted)) {
         (Some(x), Some(y)) => {
@@ -276,7 +272,10 @@ pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRe
         (None, y) => y,
     };
 
-    let established = match (live_est(&a.identity.established), live_est(&b.identity.established)) {
+    let established = match (
+        live_est(&a.identity.established),
+        live_est(&b.identity.established),
+    ) {
         (Some(x), Some(y)) => {
             if (x.at, &x.artifact) <= (y.at, &y.artifact) {
                 Some(x)
@@ -367,12 +366,13 @@ pub fn derive_state(r: &MembershipRecord) -> RecordState {
             reason: c.reason.clone(),
             at: c.ts,
         },
-        Some(c) if c.act == CorrectionAct::Disestablish
-            && r.identity
-                .established
-                .as_ref()
-                .map(|e| e.at <= c.ts)
-                .unwrap_or(true) =>
+        Some(c)
+            if c.act == CorrectionAct::Disestablish
+                && r.identity
+                    .established
+                    .as_ref()
+                    .map(|e| e.at <= c.ts)
+                    .unwrap_or(true) =>
         {
             RecordState::Guest
         }
@@ -560,7 +560,9 @@ pub fn mint_invite_token(
 impl InviteToken {
     fn verify(&self, group_pubkey_hex: &str, group_id: &str, now: i64) -> Result<()> {
         if now >= self.expires {
-            return Err(Error::Untrusted("invite: expired — ask for a fresh one".into()));
+            return Err(Error::Untrusted(
+                "invite: expired — ask for a fresh one".into(),
+            ));
         }
         if self.group_id != group_id || self.minted_by.group_id != group_id {
             return Err(Error::Untrusted("invite: wrong mesh".into()));
@@ -576,7 +578,12 @@ impl InviteToken {
             issued: self.issued,
             expires: self.expires,
         })?;
-        verify_hex_sig(&self.minted_by.node_pubkey, &body, &self.sig, "invite token")
+        verify_hex_sig(
+            &self.minted_by.node_pubkey,
+            &body,
+            &self.sig,
+            "invite token",
+        )
     }
 }
 
@@ -848,9 +855,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-fn snapshot_cache() -> &'static Mutex<HashMap<PathBuf, (u64, Arc<Vec<MembershipRecord>>)>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, Arc<Vec<MembershipRecord>>)>>> =
-        OnceLock::new();
+/// Per-directory snapshot: the stat fingerprint it was built from, and the parsed records.
+type SnapshotMap = HashMap<PathBuf, (u64, Arc<Vec<MembershipRecord>>)>;
+
+fn snapshot_cache() -> &'static Mutex<SnapshotMap> {
+    static CACHE: OnceLock<Mutex<SnapshotMap>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -965,9 +974,7 @@ pub fn purge_stale_guests(dir: &Path, now: i64) -> Vec<String> {
             _ => continue,
         }
         // The record file itself.
-        let f = dir
-            .join(RECORDS_DIR)
-            .join(format!("{}.json", r.device_id));
+        let f = dir.join(RECORDS_DIR).join(format!("{}.json", r.device_id));
         let _ = std::fs::remove_file(&f);
         // Admission scaffolding (grant / pending / denied) and the live peer row, so the next
         // read re-mints a FRESH guest with a fresh clock rather than resurrecting this one.
@@ -998,7 +1005,12 @@ pub fn find_by_key(dir: &Path, node_id: &str) -> Option<MembershipRecord> {
 // (`config.read_records`) makes the record the answer. Rollback is the flag, not a restore.
 
 /// Load-or-create by device_id, mutate, re-derive state, save.
-fn upsert<F: FnOnce(&mut MembershipRecord)>(dir: &Path, device_id: &str, now: i64, f: F) -> Result<()> {
+fn upsert<F: FnOnce(&mut MembershipRecord)>(
+    dir: &Path,
+    device_id: &str,
+    now: i64,
+    f: F,
+) -> Result<()> {
     let mut r = load(dir, device_id)?.unwrap_or(MembershipRecord {
         device_id: device_id.to_string(),
         keys: vec![device_id.to_string()],
@@ -1447,13 +1459,18 @@ pub fn apply_correction(dir: &Path, c: &Correction, now: i64) -> Result<Membersh
     upsert(dir, subject, now, |r| {
         if !r.corrections.iter().any(|x| x.nonce == c.nonce) {
             r.corrections.push(c.clone());
-            r.corrections.sort_by(|x, y| (x.ts, &x.nonce).cmp(&(y.ts, &y.nonce)));
+            r.corrections
+                .sort_by(|x, y| (x.ts, &x.nonce).cmp(&(y.ts, &y.nonce)));
         }
         if c.act == CorrectionAct::Disestablish {
             r.identity.established = None;
         }
         if c.act == CorrectionAct::Hold {
-            r.held_until = Some(r.held_until.unwrap_or(0).max(c.ts + crate::enroll::DENY_RETRY_SECS));
+            r.held_until = Some(
+                r.held_until
+                    .unwrap_or(0)
+                    .max(c.ts + crate::enroll::DENY_RETRY_SECS),
+            );
         }
         if c.act == CorrectionAct::Restore {
             r.held_until = None;
@@ -1492,8 +1509,7 @@ pub fn apply_correction(dir: &Path, c: &Correction, now: i64) -> Result<Membersh
             let _ = crate::enroll::allow_retry(dir, subject);
             let revoked = crate::group::load_revoked(dir).unwrap_or_default();
             if revoked.iter().any(|n| n == subject) {
-                let remaining: Vec<String> =
-                    revoked.into_iter().filter(|n| n != subject).collect();
+                let remaining: Vec<String> = revoked.into_iter().filter(|n| n != subject).collect();
                 let _ = crate::group::write_json_public(
                     &dir.join(crate::group::REVOKED_FILE),
                     &remaining,
@@ -1609,12 +1625,7 @@ pub fn migrate(dir: &Path, now: i64) -> Result<MigrationReport> {
     }
 
     for d in crate::enroll::list_denials(dir) {
-        record_hold(
-            dir,
-            &d.node_id,
-            d.at + crate::enroll::DENY_RETRY_SECS,
-            now,
-        )?;
+        record_hold(dir, &d.node_id, d.at + crate::enroll::DENY_RETRY_SECS, now)?;
         report.held_from_denials += 1;
     }
 
@@ -1738,7 +1749,12 @@ pub fn doctor(dir: &Path, now: i64) -> DoctorReport {
     }
 }
 
-pub(crate) fn verify_hex_sig(pubkey_hex: &str, body: &[u8], sig_hex: &str, what: &str) -> Result<()> {
+pub(crate) fn verify_hex_sig(
+    pubkey_hex: &str,
+    body: &[u8],
+    sig_hex: &str,
+    what: &str,
+) -> Result<()> {
     let pk = exactly_32(&hex_decode(pubkey_hex)?, "pubkey")?;
     let key = VerifyingKey::from_bytes(&pk)
         .map_err(|_| Error::Untrusted(format!("{what}: bad pubkey")))?;
@@ -1768,7 +1784,11 @@ mod tests {
     }
 
     /// A mesh with one established device: Betty's iPad.
-    fn ctx_with<'a>(established: &'a [EstablishedDeviceRef], gid: &'a str, gpk: &'a str) -> AdmissionContext<'a> {
+    fn ctx_with<'a>(
+        established: &'a [EstablishedDeviceRef],
+        gid: &'a str,
+        gpk: &'a str,
+    ) -> AdmissionContext<'a> {
         AdmissionContext {
             now: NOW,
             group_id: gid,
@@ -1801,8 +1821,7 @@ mod tests {
     fn e1_a_rotation_proof_carries_the_established_identity_across_a_reinstall() {
         let (old, est) = betty_ipad("e1_old");
         let new = key("e1_new");
-        let proof =
-            RotationProof::mint(&old, "device-ipad", &new.identity().pubkey, NOW).unwrap();
+        let proof = RotationProof::mint(&old, "device-ipad", &new.identity().pubkey, NOW).unwrap();
         let ctx = ctx_with(&est, "g", "unused");
         let e = evaluate_admission(
             &subject(&new.node_id()),
@@ -1833,8 +1852,7 @@ mod tests {
         .is_err());
 
         // Forged signature.
-        let mut forged =
-            RotationProof::mint(&old, "d", &new.identity().pubkey, NOW).unwrap();
+        let mut forged = RotationProof::mint(&old, "d", &new.identity().pubkey, NOW).unwrap();
         forged.sig = stranger.sign(b"not the body");
         assert!(evaluate_admission(
             &subject(&new.node_id()),
@@ -1861,8 +1879,7 @@ mod tests {
     fn e2_a_voucher_from_the_humans_own_device_establishes_the_new_one() {
         let (ipad, est) = betty_ipad("e2_ipad");
         let phone = key("e2_phone");
-        let v =
-            DeviceVoucher::mint(&ipad, "betty", &phone.identity().pubkey, NOW, "n1").unwrap();
+        let v = DeviceVoucher::mint(&ipad, "betty", &phone.identity().pubkey, NOW, "n1").unwrap();
         let ctx = ctx_with(&est, "g", "unused");
         let e = evaluate_admission(
             &subject(&phone.node_id()),
@@ -1882,8 +1899,7 @@ mod tests {
         let ctx = ctx_with(&est, "g", "unused");
 
         // Betty's iPad cannot vouch anyone in as "ian".
-        let wrong =
-            DeviceVoucher::mint(&ipad, "ian", &phone.identity().pubkey, NOW, "n1").unwrap();
+        let wrong = DeviceVoucher::mint(&ipad, "ian", &phone.identity().pubkey, NOW, "n1").unwrap();
         assert!(evaluate_admission(
             &subject(&phone.node_id()),
             None,
@@ -2378,7 +2394,10 @@ mod tests {
         // B: pending → guest WITH its attestation retained.
         let rb = load(&host, &b.node_id()).unwrap().unwrap();
         assert_eq!(derive_state(&rb), RecordState::Guest);
-        assert!(rb.attestation.is_some(), "a pending's attestation must survive");
+        assert!(
+            rb.attestation.is_some(),
+            "a pending's attestation must survive"
+        );
 
         // C: denied → held.
         let rc = load(&host, &c.node_id()).unwrap().unwrap();
@@ -2393,7 +2412,11 @@ mod tests {
         // Idempotent: a second run at the same instant is byte-identical.
         let before: Vec<_> = load_all(&host);
         migrate(&host, NOW + 100).unwrap();
-        assert_eq!(load_all(&host), before, "re-running the fold must change nothing");
+        assert_eq!(
+            load_all(&host),
+            before,
+            "re-running the fold must change nothing"
+        );
     }
 
     #[test]
@@ -2403,7 +2426,8 @@ mod tests {
         let rep = doctor(&host, NOW + 100);
         assert!(!rep.rows.is_empty());
         assert_eq!(
-            rep.divergent, 0,
+            rep.divergent,
+            0,
             "after the fold every answer must agree: {:?}",
             rep.rows.iter().filter(|r| !r.ok).collect::<Vec<_>>()
         );
@@ -2428,7 +2452,9 @@ mod tests {
         .unwrap();
         let rep2 = doctor(&host, NOW + 100);
         assert!(
-            rep2.ghost_suspects.iter().any(|(l, ids)| l == "iPhone" && ids.len() == 2),
+            rep2.ghost_suspects
+                .iter()
+                .any(|(l, ids)| l == "iPhone" && ids.len() == 2),
             "three iPhones one alive is the exact failure this flags"
         );
     }
@@ -2442,7 +2468,11 @@ mod tests {
 
         // Flag on: the record (dual-written by the grant) answers; the unknown stays a guest.
         std::fs::create_dir_all(dirp.join("mesh")).unwrap();
-        std::fs::write(dirp.join(crate::config::CONFIG_FILE), r#"{"read_records":true}"#).unwrap();
+        std::fs::write(
+            dirp.join(crate::config::CONFIG_FILE),
+            r#"{"read_records":true}"#,
+        )
+        .unwrap();
         assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Full);
         assert_eq!(standing_of(&dirp, "total-stranger"), Standing::Guest);
 
@@ -2451,7 +2481,11 @@ mod tests {
         assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Guest);
 
         // Flag off: the roll answers again — that is the whole rollback.
-        std::fs::write(dirp.join(crate::config::CONFIG_FILE), r#"{"read_records":false}"#).unwrap();
+        std::fs::write(
+            dirp.join(crate::config::CONFIG_FILE),
+            r#"{"read_records":false}"#,
+        )
+        .unwrap();
         assert_eq!(standing_of(&dirp, "node-full-000001"), Standing::Full);
     }
 
