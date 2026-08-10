@@ -241,6 +241,8 @@ mod tests {
             last_status: String::new(),
             origin: origin.into(),
             origin_verified_at: 0,
+            null_streak: 0,
+            last_useful_at: 0,
         }
     }
 

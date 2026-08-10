@@ -17,6 +17,16 @@ use crate::store;
 
 pub const TOOLS_FILE: &str = "tools.jsonl";
 
+/// The window over which a sensor's null-result streak is judged — a run older than this
+/// no longer counts against it (the same reversible-window discipline as
+/// [`crate::corruption`]). A day: a sensor that produced nothing for a full day is stale.
+pub const NULL_WINDOW_SECS: i64 = 86_400;
+/// Consecutive null/failed runs within the window before the audit retires a deployed
+/// sensor autonomously (~1h at the 20-min cultivation cadence). Forgiving of a transient
+/// blip; a fabricating tool is gone within the hour. Reversible: it heals if it produces
+/// genuine signal again.
+pub const NULL_STREAK_RETIRE: u32 = 3;
+
 /// A reusable capability the familiar authored once and can run again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tool {
@@ -48,6 +58,16 @@ pub struct Tool {
     /// When a federated tool's body was verified (sha-matched) on merge; 0 for local tools.
     #[serde(default)]
     pub origin_verified_at: i64,
+    /// Consecutive runs that produced nothing useful (empty, error-marked, or a null result
+    /// like "no devices found") — the self-correction signal (ADR-0036). A useful run resets
+    /// it to 0; the audit retires a tool that reaches [`NULL_STREAK_RETIRE`]. `#[serde(default)]`
+    /// so older `tools.jsonl` loads unchanged.
+    #[serde(default)]
+    pub null_streak: u32,
+    /// When this tool last produced a genuinely useful run — the healing timestamp. 0 until
+    /// its first useful run.
+    #[serde(default)]
+    pub last_useful_at: i64,
 }
 
 impl Tool {
@@ -100,6 +120,17 @@ pub fn record_use(
     let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
         return Ok(None);
     };
+    // The null-result streak, on the same reversible-window discipline as corruption: a run
+    // older than the window no longer counts, so a fresh failure starts from a clean slate.
+    if now - t.last_used > NULL_WINDOW_SECS {
+        t.null_streak = 0;
+    }
+    if exit_ok {
+        t.null_streak = 0; // a useful run heals the streak…
+        t.last_useful_at = now; // …and stamps when it was last genuinely useful.
+    } else {
+        t.null_streak = t.null_streak.saturating_add(1);
+    }
     t.uses += 1;
     t.last_used = now;
     t.last_exit_ok = exit_ok;
@@ -113,11 +144,18 @@ pub fn record_use(
 /// re-authors a fresh one instead of reusing it. Used when the human's feedback says an
 /// answer a tool produced was wrong. Returns true if the id was found.
 pub fn mark_unhealthy(dir: &Path, id: &str) -> io::Result<bool> {
+    mark_unhealthy_with(dir, id, "retired by your feedback")
+}
+
+/// [`mark_unhealthy`] with an explicit verdict — the self-correction audit (ADR-0036)
+/// retires a fabricating sensor with its own reason ("retired — produced nothing useful
+/// N times running"), distinct from human feedback.
+pub fn mark_unhealthy_with(dir: &Path, id: &str, status: &str) -> io::Result<bool> {
     let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
         return Ok(false);
     };
     t.last_exit_ok = false;
-    t.last_status = "retired by your feedback".to_string();
+    t.last_status = status.to_string();
     store::update_by_id(dir, TOOLS_FILE, id, &t)
 }
 
@@ -182,6 +220,8 @@ mod tests {
             last_status: String::new(),
             origin: String::new(),
             origin_verified_at: 0,
+            null_streak: 0,
+            last_useful_at: 0,
         }
     }
 
@@ -282,5 +322,45 @@ mod tests {
             "retired by your feedback"
         );
         assert!(!mark_unhealthy(&t.0, "nope").unwrap());
+    }
+
+    #[test]
+    fn a_null_run_grows_the_streak_and_a_useful_one_heals_it() {
+        let t = Temp::new("streak");
+        append(&t.0, &tool("tool-0001", "s", "p", "k")).unwrap();
+        record_use(&t.0, "tool-0001", 100, false, "nothing found").unwrap();
+        record_use(&t.0, "tool-0001", 200, false, "nothing found").unwrap();
+        assert_eq!(
+            load(&t.0).unwrap()[0].null_streak,
+            2,
+            "consecutive nulls accrue"
+        );
+        // A genuinely useful run heals the streak and stamps the moment.
+        record_use(&t.0, "tool-0001", 300, true, "exit 0 in 12ms").unwrap();
+        let tl = &load(&t.0).unwrap()[0];
+        assert_eq!(tl.null_streak, 0, "a useful run wipes the streak");
+        assert_eq!(tl.last_useful_at, 300);
+    }
+
+    #[test]
+    fn the_streak_window_resets_a_stale_gap() {
+        let t = Temp::new("streak_window");
+        append(&t.0, &tool("tool-0001", "s", "p", "k")).unwrap();
+        record_use(&t.0, "tool-0001", 100, false, "nothing found").unwrap();
+        assert_eq!(load(&t.0).unwrap()[0].null_streak, 1);
+        // A failure a day-plus later starts from a clean slate (reversible window).
+        record_use(
+            &t.0,
+            "tool-0001",
+            100 + NULL_WINDOW_SECS + 1,
+            false,
+            "nothing found",
+        )
+        .unwrap();
+        assert_eq!(
+            load(&t.0).unwrap()[0].null_streak,
+            1,
+            "the stale run no longer counts"
+        );
     }
 }
