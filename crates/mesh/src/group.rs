@@ -580,9 +580,8 @@ pub fn verify_membership(
             let wk_bytes = exactly_32(&hex_decode(&w.node_pubkey)?, "warrant pubkey")?;
             let wk = VerifyingKey::from_bytes(&wk_bytes)
                 .map_err(|_| Error::Untrusted("membership: bad warrant pubkey".into()))?;
-            wk.verify(&m.body_bytes()?, &sig).map_err(|_| {
-                Error::Untrusted("membership: minter signature did not verify".into())
-            })
+            wk.verify(&m.body_bytes()?, &sig)
+                .map_err(|_| Error::Untrusted("membership: minter signature did not verify".into()))
         }
     }
 }
@@ -621,9 +620,8 @@ pub fn verify_membership_consistent(
             let wk_bytes = exactly_32(&hex_decode(&w.node_pubkey)?, "warrant pubkey")?;
             let wk = VerifyingKey::from_bytes(&wk_bytes)
                 .map_err(|_| Error::Untrusted("membership: bad warrant pubkey".into()))?;
-            wk.verify(&m.body_bytes()?, &sig).map_err(|_| {
-                Error::Untrusted("membership: minter signature did not verify".into())
-            })
+            wk.verify(&m.body_bytes()?, &sig)
+                .map_err(|_| Error::Untrusted("membership: minter signature did not verify".into()))
         }
     }
 }
@@ -770,9 +768,8 @@ mod tests {
         let new_id = newcomer.identity();
 
         let w = issue_warrant(&cred, &door_id.node_id, &door_id.pubkey, NOW, 3600).unwrap();
-        let m =
-            mint_membership_warranted(&door, &w, &new_id.node_id, &new_id.pubkey, NOW, 3600)
-                .unwrap();
+        let m = mint_membership_warranted(&door, &w, &new_id.node_id, &new_id.pubkey, NOW, 3600)
+            .unwrap();
 
         // The chain verifies — full check and the consistency check devices use.
         verify_membership(&m, &gk, &cred.group_id, NOW + 10, &[]).unwrap();

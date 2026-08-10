@@ -29,10 +29,12 @@
 #![forbid(unsafe_code)]
 
 pub mod brief;
+pub mod changeling;
 pub mod config;
 pub mod consult;
 pub mod enroll;
 pub mod federation;
+pub mod game;
 pub mod grants;
 pub mod group;
 pub mod members;
@@ -41,8 +43,6 @@ pub mod node;
 pub mod observe;
 pub mod outreach;
 pub mod push;
-pub mod changeling;
-pub mod game;
 pub mod record;
 pub mod rendezvous;
 pub mod standing;

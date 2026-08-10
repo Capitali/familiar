@@ -5,10 +5,10 @@
 //! worldview at the sibling rung — handle and declaration visible, names withheld.
 
 use familiar_mesh::config::MeshConfig;
+use familiar_mesh::federation;
 use familiar_mesh::group::{self, DEFAULT_CERT_TTL_SECS};
 use familiar_mesh::node::NodeKey;
 use familiar_mesh::transport::{self, now_secs};
-use familiar_mesh::federation;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -67,8 +67,10 @@ fn two_meshes_federate_through_the_door() {
     // Two meshes, two trust roots — cedar is NOT in river's group.
     let a = NodeKey::load_or_mint(&dir_a, "river-node").unwrap();
     let b = NodeKey::load_or_mint(&dir_b, "cedar-node").unwrap();
-    let cred_a = group::create_group(&dir_a, &a, "river", now_secs(), DEFAULT_CERT_TTL_SECS).unwrap();
-    let cred_b = group::create_group(&dir_b, &b, "cedar", now_secs(), DEFAULT_CERT_TTL_SECS).unwrap();
+    let cred_a =
+        group::create_group(&dir_a, &a, "river", now_secs(), DEFAULT_CERT_TTL_SECS).unwrap();
+    let cred_b =
+        group::create_group(&dir_b, &b, "cedar", now_secs(), DEFAULT_CERT_TTL_SECS).unwrap();
 
     write_boundary(&dir_a, true);
     write_boundary(&dir_b, true);
@@ -78,7 +80,8 @@ fn two_meshes_federate_through_the_door() {
     // Only river's door needs to be up — cedar dials it as a client.
     let ha = transport::spawn(dir_a.clone());
     assert!(
-        wait_for(10, || std::net::TcpStream::connect(("127.0.0.1", pa)).is_ok()),
+        wait_for(10, || std::net::TcpStream::connect(("127.0.0.1", pa))
+            .is_ok()),
         "river's door should bind"
     );
 
@@ -106,7 +109,10 @@ fn two_meshes_federate_through_the_door() {
 
     // 3. River holds cedar PENDING — cedar's sibling read fails closed.
     let cedar_on_a = federation::load_sibling(&dir_a, &cred_b.group_id).unwrap();
-    assert_eq!(cedar_on_a.state, "pending", "consent is a human tap, never automatic");
+    assert_eq!(
+        cedar_on_a.state, "pending",
+        "consent is a human tap, never automatic"
+    );
     assert!(
         federation::read_sibling_worldview(&dir_b, &cred_a.group_id).is_err(),
         "pending reads nothing"
@@ -138,9 +144,14 @@ fn two_meshes_federate_through_the_door() {
         }
     }
     // Cedar sees itself standing in river's sibling list, as itself.
-    let sibs = v.get("siblings").and_then(|s| s.as_array()).cloned().unwrap_or_default();
+    let sibs = v
+        .get("siblings")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default();
     assert!(
-        sibs.iter().any(|s| s.get("handle").and_then(|h| h.as_str()) == Some("cedar")),
+        sibs.iter()
+            .any(|s| s.get("handle").and_then(|h| h.as_str()) == Some("cedar")),
         "the reader sees itself as itself"
     );
 
