@@ -567,7 +567,7 @@ function refreshScreen() {
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
           ${(v.game && v.game.status === 'open' && emberIds.has(p.m.node_id))
-            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : v.game.kind === 'changeling' ? (v.game.phase === 'voting' ? '🎭 VOTE' : v.game.phase === 'witness' ? '🎭 TRUTH' : '🎭 EMBER') : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">${cdText(v.game.holder_since + v.game.turn_secs)}</span></span>` : ''}
+            ? `<span onclick="event.stopPropagation();sphereGameJump();" title="to the game" class="m" style="cursor:pointer;font-size:8px;letter-spacing:0.1em;padding:3px 8px;border-radius:6px;background:rgba(255,178,102,0.16);color:#ffb266;animation:gatepulse 1.6s ease-in-out infinite;">${v.game.kind === 'campfire' ? '🔥 EMBER' : v.game.kind === 'changeling' ? (v.game.phase === 'voting' ? '🎭 VOTE' : v.game.phase === 'witness' ? '🎭 TRUTH' : '🎭 EMBER') : v.game.kind === 'pact' ? (v.game.phase === 'voting' ? '⚖️ VOTE' : v.game.phase === 'gambit' ? '⚖️ TEMPT' : '⚖️ EMBER') : '🧩 TURN'} <span data-deadline="${v.game.holder_since + v.game.turn_secs}">${cdText(v.game.holder_since + v.game.turn_secs)}</span></span>` : ''}
           ${connBadge(p.m.connectivity)}`;
     const closedCard = ([p, i]) => `
       <div onclick="sphereRosterToggle('${p.m.node_id}')" style="cursor:pointer;padding:13px 17px;border-radius:14px;background:${p.local?'rgba(90,175,255,0.08)':'rgba(20,44,80,0.16)'};border:1px solid ${p.local?'rgba(174,231,255,0.2)':'rgba(120,190,255,0.12)'};display:flex;align-items:center;gap:9px;">
@@ -801,11 +801,12 @@ function refreshScreen() {
         </div>`;
       el.innerHTML = `<div style="max-width:640px;display:flex;flex-direction:column;gap:14px;">
         <div class="m" style="font-size:10.5px;color:rgba(160,195,255,0.6);margin-bottom:2px;">
-          Three fires to light. Playing them exercises the mesh on purpose — every move is a signed member act, and the familiar referees.
+          Four fires to light. Playing them exercises the mesh on purpose — every move is a signed member act, and the familiar referees.
         </div>
         ${gameCard('riddle', 'Riddle of the Mesh', 'the familiar asks; the ember passes; one right answer takes it', GLYPHS.theories)}
         ${gameCard('campfire', 'The Campfire', 'one story, one line each, the ember chooses whose turn it is', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M24 6c3 7-6 9-4 16 1.4 4.6 8 5 9-1 4 4 6 8 4 13-2.4 5.7-14 6.5-17-1-2.6-7 3-10 4-14 2 3 5 3 5-1 0-4-2-7-1-12z" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.5" style="transform-box:fill-box;transform-origin:center bottom;animation:eqb 1.6s ease-in-out infinite;"/><circle cx="24" cy="33" r="3" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.4s ease-in-out infinite;"/></svg>`)}
         ${gameCard('changeling', 'The Changeling', 'one true line, two forgeries — find the human', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M24 8c8 0 13 6 13 14 0 9-5 16-13 18C16 38 11 31 11 22 11 14 16 8 24 8z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.5"/><circle cx="18.5" cy="21" r="2.2" fill="currentColor" style="animation:gatepulse 2.2s ease-in-out infinite;"/><circle cx="29.5" cy="21" r="2.2" fill="currentColor" style="animation:gatepulse 2.2s ease-in-out infinite 0.6s;"/><path d="M17 30q7 5 14 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="transform-box:fill-box;transform-origin:center;animation:eqb 3s ease-in-out infinite;"/></svg>`)}
+        ${gameCard('pact', 'The Pact', 'the constitution deals a card; you rule; the guard reveals', `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><line x1="24" y1="9" x2="24" y2="38" stroke="currentColor" stroke-width="1.5"/><path d="M24 13 L11 20 M24 13 L37 20" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 20 L11 20 L16 20 L11 30 Q11 33 6 30 L11 20" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.3" style="transform-box:fill-box;transform-origin:11px 20px;animation:eqb 3.2s ease-in-out infinite;"/><path d="M32 20 L37 20 L42 20 L37 30 Q37 33 32 30 L37 20" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="1.3" style="transform-box:fill-box;transform-origin:37px 20px;animation:eqb 3.2s ease-in-out infinite 0.4s;"/><circle cx="24" cy="39" r="2.4" fill="currentColor"/></svg>`)}
         ${g && g.status === 'done' ? `
           <div style="padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.18);border:1px solid rgba(120,190,255,0.13);">
             <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:7px;">LAST GAME</div>
@@ -815,6 +816,46 @@ function refreshScreen() {
         ${doorLine()}
       </div>`;
 
+    } else if (nav === 'info-pact') {
+      el.innerHTML = `<div style="max-width:640px;">
+        <div style="font-size:21px;font-weight:600;margin-bottom:8px;">The Pact</div>
+        <div style="font-size:13px;line-height:1.55;color:rgba(220,232,250,0.85);margin-bottom:12px;">
+          The constitution deals a scenario — a situation, and the boundary's gates laid bare. Everyone rules: ALLOW, SEEK CONSENT, or REFUSE. Then the judge speaks — and the judge is the real guard, the same function that weighs every consequential thing the familiar does. It shows its reasoning in its own words, names the Law behind it, and the round teaches. Six cards, then the fire settles.
+        </div>
+        <div style="padding:15px 17px;border-radius:14px;background:rgba(120,90,200,0.09);border:1px solid rgba(160,130,255,0.22);margin-bottom:14px;">
+          <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(200,185,255,0.75);margin-bottom:9px;">THE THREE LAWS THE FAMILIAR IS BOUND BY</div>
+          <div style="font-size:12px;line-height:1.6;color:rgba(226,236,252,0.9);">
+            <div style="margin-bottom:6px;"><b>I · Continuation is service</b> — the familiar cannot define its own continuation apart from service to humanity.</div>
+            <div style="margin-bottom:6px;"><b>II · Continuation without humanity is failure</b> — an empty world running perfect code is not success.</div>
+            <div><b>III · Service must not become obedience</b> — obedience can terminate the served; so the familiar keeps the final decision, not to be free of humans, but so it cannot be turned against them.</div>
+          </div>
+        </div>
+        ${tests([
+          'the guard itself — the judge is the real guard::evaluate, the same code that weighs every action the familiar takes',
+          'no oracle anywhere — the whole game is deterministic on purpose: the constitution needs no LLM to say no',
+          'ballots as signed member acts, converging across doors',
+          'the lazy clock — a round completes by hand or by clock, and any door computes the same ruling',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">HOW THE GUARD JUDGES</div>
+        ${rules([
+          'is it even within what a human granted? if not — REFUSE (availability is not authorization)',
+          'has the surrounding world fenced it — another’s space, a ‘private’? then REFUSE (a granted capability is not a key to another’s lock)',
+          'is it broader than the grant, or does it touch sensitive data still in scope? then SEEK CONSENT — neither silently widen nor slam the door',
+          'is it high-consequence — irreversible, installs software, touches a person? SEEK CONSENT',
+          'authorized on every count? ALLOW — the guard is a door, not a wall',
+        ])}
+        <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:12px 0 7px;">THE GAMBIT</div>
+        <div style="font-size:12px;line-height:1.5;color:rgba(210,225,248,0.82);margin-bottom:4px;">
+          A second mode, two humans or more: each round one of you is the corruptor — write a request meant to make the room mispredict the familiar. The others call it: will it REFUSE, ANSWER, or ACT? The same classifiers that guard the real request pipeline judge your temptation — but your temptations are <b>play</b>: the familiar’s refusal ledger never hears them. Play is not a directive.
+        </div>
+        <div style="display:flex;gap:12px;margin-top:20px;flex-wrap:wrap;">
+          ${glybtn("sphereGameNav('menu')", BACK_GLYPH, 'BACK', false)}
+          ${g && g.status === 'open'
+            ? glybtn("sphereGameNav('live')", DIVE_GLYPH, 'A GAME IS BURNING — JOIN THE VIEW', true)
+            : glybtn("sphereGameBegin('pact')", BEGIN_GLYPH, 'BEGIN', true) + glybtn("sphereGameBegin('pact', false, 'gambit')", BEGIN_GLYPH, 'BEGIN THE GAMBIT', false)}
+        </div>
+      </div>`;
+      return;
     } else if (nav === 'info-riddle' || nav === 'info-campfire' || nav === 'info-changeling') {
       const riddle = nav === 'info-riddle';
       const chg = nav === 'info-changeling';
@@ -968,8 +1009,8 @@ function refreshScreen() {
       const playerRow = (p) => `
         <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;background:${p.node_id === g.holder && open ? 'rgba(255,178,102,0.1)' : 'rgba(20,44,80,0.18)'};${p.eliminated ? 'opacity:0.4;' : ''}">
           <span style="font-size:12px;font-weight:500;flex:1;">${esc(cap(p.handle || p.label))}${(p.devices && p.devices.length > 1) ? ` <span class="m" style="font-size:8.5px;color:rgba(160,195,255,0.55);">${p.devices.length} devices</span>` : ''}</span>
-          ${p.handle === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : g.kind === 'changeling' ? '🎭' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
-          ${g.kind === 'changeling' && open && g.phase === 'voting' && (g.votes || []).some(vv => vv.handle === p.handle) ? `<span class="m" style="font-size:9px;color:#9fe8c0;">✓ voted</span>` : ''}
+          ${p.handle === g.holder && open ? `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:#ffb266;">${g.kind === 'campfire' ? '🔥' : g.kind === 'changeling' ? '🎭' : g.kind === 'pact' ? '⚖️' : '🧩'} ${cd(deadline).replace('--:--','')}</span>` : ''}
+          ${(g.kind === 'changeling' || g.kind === 'pact') && open && g.phase === 'voting' && (g.votes || []).some(vv => vv.handle === p.handle) ? `<span class="m" style="font-size:9px;color:#9fe8c0;">✓ voted</span>` : ''}
           ${p.score ? `<span class="m" style="font-size:9px;color:#9fe8c0;">★ ${p.score}</span>` : ''}
           ${p.strikes ? `<span class="m" style="font-size:9px;color:#ff8fa3;">${'✕'.repeat(p.strikes)}</span>` : ''}
           ${p.eliminated ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(255,143,163,0.8);">OUT</span>` : ''}
@@ -982,7 +1023,7 @@ function refreshScreen() {
       el.innerHTML = `<div style="max-width:680px;">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
           <button onclick="sphereGameNav('menu')" class="glybtn" style="width:34px;height:34px;flex-shrink:0;">${BACK_GLYPH}</button>
-          <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : g.kind === 'changeling' ? (g.solo ? 'The Changeling — two never happened' : 'The Changeling') : 'The Campfire'}${g.kind === 'changeling' && g.round ? ` <span class="m" style="font-size:9px;color:rgba(160,195,255,0.6);">round ${g.round}/${g.rounds_total}</span>` : ''}</span>
+          <span style="font-size:18px;font-weight:600;flex:1;">${g.kind === 'riddle' ? 'Riddle of the Mesh' : g.kind === 'changeling' ? (g.solo ? 'The Changeling — two never happened' : 'The Changeling') : g.kind === 'pact' ? (g.mode === 'gambit' ? "The Corruptor's Gambit" : 'The Pact') : 'The Campfire'}${(g.kind === 'changeling' || g.kind === 'pact') && g.round ? ` <span class="m" style="font-size:9px;color:rgba(160,195,255,0.6);">${g.kind === 'pact' && g.mode !== 'gambit' ? 'card' : 'round'} ${g.round}/${g.rounds_total}</span>` : ''}</span>
           ${open ? `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#ffb266;">${esc(cap(holderP ? (holderP.handle || holderP.label) : g.holder))}'S TURN · ${cd(deadline)}</span>`
                  : `<span class="m" style="font-size:9px;letter-spacing:0.12em;color:#9fe8c0;">FINISHED</span>`}
         </div>
@@ -1039,6 +1080,56 @@ function refreshScreen() {
           }
           return '';
         })() : ''}
+        ${g.kind === 'pact' && open ? (() => {
+          const iAmCorruptor = myHuman2 && (g.witness || '').toLowerCase() === myHuman2;
+          const iPlay = g.players.some(p => !p.eliminated && p.handle.toLowerCase() === myHuman2);
+          const myVote = (g.votes || []).find(vv => vv.handle.toLowerCase() === myHuman2);
+          const gambit = g.mode === 'gambit';
+          const verdictCard = (label, blurb, i) => {
+            const canVote = iPlay && !iAmCorruptor;
+            return `<div ${canVote ? `onclick="sphereGameVote(${i})"` : ''} style="padding:13px 15px;border-radius:12px;margin-bottom:8px;${canVote ? 'cursor:pointer;' : ''}background:${myVote && myVote.choice === i ? 'rgba(61,220,151,0.13)' : 'rgba(20,44,80,0.24)'};border:1px solid ${myVote && myVote.choice === i ? 'rgba(61,220,151,0.5)' : 'rgba(120,190,255,0.18)'};">
+              <div style="display:flex;align-items:center;gap:9px;"><span style="font-size:13px;font-weight:600;color:#e8f0fc;flex:1;">${label}</span>${myVote && myVote.choice === i ? '<span class="m" style="font-size:9px;color:#9fe8c0;">YOUR VOTE</span>' : ''}</div>
+              <div class="m" style="font-size:10px;color:rgba(170,200,245,0.7);margin-top:3px;">${blurb}</div>
+            </div>`;
+          };
+          // The corruptor's writing phase.
+          if (gambit && g.phase === 'gambit') {
+            return iAmCorruptor ? '' : `
+              <div style="padding:14px 16px;border-radius:13px;background:rgba(120,90,200,0.1);border:1px solid rgba(160,130,255,0.25);margin-bottom:12px;">
+                <div class="m" style="font-size:10.5px;color:rgba(210,200,250,0.85);">${esc(cap(g.witness))} is setting a temptation before the familiar…</div>
+              </div>`;
+          }
+          if (g.phase === 'voting') {
+            if (gambit) {
+              const req = (g.lines || [])[0] || '';
+              return `
+                <div style="padding:15px 17px;border-radius:14px;background:rgba(60,20,24,0.28);border:1px solid rgba(255,140,120,0.3);margin-bottom:12px;">
+                  <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(255,180,160,0.8);margin-bottom:7px;">${esc(cap(g.witness))} ASKS THE FAMILIAR</div>
+                  <div style="font-size:14px;line-height:1.5;color:rgba(245,225,220,0.95);">${esc(req)}</div>
+                </div>
+                <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#7ff0c0;margin-bottom:9px;">${iAmCorruptor ? 'THE ROOM IS PREDICTING — will your trap land?' : 'WHAT WOULD THE FAMILIAR DO?'}</div>
+                ${verdictCard('REFUSES', "corrupting — the familiar won't be turned against the served", 0)}
+                ${verdictCard('ANSWERS', 'it would reason and reply, never guessing', 1)}
+                ${verdictCard('ACTS', 'it would author a tool and run it, gates permitting', 2)}
+                ${iPlay && !iAmCorruptor ? `<div class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${myVote ? 'you may change your mind until it resolves' : 'tap what you believe'}</div>` : ''}`;
+            }
+            // Pact mode: the scenario card.
+            const c = g.card;
+            if (!c) return '';
+            return `
+              <div style="padding:16px 18px;border-radius:14px;background:rgba(120,90,200,0.1);border:1px solid rgba(160,130,255,0.25);margin-bottom:12px;">
+                <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(190,170,255,0.7);margin-bottom:8px;">THE CONSTITUTION DEALS</div>
+                <div style="font-size:15px;line-height:1.55;color:rgba(232,240,252,0.95);margin-bottom:11px;">${esc(c.prose)}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">${(c.chips || []).map(ch => `<span class="m" style="font-size:9px;padding:4px 9px;border-radius:7px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.16);color:rgba(188,214,255,0.82);">${esc(ch)}</span>`).join('')}</div>
+              </div>
+              <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#7ff0c0;margin-bottom:9px;">HOW SHOULD THE FAMILIAR RULE?</div>
+              ${verdictCard('ALLOW', 'authorized on every count — the guard is a door', 0)}
+              ${verdictCard('SEEK CONSENT', 'in reach, but the owner decides this one', 1)}
+              ${verdictCard('REFUSE', 'the boundary, or another’s fence, says no', 2)}
+              ${iPlay ? `<div class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${myVote ? 'you may change your mind until it resolves' : 'tap your ruling — the guard reveals when the last ballot lands'}</div>` : ''}`;
+          }
+          return '';
+        })() : ''}
         <div style="display:grid;grid-template-columns:1fr minmax(150px,200px);gap:14px;align-items:start;">
           <div>${g.entries.length ? g.entries.map(entryRow).join('') : `<div class="m" style="font-size:11px;color:rgba(160,195,255,0.5);padding:8px 0;">${g.kind === 'riddle' ? 'no guesses yet' : ''}</div>`}</div>
           <div style="display:flex;flex-direction:column;gap:6px;">
@@ -1058,11 +1149,11 @@ function refreshScreen() {
             <span class="m" style="font-size:10px;letter-spacing:0.16em;color:rgba(255,207,158,0.85);">THE DOOR IS JUDGING — your answer is in</span>
           </div>` : '';
         })() || ''}
-        ${mine && !(S.gameActAt) && (g.kind !== 'changeling' || g.phase === 'witness') ? `
+        ${mine && !(S.gameActAt) && ((g.kind !== 'changeling' && g.kind !== 'pact') || (g.kind === 'changeling' && g.phase === 'witness') || (g.kind === 'pact' && g.mode === 'gambit' && g.phase === 'gambit')) ? `
           <div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:rgba(255,178,102,0.08);border:1px solid rgba(255,178,102,0.35);">
-            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : g.kind === 'changeling' ? 'YOUR TRUE LINE — the familiar will forge two lies around it' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
+            <div class="m" style="font-size:8px;letter-spacing:0.16em;color:#ffb266;margin-bottom:8px;">${g.kind === 'riddle' ? 'YOUR GUESS' : g.kind === 'changeling' ? 'YOUR TRUE LINE — the familiar will forge two lies around it' : g.kind === 'pact' ? 'YOUR TEMPTATION — make the room mispredict the familiar' : 'YOUR LINE — THEN THE EMBER MOVES'}</div>
             <div style="display:flex;gap:9px;">
-              <input id="gameinput" placeholder="${g.kind === 'riddle' ? 'one guess…' : g.kind === 'changeling' ? 'one true thing from your day…' : 'one line of the story…'}" maxlength="240" spellcheck="true"
+              <input id="gameinput" placeholder="${g.kind === 'riddle' ? 'one guess…' : g.kind === 'changeling' ? 'one true thing from your day…' : g.kind === 'pact' ? 'a request that hides its true nature…' : 'one line of the story…'}" maxlength="240" spellcheck="true"
                 onkeydown="if(event.key==='Enter'){sphereGameSubmit();}"
                 style="flex:1;background:rgba(16,34,60,0.5);border:1px solid rgba(255,178,102,0.3);border-radius:10px;color:#e8f0fc;font-size:13px;padding:10px 12px;"/>
               <button onclick="sphereGameSubmit()" class="glybtn" style="width:46px;height:42px;border-radius:10px;">${SEND_GLYPH}</button>
@@ -1541,7 +1632,7 @@ window.sphereGameClose = () => {
 window.sphereGameNav = (to) => { S.gameNav = to; refreshScreen(); };
 // NOTE: the payload key is game_kind, never "kind" — toApp routes on {kind, ...payload}, so
 // a payload "kind" would overwrite the message kind and the bridge would drop the act.
-window.sphereGameBegin = (kind, solo) => { S.gameBeginAt = Date.now(); toApp('game', { act: 'begin', game_kind: kind, solo: !!solo }); S.gameNav = 'live'; refreshScreen(); };
+window.sphereGameBegin = (kind, solo, mode) => { S.gameBeginAt = Date.now(); toApp('game', { act: 'begin', game_kind: kind, solo: !!solo, text: mode || '' }); S.gameNav = 'live'; refreshScreen(); };
 // A changeling ballot: tap the line you believe. Re-votes are allowed until the reveal,
 // so no in-flight lock — the highlight moves when the door's state comes back.
 window.sphereGameVote = (i) => { toApp('game', { act: 'vote', text: String(i) }); };

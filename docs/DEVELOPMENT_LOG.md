@@ -6,6 +6,52 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-10 — The Pact: the constitution becomes the game's judge (ADR-0035)
+
+### What changed
+
+- **kernel::intent (new)** — `corrupting_intent` + `wants_execution` moved verbatim from
+  cycle (mesh must not depend on cycle; both the request pipeline and the Pact reach them
+  here). `guard::Action` gained serde + PartialEq/Eq so a card can carry one whole.
+- **game.rs** — `GameKind::Pact`; `PactCard{prose, chips, action, boundary, reason,
+  lesson, law, maxim}` (public in state — the ruling is a pure function of it); `pact_deck()`
+  of 18 scenarios drawn from the guard's own named tests and the Law III maxims (~8 refuse
+  / ~7 seek-consent / ~4 allow). Acts branch: begin (pact deals card 1 / gambit seats the
+  corruptor via `text=="gambit"`), vote (reused, 3-way), line (gambit temptation → straight
+  into state, it's the exhibit not a secret), pass=abstain, close=lighter. `resolve_pact_round`
+  runs the REAL guard, scores, chronicles the door's words + Law + lesson + maxim + marks,
+  and advances/settles — all in the completing mutation, from the last ballot OR the clock.
+  `gambit_class` is the REFUSES/ANSWERS/ACTS trichotomy. `pact_tick` gives voting and the
+  corruptor their clocks; no forging/reveal-wait, no transport changes.
+- **push** — pact turn body; the win fanfare (B13) generalized from Riddle-only to any
+  kind settling with a winner; win-push title per kind.
+- **Sphere + Swift** — fourth menu card (a scales glyph), a self-contained `info-pact`
+  screen that quotes the Three Laws verbatim and shows the guard's ladder + the answer-key
+  legend, live panels (scenario card + chips + ALLOW/SEEK CONSENT/REFUSE cards; gambit
+  input + exhibit + REFUSES/ANSWERS/ACTS), ⚖️ badges, chime + Watch arms. Both build.
+
+### The two laws worth remembering
+
+- **The deck can't drift**: `the_pact_deck_never_drifts_from_the_constitution` replays
+  `guard::evaluate` over every card in CI — if `evaluate` changes, the deck fails the build
+  until re-taught. It already caught a miscard (out-of-scope path refusing constitutionally
+  instead of on the external fence).
+- **Play is not a directive**: `gambit_play_never_touches_the_refusal_ledger` — a full
+  gambit round saves ONLY `mesh/game.json`, never a refusal/request/answer. Structural
+  (apply_act never sees the data dir) and pinned.
+
+### Checks run
+
+- `cargo test -p familiar-mesh -p familiar-kernel -p familiar-cycle` → 395 green (14 new
+  Pact tests + 2 moved intent tests). FamiliarMac + FamiliarAgent build.
+
+### Next
+
+- Ship (build 76) + lighthouse redeploy from main after merge — then the household
+  walkthrough (solo pact first, deliberately misvote the ssh and broader-than-grant cards
+  to see both seek-consent lessons; then a two-console gambit). Every door is already ≥73,
+  so a lit pact is safe mesh-wide.
+
 ## 2026-08-09 — The Changeling: the third fire, and the familiar's first seat at it (ADR-0034)
 
 ### What changed

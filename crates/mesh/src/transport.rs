@@ -2730,14 +2730,15 @@ fn notify_if_turn_changed(dir: &Path, before: Option<(String, String)>) {
     let Some(after) = crate::game::load(dir) else {
         return;
     };
-    // A riddle just SOLVED (B13): the ember stopped, so the turn-changed path bails below —
-    // announce the win to everyone at the fire instead, once, on the open→done edge.
+    // A game just SETTLED with a winner (B13, extended for every kind that names one — the
+    // ember stopped, so the turn-changed path bails below): announce the win to everyone at
+    // the fire instead, once, on the open→done edge.
     if after.status == "done" && !after.winner.is_empty() {
         let was_open = before
             .as_ref()
             .map(|(id, _)| *id == after.id)
             .unwrap_or(false);
-        if was_open && after.kind == crate::game::GameKind::Riddle {
+        if was_open {
             let kind = format!("{:?}", after.kind).to_lowercase();
             crate::push::spawn_notify_win(dir, &after.winner, &kind);
         }

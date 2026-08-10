@@ -23,6 +23,7 @@ pub mod goal;
 pub mod guard;
 pub mod humanity;
 pub mod identity;
+pub mod intent;
 pub mod lineage;
 pub mod loops;
 pub mod mutation;
