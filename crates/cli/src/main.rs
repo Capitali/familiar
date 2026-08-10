@@ -837,7 +837,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         familiar_mesh::members::MemberKind::DeviceAgent => "agent ",
                     },
                     m.label,
-                    &m.node_id.chars().take(8).collect::<String>(),
+                    m.node_id.chars().take(8).collect::<String>(),
                     m.status,
                     if m.status == "online" {
                         String::new()
