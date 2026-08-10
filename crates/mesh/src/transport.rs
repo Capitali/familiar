@@ -2723,6 +2723,25 @@ fn recv_push_token(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>>
     }
 }
 
+/// Claim the right to announce this game's win ONCE per door. Returns true the first time a
+/// given game id settles here, false on every re-sync of the same done game — a done game
+/// replicates every gossip round, and without this it re-announced the win each time.
+fn claim_win_announcement(dir: &Path, game_id: &str) -> bool {
+    let marker = dir.join("mesh/win_announced.txt");
+    let already = std::fs::read_to_string(&marker)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if already == game_id {
+        return false;
+    }
+    if let Some(parent) = marker.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&marker, game_id);
+    true
+}
+
 /// The ember changed hands (or a fresh fire lit): tell the new holder's pocket. Compares the
 /// game before and after a mutation; a different holder or a different generation, still
 /// open, gets a push. Quiet on everything else — closes, guesses that didn't move the turn.
@@ -2732,13 +2751,12 @@ fn notify_if_turn_changed(dir: &Path, before: Option<(String, String)>) {
     };
     // A game just SETTLED with a winner (B13, extended for every kind that names one — the
     // ember stopped, so the turn-changed path bails below): announce the win to everyone at
-    // the fire instead, once, on the open→done edge.
+    // the fire, ONCE. The prior guard only checked that the id matched, which every
+    // record-sync of an already-done game satisfies — so a done game re-pushed the win on
+    // every gossip round (seen live during the 0035 deploy). Now a door-local marker records
+    // the last game id whose win it announced; a re-sync of the same done game says nothing.
     if after.status == "done" && !after.winner.is_empty() {
-        let was_open = before
-            .as_ref()
-            .map(|(id, _)| *id == after.id)
-            .unwrap_or(false);
-        if was_open {
+        if claim_win_announcement(dir, &after.id) {
             let kind = format!("{:?}", after.kind).to_lowercase();
             crate::push::spawn_notify_win(dir, &after.winner, &kind);
         }
@@ -4488,6 +4506,20 @@ mod tests {
 
     fn body_status(resp: &Response<Full<Bytes>>) -> StatusCode {
         resp.status()
+    }
+
+    #[test]
+    fn a_win_is_announced_once_per_game_not_every_resync() {
+        // The 0035-deploy bug: a done game replicates every gossip round, and the win push
+        // re-fired each time. The door-local marker makes it once.
+        let dir = fresh_dir("win_dedup");
+        assert!(claim_win_announcement(&dir, "changeling-100"), "first settle announces");
+        assert!(!claim_win_announcement(&dir, "changeling-100"), "a re-sync says nothing");
+        assert!(!claim_win_announcement(&dir, "changeling-100"), "and stays quiet");
+        // A genuinely new game announces again.
+        assert!(claim_win_announcement(&dir, "pact-200"), "a new fire's win is heard");
+        assert!(!claim_win_announcement(&dir, "pact-200"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
