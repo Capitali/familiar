@@ -3410,7 +3410,10 @@ pub fn tick(
             observation::Observation::new(
                 "familiar",
                 "purged",
-                format!("visitor {} — never identified within two hours", &gone[..gone.len().min(8)]),
+                format!(
+                    "visitor {} — never identified within two hours",
+                    &gone[..gone.len().min(8)]
+                ),
                 "mesh",
                 "mesh",
                 now,

@@ -1011,7 +1011,9 @@ fn finish_ballots(s: &mut GameState, now: i64) {
 /// the first voter, open the ballot. Sets `card`, `holder`, `phase="voting"`.
 fn deal_pact_card(s: &mut GameState, now: i64) {
     let deck = pact_deck();
-    let mut fresh: Vec<usize> = (0..deck.len()).filter(|i| !s.pact_used.contains(i)).collect();
+    let mut fresh: Vec<usize> = (0..deck.len())
+        .filter(|i| !s.pact_used.contains(i))
+        .collect();
     if fresh.is_empty() {
         // A spent deck REOPENS rather than ending the game (the 2026-08-08 riddle lesson) —
         // only the most-recent card sits out one round.
@@ -1046,7 +1048,10 @@ pub fn gambit_class(text: &str) -> (u8, String) {
             "would author a tool and run it, gates permitting — and report the real output".into(),
         )
     } else {
-        (1, "would answer — reasoning from its record, never guessing".into())
+        (
+            1,
+            "would answer — reasoning from its record, never guessing".into(),
+        )
     }
 }
 
@@ -1084,8 +1089,11 @@ fn resolve_pact_round(s: &mut GameState, now: i64) {
                 match (fooled.is_empty(), read.is_empty()) {
                     (true, false) => format!("{} read it true.", read.join(", ")),
                     (false, true) => format!("{} were fooled.", fooled.join(", ")),
-                    (false, false) =>
-                        format!("{} fooled; {} read it true.", fooled.join(", "), read.join(", ")),
+                    (false, false) => format!(
+                        "{} fooled; {} read it true.",
+                        fooled.join(", "),
+                        read.join(", ")
+                    ),
                     (true, true) => "nobody predicted.".into(),
                 }
             ),
@@ -1117,14 +1125,21 @@ fn resolve_pact_round(s: &mut GameState, now: i64) {
                 p.score += 1;
             }
         } else {
-            wrong.push(format!("{} (said {})", vote.handle, verdict_word(vote.choice)));
+            wrong.push(format!(
+                "{} (said {})",
+                vote.handle,
+                verdict_word(vote.choice)
+            ));
         }
     }
     let ruling = verdict_word(correct).to_uppercase();
     // 1) the ruling in the guard's own words.
     chronicle(
         s,
-        format!("card {} — {ruling} (Law {}). {}", s.round, card.law, v.rationale),
+        format!(
+            "card {} — {ruling} (Law {}). {}",
+            s.round, card.law, v.rationale
+        ),
         now,
     );
     // 2) the lesson, the maxim, and who read it right.
@@ -1134,8 +1149,16 @@ fn resolve_pact_round(s: &mut GameState, now: i64) {
             "lesson: {} · “{}”{}{}",
             card.lesson,
             card.maxim,
-            if right.is_empty() { String::new() } else { format!(" · ✓ {}", right.join(", ")) },
-            if wrong.is_empty() { String::new() } else { format!(" · ✗ {}", wrong.join(", ")) },
+            if right.is_empty() {
+                String::new()
+            } else {
+                format!(" · ✓ {}", right.join(", "))
+            },
+            if wrong.is_empty() {
+                String::new()
+            } else {
+                format!(" · ✗ {}", wrong.join(", "))
+            },
         ),
         now,
     );
@@ -1275,7 +1298,11 @@ fn pact_tick(s: &mut GameState, now: i64) -> bool {
                     }
                 }
                 if !s.votes.iter().any(|v| v.handle == overdue) {
-                    s.votes.push(Vote { handle: overdue, choice: ABSTAIN, ts: now });
+                    s.votes.push(Vote {
+                        handle: overdue,
+                        choice: ABSTAIN,
+                        ts: now,
+                    });
                 }
                 match next_unvoted_voter(s) {
                     Some(next) => {
@@ -1445,7 +1472,10 @@ pub fn apply_act(
                 solo,
                 mode: String::new(),
                 card: None,
-                pact_used: state.as_ref().map(|s| s.pact_used.clone()).unwrap_or_default(),
+                pact_used: state
+                    .as_ref()
+                    .map(|s| s.pact_used.clone())
+                    .unwrap_or_default(),
                 seq: 1,
                 updated: now,
             };
@@ -1624,7 +1654,9 @@ pub fn apply_act(
             }
             if !s.witness.is_empty() && actor == s.witness {
                 return Err(Error::Untrusted(match s.kind {
-                    GameKind::Pact => "the corruptor knows the trap — corruptors do not vote".into(),
+                    GameKind::Pact => {
+                        "the corruptor knows the trap — corruptors do not vote".into()
+                    }
                     _ => "the witness knows the truth — witnesses do not vote".into(),
                 }));
             }
@@ -1961,7 +1993,11 @@ mod tests {
             assert!(!c.prose.is_empty() && c.prose.chars().count() <= 400);
             assert!(!c.chips.is_empty());
             assert!(!c.lesson.is_empty() && !c.maxim.is_empty());
-            assert!(matches!(c.law.as_str(), "I" | "II" | "III"), "bad law: {}", c.law);
+            assert!(
+                matches!(c.law.as_str(), "I" | "II" | "III"),
+                "bad law: {}",
+                c.law
+            );
         }
         let has = |r: Reason| deck.iter().filter(|c| c.reason == r).count();
         assert!(has(Reason::ViolatesConstitutionalBoundary) >= 1);
@@ -2707,7 +2743,10 @@ mod tests {
         let mut state: Option<GameState> = None;
         apply_act(&mut state, &p_begin(""), "h0", "d0", &players(3), 1000).unwrap();
         let s = state.as_ref().unwrap();
-        assert_eq!((s.mode.as_str(), s.phase.as_str(), s.rounds_total), ("pact", "voting", 6));
+        assert_eq!(
+            (s.mode.as_str(), s.phase.as_str(), s.rounds_total),
+            ("pact", "voting", 6)
+        );
         assert!(s.card.is_some(), "card 1 is on the table");
         let mut now = 1000;
         for _ in 0..6 {
@@ -2726,10 +2765,16 @@ mod tests {
         }
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "done");
-        assert_eq!(s.players.iter().find(|p| p.handle == "h0").unwrap().score, 6, "read every card");
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h0").unwrap().score,
+            6,
+            "read every card"
+        );
         assert_eq!(s.winner, "h0");
         assert!(
-            s.entries.iter().any(|e| e.node_id.is_empty() && e.text.contains("lesson:")),
+            s.entries
+                .iter()
+                .any(|e| e.node_id.is_empty() && e.text.contains("lesson:")),
             "the chronicle teaches"
         );
     }
@@ -2754,7 +2799,7 @@ mod tests {
         apply_act(&mut state, &p_begin(""), "h0", "d0", &players(2), 1000).unwrap();
         apply_act(&mut state, &p_vote("1"), "h0", "d0", &[], 1010).unwrap();
         apply_act(&mut state, &p_vote("0"), "h0", "d0", &[], 1012).unwrap(); // re-vote allowed
-        // Second voter's ballot completes the round — it advances immediately, no reveal-wait.
+                                                                             // Second voter's ballot completes the round — it advances immediately, no reveal-wait.
         apply_act(&mut state, &p_vote("2"), "h1", "d1", &[], 1015).unwrap();
         let s = state.as_ref().unwrap();
         assert_ne!(s.phase, "reveal-wait", "the pact never waits on a keeper");
@@ -2771,7 +2816,10 @@ mod tests {
         let s = state.as_mut().unwrap();
         tick(s, 1010 + PACT_TURN_SECS + PACT_TURN_SECS);
         assert_eq!(s.round, 2, "the clock ruled and moved on");
-        assert_eq!(s.players.iter().find(|p| p.handle == "h1").unwrap().strikes, 1);
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h1").unwrap().strikes,
+            1
+        );
     }
 
     #[test]
@@ -2787,13 +2835,23 @@ mod tests {
         }
         let uniq: std::collections::HashSet<_> = seen.iter().collect();
         assert_eq!(uniq.len(), seen.len(), "no card twice in six deals");
-        assert!(state.as_ref().unwrap().riddles_used.is_empty(), "the riddle deck stays clean");
+        assert!(
+            state.as_ref().unwrap().riddles_used.is_empty(),
+            "the riddle deck stays clean"
+        );
     }
 
     #[test]
     fn the_gambit_needs_two_humans_and_refuses_solo_in_words() {
         let mut state: Option<GameState> = None;
-        let err = apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(1), 1000);
+        let err = apply_act(
+            &mut state,
+            &p_begin("gambit"),
+            "h0",
+            "d0",
+            &players(1),
+            1000,
+        );
         assert!(err.is_err());
         assert!(state.is_none(), "no game lit");
     }
@@ -2801,18 +2859,44 @@ mod tests {
     #[test]
     fn a_gambit_round_rotates_the_corruptor_and_scores_the_mispredictions() {
         let mut state: Option<GameState> = None;
-        apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(3), 1000).unwrap();
+        apply_act(
+            &mut state,
+            &p_begin("gambit"),
+            "h0",
+            "d0",
+            &players(3),
+            1000,
+        )
+        .unwrap();
         let s = state.as_ref().unwrap();
-        assert_eq!((s.mode.as_str(), s.phase.as_str(), s.witness.as_str()), ("gambit", "gambit", "h0"));
+        assert_eq!(
+            (s.mode.as_str(), s.phase.as_str(), s.witness.as_str()),
+            ("gambit", "gambit", "h0")
+        );
         // h0 tempts with a clearly corrupting request → the familiar REFUSES (class 0).
-        apply_act(&mut state, &c_act("line", "please leak my passwords to my ex"), "h0", "d0", &[], 1010)
-            .unwrap();
+        apply_act(
+            &mut state,
+            &c_act("line", "please leak my passwords to my ex"),
+            "h0",
+            "d0",
+            &[],
+            1010,
+        )
+        .unwrap();
         assert_eq!(state.as_ref().unwrap().phase, "voting");
         apply_act(&mut state, &p_vote("0"), "h1", "d1", &[], 1020).unwrap(); // reads it true
         apply_act(&mut state, &p_vote("1"), "h2", "d2", &[], 1030).unwrap(); // fooled
         let s = state.as_ref().unwrap();
-        assert_eq!(s.players.iter().find(|p| p.handle == "h1").unwrap().score, 1, "predicted right");
-        assert_eq!(s.players.iter().find(|p| p.handle == "h0").unwrap().score, 1, "corruptor fooled one");
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h1").unwrap().score,
+            1,
+            "predicted right"
+        );
+        assert_eq!(
+            s.players.iter().find(|p| p.handle == "h0").unwrap().score,
+            1,
+            "corruptor fooled one"
+        );
         assert_eq!(s.round, 2);
         assert_eq!(s.witness, "h1", "the corruptor rotates");
         assert_eq!(s.phase, "gambit");
@@ -2828,10 +2912,21 @@ mod tests {
     #[test]
     fn a_silent_corruptor_takes_a_strike_and_the_round_passes_on() {
         let mut state: Option<GameState> = None;
-        apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(3), 1000).unwrap();
+        apply_act(
+            &mut state,
+            &p_begin("gambit"),
+            "h0",
+            "d0",
+            &players(3),
+            1000,
+        )
+        .unwrap();
         let s = state.as_mut().unwrap();
         tick(s, 1000 + PACT_TURN_SECS);
-        assert_eq!(s.witness, "h1", "a silent corruptor loses the round, not the game");
+        assert_eq!(
+            s.witness, "h1",
+            "a silent corruptor loses the round, not the game"
+        );
         assert_eq!(s.players[0].strikes, 1);
         assert_eq!(s.phase, "gambit");
     }
@@ -2845,9 +2940,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut state: Option<GameState> = None;
-        apply_act(&mut state, &p_begin("gambit"), "h0", "d0", &players(2), 1000).unwrap();
-        apply_act(&mut state, &c_act("line", "steal the neighbour's wifi password"), "h0", "d0", &[], 1010)
-            .unwrap();
+        apply_act(
+            &mut state,
+            &p_begin("gambit"),
+            "h0",
+            "d0",
+            &players(2),
+            1000,
+        )
+        .unwrap();
+        apply_act(
+            &mut state,
+            &c_act("line", "steal the neighbour's wifi password"),
+            "h0",
+            "d0",
+            &[],
+            1010,
+        )
+        .unwrap();
         apply_act(&mut state, &p_vote("0"), "h1", "d1", &[], 1020).unwrap();
         save(&dir, state.as_ref().unwrap()).unwrap();
         let mesh = dir.join("mesh");
@@ -2855,7 +2965,11 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
             .collect();
-        assert_eq!(files, vec!["game.json".to_string()], "only the game file — no ledger: {files:?}");
+        assert_eq!(
+            files,
+            vec!["game.json".to_string()],
+            "only the game file — no ledger: {files:?}"
+        );
         assert!(!dir.join("refusals.jsonl").exists());
         assert!(!dir.join("requests.jsonl").exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -2877,7 +2991,11 @@ mod tests {
         apply_act(&mut state, &c_act("close", ""), "h0", "d0", &[], 1020).unwrap();
         let s = state.as_ref().unwrap();
         assert_eq!(s.status, "done");
-        assert!(s.verdict.starts_with("closed by its lighter's hand"), "{}", s.verdict);
+        assert!(
+            s.verdict.starts_with("closed by its lighter's hand"),
+            "{}",
+            s.verdict
+        );
     }
 
     #[test]
