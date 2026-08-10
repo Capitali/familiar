@@ -13,6 +13,19 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The familiar tests its own code before deploying it, and retires what stops working
+  (ADR-0036).** A cultivated tool that pinged fictional IPs and reported "no reachable
+  devices" was kept in the durable library and re-run indefinitely, poisoning the muse with
+  a fabricated network crisis. Now a drafted tool must earn deployment: it is trialed
+  through the same gates a real run faces and must genuinely succeed — a deterministic
+  null-result floor (clean-but-empty output like "no devices found" is failure, not health)
+  plus, when the LLM is open, a self-assessment where the familiar reads its own tool's
+  output and judges honestly whether it accomplished the goal. Nothing enters the library
+  until it works. And deployment is not tenure: a per-tick audit retires any sensor that
+  produces nothing useful three runs running (reversible — it heals if it produces signal
+  again), on the same windowed discipline as corruption trust. Readings from unhealthy or
+  since-retired sensors no longer reach the muse. *Validated by unit tests across kernel and
+  cycle, incl. a fake-adapter deploy-rejection and the autonomous retirement.*
 - **The Pact — the fourth mesh game, and the first to teach the Three Laws (ADR-0035).**
   The constitution deals a scenario card; everyone votes ALLOW / SEEK CONSENT / REFUSE; and
   the judge is the *real* `guard::evaluate` — the same function that weighs every

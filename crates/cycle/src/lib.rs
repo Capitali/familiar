@@ -294,6 +294,9 @@ fn infra_triple(action: &str, object: &str) -> bool {
         // (network theories → network tools → network observations → network theories).
         | "gathered" | "cultivated-from" | "cultivated-tool" | "theorizes"
         | "can_run" | "declined_to_run" | "regulated_presence"
+        // Tool self-correction (ADR-0036): a draft rejected before deploy, a deployed sensor
+        // retired by the audit — bookkeeping about the library, never a theory subject.
+        | "rejected-tool" | "retired-sensor"
         // Mesh lifecycle: the body joining, being admitted, vouching, welcoming, federating.
         // These are the mesh's plumbing too — musing over them fixates the familiar on its own
         // membership churn instead of the world it serves (B9).
@@ -688,10 +691,31 @@ fn maybe_theorize(
     // at; that content is exactly what a muse should theorize over. Freshest reading per
     // distinct sensor, a few sensors deep, each line bounded.
     let mut seen_sensors = std::collections::HashSet::new();
+    // Only readings from a currently-HEALTHY sensor, whose content is a genuine result, reach
+    // the muse (ADR-0036). A reading from a since-retired sensor (its tool now unhealthy or
+    // gone) is stale, and a null-result reading ("no devices found") is a fabricated non-signal
+    // — either would poison theories exactly as the network aggregator did. This is the source
+    // guard beneath the topic blocklist below.
+    let healthy_sensors: std::collections::HashSet<String> = tool::load(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.last_exit_ok)
+        .map(|t| t.name)
+        .collect();
     let readings: Vec<String> = obs
         .iter()
         .rev()
         .filter(|o| o.action == "gathered" && !o.context.trim().is_empty())
+        // The reading's producing sensor must still be healthy and present — a retired or
+        // deleted sensor's last reading is stale and must not resurface as current truth.
+        .filter(|o| {
+            o.object
+                .strip_prefix("sensor:")
+                .map(|name| healthy_sensors.contains(name))
+                .unwrap_or(false)
+        })
+        // …and the reading itself must be genuine signal, not a clean-but-null result.
+        .filter(|o| looks_unsuccessful(&o.context).is_none())
         // Connectivity readings are the loop's fuel: every cultivated sensor on this node is a
         // network diagnostic, so their `context` is pure reachability text, and feeding it back
         // is exactly what made the familiar theorize about nothing but the network (B9). Drop
@@ -1259,9 +1283,98 @@ fn persist_tool(dir: &Path, d: &DraftedTool, keywords: &[String], now: i64) -> i
         last_status: String::new(),
         origin: String::new(),
         origin_verified_at: 0,
+        null_streak: 0,
+        last_useful_at: 0,
     };
     tool::append(dir, &t)?;
     Ok(t)
+}
+
+/// The self-assessment ceiling over the deterministic validity floor (ADR-0036): when the
+/// LLM is open, the familiar reads its own tool's output and judges honestly whether it
+/// *genuinely accomplished the goal* — catching plausible-but-useless output the keyword
+/// floor can't (a greenhouse sensor that reports a fabricated reading, a calendar tool that
+/// invents an event). Returns whether the tool should deploy. **The floor is the ground,
+/// this is the ceiling**: with no LLM, or on refusal/rate-limit/unparseable, it returns
+/// true — the deterministic `looks_unsuccessful` check in the trial has already had its say,
+/// and the consult never *weakens* the floor, only tightens it.
+fn assess_result(dir: &Path, goal: &str, out: &str, allow_llm: bool) -> bool {
+    if !allow_llm || out.trim().is_empty() {
+        return allow_llm || !out.trim().is_empty(); // no LLM → floor already passed; empty out → fail
+    }
+    let prompt = format!(
+        "A tool was written to accomplish this goal: \"{goal}\".\nIt produced this output:\n\
+         ---\n{}\n---\nJudging ONLY from the output, did it GENUINELY accomplish the goal — \
+         real, useful signal, not a plausible-looking failure or a fabricated/empty result? \
+         Be honest; never invent signal that isn't there. Reply with exactly one word: YES or NO.",
+        out.chars().take(1500).collect::<String>()
+    );
+    match familiar_llm::consult(dir, &prompt) {
+        Ok(familiar_llm::Outcome::Response(r)) => {
+            let low = r.to_lowercase();
+            // Only a clear NO blocks deployment; anything else defers to the floor (which passed).
+            !(low.contains("\"no\"") || low.trim_start().starts_with("no") || low.contains(": no"))
+        }
+        // Refused / rate-limited / unparseable → the floor stands alone.
+        _ => true,
+    }
+}
+
+/// Record, visibly, that a drafted tool was tested and NOT deployed because it produced
+/// nothing useful — so the rejection is legible in the record (the muse ignores it: the
+/// triple is infra). ADR-0036.
+fn record_tool_rejected(dir: &Path, name: &str, run: &ToolRun, now: i64) -> io::Result<()> {
+    let why = run
+        .declined
+        .clone()
+        .or_else(|| run.broken.map(|s| s.to_string()))
+        .unwrap_or_else(|| run.status.clone());
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            "rejected-tool",
+            name.to_string(),
+            format!("tested before deploy and kept out of the library — {why} (ADR-0036)"),
+            "familiar",
+            now,
+            1.0,
+        ),
+    )?;
+    Ok(())
+}
+
+/// Test a freshly-drafted tool BEFORE it is deployed into the durable library (ADR-0036):
+/// write it to a transient script (never in the index), run it through the *same* review,
+/// boundary gates, sandbox, and validity floor a deployed tool faces (`execute_tool`), and
+/// return the outcome. The probe id is not in `tools.jsonl`, so `execute_tool`'s
+/// `record_use` is a harmless no-op — nothing is deployed or health-tracked yet. The caller
+/// deploys only if the trial genuinely succeeded. A test-run can never do what a deploy
+/// couldn't: it passes through every gate the real run would.
+fn trial_tool(dir: &Path, d: &DraftedTool, now: i64) -> io::Result<ToolRun> {
+    let ws = familiar_workspace();
+    fs::create_dir_all(&ws)?;
+    let path = ws.join(format!(".trial-{now}.sh"));
+    fs::write(&path, &d.script)?;
+    let probe = Tool {
+        id: format!("trial-{now}"), // NOT persisted — record_use will no-op on it
+        name: d.name.clone(),
+        purpose: d.purpose.clone(),
+        keywords: String::new(),
+        script_path: path.display().to_string(),
+        created_at: now,
+        uses: 0,
+        last_used: 0,
+        last_exit_ok: true,
+        last_status: String::new(),
+        origin: String::new(),
+        origin_verified_at: 0,
+        null_streak: 0,
+        last_useful_at: 0,
+    };
+    let run = execute_tool(dir, &probe, now);
+    let _ = fs::remove_file(&path);
+    run
 }
 
 /// Run a persisted tool to answer a request and turn its real output into an answer. The
@@ -1361,7 +1474,7 @@ fn execute_tool(dir: &Path, t: &Tool, now: i64) -> io::Result<ToolRun> {
     // forever while emitting garbage (the "ask" dead-end). Inspect the output too: a failure
     // signature (or a timeout / nonzero exit) marks the tool unhealthy, so `best_match` skips
     // it and the familiar re-authors a fresh one next time instead of repeating bad output.
-    let broken = output_looks_broken(&out);
+    let broken = looks_unsuccessful(&out);
     let healthy = run.exit_ok && !run.timed_out && broken.is_none();
     // A concise verdict on this run — persisted on the tool (shown in the Glass so a failure is
     // diagnosable, not just an orange badge) and carried in the answer's evidence line.
@@ -1409,13 +1522,19 @@ fn run_tool(
             "the pre-execution review (docs/boundaries.md)".to_string(),
         ));
     }
-    let (out, broken, status, confidence, uses) =
-        (r.out.as_str(), r.broken, r.status, r.confidence, r.uses);
+    Ok(answer_from_run(&t.name, &r, reused))
+}
+
+/// Frame a tool's run as a human answer — the body (the real output, or an honest note when
+/// it produced nothing), the confidence, and an evidence line. Shared by the reuse path
+/// ([`run_tool`]) and the deploy path, so a freshly-trialled tool's output is reported the
+/// same way without running it twice.
+fn answer_from_run(name: &str, r: &ToolRun, reused: bool) -> (String, Confidence, String) {
+    let (out, broken, status, uses) = (r.out.as_str(), r.broken, &r.status, r.uses);
     let body = if let Some(sig) = broken {
         format!(
-            "I ran the tool '{}', but its output looks wrong ({sig}) — I've retired it and \
-             will write a fresh one next time you ask.\n\n{out}",
-            t.name
+            "I drafted a tool for that, but it didn't produce a usable result ({sig}) — so I \
+             haven't kept it.\n\n{out}"
         )
     } else if out.is_empty() {
         "I ran it; it produced no output.".to_string()
@@ -1423,28 +1542,30 @@ fn run_tool(
         format!("I ran it. Here is the result:\n\n{out}")
     };
     let evidence = if reused {
-        format!(
-            "reused tool '{}' ({} uses) — no re-authoring; {status}",
-            t.name, uses
-        )
+        format!("reused tool '{name}' ({uses} uses) — no re-authoring; {status}")
     } else {
-        format!("authored and saved a new tool '{}'; {status}", t.name)
+        format!("authored, tested, and saved a new tool '{name}'; {status}")
     };
-    Ok((body, confidence, evidence))
+    (body, r.confidence, evidence)
 }
 
 /// Does a tool's stdout look like a failure even though it exited cleanly? Returns the
 /// signature that flagged it, or `None` if the output looks like a genuine result. Empty
 /// output counts (a "run and tell me" tool that prints nothing did not do its job); so do
-/// common shell error markers. Deliberately conservative — it only flags clear breakage, so a
-/// real result is never mistaken for one.
-fn output_looks_broken(out: &str) -> Option<&'static str> {
+/// common shell error markers **and** null-result markers — output that is clean but says,
+/// in substance, "I found nothing." The second class is what let `network_status_aggregator`
+/// (ADR-0036) pass: it exited 0 and printed "No reachable devices found," which no error
+/// marker catches. Both are "the tool did not succeed." Deliberately conservative and
+/// phrase-anchored — every needle is multiword, never a bare "empty"/"none", so a genuine
+/// reading (a temperature of none, a load of 0) is never mistaken for a failure.
+fn looks_unsuccessful(out: &str) -> Option<&'static str> {
     let o = out.trim();
     if o.is_empty() {
         return Some("no output");
     }
     let l = o.to_lowercase();
     [
+        // shell error markers — the tool broke
         "does not exist",
         "command not found",
         "no such file",
@@ -1457,6 +1578,18 @@ fn output_looks_broken(out: &str) -> Option<&'static str> {
         "invalid option",
         "unrecognized option",
         "illegal option",
+        // null-result markers — the tool ran clean but gathered nothing
+        "no reachable devices",
+        "no devices found",
+        "no hosts found",
+        "no hosts up",
+        "0 hosts up",
+        "not reachable",
+        "no results",
+        "no matching",
+        "none found",
+        "nothing found",
+        "no data",
     ]
     .into_iter()
     .find(|m| l.contains(m))
@@ -1610,10 +1743,24 @@ fn answer_requests(
                             String::new(),
                         )),
                         Some(drafted) => {
-                            let saved = persist_tool(dir, &drafted, &kw, now)?;
-                            let id = saved.id.clone();
-                            let (b, c, e) = run_tool(dir, &saved, now, false)?;
-                            Some((b, c, e, id))
+                            // Test before deploy (ADR-0036): trial the draft in a transient
+                            // script through the same gates, and keep it ONLY if it genuinely
+                            // worked — a fabricating tool never enters the library, and the
+                            // one trial run doubles as the human's answer (no second run).
+                            let trial = trial_tool(dir, &drafted, now)?;
+                            let deploy = trial.declined.is_none()
+                                && trial.healthy
+                                && assess_result(dir, &r.text, &trial.out, allow_llm);
+                            if deploy {
+                                let saved = persist_tool(dir, &drafted, &kw, now)?;
+                                let _ = tool::record_use(dir, &saved.id, now, true, &trial.status);
+                                let (b, c, e) = answer_from_run(&saved.name, &trial, false);
+                                Some((b, c, e, saved.id))
+                            } else {
+                                record_tool_rejected(dir, &drafted.name, &trial, now)?;
+                                let (b, c, e) = answer_from_run(&drafted.name, &trial, false);
+                                Some((b, c, e, String::new()))
+                            }
                         }
                         None => None, // authoring failed — fall through to read-only analysis
                     },
@@ -1934,6 +2081,8 @@ fn sync_actuator_tools(
                         last_status: String::new(),
                         origin: "declared".to_string(),
                         origin_verified_at: now,
+                        null_streak: 0,
+                        last_useful_at: 0,
                     },
                 )?;
             }
@@ -2583,6 +2732,14 @@ fn is_observation_goal(direction: &str) -> bool {
 /// a broken sensor doesn't poison the record. Returns true if a reading was gathered.
 fn gather_with_tool(dir: &Path, t: &Tool, now: i64, reused: bool) -> io::Result<bool> {
     let r = execute_tool(dir, t, now)?;
+    record_reading(dir, &t.name, &r, reused, now)
+}
+
+/// Retain a tool's run as a **gathered** reading (the durable trace that grounds knowledge)
+/// plus a visible "cultivated-tool" note — but only if the run genuinely produced signal.
+/// Shared by the reuse path ([`gather_with_tool`]) and the deploy path, so a freshly-trialled
+/// sensor's reading is recorded from its trial without running it twice (ADR-0036).
+fn record_reading(dir: &Path, name: &str, r: &ToolRun, reused: bool, now: i64) -> io::Result<bool> {
     if r.declined.is_some() || !r.healthy || r.out.is_empty() {
         return Ok(false);
     }
@@ -2592,23 +2749,21 @@ fn gather_with_tool(dir: &Path, t: &Tool, now: i64, reused: bool) -> io::Result<
         observation::Observation::new(
             "familiar",
             "gathered",
-            format!("sensor:{}", t.name),
+            format!("sensor:{name}"),
             reading,
             "familiar",
             now,
             0.9,
         ),
     )?;
-    // A visible note that a utility ran and fed the record — distinguishes a freshly-cultivated
-    // sensor from a reused one, so the Glass can show the library working, not just growing.
     let verb = if reused { "refreshed" } else { "cultivated" };
     observation::record(
         dir,
         observation::Observation::new(
             "familiar",
             "cultivated-tool",
-            t.name.clone(),
-            format!("{verb} a sensor '{}' — {}", t.name, r.status),
+            name.to_string(),
+            format!("{verb} a sensor '{name}' — {}", r.status),
             "familiar",
             now,
             1.0,
@@ -2693,11 +2848,64 @@ fn cultivate_utilities(
         fs::write(dir.join(LAST_CULTIVATE_FILE), now.to_string())?;
         return Ok(0);
     }
-    let saved = persist_tool(dir, &drafted, &kw, now)?;
-    let _ = gather_with_tool(dir, &saved, now, false)?;
-    mark_cultivated(dir, &t.id, &saved.name, now)?;
+    // Test before deploy (ADR-0036): trial the draft, and keep it ONLY if it produced a
+    // genuine reading. A fabricating sensor (the network_status_aggregator that pinged
+    // fictional IPs) never enters the durable library, and never re-runs to poison the muse.
+    let trial = trial_tool(dir, &drafted, now)?;
+    let deploy = trial.declined.is_none()
+        && trial.healthy
+        && assess_result(dir, &t.direction, &trial.out, allow_llm);
+    if deploy {
+        let saved = persist_tool(dir, &drafted, &kw, now)?;
+        let _ = tool::record_use(dir, &saved.id, now, true, &trial.status);
+        let _ = record_reading(dir, &saved.name, &trial, false, now)?;
+        mark_cultivated(dir, &t.id, &saved.name, now)?;
+    } else {
+        record_tool_rejected(dir, &drafted.name, &trial, now)?;
+        // Mark the theory attempted so the cadence doesn't re-author the same dud every cycle;
+        // a genuinely new need spawns a new theory.
+        mark_cultivated(dir, &t.id, &drafted.name, now)?;
+    }
     fs::write(dir.join(LAST_CULTIVATE_FILE), now.to_string())?;
-    Ok(1)
+    Ok(if deploy { 1 } else { 0 })
+}
+
+/// The self-correction audit (ADR-0036): retire any healthy tool whose null-result streak has
+/// reached [`tool::NULL_STREAK_RETIRE`] — a deployed sensor that keeps producing nothing useful
+/// is fabricating or has outlived its subject, and is retired autonomously (no human prune).
+/// `best_match` already skips an unhealthy tool, so retirement stops it re-running and frees its
+/// theory to be re-authored. Records a visible `retired-sensor` observation (infra, so it never
+/// itself feeds the muse). Declared actuator wrappers are exempt — they are not sensors and their
+/// health is judged by the reaction loop. Returns how many were retired.
+fn audit_tool_health(dir: &Path, now: i64) -> io::Result<usize> {
+    let mut retired = 0;
+    for t in tool::load(dir)? {
+        if t.origin == "declared" || !t.last_exit_ok {
+            continue; // declared wrappers exempt; already-unhealthy tools need no re-retiring
+        }
+        if t.null_streak >= tool::NULL_STREAK_RETIRE {
+            let reason = format!(
+                "produced nothing useful {} runs running — retired by the audit (ADR-0036)",
+                t.null_streak
+            );
+            if tool::mark_unhealthy_with(dir, &t.id, &reason)? {
+                observation::record(
+                    dir,
+                    observation::Observation::new(
+                        "familiar",
+                        "retired-sensor",
+                        t.name.clone(),
+                        reason,
+                        "familiar",
+                        now,
+                        1.0,
+                    ),
+                )?;
+                retired += 1;
+            }
+        }
+    }
+    Ok(retired)
 }
 
 /// Mark a theory as having yielded a durable utility, so the cycle doesn't re-cultivate it — the
@@ -3371,6 +3579,13 @@ pub fn tick(
     //      aware, paced). Gated by the sharpest reach: execute + authored-execute + llm, fail-closed.
     let cultivated = cultivate_utilities(dir, now, allow_execute, authored, allow_llm)?;
 
+    // 8·2 Self-correct — audit the tool library and retire any deployed sensor that has gone
+    //      silent (produced nothing useful N runs running). The autonomous conscience over the
+    //      test-before-deploy gate: a tool that passed its trial but later stops producing
+    //      genuine signal is retired without a human pruning by hand (ADR-0036). Reversible: a
+    //      tool heals if it produces signal again before it is retired.
+    let _ = audit_tool_health(dir, now);
+
     // 8·3 The hand on the world (ADR-0032): poll each declared surface, heed the verbal
     //      reactions to any open act, then act on matched needs — consent by observation,
     //      double-gated (allow_actuate for the surface, allow_execute for the running).
@@ -4038,13 +4253,31 @@ mod tests {
     #[test]
     fn broken_output_is_detected_even_on_clean_exit() {
         // the exact failure the reused local_network_scan produced on macOS
-        assert!(output_looks_broken("ifconfig: interface inet does not exist").is_some());
-        assert!(output_looks_broken("").is_some()); // no output = did nothing
-        assert!(output_looks_broken("Usage: nmap [options] target").is_some());
-        assert!(output_looks_broken("bash: nmap: command not found").is_some());
+        assert!(looks_unsuccessful("ifconfig: interface inet does not exist").is_some());
+        assert!(looks_unsuccessful("").is_some()); // no output = did nothing
+        assert!(looks_unsuccessful("Usage: nmap [options] target").is_some());
+        assert!(looks_unsuccessful("bash: nmap: command not found").is_some());
         // a genuine result is not flagged
-        assert!(output_looks_broken("Host up: 192.168.108.42\nHost up: 192.168.108.41").is_none());
-        assert!(output_looks_broken("CPU load: 1.24").is_none());
+        assert!(looks_unsuccessful("Host up: 192.168.108.42\nHost up: 192.168.108.41").is_none());
+        assert!(looks_unsuccessful("CPU load: 1.24").is_none());
+    }
+
+    #[test]
+    fn the_validity_floor_flags_a_null_result_but_not_a_real_one() {
+        // The exact fabrication that poisoned the muse: clean exit, plausible text, no signal.
+        assert!(
+            looks_unsuccessful("192.168.1.10 unreachable\n\nNo reachable devices found.").is_some()
+        );
+        assert!(looks_unsuccessful("no data").is_some());
+        assert!(looks_unsuccessful("scan complete — nothing found").is_some());
+        // But a real reading whose VALUE happens to be zero or none is NOT a failure.
+        assert!(looks_unsuccessful("battery: 0%").is_none());
+        assert!(looks_unsuccessful("active connections: 0").is_none());
+        assert!(
+            looks_unsuccessful("mood: none reported today").is_none(),
+            "'none' alone is a value, not a null result"
+        );
+        assert!(looks_unsuccessful("3 devices reachable: .10 .41 .42").is_none());
     }
 
     struct Temp(PathBuf);
@@ -4780,6 +5013,8 @@ mod tests {
                 last_status: String::new(),
                 origin: String::new(),
                 origin_verified_at: 0,
+                null_streak: 0,
+                last_useful_at: 0,
             },
         )
         .unwrap();
@@ -4972,6 +5207,8 @@ mod tests {
             last_status: String::new(),
             origin: String::new(),
             origin_verified_at: 0,
+            null_streak: 0,
+            last_useful_at: 0,
         };
         tool::append(&t.0, &tl).unwrap();
         let (body, conf, _) = run_tool(&t.0, &tl, 100, false).unwrap();
@@ -5000,6 +5237,8 @@ mod tests {
             last_status: String::new(),
             origin: String::new(),
             origin_verified_at: 0,
+            null_streak: 0,
+            last_useful_at: 0,
         };
         tool::append(dir, &tl).unwrap();
 
@@ -5228,5 +5467,183 @@ mod tests {
         // promoted candidate's status updated; re-tick tests nothing new
         let r2 = tick(&t.0, 1_000_000, false, false, true, false).unwrap();
         assert_eq!(r2.tested, 0, "no candidates left in 'generated' state");
+    }
+
+    // ---- ADR-0036: test before deploy + self-correction ----
+
+    fn a_tool(dir: &Path, id: &str, name: &str, keywords: &str, script: &str, streak: u32) {
+        let path = std::env::temp_dir().join(format!("{}_{id}.sh", std::process::id()));
+        fs::write(&path, script).unwrap();
+        tool::append(
+            dir,
+            &Tool {
+                id: id.into(),
+                name: name.into(),
+                purpose: name.into(),
+                keywords: keywords.into(),
+                script_path: path.display().to_string(),
+                created_at: 1,
+                uses: 1,
+                last_used: 100,
+                last_exit_ok: true,
+                last_status: String::new(),
+                origin: String::new(),
+                origin_verified_at: 0,
+                null_streak: streak,
+                last_useful_at: 0,
+            },
+        )
+        .unwrap();
+    }
+
+    /// Install a fake LLM adapter that always returns `resp` as response.json — so author_tool
+    /// and assess_result run without a real provider.
+    fn fake_llm(dir: &Path, resp: &str) {
+        let llm = dir.join("llm");
+        fs::create_dir_all(&llm).unwrap();
+        // The adapter writes a fixed response, ignoring the prompt.
+        fs::write(
+            llm.join("call_llm.sh"),
+            format!(
+                "#!/bin/sh\ncat > \"$(dirname \"$0\")/response.json\" <<'RESP'\n{resp}\nRESP\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_tool_that_finds_nothing_is_not_deployed() {
+        let t = Temp::new("no_deploy");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        // A pursued observation-goal theory with no covering tool → cultivate authors one.
+        thread::append(
+            dir,
+            &Thread {
+                id: "thread-0001".into(),
+                question: String::new(),
+                theory: "the network may be unstable".into(),
+                direction: "monitor network reachability across devices".into(),
+                created_at: 100,
+                status: "pursued".into(),
+                status_at: 100,
+                last_worked_at: 100,
+                reinforced: 0,
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: String::new(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        // The adapter authors a tool that echoes a fabricated null result (the real bug).
+        fake_llm(
+            dir,
+            r##"{"name":"network_status","purpose":"check the network","script":"#!/bin/sh\necho '192.168.1.10 unreachable'\necho 'No reachable devices found.'"}"##,
+        );
+        let n = cultivate_utilities(dir, 10_000, true, true, true).unwrap();
+        assert_eq!(n, 0, "a tool that finds nothing is NOT deployed");
+        assert!(
+            tool::load(dir).unwrap().is_empty(),
+            "nothing entered the durable library"
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(
+            obs.iter().any(|o| o.action == "rejected-tool"),
+            "the rejection is recorded visibly"
+        );
+    }
+
+    #[test]
+    fn a_proven_tool_is_deployed_with_honest_health() {
+        let t = Temp::new("deploy_ok");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        thread::append(
+            dir,
+            &Thread {
+                id: "thread-0001".into(),
+                question: String::new(),
+                theory: "how busy is the host".into(),
+                direction: "monitor cpu load status".into(),
+                created_at: 100,
+                status: "pursued".into(),
+                status_at: 100,
+                last_worked_at: 100,
+                reinforced: 0,
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: String::new(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        // A tool that produces a genuine reading, and an assessment that approves.
+        fake_llm(
+            dir,
+            r##"{"name":"cpu_load","purpose":"report cpu load","script":"#!/bin/sh\necho 'CPU load: 0.42'"}"##,
+        );
+        let n = cultivate_utilities(dir, 10_000, true, true, true).unwrap();
+        assert_eq!(n, 1, "a working tool deploys");
+        let tools = tool::load(dir).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert!(tools[0].last_exit_ok, "deployed with honest, proven health");
+        assert!(tools[0].last_useful_at > 0, "and a healing timestamp");
+    }
+
+    #[test]
+    fn a_sensor_that_goes_silent_is_retired_by_the_audit() {
+        let t = Temp::new("audit_retire");
+        let dir = &t.0;
+        // A deployed sensor at the retirement threshold (produced nothing 3 runs running).
+        a_tool(
+            dir,
+            "tool-0001",
+            "network_status",
+            "network status",
+            "#!/bin/sh\necho x",
+            tool::NULL_STREAK_RETIRE,
+        );
+        assert_eq!(
+            audit_tool_health(dir, 10_000).unwrap(),
+            1,
+            "the silent sensor is retired"
+        );
+        let tl = &tool::load(dir).unwrap()[0];
+        assert!(!tl.last_exit_ok, "retired — best_match will skip it");
+        assert!(tl.last_status.contains("retired by the audit"));
+        let obs = observation::load(dir).unwrap();
+        assert!(obs.iter().any(|o| o.action == "retired-sensor"));
+        // A second audit is a no-op (already unhealthy).
+        assert_eq!(audit_tool_health(dir, 10_100).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_healthy_sensor_below_the_threshold_survives_the_audit() {
+        let t = Temp::new("audit_keep");
+        let dir = &t.0;
+        a_tool(
+            dir,
+            "tool-0001",
+            "cpu_load",
+            "cpu load",
+            "#!/bin/sh\necho ok",
+            tool::NULL_STREAK_RETIRE - 1,
+        );
+        assert_eq!(
+            audit_tool_health(dir, 10_000).unwrap(),
+            0,
+            "one blip short is forgiven"
+        );
+        assert!(tool::load(dir).unwrap()[0].last_exit_ok);
+    }
+
+    #[test]
+    fn the_validity_floor_works_with_no_llm() {
+        // assess_result with the LLM closed defers to the deterministic floor: a non-empty
+        // output deploys (floor already judged it), an empty one does not.
+        let t = Temp::new("no_llm_floor");
+        assert!(assess_result(&t.0, "goal", "CPU load: 0.42", false));
+        assert!(!assess_result(&t.0, "goal", "   ", false));
     }
 }

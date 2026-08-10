@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-10 (later) — Tested before deployed; self-correcting after (ADR-0036)
+
+### What changed
+
+Root-caused a muse full of fabricated network-crisis theories: a cultivated
+`network_status_aggregator` pinged hallucinated IPs (192.168.1.10/20/30 — the tutorial
+subnet, not the real 192.168.108.x), reported "No reachable devices found," passed every
+gate, and re-ran every ~20 min feeding the lie into theorizing. Immediate: `tool prune`
+(17 network tools). Durable, three pillars:
+- **kernel::tool** — `null_streak` + `last_useful_at` (serde-default); `record_use` heals
+  on a useful run / accrues on a null one / resets on a stale-window gap (corruption's
+  discipline); `mark_unhealthy_with` for an audit-authored reason.
+- **cycle: test before deploy** — `output_looks_broken` → `looks_unsuccessful` (error
+  denylist + phrase-anchored null-result denylist, multiword so a zero value is never a
+  false positive); `trial_tool` runs a draft in a transient script through the real
+  review/boundary/sandbox without persisting; both author paths reorder to
+  trial→validate→persist; `assess_result` is the optional Law-framed self-assessment
+  consult (floor stands alone with no LLM); rejection recorded, human answered honestly;
+  the trial's run doubles as the answer/reading (no double run).
+- **cycle: self-correct** — `audit_tool_health` in the tick (step 8·2) retires any healthy
+  tool at `NULL_STREAK_RETIRE=3` with a visible `retired-sensor` obs; declared actuators
+  exempt. Muse defense-in-depth: `maybe_theorize` readings pull now requires a healthy
+  producing sensor + genuine (`looks_unsuccessful`-clean) content.
+
+### Checks run
+
+- `cargo test -p familiar-kernel -p familiar-cycle` green (2 kernel streak tests + 6 cycle:
+  the validity floor two-sidedness, no-deploy of a null tool via fake adapter, honest
+  deploy of a working one, autonomous retirement, threshold survival, no-LLM floor).
+
+### Next
+
+- Ship (next build) + lighthouse redeploy from main. The old navel-gazing theories remain
+  in the record (harmless — the source is gone); offer Ian an archive-and-reset if he wants
+  a clean slate, as done 2026-08-08. Note: a duplicate `tool-0015` row in a live
+  tools.jsonl is separate store hygiene, not this build.
+
 ## 2026-08-10 — The Pact: the constitution becomes the game's judge (ADR-0035)
 
 ### What changed

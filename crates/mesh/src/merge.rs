@@ -456,6 +456,8 @@ fn merge_one(
             last_status: String::new(),
             origin: node_id.clone(),
             origin_verified_at: now,
+            null_streak: 0,
+            last_useful_at: 0,
         };
         if tool::append(dir, &t).is_ok() {
             report.tools_merged += 1;
@@ -1569,6 +1571,8 @@ mod tests {
             last_status: String::new(),
             origin: origin.into(),
             origin_verified_at: 0,
+            null_streak: 0,
+            last_useful_at: 0,
         };
         familiar_kernel::tool::append(
             &dir,
