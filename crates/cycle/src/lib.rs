@@ -680,11 +680,17 @@ fn maybe_theorize(
         .iter()
         .rev()
         .filter(|o| !infra_observation(o))
+        // The substrate is never a subject to serve (Law II: humanity is served, not the
+        // machine). A `host reports connectivity:online` slips past infra_observation, and a
+        // muse starved of humans will otherwise theorize that the *host* needs to feel seen.
+        // The host, its hardware, the network, the lighthouse inform awareness — but they are
+        // not people to muse needs for. When only they remain, the familiar waits for a human.
+        .filter(|o| !familiar_kernel::routing::is_substrate(&o.actor))
         .take(20)
         .map(|o| format!("- {} {} {}", o.actor, o.action, o.object))
         .collect();
     if recent.is_empty() {
-        return Ok(false); // nothing but plumbing to muse on — wait for the world
+        return Ok(false); // nothing but plumbing/substrate to muse on — wait for the world
     }
     // What the sensor library last SAW — readings, not run records. `gathered` triples are
     // metabolism (filtered above), but their context field holds the world the sensor looked
@@ -3777,6 +3783,25 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn a_muse_with_only_the_machine_to_watch_waits_for_the_world() {
+        // The lonely-familiar fix (Law II): fed nothing but the host reporting its own
+        // connectivity and hardware, the muse must NOT theorize that the machine needs to
+        // feel seen — it waits. maybe_theorize returns false without ever consulting (recent
+        // is empty once substrate is filtered), so no adapter is needed.
+        let t = Temp::new("muse_substrate_only");
+        let obs = vec![
+            observation::Observation::new("host", "reports", "connectivity:online", "", "sensor", 100, 1.0),
+            observation::Observation::new("local_hardware", "reports", "cpu:idle", "", "sensor", 101, 1.0),
+            observation::Observation::new("mesh:f56e5601", "reports", "presence", "", "mesh:x", 102, 1.0),
+        ];
+        assert!(
+            !maybe_theorize(&t.0, 1_000_000, &obs, &[], true).unwrap(),
+            "with only the substrate to watch, the familiar stays quiet"
+        );
+        assert!(thread::load(&t.0).unwrap().is_empty(), "and forms no theory about the machine");
+    }
 
     #[test]
     fn theorizing_is_novelty_gated() {
