@@ -99,8 +99,13 @@
   <div id="holo" style="position:absolute;top:53%;left:50%;width:min(1040px,80vw);height:min(78vh,880px);z-index:6;display:flex;flex-direction:column;border-radius:60px;overflow:hidden;background:linear-gradient(158deg,rgba(20,44,80,0.128),rgba(8,20,40,0.056));backdrop-filter:blur(15px) saturate(1.35);-webkit-backdrop-filter:blur(15px) saturate(1.35);box-shadow:0 0 90px rgba(60,150,255,0.13);-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 11%,#000 89%,transparent 100%),linear-gradient(90deg,transparent 0%,#000 6%,#000 94%,transparent 100%);-webkit-mask-composite:source-in;-webkit-mask-repeat:no-repeat;animation:floaty 11s ease-in-out infinite,holoflicker 8s ease-in-out infinite;">
     <div style="position:absolute;inset:0;z-index:1;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(150,215,255,0.04) 0px,rgba(150,215,255,0.04) 1px,transparent 1px,transparent 3px);mix-blend-mode:screen;animation:holoscan 9s linear infinite;"></div>
     <div style="position:absolute;left:50%;bottom:8%;width:min(60%,520px);height:2px;transform:translateX(-50%);background:linear-gradient(90deg,transparent,rgba(150,215,255,0.9),transparent);box-shadow:0 0 22px rgba(120,200,255,0.8);animation:holobase 4.5s ease-in-out infinite;z-index:1;pointer-events:none;"></div>
-    <div style="position:relative;z-index:2;flex-shrink:0;display:flex;align-items:baseline;justify-content:space-between;gap:14px;padding:clamp(10px,1.6vh,18px) clamp(30px,6vw,84px) clamp(12px,2vh,20px);">
-      <div id="sctitle" style="font-size:clamp(24px,3.2vw,36px);font-weight:600;letter-spacing:-0.02em;line-height:1;text-shadow:0.6px 0 rgba(255,80,140,0.25),-0.6px 0 rgba(90,210,255,0.35);"></div>
+    <!-- Title CENTRED, not left-aligned: the menu ring parks buttons at ~20% and ~80% width in
+         this same top band (the Device glyph landed squarely on a left-aligned title on every
+         screen). Centred, the title sits at 50% — the top-centre glyph is far above it, and the
+         upper-left/right glyphs flank it with clear air. The connection dot rides just after the
+         word so it travels with the (now centred) title instead of being flung to the edge under a glyph. -->
+    <div style="position:relative;z-index:2;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:9px;padding:clamp(10px,1.6vh,18px) clamp(30px,6vw,84px) clamp(12px,2vh,20px);">
+      <div id="sctitle" style="font-size:clamp(24px,3.2vw,36px);font-weight:600;letter-spacing:-0.02em;line-height:1;text-align:center;text-shadow:0.6px 0 rgba(255,80,140,0.25),-0.6px 0 rgba(90,210,255,0.35);"></div>
       <span style="width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 10px #3ddc97;animation:iconpulse 2.4s ease-in-out infinite;flex-shrink:0;"></span>
     </div>
     <div id="scbody" class="hos" style="position:relative;z-index:2;flex:1;overflow-y:auto;padding:0 clamp(30px,6vw,84px) clamp(30px,5vh,60px);"></div>
@@ -490,26 +495,56 @@ function refreshScreen() {
     const box = $('convmsgs'); if (!box) return;
     if (!v) { box.innerHTML = ''; return; }
     const msgs = [];
-    for (const o of [...(v.recent || [])].reverse()) {
+    for (const o of (v.recent || [])) {
       if (o.context === 'console' || /told|asked|answered|replied/.test(o.action)) {
         const human = o.actor !== 'familiar' && !o.actor.startsWith('mesh');
         // A human's words live in `object` (or `context` when `object` is a thread ref);
         // a familiar reply carries its text in `object`.
         const text = (o.object || '').startsWith('thread:') && o.context ? o.context : o.object;
-        msgs.push({ f: !human, text });
+        msgs.push({ f: !human, text, ts: o.ts || 0 });
       }
     }
+    // Time is the spine of a back-and-forth: sort by it so turns interleave in the order they
+    // were spoken, never grouped by who spoke. (recent arrives newest-first; a plain reverse
+    // assumed it was perfectly sorted — an explicit ts sort is the honest ordering.)
+    msgs.sort((a, b) => a.ts - b.ts);
+    // The standing question is NOT a message — pinning it as a bubble left "What do you need
+    // most today?" hovering over the input forever. It belongs in the input itself, as the
+    // prompt the cursor is already answering. (A question owned by someone else still shows,
+    // named, so a question put to Betty isn't silently answered by whoever holds the device.)
     const q = (v.question || '').trim();
-    // Who it is addressed to (ADR-0019 routing). A question put to Betty is shown as hers rather
-    // than dropped in front of whoever is holding the device — that difference is the whole point
-    // of giving questions owners. Absent from a guest projection, which names nobody.
     const qOwner = (v.question_owner || '').trim();
-    if (q) msgs.push({ f: true, text: q, isQ: true, owner: qOwner });
-    const html = msgs.slice(-14).map(mm => `
-      <div style="align-self:${mm.f?'flex-start':'flex-end'};max-width:78%;padding:14px 17px;border-radius:16px;background:${mm.f?'rgba(20,44,80,0.3)':'rgba(90,170,255,0.12)'};border:1px solid ${mm.isQ?'rgba(174,231,255,0.5)':mm.f?'rgba(120,190,255,0.2)':'rgba(174,231,255,0.28)'};">
-        ${mm.owner ? `<div class="m" style="font-size:8.5px;letter-spacing:0.14em;color:rgba(150,180,255,0.6);margin-bottom:6px;">ASKING ${esc(mm.owner.toUpperCase())}</div>` : ''}
-        <div style="font-size:clamp(14px,1.6vw,17px);line-height:1.5;color:rgba(232,240,252,0.92);">${esc(mm.text)}</div>
+    const inp = $('convin');
+    if (inp && document.activeElement !== inp) {
+      inp.placeholder = q ? (qOwner ? `${cap(qOwner)}: ${q}` : q) : 'Say something to the familiar…';
+    }
+    // A conversation older than an hour is memory, not the live thread: fold it away behind a
+    // history toggle so the screen opens on what's current, and the past is one tap away.
+    const HOUR = 3600;
+    const now = Math.floor(Date.now() / 1000);
+    const live = msgs.filter(m => !m.ts || now - m.ts < HOUR);
+    const olderCount = msgs.length - live.length;
+    const shown = (S.convShowHistory ? msgs : live).slice(-40);
+    const stamp = (ts) => {
+      if (!ts) return '';
+      const d = new Date(ts * 1000);
+      let h = d.getHours(); const m = String(d.getMinutes()).padStart(2, '0');
+      const ap = h < 12 ? 'am' : 'pm'; h = h % 12 || 12;
+      return `${h}:${m}${ap}`;
+    };
+    const bubbles = shown.map(mm => `
+      <div style="display:flex;flex-direction:column;align-items:${mm.f?'flex-start':'flex-end'};gap:3px;">
+        <div style="max-width:78%;padding:14px 17px;border-radius:16px;background:${mm.f?'rgba(20,44,80,0.3)':'rgba(90,170,255,0.12)'};border:1px solid ${mm.f?'rgba(120,190,255,0.2)':'rgba(174,231,255,0.28)'};">
+          <div style="font-size:clamp(14px,1.6vw,17px);line-height:1.5;color:rgba(232,240,252,0.92);">${esc(mm.text)}</div>
+        </div>
+        ${mm.ts ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(150,180,255,0.4);padding:0 6px;">${stamp(mm.ts)}</span>` : ''}
       </div>`).join('');
+    // The history control lives at the TOP of the stream (older is up): a switch when hidden,
+    // a "hide" when open. Only present when there is actually older talk to reveal.
+    const histBar = (olderCount > 0 || S.convShowHistory)
+      ? `<button onclick="window.sphereToggleHistory()" class="glybtn" style="align-self:center;width:auto;height:auto;padding:5px 13px;border-radius:999px;margin-bottom:2px;"><span class="m" style="font-size:8.5px;letter-spacing:0.14em;color:rgba(176,210,255,0.7);">${S.convShowHistory ? 'HIDE EARLIER' : `↑ ${olderCount} EARLIER`}</span></button>`
+      : '';
+    const html = histBar + bubbles;
     if (box.dataset.html !== html) { box.dataset.html = html; box.innerHTML = html; }
     return;
   }
@@ -1694,7 +1729,12 @@ window.sphereDevice = (dev) => {
     S.guidedOnce = true;
     S.activeScreen = 'device';
     S.holoHidden = false;
+    // Don't just tell them where the name box is — open it, cursor waiting. A fresh guest lands
+    // with the "I AM [ your name ]" field already up, so the single step to membership is the
+    // literal first thing on screen, not a link they have to notice and click.
+    S.correctServing = true;
     try { renderButtons(); refreshScreen(); renderChrome(); } catch (e) {}
+    setTimeout(() => { const i = document.getElementById('servedHumanInput'); if (i) i.focus(); }, 140);
     return;
   }
   if (mst === 'member') S.guidedOnce = true; // a member who later un-enrolls still gets guided
@@ -1736,6 +1776,13 @@ window.sphereUnenroll = () => {
   }
 };
 window.sphereSend = () => { const inp = $('convin'); if (!inp || !inp.value.trim()) return; toApp('answer', { text: inp.value.trim() }); inp.value = ''; };
+// Reveal / re-fold the pre-hour history. Clears the cached html so the next refresh repaints
+// with the full (or trimmed) stream rather than diffing against the collapsed view.
+window.sphereToggleHistory = () => {
+  S.convShowHistory = !S.convShowHistory;
+  const box = $('convmsgs'); if (box) box.dataset.html = '';
+  refreshScreen();
+};
 window.sphereGate = (gate, open) => toApp('gate', { gate, open: open === true || open === 'true' });
 
 // Who the familiar believes is here, and how it worked that out (ADR-0019).
