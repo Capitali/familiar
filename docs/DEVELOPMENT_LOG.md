@@ -6,6 +6,49 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-12 — The machine is not served; the console learns to welcome and to converse
+
+### What changed
+
+Three refinements, one build (78), no new ADR — each tightens an existing law.
+
+- **Substrate is never a subject to serve (Law II).** Wiped to an empty record, the muse's
+  first theories worried whether the *host* felt seen and offered the *hardware* a
+  dashboard: `routing::subject_and_strength` was reading `host reports connectivity:online`
+  as a human named "host". New `routing::is_substrate` (host, local_hardware, network, cli,
+  the familiar itself) + a `mesh:<node>` guard excludes the substrate at the one ladder that
+  attributes observations — so dossier, presence, and needs all inherit it — and
+  `maybe_theorize` drops substrate from its material, returning false (waits for the world)
+  when only plumbing remains. Live dossier purged of its host/local_hardware rows.
+- **Onboarding out of visitor limbo.** A guest's first launch now opens the name field
+  itself (cursor waiting), not just a link to it (index.html `sphereDevice`). A watch is
+  established through its phone (ADR-0028): when linked but unnamed it now says "Say who you
+  are in Familiar on your iPhone — this watch will follow" (`humanName`, empty/"observer" =
+  unnamed) instead of resting as a nameless visitor; `setServedHuman` already re-hands the
+  human off, so naming the phone lights the watch. The naming path
+  (say-name → introduceMesh → POST /mesh/introduce) was verified sound end to end.
+- **The Dialogue screen reads as a conversation.** Turns sort by `ts` and interleave, each
+  bubble stamped with its minute; the standing question stops hovering as a pinned bubble
+  and becomes the input's placeholder; talk older than an hour folds behind an "↑ N earlier"
+  switch; the screen title is centred so the menu ring's upper glyphs (the Device phone
+  landed on the word) flank it with air — fixes the overlap on every screen.
+
+### Checks run
+
+- `cargo test -p familiar-kernel -p familiar-cycle` green (incl. new
+  `the_substrate_is_never_a_person_to_serve`, `is_substrate_knows_the_machine_from_the_person`,
+  `a_muse_with_only_the_machine_to_watch_waits_for_the_world`). Full cycle suite 53/53
+  single-threaded; a pre-existing parallel-isolation flake in
+  `a_proven_tool_is_deployed_with_honest_health` reproduces identically on the Build 77 tree.
+- `xcodebuild` FamiliarMac (universal) and FamiliarWatch (generic watchOS) both BUILD
+  SUCCEEDED; sphere module JS `node --check` clean.
+
+### Next
+
+Fresh session: additional reasoning work (planning). The daemon substrate fix wants the
+running Mac + lighthouse daemons rebuilt (done at ship); watch for a background checkpoint
+process that auto-commits the working tree with a junk message and soft-resets.
+
 ## 2026-08-10 (later) — Tested before deployed; self-correcting after (ADR-0036)
 
 ### What changed
