@@ -13,6 +13,25 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The machine the familiar runs on is not someone it serves (Law II).** Started from an
+  empty record, the familiar's first instinct had been to worry about the *host* — was it
+  seen, did the hardware need a dashboard — because the one ladder that decides who an
+  observation is *about* was reading "host reports connectivity: online" as a person named
+  "host". Now the substrate (host, local hardware, network, the command line, the familiar
+  itself, and headless mesh nodes) is never a subject to serve: it can inform awareness, but
+  it never becomes someone with needs, and when only the plumbing is present the familiar
+  stays quiet and waits for the world. Humanity is served, not the machine. *Validated by
+  routing + cycle unit tests.*
+- **Getting into the mesh is no longer a guessing game.** A brand-new device opens straight
+  onto its name field, cursor waiting — the single step to membership is the first thing on
+  screen, not a link to hunt for. A watch is joined through its phone, so a linked-but-unnamed
+  watch now says plainly "Say who you are in Familiar on your iPhone — this watch will
+  follow" instead of resting as a nameless visitor; naming the phone lights the watch up too.
+- **The Dialogue screen reads like a conversation.** Messages interleave in the order they
+  were said, each stamped with its time; the familiar's standing question moved out of a
+  bubble that hovered forever above the input and into the input's own prompt; anything older
+  than an hour tucks behind an "earlier" switch so the screen opens on what's current; and
+  the screen title is centred so the menu ring no longer overlaps the word.
 - **The familiar tests its own code before deploying it, and retires what stops working
   (ADR-0036).** A cultivated tool that pinged fictional IPs and reported "no reachable
   devices" was kept in the durable library and re-run indefinitely, poisoning the muse with

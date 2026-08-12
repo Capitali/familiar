@@ -79,13 +79,33 @@ pub fn subject_and_strength(o: &Observation) -> Option<(String, f64, &'static st
     } else {
         return None;
     };
+    // A headless mesh node reporting about ITSELF (the lighthouse announcing presence) carries
+    // no human — its actor is `mesh:<node>`, not `phone:<name>`. It is substrate too: a peer
+    // to be aware of, never a person to serve. (A human's device still names its human in the
+    // actor, e.g. `phone:ian`, and passes.)
+    if o.actor.starts_with("mesh") {
+        return None;
+    }
     let who = who.trim().to_lowercase();
     // `observer` is the absence of a name; `someone` is the poller's honest shrug when
     // the room was empty or ambiguous. Neither is a person to route to or pattern.
-    if who.is_empty() || who == "observer" || who == "someone" {
+    if who.is_empty() || who == "observer" || who == "someone" || is_substrate(&who) {
         return None;
     }
     Some((who, strength, via))
+}
+
+/// The substrate the familiar runs ON or WITH — the host, its hardware, the network, the
+/// command line. These are **never someone to serve** (Law II: humanity is served, not the
+/// machine). They inform awareness and decisions freely — a connectivity signal, hardware
+/// capacity — but they are not people: never a dossier subject, never a present "human",
+/// never a need theorized on their behalf. A familiar starved of humans must not mistake the
+/// machine it runs on for one and start worrying whether the host feels seen.
+pub fn is_substrate(actor: &str) -> bool {
+    matches!(
+        actor.trim().to_lowercase().as_str(),
+        "host" | "local_hardware" | "hardware" | "network" | "cli" | "familiar"
+    )
 }
 
 /// Everyone the familiar has fresh evidence for, strongest first. `observer` is excluded: it is the
@@ -315,5 +335,27 @@ mod tests {
         // The poller's honest shrug names nobody — like `observer`, excluded.
         let anon = ob("someone", "adjusted", "lights=dim", "actuator", NOW);
         assert!(subject_and_strength(&anon).is_none());
+    }
+
+    #[test]
+    fn the_substrate_is_never_a_person_to_serve() {
+        // The machine the familiar runs on is not someone it serves (Law II). A host
+        // reporting its own connectivity used to read as a human named "host" — folding it
+        // into the dossier and theorizing its "needs." No longer.
+        assert!(subject_and_strength(&ob("host", "reports", "connectivity:online", "sensor", NOW)).is_none());
+        assert!(subject_and_strength(&ob("local_hardware", "reports", "cpu:busy", "sensor", NOW)).is_none());
+        assert!(subject_and_strength(&ob("network", "reports", "up", "sensor", NOW)).is_none());
+        // A headless mesh node reporting its own presence (the lighthouse) is a peer, not a person.
+        assert!(subject_and_strength(&ob("mesh:f56e5601d0cd", "reports", "presence", "mesh:x", NOW)).is_none());
+        // But a real human's device still names its human and passes.
+        let (who, _, _) = subject_and_strength(&ob("phone:ian", "reports", "motion:walking", "device", NOW)).unwrap();
+        assert_eq!(who, "ian");
+    }
+
+    #[test]
+    fn is_substrate_knows_the_machine_from_the_person() {
+        assert!(is_substrate("host") && is_substrate("HOST") && is_substrate("local_hardware"));
+        assert!(is_substrate("network") && is_substrate("familiar") && is_substrate("cli"));
+        assert!(!is_substrate("ian") && !is_substrate("betty"));
     }
 }

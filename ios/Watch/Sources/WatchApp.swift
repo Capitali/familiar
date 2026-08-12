@@ -28,7 +28,18 @@ struct WatchRootView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if model.enrolled {
-                WatchOrbView()
+                if model.humanName.isEmpty {
+                    // Linked, but the mesh still doesn't know whose wrist this is — a watch is
+                    // established through its phone (ADR-0028), so the honest instruction is to go
+                    // there, not to offer a dead-end path here (the watch has no good text entry).
+                    VStack(spacing: 8) {
+                        WatchOrbView().frame(width: 84, height: 84).opacity(0.6)
+                        Text("Say who you are in Familiar on your iPhone — this watch will follow.")
+                            .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                } else {
+                    WatchOrbView()
+                }
             } else if model.enrolling {
                 VStack(spacing: 6) { WatchOrbView().frame(width: 90, height: 90); Text("joining…").font(.caption2).foregroundStyle(.secondary) }
             } else {

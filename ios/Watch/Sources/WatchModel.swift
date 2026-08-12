@@ -13,6 +13,10 @@ final class WatchModel: NSObject, ObservableObject {
     @Published var enrolled = false
     @Published var enrolling = false
     @Published var groupLabel = ""
+    /// The human this watch follows — inherited from the paired phone (ADR-0028: a watch holds
+    /// no seat, it is established through its phone). Empty until the phone names its human, which
+    /// is the signal the resting face uses to send the wearer back to the phone to say who they are.
+    @Published var humanName = ""
     @Published var sentCount = 0
     @Published var lastHeartRate: Int?
     @Published var log: [String] = []
@@ -49,6 +53,14 @@ final class WatchModel: NSObject, ObservableObject {
         super.init()
         groupLabel = defaults.string(forKey: "watch.enroll.label") ?? ""
         enrolled = storedGrant() != nil
+        humanName = Self.realHuman(defaults.string(forKey: "watch.servedHuman"))
+    }
+
+    /// A served-human string that names a real person, or "" for the placeholder "observer"/empty —
+    /// so the resting face can tell "the phone hasn't said who I am yet" from "I follow someone".
+    private static func realHuman(_ raw: String?) -> String {
+        let h = (raw ?? "").trimmingCharacters(in: .whitespaces)
+        return (h.isEmpty || h == "observer") ? "" : h
     }
 
     func start() {
@@ -68,6 +80,7 @@ final class WatchModel: NSObject, ObservableObject {
         // The human the paired phone serves — the watch attributes its reports to the same person
         // (ADR-0016), so `watch:<handle>` matches `phone:<handle>` rather than a baked "ian".
         if !human.isEmpty { defaults.set(human, forKey: "watch.servedHuman") }
+        humanName = Self.realHuman(human)
         groupLabel = label
         guard !enrolled, !enrolling else { return }
         enrolling = true
