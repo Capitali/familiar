@@ -3797,15 +3797,42 @@ mod tests {
         // is empty once substrate is filtered), so no adapter is needed.
         let t = Temp::new("muse_substrate_only");
         let obs = vec![
-            observation::Observation::new("host", "reports", "connectivity:online", "", "sensor", 100, 1.0),
-            observation::Observation::new("local_hardware", "reports", "cpu:idle", "", "sensor", 101, 1.0),
-            observation::Observation::new("mesh:f56e5601", "reports", "presence", "", "mesh:x", 102, 1.0),
+            observation::Observation::new(
+                "host",
+                "reports",
+                "connectivity:online",
+                "",
+                "sensor",
+                100,
+                1.0,
+            ),
+            observation::Observation::new(
+                "local_hardware",
+                "reports",
+                "cpu:idle",
+                "",
+                "sensor",
+                101,
+                1.0,
+            ),
+            observation::Observation::new(
+                "mesh:f56e5601",
+                "reports",
+                "presence",
+                "",
+                "mesh:x",
+                102,
+                1.0,
+            ),
         ];
         assert!(
             !maybe_theorize(&t.0, 1_000_000, &obs, &[], true).unwrap(),
             "with only the substrate to watch, the familiar stays quiet"
         );
-        assert!(thread::load(&t.0).unwrap().is_empty(), "and forms no theory about the machine");
+        assert!(
+            thread::load(&t.0).unwrap().is_empty(),
+            "and forms no theory about the machine"
+        );
     }
 
     #[test]

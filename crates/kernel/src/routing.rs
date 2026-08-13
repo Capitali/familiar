@@ -342,13 +342,28 @@ mod tests {
         // The machine the familiar runs on is not someone it serves (Law II). A host
         // reporting its own connectivity used to read as a human named "host" — folding it
         // into the dossier and theorizing its "needs." No longer.
-        assert!(subject_and_strength(&ob("host", "reports", "connectivity:online", "sensor", NOW)).is_none());
-        assert!(subject_and_strength(&ob("local_hardware", "reports", "cpu:busy", "sensor", NOW)).is_none());
+        assert!(
+            subject_and_strength(&ob("host", "reports", "connectivity:online", "sensor", NOW))
+                .is_none()
+        );
+        assert!(
+            subject_and_strength(&ob("local_hardware", "reports", "cpu:busy", "sensor", NOW))
+                .is_none()
+        );
         assert!(subject_and_strength(&ob("network", "reports", "up", "sensor", NOW)).is_none());
         // A headless mesh node reporting its own presence (the lighthouse) is a peer, not a person.
-        assert!(subject_and_strength(&ob("mesh:f56e5601d0cd", "reports", "presence", "mesh:x", NOW)).is_none());
+        assert!(subject_and_strength(&ob(
+            "mesh:f56e5601d0cd",
+            "reports",
+            "presence",
+            "mesh:x",
+            NOW
+        ))
+        .is_none());
         // But a real human's device still names its human and passes.
-        let (who, _, _) = subject_and_strength(&ob("phone:ian", "reports", "motion:walking", "device", NOW)).unwrap();
+        let (who, _, _) =
+            subject_and_strength(&ob("phone:ian", "reports", "motion:walking", "device", NOW))
+                .unwrap();
         assert_eq!(who, "ian");
     }
 
