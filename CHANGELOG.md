@@ -13,6 +13,20 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **Devices lead with their names, everywhere.** The roster, the welcome screen, the globe
+  callouts, the device screen and the door's own notes now lead with a device's established
+  name — Wildhorse, MacOnStick, Aphelion — with the hardware's own label as quiet small
+  print beside it and the numeric node id demoted to small print and the node detail
+  screen. A device the mesh hasn't named yet appears as what it honestly is (*unnamed
+  Mac*, *unnamed iPhone*) instead of a bare hex id: a node id is an address, not a name.
+  *Validated by the sphere driven against fixture worldviews; naming rule mirrored in
+  Swift for the door notes.*
+- **The private-cloud consent has its switch (completes ADR-0038's named next brick).**
+  Every console's Device screen now carries a *private cloud* tile beside the other
+  consents — the device-side half of the cloud gate. Consent here is necessary, never
+  sufficient: a consult reaches Apple's Private Cloud Compute only when the hub's own
+  gate is also open. The watch inherits its phone's choice. *Validated by both console
+  builds and the sphere fixture render.*
 - **A prompt leaves your hardware only when you say so — and Apple Intelligence joins the
   provider bench (ADR-0038).** "A prompt need never leave your hardware" was a promise kept
   by configuration; it is now kept by the constitution. One new fail-closed gate
@@ -298,6 +312,14 @@ this file is the human-readable summary.
   the lab → many served. Enforced by the obedience guard; no outward capability runs
   until that and the boundary mechanism exist. Wired into the roadmap and human-review
   requirements; Law III in SOUL gains an "operational restraint" note.
+
+### Fixed
+- **A console no longer files under a neighbour's machine.** From the lighthouse's point
+  of view every machine in a household shares one public address, and the roster took
+  that as proof of residence — MacOnStick's console nested under Wildhorse's card. A
+  shared address now counts only when it is private to the household's networks, and the
+  console you are holding never nests under another machine, whatever a stale door says.
+  *Validated by the new NAT regression test beside the existing attach cases.*
 
 ### Changed
 - **Rename: Substrate → The Familiar.** The project and its CLI binary were renamed; the

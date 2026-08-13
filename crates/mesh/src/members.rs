@@ -917,11 +917,20 @@ fn attach_consoles(out: &mut [Member], self_hosts: &[String]) {
                 *hi != ci && !is_console(h) && !stem.is_empty() && h.label.to_lowercase() == stem
             })
             .or_else(|| {
+                // A shared address identifies a MACHINE only when it is private to the
+                // household's own networks (LAN, loopback, tailnet — `is_gossipable_addr`,
+                // the same judgement the host list uses). A public address is a HOUSEHOLD
+                // behind its NAT: from the lighthouse's vantage every machine at home wears
+                // it, and matching on it filed MacOnStick's console under wildhorse's daemon
+                // (seen live, 2026-08-13). Public match ⇒ no link; the console stands alone,
+                // which the roster already renders honestly.
                 out.iter().enumerate().find(|(hi, h)| {
                     *hi != ci
                         && full_node(h)
                         && ((h.kind == MemberKind::SelfNode && on_self_host)
-                            || (!cip.is_empty() && ip_of(&h.addr) == cip))
+                            || (!cip.is_empty()
+                                && ip_of(&h.addr) == cip
+                                && crate::worldview::is_gossipable_addr(&cip)))
                 })
             });
         if let Some((hi, _)) = host {
@@ -1484,6 +1493,61 @@ mod tests {
         assert_eq!(
             sibling[2].attached_to, "1c99",
             "the console nests under its machine even when the machine reads as a device peer"
+        );
+    }
+
+    #[test]
+    fn a_console_behind_nat_never_files_under_another_machine() {
+        let mk = |node: &str, label: &str, actor: &str, kind: &str, addr: &str| -> Member {
+            serde_json::from_value(serde_json::json!({
+                "node_id": node, "label": label, "kind": kind, "actor": actor, "addr": addr,
+                "os": "", "detail": "", "first_seen": 0, "last_seen": 0, "online": true,
+            }))
+            .unwrap()
+        };
+        // From the lighthouse's vantage every machine at home wears the same public address.
+        // MacOnStick's console must not nest under wildhorse's daemon just because the
+        // household NAT makes them neighbours (seen live, 2026-08-13): a public address is a
+        // household, not a machine. With its own daemon absent it stands alone.
+        let mut nat = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("1c99", "wildhorse", "", "gossip_peer", "203.0.113.7:47100"),
+            mk(
+                "77aa",
+                "MacOnStick console",
+                "mac:ian",
+                "device_peer",
+                "203.0.113.7:52210",
+            ),
+        ];
+        attach_consoles(&mut nat, &[]);
+        assert!(
+            nat[2].attached_to.is_empty(),
+            "a shared public address is not evidence — the console stands alone"
+        );
+        assert!(
+            !nat[1].attached.iter().any(|a| a == "🖥 console"),
+            "wildhorse is not badged with a console that isn't its own"
+        );
+
+        // And once MacOnStick's own daemon is on the roster, the label stem claims the
+        // console for the machine it actually runs on — same public address throughout.
+        let mut named = vec![
+            mk("selflh", "lighthouse", "", "self_node", "localhost"),
+            mk("1c99", "wildhorse", "", "gossip_peer", "203.0.113.7:47100"),
+            mk("3d68", "maconstick", "", "gossip_peer", "203.0.113.7:47101"),
+            mk(
+                "77aa",
+                "MacOnStick console",
+                "mac:ian",
+                "device_peer",
+                "203.0.113.7:52210",
+            ),
+        ];
+        attach_consoles(&mut named, &[]);
+        assert_eq!(
+            named[3].attached_to, "3d68",
+            "the console files under the machine its label names, never the NAT neighbour"
         );
     }
 
