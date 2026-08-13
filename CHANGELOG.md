@@ -13,6 +13,20 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **A prompt leaves your hardware only when you say so — and Apple Intelligence joins the
+  provider bench (ADR-0038).** "A prompt need never leave your hardware" was a promise kept
+  by configuration; it is now kept by the constitution. One new fail-closed gate
+  (`allow_llm_cloud` in `boundary.json`) governs every off-device consult — hosted APIs and
+  Apple's Private Cloud Compute alike — enforced in the kernel's guard, in the adapter's
+  provider chain, and on the mesh wire, where each prompt carries the decision to the
+  device that answers it. A device adds its own consent on top before ever choosing PCC,
+  and every missing consent degrades silently to on-device. Alongside it, two new
+  providers: `apple_local` (the Mac's own Apple Intelligence via the macOS 27 `fm` CLI —
+  the daemon thinks on its own silicon with no API key at all) and `apple_pcc`. Existing
+  hosted setups need one deliberate line: `"allow_llm_cloud": true`. *Validated by the
+  kernel/seam/wire unit tests (doctrinal: llm open does not imply cloud; the grant survives
+  the lighthouse relay), a live four-case adapter matrix, and both consoles building with
+  the PCC branch against the macOS 27 SDK.*
 - **The machine the familiar runs on is not someone it serves (Law II).** Started from an
   empty record, the familiar's first instinct had been to worry about the *host* — was it
   seen, did the hardware need a dashboard — because the one ladder that decides who an
