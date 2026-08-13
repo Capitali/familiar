@@ -60,7 +60,8 @@ fn wait_for<F: Fn() -> bool>(secs: u64, f: F) -> bool {
 
 #[test]
 fn two_meshes_federate_through_the_door() {
-    let pa = 48911u16;
+    // Below the ephemeral floor + spaced ≥10 (see two_instance.rs on both counts).
+    let pa = 24911u16;
     let dir_a = tmp("river");
     let dir_b = tmp("cedar");
 
@@ -75,7 +76,7 @@ fn two_meshes_federate_through_the_door() {
     write_boundary(&dir_a, true);
     write_boundary(&dir_b, true);
     write_config(&dir_a, pa, &["weather", "energy"]);
-    write_config(&dir_b, pa + 1, &[]);
+    write_config(&dir_b, pa + 10, &[]);
 
     // Only river's door needs to be up — cedar dials it as a client.
     let ha = transport::spawn(dir_a.clone());

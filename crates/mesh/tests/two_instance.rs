@@ -105,8 +105,11 @@ fn inbox_has(dir: &Path, node_id: &str) -> bool {
 
 #[test]
 fn two_group_members_exchange_briefs_over_loopback() {
-    // Pick two ports unlikely to collide with the tailnet mesh port.
-    let (pa, pb) = (48611u16, 48612u16);
+    // Test ports live BELOW the Linux ephemeral range (32768+) — a busy CI runner's
+    // outbound connections squat fixed ports inside it and the bind quietly loses.
+    // And they are spaced ≥10 apart: transport::spawn also binds gossip_port + 1
+    // (the local server), so adjacent picks overlap the neighbour's main port.
+    let (pa, pb) = (24611u16, 24621u16);
     let dir_a = tmp("a");
     let dir_b = tmp("b");
 
@@ -157,7 +160,7 @@ fn two_group_members_exchange_briefs_over_loopback() {
 
 #[test]
 fn closed_boundary_never_binds_or_exchanges() {
-    let (pa, pb) = (48711u16, 48712u16);
+    let (pa, pb) = (24711u16, 24721u16);
     let dir_a = tmp("closed_a");
     let dir_b = tmp("closed_b");
     let a = NodeKey::load_or_mint(&dir_a, "alpha").unwrap();

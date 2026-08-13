@@ -6,6 +6,31 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-13 (later) — Test ports move out of the runner's reach
+
+### What changed
+
+- **CI stayed red after the reach fix — one layer deeper, and intermittent.** The
+  two-instance brief exchange timed out on the runner (24s, both directions dark)
+  though the same commit region passed on Aug 11. Two hazards, both port arithmetic:
+  the fixed test ports (`48611/48612`, `48711/48712`, `48911`) sit **inside Linux's
+  ephemeral range** (32768–60999), where a busy runner's outbound connections squat
+  fixed ports and the server's bind quietly loses; and the pairs were **adjacent**,
+  while `transport::spawn` also binds `gossip_port + 1` for the local server — so A's
+  local listener sat exactly on B's main port (`two_meshes` dialed cedar at `pa + 1`
+  *literally*). Test ports now live below the ephemeral floor and ≥10 apart;
+  production binds are untouched.
+
+### Checks run
+
+- `two_instance` + `two_meshes` 3× green locally; full green bar (fmt, clippy
+  `-D warnings`, `cargo test --all`, kernel `unsafe` grep) green. CI watched on push.
+
+### Next
+
+- If the exchange ever flakes again on a runner, the escalation is real hermeticity:
+  bind `:0` in transport and surface the bound addr — an API change, its own brick.
+
 ## 2026-08-13 — The reach tests stop trusting whatever answers the runner's loopback
 
 ### What changed
