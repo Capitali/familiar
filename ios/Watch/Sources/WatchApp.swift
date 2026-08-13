@@ -10,6 +10,7 @@ struct FamiliarWatchApp: App {
 
 struct WatchRootView: View {
     @EnvironmentObject var model: WatchModel
+    @State private var showTalk = false
     var body: some View {
         if let kind = model.emberKind {
             EmberView(kind: kind) { model.emberKind = nil }
@@ -22,8 +23,8 @@ struct WatchRootView: View {
 
     // The wrist's resting face (B18): the blue globe orb, orbiting slowly. No health data — the
     // watch is a presence and a signal, not a dashboard. It shows the ember when a notification
-    // arrives (handled above), and voice comes later. Enrolled → just the orb; not yet → a quiet
-    // line to link it.
+    // arrives (handled above). A named wrist can TAP THE ORB to talk: dictate a turn, hear the
+    // reply. Enrolled → the orb; not yet → a quiet line to link it.
     var mainBody: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -38,7 +39,22 @@ struct WatchRootView: View {
                             .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
                 } else {
-                    WatchOrbView()
+                    VStack(spacing: 10) {
+                        WatchOrbView()
+                            .onTapGesture { showTalk = true }
+                        if let r = model.reply {
+                            Text(r)
+                                .font(.caption2)
+                                .foregroundStyle(Color(red: 0.72, green: 0.85, blue: 1.0))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(4)
+                                .onTapGesture { model.reply = nil }
+                        } else if model.saying {
+                            Text("carrying your words…")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .sheet(isPresented: $showTalk) { WatchTalkView(model: model) }
                 }
             } else if model.enrolling {
                 VStack(spacing: 6) { WatchOrbView().frame(width: 90, height: 90); Text("joining…").font(.caption2).foregroundStyle(.secondary) }
@@ -118,6 +134,32 @@ struct EmberView: View {
         }
         .onAppear { flare = true }
         .onTapGesture { dismiss() }
+    }
+}
+
+/// Talk to the familiar from the wrist. watchOS text entry IS dictation (plus scribble),
+/// so the field is the deliberate wake-act ADR-0023 requires — nothing listens until the
+/// human opens this and speaks. The turn travels the same dialogue pipe as every console;
+/// the reply comes back to the resting face, spoken aloud.
+struct WatchTalkView: View {
+    @ObservedObject var model: WatchModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("Talk to the familiar").font(.caption).foregroundStyle(.secondary)
+            TextField("Say something…", text: $text)
+            Button {
+                model.say(text)
+                text = ""
+                dismiss()
+            } label: {
+                Label("Send", systemImage: "arrow.up.circle.fill")
+            }
+            .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(6)
     }
 }
 

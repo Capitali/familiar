@@ -16,6 +16,10 @@ final class VoiceSensing: NSObject, ObservableObject {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let deliver: (ObsRecord) -> Void
+    /// When set, a final transcript is a **dialogue turn** — handed here (the console submits
+    /// it as "told the familiar") instead of becoming a `said` observation. Same mic, same
+    /// push-to-talk consent; only the destination differs.
+    var onFinal: ((String) -> Void)?
 
     init(deliver: @escaping (ObsRecord) -> Void) {
         self.deliver = deliver
@@ -79,8 +83,12 @@ final class VoiceSensing: NSObject, ObservableObject {
 
     private func finish(_ text: String) {
         let trimmed = String(text.prefix(200))
-        deliver(ObsRecord(actor: DeviceActor.current, action: "said",
-                          object: "voice:\(trimmed)", context: "on-device speech", confidence: 0.9))
+        if let onFinal {
+            onFinal(trimmed)
+        } else {
+            deliver(ObsRecord(actor: DeviceActor.current, action: "said",
+                              object: "voice:\(trimmed)", context: "on-device speech", confidence: 0.9))
+        }
         partial = ""
     }
 }

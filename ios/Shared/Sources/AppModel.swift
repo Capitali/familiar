@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AVFoundation
 import FamiliarMesh
 
 /// The agent's whole state: enrollment (via the covenant handshake), the signing session, consent,
@@ -315,6 +316,48 @@ final class AppModel: ObservableObject {
     // The console's answer field (The Glass home screen). The human speaking to the familiar.
     @Published var consoleAnswer = ""
 
+    // MARK: dialogue voice — the loop closes by mouth and ear
+
+    /// The console's push-to-talk is wired and usable (set by the iOS shell when the
+    /// recognizer is ready). Read by the sphere console to show its mic control.
+    @Published var dialogueVoiceAvailable = false
+    /// The ts of a voice-originated turn still awaiting a spoken reply, nil when none. Voice
+    /// in → voice out: only a turn that arrived by mouth is answered aloud, so the console
+    /// never starts talking at someone who was typing quietly.
+    private var awaitingSpokenReplySince: Int64?
+    private let replyVoice = AVSpeechSynthesizer()
+
+    /// A dialogue turn that arrived by voice: same pipe as the typed console answer, plus a
+    /// marker so the familiar's reply is spoken back when the worldview carries it in.
+    func submitVoiceTurn(_ text: String) {
+        markInteraction()
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        emit(ObsRecord(actor: servedHuman, action: "told the familiar", object: t,
+                       context: "console", confidence: 1.0))
+        note("said: \(t)")
+        awaitingSpokenReplySince = Int64(Date().timeIntervalSince1970)
+    }
+
+    /// Speak the familiar's reply to a pending voice turn, once, when a poll carries it in.
+    /// A reply that takes longer than two minutes is stale — the moment has passed, and a
+    /// surprise voice an hour later would be worse than silence.
+    private func speakReplyIfDue(_ view: Worldview) {
+        guard let since = awaitingSpokenReplySince else { return }
+        let now = Int64(Date().timeIntervalSince1970)
+        if now - since > 120 {
+            awaitingSpokenReplySince = nil
+            return
+        }
+        guard let reply = view.recent.first(where: {
+            $0.actor == "familiar" && $0.action == "replied" && $0.ts >= since
+        }) else { return }
+        awaitingSpokenReplySince = nil
+        let u = AVSpeechUtterance(string: reply.object)
+        u.prefersAssistiveTechnologySettings = true
+        replyVoice.speak(u)
+    }
+
     // The familiar's worldview, as this peer reads it (the iPad Glass console). Polled while shown.
     @Published var worldview: Worldview?
     /// The same snapshot as raw JSON, for the Metal Sphere web layer (window.sphereUpdate).
@@ -435,6 +478,8 @@ final class AppModel: ObservableObject {
             "deviceRole": deviceRole.rawValue,
             "deviceOwner": deviceOwner,
             "oracle": ConsultRunner.state,
+            // Push-to-talk is wired on this shell — the dialogue screen shows its mic.
+            "voice": dialogueVoiceAvailable,
             // The app's recent working notes — the door's verbatim replies to this device's own
             // acts (game moves, vouches, invites). The console shows the newest one; without
             // this, a refused BEGIN looked like a dead button (the door's words landed in a
@@ -1391,6 +1436,8 @@ final class AppModel: ObservableObject {
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
+                // A voice turn is answered by voice — speak the reply this read carried in.
+                speakReplyIfDue(view)
                 // Loyalty with hysteresis: only a preferred door that keeps failing loses its
                 // place. Five consecutive misses ≈ 15s of silence — a real outage, not a hiccup.
                 if tried == preferred {

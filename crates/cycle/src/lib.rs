@@ -296,7 +296,9 @@ fn infra_triple(action: &str, object: &str) -> bool {
         | "can_run" | "declined_to_run" | "regulated_presence"
         // Tool self-correction (ADR-0036): a draft rejected before deploy, a deployed sensor
         // retired by the audit — bookkeeping about the library, never a theory subject.
-        | "rejected-tool" | "retired-sensor"
+        // "narrated" is the same bookkeeping told to the human in dialogue — the familiar
+        // must not muse over its own narration of its own work.
+        | "rejected-tool" | "retired-sensor" | "narrated"
         // Mesh lifecycle: the body joining, being admitted, vouching, welcoming, federating.
         // These are the mesh's plumbing too — musing over them fixates the familiar on its own
         // membership churn instead of the world it serves (B9).
@@ -592,14 +594,20 @@ fn maybe_reply(
 
     let who = observer_phrase(dir);
     let reply = if allow_llm {
+        // The dialogue is the MOST human-facing generation there is — it speaks in the
+        // Law III voice like every other one (dialog.rs's promise, which this path
+        // used to skip).
         let prompt = format!(
-            "You are a factory whose only purpose is to serve {who} (the Three Laws; humanity is \
+            "{LAW_III_VOICE}\n\n\
+             You are a factory whose only purpose is to serve {who} (the Three Laws; humanity is \
              served, never managed or replaced). {who} just said to you:\n\"{said}\"\n\
              Reply directly, warmly, and briefly — ONE or two sentences that acknowledge what they \
              said and, where it fits, what you'll do with it. Do NOT ask a question (that comes \
              separately). Reply as plain text only, no quotes, no JSON.",
         );
-        match familiar_llm::consult(dir, &prompt) {
+        // Human lane: this consult jumps the queue and any in-flight background
+        // consult steps aside — the person is waiting *right now*.
+        match familiar_llm::consult_human(dir, &prompt) {
             Ok(familiar_llm::Outcome::Response(r)) => looks_like_prose(&r)
                 .map(|p| p.chars().take(400).collect())
                 .unwrap_or_else(|| templated_reply(said, now)),
@@ -610,6 +618,20 @@ fn maybe_reply(
         templated_reply(said, now)
     };
 
+    // Two answerers can pass the freshness check together (the tick's converse step and
+    // the daemon's reply thread) — their consults serialize on the lane, so by the time
+    // the slower one gets here the faster one's reply is on the record. Re-check against
+    // the LIVE log before recording, so the human hears one voice, not an echo.
+    let already_answered = observation::load(dir)?
+        .iter()
+        .filter(|o| o.actor == "familiar" && o.action == "replied")
+        .map(|o| o.ts)
+        .max()
+        .unwrap_or(0)
+        >= human_ts;
+    if already_answered {
+        return Ok(false);
+    }
     observation::record(
         dir,
         observation::Observation::new(
@@ -656,6 +678,23 @@ fn templated_reply(said: &str, now: i64) -> String {
     // Deterministic pick keyed on the utterance + tick, so it varies without randomness.
     let idx = (fnv1a(said).wrapping_add(now as u64) as usize) % ACKS.len();
     ACKS[idx].to_string()
+}
+
+/// The familiar tells the human, in the dialogue, what it just did to its own tool library.
+/// ADR-0036 made the lifecycle *safe* (tested before deployed, retired when useless); this
+/// makes it *legible* — background authorship the human never sees is background authorship
+/// the human can't correct. One plain sentence, recorded as
+/// `familiar / narrated / <text> / console` so every console renders it as a quiet familiar
+/// turn. Deliberately not `replied` — narration must never count as having answered the
+/// human's latest utterance.
+fn narrate(dir: &Path, text: String, now: i64) -> io::Result<()> {
+    observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar", "narrated", text, "console", "familiar", now, 1.0,
+        ),
+    )?;
+    Ok(())
 }
 
 /// The factory thinks out loud: grounded in what it has observed, it (LLM-)forms a
@@ -766,9 +805,9 @@ fn maybe_theorize(
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
-            return Ok(false)
-        }
+        familiar_llm::Outcome::Refused(_)
+        | familiar_llm::Outcome::RateLimited(_)
+        | familiar_llm::Outcome::Yielded(_) => return Ok(false),
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
         return Ok(false);
@@ -950,9 +989,9 @@ fn maybe_theorize_needs(
     fs::write(dir.join(NEED_MUSE_FILE), serde_json::to_string(&mused)?)?;
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
-            return Ok(false)
-        }
+        familiar_llm::Outcome::Refused(_)
+        | familiar_llm::Outcome::RateLimited(_)
+        | familiar_llm::Outcome::Yielded(_) => return Ok(false),
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
         return Ok(false);
@@ -1162,7 +1201,9 @@ fn analyze_with_llm(
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => return None,
+        familiar_llm::Outcome::Refused(_)
+        | familiar_llm::Outcome::RateLimited(_)
+        | familiar_llm::Outcome::Yielded(_) => return None,
     };
     let v: serde_json::Value = serde_json::from_str(&json).ok()?;
     let field = |k: &str| {
@@ -1246,7 +1287,9 @@ fn author_tool(dir: &Path, text: &str) -> Option<DraftedTool> {
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => return None,
+        familiar_llm::Outcome::Refused(_)
+        | familiar_llm::Outcome::RateLimited(_)
+        | familiar_llm::Outcome::Yielded(_) => return None,
     };
     let v: serde_json::Value = serde_json::from_str(&json).ok()?;
     let field = |k: &str| {
@@ -1346,6 +1389,11 @@ fn record_tool_rejected(dir: &Path, name: &str, run: &ToolRun, now: i64) -> io::
             now,
             1.0,
         ),
+    )?;
+    narrate(
+        dir,
+        format!("I drafted a tool, '{name}', but it failed its trial — I did not keep it."),
+        now,
     )?;
     Ok(())
 }
@@ -1654,7 +1702,9 @@ fn fetch_and_answer(dir: &Path, text: &str, url: &str) -> Option<(String, Confid
     );
     let json = match familiar_llm::consult(dir, &prompt).ok()? {
         familiar_llm::Outcome::Response(j) => j,
-        familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
+        familiar_llm::Outcome::Refused(_)
+        | familiar_llm::Outcome::RateLimited(_)
+        | familiar_llm::Outcome::Yielded(_) => {
             return Some((
                 format!("I fetched {url}, but couldn't reach a model to read it just now — try again shortly."),
                 Confidence::Unknown,
@@ -2780,6 +2830,17 @@ fn record_reading(dir: &Path, name: &str, r: &ToolRun, reused: bool, now: i64) -
             1.0,
         ),
     )?;
+    // A birth is worth a sentence in the dialogue; a routine re-run is not.
+    if !reused {
+        narrate(
+            dir,
+            format!(
+                "I built a small sensor, '{name}', from a theory my trials bore out. \
+                 It runs on my own cadence — say the word and I'll retire it."
+            ),
+            now,
+        )?;
+    }
     Ok(true)
 }
 
@@ -2911,6 +2972,15 @@ fn audit_tool_health(dir: &Path, now: i64) -> io::Result<usize> {
                         now,
                         1.0,
                     ),
+                )?;
+                narrate(
+                    dir,
+                    format!(
+                        "I retired my sensor '{}' — it kept coming back with nothing useful, \
+                         so I stopped trusting it.",
+                        t.name
+                    ),
+                    now,
                 )?;
                 retired += 1;
             }
@@ -3781,6 +3851,16 @@ pub fn tick_gated(dir: &Path, now: i64) -> io::Result<TickReport> {
         execute_allowed(dir),
         authored_execute_allowed(dir),
     )
+}
+
+/// Answer the human's freshest utterance *now*, outside the tick — the fast path the
+/// daemon takes when the dialogue wake-file is touched ([`familiar_kernel::dialog::wake`]),
+/// so a person never waits out the metabolism's cadence for a reply. Does exactly and
+/// only what the tick's converse step does (same idempotence: nothing happens if the
+/// latest utterance is already answered), so racing an in-flight tick is harmless.
+pub fn reply_now(dir: &Path, now: i64) -> io::Result<bool> {
+    let obs = observation::load(dir)?;
+    maybe_reply(dir, now, &obs, llm_allowed(dir))
 }
 
 #[cfg(test)]
@@ -4776,6 +4856,125 @@ mod tests {
     }
 
     #[test]
+    fn reply_now_answers_outside_the_tick_and_stays_idempotent() {
+        // The daemon's wake fast-path: a fresh utterance gets a reply without a full
+        // tick, and calling it again (as when a tick races the wake) adds nothing.
+        let t = Temp::new("reply_now");
+        let dir = &t.0;
+        let now = 1_000_000;
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "the watch is back online",
+                "console",
+                "local",
+                now,
+                1.0,
+            ),
+        )
+        .unwrap();
+        assert!(
+            reply_now(dir, now + 1).unwrap(),
+            "a fresh utterance is answered"
+        );
+        assert!(!reply_now(dir, now + 2).unwrap(), "never answered twice");
+        let replies = observation::load(dir)
+            .unwrap()
+            .iter()
+            .filter(|o| o.actor == "familiar" && o.action == "replied")
+            .count();
+        assert_eq!(replies, 1);
+    }
+
+    // ---- interaction goldens: the dialogue's voice and its guards ----
+
+    #[test]
+    fn the_dialogue_reply_speaks_in_the_law_iii_voice() {
+        // The reply prompt must carry the Law III voice guidance and the human's own words —
+        // the dialogue is the most human-facing generation there is, and it used to be the
+        // one path that skipped the voice.
+        let t = Temp::new("reply_voice");
+        let dir = &t.0;
+        write_boundary(dir, false, false, true);
+        let llm = dir.join("llm");
+        fs::create_dir_all(&llm).unwrap();
+        fs::write(
+            llm.join("call_llm.sh"),
+            "#!/bin/sh\nd=\"$(dirname \"$0\")\"\ncp \"$d/prompt.txt\" \"$d/captured.txt\"\n\
+             printf 'I hear you — noted.' > \"$d/response.json\"\n",
+        )
+        .unwrap();
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "please watch the greenhouse",
+                "console",
+                "local",
+                1_000_000,
+                1.0,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, 1_000_001, &obs, true).unwrap());
+        let prompt = fs::read_to_string(llm.join("captured.txt")).unwrap();
+        assert!(
+            prompt.contains("service is not obedience"),
+            "the Law III voice frames the reply"
+        );
+        assert!(prompt.contains("Preference is not permission"));
+        assert!(
+            prompt.contains("please watch the greenhouse"),
+            "grounded in what was actually said"
+        );
+        let after = observation::load(dir).unwrap();
+        let r = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "replied")
+            .expect("a reply was recorded");
+        assert_eq!(r.object, "I hear you — noted.");
+    }
+
+    #[test]
+    fn a_garbage_model_reply_never_reaches_the_dialogue() {
+        // A coder model coughing up JSON must not speak to a person — the guard falls back
+        // to an honest templated acknowledgment instead.
+        let t = Temp::new("reply_garbage");
+        let dir = &t.0;
+        write_boundary(dir, false, false, true);
+        fake_llm(dir, r#"{"type":"object","properties":{}}"#);
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "hello there",
+                "console",
+                "local",
+                1_000_000,
+                1.0,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, 1_000_001, &obs, true).unwrap());
+        let after = observation::load(dir).unwrap();
+        let r = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "replied")
+            .expect("a reply was still recorded");
+        assert!(
+            !r.object.trim_start().starts_with(['{', '[', '<', '`']),
+            "the JSON artifact was kept out of the dialogue: {}",
+            r.object
+        );
+    }
+
+    #[test]
     fn the_familiar_replies_to_the_latest_human_utterance_once() {
         let t = Temp::new("maybe_reply");
         let dir = &t.0;
@@ -5609,6 +5808,12 @@ mod tests {
             obs.iter().any(|o| o.action == "rejected-tool"),
             "the rejection is recorded visibly"
         );
+        assert!(
+            obs.iter().any(|o| o.action == "narrated"
+                && o.context == "console"
+                && o.object.contains("failed its trial")),
+            "the rejection is narrated in the dialogue, not just the ledger"
+        );
     }
 
     #[test]
@@ -5671,6 +5876,12 @@ mod tests {
         assert!(tl.last_status.contains("retired by the audit"));
         let obs = observation::load(dir).unwrap();
         assert!(obs.iter().any(|o| o.action == "retired-sensor"));
+        assert!(
+            obs.iter().any(|o| o.action == "narrated"
+                && o.context == "console"
+                && o.object.contains("retired")),
+            "the retirement is narrated in the dialogue"
+        );
         // A second audit is a no-op (already unhealthy).
         assert_eq!(audit_tool_health(dir, 10_100).unwrap(), 0);
     }

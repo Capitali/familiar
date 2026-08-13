@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import WatchConnectivity
 import WatchKit
+import AVFoundation
 import FamiliarMesh
 
 /// The watch agent's state: it enrols into the familiar **by covenant** (receiving the familiar's
@@ -35,6 +36,14 @@ final class WatchModel: NSObject, ObservableObject {
     @AppStorage("watch.consent.heart") var heartEnabled = false
     @AppStorage("watch.consent.location") var locationEnabled = false
     @AppStorage("watch.consent.asked") var consentAsked = false
+
+    // MARK: talking to the familiar (voice loop, ADR-0023 phase 1 posture: deliberate speech)
+
+    /// A dictated turn is on its way to the familiar.
+    @Published var saying = false
+    /// The familiar's reply to the last turn — shown under the orb and spoken aloud.
+    @Published var reply: String?
+    private let replyVoice = AVSpeechSynthesizer()
 
     private let grantAccount = "watch.grant.json"
     private let defaults = UserDefaults.standard
@@ -190,6 +199,58 @@ final class WatchModel: NSObject, ObservableObject {
         if host == lighthouseHost { return "lighthouse" }
         if host.hasPrefix("100.") { return "tailscale" }   // coarse 100.64/10 tailnet check
         return "local"
+    }
+
+    /// A dictated dialogue turn: the same "told the familiar" pipe as every console, attributed
+    /// to the human this wrist follows. Then a short poll for the familiar's reply — spoken
+    /// aloud and shown under the orb. The poll is bounded (45s) so a slow mesh costs a shrug,
+    /// not a battery.
+    func say(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !saying, !humanName.isEmpty else { return }
+        saying = true
+        reply = nil
+        let sentAt = Int64(Date().timeIntervalSince1970)
+        Task {
+            guard let s = self.makeSession() else {
+                self.saying = false
+                self.reply = "not linked yet"
+                return
+            }
+            let turn = ObsRecord(actor: self.humanName, action: "told the familiar",
+                                 object: t, context: "console", confidence: 1.0)
+            guard (try? await ObservationClient(session: s).send([turn])) != nil else {
+                self.saying = false
+                self.reply = "couldn't reach the familiar"
+                return
+            }
+            self.note("said: \(t)")
+            await self.awaitReply(since: sentAt)
+        }
+    }
+
+    /// Poll the worldview briefly for a familiar reply newer than the turn; speak it if found.
+    private func awaitReply(since: Int64) async {
+        defer { saying = false }
+        guard let g = storedGrant(),
+              let host = defaults.string(forKey: "watch.enroll.host"),
+              let port = Int(defaults.string(forKey: "watch.enroll.port") ?? ""),
+              let url = WorldviewClient.worldviewURL(host: host, port: port)
+        else { return }
+        let session = ObservationClient.Session(node: node, membership: g.membership, url: url)
+        for _ in 0..<15 {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let view = try? await WorldviewClient(session: session).fetch() else { continue }
+            if let r = view.recent.first(where: {
+                $0.actor == "familiar" && $0.action == "replied" && $0.ts >= since
+            }) {
+                reply = r.object
+                WKInterfaceDevice.current().play(.success)
+                replyVoice.speak(AVSpeechUtterance(string: r.object))
+                return
+            }
+        }
+        reply = "the familiar is thinking — the reply will be on your phone"
     }
 
     private func saveGrant(_ g: Grant) {

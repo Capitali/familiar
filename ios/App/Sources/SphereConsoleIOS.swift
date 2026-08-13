@@ -15,6 +15,9 @@ import FamiliarMesh
 struct SphereConsoleIOS: View {
     @EnvironmentObject var model: AppModel
     @StateObject private var bridge = SphereBridgeIOS()
+    // Push-to-talk for the dialogue screen. The deliver closure goes unused — a dialogue
+    // utterance routes through onFinal into the console-answer pipe, not a `said` observation.
+    @StateObject private var voice = VoiceSensing { _ in }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -66,6 +69,21 @@ struct SphereConsoleIOS: View {
             bridge.onAnswer = { [weak model] text in
                 model?.consoleAnswer = text
                 model?.submitConsoleAnswer()
+            }
+            // The voice loop: mic button → on-device transcription → the same dialogue pipe
+            // as typing → the reply is spoken back (voice in, voice out — AppModel's rule).
+            model.dialogueVoiceAvailable = voice.available
+            voice.onFinal = { [weak model, weak bridge] text in
+                model?.submitVoiceTurn(text)
+                bridge?.pushVoicePartial("")
+            }
+            bridge.onVoice = { [weak voice] act in
+                guard let voice else { return }
+                if act == "start" {
+                    voice.requestAccess { ok in if ok { voice.start() } }
+                } else {
+                    voice.stop()
+                }
             }
             bridge.onConsent = { [weak model] key, on in
                 model?.setConsent(key, on)
@@ -119,6 +137,12 @@ struct SphereConsoleIOS: View {
         .onReceive(model.$worldviewError) { err in
             if let err { bridge.pushLinkDown(err) }
         }
+        .onReceive(voice.$partial) { text in
+            if voice.listening { bridge.pushVoicePartial(text) }
+        }
+        .onReceive(voice.$listening) { on in
+            bridge.pushVoiceState(on)
+        }
     }
 }
 
@@ -169,6 +193,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     weak var web: WKWebView?
     weak var map: MKMapView?
     var onAnswer: ((String) -> Void)?
+    /// Push-to-talk from the dialogue screen: "start" | "stop".
+    var onVoice: ((String) -> Void)?
     var onConsent: ((String, Bool) -> Void)?
     var onAnswerThread: ((String, String) -> Void)?
     /// (node_id, "grant"|"deny") — a standing decision (ADR-0020), sent over the mesh by the model.
@@ -216,6 +242,17 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
 
     func pushDevice(_ json: String) {
         web?.evaluateJavaScript("window.sphereDevice && window.sphereDevice(\(json))", completionHandler: nil)
+    }
+
+    /// Live transcript into the dialogue input while the human speaks; "" clears it.
+    func pushVoicePartial(_ text: String) {
+        let quoted = (try? JSONEncoder().encode(text)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
+        web?.evaluateJavaScript("window.sphereVoicePartial && window.sphereVoicePartial(\(quoted))", completionHandler: nil)
+    }
+
+    /// The mic's listening state, so the console's control shows live/idle honestly.
+    func pushVoiceState(_ on: Bool) {
+        web?.evaluateJavaScript("window.sphereVoiceState && window.sphereVoiceState(\(on))", completionHandler: nil)
     }
 
     private func setNodes(_ list: [[String: Any]]) {
@@ -321,6 +358,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             switch kind {
             case "answer":
                 if let text = body["text"] as? String, !text.isEmpty { self.onAnswer?(text) }
+            case "voice":
+                if let act = body["act"] as? String { self.onVoice?(act) }
             case "street":
                 self.setNodes(body["nodes"] as? [[String: Any]] ?? [])
                 self.surfaceStreet(lat: body["lat"] as? Double ?? 0,
