@@ -29,8 +29,11 @@ struct TheoryAnswer {
 
 /// Runs a consult prompt through the device's own model — Apple Intelligence — and returns the
 /// answer as an opaque JSON string the familiar's `apple` provider hands back to the muse (ADR-0014).
-/// On-device only; Private Cloud Compute is a separate consent, off here. Where FoundationModels or
-/// Apple Intelligence isn't present it returns `nil` and the familiar's provider chain simply rolls on.
+/// On-device by default; Private Cloud Compute is chosen only when every consent stacks (ADR-0038):
+/// the hub's boundary said `cloud_ok`, the human turned this device's `consent.pcc` on, the OS is
+/// 27+, and Apple reports PCC available — anything short of all four answers on-device, silently.
+/// Where FoundationModels or Apple Intelligence isn't present it returns `nil` and the familiar's
+/// provider chain simply rolls on.
 enum ConsultRunner {
     /// Whether this device can actually answer a consult right now.
     static var available: Bool {
@@ -47,7 +50,7 @@ enum ConsultRunner {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             switch SystemLanguageModel.default.availability {
-            case .available: return "available"
+            case .available: return "available" + pccSuffix()
             case .unavailable(.deviceNotEligible): return "model-missing"
             case .unavailable(.appleIntelligenceNotEnabled): return "apple-intelligence-off"
             case .unavailable(.modelNotReady): return "model-loading"
@@ -72,12 +75,12 @@ enum ConsultRunner {
     /// the A9 campaign every 1-2 cells. Racing generation against a sleep guarantees this returns, so a
     /// stuck generation degrades to "this device didn't answer that one" (the adapter retries) and the
     /// loop self-heals. A late-finishing generation is simply discarded.
-    static func answer(_ prompt: String, kind: String? = nil, timeout: TimeInterval = 90) async -> String? {
+    static func answer(_ prompt: String, kind: String? = nil, cloudOK: Bool = false, timeout: TimeInterval = 90) async -> String? {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             guard case .available = SystemLanguageModel.default.availability else { return nil }
             return await withTaskGroup(of: String?.self) { group in
-                group.addTask { await generate(prompt, kind: kind) }
+                group.addTask { await generate(prompt, kind: kind, cloudOK: cloudOK) }
                 group.addTask {
                     try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                     return nil   // timeout sentinel — indistinguishable from silence, which is correct
@@ -92,11 +95,38 @@ enum ConsultRunner {
     }
 
     #if canImport(FoundationModels)
+    /// "+pcc" when this device could choose Private Cloud Compute right now (OS 27, consent
+    /// on, Apple reports it available) — so the console's oracle status shows the dimension.
+    private static func pccSuffix() -> String {
+        if #available(iOS 27.0, macOS 27.0, *),
+           UserDefaults.standard.bool(forKey: "consent.pcc") {
+            if case .available = PrivateCloudComputeLanguageModel().availability { return "+pcc" }
+        }
+        return ""
+    }
+
+    /// The session — and with it, WHERE this thought runs (ADR-0038). PCC only when every
+    /// consent stacks: the prompt's cloud_ok (the hub's boundary), this device's consent.pcc
+    /// (the human's toggle, default off), OS 27+, and Apple reporting PCC available. The
+    /// guided-generation calls are untouched — same respond(to:generating:) either way.
+    @available(iOS 26.0, macOS 26.0, *)
+    private static func makeSession(cloudOK: Bool) -> LanguageModelSession {
+        if #available(iOS 27.0, macOS 27.0, *),
+           cloudOK,
+           UserDefaults.standard.bool(forKey: "consent.pcc") {
+            let pcc = PrivateCloudComputeLanguageModel()
+            if case .available = pcc.availability {
+                return LanguageModelSession(model: pcc)
+            }
+        }
+        return LanguageModelSession()
+    }
+
     /// The actual generation, dispatched by strategy. Returns a JSON string or nil on any failure.
     @available(iOS 26.0, macOS 26.0, *)
-    private static func generate(_ prompt: String, kind: String?) async -> String? {
+    private static func generate(_ prompt: String, kind: String?, cloudOK: Bool) async -> String? {
         do {
-            let session = LanguageModelSession()
+            let session = makeSession(cloudOK: cloudOK)
             switch (kind ?? "").lowercased() {
             case "script":
                 let a = try await session.respond(to: prompt, generating: ScriptAnswer.self).content

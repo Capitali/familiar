@@ -132,6 +132,18 @@ gates, and — for any executed artifact — a **constitutional pre-execution re
 harmful actions: destructive wipes, reading secrets, exfiltration, privilege escalation,
 or tampering with its own boundary.
 
+**Where a thought may travel — `allow_llm_cloud`** ([ADR-0038](decision-records/0038-the-cloud-consent-gate.md)).
+`allow_llm` opens consulting at all; this further, fail-closed gate opens the class of act
+where the prompt **leaves hardware the covenant controls** — hosted APIs
+(gemini/cerebras/claude) and Apple's Private Cloud Compute alike. Local providers (ollama on
+loopback, a covenant device's on-device model per ADR-0014, the host's own `fm` model) need
+only `allow_llm`. Enforced at three layers: the guard's `LlmCloud` kind (in-process
+providers), the seam's exported `FAMILIAR_ALLOW_LLM_CLOUD` filtering the adapter's provider
+chain (unset = closed), and `ConsultPrompt.cloud_ok` carrying the hub's decision to the
+answering device, which stacks its own consent on top. Permission does not compose: opening
+the LLM is not opening the datacenter. What a cloud-bound prompt may *contain* is still not
+inspected — that stays on the named-hardening list below.
+
 **Peer federation — `allow_mesh`.** Sharing tools/knowledge/humans with peer familiars over
 the tailnet is outward transmission — the exfiltration surface Law III guards, at node-to-node
 scale. `allow_mesh` is fail-closed (`false` by default and for any pre-existing boundary file),

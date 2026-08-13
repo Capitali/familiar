@@ -22,7 +22,9 @@ You hold the keys. The group is yours to admit people to and yours to abandon;
 the mesh talks to itself over pinned TLS, and its thinking runs through a
 boundary-gated adapter pointed at a provider you choose — a local model, a
 free-tier API, or (on supported devices) the **Apple Intelligence model already
-on your phone**, so a prompt need never leave your hardware at all.
+on your phone** — and "a prompt need never leave your hardware" is enforced, not
+configured: off-device consult has its own fail-closed gate (`allow_llm_cloud`,
+[ADR-0038](docs/decision-records/0038-the-cloud-consent-gate.md)).
 
 Membership is **two filters, both legible**
 ([ADR-0026](docs/decision-records/0026-two-filter-admission.md)): a device is a

@@ -27,6 +27,15 @@ pub struct Boundary {
     pub allow_network: bool,
     /// May the factory consult an LLM (the periphery seam)?
     pub allow_llm: bool,
+    /// May a consult **leave hardware the covenant controls**? Subordinate to `allow_llm`
+    /// (meaningless without it): that gate opens consulting at all; this one opens the class
+    /// of act where the prompt travels to someone else's datacenter — a hosted API
+    /// (gemini/cerebras/claude) and Apple's Private Cloud Compute alike (ADR-0038). Local
+    /// stays local on `allow_llm` alone: ollama on loopback, the device oracle (an enrolled
+    /// covenant device, ADR-0014), the host's own on-device model. Fail-closed, human-opened
+    /// — README's "a prompt need never leave your hardware" made enforceable.
+    #[serde(default)]
+    pub allow_llm_cloud: bool,
     /// May the factory install/download tools?
     pub allow_tool_install: bool,
     /// May the factory **execute generated artifacts** (run code it produced)? A
@@ -129,6 +138,7 @@ impl Boundary {
             phase: "closed".to_string(),
             allow_network: false,
             allow_llm: false,
+            allow_llm_cloud: false,
             allow_tool_install: false,
             allow_execute: false,
             allow_authored_execute: false,
@@ -153,6 +163,7 @@ impl Boundary {
     pub fn is_closed(&self) -> bool {
         !self.allow_network
             && !self.allow_llm
+            && !self.allow_llm_cloud
             && !self.allow_tool_install
             && !self.allow_execute
             && !self.allow_authored_execute
@@ -256,6 +267,9 @@ pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
         phase: format!("{}·scoped", b.phase),
         allow_network: b.allow_network && s.network,
         allow_llm: b.allow_llm,
+        // Preserved alongside allow_llm: an agent's consult runs through the same seam,
+        // and where a thought may travel is the human's setting, not per-scope (ADR-0038).
+        allow_llm_cloud: b.allow_llm_cloud,
         allow_tool_install: b.allow_tool_install && s.tool_install,
         allow_execute: b.allow_execute && s.execute,
         allow_authored_execute: b.allow_authored_execute && s.authored_execute,
@@ -474,6 +488,43 @@ mod tests {
             !eff.allow_location,
             "scope withholds location even though boundary allows it"
         );
+    }
+
+    #[test]
+    fn llm_open_does_not_imply_cloud() {
+        // The doctrinal test (ADR-0038): opening the LLM seam is not permission for a
+        // prompt to leave the hardware — permission does not compose.
+        assert!(!Boundary::closed().allow_llm_cloud);
+        // An old policy file that opens allow_llm and predates the flag stays local-only.
+        let t = Temp::new("cloud_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        let b = load(&t.0).unwrap();
+        assert!(
+            b.allow_llm && !b.allow_llm_cloud,
+            "unspecified cloud stays off"
+        );
+        // Opening it alone counts as outward capability.
+        let mut b = Boundary::closed();
+        b.allow_llm_cloud = true;
+        assert!(!b.is_closed());
+        // And a scoped agent inherits the human's cloud setting unchanged, both ways —
+        // a delegated loop neither gains nor loses where its thoughts may travel.
+        let mut open = Boundary::closed();
+        open.allow_llm = true;
+        open.allow_llm_cloud = true;
+        let eff = scoped_boundary(&open, &CapabilityScope::none());
+        assert!(
+            eff.allow_llm_cloud,
+            "scope preserves the human's cloud grant"
+        );
+        let mut local_only = Boundary::closed();
+        local_only.allow_llm = true;
+        let eff = scoped_boundary(&local_only, &CapabilityScope::from_boundary(&local_only));
+        assert!(!eff.allow_llm_cloud, "a scope never invents a cloud grant");
     }
 
     #[test]

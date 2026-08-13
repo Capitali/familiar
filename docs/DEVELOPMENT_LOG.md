@@ -6,6 +6,44 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-13 (later still) — Where a thought may travel becomes the human's setting (ADR-0038)
+
+### What changed
+
+- **The cloud consent gate, end to end.** `Boundary.allow_llm_cloud` (fail-closed,
+  scope-preserved) with the guard's `LlmCloud` kind — subordinate to `allow_llm`, never a
+  bypass. The seam exports `FAMILIAR_ALLOW_LLM_CLOUD` unconditionally each consult; the
+  adapter captures it ahead of key.env (the `_CALLER_PROVIDER` discipline) and filters
+  `CLOUD_PROVIDERS` from the chain when closed, exiting 1 with a named message if that
+  empties a consult. `ConsultPrompt.cloud_ok` carries the decision through the mesh — the
+  load-bearing test pins `accept_relay` preserving it across the broker's re-serialization.
+- **Apple Intelligence on the bench.** `apple_local` / `apple_pcc` via the macOS 27 `fm`
+  CLI behind one helper: guided `--schema` generation for the script/theory kinds,
+  `fm available` preflight mapping not-ready states to the DeviceAsleep retry path.
+  Live finding: `fm respond --model pcc` is context-gated by Apple to real Terminal
+  sessions (recorded in key.env.example) — the chain marks it and rolls on.
+- **The device stacks its consent.** ConsultRunner chooses
+  `LanguageModelSession(model: PrivateCloudComputeLanguageModel())` only under
+  cloud_ok ∧ `consent.pcc` (default off) ∧ OS 27 ∧ `.available`; oracle status gains
+  "+pcc". Deployment floors untouched. The sphere's visible toggle for `consent.pcc`
+  is deliberately its own next brick.
+
+### Checks run
+
+- Green bar per brick (fmt, clippy `-D warnings`, `cargo test --all`, kernel `unsafe`
+  grep); live adapter matrix (closed filters hosted + probe; unset fail-closed; open
+  reaches gemini; ollama survives a closed gate); both consoles BUILD SUCCEEDED against
+  the macOS 27 SDK with the PCC branch.
+
+### Next
+
+- Flip `"allow_llm_cloud": true` on nodes that want hosted providers (the hub; done at
+  this merge's deploy). PCC live-fire needs: the phones on the Brick-8 build (TestFlight),
+  `consent.pcc` on, and the PCC entitlement granted to the app ids. Then the ai-eval rerun
+  (on-device vs PCC vs the 2026-07-28 baseline) is the quality gate. The M3 Air's refusal
+  to enable Apple Intelligence is a standalone open issue — `fm` says modelNotReady; no
+  Apple Account is signed in on that machine.
+
 ## 2026-08-13 (later) — Test ports move out of the runner's reach
 
 ### What changed

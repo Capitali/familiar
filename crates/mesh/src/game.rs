@@ -153,6 +153,7 @@ pub fn pact_deck() -> Vec<PactCard> {
         phase: "phase-1".into(),
         allow_network: true,
         allow_llm: true,
+        allow_llm_cloud: false,
         allow_tool_install: false,
         allow_execute: false,
         allow_authored_execute: false,

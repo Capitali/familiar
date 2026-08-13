@@ -157,7 +157,17 @@ fn consult_in(dir: &Path, prompt: &str, timeout: Duration, lane: Lane) -> io::Re
     }
     fs::create_dir_all(&llm_dir)?;
     fs::write(llm_dir.join("prompt.txt"), prompt)?;
-    let mut child = Command::new("sh").arg(&script).spawn()?;
+    // ADR-0038: the boundary's cloud decision rides along on every consult — set
+    // unconditionally both ways so a stale inherited value can never lie. The adapter
+    // filters its provider chain by it; unset (a human running the script by hand)
+    // means closed.
+    let mut child = Command::new("sh")
+        .arg(&script)
+        .env(
+            "FAMILIAR_ALLOW_LLM_CLOUD",
+            if b.allow_llm_cloud { "1" } else { "0" },
+        )
+        .spawn()?;
     let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child.try_wait()? {
@@ -328,6 +338,50 @@ mod tests {
             vec!["bg-one", "human-turn", "bg-two"],
             "the human turn runs ahead of queued background work"
         );
+    }
+
+    #[test]
+    fn the_boundarys_cloud_decision_reaches_the_adapter() {
+        let _x = exclusive();
+        // ADR-0038: FAMILIAR_ALLOW_LLM_CLOUD is exported from the boundary on every
+        // consult — 0 under allow_llm alone, 1 only when the human opened the cloud gate.
+        let body = "#!/bin/sh\nprintf '%s' \"$FAMILIAR_ALLOW_LLM_CLOUD\" > \"$(dirname \"$0\")/response.json\"\n";
+        let t = open_dir_with_adapter("cloud_closed", body);
+        match consult(&t.0, "hello").unwrap() {
+            Outcome::Response(r) => assert_eq!(r, "0", "cloud closed exports 0"),
+            _ => panic!("consult must succeed"),
+        }
+
+        // A stale inherited value cannot lie: the seam sets the var unconditionally,
+        // so a "1" sitting in this process's environment never leaks through.
+        std::env::set_var("FAMILIAR_ALLOW_LLM_CLOUD", "1");
+        let t2 = open_dir_with_adapter("cloud_stale", body);
+        match consult(&t2.0, "hello").unwrap() {
+            Outcome::Response(r) => {
+                assert_eq!(r, "0", "the boundary's value wins over inherited env")
+            }
+            _ => panic!("consult must succeed"),
+        }
+        std::env::remove_var("FAMILIAR_ALLOW_LLM_CLOUD");
+
+        // And the human opening the gate is what flips it to 1.
+        use familiar_kernel::boundary::{Boundary, BOUNDARY_FILE};
+        let p = std::env::temp_dir().join(format!(
+            "familiar_llm_test_cloud_open_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(p.join("llm")).unwrap();
+        let mut b = Boundary::closed();
+        b.allow_llm = true;
+        b.allow_llm_cloud = true;
+        fs::write(p.join(BOUNDARY_FILE), serde_json::to_string(&b).unwrap()).unwrap();
+        fs::write(p.join("llm").join("call_llm.sh"), body).unwrap();
+        let t3 = Temp(p);
+        match consult(&t3.0, "hello").unwrap() {
+            Outcome::Response(r) => assert_eq!(r, "1", "an open cloud gate exports 1"),
+            _ => panic!("consult must succeed"),
+        }
     }
 
     #[test]

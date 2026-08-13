@@ -370,6 +370,9 @@ final class AppModel: ObservableObject {
     // The iPad as a thinking-peer: on-device Apple Intelligence reasoning under the Three Laws.
     let reasoner = LocalReasoner()
     @AppStorage("consent.reasoning") var reasoningEnabled = false
+    /// May THIS device choose Private Cloud Compute for a cloud-cleared consult (ADR-0038)?
+    /// Stacks with the hub's cloud_ok — both must hold; default off. (Toggle UI: sphere, next brick.)
+    @AppStorage("consent.pcc") var pccEnabled = false
     private var reasoningTask: Task<Void, Never>?
     private var lastReasonedAt: Date?
 
@@ -996,7 +999,7 @@ final class AppModel: ObservableObject {
         let client = ConsultClient(node: node, membership: g.membership, groupPubkey: g.group_pubkey,
                                    host: readHost, port: enrollPort)
         for p in await client.pull() {
-            if let answer = await ConsultRunner.answer(p.prompt, kind: p.kind) {
+            if let answer = await ConsultRunner.answer(p.prompt, kind: p.kind, cloudOK: p.cloud_ok ?? false) {
                 await client.push(id: p.id, json: answer)
             }
         }
