@@ -6,6 +6,73 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-13 (evening) — Names lead, a console stays home, and the cloud gate gets its switch
+
+### What changed
+
+- **The established handle leads everywhere a device is shown.** ADR-0027 already ruled
+  it — *the roster's name for a device is its record's established handle, never a cached
+  brief's word* — but the sphere led with the label and wore the handle as a green suffix,
+  and four surfaces (claims, arrivals, the Mac's own device header, correction notes)
+  led with the bare node id. Now `nodeName()` applies one rule everywhere: handle (green,
+  the mark of a known identity), else the device's own label, else a mask. **A node id is
+  an address, not a name** — it never leads; it is demoted to small print on the cards and
+  a NODE ID row on the node screen. The un-named wear what the mesh honestly knows —
+  *unnamed Mac*, *unnamed iPhone* (OS word from the member row or the arrival's build
+  string) — dim and italic, so a placeholder can never pass for a name. `idLed()` spots
+  labels that are only the id in a haircut (the doors' own `node_id[..8]` fallback), by
+  exact prefix match rather than a hex heuristic. Swift's `displayName(for:)` gives the
+  door notes the same manners ("✓ Wildhorse — sever", "welcome an unnamed device
+  (7cc41b02)"). Handles stay lowercase slugs on the wire; `cap()` dresses them for
+  display (wildhorse → Wildhorse) — names are important.
+- **A console files under the machine it runs on — or stands alone, honestly.** From the
+  lighthouse's vantage every machine at home wears the same public address, and the
+  structural pass in `attach_consoles` took that as evidence: MacOnStick's console filed
+  under wildhorse's daemon (seen live today, both Mac consoles nested under the one card).
+  A shared address now identifies a machine only when it is **private** to the household's
+  networks (LAN, loopback, tailnet — the same `is_gossipable_addr` judgement the host list
+  uses); a public address is a household, not a machine, and yields no link. The label-stem
+  pass is untouched, so *Wildhorse console* still files under *wildhorse* from any door.
+  Belt and braces in the sphere: the SELF row — the very device rendering the roster —
+  never nests under another machine's card, whatever a stale door still claims
+  (read-loyalty keeps old doors serving for a release).
+- **The device screen completes ADR-0038's named next brick: the `consent.pcc` switch.**
+  One tile — *private cloud* — beside the other consents, on every console (the sphere
+  bundle is shared by FamiliarMac, iPhone and iPad; both bridges already pass any consent
+  key through to `setConsent`). The hover title says the doctrine in full: a consult
+  leaves this device for Private Cloud Compute only when the hub has also cleared the
+  cloud — permission does not compose. No sensing to start or stop: ConsultRunner reads
+  the flag at each consult. The hub's `allow_llm_cloud` stays file-only, by boundary
+  doctrine — no UI for it, ever. The watch renders no consent screen of its own; it is
+  established through its phone and inherits the phone's choice.
+
+### Checks run
+
+- Green bar: `cargo fmt --check`, `clippy -D warnings`, full `cargo test` (31 suites,
+  including the new `a_console_behind_nat_never_files_under_another_machine` and every
+  pre-existing attach case unchanged); `xcodegen`; **both consoles BUILD SUCCEEDED**
+  (FamiliarMac / macOS, FamiliarAgent / iOS Simulator) on the Build-80-stamped project.
+- Sphere driven live in a browser against fixture worldviews: handles lead green with the
+  hardware word beside them (Aphelion · Ian's iPhone), masks render dim-italic with the
+  id in small print (unnamed Mac · 9f21c3aa), the claims/arrivals cards never title on
+  hex, a SELF row with a stale `attached_to` stands top-level while the legitimate nested
+  console stays nested, and the *private cloud* tile renders beside *reason*.
+
+### Next
+
+- **Name the fleet.** The masks show exactly where establishment is missing — this Mac
+  (3d68a068) reads *unnamed Mac* until the lighthouse door runs `standing grant` + `mesh
+  name`. The naming acts are one-liners; the console now makes the gap visible instead
+  of spelling it in hex.
+- **Per-Mac console identity is a records question, deliberately not answered here.** The
+  lighthouse's legacy roll still carries one record labelled "wildhorse - the macOS
+  console app (mac:*)" from when wildhorse was the only Mac, and `dedup_devices` still
+  groups by `mac:<human>` — two real Macs serving the same human are two machines, not a
+  reinstall lineage. Both want the ADR-0026/0027 treatment (a record per physical
+  console, the legacy record retired) rather than a display patch.
+- PCC live-fire prerequisites unchanged from the entry below; the new tile removes the
+  "no UI" item from that list.
+
 ## 2026-08-13 (later still) — Where a thought may travel becomes the human's setting (ADR-0038)
 
 ### What changed
