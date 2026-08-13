@@ -1465,7 +1465,9 @@ function refreshScreen() {
       if (/^\d/.test(s) || s.includes('::')) return 'internet';
       return 'dns name';
     };
-    const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason' };
+    const CONSENT_META = { location:'position', motion:'motion', face:'face', discovery:'survey', reasoning:'reason', pcc:'private cloud' };
+    // ADR-0038, said in full on hover: consent here is necessary, never sufficient.
+    const CONSENT_TITLE = { pcc: "think in Apple's private cloud — a consult leaves this device for Private Cloud Compute only when the hub has also cleared the cloud; permission does not compose" };
     // The visitor's path — ADR-0026's two filters as a literal checklist, with the door's own
     // words and every way in spelled out. A guest should never have to infer what to do next.
     const mem = d.membership || {};
@@ -1531,7 +1533,7 @@ function refreshScreen() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">` +
       Object.entries(CONSENT_META).map(([key, label]) => {
         const on = !!(d.consents && d.consents[key]);
-        return `<button onclick="toApp('consent',{key:'${key}',on:${!on}})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${on?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
+        return `<button onclick="toApp('consent',{key:'${key}',on:${!on}})" ${CONSENT_TITLE[key] ? `title="${esc(CONSENT_TITLE[key])}"` : ''} style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${on?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
           ${gateGlyph(on)}
           <span class="m" style="font-size:9px;letter-spacing:0.14em;color:rgba(200,216,248,0.6);">${label}</span>
         </button>`;

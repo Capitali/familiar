@@ -492,6 +492,9 @@ final class AppModel: ObservableObject {
                 "location": locationEnabled, "motion": motionEnabled, "face": faceEnabled,
                 "faceRecognition": faceRecognitionEnabled,
                 "discovery": discoveryEnabled, "reasoning": reasoningEnabled,
+                // ADR-0038: the device-side half of the cloud gate. The hub's allow_llm_cloud
+                // stays file-only by boundary doctrine — permission does not compose.
+                "pcc": pccEnabled,
             ],
         ]
         return (try? JSONSerialization.data(withJSONObject: d)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -506,6 +509,9 @@ final class AppModel: ObservableObject {
         case "faceRecognition": faceRecognitionEnabled = on
         case "discovery": discoveryEnabled = on
         case "reasoning": reasoningEnabled = on
+        // No sensing to start/stop: ConsultRunner reads the flag at each consult
+        // (ADR-0038 — it gates where a thought may run, not whether one runs).
+        case "pcc": pccEnabled = on
         default: return
         }
         startSensingIfConsented()
