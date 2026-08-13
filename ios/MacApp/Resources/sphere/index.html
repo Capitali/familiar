@@ -606,13 +606,17 @@ function refreshScreen() {
     // sibling. Still its own member — own key, own row in history, own dive — and if the host
     // is absent from the live roster the member stands alone again (quit the daemon and the
     // console honestly reappears at top level).
-    const nestedIn = (host) => live.filter(([q]) => q.m.attached_to === host.m.node_id);
+    // The row that IS this device (SELF) never files under another machine's card — it runs
+    // exactly here, whatever a door's stale attribution says (a shared NAT address once filed
+    // MacOnStick's console under wildhorse; the door is fixed, but read-loyalty keeps old
+    // doors serving for a release).
+    const nestedIn = (host) => live.filter(([q]) => !q.local && q.m.attached_to === host.m.node_id);
     const standing_ = live.filter(([p]) =>
-      !p.m.attached_to || !live.some(([h]) => h.m.node_id === p.m.attached_to));
+      p.local || !p.m.attached_to || !live.some(([h]) => h.m.node_id === p.m.attached_to));
     const nestedRow = ([q, qi]) => `
       <div onclick="event.stopPropagation();sphereNode(${qi})" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 12px;border-radius:11px;background:rgba(20,44,80,0.3);border:1px solid rgba(120,190,255,0.14);cursor:pointer;">
         <span style="width:7px;height:7px;border-radius:50%;background:${q.color};box-shadow:0 0 9px ${q.color};"></span>
-        <span style="font-size:13px;font-weight:500;flex:1;letter-spacing:-0.01em;">${esc(q.name)}</span>
+        <span style="font-size:13px;font-weight:500;flex:1;letter-spacing:-0.01em;${q.masked ? 'color:rgba(190,210,240,0.6);font-style:italic;' : q.m.human ? 'color:#9fe8c0;' : ''}">${esc(q.name)}</span>
         ${chip(q.kindWord, '#bcd2ff')}
         <span class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(160,195,255,0.55);">${esc((q.status||'').toUpperCase())}</span>
       </div>`;

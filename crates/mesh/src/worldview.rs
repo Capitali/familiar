@@ -569,7 +569,7 @@ pub(crate) fn read_worldview(
 /// someone else. That is the distinction being enforced here, and it is why a future second
 /// lighthouse (ADR-0018 wants the door eventually redundant) must be introduced by configuration
 /// or enrolment rather than inferred from a connection.
-fn is_gossipable_addr(ip: &str) -> bool {
+pub(crate) fn is_gossipable_addr(ip: &str) -> bool {
     use std::net::IpAddr;
     match ip.parse::<IpAddr>() {
         Ok(IpAddr::V4(v4)) => {
