@@ -8,7 +8,9 @@
 # devices → TestFlight upload. Each stage prints a marker; the first failure stops the ship.
 set -euo pipefail
 
-REPO=/Users/ian/Development/familiar
+# Still absolute at runtime — derived from this script's own location, so the ship
+# works from any checkout (wildhorse kept the repo in ~/Development, this Mac in ~/Projects).
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IOS="$REPO/ios"
 BUILD="${1:?usage: ship.sh <build-number>}"
 DEVICES=(20369E69-19C1-5DC1-B404-72A68D3DA0E9 EE750B79-EF86-514C-A14D-F2E4AD4ACBF8)
