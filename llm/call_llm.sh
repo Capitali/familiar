@@ -378,9 +378,64 @@ def call_apple(max_tokens):
     raise DeviceAsleep(f"no device answered within {timeout}s")
 
 
+def call_fm(name, model_flag):
+    # The host's own Apple Intelligence via the macOS 27 `fm` CLI — `system` runs on this
+    # machine's silicon (a LOCAL provider, ADR-0038); `pcc` sends to Apple's Private Cloud
+    # Compute (a CLOUD provider, gated). `--schema` is fm's guided generation: the answer
+    # comes back as exactly the JSON shape the muse asked for, so usable_json never guesses.
+    import shutil, subprocess
+    if not shutil.which("fm"):
+        raise RuntimeError(f"{name}: fm CLI not present (macOS 27+)")
+    avail = subprocess.run(["fm", "available", "--model", model_flag],
+                           capture_output=True, text=True, timeout=15)
+    if avail.returncode == 69:
+        raise RuntimeError(f"{name}: fm license not agreed — run: sudo fm license")
+    if avail.returncode != 0 or "available" not in avail.stdout.lower():
+        # Model not ready / Apple Intelligence off / PCC unreachable: the same evidentiary
+        # case as a sleeping device — transient silence the muse retries, never garbage.
+        raise DeviceAsleep(f"{name}: {(avail.stdout or avail.stderr).strip()[:160]}")
+    kind = os.environ.get("APPLE_CONSULT_KIND", "")
+    if not kind:
+        low = prompt_text.lower()
+        if '"script"' in low:
+            kind = "script"
+        elif '"theory"' in low and '"direction"' in low:
+            kind = "theory"
+    args = ["fm", "respond", "--model", model_flag, "--no-stream"]
+    if kind == "script":
+        args += ["--schema",
+                 '{"type":"object","properties":{"script":{"type":"string"}},"required":["script"]}']
+    elif kind == "theory":
+        args += ["--schema",
+                 '{"type":"object","properties":{"question":{"type":"string"},'
+                 '"theory":{"type":"string"},"direction":{"type":"string"}},'
+                 '"required":["question","theory","direction"]}']
+    args.append(prompt_text)
+    deadline = int(os.environ.get("FM_TIMEOUT", "100"))  # under the seam's 120s kill
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=deadline)
+    except subprocess.TimeoutExpired:
+        raise DeviceAsleep(f"{name}: no answer within {deadline}s")
+    if r.returncode != 0:
+        raise RuntimeError(f"{name}: fm exit {r.returncode}: {(r.stderr or '').strip()[:200]}")
+    text = r.stdout.strip()
+    # fm reports no token usage; estimate for the ledger so budgets still bind.
+    spend_record(name, max(1, (len(prompt_text) + len(text)) // 4))
+    return text if kind in ("script", "theory") else usable_json(text)
+
+
+def call_apple_local(max_tokens):
+    return call_fm("apple_local", "system")
+
+
+def call_apple_pcc(max_tokens):
+    return call_fm("apple_pcc", "pcc")
+
+
 PROVIDERS = {"claude": call_claude, "anthropic": call_claude,
              "gemini": call_gemini, "cerebras": call_cerebras,
-             "ollama": call_ollama, "apple": call_apple}
+             "ollama": call_ollama, "apple": call_apple,
+             "apple_local": call_apple_local, "apple_pcc": call_apple_pcc}
 
 
 def http_detail(e):
