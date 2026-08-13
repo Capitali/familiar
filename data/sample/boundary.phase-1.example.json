@@ -1,9 +1,11 @@
 {
   "_comment": "EXAMPLE ONLY — not active. To enable Phase 1 (companion-to-one), a HUMAN copies this to <data-dir>/boundary.json (default familiar_data/boundary.json) and edits the paths. The familiar only reads boundary.json; it can never write or widen it. Remove the file (or set everything false/empty) to return to CLOSED. See docs/boundaries.md.",
   "_gates": "each is a separate human choice. allow_execute runs the familiar's own (deterministic) artifacts; allow_authored_execute runs LLM-WRITTEN code — a real exfiltration surface the in-process runner does not sandbox, so leave it off unless you accept that risk.",
+  "_cloud": "allow_llm_cloud lets a consult LEAVE your hardware (hosted APIs and Apple PCC alike, ADR-0038). Off, the familiar still thinks with local providers: ollama, a covenant device's on-device model, the host's own. Open it only if you accept prompts traveling to a provider you chose.",
   "phase": "phase-1",
   "allow_network": true,
   "allow_llm": true,
+  "allow_llm_cloud": false,
   "allow_tool_install": false,
   "allow_execute": false,
   "allow_authored_execute": false,

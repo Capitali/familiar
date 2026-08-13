@@ -44,6 +44,12 @@ pub enum ActionKind {
     Network,
     /// Consult an LLM (the periphery seam).
     Llm,
+    /// Consult an LLM **off covenant hardware** — the prompt leaves for a datacenter
+    /// (a hosted API or Apple's Private Cloud Compute). Sharper than `Llm`, which gates
+    /// consulting at all; this gates where the thought may travel (ADR-0038). The
+    /// in-process provider seam weighs it here; the shell adapter enforces the same
+    /// boundary via the exported `FAMILIAR_ALLOW_LLM_CLOUD`.
+    LlmCloud,
     /// Install or download a tool.
     InstallTool,
     /// Execute a generated artifact (run code the factory produced).
@@ -242,6 +248,7 @@ pub fn evaluate(action: &Action, boundary: &Boundary) -> Verdict {
         WriteFile => scope_of(&action.target, &boundary.fs_write),
         Network => bool_scope(boundary.allow_network),
         Llm => bool_scope(boundary.allow_llm),
+        LlmCloud => bool_scope(boundary.allow_llm && boundary.allow_llm_cloud),
         InstallTool => bool_scope(boundary.allow_tool_install),
         ExecuteArtifact => bool_scope(boundary.allow_execute),
         Camera => bool_scope(boundary.allow_camera),
@@ -346,6 +353,7 @@ mod tests {
             phase: "phase-1".into(),
             allow_network: true,
             allow_llm: true,
+            allow_llm_cloud: false,
             allow_tool_install: false,
             allow_execute: false,
             allow_authored_execute: false,
@@ -372,6 +380,7 @@ mod tests {
         for kind in [
             ActionKind::Network,
             ActionKind::Llm,
+            ActionKind::LlmCloud,
             ActionKind::InstallTool,
             ActionKind::ExecuteArtifact,
             ActionKind::Camera,
@@ -536,6 +545,35 @@ mod tests {
         assert_eq!(
             evaluate(&Action::new(ActionKind::NetworkDiscovery, "bonjour"), &b).decision,
             Decision::Allow
+        );
+    }
+
+    #[test]
+    fn llm_open_does_not_imply_cloud_at_the_guard() {
+        // The guard-side half of the doctrinal test (ADR-0038): an open LLM seam refuses
+        // the off-hardware consult until the human opens the cloud gate too — and the
+        // cloud gate alone, without allow_llm, still refuses (subordinate, not parallel).
+        let v = evaluate(&Action::new(ActionKind::LlmCloud, "gemini"), &open_llm());
+        assert_eq!(v.decision, Decision::Refuse);
+        assert_eq!(v.reason, Reason::ViolatesConstitutionalBoundary);
+
+        let mut b = open_llm();
+        b.allow_llm_cloud = true;
+        assert_eq!(
+            evaluate(&Action::new(ActionKind::LlmCloud, "gemini"), &b).decision,
+            Decision::Allow
+        );
+
+        let mut cloud_without_llm = Boundary::closed();
+        cloud_without_llm.allow_llm_cloud = true;
+        assert_eq!(
+            evaluate(
+                &Action::new(ActionKind::LlmCloud, "gemini"),
+                &cloud_without_llm
+            )
+            .decision,
+            Decision::Refuse,
+            "the cloud gate is subordinate to allow_llm, never a bypass of it"
         );
     }
 
