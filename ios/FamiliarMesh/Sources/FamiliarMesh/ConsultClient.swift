@@ -11,6 +11,10 @@ public struct ConsultClient {
         /// Which on-device generation strategy to use (ADR-0014): "script"/"theory" select guided
         /// generation; absent/"" / "free" is free-form. Optional so older servers that omit it decode.
         public var kind: String?
+        /// May this consult leave covenant hardware (ADR-0038)? The hub boundary's decision;
+        /// the device stacks its own consent on top before choosing Private Cloud Compute.
+        /// Optional so older servers that omit it decode — absent means local.
+        public var cloud_ok: Bool?
     }
     struct Answer: Codable {
         var id: String

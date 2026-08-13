@@ -28,6 +28,12 @@ pub struct ConsultPrompt {
     /// Python adapter that omit it still deserialize — the device just falls back to free-form.
     #[serde(default)]
     pub kind: String,
+    /// May this consult leave covenant hardware (ADR-0038)? Set from the hub's boundary at
+    /// enqueue; an answering device stacks its own consent on top and, lacking either, simply
+    /// answers on-device. Serde default false: absent on old peers ⇒ local — and an old broker
+    /// that re-serializes without the field degrades the same safe way.
+    #[serde(default)]
+    pub cloud_ok: bool,
 }
 
 /// The device's answer. `json` is opaque — a structured result the adapter parses, not this seam.
@@ -107,12 +113,21 @@ fn queue(dir: &Path) -> std::path::PathBuf {
 }
 
 /// Queue a prompt for a device to answer. Returns the stored prompt (with its id + timestamp).
-pub fn enqueue(dir: &Path, id: &str, prompt: &str, kind: &str, now: i64) -> Result<ConsultPrompt> {
+/// `cloud_ok` is the hub boundary's ADR-0038 decision, carried with the prompt.
+pub fn enqueue(
+    dir: &Path,
+    id: &str,
+    prompt: &str,
+    kind: &str,
+    cloud_ok: bool,
+    now: i64,
+) -> Result<ConsultPrompt> {
     let p = ConsultPrompt {
         id: id.to_string(),
         prompt: prompt.to_string(),
         ts: now,
         kind: kind.to_string(),
+        cloud_ok,
     };
     std::fs::create_dir_all(queue(dir)).map_err(|e| Error::Malformed(format!("consult: {e}")))?;
     let path = queue(dir).join(format!("{id}.prompt.json"));
@@ -298,7 +313,7 @@ mod tests {
     #[test]
     fn queue_round_trips_and_expires() {
         let dir = tmp("rt");
-        enqueue(&dir, "c1", "what is the weather theory?", "", NOW).unwrap();
+        enqueue(&dir, "c1", "what is the weather theory?", "", false, NOW).unwrap();
         assert_eq!(pending(&dir, NOW).len(), 1);
         // An answer for the prompt clears it; a fresh read finds the answer.
         let ans = ConsultAnswer {
@@ -311,7 +326,7 @@ mod tests {
         assert_eq!(pending(&dir, NOW).len(), 0, "answered prompt is cleared");
         assert_eq!(answer_of(&dir, "c1").unwrap().json, "{\"theory\":\"x\"}");
         // Stale prompts expire on the next listing.
-        enqueue(&dir, "c2", "q", "", NOW).unwrap();
+        enqueue(&dir, "c2", "q", "", false, NOW).unwrap();
         assert_eq!(pending(&dir, NOW + PROMPT_TTL_SECS + 1).len(), 0);
     }
 
@@ -332,7 +347,7 @@ mod tests {
         let home = tmp("home");
         let node = NodeKey::load_or_mint(&home, "n").unwrap();
         let cred = create_group(&home, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        enqueue(&home, "c9", "q", "", NOW).unwrap();
+        enqueue(&home, "c9", "q", "", false, NOW).unwrap();
         // Answer claiming a different node_id than the membership is refused.
         let mut report = ConsultAnswerReport {
             membership: cred.membership.clone(),
@@ -353,6 +368,39 @@ mod tests {
         assert_eq!(pending(&home, NOW).len(), 0);
     }
 
+    #[test]
+    fn the_cloud_decision_survives_the_relay_and_old_json_reads_local() {
+        // ADR-0038, both compatibility edges. Old JSON without the field parses as local —
+        // an old peer or adapter can never accidentally grant the cloud.
+        let old: ConsultPrompt =
+            serde_json::from_str(r#"{"id":"c0","prompt":"q","ts":1,"kind":""}"#).unwrap();
+        assert!(!old.cloud_ok, "absent on the wire means local");
+
+        // And the broker's re-serialization preserves the grant: accept_relay parks the
+        // prompt by writing the STRUCT back to disk (serde_json::to_vec), so a field the
+        // struct lacked would be silently dropped crossing the lighthouse. Pin it.
+        let hub = tmp("cloud_hub");
+        let broker = tmp("cloud_broker");
+        let node = NodeKey::load_or_mint(&hub, "n").unwrap();
+        let cred = create_group(&hub, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let p = enqueue(&hub, "c7", "a cloud-cleared question", "theory", true, NOW).unwrap();
+        assert!(p.cloud_ok);
+        let relay = ConsultRelay {
+            membership: cred.membership.clone(),
+            group_pubkey: cred.group_pubkey.clone(),
+            prompts: vec![p],
+            nonce: "n7".into(),
+            ts: NOW,
+        };
+        accept_relay(&broker, &relay, NOW).unwrap();
+        let parked = pending(&broker, NOW);
+        assert_eq!(parked.len(), 1);
+        assert!(
+            parked[0].cloud_ok,
+            "the hub's cloud grant must survive the broker's re-serialization"
+        );
+    }
+
     /// The whole broker lifecycle, in the order it actually happens across gossip rounds.
     #[test]
     fn broker_relays_a_consult_and_returns_the_answer_once() {
@@ -370,7 +418,7 @@ mod tests {
 
         // Round 1 — the hub relays a pending prompt; the broker parks it where its own
         // /mesh/consult pull will serve it, and has nothing to hand back yet.
-        let p = enqueue(&hub, "c1", "a question", "theory", NOW).unwrap();
+        let p = enqueue(&hub, "c1", "a question", "theory", false, NOW).unwrap();
         assert!(accept_relay(&broker, &relay_of(vec![p.clone()]), NOW)
             .unwrap()
             .is_empty());
@@ -415,7 +463,7 @@ mod tests {
         let broker = tmp("relay_giveup_b");
         let node = NodeKey::load_or_mint(&hub, "n").unwrap();
         let cred = create_group(&hub, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        let p = enqueue(&hub, "c2", "q", "", NOW).unwrap();
+        let p = enqueue(&hub, "c2", "q", "", false, NOW).unwrap();
         let mut relay = ConsultRelay {
             membership: cred.membership.clone(),
             group_pubkey: cred.group_pubkey.clone(),
@@ -438,7 +486,7 @@ mod tests {
         let hub = tmp("relay_local_hub");
         let node = NodeKey::load_or_mint(&hub, "n").unwrap();
         let cred = create_group(&hub, &node, "TheRiver", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        enqueue(&broker, "mine", "the broker's own question", "", NOW).unwrap();
+        enqueue(&broker, "mine", "the broker's own question", "", false, NOW).unwrap();
         let relay = ConsultRelay {
             membership: cred.membership,
             group_pubkey: cred.group_pubkey,

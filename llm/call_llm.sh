@@ -358,7 +358,10 @@ def call_apple(max_tokens):
         elif '"theory"' in low and '"direction"' in low:
             kind = "theory"
     with open(prompt_file, "w") as f:
-        json.dump({"id": cid, "prompt": prompt_text, "ts": int(time.time()), "kind": kind}, f)
+        # cloud_ok: the boundary's ADR-0038 decision rides to the answering device, which
+        # stacks its own consent on top before ever choosing Private Cloud Compute.
+        json.dump({"id": cid, "prompt": prompt_text, "ts": int(time.time()), "kind": kind,
+                   "cloud_ok": cloud_ok}, f)
     timeout = int(os.environ.get("APPLE_CONSULT_TIMEOUT", "90"))
     deadline = time.time() + timeout
     while time.time() < deadline:
