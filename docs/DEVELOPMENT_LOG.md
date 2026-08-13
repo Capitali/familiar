@@ -6,6 +6,37 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-13 — The reach tests stop trusting whatever answers the runner's loopback
+
+### What changed
+
+- **The green bar was red for two stacked reasons; both are gone.** Build 78 landed
+  lines the rust 1.97 rustfmt rewraps — fmt failed first on CI and masked everything
+  after it (fixed mechanically in `5e35f80`, no notebook entry, per precedent). Beneath
+  it, the two reach tests had been failing on GitHub's runners since `a72cd6d`: they
+  probed `127.0.0.2` as a silent host, but on a shared runner anything bound to
+  `0.0.0.0` — the runner's own sshd — answers for **every** loopback address, so the
+  ghost ranked *agent-capable* and the tagged observation read `class=agent-capable`.
+- **The probe is now a parameter.** `assess_device` / `assess` delegate to private
+  `_with` variants taking `fn(&str, u16, Duration) -> bool`; production passes
+  `port_open` unchanged, so no caller and no behavior moves. The silent-host and
+  tagged-observation tests inject a deaf probe and are hermetic on any machine, and a
+  new `an_ssh_speaker_is_agent_capable` pins the ladder from the open side.
+  `port_open` itself keeps its real listener-based test.
+
+### Checks run
+
+- Local (macOS, rust 1.97.1): `cargo fmt --all -- --check`, `cargo clippy
+  --all-targets -- -D warnings`, `cargo test --all` — all green; kernel `unsafe` grep
+  clean. CI watched on push — this entry ships with the fix, the run verdict lands
+  after.
+
+### Next
+
+Ship + deploy (Mac + lighthouse daemons rebuilt), then enrol Ian's new Mac as a node.
+Then the real work: Apple Intelligence under OS 27 and the PCC seam on platforms that
+have it.
+
 ## 2026-08-12 — The machine is not served; the console learns to welcome and to converse
 
 ### What changed

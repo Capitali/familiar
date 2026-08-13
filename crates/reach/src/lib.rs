@@ -157,10 +157,22 @@ pub(crate) fn port_open(ip: &str, port: u16, timeout: Duration) -> bool {
 
 /// Probe one device's IP against the catalog, returning what's open + the strongest reach class.
 pub fn assess_device(label: &str, ip: &str, timeout: Duration) -> DeviceReach {
+    assess_device_with(port_open, label, ip, timeout)
+}
+
+/// The probe is a parameter so tests can pin what the network says: on a shared CI runner
+/// anything bound to 0.0.0.0 (the runner's own sshd) answers for every loopback address,
+/// so probing a "silent" 127.0.0.2 there finds a listener and a ghost ranks agent-capable.
+fn assess_device_with(
+    probe: fn(&str, u16, Duration) -> bool,
+    label: &str,
+    ip: &str,
+    timeout: Duration,
+) -> DeviceReach {
     let mut open = Vec::new();
     let mut class = ReachClass::ObservableOnly;
     for svc in CATALOG {
-        if port_open(ip, svc.port, timeout) {
+        if probe(ip, svc.port, timeout) {
             open.push(svc.name);
             if svc.class.rank() > class.rank() {
                 class = svc.class;
@@ -183,6 +195,15 @@ pub fn assess(
     now: i64,
     timeout_ms: u64,
 ) -> (Vec<DeviceReach>, Vec<Observation>) {
+    assess_with(port_open, devices, now, timeout_ms)
+}
+
+fn assess_with(
+    probe: fn(&str, u16, Duration) -> bool,
+    devices: &[Device],
+    now: i64,
+    timeout_ms: u64,
+) -> (Vec<DeviceReach>, Vec<Observation>) {
     let timeout = Duration::from_millis(timeout_ms.max(1));
     let mut reaches = Vec::new();
     let mut observations = Vec::new();
@@ -190,7 +211,7 @@ pub fn assess(
         if d.ip.is_empty() {
             continue;
         }
-        let r = assess_device(&d.label, &d.ip, timeout);
+        let r = assess_device_with(probe, &d.label, &d.ip, timeout);
         let ctx = format!(
             "class={} open={} ip={}",
             r.class.label(),
@@ -263,17 +284,32 @@ mod tests {
         assert!(!port_open("127.0.0.2", port, Duration::from_millis(100)));
     }
 
+    // A probe that hears nothing anywhere — what the real network answers is some
+    // other machine's fact, not this test's.
+    fn deaf(_ip: &str, _port: u16, _t: Duration) -> bool {
+        false
+    }
+
     #[test]
     fn a_silent_host_is_observable_only() {
-        // 127.0.0.2 with nothing listening → no catalog port open → observable-only.
-        let r = assess_device("ghost", "127.0.0.2", Duration::from_millis(100));
+        let r = assess_device_with(deaf, "ghost", "127.0.0.2", Duration::from_millis(100));
         assert_eq!(r.class, ReachClass::ObservableOnly);
         assert!(r.open.is_empty());
     }
 
     #[test]
+    fn an_ssh_speaker_is_agent_capable() {
+        fn ssh_only(_ip: &str, port: u16, _t: Duration) -> bool {
+            port == 22
+        }
+        let r = assess_device_with(ssh_only, "box", "192.0.2.9", Duration::from_millis(100));
+        assert_eq!(r.class, ReachClass::AgentCapable);
+        assert_eq!(r.open, vec!["ssh"]);
+    }
+
+    #[test]
     fn assess_emits_tagged_observations() {
-        let (_reaches, obs) = assess(&[device("x", "127.0.0.2")], 42, 100);
+        let (_reaches, obs) = assess_with(deaf, &[device("x", "127.0.0.2")], 42, 100);
         assert_eq!(obs.len(), 1);
         assert_eq!(obs[0].source, "reach");
         assert_eq!(obs[0].action, "can-reach");
