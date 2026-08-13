@@ -38,6 +38,7 @@ git push origin "$(git branch --show-current)" 2>&1 | tail -1
 echo "✓ committed + pushed"
 
 cd "$IOS"
+mkdir -p build
 # The Mac stage authenticates like the iOS stage below: a fresh machine has no signing
 # certificate in its keychain, and the API session lets xcodebuild mint one on the spot.
 # Build output survives in a log — a swallowed diagnostic once cost a ship a debugging round.
