@@ -1166,6 +1166,26 @@ final class AppModel: ObservableObject {
         return "local"
     }
 
+    /// True when a label is only the node id wearing a haircut — the doors' own fallback is
+    /// `node_id[..8]` when a device has no name — so it must never lead anything said to the
+    /// human; the id stays small print.
+    static func idLed(_ label: String, nodeId: String) -> Bool {
+        let l = label.trimmingCharacters(in: .whitespaces).lowercased()
+        let n = nodeId.trimmingCharacters(in: .whitespaces).lowercased()
+        if l.isEmpty { return true }
+        return !n.isEmpty && (n.hasPrefix(l) || l.hasPrefix(n))
+    }
+
+    /// The name a node leads with in anything said to the human — its record's established
+    /// handle (ADR-0027: never a cached brief's word), else the device's own label, else what
+    /// the mesh honestly knows ("an unnamed device"), with the id demoted to a parenthesis.
+    func displayName(for nodeId: String) -> String {
+        let m = worldview?.members?.first { $0.node_id == nodeId }
+        if let h = m?.human, !h.isEmpty { return h }
+        if let l = m?.label, !Self.idLed(l, nodeId: nodeId) { return l }
+        return "an unnamed device (\(nodeId.prefix(8)))"
+    }
+
     /// A member's deliberate act about another device (ADR-0026 §5): corrections — sever,
     /// disestablish ("that's not Betty"), hold, restore — signed and sent to the node this
     /// device reads from; the record travels from there. Approval is gone: admission is
@@ -1190,7 +1210,7 @@ final class AppModel: ObservableObject {
                                                 reason: "from the console",
                                                 host: host, port: enrollPort) {
                 case .applied(let state):
-                    note("✓ \(subject.prefix(8)) — \(mact) (now \(state))")
+                    note("✓ \(displayName(for: subject)) — \(mact) (now \(state))")
                 case .refused(let why):
                     note("✗ \(mact) refused: \(why)")
                 }
@@ -1204,9 +1224,9 @@ final class AppModel: ObservableObject {
                 switch try await client.cast(subject: subject, act: act, host: host, port: enrollPort) {
                 case .decided(let said):
                     if act == "grant" { Chime.accepted() }
-                    note("✓ \(subject.prefix(8)) — \(said)")
+                    note("✓ \(displayName(for: subject)) — \(said)")
                 case .alreadyDecided(let said):
-                    note("· \(subject.prefix(8)) — someone already decided (\(said))")
+                    note("· \(displayName(for: subject)) — someone already decided (\(said))")
                 case .refused(let why):
                     note("✗ standing refused: \(why)")
                 }
@@ -1320,7 +1340,13 @@ final class AppModel: ObservableObject {
                         let fresh = arr.filter { !known.contains($0.node_id) && $0.node_id != node.nodeId }
                         if !fresh.isEmpty {
                             Chime.guestWaiting()
-                            let names = fresh.map { $0.handle.isEmpty ? $0.label : $0.handle }
+                            // The established handle leads the greeting; a device with no name
+                            // is greeted as what it is, never as a bare hex id.
+                            let names = fresh.map { a in
+                                !a.handle.isEmpty ? a.handle
+                                    : !Self.idLed(a.label, nodeId: a.node_id) ? a.label
+                                    : "an unnamed device (\(a.node_id.prefix(8)))"
+                            }
                             note("welcome \(names.joined(separator: ", ")) — new to the mesh")
                         }
                         // ACCUMULATE, never replace: a read that momentarily lost an arrival
@@ -1357,7 +1383,10 @@ final class AppModel: ObservableObject {
                         let fresh = mine.filter { !known.contains("\($0.node_id):\($0.since)") }
                         if !fresh.isEmpty {
                             Chime.guestWaiting()
-                            let names = fresh.map { $0.label }.joined(separator: ", ")
+                            let names = fresh.map { c in
+                                Self.idLed(c.label, nodeId: c.node_id)
+                                    ? "an unnamed device (\(c.node_id.prefix(8)))" : c.label
+                            }.joined(separator: ", ")
                             note("\(names) says it is yours — confirm on the welcome screen")
                         }
                     }

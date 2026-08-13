@@ -353,8 +353,9 @@ function peers(all) {
     // No scatter-near-the-anchor for unlocated devices anymore (B12): a fabricated position
     // is exactly the inaccuracy that put stale, place-less phones on the map. Unlocated nodes
     // keep 0,0 and `located:false`, which the roster shows as "≈" and the globe drops.
+    const nm = nodeName(m);
     return {
-      m, name: m.label, lat, lon, located, hasAnchor: !!anchor, status: st,
+      m, name: nm.text, masked: nm.masked, lat, lon, located, hasAnchor: !!anchor, status: st,
       color: statusColor(st, m.kind), local: m.kind === 'self_node',
       kindWord: { self_node: 'SELF', gossip_peer: 'PEER', device_peer: 'DEVICE', device_agent: 'AGENT' }[m.kind] || 'NODE',
       // Last-known location + when it was known (C4) — persists in the roster even after the
@@ -442,6 +443,36 @@ const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories',
 // Display capitalization: handles are lowercase slugs by design ("ian", "betty-jo") — but
 // names read as names: Ian, Betty-jo. Display-only; the slug stays the identity.
 function cap(h) { return h ? h.charAt(0).toUpperCase() + h.slice(1) : h; }
+// A node id is an address, not a name. The record's ESTABLISHED handle (the door's
+// `mesh name`) leads everywhere a device is shown (ADR-0027: the roster's name for a device
+// is its record's established handle — never a cached brief's word); the device's own label
+// is the fallback; the id itself never leads — it is demoted to small print. idLed() spots a
+// label that is only the id wearing a haircut (the doors' own fallback is node_id[..8]).
+function idLed(label, nodeId) {
+  const l = (label || '').trim().toLowerCase(), n = (nodeId || '').trim().toLowerCase();
+  if (!l) return true;
+  return !!n && (n.startsWith(l) || l.startsWith(n));
+}
+// What the mesh honestly knows about an un-named node — the hardware kind — worn as a mask
+// kinder than the hex. "unnamed" stays in the name so nobody mistakes the mask for a name.
+const OS_WORD = { macos:'Mac', ios:'iPhone', ipados:'iPad', watchos:'Watch', tvos:'TV', linux:'Linux box', windows:'PC' };
+function maskName(osHint) {
+  const fam = (osHint || '').trim().split(/[\s·]/)[0].toLowerCase();
+  return `unnamed ${OS_WORD[fam] || 'device'}`;
+}
+// The one naming rule, applied to a roster member: handle, else label, else the mask.
+// `masked` lets a renderer dress the mask differently (dimmer, italic) — a mask should
+// read as a placeholder, never pass for a name.
+function nodeName(m) {
+  const h = (m.human || '').trim();
+  if (h) return { text: cap(h), masked: false };
+  if (!idLed(m.label, m.node_id)) return { text: m.label, masked: false };
+  return { text: maskName(m.os), masked: true };
+}
+// The short id as quiet small print — the tap-to-reveal tier, one style everywhere.
+function idSmall(nodeId, dim) {
+  return nodeId ? `<span class="m" style="font-size:9px;color:rgba(160,195,255,${dim ? '0.4' : '0.55'});">${esc(String(nodeId).slice(0, 8))}</span>` : '';
+}
 function chip(t, color) { return `<span class="m" style="font-size:8px;letter-spacing:0.12em;padding:3px 8px;border-radius:6px;background:rgba(120,190,255,0.1);color:${color};">${esc(t)}</span>`; }
 // The connectivity badge (ADR-0017): how a member is reaching the mesh right now.
 function connBadge(mode) {
@@ -603,10 +634,15 @@ function refreshScreen() {
         if (hp && hp[0].m.attached_to) emberIds.add(hp[0].m.attached_to);
       }
     }
+    // The established handle leads and keeps the green of a known identity; a device that
+    // leads with its own label shows plain; a mask reads dim and italic — a placeholder must
+    // never pass for a name. The hardware's own word stays as quiet small print beside the
+    // handle, so Betty's three devices still read apart at a glance.
     const headerRow = (p) => `
           <span style="width:9px;height:9px;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
-          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;">${esc(p.name)}</span>
-          ${p.m.human ? `<span style="font-size:15px;font-weight:500;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(cap(p.m.human))}</span>` : ''}
+          <span style="font-size:17px;font-weight:600;letter-spacing:-0.01em;${p.m.human ? 'color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);' : p.masked ? 'color:rgba(190,210,240,0.6);font-style:italic;font-weight:500;' : ''}">${esc(p.name)}</span>
+          ${p.m.human && !idLed(p.m.label, p.m.node_id) && (p.m.label || '').toLowerCase() !== (p.m.human || '').toLowerCase() ? `<span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(p.m.label)}</span>` : ''}
+          ${p.masked ? idSmall(p.m.node_id, true) : ''}
           <span style="flex:1;"></span>
           ${chip(p.kindWord, p.local ? '#cdeeff' : '#bcd2ff')}
           ${(p.m.attached||[]).map(a => chip(esc(a), '#aee7ff')).join('')}
@@ -628,7 +664,7 @@ function refreshScreen() {
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
         ${p.m.detail ? `<div class="m" style="font-size:10px;color:rgba(174,231,255,0.7);margin-bottom:8px;">${esc(p.m.detail)}</div>` : ''}
-        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:9px;">${dstr(p.m.first_seen)}${p.m.human?' · serves '+esc(p.m.human):''}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'}</div>
+        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:9px;">${dstr(p.m.first_seen)}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'} · ${esc(String(p.m.node_id||'').slice(0,8))}</div>
         <div class="m" style="font-size:9.5px;margin-bottom:13px;display:flex;align-items:center;gap:6px;color:${p.present.known?'rgba(174,231,255,0.82)':'rgba(150,170,200,0.45)'};"><span style="width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${p.present.known?'#aee7ff':'rgba(140,160,190,0.4)'};${p.present.known?'box-shadow:0 0 7px #aee7ff;':''}"></span><span style="letter-spacing:0.1em;font-size:7px;color:rgba(150,180,255,0.55);">PRESENT</span> ${esc(p.present.text)}</div>
         <div style="display:grid;grid-template-columns:minmax(84px,auto) auto auto;justify-content:start;gap:18px;align-items:end;margin-bottom:12px;">
           <div>${seenCell(p, 26, 16)}<div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SEEN</div></div>
@@ -663,7 +699,7 @@ function refreshScreen() {
         <tbody>${past.map(([p, i]) => `
           <tr onclick="sphereNode(${i})" style="cursor:pointer;border-top:1px solid rgba(120,190,255,0.09);">
             <td style="padding:9px 12px 9px 0;white-space:nowrap;">
-              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${p.color};margin-right:8px;"></span>${esc(p.name)}
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${p.color};margin-right:8px;"></span><span style="${p.masked ? 'color:rgba(190,210,240,0.55);font-style:italic;' : ''}">${esc(p.name)}</span>
             </td>
             <td class="m" style="padding:9px 12px 9px 0;color:rgba(188,210,255,0.75);white-space:nowrap;">${esc(p.kindWord)}</td>
             <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.os || '—')}</td>
@@ -710,9 +746,11 @@ function refreshScreen() {
     const claimsHtml = claims.map(c => `
       <div style="padding:14px 16px;border-radius:14px;background:rgba(40,60,24,0.28);border:1px solid rgba(61,220,151,0.3);margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
-          <span style="font-size:16px;font-weight:600;">${esc(c.label || c.node_id.slice(0,8))}</span>
+          ${idLed(c.label, c.node_id)
+            ? `<span style="font-size:16px;font-weight:500;font-style:italic;color:rgba(190,210,240,0.65);">${esc(maskName())}</span>`
+            : `<span style="font-size:16px;font-weight:600;">${esc(c.label)}</span>`}
           ${c.known ? chip('SAYS IT IS YOURS', '#9fe8c0') : chip('A NEW NAME — ' + esc(cap(c.handle).toUpperCase()), '#ffcf9e')}
-          <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(c.node_id.slice(0,8))}</span>
+          ${idSmall(c.node_id)}
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(180,215,190,0.7);margin-bottom:10px;">
           ${c.known
@@ -782,14 +820,19 @@ function refreshScreen() {
          </div>` + arrivals.map(a => `
         <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(120,190,255,0.18);margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
-            <span style="font-size:16px;font-weight:600;">${esc(a.label || a.node_id.slice(0,8))}</span>
+            ${a.handle
+              ? `<span style="font-size:16px;font-weight:600;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(cap(a.handle))}</span>`
+                + (!idLed(a.label, a.node_id) && a.label.toLowerCase() !== a.handle.toLowerCase() ? `<span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(a.label)}</span>` : '')
+              : idLed(a.label, a.node_id)
+                ? `<span style="font-size:16px;font-weight:500;font-style:italic;color:rgba(190,210,240,0.65);">${esc(maskName(a.build))}</span>`
+                : `<span style="font-size:16px;font-weight:600;">${esc(a.label)}</span>`}
             ${a.state === 'guest' ? chip('VISITOR', '#bcd2ff') : chip('MEMBER', '#9fe8c0')}
-            <span class="m" style="font-size:9px;color:rgba(160,195,255,0.55);">${esc(a.node_id.slice(0,8))}</span>
+            ${idSmall(a.node_id)}
           </div>
           <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);">
             ${a.state === 'guest'
               ? 'a visitor is looking around — they read the mesh’s shape and none of the names'
-              : esc((a.handle ? a.handle + ' — ' : '') + (viaWord[a.via] || 'established'))}
+              : esc(viaWord[a.via] || 'established')}
             · arrived ${dtstr(a.at)}${a.last_seen > 0 ? ' · seen ' + (nowS() - a.last_seen < 90 ? 'just now' : dur(nowS() - a.last_seen) + ' ago') : ''}
           </div>
           ${(a.addr || a.build || a.lat || a.lon) ? `
@@ -1240,12 +1283,13 @@ function refreshScreen() {
       ${row('SYSTEM', p.os)}
       ${row('JOINED', dstr(m.first_seen))}
       ${row('PRESENT', p.present.text)}
-      ${row('SERVES', (m.human || '') + (m.interactive ? ' · interactive' : ''))}
+      ${row('SERVES', ((m.human && m.human.toLowerCase() !== p.name.toLowerCase()) ? m.human : '') + (m.interactive ? ' · interactive' : ''))}
       ${row('POSITION', p.located ? p.lat.toFixed(4)+'°, '+p.lon.toFixed(4)+'°' : p.hasAnchor ? '≈ near mesh' : '—')}
       ${p.located && p.locationAt > 0 ? row('LAST FIX', p.locationAgo < 90 ? 'just now' : dur(p.locationAgo) + ' ago · ' + dtstr(p.locationAt)) : ''}
       ${row('ADDRESS', m.addr)}
       ${row('OFFERS', (m.tools||0) + ' tools · ' + (m.patterns||0) + ' patterns')}
       ${row('ROLE', m.relationship)}
+      ${row('NODE ID', m.node_id)}
       ${/lighthouse/i.test(p.name) ? `
         <div style="margin-top:16px;padding:14px 16px;border-radius:13px;background:rgba(20,44,80,0.2);border:1px solid rgba(120,190,255,0.15);">
           <div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin-bottom:7px;">WHAT A LIGHTHOUSE IS</div>
@@ -1340,7 +1384,7 @@ function refreshScreen() {
       </div>` + `<div style="display:flex;flex-direction:column;gap:8px;">` + P.map((p, i) => `
       <div onclick="sphereDive(${i})" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;background:rgba(16,34,60,0.2);border:1px solid rgba(120,190,255,0.1);">
         <span style="width:8px;height:8px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color};"></span>
-        <span style="font-size:14px;font-weight:600;flex:1;">${esc(p.name)}</span>
+        <span style="font-size:14px;font-weight:600;flex:1;${p.masked ? 'color:rgba(190,210,240,0.6);font-style:italic;font-weight:500;' : ''}">${esc(p.name)}${p.masked ? ' ' + idSmall(p.m.node_id, true) : ''}</span>
         ${addrCell(p.m.addr)}
         ${p.m.connectivity ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;padding:2px 7px;border-radius:5px;background:rgba(120,190,255,0.06);color:rgba(174,231,255,0.75);white-space:nowrap;">via ${esc(p.m.connectivity)}</span>` : ''}
         <span class="m" style="font-size:11px;color:${p.color};white-space:nowrap;text-align:right;">${esc(p.seenFull)}</span>
@@ -1377,8 +1421,15 @@ function refreshScreen() {
       // its consent tiles — so the camera control is consistent everywhere, not a boundary gate on
       // the Mac and a consent on the others.
       const selfCam = !!(v.gates && v.gates.camera);
-      const selfHuman = ((v.members||[]).find(m => m.kind === 'self_node')||{}).human || 'observer';
-      el.innerHTML = `<div class="m" style="font-size:11px;color:rgba(150,180,255,0.6);margin-bottom:14px;">${esc(v.group_label)} · ${esc(v.node_id)}</div>
+      const selfM = (v.members||[]).find(m => m.kind === 'self_node');
+      const selfHuman = (selfM||{}).human || 'observer';
+      // This node's own name leads its own screen — the id is an address, kept to small print.
+      const selfNm = selfM ? nodeName(selfM) : { text: v.group_label, masked: false };
+      el.innerHTML = `<div style="margin-bottom:14px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:15px;font-weight:600;${selfNm.masked ? 'color:rgba(190,210,240,0.65);font-style:italic;font-weight:500;' : (selfM||{}).human ? 'color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);' : ''}">${esc(selfNm.text)}</span>
+          <span class="m" style="font-size:10px;color:rgba(150,180,255,0.6);">${esc(v.group_label)}</span>
+          ${idSmall(v.node_id)}
+        </div>
         ${servingRow(S.device || { presence: { handle: selfHuman === 'observer' ? '' : selfHuman } })}
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;max-width:300px;margin-bottom:22px;">
           <button onclick="sphereGate('allow_camera', ${selfCam ? 'false' : 'true'})" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 12px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${selfCam?'rgba(61,220,151,0.28)':'rgba(255,110,110,0.22)'};cursor:pointer;">
@@ -1604,7 +1655,7 @@ function renderCallouts() {
       <div style="position:absolute;left:0;top:0;width:44px;height:1px;transform-origin:0 0;transform:rotate(-58deg);background:linear-gradient(90deg,${p.color},rgba(140,180,255,0));"></div>
       <div onclick="sphereDive(${i})" style="position:absolute;left:18px;top:-52px;min-width:110px;padding:7px 10px;border-radius:11px;background:rgba(9,15,32,0.6);border:1px solid ${p.local?'rgba(174,231,255,0.35)':'rgba(120,160,255,0.28)'};backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 10px 30px rgba(0,0,0,0.45);pointer-events:auto;cursor:pointer;">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
-          <span style="font-size:12px;font-weight:600;">${esc(p.name)}</span>
+          <span style="font-size:12px;font-weight:600;${p.masked ? 'color:rgba(190,210,240,0.65);font-style:italic;font-weight:500;' : p.m.human ? 'color:#9fe8c0;' : ''}">${esc(p.name)}</span>
           <span class="m" style="font-size:7.5px;letter-spacing:0.1em;padding:2px 5px;border-radius:5px;background:${p.local?'rgba(174,231,255,0.16)':'rgba(120,160,255,0.16)'};color:${p.local?'#cdeeff':'#bcd2ff'};">${p.kindWord}</span>
         </div>
         <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};white-space:nowrap;">${esc(p.seenFull)}</span></div>
