@@ -1531,6 +1531,19 @@ fn recv_observe(
                         }
                     }
                 }
+                // A device just carried a human's words in — wake the dialogue so the
+                // reply doesn't wait out the metabolism's cadence.
+                let spoke = v["observations"].as_array().is_some_and(|arr| {
+                    arr.iter().any(|o| {
+                        matches!(
+                            o["action"].as_str(),
+                            Some("told the familiar") | Some("answered")
+                        )
+                    })
+                });
+                if spoke {
+                    familiar_kernel::dialog::wake(dir);
+                }
             }
             text(StatusCode::OK, format!("recorded {n}"))
         }
@@ -1589,6 +1602,7 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
             1.0,
         );
         let _ = familiar_kernel::observation::record(dir, obs);
+        familiar_kernel::dialog::wake(dir);
         return text(StatusCode::OK, "ok");
     }
     let obs = familiar_kernel::observation::Observation::new(
@@ -1604,6 +1618,8 @@ fn local_answer(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
     // Retire the open question so the cycle re-coordinates.
     let _ = std::fs::write(dir.join("question.txt"), "");
     let _ = std::fs::write(dir.join("active_question.txt"), "");
+    // The human spoke: wake the dialogue fast path rather than waiting out the cadence.
+    familiar_kernel::dialog::wake(dir);
     text(StatusCode::OK, "ok")
 }
 
@@ -4653,12 +4669,21 @@ mod tests {
                 .any(|o| o.actor == "betty" && o.action == "answered"),
             "the observation speaks in her name, not a baked-in one"
         );
+        // Speaking wakes the dialogue fast path — both the thread and console shapes.
+        assert!(
+            familiar_kernel::dialog::take_wake(&dir),
+            "a thread answer touches the dialogue wake"
+        );
         // A node that hasn't learned who it serves still answers — as the fallback.
         let dir2 = fresh_dir("local_answer_fallback");
         let resp = local_answer(&dir2, br#"{"text":"hello there"}"#);
         assert_eq!(body_status(&resp), StatusCode::OK);
         let obs2 = familiar_kernel::observation::load(&dir2).unwrap();
         assert!(obs2.iter().any(|o| o.actor == "ian"));
+        assert!(
+            familiar_kernel::dialog::take_wake(&dir2),
+            "a console utterance touches the dialogue wake"
+        );
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&dir2);
     }

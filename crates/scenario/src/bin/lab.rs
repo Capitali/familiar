@@ -216,7 +216,7 @@ fn author_cmd(args: &[String]) -> ExitCode {
                 eprintln!("familiar-lab: draft {i}: rate-limited ({why}) — stopping here");
                 break;
             }
-            Ok(familiar_llm::Outcome::Refused(why)) => {
+            Ok(familiar_llm::Outcome::Refused(why)) | Ok(familiar_llm::Outcome::Yielded(why)) => {
                 eprintln!("familiar-lab: draft {i}: {why}");
                 continue;
             }

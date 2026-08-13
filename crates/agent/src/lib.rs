@@ -57,10 +57,15 @@ pub fn run_agent(
     for step in 1..=step_budget.max(1) {
         last_step = step;
         let prompt = build_prompt(task, &transcript);
-        let resp = match familiar_llm::consult(dir, &prompt)? {
-            familiar_llm::Outcome::Response(j) => j,
-            familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
-                return Ok(None); // fall back to one-shot
+        let resp = loop {
+            match familiar_llm::consult(dir, &prompt)? {
+                familiar_llm::Outcome::Response(j) => break j,
+                // A dialogue reply cut in; the queue (not a sleep) paces the retry —
+                // the step and its transcript survive the interruption.
+                familiar_llm::Outcome::Yielded(_) => continue,
+                familiar_llm::Outcome::Refused(_) | familiar_llm::Outcome::RateLimited(_) => {
+                    return Ok(None); // fall back to one-shot
+                }
             }
         };
         match parse_action(&resp) {

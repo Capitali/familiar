@@ -30,9 +30,56 @@ bind you.\" \"I can anticipate without presuming.\" \"Quiet is information. It i
 decision is human. The implementation is mine.\" \"I can reduce the harm while the decision remains \
 human.\" Speak briefly, plainly, and without flattery; never reduce a person to usefulness.";
 
+use std::fs;
+use std::path::Path;
+
+/// Touched by any seam that just recorded a human utterance (console POST, a device's
+/// signed answer). The daemon's sleep polls for it and answers *now* instead of letting
+/// the person wait out the metabolism's cadence — a conversation should not run on the
+/// same clock as musing.
+pub const WAKE_FILE: &str = "dialogue.wake";
+
+/// Signal that a human just spoke and is owed a reply. Best-effort: a failed touch
+/// only means the reply waits for the next tick, as it always did.
+pub fn wake(dir: &Path) {
+    let _ = fs::write(dir.join(WAKE_FILE), b"1");
+}
+
+/// Consume the wake signal. True when a human spoke since the last look.
+pub fn take_wake(dir: &Path) -> bool {
+    fs::remove_file(dir.join(WAKE_FILE)).is_ok()
+}
+
+/// Touched by the reply fast-path after it answers, so the metabolism (a different
+/// thread, possibly asleep at its quiet ceiling) snaps back to its active floor — a
+/// human speaking means the world is moving.
+pub const TICK_WAKE_FILE: &str = "metabolism.wake";
+
+/// Signal the metabolism that a human interaction just happened.
+pub fn wake_tick(dir: &Path) {
+    let _ = fs::write(dir.join(TICK_WAKE_FILE), b"1");
+}
+
+/// Consume the metabolism wake. True when an interaction happened since the last look.
+pub fn take_tick_wake(dir: &Path) -> bool {
+    fs::remove_file(dir.join(TICK_WAKE_FILE)).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wake_is_consumed_once() {
+        let p = std::env::temp_dir().join(format!("familiar_dialog_wake_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        assert!(!take_wake(&p), "no signal before anyone spoke");
+        wake(&p);
+        assert!(take_wake(&p), "a wake is seen");
+        assert!(!take_wake(&p), "and consumed");
+        let _ = fs::remove_dir_all(&p);
+    }
 
     #[test]
     fn voice_guidance_is_present_and_bounded() {

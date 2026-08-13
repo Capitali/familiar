@@ -898,6 +898,13 @@ fn author_artifact(
                     }
                     std::thread::sleep(backoff);
                 }
+                // A dialogue reply cut in — retry within the same patience; the lane
+                // queue itself paces the wait (acquire blocks until the human is served).
+                Ok(llm::Outcome::Yielded(_)) => {
+                    if std::time::Instant::now() >= deadline {
+                        break "failed";
+                    }
+                }
                 Ok(llm::Outcome::Refused(_)) | Err(_) => break "failed",
             }
         };

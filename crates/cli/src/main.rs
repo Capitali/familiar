@@ -2834,6 +2834,23 @@ fn cmd_run(args: &[String]) -> ExitCode {
         // Glass is picked up without a daemon restart. The handle lives for the process
         // lifetime (this loop never returns); on exit the OS reclaims the thread.
         let _mesh = familiar_mesh::transport::spawn(dir.clone());
+        // The dialogue's own thread: a console/device seam touches the wake-file the moment
+        // a human speaks, and this thread answers within ~1s on the human-priority lane —
+        // even mid-tick, when the metabolism is heads-down in a long consult (the lane makes
+        // that consult step aside; a same-thread check could never run while the tick holds
+        // the thread). After replying it pokes the metabolism so the cadence snaps active.
+        {
+            let reply_dir = dir.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if familiar_kernel::dialog::take_wake(&reply_dir) {
+                    if let Err(e) = familiar_cycle::reply_now(&reply_dir, now_secs()) {
+                        eprintln!("reply: {e}");
+                    }
+                    familiar_kernel::dialog::wake_tick(&reply_dir);
+                }
+            });
+        }
         if fixed {
             println!("metabolism running every {floor}s (fixed) — Ctrl-C to stop");
         } else {
@@ -2871,7 +2888,19 @@ fn cmd_run(args: &[String]) -> ExitCode {
                     if quiet { "quiet" } else { "active" }
                 );
             }
-            std::thread::sleep(std::time::Duration::from_secs(interval));
+            // The sleep listens: when the reply thread has just answered a human (it owns
+            // the dialogue wake; this loop owns the metabolism wake it pokes afterward),
+            // the world is active — snap the cadence back to its floor and re-tick now
+            // rather than drowsing out a quiet-ceiling sleep.
+            let mut slept = 0u64;
+            while slept < interval {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                slept += 1;
+                if familiar_kernel::dialog::take_tick_wake(&dir) {
+                    interval = floor;
+                    break;
+                }
+            }
         }
     }
 
@@ -2984,12 +3013,13 @@ fn cmd_consult(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match familiar_llm::consult(&dir, prompt) {
+    // A person is at this terminal: human lane, ahead of any daemon musing.
+    match familiar_llm::consult_human(&dir, prompt) {
         Ok(familiar_llm::Outcome::Response(r)) => {
             println!("{r}");
             ExitCode::SUCCESS
         }
-        Ok(familiar_llm::Outcome::Refused(why)) => {
+        Ok(familiar_llm::Outcome::Refused(why)) | Ok(familiar_llm::Outcome::Yielded(why)) => {
             println!("REFUSE: {why}");
             println!("  a human opens the LLM seam via boundary.json (docs/boundaries.md)");
             ExitCode::SUCCESS

@@ -19,12 +19,85 @@ use familiar_kernel::guard::{self, Action, ActionKind, Decision};
 /// per-request network timeout, so the adapter times out first when it can.
 pub const DEFAULT_ADAPTER_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// One consult at a time per process. The adapter contract is a shared
-/// `llm/prompt.txt` → `llm/response.json` pair, so two concurrent consults would cross
-/// their prompts and answers. The daemon is one process running several consulting
-/// threads (the cycle, the mesh's changeling forge); this serializes them. A CLI
-/// consult racing the daemon cross-process remains possible — pre-existing, unchanged.
-static CONSULT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Deadline for a human-lane consult (a dialogue reply). A conversational answer that
+/// takes longer than this has already failed as conversation — the caller falls back to
+/// an honest templated acknowledgment instead of leaving the person staring at silence.
+pub const HUMAN_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Which queue a consult stands in. The adapter contract is a shared
+/// `llm/prompt.txt` → `llm/response.json` pair, so consults serialize; the lane decides
+/// *who goes next* when several wait, and whether an in-flight consult must step aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lane {
+    /// A human is waiting on this reply. Goes to the head of the queue, and any
+    /// in-flight background consult yields (its adapter is killed; the muse retries
+    /// on its own cadence). Law II in scheduling form: presence outranks musing.
+    Human,
+    /// The metabolism's own thinking (muse, forge, tool authoring). Waits its turn,
+    /// and steps aside the moment a human-lane consult arrives.
+    Background,
+}
+
+/// The lane state: one consult runs at a time (`busy`); human-lane arrivals are counted
+/// so both waiting *and running* background consults can see them and step aside.
+struct Lanes {
+    busy: bool,
+    humans_waiting: usize,
+}
+
+/// The single per-process consult queue. Poison-tolerant throughout — a panicked
+/// consult must not silence the LLM forever.
+static LANES: (std::sync::Mutex<Lanes>, std::sync::Condvar) = (
+    std::sync::Mutex::new(Lanes {
+        busy: false,
+        humans_waiting: 0,
+    }),
+    std::sync::Condvar::new(),
+);
+
+/// Holds the consult slot; released (with a wake to all waiters) on drop.
+struct LaneGuard;
+
+impl Drop for LaneGuard {
+    fn drop(&mut self) {
+        let mut l = LANES.0.lock().unwrap_or_else(|e| e.into_inner());
+        l.busy = false;
+        LANES.1.notify_all();
+    }
+}
+
+/// Wait for the consult slot. Human-lane callers announce themselves first (so the
+/// background lane — waiting or running — steps aside), then take the next free slot.
+fn acquire(lane: Lane) -> LaneGuard {
+    let mut l = LANES.0.lock().unwrap_or_else(|e| e.into_inner());
+    match lane {
+        Lane::Human => {
+            l.humans_waiting += 1;
+            while l.busy {
+                l = LANES.1.wait(l).unwrap_or_else(|e| e.into_inner());
+            }
+            l.humans_waiting -= 1;
+        }
+        Lane::Background => {
+            while l.busy || l.humans_waiting > 0 {
+                l = LANES.1.wait(l).unwrap_or_else(|e| e.into_inner());
+            }
+        }
+    }
+    l.busy = true;
+    LaneGuard
+}
+
+/// Is a human-lane consult waiting right now? A running background consult polls this
+/// and yields between adapter checks.
+fn human_is_waiting() -> bool {
+    LANES
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .humans_waiting
+        > 0
+}
 
 /// The result of a consult attempt.
 pub enum Outcome {
@@ -33,6 +106,10 @@ pub enum Outcome {
     /// Every provider is rate-limited right now (adapter exit code 2). Distinct
     /// from `Refused` so callers can wait-and-retry instead of degrading.
     RateLimited(String),
+    /// A background consult stepped aside because a human-lane consult arrived
+    /// mid-flight (its adapter was killed). Not a failure — the caller simply
+    /// retries on its own cadence, as after `Refused`.
+    Yielded(String),
     /// The adapter's raw response (JSON text, per call_llm.sh).
     Response(String),
 }
@@ -46,13 +123,24 @@ pub fn consult(dir: &Path, prompt: &str) -> io::Result<Outcome> {
     consult_with(dir, prompt, DEFAULT_ADAPTER_TIMEOUT)
 }
 
+/// A human-lane consult: a person is at a console (or speaking) waiting on this reply.
+/// Goes to the head of the queue, causes any in-flight background consult to yield,
+/// and runs under the shorter [`HUMAN_TIMEOUT`] — past that the caller should say
+/// something honest rather than keep the person waiting.
+pub fn consult_human(dir: &Path, prompt: &str) -> io::Result<Outcome> {
+    consult_in(dir, prompt, HUMAN_TIMEOUT, Lane::Human)
+}
+
 /// [`consult`] with an explicit adapter deadline. A hung adapter must never hang
 /// the caller: at the deadline the adapter is killed and the consult is
 /// `Refused`. Exit code 2 is the adapter contract for "every provider
 /// rate-limited" and maps to [`Outcome::RateLimited`].
 pub fn consult_with(dir: &Path, prompt: &str, timeout: Duration) -> io::Result<Outcome> {
-    // Poison-tolerant: a panicked consult must not silence the LLM forever.
-    let _serial = CONSULT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    consult_in(dir, prompt, timeout, Lane::Background)
+}
+
+fn consult_in(dir: &Path, prompt: &str, timeout: Duration, lane: Lane) -> io::Result<Outcome> {
+    let _slot = acquire(lane);
     let b = boundary::load(dir)?;
     let verdict = guard::evaluate(&Action::new(ActionKind::Llm, "llm-provider"), &b);
     if verdict.decision != Decision::Allow {
@@ -83,6 +171,15 @@ pub fn consult_with(dir: &Path, prompt: &str, timeout: Duration) -> io::Result<O
                 timeout.as_secs()
             )));
         }
+        // A person is waiting: background thinking steps aside mid-flight. The muse
+        // retries on its own cadence; the human's reply starts within ~100ms.
+        if lane == Lane::Background && human_is_waiting() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(Outcome::Yielded(
+                "stepped aside for a human-lane consult".to_string(),
+            ));
+        }
         std::thread::sleep(Duration::from_millis(100));
     };
     if status.code() == Some(2) {
@@ -111,8 +208,17 @@ mod tests {
         }
     }
 
+    /// The lane queue is process-global, so tests that consult must not overlap: a
+    /// human-lane consult in one test would make another test's background consult
+    /// yield, failing both. Poison-tolerant so one panicked test doesn't cascade.
+    static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+        TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn refused_with_no_side_effects_under_closed_boundary() {
+        let _x = exclusive();
         let p =
             std::env::temp_dir().join(format!("familiar_llm_test_closed_{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
@@ -120,7 +226,7 @@ mod tests {
         let t = Temp(p.clone());
         match consult(&t.0, "hello").unwrap() {
             Outcome::Refused(_) => {}
-            Outcome::Response(_) | Outcome::RateLimited(_) => {
+            Outcome::Response(_) | Outcome::RateLimited(_) | Outcome::Yielded(_) => {
                 panic!("closed boundary must refuse")
             }
         }
@@ -144,16 +250,18 @@ mod tests {
 
     #[test]
     fn adapter_exit_two_is_rate_limited_not_refused() {
+        let _x = exclusive();
         let t = open_dir_with_adapter("ratelimit", "#!/bin/sh\nexit 2\n");
         match consult(&t.0, "hello").unwrap() {
             Outcome::RateLimited(why) => assert!(why.contains("rate-limited")),
             Outcome::Refused(why) => panic!("exit 2 must be RateLimited, got Refused({why})"),
-            Outcome::Response(_) => panic!("exit 2 must not be a response"),
+            Outcome::Response(_) | Outcome::Yielded(_) => panic!("exit 2 must not be a response"),
         }
     }
 
     #[test]
     fn consults_serialize_within_the_process() {
+        let _x = exclusive();
         // The adapter contract is one shared prompt.txt → response.json pair; two threads
         // consulting at once must not cross their prompts. The adapter echoes the prompt
         // back after a pause — interleaving would hand at least one caller the other's words.
@@ -178,7 +286,53 @@ mod tests {
     }
 
     #[test]
+    fn human_lane_preempts_and_jumps_the_queue() {
+        let _x = exclusive();
+        // Adapter: log each prompt's first word, sleep, echo the prompt back. Slow enough
+        // that the human consult arrives while the first background consult is in flight.
+        let t = open_dir_with_adapter(
+            "lanes",
+            "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nhead -c 32 \"$d/prompt.txt\" >> \"$d/invocations.log\"\n\
+             echo >> \"$d/invocations.log\"\nsleep 2\ncp \"$d/prompt.txt\" \"$d/response.json\"\n",
+        );
+        let (da, db, dh) = (t.0.clone(), t.0.clone(), t.0.clone());
+        let bg1 = std::thread::spawn(move || consult(&da, "bg-one").unwrap());
+        std::thread::sleep(Duration::from_millis(300)); // bg-one is in flight
+        let bg2 = std::thread::spawn(move || consult(&db, "bg-two").unwrap());
+        std::thread::sleep(Duration::from_millis(100)); // bg-two is queued behind bg-one
+        let human = std::thread::spawn(move || consult_human(&dh, "human-turn").unwrap());
+        let (r1, r2, rh) = (
+            bg1.join().unwrap(),
+            bg2.join().unwrap(),
+            human.join().unwrap(),
+        );
+        // The in-flight background consult stepped aside for the person…
+        match r1 {
+            Outcome::Yielded(_) => {}
+            _ => panic!("in-flight background consult must yield to a waiting human"),
+        }
+        // …the human got a real answer…
+        match rh {
+            Outcome::Response(r) => assert_eq!(r, "human-turn"),
+            _ => panic!("the human-lane consult must succeed"),
+        }
+        // …the queued background consult still ran, after the human.
+        match r2 {
+            Outcome::Response(r) => assert_eq!(r, "bg-two"),
+            _ => panic!("the queued background consult must still run"),
+        }
+        let log = fs::read_to_string(t.0.join("llm").join("invocations.log")).unwrap();
+        let order: Vec<&str> = log.lines().collect();
+        assert_eq!(
+            order,
+            vec!["bg-one", "human-turn", "bg-two"],
+            "the human turn runs ahead of queued background work"
+        );
+    }
+
+    #[test]
     fn hung_adapter_is_killed_at_the_deadline() {
+        let _x = exclusive();
         let t = open_dir_with_adapter("hang", "#!/bin/sh\nsleep 300\n");
         let started = std::time::Instant::now();
         match consult_with(&t.0, "hello", Duration::from_secs(1)).unwrap() {
