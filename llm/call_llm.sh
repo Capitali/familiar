@@ -51,10 +51,15 @@ MODE="${1:-consult}"
 # `export SUBSTRATE_LLM_PROVIDER=…` in key.env can't clobber `SUBSTRATE_LLM_PROVIDER=apple <cmd>`
 # (the device-oracle path, a lab campaign pinning one provider, etc.).
 _CALLER_PROVIDER="${SUBSTRATE_LLM_PROVIDER:-}"
+# The boundary's cloud decision (ADR-0038) likewise wins over key.env: captured before
+# sourcing so a stray export in key.env can never widen it. Unset means closed — a human
+# running the adapter by hand gets the fail-closed default; the seam always sets it.
+_ALLOW_CLOUD="${FAMILIAR_ALLOW_LLM_CLOUD:-0}"
 if [ -f "$SCRIPT_DIR/key.env" ]; then
     . "$SCRIPT_DIR/key.env"
 fi
 [ -n "$_CALLER_PROVIDER" ] && SUBSTRATE_LLM_PROVIDER="$_CALLER_PROVIDER"
+FAMILIAR_ALLOW_LLM_CLOUD="$_ALLOW_CLOUD"
 
 if [ "$MODE" = "consult" ] && [ ! -f "$SCRIPT_DIR/prompt.txt" ]; then
     echo "error: prompt.txt not found at $SCRIPT_DIR/prompt.txt" >&2
@@ -63,7 +68,7 @@ fi
 
 PROVIDERS="${SUBSTRATE_LLM_PROVIDER:-gemini,cerebras}"
 
-python3 - "$SCRIPT_DIR" "$PROVIDERS" "$MODE" <<'PYEOF'
+python3 - "$SCRIPT_DIR" "$PROVIDERS" "$MODE" "$FAMILIAR_ALLOW_LLM_CLOUD" <<'PYEOF'
 import os, sys, json, re, time, socket, urllib.request, urllib.error
 
 # Prefer IPv4: some networks advertise IPv6 that silently blackholes, and Python's urllib
@@ -73,6 +78,7 @@ _gai = socket.getaddrinfo
 socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda ai: ai[0] != socket.AF_INET)
 
 script_dir, providers_str, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+cloud_ok = len(sys.argv) > 4 and sys.argv[4] == "1"
 prompt_path = os.path.join(script_dir, "prompt.txt")
 response_path = os.path.join(script_dir, "response.json")
 health_path = os.path.join(script_dir, "health.json")
@@ -404,6 +410,21 @@ def succeed(health, name):
 
 health = load_health()
 configured = [p.strip() for p in providers_str.split(",") if p.strip()]
+
+# ADR-0038: when the boundary closes the cloud, off-hardware providers leave the chain
+# entirely — consult AND probe alike (a probe is still an outward request carrying tokens).
+CLOUD_PROVIDERS = {"claude", "anthropic", "gemini", "cerebras", "apple_pcc"}
+if not cloud_ok:
+    dropped = [p for p in configured if p in CLOUD_PROVIDERS]
+    configured = [p for p in configured if p not in CLOUD_PROVIDERS]
+    if dropped and mode == "consult":
+        print(f"cloud gate closed (allow_llm_cloud=false): skipping {','.join(dropped)}",
+              file=sys.stderr)
+if mode == "consult" and not configured:
+    print("every configured provider is off-device and the boundary closes the cloud "
+          "(allow_llm_cloud=false) — open it in boundary.json or configure a local "
+          "provider (apple_local, apple, ollama)", file=sys.stderr)
+    sys.exit(1)
 
 # Order: providers not in cooldown first, then those last seen healthy, otherwise the
 # configured order (stable sort). This is the quick rollover — a dead provider sinks.
