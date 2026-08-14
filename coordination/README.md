@@ -62,7 +62,10 @@ The files:
    operations live in STATE.md's ledger with their exact trigger, so a held operation
    is never re-invented, half-run, or fired twice.
 9. **Verify like you don't trust yourself.** A bar piped through `tail`/`grep` swallows
-   exit codes — check the failing step's exit explicitly. Report outcomes with the
+   exit codes — check the failing step's exit explicitly. Clippy runs in CI's shape or
+   not at all: `cargo clippy --all-targets -- -D warnings` (plain clippy skips test
+   targets; that scope gap kept main red for a day, 2026-08-14). CI-green on the exact
+   sha is a hard precondition for any ship or fleet pass. Report outcomes with the
    evidence, not adjectives; "green" means you saw the counts.
 10. **Messages are ephemeral, records are real.** If agents exchange live messages
     (SendMessage or any side channel), anything decided there that outlives the moment

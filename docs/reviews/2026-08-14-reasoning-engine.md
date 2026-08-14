@@ -53,12 +53,12 @@ ADR-0038's cloud gate, with `apple_local`/`apple_pcc` on-device options.
   direction; nothing composes. There is no chain "theory A + theory B → C", no
   counterfactual test ("if the theory were false, what would I expect to see?"), and
   abandonment is reactive (human reverted) rather than evidential (predictions failed).
-- **L2 — Recurrence is the only lens.** `loops::detect` sees *repetition*. Correlation
+- **L2 — (historical as of A1's landing; kept for the record) Recurrence was the only lens.** `loops::detect` sees *repetition*. Correlation
   across streams (lights adjusted ↔ presence transitions), absence ("the 09:00 thing
   didn't happen"), and rate-change all fall through. The lighting theory existed only
   because a human kept adjusting — the CO-OCCURRENCE was never computed, an LLM guessed
   it from a prompt.
-- **L3 — Tool authoring is stringly.** Artifacts are one-shot shell scripts; there is
+- **L3 — Tool authoring is stringly, and the runner is resource-bounded, not sandboxed in the security sense (codex, round 2).** Artifacts are one-shot shell scripts; there is
   no iteration loop on a failing artifact (author → run → read error → repair), no
   library composition (a new tool can't *call* a proven one), and trials measure output
   shape more than truth.

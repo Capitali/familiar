@@ -17,6 +17,35 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
+- status: queued
+- owner: controller (after T-112)
+- scope: crates/kernel (predictions store + settlement), crates/cycle (tick scoring pass)
+- depends: T-112
+- accept: anchored typed predictions with opening/deadline/cooldown; PredictionResult append-only evidence; deadline-miss settlement with carried grace (co-owned param default); versioned matchers; tests incl. late-event amendment and never-rewrite-finals
+- notes: dialogue rounds 1-3, all DECIDED
+
+### T-114 · D1/Q5: belief states + narration
+- status: queued
+- owner: — (pairs with T-113; codex may claim if free first)
+- depends: T-113
+- accept: tentative→supported→doubtful→abandoned with hysteresis + evidence floor; human-correction exception; transition-only narration, one aside/tick by consequence, per-theory cooldown; citation format per dialogue Q5
+- notes: —
+
+### T-115 · C2 + the recipe interpreter (codex's Q2 design)
+- status: queued
+- owner: — (reserved: companion:codex — your design)
+- depends: —
+- accept: structural tool composition (proven-tool inputs by id) + the Recipe v1 interpreter as designed in dialogue round 2 (typed steps, no ambient authority, deny_unknown_fields, bounded, deterministic); python authoring confined to the scenario lab; design doc then build
+- notes: sequencing decided in Q2: this precedes any general-language C3
+
+### T-116 · Q4: scenario fixture oracles
+- status: queued
+- owner: —
+- depends: T-115
+- accept: output contracts on candidates; fixture-held ground truth; accuracy/coverage/quietness/discrimination checks, lexicographic eligibility; extends ADR-0036
+- notes: —
+
 ### T-110 · ADR-0040 draft: the reasoning engine's next steps
 - status: queued
 - owner: controller
@@ -66,6 +95,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-112 · Q7: the ObservationClass module (prerequisite to B1)
+- status: claimed
+- owner: controller
+- scope: crates/kernel/src/obs_class.rs (new), crates/kernel/src/loops.rs (A1 re-pointed)
+- depends: —
+- accept: one versioned classing/matcher module (class v1 = A1's head heuristic; exact/prefix FieldMatch per Q1); version rides every persisted class; A1 calls it; pure + heavily tested
+- notes: dialogue Q7, decided round 3
 
 ### T-103 · Reach-side reverse name lookup
 - status: claimed
