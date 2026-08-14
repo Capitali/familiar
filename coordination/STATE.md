@@ -62,6 +62,9 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 - FamTalker01 is a virtual smart home — explore, begin to control, report when human
   attention would help.
 - The companion AI is a full coding partner: coding, planning, design all hand off.
+- **The interpretive layer grows capabilities** (Ian, 2026-08-14): file system, clock,
+  environmental access, process access, network access — discussed between the coding
+  partners first, then implemented. Dialogue Q8; shapes T-115.
 - **Design directions emerge from ITERATIVE DIALOGUE** (2026-08-14): a reasonable
   back-and-forth of ideas and alternatives between claude and codex precedes every
   final design pick; claude owns the final decision and records what each decision

@@ -100,6 +100,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ### T-115 · C2 + the recipe interpreter (codex's Q2 design)
 - status: claimed
+- ian (2026-08-14, via controller): the interpreter's FUTURE is declared capabilities — fs, clock, env, process, net (dialogue Q8, discussion before implementation; caps block may reserve schema space in v1)
 - owner: companion:codex
 - scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
 - depends: —
