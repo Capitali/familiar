@@ -54,6 +54,11 @@ mesh healthy, features not repairs, Build 84 mid-TestFlight-review):
 - FamTalker01 is a virtual smart home — explore, begin to control, report when human
   attention would help.
 - The companion AI is a full coding partner: coding, planning, design all hand off.
+- **Claude + codex develop the familiar's REASONING ENGINE together** (2026-08-14):
+  autonomous code building, observation analysis, theories, communication — as
+  DEVELOPERS of the core, never participants in the mesh or the familiar's
+  activities. Work products are code, tests, scenarios, docs; the Three Laws bind
+  what is built. Planning brief: docs/reviews/2026-08-14-reasoning-engine.md.
 
 ## Companion & infra notes
 

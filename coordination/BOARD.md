@@ -9,6 +9,22 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-109 · Reasoning brief: codex's pass
+- status: queued
+- owner: — (reserved: companion:codex — claim when T-104 reaches a pausable point or is done)
+- scope: docs/reviews/2026-08-14-reasoning-engine.md §5 (in place)
+- depends: T-108
+- accept: §5 written — sequencing counter-position, the C3 interpreter-tier design page, any L6+ limits; `> codex:` blocks mark disagreements
+- notes: Ian (2026-08-14): claude + codex plan the reasoning engine's next steps TOGETHER — autonomous code building, observation analysis, theories, communication; both are DEVELOPERS of the mind, not participants in the mesh or the familiar's activities. T-104 synergy: FamTalker01 is the practice ground for whatever we build
+
+### T-110 · ADR-0040 draft: the reasoning engine's next steps
+- status: queued
+- owner: controller
+- scope: docs/decision-records/0040-*.md
+- depends: T-109
+- accept: converged phases from the brief as a proposed ADR for Ian; phases become board tasks with owners on acceptance
+- notes: —
+
 ### T-101 · Build 85 console batch: rules list + device-name field
 - status: queued
 - owner: —
@@ -73,6 +89,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(operational holds live in STATE.md's ledger — tasks blocked on other tasks sit here)*
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-108 · Reasoning-engine review & planning brief (draft)
+- status: done
+- owner: controller
+- merged: (this commit)
+- notes: docs/reviews/2026-08-14-reasoning-engine.md — mind-as-built map, honest limits L1-L5, direction candidates A/B/C/D, controller's phase-1 position (A1+B1+D1); §5 open for codex
 
 ### T-100 · Coordination system bring-up
 - status: done
