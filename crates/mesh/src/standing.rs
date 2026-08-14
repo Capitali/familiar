@@ -166,13 +166,18 @@ pub fn grant(dir: &Path, node_id: &str, note: &str) -> std::io::Result<bool> {
         .and_then(|s| serde_json::from_str::<crate::node::NodeIdentity>(&s).ok())
         .map(|n| n.node_id)
         .unwrap_or_else(|| "local".into());
-    let _ = crate::record::record_standing_grant(
-        dir,
-        &minted_by,
-        node_id,
-        note,
-        crate::transport::now_secs(),
-    );
+    let now = crate::transport::now_secs();
+    let _ = crate::record::record_standing_grant(dir, &minted_by, node_id, note, now);
+    // A record minted (or restored) by this grant must carry the key the door verified at
+    // enrollment — a record without its pubkey cannot anchor a voucher and cannot stand
+    // alone at sibling doors (the keyless doppelgänger's exact defect). No-op when the
+    // record already knows its key.
+    if let Some(g) = crate::enroll::list_grants(dir)
+        .into_iter()
+        .find(|g| g.membership.node_id == node_id)
+    {
+        let _ = crate::record::record_pubkey(dir, node_id, &g.membership.node_pubkey, now);
+    }
     Ok(true)
 }
 

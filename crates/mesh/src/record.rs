@@ -1221,9 +1221,23 @@ pub fn resolve_node_id(dir: &Path, given: &str) -> Result<String> {
     hits.dedup();
     match hits.len() {
         1 => Ok(hits.remove(0)),
-        0 => Err(Error::Untrusted(format!(
-            "no record for “{given}” — membership acts land on records that exist"
-        ))),
+        // No record — but a node this door ADMITTED has verifiable identity in the enroll
+        // store even after its guest record was purged (an un-established guest is
+        // forgotten by design, B10). The exact full id of a held grant resolves, and the
+        // act's dual-write restores the record from that evidence — ADR-0027's
+        // restoration-from-cert, reachable from the operator's hands. Exact only: a
+        // prefix must never pick a key the human didn't type in full.
+        0 => {
+            if crate::enroll::list_grants(dir)
+                .iter()
+                .any(|g| g.membership.node_id == given)
+            {
+                return Ok(given.to_string());
+            }
+            Err(Error::Untrusted(format!(
+                "no record for “{given}” — membership acts land on records that exist"
+            )))
+        }
         _ => Err(Error::Untrusted(format!(
             "“{given}” is ambiguous — it prefixes {}",
             hits.join(", ")
@@ -2407,6 +2421,42 @@ mod tests {
         // Unknown ids refuse at resolution — the entrances never reach the mint.
         assert!(resolve_node_id(&dir, "beefbeef").is_err());
         assert!(load(&dir, "beefbeef").unwrap().is_none());
+
+        // A node this door ADMITTED resolves by its exact full id even with its guest
+        // record purged (B10 forgets un-established guests): the enroll store is the
+        // evidence, and the grant's dual-write restores the record — with its pubkey,
+        // the thing the keyless doppelgänger fatally lacked.
+        let purged = "cafe0123cafe0123";
+        std::fs::create_dir_all(dir.join("mesh/granted")).unwrap();
+        std::fs::write(
+            dir.join("mesh/granted").join(format!("{purged}.json")),
+            serde_json::json!({
+                "membership": {
+                    "node_id": purged, "node_pubkey": "ab".repeat(32),
+                    "issued": NOW, "expiry": NOW + 1000, "group_id": "g", "cert": ""
+                },
+                "group_id": "g", "group_pubkey": "", "group_label": "g"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(
+            load(&dir, purged).unwrap().is_none(),
+            "no record before the act"
+        );
+        assert_eq!(resolve_node_id(&dir, purged).unwrap(), purged);
+        assert!(
+            resolve_node_id(&dir, "cafe0123").is_err(),
+            "grants resolve by exact full id only — never by prefix"
+        );
+        crate::standing::grant(&dir, purged, "restored from the door's own grant").unwrap();
+        let restored = find_by_key(&dir, purged).unwrap();
+        assert!(restored.identity.established.is_some());
+        assert_eq!(
+            restored.pubkey,
+            "ab".repeat(32),
+            "the grant's key rides the record"
+        );
 
         // An ambiguous prefix refuses and says so.
         let _ = save(&dir, &base_record("3d68a068ffffffff"));
