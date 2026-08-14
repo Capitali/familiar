@@ -412,6 +412,38 @@ mod tests {
     }
 
     #[test]
+    fn a_brief_carrying_hostile_floats_still_verifies_after_the_wire() {
+        // The 2026-08-13 outage, pinned: MacOnStick's IP-geolocated longitude, printed
+        // shortest by ryu, was re-parsed 1 ULP off by serde_json's default float path — so
+        // signing_bytes(parse(wire)) differed from the signed bytes by one digit and every
+        // door (its own included) answered "node signature did not verify" for 8 hours.
+        // float_roundtrip makes the parse exact; this test holds the fleet to it.
+        let dir = tmp("floats");
+        let node = NodeKey::load_or_mint(&dir, "n").unwrap();
+        let cred = create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+        let mut body = sample_body(&node, cred.membership.clone());
+        // The exact coordinates from the live geo.json that broke the mesh.
+        body.capability.lat = 48.583070380229856;
+        body.capability.lon = -93.396688390659293;
+        let brief = sign_brief(body, &node).unwrap();
+        let gk = cred.verifying_key().unwrap();
+
+        // Compact wire (the POST body) and pretty (the outbox file on disk) must both
+        // re-parse to a verifiable brief.
+        for wire in [
+            serde_json::to_vec(&brief).unwrap(),
+            serde_json::to_vec_pretty(&brief).unwrap(),
+        ] {
+            let back: MeshBrief = serde_json::from_slice(&wire).unwrap();
+            assert!(
+                verify_brief(&back, &gk, &cred.group_id, NOW + 1, &[]).is_ok(),
+                "a signed float must round-trip to the very bytes that were signed"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn tampered_body_fails_verification() {
         let dir = tmp("tamper");
         let node = NodeKey::load_or_mint(&dir, "n").unwrap();

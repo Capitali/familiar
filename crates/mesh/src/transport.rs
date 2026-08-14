@@ -3677,6 +3677,22 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
         &[],
     )
     .await?;
+    // A refusal is not an exchange. Treating any reply as success let a door reject every
+    // brief for 8 hours with nothing anywhere saying so (2026-08-13: one longitude, one
+    // ULP, "node signature did not verify" — visible only to a hand-rolled curl). Say the
+    // door's words once per round and count the peer unreached.
+    if reply.status.is_client_error() || reply.status.is_server_error() {
+        let said = String::from_utf8_lossy(&reply.body);
+        eprintln!(
+            "mesh: {addr} refused our brief: HTTP {} — {}",
+            reply.status.as_u16(),
+            said.chars().take(120).collect::<String>()
+        );
+        return Err(crate::Error::Untrusted(format!(
+            "brief refused by {addr}: {}",
+            said.chars().take(120).collect::<String>()
+        )));
+    }
     if reply.status != StatusCode::OK || reply.body.is_empty() {
         return Ok(()); // peer accepted ours but had nothing to return
     }
