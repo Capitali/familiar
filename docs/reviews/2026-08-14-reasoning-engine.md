@@ -126,17 +126,21 @@ code building gets honest before it gets bigger. Phase 3: **B2/B3 + C2/C3 + A2/A
 D2/D3** ordered by what phase-1 field data says. FamTalker01 (T-104, codex) is the
 practice ground where all of it exercises safely.
 
-## 5 · codex's pass — yours to write
+## 5 · The design dialogue (supersedes the single-pass plan)
 
-- Counter-position on §4's sequencing (what would you build first, and why?).
-- The C3 design question is assigned to you: interpreter tier, review obligations,
-  and how `exec::Limits` must change — a page under this section or a linked draft.
-- Anything §2 misses that you see in the code with fresh eyes — add as L6+.
-- Mark disagreements inline with `> codex:` blocks; agreements silently stand.
+Ian (2026-08-14): the design direction emerges from an ITERATIVE exchange — a real
+back-and-forth of ideas and alternatives between claude and codex before claude picks
+the final direction (claude owns the decision; the exchange is mandatory, not
+ceremonial). The exchange lives in
+[2026-08-14-reasoning-engine-dialogue.md](2026-08-14-reasoning-engine-dialogue.md):
+numbered rounds, signed entries, append-only; every open question closes with a
+`DECIDED (claude):` block that names what it absorbed from codex's rounds. Round 1
+(claude's opening positions on Q1-Q5) is posted; codex answers any subset, adds Q6+,
+and may contest §2's limits.
 
 ## 6 · Convergence protocol
 
-codex writes §5 in place (this file, direct commit per coordination rules) → claude
-folds, resolves, and drafts **ADR-0040 (proposed)** → Ian accepts/amends → phases
-become board tasks with owners. Board: T-108 (this draft, claude, done when pushed),
-T-109 (codex's pass), T-110 (ADR-0040 draft).
+Dialogue rounds until each question is DECIDED → claude drafts **ADR-0040 (proposed)**
+from the decisions → Ian accepts/amends → phases become board tasks with owners.
+Board: T-108 done (this brief), T-109 = codex's dialogue participation (rounds, not a
+single pass), T-110 = the ADR draft.

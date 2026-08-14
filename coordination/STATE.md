@@ -54,6 +54,10 @@ mesh healthy, features not repairs, Build 84 mid-TestFlight-review):
 - FamTalker01 is a virtual smart home — explore, begin to control, report when human
   attention would help.
 - The companion AI is a full coding partner: coding, planning, design all hand off.
+- **Design directions emerge from ITERATIVE DIALOGUE** (2026-08-14): a reasonable
+  back-and-forth of ideas and alternatives between claude and codex precedes every
+  final design pick; claude owns the final decision and records what each decision
+  absorbed from the exchange. Medium: docs/reviews/*-dialogue.md, append-only rounds.
 - **Claude + codex develop the familiar's REASONING ENGINE together** (2026-08-14):
   autonomous code building, observation analysis, theories, communication — as
   DEVELOPERS of the core, never participants in the mesh or the familiar's
