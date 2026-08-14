@@ -69,6 +69,12 @@ pub struct DeviceRecord {
     /// this lists the hardware truth, the gates decide the reach).
     #[serde(default)]
     pub observation_interfaces: Vec<String>,
+    /// The name DISCOVERY gave this device — its mDNS/tailnet hostname ("codex"), which
+    /// is the name its human gave it on the device itself. Outranked by an explicit
+    /// `name`, outranks everything else (Ian, 2026-08-14: autodiscovery should gather
+    /// device names; router config must not be required).
+    #[serde(default)]
+    pub discovered_name: String,
     #[serde(default)]
     pub networks: Vec<NetworkSeen>,
     /// Humans associated, current and past (ADR-0039: the establishment binds identity;
@@ -140,6 +146,72 @@ pub fn set_name(dir: &Path, node_ref: &str, name: &str, now: i64) -> Result<Devi
     rec.updated_at = now;
     save(dir, &rec)?;
     Ok(rec)
+}
+
+/// Words that are hardware, not names — a discovered "iPhone" names nothing.
+fn is_generic_name(n: &str) -> bool {
+    let l = n.trim().to_lowercase();
+    l.is_empty()
+        || matches!(
+            l.as_str(),
+            "iphone" | "ipad" | "watch" | "mac" | "macbook" | "imac" | "appletv" | "localhost"
+        )
+        || l.chars()
+            .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.' || c == '-')
+}
+
+/// Adopt a DISCOVERED name (mDNS host, tailnet host) onto a device — trimmed of
+/// `.local`-style suffixes, refused when generic, written only on change so the
+/// every-read call sites stay cheap. Never touches the given `name`; the SystemName
+/// ladder prefers that on its own.
+pub fn set_discovered_name(dir: &Path, device_id: &str, raw: &str, now: i64) -> Result<()> {
+    let cleaned = raw
+        .trim()
+        .trim_end_matches('.')
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    if is_generic_name(&cleaned) || device_id.trim().is_empty() {
+        return Ok(());
+    }
+    let mut rec = load(dir, device_id)?.unwrap_or_default();
+    if rec.discovered_name == cleaned {
+        return Ok(());
+    }
+    rec.device_id = device_id.to_string();
+    rec.discovered_name = cleaned;
+    rec.updated_at = now;
+    save(dir, &rec)
+}
+
+/// Remember an address a member was SEEN at — its LAN face, tailnet face, NAT face
+/// accumulate here over time, so a discovery at any interface can be associated back to
+/// the member ("codex" at the LAN ip IS the iPad reading via the lighthouse — the
+/// association Ian watched the map lose, 2026-08-14). Deduped by address, capped.
+pub fn note_network(dir: &Path, device_id: &str, kind: &str, addr: &str, now: i64) -> Result<()> {
+    let addr = addr.trim();
+    if device_id.trim().is_empty() || addr.is_empty() || addr == "localhost" {
+        return Ok(());
+    }
+    let mut rec = load(dir, device_id)?.unwrap_or_default();
+    rec.device_id = device_id.to_string();
+    if let Some(n) = rec.networks.iter_mut().find(|n| n.addr == addr) {
+        // Refresh at most hourly — this runs on every worldview read.
+        if now - n.last_seen < 3600 {
+            return Ok(());
+        }
+        n.last_seen = now;
+    } else {
+        rec.networks.push(NetworkSeen {
+            kind: kind.to_string(),
+            addr: addr.to_string(),
+            last_seen: now,
+        });
+        rec.networks.sort_by_key(|n| std::cmp::Reverse(n.last_seen));
+        rec.networks.truncate(12);
+    }
+    save(dir, &rec)
 }
 
 /// Keep this node's own device record honest on every tick: machine facts refreshed,
@@ -342,6 +414,47 @@ mod tests {
         stale.updated_at = NOW - 10;
         let merged = absorb(&dir, &stale).unwrap();
         assert_eq!(merged.name, "Aphelion-2", "an older rename never wins");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discovered_names_are_cleaned_guarded_and_outranked_by_the_given_name() {
+        let dir = tmp("disc");
+        membership_record(&dir, "aa11aa11aa11aa11");
+        // mDNS-style suffix trimmed; generic hardware words and bare addresses refused.
+        set_discovered_name(&dir, "aa11aa11aa11aa11", "Codex.local.", NOW).unwrap();
+        assert_eq!(
+            load(&dir, "aa11aa11aa11aa11")
+                .unwrap()
+                .unwrap()
+                .discovered_name,
+            "Codex"
+        );
+        set_discovered_name(&dir, "aa11aa11aa11aa11", "iPhone", NOW + 1).unwrap();
+        set_discovered_name(&dir, "aa11aa11aa11aa11", "192.168.1.7", NOW + 2).unwrap();
+        assert_eq!(
+            load(&dir, "aa11aa11aa11aa11")
+                .unwrap()
+                .unwrap()
+                .discovered_name,
+            "Codex",
+            "generic words and addresses never overwrite a discovered name"
+        );
+        // networks accumulate deduped, and the hourly throttle skips hot rewrites.
+        note_network(&dir, "aa11aa11aa11aa11", "lan", "192.168.108.42", NOW).unwrap();
+        note_network(&dir, "aa11aa11aa11aa11", "lan", "192.168.108.42", NOW + 10).unwrap();
+        note_network(&dir, "aa11aa11aa11aa11", "tailnet", "100.64.9.9", NOW + 20).unwrap();
+        let d = load(&dir, "aa11aa11aa11aa11").unwrap().unwrap();
+        assert_eq!(d.networks.len(), 2);
+        assert_eq!(
+            d.networks
+                .iter()
+                .find(|n| n.addr == "192.168.108.42")
+                .unwrap()
+                .last_seen,
+            NOW,
+            "a sighting inside the hour is not rewritten"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

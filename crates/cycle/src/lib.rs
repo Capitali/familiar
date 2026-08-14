@@ -2634,6 +2634,23 @@ fn tend_actuators(dir: &Path, now: i64) -> io::Result<usize> {
                 1.0,
             ),
         )?;
+        // Why, said to the humans at change time (Ian, 2026-08-14) — the pursued
+        // direction is the reason, and the undo is named in the same breath.
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "narrated",
+                format!(
+                    "I set {} to {label} — pursuing “{}”. Say no or set it back, and I will undo it and stand down.",
+                    a.surface, t.direction
+                ),
+                "console",
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
         st.bucket = label.clone(); // self-debounce
         st.act = Some(familiar_kernel::actuator::PendingAct {
             thread_id: t.id.clone(),
@@ -2718,6 +2735,26 @@ fn tend_rules(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Res
                 "actuated",
                 format!("{}={}", a.surface, rule.act),
                 format!("rule:{} {} was:{prev}", rule.id, rule.sentence()),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
+        // The familiar talks about what it is doing and WHY when changes are made
+        // (Ian, 2026-08-14) — a quiet aside in the dialog, at change time, every time.
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "narrated",
+                format!(
+                    "I set {} to {} — {} went {}, and the standing rule you confirmed asks for it. Undo it by hand and the rule stands down.",
+                    a.surface,
+                    rule.act,
+                    rule.subject,
+                    rule.trigger.word()
+                ),
+                "console",
                 "familiar",
                 now,
                 1.0,

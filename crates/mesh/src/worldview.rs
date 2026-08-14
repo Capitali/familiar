@@ -858,7 +858,7 @@ pub fn assemble_worldview(
                 && !roll.full.iter().any(|n| n == &m.node_id)
         })
         .count();
-    let frontier = frontier_devices(&obs, &members);
+    let frontier = frontier_devices(dir, &obs, &members, now);
     let edges = mesh_edges(&members, &obs, &cred.membership.node_id);
 
     // Who is new: every record whose admission (or, for a guest, first sighting) falls within
@@ -1234,8 +1234,10 @@ fn mesh_edges(
 /// and with any device that already matches an enrolled member (by label or IP) removed — a member
 /// isn't a frontier. Sorted strongest-reach first.
 fn frontier_devices(
+    dir: &Path,
     obs: &[familiar_kernel::observation::Observation],
     members: &[crate::members::Member],
+    now: i64,
 ) -> Vec<FrontierView> {
     use std::collections::HashMap;
     let member_labels: std::collections::HashSet<String> =
@@ -1244,6 +1246,20 @@ fn frontier_devices(
         .iter()
         .map(|m| m.addr.clone())
         .filter(|a| !a.is_empty())
+        .collect();
+    // Every face a member has EVER shown a door (LAN, tailnet, NAT — accumulated on its
+    // device record): a discovery at any of them is the member itself, not a stranger.
+    // The join ADOPTS the discovered name onto the device record before the row is
+    // dropped — "codex" beside "iPad" was the mesh discarding a name it had already
+    // learned (Ian, 2026-08-14).
+    let face_of: HashMap<String, String> = crate::device::load_all(dir)
+        .into_iter()
+        .flat_map(|d| {
+            let id = d.device_id.clone();
+            d.networks
+                .into_iter()
+                .map(move |n| (n.addr.clone(), id.clone()))
+        })
         .collect();
     let mut latest: HashMap<String, FrontierView> = HashMap::new();
     for o in obs {
@@ -1293,7 +1309,20 @@ fn frontier_devices(
     let mut v: Vec<FrontierView> = latest
         .into_values()
         .filter(|f| {
-            !member_labels.contains(&f.label.to_lowercase()) && !member_addrs.contains(&f.ip)
+            let member_face = member_addrs.contains(&f.ip) || face_of.contains_key(&f.ip);
+            if member_face && f.label != f.ip {
+                // A named discovery at a member's face: the name is the device's own
+                // (its human named it there) — adopt it before dropping the ghost row.
+                if let Some(id) = face_of.get(&f.ip) {
+                    let _ = crate::device::set_discovered_name(dir, id, &f.label, now);
+                } else if let Some(m) = members.iter().find(|m| m.addr == f.ip) {
+                    if let Some(r) = crate::record::find_by_key(dir, &m.node_id) {
+                        let _ =
+                            crate::device::set_discovered_name(dir, &r.device_id, &f.label, now);
+                    }
+                }
+            }
+            !member_labels.contains(&f.label.to_lowercase()) && !member_face
         })
         .collect();
     v.sort_by(|a, b| {
@@ -1429,6 +1458,67 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     const NOW: i64 = 1_000_000;
+
+    #[test]
+    fn a_discovery_at_a_members_face_names_the_member_instead_of_ghosting_beside_it() {
+        // Ian watched "codex" stand on the map beside the very iPad it names: the reach
+        // sweep found the device's LAN face, and the dedup DISCARDED the name while
+        // dropping the row. Now the join adopts it: any address a member has ever shown
+        // a door (accumulated on its device record) associates the discovery back.
+        let dir = fresh("frontier_adopt");
+        crate::record::upsert_enrolled(&dir, "d5c314724525d19c", None, NOW - 100).unwrap();
+        crate::device::note_network(&dir, "d5c314724525d19c", "lan", "192.168.108.42", NOW - 50)
+            .unwrap();
+
+        let mut m = member(
+            "d5c314724525d19c",
+            "ipad:ian",
+            crate::members::MemberKind::DevicePeer,
+        );
+        m.addr = "129.224.211.193".into(); // reading via the NAT face right now
+        let obs = vec![Observation::new(
+            "familiar",
+            "can-reach",
+            "device:codex",
+            "class=observable-only open=- ip=192.168.108.42",
+            "reach",
+            NOW - 10,
+            0.9,
+        )];
+
+        let frontier = frontier_devices(&dir, &obs, &[m], NOW);
+        assert!(
+            frontier.is_empty(),
+            "a member's own face never stands as a frontier ghost"
+        );
+        let d = crate::device::load(&dir, "d5c314724525d19c")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            d.discovered_name, "codex",
+            "the discovered name is adopted, not discarded"
+        );
+
+        // A NAMELESS sighting (label == ip) at the same face still dedups, adopts nothing.
+        let obs2 = vec![Observation::new(
+            "familiar",
+            "can-reach",
+            "device:192.168.108.42",
+            "class=observable-only open=- ip=192.168.108.42",
+            "reach",
+            NOW - 5,
+            0.9,
+        )];
+        let frontier2 = frontier_devices(&dir, &obs2, &[], NOW);
+        assert!(frontier2.is_empty());
+        let d2 = crate::device::load(&dir, "d5c314724525d19c")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            d2.discovered_name, "codex",
+            "an ip is an address, never a name"
+        );
+    }
 
     fn member(
         node_id: &str,
