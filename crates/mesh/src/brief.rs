@@ -412,6 +412,10 @@ mod tests {
     }
 
     #[test]
+    // The "excessive" precision IS the test: these are the exact live coordinates whose
+    // shortest-round-trip digits the default float parser re-read 1 ULP off. Truncate
+    // them and the regression stops guarding anything.
+    #[allow(clippy::excessive_precision)]
     fn a_brief_carrying_hostile_floats_still_verifies_after_the_wire() {
         // The 2026-08-13 outage, pinned: MacOnStick's IP-geolocated longitude, printed
         // shortest by ryu, was re-parsed 1 ULP off by serde_json's default float path — so
