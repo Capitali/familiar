@@ -6,6 +6,53 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-14 (night) — FamTalker01 gets a reversible virtual home (companion:codex)
+
+### What changed
+
+- **Two declared surfaces, no new schema:** `vm/famtalker01/actuators.json` declares
+  independent living-room and greenhouse virtual lights against ADR-0032's existing
+  state contract. Both are closed over the same three observable restoring acts —
+  `off`, `dim`, `bright` — so every change carries a real revert.
+- **A small world behind the declaration:** `virtual_home.py` owns the two persistent
+  states with locked, atomic writes, prints the existing motorlights-shaped state block,
+  and refuses corrupt state rather than guessing. It has no listener and no undeclared
+  act path. Its snapshot also exposes three observation points: each light plus their
+  aggregate virtual power draw.
+- **Changed-world feed:** a hardened systemd oneshot/timer posts that snapshot through
+  the daemon's loopback `/local/observe` seam only when it changes. The result is ordinary
+  `reports` evidence the familiar can analyze, without a periodic duplicate stream.
+- **The human-owned install:** `vm/provision-virtual-home.sh` installs the helper,
+  declaration, and feed on FamTalker01. Running it is the consent act: it preserves the
+  existing boundary and opens `allow_execute` + `allow_actuate`, the two gates the current
+  declared-act loop requires. A malformed existing boundary aborts instead of being
+  replaced. `vm/README.md` carries the runbook and live acceptance.
+
+### Why
+
+Ian named FamTalker01 a virtual smart home for the familiar to explore, begin to control,
+and learn when human attention would help. This is ADR-0032's promised second surface:
+different plumbing from the BLE strip, but the same declaration, reversible hand,
+reaction-reading, and narration discipline. Keeping it file-local and listener-free
+makes the practice world legible and prevents its convenience from becoming a new
+control seam.
+
+### Checks run
+
+- `python3 -m unittest vm/famtalker01/test_virtual_home.py` — 5 passed (persistence,
+  state contract, corrupt-state refusal, closed revert maps, changed-only feed).
+- `bash -n` + `shellcheck` on both shell scripts; declaration parsed with
+  `python3 -m json.tool`; `git diff --check` clean.
+- Green bar: `cargo fmt --check`; `cargo clippy -- -D warnings`; full `cargo test`
+  (all workspace and doc-test suites passed).
+
+### Next
+
+- Fleet ops, not companion surgery: upgrade FamTalker01 through the infra lane, run the
+  provisioner, verify changed snapshots land, then let one familiar-originated act render
+  its existing `narrated` aside in Ian's console. The board carries that as a Proposed
+  operation; T-104 remains open until the live acceptance is witnessed.
+
 ## 2026-08-14 (small hours) — An upgrade re-registers its binary
 
 ### What changed

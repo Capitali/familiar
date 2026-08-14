@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch FamTalker01's virtual-home observation points
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+Unit=familiar-virtual-home-feed.service
+
+[Install]
+WantedBy=timers.target

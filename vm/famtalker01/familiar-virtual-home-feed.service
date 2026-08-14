@@ -1,0 +1,14 @@
+[Unit]
+Description=FamTalker01 virtual-home observation feed
+After=familiar-peer.service
+Wants=familiar-peer.service
+
+[Service]
+Type=oneshot
+User=familiar-svc
+ExecStart=/usr/local/bin/familiar-virtual-home-feed
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/familiar/virtual-home
+
