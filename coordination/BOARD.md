@@ -27,7 +27,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Queued
 
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
-- status: claimed
+- status: done
 - owner: controller
 - scope: crates/kernel (predictions store + settlement), crates/cycle (tick scoring pass)
 - depends: T-112
