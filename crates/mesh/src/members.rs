@@ -38,6 +38,11 @@ pub struct Member {
     /// OS release detail ("iPadOS 26.1", "Ubuntu 24.04") when the node reports it. Empty otherwise.
     #[serde(default)]
     pub os_version: String,
+    /// CPU architecture from the node's brief ("x86_64"/"aarch64") — lets a console say
+    /// "MacIntel" and "Mac" apart (Ian's roster sentence). Empty when the node never
+    /// briefed (a device peer that only reads).
+    #[serde(default)]
+    pub arch: String,
     /// The device's actor namespace where applicable (`phone:ian`, `ipad:ian`, `watch:ian`).
     pub actor: String,
     /// Latest thing this member did/reported — a one-line status.
@@ -393,6 +398,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             kind: MemberKind::SelfNode,
             os: os_pretty(std::env::consts::OS),
             os_version: crate::merge::os_release(),
+            arch: std::env::consts::ARCH.to_string(),
             actor: String::new(),
             detail: format!("this node · v{}", env!("CARGO_PKG_VERSION")),
             first_seen: first,
@@ -594,6 +600,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             kind,
             os,
             os_version: p.os_version.clone(),
+            arch: p.arch.clone(),
             actor,
             detail,
             first_seen: p.first_seen,
@@ -664,6 +671,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             kind: MemberKind::DeviceAgent,
             os: os_from_actor(actor),
             os_version: String::new(),
+            arch: String::new(),
             actor: actor.clone(),
             detail: object.clone(),
             first_seen: *ts,
@@ -756,6 +764,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             kind: MemberKind::DevicePeer,
             os: String::new(),
             os_version: String::new(),
+            arch: String::new(),
             actor: String::new(),
             detail: r.note.clone(),
             first_seen: joined,
