@@ -40,6 +40,49 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (late afternoon) — Discovery names the fleet, and the familiar says why
+
+### What changed
+
+- **Autodiscovery naming** (Ian: Bonjour/mDNS/local-DNS should gather device names;
+  router config must never be required — and he watched "codex" stand on the map beside
+  the very iPad it names). Three mechanisms, one association:
+  `DeviceRecord.discovered_name` — the name the device's own human gave it, learned from
+  the network (mDNS host, tailnet host), cleaned of `.local`-suffixes, generic hardware
+  words refused, outranked only by an explicitly given name. `note_network` accumulates
+  every address a member shows a door (LAN, tailnet, NAT faces; deduped, hourly-throttled,
+  capped) onto its device record — so the **frontier join can associate a discovery at ANY
+  face back to the member**: the ghost row drops AND its name is adopted (the old dedup
+  discarded the name while dropping the row — the exact loss). Tailnet hostnames adopt on
+  sight at the member ladder. SystemName ladder now: given > discovered > live-tailnet >
+  brief label > mask. Discovered names replicate on device-sync like every device fact.
+- **The familiar narrates its changes** (Ian: "the familiar needs to talk about what it
+  is doing and why with the humans when changes are being made"). Both act paths — a
+  standing rule firing and a pursued-thread act — now speak a `narrated` aside into the
+  dialog at change time, reason and undo named in the same breath: *"I set lights to dim
+  — ian went away, and the standing rule you confirmed asks for it. Undo it by hand and
+  the rule stands down."*
+- **FamTalker01's purpose, recorded**: a VIRTUAL SMART HOME — virtual interfaces and
+  observation points for the familiar to explore, begin to control, and report on when
+  human intervention would help. It is the "second surface" ADR-0032's follow-on asked
+  for: its virtual controls should be declared in its `actuators.json` and its
+  observation points fed as observations — the safe practice ground for the reaction
+  loop. Design/ops thread, queued.
+
+### Checks run
+
+- Device tests (name cleaning/guarding, network accumulation + throttle), the frontier
+  adoption regression (named discovery at a member's remembered face → ghost dropped,
+  name adopted; bare-ip sightings adopt nothing), full workspace bar, release build.
+
+### Next
+
+- Reach-side reverse lookup (mDNS PTR / local-DNS `dig -x`) so a door can RESOLVE names
+  itself instead of waiting to overhear one — gated by `network_discovery`, riding the
+  paced reach sweep. With it, MacOnStick needs no ASUS DNS entry ever.
+- FamTalker01 actuator declaration + observation-point feed (with the narration above,
+  the familiar will say what it changes there and why).
+
 ## 2026-08-14 (afternoon) — A theory tells its whole life, and three console honesty fixes
 
 ### What changed
