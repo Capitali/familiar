@@ -3,9 +3,11 @@
 #
 #   bash tools/new-mac-bootstrap.sh            # toolchain + clone + build
 #   bash tools/new-mac-bootstrap.sh --ios      # ...plus iOS/watch simulator builds
-#   bash tools/new-mac-bootstrap.sh --daemon   # install + start the daemon LaunchAgent
-#                                              # (run AFTER the transfer bundle is unpacked —
-#                                              #  the daemon is mute without llm/call_llm.sh)
+#   bash tools/new-mac-bootstrap.sh --daemon   # install/upgrade + (re)start the daemon
+#                                              # LaunchAgent (first install AFTER the transfer
+#                                              #  bundle is unpacked — the daemon is mute
+#                                              #  without llm/call_llm.sh; re-run after any
+#                                              #  rebuild to upgrade — see UPGRADE NOTE below)
 #
 # Idempotent: every step checks before it acts, so re-running after a failure is safe.
 # What this cannot do (hand-carry from the old Mac; see the transfer bundle):
@@ -123,6 +125,14 @@ if [ "$MODE" = "daemon" ]; then
   step "daemon install ($LABEL)"
   [ -x "$REPO_DIR/target/release/familiar" ] || (cd "$REPO_DIR" && cargo build --release)
   mkdir -p "$APP_SUPPORT/bin" "$APP_SUPPORT/data"
+
+  # UPGRADE NOTE (macOS 27+): launchd records a Lightweight Code Requirement for the
+  # executable at bootstrap time. Swap the binary in place and kickstart, and the spawn
+  # dies with `last exit reason = OS_REASON_CODESIGNING` — ad-hoc re-signing does not
+  # help (observed live on MacOnStick, 2026-08-13). So: bootout while the OLD binary is
+  # still the registered one (no-op on a fresh Mac), swap while nothing runs it, and let
+  # the bootstrap below re-register with the NEW binary's requirement.
+  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   cp "$REPO_DIR/target/release/familiar" "$APP_SUPPORT/bin/familiar"
 
   if [ ! -f "$APP_SUPPORT/data/llm/call_llm.sh" ]; then
@@ -150,9 +160,11 @@ if [ "$MODE" = "daemon" ]; then
   <key>StandardErrorPath</key><string>$APP_SUPPORT/data/daemon.log</string>
 </dict></plist>
 PL
-    launchctl bootstrap "gui/$(id -u)" "$PLIST"
   fi
-  # kickstart -k, never unload -w/load -w (that pattern leaves the agent registered-but-stalled).
+  # bootstrap registers the current binary's code requirement (see UPGRADE NOTE above);
+  # kickstart -k then starts it fresh. Never unload -w/load -w — that pattern leaves
+  # the agent registered-but-stalled.
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
   launchctl kickstart -k "gui/$(id -u)/$LABEL"
   sleep 3
   code=$(curl -ksf -o /dev/null -w '%{http_code}' https://127.0.0.1:47100/mesh/hello || true)
