@@ -40,6 +40,33 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (evening) — Two AIs, one codebase: the coordination directory
+
+### What changed
+
+- **`coordination/`** — the shared memory between the AIs working this codebase (Ian:
+  a common, always-updated file about tasks, work done, and system changes, keeping
+  the controlling AI and a companion AI in sync; the companion is a full coding
+  partner — coding, planning, and design hand off to it). Files over chat, because
+  files survive sessions: `README.md` (the rules — claim-before-work in a pushed
+  commit, scope collision checks, controller/companion roles, held-operations
+  discipline, messages-are-ephemeral-records-are-real), `BOARD.md` (the task board in
+  a fixed entry format, seeded with the real queue: Build 85 console batch,
+  theory-affirmation rule minting, reach-side reverse name lookup, FamTalker01's
+  virtual-smart-home declaration, HumanRecord, geo source, the ADR-0039 migration),
+  `STATE.md` (fleet truth, the held consolidated pass, what waits on Ian, his standing
+  directions recorded), and `COMPANION_PROMPT.md` (the self-contained brief Ian hands
+  a new companion).
+- The rules encode this week's paid-for lessons: the shared-checkout worktree
+  discipline, push-race handling without force, exit-code-honest bars, held operations
+  as a ledger with explicit triggers, and the betty/mol never-touch line.
+
+### Checks run
+
+- Docs-only brick: markdown proofread, entry format self-consistent with its own
+  README, board/state cross-checked against the live fleet and the peer session's
+  held-pass plan.
+
 ## 2026-08-14 (late afternoon) — Discovery names the fleet, and the familiar says why
 
 ### What changed
