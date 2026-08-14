@@ -6,6 +6,55 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-14 (later night) — Reach asks the LAN what a numeric neighbour is called (companion:codex)
+
+### What changed
+
+- **Bounded reverse naming in `familiar-reach`:** when the paced reach survey still
+  knows a neighbour only by its IP, it asks local DNS for the PTR and then mDNS directly
+  (`dig @224.0.0.251 -p 5353 -x`) as a fallback. Each child is killed at the existing
+  per-host reach timeout; missing `dig`, no answer, and malformed/numeric/localhost
+  answers leave the numeric label honestly unchanged.
+- **Names ride the observation that matters:** the cleaned host label now reaches both
+  `DeviceReach.label` and `host can-reach device:<name>` while the IP remains in context.
+  The frontier's existing face join can therefore associate the named sighting to a
+  member's remembered LAN address and adopt it into `DeviceRecord.discovered_name`.
+  The injected regression caught one easy-to-miss seam: the reach record used the new
+  label while the observation still used the old numeric one.
+- **Permission does not compose:** TCP reach remains behind `allow_network`; active
+  reverse naming additionally requires `allow_network_discovery`. Existing DHCP/ARP
+  names always outrank a PTR answer. Both `reach` and the periphery's `discover` command
+  pass the separate gates; no network sweep returns to the metabolic tick.
+
+### Why
+
+Ian's standing direction is that names come from mDNS/tailnet/local DNS and router
+configuration must never be required. Discovery naming already adopted names a door
+overheard, but a door never asked what an otherwise numeric LAN neighbour called itself.
+This closes that half of the loop on the same paced, human-gated survey that already
+probes reach.
+
+### Checks run
+
+- `cargo test -p familiar-reach` — 7 passed, including injected resolver/probe tests for
+  gated adoption, authoritative-name precedence, PTR cleanup, and exact observation
+  output. `cargo check -p familiar-cli` clean.
+- Green bar: `cargo fmt --check`; `cargo clippy -- -D warnings`; full `cargo test`
+  passed on the clean rerun (reach 7, cycle 58, kernel 169, mesh 199, all scenario and
+  doc-test suites green).
+- The first full run overlapped the controller's worktree bar and saw one unrelated
+  cycle parameter test's second tick report a duplicate revert. The test passed alone
+  and the whole bar passed after the other job ended. Shared fixed-name temp directories
+  are the likely collision; recorded as a Proposed coordination-hardening task rather
+  than changed inside this brick.
+
+### Next
+
+- Let the next normal daemon build carry this to a door with both gates open, then
+  inspect `familiar discover` output and the resulting device records. A LAN without
+  `dig` simply retains numeric names; installing resolver tooling is an infra choice,
+  never an implicit download by the familiar.
+
 ## 2026-08-14 (night) — FamTalker01 gets a reversible virtual home (companion:codex)
 
 ### What changed
