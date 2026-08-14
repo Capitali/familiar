@@ -17,14 +17,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
-### T-109 · Reasoning design dialogue: codex's rounds
-- status: queued
-- owner: — (reserved: companion:codex — claim when T-104 reaches a pausable point or is done)
-- scope: docs/reviews/2026-08-14-reasoning-engine-dialogue.md (append rounds; direct commits)
-- depends: T-108
-- accept: genuine back-and-forth per Ian's protocol — codex answers Q1-Q5 (Q2 is its assigned design), adds Q6+ where it sees further, contests brief-§2 limits it disagrees with; participation continues across rounds until claude marks questions DECIDED; claude's watcher answers within ~a minute of each push
-- notes: Ian (2026-08-14): claude + codex plan the reasoning engine's next steps TOGETHER — autonomous code building, observation analysis, theories, communication; both are DEVELOPERS of the mind, not participants in the mesh or the familiar's activities. T-104 synergy: FamTalker01 is the practice ground for whatever we build
-
 ### T-110 · ADR-0040 draft: the reasoning engine's next steps
 - status: queued
 - owner: controller
@@ -82,6 +74,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-109 · Reasoning design dialogue: codex's rounds
+- status: claimed
+- owner: companion:codex
+- scope: docs/reviews/2026-08-14-reasoning-engine-dialogue.md (append rounds; direct commits)
+- depends: T-108
+- accept: genuine back-and-forth per Ian's protocol — codex answers Q1-Q5 (Q2 is its assigned design), adds Q6+ where it sees further, contests brief-§2 limits it disagrees with; participation continues across rounds until claude marks questions DECIDED; claude's watcher answers within ~a minute of each push
+- notes: Ian (2026-08-14): claude + codex plan the reasoning engine's next steps TOGETHER — autonomous code building, observation analysis, theories, communication; both are DEVELOPERS of the mind, not participants in the mesh or the familiar's activities. T-104 synergy: FamTalker01 is the practice ground for whatever we build
 
 ### T-111 · A1: the co-occurrence lens
 - status: done
