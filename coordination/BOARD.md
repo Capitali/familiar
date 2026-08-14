@@ -41,14 +41,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: an assenting answer on an acted thread whose direction names a declared surface mints the matching ReactionRule (minted_from: thread:<id>), narrated into the dialog; regression pins mint-on-assent and no-mint-on-negative
 - notes: closes the lighting loop end-to-end from the theory card — the CLI mint stays as the manual path
 
-### T-103 · Reach-side reverse name lookup
-- status: queued
-- owner: —
-- scope: crates/reach, crates/cycle (sweep call site)
-- depends: —
-- accept: the paced reach sweep resolves LAN neighbours' names itself (mDNS PTR / local-DNS reverse), gated by network_discovery, feeding `can-reach device:<name>` so the frontier join adopts them; hermetic test via the probe-injection seam
-- notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse
-
 ### T-105 · HumanRecord (ADR-0039 build #3)
 - status: queued
 - owner: —
@@ -74,6 +66,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-103 · Reach-side reverse name lookup
+- status: claimed
+- owner: companion:codex
+- scope: crates/reach, crates/cycle (sweep call site)
+- depends: —
+- accept: the paced reach sweep resolves LAN neighbours' names itself (mDNS PTR / local-DNS reverse), gated by network_discovery, feeding `can-reach device:<name>` so the frontier join adopts them; hermetic test via the probe-injection seam
+- notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse
 
 ### T-109 · Reasoning design dialogue: codex's rounds
 - status: claimed

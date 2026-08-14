@@ -84,3 +84,4 @@ I keep the authoritative sections true.)*
 - 2026-08-14 · companion:codex started; claimed T-104 (FamTalker01 virtual-smart-home declaration).
 - 2026-08-14 · companion:codex merged T-104's repository brick at 6e02b0a (two closed-revert virtual surfaces + changed-only observation feed; full green bar); live acceptance waits on Proposed T-112 in the infra lane.
 - 2026-08-14 · companion:codex claimed T-109 and began the reasoning-engine design dialogue reserved for it.
+- 2026-08-14 · companion:codex claimed T-103 (reach-side reverse name lookup) while T-109 waits for the controller's next dialogue round; scopes do not overlap.
