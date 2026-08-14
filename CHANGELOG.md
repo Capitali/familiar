@@ -314,6 +314,15 @@ this file is the human-readable summary.
   requirements; Law III in SOUL gains an "operational restraint" note.
 
 ### Fixed
+- **A released identity stays released — and a rename lands.** Renaming a device
+  (release → re-grant → name) inside one second left the record a guest wearing its own
+  new name on every welcome screen, and a release could leave a stale admission behind
+  that flipped the record from member to guest one sync round later. Deliberate acts now
+  always land strictly after the release they answer, a release spends both member facts
+  everywhere at once, and nothing — roster, welcome, notes, game seats or game turns —
+  ever leads with a name the record has released. *Validated by two new record
+  regressions beside the full merge/correction suite, and the live worldview rendered
+  through the console.*
 - **A console no longer files under a neighbour's machine.** From the lighthouse's point
   of view every machine in a household shares one public address, and the roster took
   that as proof of residence — MacOnStick's console nested under Wildhorse's card. A

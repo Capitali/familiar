@@ -6,6 +6,60 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-13 (night) — A release spends what it means to spend, and nothing else
+
+### What changed
+
+- **The live sighting.** Minutes after Build 81, MacOnStick's welcome card read
+  *MacOnStick · VISITOR — a visitor is looking around*: an established name in the state
+  copy of a guest. The trail led to the lighthouse's rename dance (disestablish → grant →
+  name, scripted inside one wall-clock second) and from there to three distinct defects in
+  the record layer, each now fixed and pinned by a test.
+- **1 · The same-second boundary.** Both merge keep-filters and the derive boundary treat a
+  fact at the same second as a Disestablish as SPENT (the release wins ties — leaving must
+  always work). Right rule, but the door's own mint paths could land a deliberate re-grant
+  in the release's second, spending it at birth. `unspent_at` now clamps every establishment
+  and admission the door mints to strictly after the latest release; the tie rule survives
+  for true races (`a_true_same_second_tie_is_spent_and_names_nobody`), and the scripted
+  dance derives Member everywhere, replication included
+  (`a_same_second_rename_dance_stays_member_everywhere`).
+- **2 · The admission a release forgot.** A Disestablish cleared the establishment but left
+  the AdmissionFact — so a release → re-establish on a live record kept the pre-release
+  admission, which merge's keep-filter then spent on the first sync: member at its own
+  door, guest one gossip round later. A release now spends BOTH member facts locally,
+  exactly as merge spends them on every replica; re-establishing mints a fresh admission
+  through the rules engine (the attestation, filter 1, is retained).
+- **3 · Spent names named things.** `identity.established` kept the handle on a spent
+  establishment, and four consumers read it raw: the roster's `human`, the welcome's
+  arrival handle, the game seat key, and the game turn-actor resolution — the last two
+  meaning a RELEASED device could still hold a seat and act under its old handle.
+  One canonical gate now — `record::effective_establishment` — mirrored by `derive_state`
+  and used by every consumer that names a device; `mesh name` refuses to write a name onto
+  a spent establishment ("re-establish first, then name"); the sphere's arrival card
+  titles on the handle only for members, so even an old door can't make it contradict
+  itself. The voucher/E1/E2 anchor list was already state-gated; verified, unchanged.
+
+### Checks run
+
+- `cargo fmt`, `clippy -D warnings`, full `cargo test` (mesh lib 192 green including the
+  two new regressions; workspace green); `xcodegen`; both consoles rebuilt (the sphere is
+  a bundled resource). The REAL local worldview (`/local/worldview` off the running
+  daemon) rendered through the new sphere: handles lead, the Wildhorse console nests under
+  Wildhorse, MacOnStick's console stands alone honestly.
+
+### Next
+
+- **Repair the damaged record** once fixed binaries stand on the lighthouse: re-run the
+  dance for 3d68a068 (disestablish → grant → name) — under the clamp it lands strictly
+  after its release and replicates as Member "MacOnStick" everywhere. The consoles converge
+  within a sync round.
+- **Fleet naming is data, not code:** wildhorse's machine record is established as "ian",
+  so the roster leads that card with *Ian · Wildhorse*. If the machine name should lead,
+  the same (now-safe) dance renames it — Ian's call per record.
+- A released device's record (both member facts spent, attestation retained) is no longer
+  purge-exempt via a lingering establishment; restoration-from-cert still covers a
+  returning device. Watch it in the field.
+
 ## 2026-08-13 (evening) — Names lead, a console stays home, and the cloud gate gets its switch
 
 ### What changed
