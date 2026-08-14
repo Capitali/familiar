@@ -471,10 +471,13 @@ function nodeName(m) {
   if (!idLed(m.label, m.node_id)) return { text: m.label, masked: false };
   return { text: maskName(m.os), masked: true };
 }
-// The SystemType segment — the hardware kind as one word.
+// The SystemType segment — the hardware kind as one word. Arch sharpens a Mac:
+// x86_64 reads "MacIntel" (Ian's sentence — "Wildhorse : MacIntel : Ian").
 function typeWord(m) {
   const fam = ((m.os || '').trim().split(/[\s·]/)[0] || '').toLowerCase();
-  return OS_WORD[fam] || '';
+  const w = OS_WORD[fam] || '';
+  if (w === 'Mac' && /x86|amd64|intel/i.test(m.arch || '')) return 'MacIntel';
+  return w;
 }
 // The ServedUser segment — the record's established handle, display-capitalized.
 function servedWord(m) { return m.human ? cap(m.human) : ''; }

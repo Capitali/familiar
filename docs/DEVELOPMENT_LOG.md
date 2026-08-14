@@ -40,6 +40,42 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (dawn) — The sentence gets its nouns, and the two-record direction lands
+
+### What changed
+
+- **ADR-0039 written and accepted** (Ian's direction, verbatim in the record): humans
+  and devices become separate first-class records — HumanRecord (name, devices,
+  relationships/lineage, preferences, habits, routines, workflows) and DeviceRecord
+  (name, kind, os/arch, capabilities, observation interfaces, networks, human
+  associations current+past) — related only through time-bounded association edges,
+  with **the roster demoted to a view** over them. ADR-0032's deferred pieces are
+  scheduled inside it: persistent ReactionRules (a confirmed intent becomes a standing,
+  visible, revocable automation — the lighting theory stops re-asking) and
+  habit-threshold proposals. Build order in the ADR; DeviceRecord + the device-name
+  field + ReactionRules head the list.
+- **`Member.arch` rides the worldview** (from the peer's brief, already persisted in
+  peers.json; self reports its own): the console's type word can finally tell Macs
+  apart — `typeWord` reads "MacIntel" for macOS on x86_64. With the label ops below,
+  Ian's sentences render live: `MacOnStick : Mac : Ian`, `Wildhorse : MacIntel : Ian`,
+  `Codex : iPad : Ian` (fixture-verified all three).
+- **Ops:** this Mac's node label renamed "Mac.river.io" → "MacOnStick" (node.json —
+  cosmetic slot, rides briefs). The establishment re-dance to the fleet convention
+  (label = machine name, establishment = human: `disestablish → grant → name ian`) runs
+  on the lighthouse; under ADR-0039 the machine name migrates to DeviceRecord.name
+  properly.
+
+### Checks run
+
+- Green bar (fmt, clippy `-D warnings`, full workspace tests), FamiliarMac build,
+  release build; sphere fixture-driven in a browser for all three sentences.
+
+### Next
+
+- The phones' SystemNames ("Codex", "Aphelion") wait on the device-name field
+  (ADR-0039 build order #1) — iOS reports the generic model as its label and the
+  lighthouse cannot see tailnet hostnames. Until then their rows read type-as-name.
+
 ## 2026-08-14 (small hours, cont.) — The roster reads as a sentence, and the mesh shows its body
 
 ### What changed

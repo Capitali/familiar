@@ -23,6 +23,8 @@ public struct Member: Codable, Equatable, Identifiable {
     public var kind: Kind
     public var os: String
     public var os_version: String?
+    /// CPU architecture from the node's brief ("x86_64"/"aarch64") — "MacIntel" vs "Mac".
+    public var arch: String?
     public var actor: String
     public var detail: String
     public var first_seen: Int64

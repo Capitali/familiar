@@ -1317,6 +1317,7 @@ mod tests {
             kind,
             os: String::new(),
             os_version: String::new(),
+            arch: String::new(),
             actor: actor.into(),
             detail: String::new(),
             first_seen: 0,
