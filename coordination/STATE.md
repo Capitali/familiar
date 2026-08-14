@@ -25,8 +25,16 @@ requests fleet ops through the board, never runs them directly unless assigned).
 
 ## Held-operations ledger
 
-**One consolidated pass, fires only on Ian's explicit go** (deliberately not before —
-mesh healthy, features not repairs, Build 84 mid-TestFlight-review):
+**IAN'S GO, RECORDED (2026-08-14, verbatim intent):** "continue this work… make
+decisions that make sense… push builds when it seems appropriate and notify me if you
+need me for testing or confirmation — you and the coding partner make most of the
+decisions… without further interaction from me for at least the next several hours."
+Controller's reading: the consolidated pass below is RELEASED except the wildhorse-geo
+step (his coords-vs-zero choice — the ≈ mark keeps it honest meanwhile). Manual device
+naming runs ONLY if discovery yields unambiguous names on Ian's established devices;
+no guesses, ever. Notify Ian when Build 85 is on his devices to test.
+
+**The consolidated pass** (infra session executes):
 
 1. Deploy `8363f15` to lighthouse + Wildhorse daemons.
 2. Wait a few sync rounds; `mesh device show` on the lighthouse — the phones likely
@@ -39,11 +47,11 @@ mesh healthy, features not repairs, Build 84 mid-TestFlight-review):
 
 ## Waiting on Ian
 
-- **The go** for the consolidated pass above.
 - **Wildhorse's real coordinates** → written to its `data/mesh/geo.json`, **or** "zero
   it" → delete the file, node reads honestly unlocated. Until then its pin wears ≈.
-- (Dissolving:) the Codex/Aphelion mapping — likely self-answers via discovery in
-  pass step 2; his word still wins if discovery disagrees.
+- (Dissolving:) the Codex/Aphelion mapping — discovery decides in pass step 2; manual
+  naming only on unambiguous discovery, else skipped entirely.
+- Build 85 testing on his devices, once shipped (notification will be waiting).
 
 ## Standing directions from Ian (recorded, binding)
 
