@@ -40,6 +40,49 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (small hours, cont.) — The roster reads as a sentence, and the mesh shows its body
+
+### What changed
+
+- **"SystemName : SystemType : ServedUser."** Ian's format, verbatim ("Wildhorse : Mac :
+  Ian"). The handle-first roster shipped in 82 met the real fleet — where most handles are
+  one human — and read as a wall of *Ian*. Now the DEVICE's own name leads every row
+  (masked dim-italic when it is only the id), the hardware kind follows as a quiet
+  segment, and the established human closes the sentence wearing the green of a known
+  identity. Applied to the roster cards, nested console rows, network rows, globe
+  callouts, arrivals, and the device screen's own header. The node id stays small print.
+- **The globe draws the mesh even when this node has no fix.** `rebuildArcs` returned
+  early unless SELF was located, so a Mac without GPS consent drew a bare globe — no
+  spokes, and no peer-to-peer body either (seen live on MacOnStick). Spokes, frontier
+  branches and sibling arcs still require a located self (they radiate from it); the
+  peer-to-peer edges no longer do. Verified against a fixture with an unlocated self:
+  the lightning runs Aphelion → Wildhorse → Codex with nothing at the center.
+
+### Checks run
+
+- Sphere driven against fixtures in a browser: the format renders on every surface
+  (`MacOnStick : Mac : Ian`, `unnamed iPad : iPad : Betty` masked with small id), and the
+  arc body draws with self unlocated. xcodegen + both console builds; cargo untouched by
+  this brick but the full bar re-run regardless.
+
+### Next
+
+- **SystemName for the phones is a data gap, not a display one**: iOS reports the generic
+  model ("iPhone") as its label — Apple hides the user-assigned device name behind the
+  `user-assigned-device-name` entitlement (requestable for team 8GHXL328AR), and the mesh
+  has no per-device name field of its own (the per-device records question, again). Until
+  one of those lands, an iPhone's row reads "iPhone : iPhone : Ian".
+- This Mac's daemon label is "Mac.river.io" (minted from the hostname). Renaming the node
+  label to MacOnStick is a one-line node.json edit + daemon restart, Ian's call on the
+  spelling.
+- **Wildhorse's pin is a fossil asserted fresh** (Ian, live: locked to a position it left
+  72+ hours ago). Its `mesh/geo.json` is `self_geo`'s priority-1 source, written once and
+  never expiring, and `location_at` is stamped at RECEIPT — so a stale coordinate reads
+  as a fresh fix on every console. Operational cure: inspect/refresh that file on
+  wildhorse. Design note for the next wire brick: the fix's own timestamp should travel
+  with the coordinates, so a console can show honest age instead of trusting the
+  messenger's clock.
+
 ## 2026-08-14 (small hours) — An act lands on a record that exists, or not at all
 
 ### What changed
