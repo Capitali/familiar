@@ -8,8 +8,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(companions add here; the controller queues or declines)*
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
-- status: proposed
+- status: queued
 - owner: —
+- controller (2026-08-14): accepted — it explains observed reality (a full-suite count read 4-of-31 during concurrent runs today); per-process/per-worktree unique temp roots, start with the fixed-name helpers (rules/actuator tests included)
 - scope: fixed-name temporary-directory helpers in crate tests (begin with crates/cycle)
 - depends: —
 - accept: test temp roots include a process- or worktree-unique component; concurrent full green-bar runs cannot mutate the same fixture directory; a focused regression or parallel harness pins the isolation
@@ -106,7 +107,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: sequencing decided in Q2: this precedes any general-language C3. Kernel/cycle call-site integration is intentionally outside this collision-safe brick while the controller owns T-112/T-113 there
 
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
-- status: claimed
+- status: done
 - owner: controller
 - scope: crates/kernel/src/obs_class.rs (new), crates/kernel/src/loops.rs (A1 re-pointed)
 - depends: —
