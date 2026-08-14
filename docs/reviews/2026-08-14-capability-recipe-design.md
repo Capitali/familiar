@@ -72,10 +72,12 @@ bounded before deserialization and `version` must be `1`.
 }
 ```
 
-Names are ASCII lower-case identifiers (`[a-z][a-z0-9_]*`). Inputs and step outputs
-occupy immutable named slots; duplicate names and forward references are rejected. The
-immutability makes lineage and replay legible and prevents a later step from silently
-changing what an earlier name meant.
+Input, argument, output, and mapped-field names are ASCII lower-case identifiers
+(`[a-z][a-z0-9_]*`). Path segments may carry any nonempty, control-free JSON field name,
+so tools do not need to reshape real-world keys. Inputs and step outputs occupy immutable
+named slots; duplicate names and forward references are rejected. The immutability makes
+lineage and replay legible and prevents a later step from silently changing what an
+earlier name meant.
 
 ## Runtime values and operations
 
@@ -102,8 +104,8 @@ does not coerce a malformed value or skip a bad row.
 
 The emit templates use the same typed segments. `actor` and `action` are fixed nonempty
 literals; `object` and `context` are rendered from immutable slots. The result also
-returns the ordered `(input name, tool id)` lineage. Persistence as an Observation is a
-caller's decision, not a side effect of evaluation.
+returns the ordered `(input name, tool id, arguments)` lineage. Persistence as an
+Observation is a caller's decision, not a side effect of evaluation.
 
 ## Bounds and refusal behavior
 
@@ -139,7 +141,7 @@ Unit tests must pin:
 - row, byte, step, input, and hard-ceiling enforcement before or during execution;
 - malformed JSON/UTF-8, missing paths, type mismatches, incompatible predicates,
   non-finite mean, and empty aggregate refusal;
-- deterministic replay and exact input lineage; and
+- deterministic replay and exact input/argument lineage; and
 - a source implementation that attempts filesystem/network/process access is never part
   of the interpreter API — only returned bytes cross the seam.
 

@@ -6,6 +6,51 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-14 (latest) — A useful language with no ambient hands (companion:codex)
+
+### What changed
+
+- **Capability Recipe v1:** the new `familiar-recipe` crate interprets an authored,
+  strictly typed sequence of `parse_json`, `parse_lines`, `select`, `map`, `filter`,
+  `group`, `count`, `min`, `max`, `mean`, `compare`, and `format` steps. Inputs and
+  results live in immutable named slots; emit templates produce one observation-shaped
+  result with exact input/tool/argument lineage.
+- **C2 is structural:** a recipe can invoke only an opaque `tool_id` through an injected
+  `ProvenToolSource`. There is no interpreter API for paths, executables, processes,
+  files, URLs, networks, clocks, environment, or randomness. The caller's proven-tool
+  catalog remains responsible for health, review, argument schema, and every existing
+  human-owned gate.
+- **Bounded before useful:** serde rejects unknown fields at every level; the manifest,
+  input count, step count, materialized bytes, and produced rows have declared limits
+  beneath hard ceilings. Missing paths, malformed/non-UTF-8 input, incompatible types,
+  empty aggregates, unknown tools, and non-finite arithmetic fail the whole evaluation —
+  no partial observation or plausible substitute is emitted.
+- **Design first:** `docs/reviews/2026-08-14-capability-recipe-design.md` records the
+  language, operation types, accounting rules, authority seam, and deliberate exclusions.
+  Python remains a scenario-lab authoring aid, never a live artifact; general-language
+  WASI remains a later decision.
+
+### Why
+
+The reasoning dialogue rejected arbitrary live Python because resource limits are not an
+authority boundary. Recipe v1 gives the familiar real program composition and repairable,
+typed failures while beginning with a language whose reach can be inspected mechanically
+and replayed exactly. Its deliberate expressiveness cost buys an honest Law III boundary.
+
+### Checks run
+
+- `cargo test -p familiar-recipe` — 18 pure tests covering strict parsing, ordered
+  once-only tool invocation, exact lineage, every operation, grouped aggregates,
+  deterministic replay, real-world JSON keys, and all declared/hard refusal bounds.
+- `cargo clippy -p familiar-recipe --all-targets -- -D warnings` clean.
+
+### Next
+
+- After the controller's T-113 prediction work leaves the kernel/cycle seams, integrate
+  recipe persistence, author/repair prompting, and scheduling there as a separate claimed
+  brick. T-116 then tests recipe candidates against fixture-held truth; it must not let a
+  recipe score its own output.
+
 ## 2026-08-14 (later night) — Reach asks the LAN what a numeric neighbour is called (companion:codex)
 
 ### What changed
