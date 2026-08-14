@@ -314,6 +314,13 @@ this file is the human-readable summary.
   requirements; Law III in SOUL gains an "operational restraint" note.
 
 ### Fixed
+- **A typo can no longer mint a member.** Membership acts (grant, name, corrections)
+  typed with the short id every screen displays used to silently create a fresh, keyless
+  record for the unknown string — a ghost that could wear a name while the real device
+  stayed unnamed. Acts now resolve the displayed short form to the one record it names,
+  and refuse — out loud — when the reference is unknown or ambiguous. *Validated by
+  record-layer regressions; the live ghost this fixes was found wearing MacOnStick's
+  name.*
 - **A device can no longer be silently exiled by its own coordinates.** One
   full-precision longitude, printed exactly and re-parsed a hair off, made every signed
   status brief from a device fail verification at every door — including its own — with
