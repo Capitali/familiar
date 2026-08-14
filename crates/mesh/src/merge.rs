@@ -121,6 +121,8 @@ pub fn build_outbox(
 ) -> crate::Result<()> {
     let node = NodeKey::load_or_mint(dir, "familiar")?;
     let id = node.identity();
+    // Keep this node's own device record honest (ADR-0039) — facts only, never the name.
+    let _ = crate::device::refresh_self(dir, &id.node_id, now);
 
     let people = identity::load(dir).unwrap_or_default();
     let obs = observation::load(dir).unwrap_or_default();

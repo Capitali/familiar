@@ -32,6 +32,7 @@ pub mod brief;
 pub mod changeling;
 pub mod config;
 pub mod consult;
+pub mod device;
 pub mod enroll;
 pub mod federation;
 pub mod game;

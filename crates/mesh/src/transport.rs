@@ -1297,6 +1297,16 @@ async fn handle(
         // reconciles. GET is this door's own offer, POST accepts a sibling's — both are called
         // by the dial-OUT side of a gossip exchange, so CGNAT'd doors sync in both directions.
         (Method::GET, "/mesh/records") => offer_records(&dir),
+        // Device records (ADR-0039) ride the same dial with their own endpoints, so a
+        // door built before them 404s harmlessly instead of failing a signed body.
+        (Method::GET, "/mesh/devices") => offer_devices(&dir),
+        (Method::POST, "/mesh/device-sync") => {
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_device_sync(&dir, &bytes)
+        }
         (Method::POST, "/mesh/record-sync") => {
             let bytes = match collect(req).await {
                 Ok(b) => b,
@@ -3015,6 +3025,97 @@ fn offer_records(dir: &Path) -> Response<Full<Bytes>> {
     }
 }
 
+/// `GET /mesh/devices` → this door's device-record offer (ADR-0039), record-sync's twin.
+fn offer_devices(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no node key");
+    };
+    match crate::device::build_device_sync(dir, &cred, &node, now_secs()) {
+        Ok(Some(sync)) => match serde_json::to_vec(&sync) {
+            Ok(body) => text(StatusCode::OK, body),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        },
+        Ok(None) => text(StatusCode::NO_CONTENT, ""),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "assemble"),
+    }
+}
+
+/// `POST /mesh/device-sync` → absorb a sibling door's device records (ADR-0039).
+fn recv_device_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
+    let sync: crate::device::DeviceSync = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return text(StatusCode::BAD_REQUEST, "bad device-sync"),
+    };
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Ok(gk) = cred.verifying_key() else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "bad group key");
+    };
+    let revoked = group::load_revoked(dir).unwrap_or_default();
+    if let Err(e) =
+        crate::device::verify_device_sync(&sync, &gk, &cred.group_id, now_secs(), &revoked)
+    {
+        return text(StatusCode::FORBIDDEN, e.to_string());
+    }
+    let mut absorbed = 0usize;
+    for d in &sync.body.devices {
+        if crate::device::absorb(dir, d).is_ok() {
+            absorbed += 1;
+        }
+    }
+    text(StatusCode::OK, format!("absorbed {absorbed}"))
+}
+
+/// The dial-out half of device replication — record-sync's twin, same best-effort shape:
+/// offer ours, absorb theirs; an old door 404s both and nothing is lost.
+async fn sync_devices_with(dir: &Path, addr: &str) {
+    let now = now_secs();
+    if let (Ok(Some(cred)), Ok(node)) = (
+        group::load(dir),
+        crate::node::NodeKey::load_or_mint(dir, "familiar"),
+    ) {
+        if let Ok(Some(ours)) = crate::device::build_device_sync(dir, &cred, &node, now) {
+            if let Ok(raw) = serde_json::to_vec(&ours) {
+                let _ = http_send(
+                    addr,
+                    Method::POST,
+                    "/mesh/device-sync",
+                    Some(raw),
+                    &[("content-type", "application/json")],
+                )
+                .await;
+            }
+        }
+        if let Ok(resp) = http_send(addr, Method::GET, "/mesh/devices", None, &[]).await {
+            if resp.status == StatusCode::OK {
+                if let Ok(theirs) = serde_json::from_slice::<crate::device::DeviceSync>(&resp.body)
+                {
+                    let revoked = group::load_revoked(dir).unwrap_or_default();
+                    if let Ok(gk) = cred.verifying_key() {
+                        if crate::device::verify_device_sync(
+                            &theirs,
+                            &gk,
+                            &cred.group_id,
+                            now,
+                            &revoked,
+                        )
+                        .is_ok()
+                        {
+                            for d in &theirs.body.devices {
+                                let _ = crate::device::absorb(dir, d);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// `POST /mesh/record-sync` → absorb a sibling door's records. The envelope is self-proving
 /// (cert + signature inside the body, verified against OUR group key), so no header sig.
 fn recv_record_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
@@ -3709,6 +3810,8 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
     // Records replicate on the same dial-out connection path (a CGNAT'd door can only be
     // reached by whoever dials out) — offer ours, absorb theirs, best-effort.
     sync_records_with(dir, addr).await;
+    // Device records (ADR-0039) ride the same dial through their own endpoints.
+    sync_devices_with(dir, addr).await;
     // Pre-fetch tool bodies we don't already have, content-addressed for the in-tick merge.
     if let Ok(brief) = serde_json::from_slice::<MeshBrief>(&reply.body) {
         upsert_peer(dir, &brief, addr)?;

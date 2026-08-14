@@ -40,6 +40,44 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (morning, cont.) — The device gets its own record (ADR-0039 build #1)
+
+### What changed
+
+- **`device.rs`**: the DeviceRecord store — `mesh/devices/<device_id>.json`, keyed by the
+  durable device id. Machine facts (kind, os, os_version, arch, capabilities,
+  observation interfaces, networks with sighting ages), human associations as
+  time-bounded edges (union on merge; a closed edge stays closed), and **`name` — the
+  SystemName, deliberate and human-given, never invented**. Facts merge latest-wins by
+  `updated_at`; no floats ride the record, by design (the one-longitude lesson).
+- **Replication**: `GET /mesh/devices` + `POST /mesh/device-sync` — record-sync's twin
+  (same proof envelope, same 48h window/cap, riding the same outbound dial via
+  `sync_devices_with`). Deliberately its OWN endpoints rather than fields on the signed
+  record-sync body: a door built before this simply 404s, instead of failing a signature
+  over fields its parser drops (the `build_version` lesson, generalized).
+- **`mesh device name <node_id> <name>`** (+ `device show`): the operator's naming act,
+  resolving prefixes through the membership records (typos refuse — the doppelgänger
+  guard covers devices too). The console's Device-screen field lands with Build 85 and
+  writes the same store.
+- **The SystemName ladder** in the roster: a given device name outranks the tailnet
+  hostname outranks the brief label — for peers and for the self row both; a rotated key
+  still finds its name through the membership record. `refresh_self` keeps this node's
+  own machine facts current every outbox build, never touching the name.
+
+### Checks run
+
+- Green bar (fmt, clippy `-D warnings`, full workspace), device module tests (naming via
+  prefix + refusal, rename latest-wins both absorb directions, association union with
+  closed-edge persistence, sync round-trip + foreign-group refusal), release build.
+
+### Next
+
+- Doors need this merge before names travel (device-sync 404s until then — queued with
+  the peer session's next deploy cycle). MacOnStick and Wildhorse can be named from any
+  upgraded door; the phones name themselves at Build 85, or an operator names them once
+  their ids are confirmed against the lighthouse's peer table.
+- ReactionRules (ADR-0039 build #2) is next.
+
 ## 2026-08-14 (morning) — The machine you sit at learns its own name
 
 ### What changed

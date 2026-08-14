@@ -365,10 +365,18 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
     // other peer's brief label), NOT by the group or a privileged "familiar" name. `SelfNode` marks
     // "you are here"; it confers no special standing.
     if let Ok(Some(cred)) = group::load(dir) {
-        let label = crate::node::NodeKey::load_or_mint(dir, "")
+        // Own device-record name first (ADR-0039), then the node's cosmetic label.
+        let label = crate::device::load(dir, &cred.membership.node_id)
             .ok()
-            .map(|n| n.identity().label)
-            .filter(|l| !l.is_empty())
+            .flatten()
+            .map(|d| d.name)
+            .filter(|n| !n.is_empty())
+            .or_else(|| {
+                crate::node::NodeKey::load_or_mint(dir, "")
+                    .ok()
+                    .map(|n| n.identity().label)
+                    .filter(|l| !l.is_empty())
+            })
             .unwrap_or_else(|| cred.membership.node_id.chars().take(8).collect());
         let obs = familiar_kernel::observation::load_recent(dir, 4000).unwrap_or_default();
         let first = familiar_kernel::observation::first_ts(dir)
@@ -509,16 +517,26 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
                 "gossip peer".to_string(),
             )
         };
-        // Prefer a resolved tailnet hostname for gossip peers; keep the device's own label otherwise.
-        let label = if !is_device {
-            tailnet
-                .get(&ip)
-                .cloned()
-                .filter(|h| !h.is_empty())
-                .unwrap_or_else(|| p.label.clone())
-        } else {
-            p.label.clone()
-        };
+        // The SystemName ladder (ADR-0039): a deliberately-given device name outranks
+        // everything; then a resolved tailnet hostname for gossip peers; then the
+        // device's own brief label. The device record is keyed by the durable device_id,
+        // so a rotated key still finds its name through the membership record.
+        let device_name = crate::record::find_by_key(dir, &p.node_id)
+            .map(|r| r.device_id)
+            .and_then(|id| crate::device::load(dir, &id).ok().flatten())
+            .map(|d| d.name)
+            .filter(|n| !n.is_empty());
+        let label = device_name.unwrap_or_else(|| {
+            if !is_device {
+                tailnet
+                    .get(&ip)
+                    .cloned()
+                    .filter(|h| !h.is_empty())
+                    .unwrap_or_else(|| p.label.clone())
+            } else {
+                p.label.clone()
+            }
+        });
         let detail = if is_device {
             reports
                 .get(&p.node_id)
