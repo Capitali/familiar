@@ -40,6 +40,21 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (morning) — The machine you sit at learns its own name
+
+### What changed
+
+- The SELF row now reads its own record's effective establishment before falling back to
+  the local identity file — every peer row already did (ADR-0027); the one machine blind
+  to its own establishment was the one you were sitting at. With the re-danced record
+  (establishment "ian") and the label rename, this console's own row completes the
+  sentence: `MacOnStick : Mac : Ian`.
+
+### Checks run
+
+- Green bar (fmt, clippy `-D warnings`, 31 suites), release build; live worldview row
+  verified on MacOnStick after deploy.
+
 ## 2026-08-14 (dawn) — The sentence gets its nouns, and the two-record direction lands
 
 ### What changed
