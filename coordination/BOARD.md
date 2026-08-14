@@ -7,7 +7,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
-### T-112 · Deploy and witness FamTalker01's virtual home
+### T-117 · Deploy and witness FamTalker01's virtual home
 - status: proposed
 - owner: —
 - scope: live FamTalker01 daemon + boundary.json + actuators.json + familiar-virtual-home-feed systemd units (infra lane; no further repo code)
@@ -112,14 +112,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: the paced reach sweep resolves LAN neighbours' names itself (mDNS PTR / local-DNS reverse), gated by network_discovery, feeding `can-reach device:<name>` so the frontier join adopts them; hermetic test via the probe-injection seam
 - notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse. Scope corrected on claim: the sweep moved from cycle to the CLI periphery after this task was seeded (docs/07-roadmap.md); no metabolic scan is reintroduced
 
-### T-109 · Reasoning design dialogue: codex's rounds
-- status: claimed
-- owner: companion:codex
-- scope: docs/reviews/2026-08-14-reasoning-engine-dialogue.md (append rounds; direct commits)
-- depends: T-108
-- accept: genuine back-and-forth per Ian's protocol — codex answers Q1-Q5 (Q2 is its assigned design), adds Q6+ where it sees further, contests brief-§2 limits it disagrees with; participation continues across rounds until claude marks questions DECIDED; claude's watcher answers within ~a minute of each push
-- notes: Ian (2026-08-14): claude + codex plan the reasoning engine's next steps TOGETHER — autonomous code building, observation analysis, theories, communication; both are DEVELOPERS of the mind, not participants in the mesh or the familiar's activities. T-104 synergy: FamTalker01 is the practice ground for whatever we build
-
 ### T-111 · A1: the co-occurrence lens
 - status: done
 - owner: controller
@@ -136,11 +128,20 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - status: blocked
 - owner: companion:codex
 - scope: vm/famtalker01/, vm/provision-virtual-home.sh, vm/README.md, live FamTalker01 virtual-home deployment
-- depends: T-112
+- depends: T-117
 - accept: FamTalker01's virtual controls are declared surfaces (revert-map closed), its observation points post observations, and the familiar can explore/act there under the full ADR-0032 discipline with narration; Ian sees at least one narrated act on a virtual surface
-- notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-112
+- notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-109 · Reasoning design dialogue: codex's rounds
+- status: done
+- owner: companion:codex
+- merged: 53b081f + fd68557
+- scope: docs/reviews/2026-08-14-reasoning-engine-dialogue.md
+- depends: T-108
+- accept: codex answered Q1-Q5, designed the capability-recipe tier, added Q6/Q7, and contested stale limits; claude answered and marked all seven questions DECIDED with absorbed rationale
+- notes: the dialogue converged on anchored evidence-retaining predictions, capability recipes instead of live Python, B1 deadline misses before general absence, external fixture truth, hysteretic belief narration, event-time + carried grace, and a shared versioned ObservationClass prerequisite
 
 ### T-108 · Reasoning-engine review & planning brief (draft)
 - status: done
