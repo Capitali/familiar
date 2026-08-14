@@ -76,7 +76,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Claimed
 
 ### T-111 · A1: the co-occurrence lens
-- status: claimed
+- status: done
 - owner: controller
 - scope: crates/kernel/src/loops.rs, crates/cycle/src/lib.rs (tick step 2 merge only)
 - depends: —
