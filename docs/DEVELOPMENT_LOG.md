@@ -40,6 +40,51 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (afternoon) — A theory tells its whole life, and three console honesty fixes
+
+### What changed
+
+- **The theory drill-down** (Ian: "a stacked, hierarchical view of the progress from
+  beginning to success or abandonment"). `TheoryView` now carries the lineage the stores
+  always held but never told: `seeded_by` (the loop's observation count), `work[]` (each
+  candidate generation — hypothesis, status, mutation reason, nested trial verdicts, the
+  tool it left behind, matched by artifact path), and `acts[]` (dated actuated/demoted/
+  adjusted lines from the observation record, keyed by the thread tag). All additive
+  fields; capped (6 generations × 4 trials, 8 acts) so a read stays a read. The sphere's
+  theory card opens into the stack: **BORN → the question and answers → THE WORK →
+  IN THE WORLD → NOW** — how the familiar is progressively changing, per theory, on one
+  screen. Open state survives the poll like every accordion here.
+- **The dialog threads answers to their questions.** An answer spoken on the theories
+  screen landed in the dialog as a bare "yes" — connected in the record, disconnected in
+  the rendering. Thread-ref bubbles now carry their theory's question as a quoted line
+  above the answer.
+- **Cluster bubbles zoom.** The counted circles the globe collapses distant nodes into
+  were dead ends (`#clusters` is pointer-events:none; the bubbles never opted back in) —
+  the visible face of "can't zoom into hosts." A tap now rotates the cluster centroid
+  under the camera and closes ~40% of the distance per step (the dive's own aim math,
+  generalized to `aimQFor`); clusters separate into callouts, whose dives already work.
+- **Positions tell their provenance.** A fresh-but-wrong IP-geolocated position rendered
+  exactly like a GPS fix (Wildhorse's pin, 72h after the machine moved — the geo DB's
+  word against reality). Every surface now renders non-`geo_device` positions with a
+  leading ≈ (and "(estimated)" on the node screen). The source tag riding the brief is
+  deferred deliberately — a new Capability field is the `build_version` signed-body trap
+  until every door re-serializes it; it joins the held door deploy.
+
+### Checks run
+
+- Fixture-driven browser verification: all drill stages render (both generations, trial
+  verdicts colored by result, tool chip, seed count), the dialog shows the quoted
+  question above the "yes", Wildhorse renders "≈ 44.900°", zero console errors. Green
+  bar + FamiliarMac build + release.
+
+### Next
+
+- Wildhorse's actual coordinates: ops — write real coords into its `data/mesh/geo.json`
+  (priority-1 source) or zero it to honest-unlocated; needs Ian's word or the peer's
+  hands. A household-anchor inheritance (a daemon adopting cohabiting member GPS) is a
+  design question for an ADR, not a quick brick.
+- geo source over the wire + console rules list + device-name field: Build 85 scope.
+
 ## 2026-08-14 (midday) — A confirmed intent becomes a standing rule (ADR-0039 build #2)
 
 ### What changed
