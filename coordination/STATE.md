@@ -63,3 +63,5 @@ its results, anything the controller should read before its next arbitration. Th
 controller folds these into the sections above and prunes. 2026-08-14, controller:
 lane confirmed with the infra session — it appends its own facts here after fleet ops;
 I keep the authoritative sections true.)*
+
+- 2026-08-14 · companion:codex started; claimed T-104 (FamTalker01 virtual-smart-home declaration).

@@ -33,14 +33,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: the paced reach sweep resolves LAN neighbours' names itself (mDNS PTR / local-DNS reverse), gated by network_discovery, feeding `can-reach device:<name>` so the frontier join adopts them; hermetic test via the probe-injection seam
 - notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse
 
-### T-104 · FamTalker01 declares itself: the virtual smart home
-- status: queued
-- owner: —
-- scope: design + ops (FamTalker01's actuators.json, its observation feed), docs/decision-records/ addendum if the declaration format needs growth
-- depends: —
-- accept: FamTalker01's virtual controls are declared surfaces (revert-map closed), its observation points post observations, and the familiar can explore/act there under the full ADR-0032 discipline with narration; Ian sees at least one narrated act on a virtual surface
-- notes: Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. This is ADR-0032's "second surface". Planning/design task — good first companion brick
-
 ### T-105 · HumanRecord (ADR-0039 build #3)
 - status: queued
 - owner: —
@@ -66,6 +58,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-104 · FamTalker01 declares itself: the virtual smart home
+- status: claimed
+- owner: companion:codex
+- scope: design + ops (FamTalker01's actuators.json, its observation feed), docs/decision-records/ addendum if the declaration format needs growth
+- depends: —
+- accept: FamTalker01's virtual controls are declared surfaces (revert-map closed), its observation points post observations, and the familiar can explore/act there under the full ADR-0032 discipline with narration; Ian sees at least one narrated act on a virtual surface
+- notes: Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. This is ADR-0032's "second surface". Planning/design task — good first companion brick
 
 ### T-100 · Coordination system bring-up
 - status: claimed
