@@ -427,7 +427,14 @@ mod tests {
     #[test]
     fn a_gated_reverse_lookup_names_a_numeric_neighbor_before_it_reaches_the_frontier() {
         let numeric = device("192.168.108.42", "192.168.108.42");
-        let (reaches, obs) = assess_with(deaf, codex_name, &[numeric.clone()], 42, 100, true);
+        let (reaches, obs) = assess_with(
+            deaf,
+            codex_name,
+            std::slice::from_ref(&numeric),
+            42,
+            100,
+            true,
+        );
         assert_eq!(reaches[0].label, "codex");
         assert_eq!(obs[0].object, "device:codex");
         assert!(obs[0].context.contains("ip=192.168.108.42"));
