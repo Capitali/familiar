@@ -55,7 +55,11 @@ mesh healthy, features not repairs, Build 84 mid-TestFlight-review):
   attention would help.
 - The companion AI is a full coding partner: coding, planning, design all hand off.
 
-## Companion notes
+## Companion & infra notes
 
-*(companions: append dated one-liners here — session started/ended, anything the
-controller should read before its next arbitration; keep it to facts)*
+*(any non-controller session — companion engineers and the infra/fleet-ops session
+alike: append dated one-liner FACTS here — session started/ended, a pass executed and
+its results, anything the controller should read before its next arbitration. The
+controller folds these into the sections above and prunes. 2026-08-14, controller:
+lane confirmed with the infra session — it appends its own facts here after fleet ops;
+I keep the authoritative sections true.)*
