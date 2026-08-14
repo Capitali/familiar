@@ -2568,7 +2568,13 @@ fn cmd_reach(args: &[String]) -> ExitCode {
     }
 
     println!("assessing reach (probing discovered devices)…");
-    let (reaches, observations) = familiar_reach::scan(&dir, now, b.allow_network, timeout);
+    let (reaches, observations) = familiar_reach::scan(
+        &dir,
+        now,
+        b.allow_network,
+        b.allow_network_discovery,
+        timeout,
+    );
     if reaches.is_empty() {
         println!(
             "reach: no devices discovered — are you on the LAN? (A `devices.json` pointed at your \
@@ -2865,7 +2871,8 @@ fn cmd_tick(args: &[String]) -> ExitCode {
 /// This is the seam that replaces the core's old autonomous sweep: the shell (a launchd timer, the
 /// GUI app, a native survey) decides *when* to look, invokes this, and the findings flow back in as
 /// observations — so discovery is a peripheral, consent-gated act, not a metabolic reflex flooding
-/// the theory pipeline. Gated on `allow_network`: nothing reaches outward without the human's gate.
+/// the theory pipeline. Gated on `allow_network`; reverse DNS/mDNS naming additionally requires
+/// `allow_network_discovery`. Nothing reaches outward without the corresponding human gate.
 fn cmd_discover(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
@@ -2898,7 +2905,13 @@ fn cmd_discover(args: &[String]) -> ExitCode {
         }
     }
     // … then reach assessment (what we could do with them) — seeds the frontier.
-    let (reaches, obs) = familiar_reach::scan(&dir, now, b.allow_network, timeout);
+    let (reaches, obs) = familiar_reach::scan(
+        &dir,
+        now,
+        b.allow_network,
+        b.allow_network_discovery,
+        timeout,
+    );
     for o in obs {
         if observation::record(&dir, o).is_ok() {
             recorded += 1;
