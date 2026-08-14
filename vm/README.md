@@ -57,3 +57,45 @@ auto-join work; point it at the default branch once that merges.
   treat the first run as supervised, not fire-and-forget.
 - The guest user is `familiar` / `$GUEST_PASSWORD` (default `famtalker01`); change it
   (`passwd`) once the VM is up if the LAN isn't fully trusted.
+
+## Declare the virtual smart home
+
+The VM can become ADR-0032's second, wholly reversible practice surface without a
+new declaration format. After its daemon is upgraded to current `main`, copy the
+repository to the guest and run, as root:
+
+```sh
+bash vm/provision-virtual-home.sh
+```
+
+That human/infra-run step installs two independent virtual lighting surfaces
+(`living-room-lights` and `greenhouse-lights`), writes the human-owned
+`actuators.json`, and opens `allow_execute` plus `allow_actuate` while preserving
+every other boundary choice. Each surface has a closed revert map: `off`, `dim`, and
+`bright` are both observable buckets and restoring actions. No core or declaration
+schema change is involved.
+
+A systemd timer watches the two surface states and their aggregate virtual power draw.
+It posts a snapshot through `/local/observe` only when one changes, producing ordinary
+`reports` observations for the familiar to analyze. It has no network listener and no
+control route outside the human-declared actuator commands.
+
+Local repository smoke test:
+
+```sh
+python3 -m unittest vm/famtalker01/test_virtual_home.py
+```
+
+On the guest, inspect without acting:
+
+```sh
+sudo -u familiar-svc python3 /usr/local/lib/familiar/virtual_home.py \
+  --state-dir /var/lib/familiar/virtual-home observations
+sudo -u familiar-svc familiar actuate living-room-lights state
+systemctl status familiar-virtual-home-feed.timer
+```
+
+Deployment and the first narrated act are fleet operations: coordinate them through
+the board rather than SSHing from a companion session. The live acceptance is a changed
+snapshot in `familiar observations`, followed by a familiar-originated act whose
+`narrated` observation says what changed, why, and how to undo it.
