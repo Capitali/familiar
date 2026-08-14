@@ -77,6 +77,23 @@ Each entry: what changed, why, checks run, what the next developer should know.
   the real node and replicates. Then the roll's stale short-id entry wants
   `standing revoke 3d68a068` so the legacy file stops disagreeing.
 
+### Addendum (same night) — the purge had eaten the real record
+
+Running the cleanup proved the guard and found the last gap at once: the sever landed on
+the ghost, and the re-dance refused — the real node had NO record anywhere. Its guest
+record was purged hours earlier (B10 forgets un-established guests, by design), briefs
+don't restore records (only worldview reads and status heartbeats do), and the ghost's
+`class: migration · artifact: standing-roll` establishment showed the fold had minted it
+from the roll's short-id entry — the original sin predating tonight's dance. So the door
+held verifiable identity for the real node (its enrollment grant, key and all) and no way
+for an operator to act on it. Amendment: `resolve_node_id` falls back to the enroll
+store's grants — **exact full id only, never a prefix** — and the grant's dual-write now
+stamps the record with the grant's pubkey, so a restored record can anchor vouchers and
+stand alone at sibling doors (the doppelgänger's fatal lack, made structurally
+impossible). The runbook simplifies: sever the ghost, then `standing grant
+3d68a0689bc32771` + `mesh name 3d68a0689bc32771 MacOnStick` — no disestablish needed on a
+record being restored from enrollment evidence.
+
 ## 2026-08-13 (later night) — One longitude, one ULP, eight hours off the mesh
 
 ### What changed
