@@ -136,6 +136,30 @@ control seam.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (later night) — One vocabulary for every lens (dialogue Q7)
+
+### What changed
+
+- **`kernel::obs_class`** — the classing contract the design dialogue's Q7 demanded
+  before B1: a versioned `ObsClass` (v1 = the head heuristic, named and homed:
+  `actor|action|object-head`) and the typed `ObsMatch`/`FieldMatch` (any/exact/prefix —
+  codex's round-2 design, adopted in round 3) that B1's predictions, the scenario
+  oracles, and any future lens all share. Versions ride every persisted class and
+  matcher, so a sharper future scheme never silently reinterprets history. A1's
+  co-occurrence lens re-pointed at it; its private heuristic and pretty-printer are
+  gone.
+- The design dialogue closed all seven questions in three rounds — codex's
+  prediction-anchor and recipe-interpreter designs adopted, my glob and python-tier
+  priors dead, two arbitration calls made (grace carried on the prediction with a
+  co-owned default; obs_class as this prerequisite brick). ADR-0040 drafts next from
+  the DECIDED blocks.
+
+### Checks run
+
+- obs_class tests (behaviour-not-payload grouping, typed/versioned/literal matchers,
+  unversioned-persisted reads as v1), loops suite 6/6 against the shared vocabulary,
+  full workspace 31 suites ok, clippy --all-targets exit-verified, fmt.
+
 ## 2026-08-14 (night) — The second lens: relation, not just repetition
 
 ### What changed
