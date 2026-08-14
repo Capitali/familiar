@@ -6,6 +6,40 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-14 (small hours) — An upgrade re-registers its binary
+
+### What changed
+
+- **The codesigning wall, encoded.** `tools/new-mac-bootstrap.sh --daemon` upgraded the
+  pre-LWCR way: `cp` over the registered binary, `launchctl kickstart -k`. On macOS 27
+  launchd records a Lightweight Code Requirement for the executable at bootstrap time,
+  so the respawn of a swapped binary dies with `last exit reason = OS_REASON_CODESIGNING`
+  — and ad-hoc re-signing does not help. Observed live on MacOnStick (2026-08-13); the
+  cure was worked out by hand that night, and tonight the script learns it.
+- **One path for install and upgrade:** `bootout` (no-op on a fresh Mac) → swap the
+  binary while nothing runs it → `bootstrap` (records the new binary's requirement) →
+  `kickstart -k`. The kickstart-only comment predated LWCR and is rewritten; the
+  unload -w/load -w prohibition (registered-but-stalled) stands. The unified tail also
+  heals the half-state where the plist exists but was never bootstrapped — the old
+  script's bare kickstart aborted there under `set -e`.
+
+### Checks run
+
+- `bash -n` and `shellcheck` clean. The sequence itself is the one proven live on
+  MacOnStick during last night's upgrades (bootout → bootstrap → kickstart after the
+  swap → daemon spawned, exchange verified). No Rust in the diff; green bar run anyway
+  (fmt, clippy `-D warnings`, full tests).
+
+### Next
+
+- `crates/cli/src/daemon.rs` `install()` still uses `unload -w`/`load -w` — it dodges
+  the LWCR wall by accident (load re-registers at that moment), but it is the exact
+  pattern the repo forbids for its registered-but-stalled hazard. Candidate brick:
+  move it to bootout/bootstrap/kickstart. (`vm/create-famtalker01.sh` also
+  unload/loads; one-shot VM bootstrap, low stakes.)
+- Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
+  predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
+
 ## 2026-08-14 (small hours) — An act lands on a record that exists, or not at all
 
 ### What changed
