@@ -47,6 +47,10 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Waiting on Ian
 
+- **ADR-0040 acceptance** — the reasoning engine's converged design (proposed;
+  docs/decision-records/0040-the-reasoning-engine-grows-honest.md). Building continues
+  on the decided tasks meanwhile; the ADR formalizes it.
+
 - **Wildhorse's real coordinates** → written to its `data/mesh/geo.json`, **or** "zero
   it" → delete the file, node reads honestly unlocated. Until then its pin wears ≈.
 - (Dissolving:) the Codex/Aphelion mapping — discovery decides in pass step 2; manual

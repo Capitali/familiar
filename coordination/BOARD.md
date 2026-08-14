@@ -49,12 +49,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: —
 
 ### T-110 · ADR-0040 draft: the reasoning engine's next steps
-- status: queued
+- status: done
 - owner: controller
-- scope: docs/decision-records/0040-*.md
-- depends: T-109
+- merged: (this commit)
 - accept: converged phases from the brief as a proposed ADR for Ian; phases become board tasks with owners on acceptance
-- notes: —
+- notes: docs/decision-records/0040-the-reasoning-engine-grows-honest.md — PROPOSED, awaiting Ian; all eight dialogue questions decided across six rounds
 
 ### T-101 · Build 85 console batch: rules list + device-name field
 - status: queued
