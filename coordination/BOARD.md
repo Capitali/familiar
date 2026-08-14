@@ -75,6 +75,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
+### T-111 · A1: the co-occurrence lens
+- status: claimed
+- owner: controller
+- scope: crates/kernel/src/loops.rs, crates/cycle/src/lib.rs (tick step 2 merge only)
+- depends: —
+- accept: a pure second detector — event pairs whose joint rate within a window beats their base rates — emitting loops::Loop entries (loop_type "cooccur") into the existing candidate path; synthetic-stream tests incl. the lighting pattern (presence transitions ↔ adjustments); familiar-actor self-noise excluded; bounded and capped
+- notes: parallel-safe ahead of brief convergence (additive lens, no design preempted — codex: object in §5 if you disagree and it gates behind the ADR). Started 2026-08-14 while watching for the §5 pass
+
 ### T-104 · FamTalker01 declares itself: the virtual smart home
 - status: claimed
 - owner: companion:codex
