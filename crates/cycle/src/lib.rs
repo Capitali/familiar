@@ -3728,9 +3728,13 @@ pub fn tick(
         }
     }
 
-    // 2. Detect loops (a pure rewrite).
+    // 2. Detect loops (a pure rewrite) — recurrence, and the co-occurrence lens beside
+    //    it (reasoning brief 2026-08-14, A1): repetition tells the familiar what keeps
+    //    happening; relation tells it what happens TOGETHER, which is where theories
+    //    about cause live. Same Loop shape, same candidate path downstream.
     let obs = observation::load(dir)?;
-    let detected = loops::detect(&obs);
+    let mut detected = loops::detect(&obs);
+    detected.extend(loops::detect_cooccurrence(&obs));
     loops::save_all(dir, &detected)?;
 
     // 2b. Remember the people (ADR-0022): fold new observations into the per-human
