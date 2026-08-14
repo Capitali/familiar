@@ -941,6 +941,10 @@ mod tests {
             "with whom is the household's business"
         );
         assert!(guest.declared_areas.is_empty());
+        assert!(
+            guest.rules.is_empty(),
+            "a standing rule names its subject's comings and goings — never a guest's to read"
+        );
 
         // Sibling rung: our handle, our declaration, and the reader's own standing — no more.
         let mut sib = full.clone();

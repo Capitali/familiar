@@ -105,6 +105,7 @@ fn main() -> ExitCode {
         Some("theories") => cmd_theories(rest),
         Some("dossier") => cmd_dossier(rest),
         Some("actuate") => cmd_actuate(rest),
+        Some("rules") => cmd_rules(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
@@ -2218,6 +2219,96 @@ fn cmd_theories(args: &[String]) -> ExitCode {
 
 /// The human's hand on a declared surface — same wrapper tools, same review, same gates
 /// as the familiar's own loop (cmd_discover pattern: boundary check up front).
+/// `familiar rules` — the standing automations (ADR-0039 §3): list, add, on/off.
+/// A rule is a consent object: minting IS the consent moment, listing shows it in
+/// plain words, and one line disables it.
+fn cmd_rules(args: &[String]) -> ExitCode {
+    use familiar_kernel::reaction_rule as rules;
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    match positional.first().map(|s| s.as_str()) {
+        None | Some("list") => {
+            let file = rules::load(&dir);
+            if file.rules.is_empty() {
+                println!("no standing rules — `familiar rules add <subject> <away|back> <surface> <act>`");
+                return ExitCode::SUCCESS;
+            }
+            for r in &file.rules {
+                println!(
+                    "{}  {}  {}{}",
+                    r.id,
+                    if r.enabled { "on " } else { "OFF" },
+                    r.sentence(),
+                    if r.disabled_reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  ({})", r.disabled_reason)
+                    }
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Some("add") => {
+            let (Some(subject), Some(when), Some(surface), Some(act)) = (
+                positional.get(1),
+                positional.get(2),
+                positional.get(3),
+                positional.get(4),
+            ) else {
+                eprintln!("rules: usage: familiar rules add <subject> <away|back> <surface> <act>");
+                return ExitCode::FAILURE;
+            };
+            let trigger = match when.as_str() {
+                "away" => rules::Trigger::Away,
+                "back" => rules::Trigger::Back,
+                other => {
+                    eprintln!("rules: trigger {other}? — away | back");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match rules::mint(&dir, subject, trigger, surface, act, "cli", now_secs()) {
+                Ok(r) => {
+                    println!("✓ {}  {}", r.id, r.sentence());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("rules: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(onoff @ ("on" | "off")) => {
+            let Some(id) = positional.get(1) else {
+                eprintln!("rules: usage: familiar rules {onoff} <id>");
+                return ExitCode::FAILURE;
+            };
+            let enabled = onoff == "on";
+            match rules::set_enabled(&dir, id, enabled, "disabled from the CLI") {
+                Ok(true) => {
+                    println!(
+                        "✓ rule {id} {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("rules: no rule {id} — `familiar rules` lists them");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("rules: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(other) => {
+            eprintln!("rules: {other}? — usage: familiar rules [list | add <subject> <away|back> <surface> <act> | on <id> | off <id>]");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn cmd_actuate(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));

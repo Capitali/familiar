@@ -2361,6 +2361,31 @@ fn poll_actuators(
         if let Some(act) = undoing {
             reactions += 1;
             let secs = now - act.at;
+            // A rule-initiated act undone by hand disables the RULE — a standing rule
+            // the human reverted is a standing mistake (ADR-0039 §3). Thread machinery
+            // doesn't apply: the rule is the pursuit.
+            if let Some(rule_id) = act.thread_id.strip_prefix("rule:") {
+                if let Some(sentence) =
+                    familiar_kernel::reaction_rule::disable_reverted(dir, rule_id, now)?
+                {
+                    observation::record(
+                        dir,
+                        observation::Observation::new(
+                            "familiar",
+                            "demoted",
+                            format!("rule {sentence}"),
+                            format!("reverted by hand within {secs}s — the rule is disabled"),
+                            "actuator",
+                            now,
+                            1.0,
+                        ),
+                    )?;
+                }
+                st.rest_until = now + ACTUATOR_REST_SECS;
+                st.act = None;
+                st.bucket = bucket;
+                continue;
+            }
             demote_after_reaction(
                 dir,
                 &act,
@@ -2624,6 +2649,95 @@ fn tend_actuators(dir: &Path, now: i64) -> io::Result<usize> {
     Ok(acted)
 }
 
+/// Standing rules fire on presence transitions (ADR-0039 §3): the same act path as a
+/// tended thread — gate, guard, withdrawn-check, read-skip-if-agreed, revert map — with
+/// the RULE as the pursuit (`thread_id = "rule:<id>"`), so the existing poll/hand
+/// machinery routes a reversal back to the rule and disables it. Returns firings acted.
+fn tend_rules(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Result<usize> {
+    let present: Vec<String> = routing::present_humans(obs, now)
+        .iter()
+        .map(|p| p.handle.clone())
+        .collect();
+    let fired = familiar_kernel::reaction_rule::due(dir, &present, now)?;
+    if fired.is_empty() {
+        return Ok(0);
+    }
+    let (acts_cfg, dropped) = familiar_kernel::actuator::load(dir)?;
+    sync_actuator_tools(dir, &acts_cfg, &dropped, now)?;
+    let b = boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed());
+    let hl = Parameters::load_or_default(dir)
+        .sane()
+        .dossier_half_life_days
+        * 86_400;
+    let mut state = familiar_kernel::actuator::load_state(dir);
+    let mut acted = 0;
+    for rule in fired {
+        let Some(a) = acts_cfg.iter().find(|a| a.surface == rule.surface) else {
+            continue; // the surface left the declaration — the rule waits, honestly
+        };
+        if !a.actions.contains_key(&rule.act) {
+            continue;
+        }
+        let st = state.entry(a.surface.clone()).or_default();
+        if st.rest_until > now || st.act.is_some() {
+            continue;
+        }
+        // A person who withdrew is not served by stealth — rules included.
+        if dossier::read(dir, &rule.subject, now, hl)
+            .map(|d| d.withdrawn)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let action = familiar_kernel::guard::Action::new(
+            familiar_kernel::guard::ActionKind::Actuate,
+            a.surface.clone(),
+        );
+        if familiar_kernel::guard::evaluate(&action, &b).decision
+            != familiar_kernel::guard::Decision::Allow
+        {
+            continue;
+        }
+        let Some(out) = run_surface_tool(dir, &actuator_tool_id(&a.surface, "state"), now)? else {
+            continue;
+        };
+        let Some(raw) = familiar_kernel::actuator::parse_state(&out) else {
+            continue;
+        };
+        let prev = familiar_kernel::actuator::bucket_of(a, &raw);
+        if prev == rule.act {
+            continue; // the world already agrees
+        }
+        if run_surface_tool(dir, &actuator_tool_id(&a.surface, &rule.act), now)?.is_none() {
+            continue;
+        }
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "actuated",
+                format!("{}={}", a.surface, rule.act),
+                format!("rule:{} {} was:{prev}", rule.id, rule.sentence()),
+                "familiar",
+                now,
+                1.0,
+            ),
+        )?;
+        st.bucket = rule.act.clone(); // self-debounce, same as every act
+        st.act = Some(familiar_kernel::actuator::PendingAct {
+            thread_id: format!("rule:{}", rule.id),
+            candidate_id: String::new(),
+            label: rule.act.clone(),
+            prev,
+            at: now,
+            answers_seen: 0,
+        });
+        acted += 1;
+    }
+    familiar_kernel::actuator::save_state(dir, &state)?;
+    Ok(acted)
+}
+
 /// The human's own hand on a surface, via the CLI (`familiar actuate <surface> <label>`).
 /// Runs the same declared wrapper tools the loop uses (same review, same gates, same
 /// health tracking). `label == "state"` reads; an action label acts — recorded as an
@@ -2678,21 +2792,33 @@ pub fn actuate_by_hand(
     // The human's hand while the familiar awaited a reaction IS the reaction.
     if let Some(act) = st.act.clone() {
         if label != act.label {
-            demote_after_reaction(
-                dir,
-                &act,
-                "human_reverted",
-                &format!(
-                    "set {surface}={} but {human} set it to {label} by hand — the change did not serve",
+            if let Some(rule_id) = act.thread_id.strip_prefix("rule:") {
+                // A standing rule undone by the subject's own hand is disabled, and the
+                // CLI says so in the same breath (ADR-0039 §3).
+                if let Some(sentence) =
+                    familiar_kernel::reaction_rule::disable_reverted(dir, rule_id, now)?
+                {
+                    lines.push(format!(
+                        "(that undid a standing rule — “{sentence}” is now disabled; `familiar rules` to re-enable)"
+                    ));
+                }
+            } else {
+                demote_after_reaction(
+                    dir,
+                    &act,
+                    "human_reverted",
+                    &format!(
+                        "set {surface}={} but {human} set it to {label} by hand — the change did not serve",
+                        act.label
+                    ),
+                    now,
+                )?;
+                lines.push(format!(
+                    "(that answered an open act — the familiar's {} is undone in the record and the surface rests)",
                     act.label
-                ),
-                now,
-            )?;
+                ));
+            }
             st.rest_until = now + ACTUATOR_REST_SECS;
-            lines.push(format!(
-                "(that answered an open act — the familiar's {} is undone in the record and the surface rests)",
-                act.label
-            ));
         }
         st.act = None;
     }
@@ -3675,6 +3801,7 @@ pub fn tick(
         let (_transitions, poll_reactions) = poll_actuators(dir, now, &obs)?;
         let heeded = heed_reactions(dir, now)?;
         let acted = tend_actuators(dir, now)?;
+        let _rules_acted = tend_rules(dir, now, &obs)?;
         (acted, poll_reactions + heeded)
     } else {
         (0, 0)
@@ -4174,6 +4301,65 @@ mod tests {
         );
         candidate::append(dir, &c).unwrap();
         (tid, "candidate-0001".to_string())
+    }
+
+    #[test]
+    fn a_standing_rule_fires_on_departure_and_a_hand_revert_disables_it() {
+        // ADR-0039 §3 end to end: mint "away → lights dim (for ian)", watch ian leave,
+        // see the act fire through the whole ADR-0032 discipline — then undo it by hand
+        // and watch the RULE die of it, not just the act.
+        let t = Temp::new("rules_fire");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        familiar_kernel::reaction_rule::mint(
+            dir,
+            "ian",
+            familiar_kernel::reaction_rule::Trigger::Away,
+            "lights",
+            "dim",
+            "cli",
+            90,
+        )
+        .unwrap();
+        let present = vec![observation::Observation::new(
+            "ian", "answered", "thread:1", "here", "console", 100, 0.9,
+        )];
+        // Seed sighting: ian present, nothing fires.
+        assert_eq!(tend_rules(dir, 100, &present).unwrap(), 0);
+        // Presence evidence lapses: the away transition fires the rule's act.
+        assert_eq!(tend_rules(dir, 200, &[]).unwrap(), 1);
+        let state = familiar_kernel::actuator::load_state(dir);
+        let st = state.get("lights").unwrap();
+        assert_eq!(
+            st.bucket, "dim",
+            "the rule's act ran and pre-wrote the bucket"
+        );
+        let act = st.act.clone().expect("a pending act awaits its reaction");
+        assert!(
+            act.thread_id.starts_with("rule:"),
+            "the rule IS the pursuit"
+        );
+        // No refire while still away.
+        assert_eq!(tend_rules(dir, 210, &[]).unwrap(), 0);
+        // The human puts it back by hand — the poller reads the reversal and the RULE
+        // is disabled, with the reversal as the reason. (A `now` past the poll pacing,
+        // still inside the 900s reaction window of the act at t=200.)
+        hand_set(dir, "bright");
+        rewind_poll(dir);
+        poll_actuators(dir, 700, &[]).unwrap();
+        let rules = familiar_kernel::reaction_rule::load(dir);
+        assert_eq!(rules.rules.len(), 1);
+        assert!(
+            !rules.rules[0].enabled,
+            "a reverted rule is a disabled rule"
+        );
+        assert!(rules.rules[0].disabled_reason.contains("reverted"));
+        let state = familiar_kernel::actuator::load_state(dir);
+        assert!(
+            state.get("lights").unwrap().act.is_none(),
+            "the window closed"
+        );
     }
 
     #[test]

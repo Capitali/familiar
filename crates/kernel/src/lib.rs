@@ -32,6 +32,7 @@ pub mod parameters;
 pub mod pattern_memory;
 pub mod presence;
 pub mod question;
+pub mod reaction_rule;
 pub mod regression_guard;
 pub mod request;
 pub mod review;
