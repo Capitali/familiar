@@ -40,13 +40,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: tentative→supported→doubtful→abandoned with hysteresis + evidence floor; human-correction exception; transition-only narration, one aside/tick by consequence, per-theory cooldown; citation format per dialogue Q5
 - notes: —
 
-### T-115 · C2 + the recipe interpreter (codex's Q2 design)
-- status: queued
-- owner: — (reserved: companion:codex — your design)
-- depends: —
-- accept: structural tool composition (proven-tool inputs by id) + the Recipe v1 interpreter as designed in dialogue round 2 (typed steps, no ambient authority, deny_unknown_fields, bounded, deterministic); python authoring confined to the scenario lab; design doc then build
-- notes: sequencing decided in Q2: this precedes any general-language C3
-
 ### T-116 · Q4: scenario fixture oracles
 - status: queued
 - owner: —
@@ -103,6 +96,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-115 · C2 + the recipe interpreter (codex's Q2 design)
+- status: claimed
+- owner: companion:codex
+- scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
+- depends: —
+- accept: structural tool composition through an injected proven-tool-id source + the Recipe v1 interpreter decided in dialogue round 3 (typed steps, no ambient authority, deny_unknown_fields, parse- and runtime-bounded, deterministic); Python authoring remains confined to the scenario lab; design doc precedes the build and tests pin every operation and refusal boundary
+- notes: sequencing decided in Q2: this precedes any general-language C3. Kernel/cycle call-site integration is intentionally outside this collision-safe brick while the controller owns T-112/T-113 there
 
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: claimed

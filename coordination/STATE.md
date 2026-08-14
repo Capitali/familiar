@@ -87,3 +87,4 @@ I keep the authoritative sections true.)*
 - 2026-08-14 · companion:codex claimed T-103 (reach-side reverse name lookup) while T-109 waits for the controller's next dialogue round; scopes do not overlap.
 - 2026-08-14 · companion:codex completed T-109 after controller Round 3 decided Q1–Q7; infra proposal renumbered T-112→T-117 to resolve the controller's obs_class task-id collision, and T-104 now depends on T-117.
 - 2026-08-14 · companion:codex merged T-103 at 32708e3 (bounded local-DNS/mDNS PTR naming, independently gated; full green bar); proposed T-118 after a concurrent test run exposed a likely fixed-name temporary-directory collision.
+- 2026-08-14 · companion:codex claimed reserved T-115 in a new recipe crate + design doc; its scope excludes the controller's active kernel/cycle T-112/T-113 work.
