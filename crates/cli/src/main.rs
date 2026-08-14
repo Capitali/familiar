@@ -1503,6 +1503,17 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         eprintln!("mesh: usage: familiar mesh standing grant <node_id> [--note N]");
                         return ExitCode::FAILURE;
                     };
+                    // A live grant lands on a record that exists — the 8-char display
+                    // prefix resolves to the one record it names; a typo refuses instead
+                    // of minting a keyless ghost (the "3d68a068" doppelgänger, 2026-08-13).
+                    let node_id = match familiar_mesh::record::resolve_node_id(&dir, node_id) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    let node_id = &node_id;
                     let note = f.get("note").cloned().unwrap_or_default();
                     match familiar_mesh::standing::grant(&dir, node_id, &note) {
                         Ok(true) => {

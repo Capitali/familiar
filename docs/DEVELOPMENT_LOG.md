@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-14 (small hours) — An act lands on a record that exists, or not at all
+
+### What changed
+
+- **The doppelgänger.** With the float fix deployed, record-sync came back to life and
+  delivered the truth about the repair dance: the record wearing *MacOnStick* has
+  `device_id "3d68a068"` — the 8-character DISPLAY prefix — no pubkey, no attestation, no
+  keys. The dance had been run with the id the consoles display, `record_standing_grant`'s
+  blind upsert minted a fresh record for the unknown string, and `mesh name` then named
+  the ghost. The real node (`3d68a0689bc32771`) was never granted and never named. Every
+  card that read *MacOnStick* was reading a keyless phantom.
+- **Resolution, and refusal.** `record::resolve_node_id`: an exact device_id/key match
+  wins; otherwise a prefix naming exactly one record resolves — the door now accepts the
+  8-character form it shows on every surface — and ambiguous or unknown references are
+  errors. The live entrances (CLI `standing grant`, `/mesh/standing`, corrections via
+  `apply_correction`, `mesh name`) all resolve before acting and never mint. The migration
+  fold alone still mints, because minting records from the roll is its stated purpose.
+- Pinned by `a_membership_act_lands_on_a_record_that_exists_or_not_at_all`: prefix grants
+  and names land on the real record with no new file; unknown ids refuse; a second record
+  sharing the prefix turns resolution into a named ambiguity error.
+
+### Checks run
+
+- Green bar (fmt, clippy `-D warnings`, full tests — mesh lib 194, workspace green),
+  release build. Live: the ghost record inspected on this door (`no pubkey, no
+  attestation`), and the float fix's convergence confirmed by its arrival.
+
+### Next
+
+- **Operational cleanup, on the lighthouse with this build:** `mesh sever 3d68a068
+  --reason "doppelgänger minted by a prefix dance"` (exact id hits the ghost; the
+  tombstone travels), then the real dance — `mesh disestablish 3d68a0689bc32771` →
+  `standing grant 3d68a0689bc32771 --note "MacOnStick — the M3 Air"` → `mesh name
+  3d68a0689bc32771 MacOnStick`. Under the clamp and the resolution guard this lands on
+  the real node and replicates. Then the roll's stale short-id entry wants
+  `standing revoke 3d68a068` so the legacy file stops disagreeing.
+
 ## 2026-08-13 (later night) — One longitude, one ULP, eight hours off the mesh
 
 ### What changed

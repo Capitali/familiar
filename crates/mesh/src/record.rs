@@ -1117,7 +1117,8 @@ pub fn name_established(dir: &Path, node_id: &str, handle: &str, now: i64) -> Re
     if handle.is_empty() {
         return Err(Error::Untrusted("a name is required".into()));
     }
-    let Some(rec) = find_by_key(dir, node_id) else {
+    let node_id = resolve_node_id(dir, node_id)?;
+    let Some(rec) = find_by_key(dir, &node_id) else {
         return Err(Error::Untrusted("no record for that node".into()));
     };
     let Some(est) = effective_establishment(&rec) else {
@@ -1194,6 +1195,40 @@ pub(crate) fn upsert_enrolled(
             r.attestation = attestation.cloned();
         }
     })
+}
+
+/// Resolve a human-typed node reference to an existing record's device id. Exact
+/// device_id/key match wins; otherwise a prefix naming exactly one record resolves — ids
+/// display as 8-character prefixes everywhere (cards, rolls, logs), so the door must
+/// accept the form it shows. Ambiguous or unknown references are errors, never fresh
+/// records: a display prefix reaching the grant path once minted a keyless doppelgänger
+/// ("3d68a068", establishment, name and all) while the real node stayed un-named
+/// (2026-08-13). A membership act lands on a record that exists, or it does not land.
+pub fn resolve_node_id(dir: &Path, given: &str) -> Result<String> {
+    let given = given.trim();
+    if given.is_empty() {
+        return Err(Error::Untrusted("a node id is required".into()));
+    }
+    if let Some(r) = find_by_key(dir, given) {
+        return Ok(r.device_id);
+    }
+    let mut hits: Vec<String> = load_all(dir)
+        .into_iter()
+        .filter(|r| r.device_id.starts_with(given) || r.keys.iter().any(|k| k.starts_with(given)))
+        .map(|r| r.device_id)
+        .collect();
+    hits.sort();
+    hits.dedup();
+    match hits.len() {
+        1 => Ok(hits.remove(0)),
+        0 => Err(Error::Untrusted(format!(
+            "no record for “{given}” — membership acts land on records that exist"
+        ))),
+        _ => Err(Error::Untrusted(format!(
+            "“{given}” is ambiguous — it prefixes {}",
+            hits.join(", ")
+        ))),
+    }
 }
 
 /// Dual-write from the legacy standing roll: full standing maps to *established + admitted*,
@@ -1467,10 +1502,15 @@ impl CorrectionEnvelope {
 /// legacy stores for the dual-write window. The caller has already verified signature and
 /// membership at the wire seam — or IS the local human (CLI / console), who needs no proof.
 pub fn apply_correction(dir: &Path, c: &Correction, now: i64) -> Result<MembershipRecord> {
-    let subject = c.subject_device.trim();
-    if subject.is_empty() {
+    let subject_given = c.subject_device.trim();
+    if subject_given.is_empty() {
         return Err(Error::Malformed("correction: empty subject".into()));
     }
+    // Corrections correct records that exist (prefixes welcome) — a typo must not mint a
+    // ghost to sever. The signed correction keeps its original subject text; the record it
+    // lands on is the resolved one.
+    let resolved = resolve_node_id(dir, subject_given)?;
+    let subject = resolved.as_str();
     // A device may not correct itself — with ONE exception: Disestablish of your own record
     // is renunciation, and renouncing your own name is always yours to do. Sever/hold/restore
     // of yourself stay forbidden (leaving is not the same as judging).
@@ -2326,6 +2366,73 @@ mod tests {
         assert_eq!(
             ab.identity.established.as_ref().unwrap().handle,
             "MacOnStick"
+        );
+    }
+
+    #[test]
+    fn a_membership_act_lands_on_a_record_that_exists_or_not_at_all() {
+        // 2026-08-13: `standing grant 3d68a068` — the 8-char DISPLAY prefix of the real
+        // node 3d68a0689bc32771 — minted a keyless doppelgänger record wearing the name,
+        // while the real node stayed un-named. Acts now resolve prefixes to the one record
+        // they name, and refuse to invent records for the rest.
+        let dir = fresh("resolve");
+        let _ = save(&dir, &base_record("3d68a0689bc32771"));
+        let _ = save(&dir, &base_record("7f2e2f9bf9446564"));
+
+        // The display prefix resolves to the full record.
+        assert_eq!(
+            resolve_node_id(&dir, "3d68a068").unwrap(),
+            "3d68a0689bc32771"
+        );
+        // A grant through the resolved prefix lands on the real record — no new file.
+        // (The live entrances — CLI and /mesh/standing — resolve before granting; the
+        // migration fold alone still mints, because minting from the roll is its purpose.)
+        let resolved = resolve_node_id(&dir, "3d68a068").unwrap();
+        record_standing_grant(&dir, "door", &resolved, "the M3 Air", NOW).unwrap();
+        assert!(load(&dir, "3d68a068").unwrap().is_none(), "no ghost minted");
+        let real = find_by_key(&dir, "3d68a0689bc32771").unwrap();
+        assert!(
+            real.identity.established.is_some(),
+            "the real node was granted"
+        );
+        // And naming through the prefix names the same record (resolution is built in).
+        name_established(&dir, "3d68a068", "MacOnStick", NOW + 1).unwrap();
+        assert_eq!(
+            effective_establishment(&find_by_key(&dir, "3d68a0689bc32771").unwrap())
+                .unwrap()
+                .handle,
+            "MacOnStick"
+        );
+
+        // Unknown ids refuse at resolution — the entrances never reach the mint.
+        assert!(resolve_node_id(&dir, "beefbeef").is_err());
+        assert!(load(&dir, "beefbeef").unwrap().is_none());
+
+        // An ambiguous prefix refuses and says so.
+        let _ = save(&dir, &base_record("3d68a068ffffffff"));
+        assert!(
+            resolve_node_id(&dir, "3d68a068").is_err(),
+            "two records share it now"
+        );
+
+        // A correction through a unique prefix corrects the record it names.
+        let c = Correction {
+            act: CorrectionAct::Hold,
+            subject_device: "7f2e2f9b".into(),
+            corrected_by: "door".into(),
+            reason: "not now".into(),
+            ts: NOW + 2,
+            nonce: "n1".into(),
+            sig: String::new(),
+        };
+        apply_correction(&dir, &c, NOW + 2).unwrap();
+        assert!(find_by_key(&dir, "7f2e2f9bf9446564")
+            .unwrap()
+            .held_until
+            .is_some());
+        assert!(
+            load(&dir, "7f2e2f9b").unwrap().is_none(),
+            "no ghost for the prefix"
         );
     }
 

@@ -2163,10 +2163,18 @@ fn local_standing(dir: &Path, body: &[u8]) -> Response<Full<Bytes>> {
         return text(StatusCode::BAD_REQUEST, "empty node_id");
     }
     match d.act.as_str() {
-        "grant" => match crate::standing::grant(dir, &d.node_id, "recognised from the console") {
-            Ok(_) => text(StatusCode::OK, "recognised"),
-            Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        },
+        "grant" => {
+            // A live grant lands on a record that exists (display prefixes resolve; a typo
+            // refuses instead of minting a keyless ghost — the "3d68a068" doppelgänger).
+            let node_id = match crate::record::resolve_node_id(dir, &d.node_id) {
+                Ok(id) => id,
+                Err(e) => return text(StatusCode::FORBIDDEN, e.to_string()),
+            };
+            match crate::standing::grant(dir, &node_id, "recognised from the console") {
+                Ok(_) => text(StatusCode::OK, "recognised"),
+                Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            }
+        }
         "deny" => {
             let now = now_secs();
             let _ = crate::standing::revoke(dir, &d.node_id);
