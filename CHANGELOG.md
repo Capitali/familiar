@@ -13,6 +13,21 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **A confirmed intent becomes a standing rule.** "When I'm away, dim the lights; when
+  I'm back, bring them up" is now an object the familiar keeps — minted once with
+  `familiar rules add ian away lights dim`, fired on real presence transitions through
+  every safeguard the act loop already had (the actuate gate, the guard, declared
+  surfaces only, the revert map), and listed in plain words beside the consents. Undo a
+  firing by hand and **the rule disables itself and says so** — a standing rule you
+  reverted is a standing mistake. Guests never see the rules: a rule names its subject's
+  comings and goings. *Validated by kernel and end-to-end loop tests; the lighting
+  request that used to be re-asked every few days is now one minted rule.*
+- **Every device has its own record now.** Machine facts (kind, OS, architecture,
+  networks), the humans associated with it over time, and — at last — **its name**, a
+  deliberate human-given fact (`familiar mesh device name <id> Aphelion`) that outranks
+  hostnames and generic labels everywhere the roster speaks, and replicates door to
+  door. The roster's sentence — *Codex : iPad : Ian* — is now data all the way down.
+  *Validated by store/merge/sync tests; ADR-0039 is the design record.*
 - **Devices lead with their names, everywhere.** The roster, the welcome screen, the globe
   callouts, the device screen and the door's own notes now lead with a device's established
   name — Wildhorse, MacOnStick, Aphelion — with the hardware's own label as quiet small

@@ -40,6 +40,47 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (midday) — A confirmed intent becomes a standing rule (ADR-0039 build #2)
+
+### What changed
+
+- **`reaction_rule.rs`** (kernel): the object ADR-0032 deferred — `ReactionRule
+  { subject, trigger (away|back), surface, act, minted_from, enabled }`, one per
+  (subject, trigger, surface), re-minting re-points and re-enables. `due()` fires on
+  presence TRANSITIONS against a remembered per-subject state (first sight seeds
+  silently, launch-silent like every edge here); the store keeps the rules and that
+  memory in one small familiar-owned JSON.
+- **`tend_rules`** in the 8·3 loop: a firing walks the ENTIRE ADR-0032 discipline —
+  `allow_actuate` gate, guard, withdrawn-check, read-and-skip-if-agreed, declared act
+  tools, revert map — with the rule as the pursuit (`PendingAct.thread_id = "rule:<id>"`),
+  so the existing poll/hand machinery routes reactions back. **A reverted firing
+  disables the RULE, not just the act** ("a standing rule the human undid is a standing
+  mistake"), by hand at the surface or via `familiar actuate`; both say so in plain
+  words. Quiet-is-consent closes rule acts positively as before (no trial minted — a
+  rule is not a candidate).
+- **`familiar rules`** CLI: `list` (id, on/OFF, the sentence "away → lights dim (for
+  ian)"), `add <subject> <away|back> <surface> <act>` (the mint IS the consent moment),
+  `on/off <id>`. The worldview exposes the same sentences (`rules: [RuleView]`,
+  additive) for the Build-85 console list — and **the guest projection strips them**:
+  a rule names its subject's comings and goings, the most private sentence in the
+  house (regression pinned beside the federation-projection test).
+- The lighting loop that kept re-asking now closes:
+  `familiar rules add ian away lights dim` + `familiar rules add ian back lights bright`
+  is the whole automation, revocable by one hand-motion at the lamp.
+
+### Checks run
+
+- Kernel rule tests (transition-only firing, no-refire, revert-disables + re-mint
+  re-enables), the cycle end-to-end (mint → departure fires through gate/guard/tools →
+  hand revert at the surface disables the rule and closes the window), guest-projection
+  regression, full workspace bar, release build.
+
+### Next
+
+- Theory-affirmation minting (an affirmed lighting theory mints the rule instead of the
+  CLI) and the console's rules list — Build 85 scope with the device-name field.
+- Habit-threshold PROPOSALS (a strong habit asks; the answer mints) — after field time.
+
 ## 2026-08-14 (morning, cont.) — The device gets its own record (ADR-0039 build #1)
 
 ### What changed

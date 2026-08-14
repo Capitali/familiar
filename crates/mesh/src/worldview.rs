@@ -239,6 +239,10 @@ pub struct Worldview {
     pub theory_quality: f64,
     /// The boundary gates (Law III) as the human has set them.
     pub gates: GateStates,
+    /// Standing reaction rules (ADR-0039 §3) in plain words — consoles list them beside
+    /// the consents, one tap to disable. Absent on older familiars.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<RuleView>,
     /// Metabolic ticks recorded (a rough age/health of the cycle).
     pub tick: u64,
     /// Seconds since the familiar's earliest observation — a coarse uptime.
@@ -280,6 +284,17 @@ pub struct Worldview {
     /// never inventory.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_areas: Vec<String>,
+}
+
+/// A standing rule as the console lists it (ADR-0039 §3): the sentence, the switch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleView {
+    pub id: String,
+    /// "away → lights dim (for ian)" — the same words the CLI prints.
+    pub sentence: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub disabled_reason: String,
 }
 
 /// A sibling mesh as the console renders it — one entity, one dot, one arc (ADR-0033 §5).
@@ -684,6 +699,17 @@ pub fn assemble_worldview(
         outreach: b.allow_outreach,
         actuate: b.allow_actuate,
     };
+    // Standing rules, in the same words the CLI prints (ADR-0039 §3).
+    let rules: Vec<RuleView> = familiar_kernel::reaction_rule::load(dir)
+        .rules
+        .iter()
+        .map(|r| RuleView {
+            id: r.id.clone(),
+            sentence: r.sentence(),
+            enabled: r.enabled,
+            disabled_reason: r.disabled_reason.clone(),
+        })
+        .collect();
     let tick = familiar_kernel::activity::load(dir)
         .map(|a| a.len() as u64)
         .unwrap_or(0);
@@ -914,6 +940,7 @@ pub fn assemble_worldview(
         theories,
         theory_quality,
         gates,
+        rules,
         tick,
         uptime_secs,
         humanity,

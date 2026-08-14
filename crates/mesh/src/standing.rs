@@ -327,6 +327,9 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
     view.claims_waiting.clear();
     // The fire is inside the house: a guest sees no game, no players, no story.
     view.game = None;
+    // A standing rule names its subject and their comings and goings — the most private
+    // sentence in the house. A guest sees none of them (ADR-0039 §4).
+    view.rules.clear();
     // A guest sees the arrivals too — the mesh greets, that is shape — but not who: labels
     // pseudonymize and handles fall to "someone", same rule as the roster.
     for a in view.arrivals.iter_mut() {
