@@ -774,7 +774,9 @@ pub fn assemble_worldview(
                         .filter(|l| !l.is_empty())
                 })
                 .unwrap_or_else(|| r.device_id.chars().take(8).collect());
-            let (handle, via) = match &r.identity.established {
+            // Through the liveness gate: a spent establishment names nobody on the welcome —
+            // the guest card must never wear a released handle (seen live, 2026-08-13).
+            let (handle, via) = match crate::record::effective_establishment(&r) {
                 Some(e) => (e.handle.clone(), format!("{:?}", e.class)),
                 None => (String::new(), String::new()),
             };

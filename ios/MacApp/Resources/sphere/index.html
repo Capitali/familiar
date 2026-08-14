@@ -824,7 +824,7 @@ function refreshScreen() {
          </div>` + arrivals.map(a => `
         <div style="padding:14px 16px;border-radius:14px;background:rgba(20,44,80,0.24);border:1px solid rgba(120,190,255,0.18);margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px;flex-wrap:wrap;">
-            ${a.handle
+            ${(a.state === 'member' && a.handle)
               ? `<span style="font-size:16px;font-weight:600;color:#9fe8c0;text-shadow:0 0 10px rgba(61,220,151,0.35);">${esc(cap(a.handle))}</span>`
                 + (!idLed(a.label, a.node_id) && a.label.toLowerCase() !== a.handle.toLowerCase() ? `<span class="m" style="font-size:10px;color:rgba(160,195,255,0.6);">${esc(a.label)}</span>` : '')
               : idLed(a.label, a.node_id)

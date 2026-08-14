@@ -545,7 +545,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         // record but no establishment was rendering NAMELESS forever, one ghost row per node.
         let human = match record
             .as_ref()
-            .and_then(|r| r.identity.established.as_ref())
+            .and_then(|r| crate::record::effective_establishment(r))
         {
             Some(e) if !e.handle.is_empty() => e.handle.clone(),
             _ if !p.human.is_empty() => p.human.clone(),

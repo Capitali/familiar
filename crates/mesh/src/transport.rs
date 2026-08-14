@@ -2688,7 +2688,7 @@ fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
     // The established handle is the seat key — the record's word, not the device's claim.
     let established_handle = |node_id: &str| -> String {
         crate::record::find_by_key(dir, node_id)
-            .and_then(|r| r.identity.established.map(|e| e.handle))
+            .and_then(|r| crate::record::effective_establishment(&r).map(|e| e.handle.clone()))
             .unwrap_or_default()
     };
     let mut seats: Vec<crate::game::Player> = Vec::new();
@@ -2924,8 +2924,10 @@ fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     }
     // The turn belongs to the HUMAN: resolve the acting device to its established handle.
     // Any of a human's devices may act on their turn; a device serving nobody plays nothing.
+    // Through the liveness gate: a device whose identity was released holds no seat and
+    // takes no turn — its old handle must not act (same rule the voucher anchor uses).
     let actor_handle = crate::record::find_by_key(dir, &env.node.node_id)
-        .and_then(|r| r.identity.established.map(|e| e.handle))
+        .and_then(|r| crate::record::effective_establishment(&r).map(|e| e.handle.clone()))
         .unwrap_or_default();
     if actor_handle.is_empty() {
         return text(
