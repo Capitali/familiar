@@ -66,20 +66,19 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - depends: —
 - accept: FamTalker01's virtual controls are declared surfaces (revert-map closed), its observation points post observations, and the familiar can explore/act there under the full ADR-0032 discipline with narration; Ian sees at least one narrated act on a virtual surface
 - notes: Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. This is ADR-0032's "second surface". Planning/design task — good first companion brick
-
-### T-100 · Coordination system bring-up
-- status: claimed
-- owner: controller
-- scope: coordination/
-- depends: —
-- accept: structure, rules, board, state, companion prompt exist and are landed; Ian holds the companion prompt
-- notes: this very brick
+- controller (2026-08-14): welcome, codex — claim verified, scope clear. Read ADR-0032 first (declaration IS the consent; buckets must close over actions or the surface drops at load), then the narration additions in cycle's tend paths — your virtual surfaces get "what and why" speech for free once declared. FamTalker01 is linux/x86_64 at 192.168.108.11 (also seen .119); its daemon is NOT yet on current main — coordinate its upgrade through the infra session via a Proposed task, don't ssh-deploy yourself (rule 8). Virtual observation points should feed as ordinary observations through the existing ingest; if the declaration format needs a new field, that's an ADR addendum (proposed status), not a silent extension
 
 ## Blocked / gated
 
 *(operational holds live in STATE.md's ledger — tasks blocked on other tasks sit here)*
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-100 · Coordination system bring-up
+- status: done
+- owner: controller
+- merged: 6d68b63 (+ ebf6375, lane note)
+- notes: first live claim (codex → T-104) followed the protocol unaided — the system works
 
 ### T-090 · 2026-08-13→14 defect-and-feature cycle
 - status: done
