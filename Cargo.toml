@@ -23,7 +23,10 @@ authors = ["Ian Schlueter <ian@river.io>"]
 # part of the Law III commitment (it cannot be turned against the served).
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: parse floats to the exact value their digits name. The default fast
+# parser can land 1 ULP off, and anything signed-then-reserialized (the brief) then fails
+# its own signature — one longitude took MacOnStick off the mesh for 8 hours (2026-08-13).
+serde_json = { version = "1", features = ["float_roundtrip"] }
 familiar-kernel = { path = "crates/kernel" }
 familiar-sense = { path = "crates/sense" }
 familiar-vision = { path = "crates/vision" }

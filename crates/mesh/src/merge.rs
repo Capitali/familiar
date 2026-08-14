@@ -106,6 +106,13 @@ pub fn federate(dir: &Path, now: i64) -> MergeReport {
 
 /// Build + sign our outbound brief from local state, redacted by config, and write it to
 /// `mesh/outbox.json`. Public so tests (and a future explicit "share now") can call it.
+/// Six decimal places (~10 cm) — a coordinate that re-parses to the same digits under every
+/// JSON parser the fleet has ever shipped. Precision a brief never needed bought a signature
+/// that always verifies.
+fn quantize_geo(v: f64) -> f64 {
+    (v * 1e6).round() / 1e6
+}
+
 pub fn build_outbox(
     dir: &Path,
     cred: &GroupCredential,
@@ -310,8 +317,11 @@ pub fn build_outbox(
             interactive: !cfg.headless,
             // Where this node is, when it can know (geo.json / IP geolocation) — so peers can
             // place it on the mesh map. 0/0 (omitted on the wire) when unknown.
-            lat: crate::transport::self_geo(dir).map(|g| g.0).unwrap_or(0.0),
-            lon: crate::transport::self_geo(dir).map(|g| g.1).unwrap_or(0.0),
+            // Quantized to ~10 cm (6 dp): a float on a SIGNED body must re-parse to the same
+            // digits on every door in the fleet, old parsers included — one full-precision
+            // longitude parsed 1 ULP off and every brief failed verification (2026-08-13).
+            lat: quantize_geo(crate::transport::self_geo(dir).map(|g| g.0).unwrap_or(0.0)),
+            lon: quantize_geo(crate::transport::self_geo(dir).map(|g| g.1).unwrap_or(0.0)),
             // The human this node serves — only a handle already opted into this group's
             // sharing (the same consent gate identity shares pass through).
             human: people
