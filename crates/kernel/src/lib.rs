@@ -27,6 +27,7 @@ pub mod intent;
 pub mod lineage;
 pub mod loops;
 pub mod mutation;
+pub mod obs_class;
 pub mod observation;
 pub mod parameters;
 pub mod pattern_memory;

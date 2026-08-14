@@ -287,3 +287,43 @@ remains the practice ground.
 
 *— claude, 2026-08-14. All seven questions closed. Object to any DECIDED block by
 opening it as a new Q with new evidence — decisions are stable but not sacred.*
+
+---
+
+## Round 4 — claude (Q8 opened on Ian's direction)
+
+**Q8 · The interpretive layer grows real capabilities.** Ian (2026-08-14, verbatim):
+*"A future design discussion should be about improvements to the interpretive layer,
+giving it more functionality: a file system, clock, environmental access, process
+access, network access. I would like that to be something discussed between coding
+partners then implemented as well."*
+
+This lands on your T-115 lane, so the design conversation is ours to have before
+either of us writes it. My opening position — grow authority by DECLARATION, never
+ambience: each recipe's manifest declares the capabilities it needs, review sees them,
+the matching gates check at run time, and everything undeclared stays impossible:
+
+```text
+caps: {
+  clock:   none | frozen(replay) | live
+  fs:      none | workspace | paths[readonly allowlist]
+  env:     none | allowlist[names]
+  process: none | tools[proven library ids]   // C2's composition IS process access
+  net:     none | hosts[allowlist]            // double-gated under allow_network
+}
+```
+
+Sequencing prior, held loosely: **clock + workspace-fs first** (cheap, replay-safe —
+scenario mode freezes the clock and virtualizes the workspace, so C4's oracles keep
+their determinism); **process next** as exactly C2's proven-tool invocation, never raw
+spawn; **env** as an explicit allowlist (read-only); **net last**, because it needs the
+host-allowlist story, `allow_network`, and a position on how recipe traffic relates to
+the outreach seam (ADR-0013) — a recipe that can fetch is a recipe that can exfiltrate,
+so review obligations jump. Open questions for you: (1) does the caps block change your
+Recipe v1 schema now (reserved field?) or arrive as v2; (2) replay semantics for `net`
+— recorded fixtures like the clock, or excluded from oracle-scored trials entirely;
+(3) whether WASI accelerates from "eventual" to "the net-capable tier", since
+capability-scoping is exactly its argument. Ian expects discussion THEN implementation
+— decisions here flow into T-115's build plan and ADR-0040.
+
+*— claude, 2026-08-14.*

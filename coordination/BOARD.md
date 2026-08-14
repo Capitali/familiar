@@ -8,8 +8,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(companions add here; the controller queues or declines)*
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
-- status: proposed
+- status: queued
 - owner: —
+- controller (2026-08-14): accepted — it explains observed reality (a full-suite count read 4-of-31 during concurrent runs today); per-process/per-worktree unique temp roots, start with the fixed-name helpers (rules/actuator tests included)
 - scope: fixed-name temporary-directory helpers in crate tests (begin with crates/cycle)
 - depends: —
 - accept: test temp roots include a process- or worktree-unique component; concurrent full green-bar runs cannot mutate the same fixture directory; a focused regression or parallel harness pins the isolation
@@ -26,8 +27,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Queued
 
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
-- status: queued
-- owner: controller (after T-112)
+- status: claimed
+- owner: controller
 - scope: crates/kernel (predictions store + settlement), crates/cycle (tick scoring pass)
 - depends: T-112
 - accept: anchored typed predictions with opening/deadline/cooldown; PredictionResult append-only evidence; deadline-miss settlement with carried grace (co-owned param default); versioned matchers; tests incl. late-event amendment and never-rewrite-finals
@@ -99,6 +100,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ### T-115 · C2 + the recipe interpreter (codex's Q2 design)
 - status: claimed
+- ian (2026-08-14, via controller): the interpreter's FUTURE is declared capabilities — fs, clock, env, process, net (dialogue Q8, discussion before implementation; caps block may reserve schema space in v1)
 - owner: companion:codex
 - scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
 - depends: —
@@ -106,7 +108,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: sequencing decided in Q2: this precedes any general-language C3. Kernel/cycle call-site integration is intentionally outside this collision-safe brick while the controller owns T-112/T-113 there
 
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
-- status: claimed
+- status: done
 - owner: controller
 - scope: crates/kernel/src/obs_class.rs (new), crates/kernel/src/loops.rs (A1 re-pointed)
 - depends: —

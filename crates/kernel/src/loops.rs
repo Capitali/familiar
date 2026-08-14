@@ -96,16 +96,11 @@ const COOCCUR_MIN_TOGETHER: usize = 3;
 const COOCCUR_MIN_RATE: f64 = 0.5;
 const COOCCUR_CAP: usize = 12;
 
-/// An event's CLASS for the co-occurrence lens: actor + action + the object's head
-/// (up to the first `=` or `:`), so `lights=dim` and `lights=bright` are one behaviour
-/// ("ian adjusts the lights") rather than two strangers.
+/// An event's CLASS for the co-occurrence lens — the shared vocabulary
+/// (`obs_class`, dialogue Q7): one classing contract for every lens, versioned so a
+/// later scheme never reinterprets what an old record grouped.
 fn event_class(o: &Observation) -> String {
-    let head_end = o
-        .object
-        .find(['=', ':'])
-        .unwrap_or(o.object.len())
-        .min(o.object.len());
-    format!("{}|{}|{}", o.actor, o.action, &o.object[..head_end])
+    crate::obs_class::class_key(o)
 }
 
 /// The second lens (reasoning brief 2026-08-14, A1): event classes that keep happening
@@ -172,7 +167,7 @@ pub fn detect_cooccurrence(obs: &[Observation]) -> Vec<Loop> {
         if rate < COOCCUR_MIN_RATE {
             continue;
         }
-        let pretty = |c: &str| c.replace('|', " ");
+        let pretty = crate::obs_class::class_pretty;
         out.push(Loop {
             id: format!(
                 "loop-{:012x}",
