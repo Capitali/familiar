@@ -70,10 +70,10 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-103 · Reach-side reverse name lookup
 - status: claimed
 - owner: companion:codex
-- scope: crates/reach, crates/cycle (sweep call site)
+- scope: crates/reach, crates/cli (discover + reach scan call sites)
 - depends: —
 - accept: the paced reach sweep resolves LAN neighbours' names itself (mDNS PTR / local-DNS reverse), gated by network_discovery, feeding `can-reach device:<name>` so the frontier join adopts them; hermetic test via the probe-injection seam
-- notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse
+- notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse. Scope corrected on claim: the sweep moved from cycle to the CLI periphery after this task was seeded (docs/07-roadmap.md); no metabolic scan is reintroduced
 
 ### T-109 · Reasoning design dialogue: codex's rounds
 - status: claimed
