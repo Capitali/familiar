@@ -74,6 +74,43 @@ pub struct TheoryView {
     /// The human's answers so far — shown under the question, carried by the pursuit.
     #[serde(default)]
     pub answers: Vec<String>,
+    /// How many observations seeded the loop this theory grew from (0 when unknown).
+    #[serde(default)]
+    pub seeded_by: usize,
+    /// The WORK: each candidate generation this theory drove, its trials nested — the
+    /// drill-down's middle stages. Capped; absent on older familiars.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work: Vec<TheoryWork>,
+    /// IN THE WORLD: dated act/reaction lines from the observation record ("actuated
+    /// lights=dim", "demoted …"). Capped, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acts: Vec<TheoryAct>,
+}
+
+/// One candidate generation in a theory's drill-down: what was tried, how it fared.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoryWork {
+    pub generation: i32,
+    pub hypothesis: String,
+    /// Candidate lifecycle word ("active", "archived", …).
+    pub status: String,
+    #[serde(default)]
+    pub mutation_reason: String,
+    /// Nested trial verdicts, oldest first: "pass 0.85 — set lights=dim and it stood".
+    #[serde(default)]
+    pub trials: Vec<String>,
+    /// The tool this generation left behind, when its artifact became one ("cpu_load").
+    #[serde(default)]
+    pub tool: String,
+}
+
+/// One dated line of a theory acting in the world, from the observation record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TheoryAct {
+    pub at: i64,
+    /// "actuated" | "demoted" | "adjusted" — the observation's own verb.
+    pub kind: String,
+    pub line: String,
 }
 
 /// One of the familiar's reflections on humanity — its lived understanding, appended beside (never
@@ -659,25 +696,85 @@ pub fn assemble_worldview(
     // Only MATURE theories reach the console (C5): a theory that keeps recurring (reinforced)
     // or that progressed to pursued/answered has earned attention; one-off connectivity noise
     // churns in the background and never clutters the view.
+    // The drill-down's raw material (Ian, 2026-08-14: "a stacked, hierarchical view of
+    // the progress from beginning to success or abandonment"): the loop that seeded each
+    // theory, the candidate generations it drove with their trials, the tools left
+    // behind, and its dated acts in the world — capped, so twenty theories don't turn a
+    // read into an archaeology dig.
+    let tools = familiar_kernel::tool::load(dir).unwrap_or_default();
+    let loops_all = familiar_kernel::loops::load(dir).unwrap_or_default();
     let theories: Vec<TheoryView> = threads
         .iter()
         .rev()
         .filter(|t| familiar_kernel::thread::is_mature(t))
         .take(THEORY_CAP)
-        .map(|t| TheoryView {
-            id: t.id.clone(),
-            question: t.question.clone(),
-            theory: t.theory.clone(),
-            direction: t.direction.clone(),
-            status: t.status.clone(),
-            created_at: t.created_at,
-            status_at: if t.status_at > 0 {
-                t.status_at
-            } else {
-                t.created_at
-            },
-            last_worked_at: t.last_worked_at,
-            answers: t.answers.clone(),
+        .map(|t| {
+            let seeded_by = loops_all
+                .iter()
+                .find(|l| l.id == t.id)
+                .map(|l| l.observation_count as usize)
+                .unwrap_or(0);
+            let work: Vec<TheoryWork> = candidates
+                .iter()
+                .filter(|c| c.loop_id == t.id)
+                .take(6)
+                .map(|c| TheoryWork {
+                    generation: c.generation,
+                    hypothesis: c.hypothesis.clone(),
+                    status: c.status.clone(),
+                    mutation_reason: c.mutation_reason.clone(),
+                    trials: trials
+                        .iter()
+                        .filter(|tr| tr.candidate_id == c.id)
+                        .take(4)
+                        .map(|tr| {
+                            let notes = tr.notes.chars().take(120).collect::<String>();
+                            if notes.is_empty() {
+                                format!("{} {:.2}", tr.result, tr.overall)
+                            } else {
+                                format!("{} {:.2} — {notes}", tr.result, tr.overall)
+                            }
+                        })
+                        .collect(),
+                    tool: tools
+                        .iter()
+                        .find(|tl| !c.artifact_path.is_empty() && tl.script_path == c.artifact_path)
+                        .map(|tl| tl.name.clone())
+                        .unwrap_or_default(),
+                })
+                .collect();
+            let thread_tag = format!("thread:{}", t.id);
+            let acts: Vec<TheoryAct> = obs
+                .iter()
+                .filter(|o| {
+                    o.context.contains(&thread_tag)
+                        && matches!(o.action.as_str(), "actuated" | "demoted" | "adjusted")
+                })
+                .take(8)
+                .map(|o| TheoryAct {
+                    at: o.ts,
+                    kind: o.action.clone(),
+                    line: format!("{} {}", o.object, o.context),
+                })
+                .collect();
+            TheoryView {
+                id: t.id.clone(),
+                question: t.question.clone(),
+                theory: t.theory.clone(),
+                direction: t.direction.clone(),
+                status: t.status.clone(),
+                created_at: t.created_at,
+                status_at: if t.status_at > 0 {
+                    t.status_at
+                } else {
+                    t.created_at
+                },
+                last_worked_at: t.last_worked_at,
+                answers: t.answers.clone(),
+                seeded_by,
+                work,
+                acts,
+            }
         })
         .collect();
 

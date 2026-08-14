@@ -548,10 +548,18 @@ function refreshScreen() {
         const human = o.actor !== 'familiar' && !o.actor.startsWith('mesh');
         // A human's words live in `object` (or `context` when `object` is a thread ref);
         // a familiar reply carries its text in `object`.
-        const text = (o.object || '').startsWith('thread:') && o.context ? o.context : o.object;
+        const threaded = (o.object || '').startsWith('thread:');
+        const text = threaded && o.context ? o.context : o.object;
+        // An answer to a THEORY's question must carry its question into the dialog — a
+        // bare "yes" floating in the stream reads as disconnected from anything (it was
+        // connected all along; only the rendering dropped the question).
+        const tid = threaded ? o.object.slice('thread:'.length) : '';
+        const quote = tid
+          ? ((v.theories || []).find(th => th.id === tid) || {}).question || ''
+          : '';
         // A narration is the familiar telling on itself (a tool born, a tool retired) —
         // rendered as a quieter aside, never mistaken for a reply to the human.
-        msgs.push({ f: !human, text, ts: o.ts || 0, aside: o.action === 'narrated' });
+        msgs.push({ f: !human, text, ts: o.ts || 0, aside: o.action === 'narrated', quote });
       }
     }
     // Time is the spine of a back-and-forth: sort by it so turns interleave in the order they
@@ -589,6 +597,7 @@ function refreshScreen() {
     const bubbles = shown.map(mm => `
       <div style="display:flex;flex-direction:column;align-items:${mm.f?'flex-start':'flex-end'};gap:3px;">
         <div style="max-width:78%;padding:${mm.aside?'9px 14px':'14px 17px'};border-radius:16px;background:${mm.aside?'rgba(20,44,80,0.16)':mm.f?'rgba(20,44,80,0.3)':'rgba(90,170,255,0.12)'};border:1px ${mm.aside?'dashed rgba(120,190,255,0.16)':'solid '+(mm.f?'rgba(120,190,255,0.2)':'rgba(174,231,255,0.28)')};">
+          ${mm.quote ? `<div style="font-size:clamp(11px,1.3vw,13px);line-height:1.4;color:rgba(190,170,255,0.75);border-left:2px solid rgba(160,130,255,0.5);padding:2px 0 2px 9px;margin-bottom:7px;font-style:italic;">${esc(mm.quote)}</div>` : ''}
           <div style="font-size:${mm.aside?'clamp(12px,1.4vw,14px)':'clamp(14px,1.6vw,17px)'};line-height:1.5;color:rgba(232,240,252,${mm.aside?'0.6':'0.92'});${mm.aside?'font-style:italic;':''}">${esc(mm.text)}</div>
         </div>
         ${mm.ts ? `<span class="m" style="font-size:8px;letter-spacing:0.1em;color:rgba(150,180,255,0.4);padding:0 6px;">${stamp(mm.ts)}</span>` : ''}
@@ -686,7 +695,7 @@ function refreshScreen() {
         </div>
         <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:6px;">${esc(p.os)}</div>
         ${p.m.detail ? `<div class="m" style="font-size:10px;color:rgba(174,231,255,0.7);margin-bottom:8px;">${esc(p.m.detail)}</div>` : ''}
-        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:9px;">${dstr(p.m.first_seen)}${p.m.ai?' · ai':''} · ${p.located ? p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'} · ${esc(String(p.m.node_id||'').slice(0,8))}</div>
+        <div class="m" style="font-size:9.5px;color:rgba(160,195,255,0.58);margin-bottom:9px;">${dstr(p.m.first_seen)}${p.m.ai?' · ai':''} · ${p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(3)+'°, '+p.lon.toFixed(3)+'°' : p.hasAnchor ? '≈' : '—'} · ${esc(String(p.m.node_id||'').slice(0,8))}</div>
         <div class="m" style="font-size:9.5px;margin-bottom:13px;display:flex;align-items:center;gap:6px;color:${p.present.known?'rgba(174,231,255,0.82)':'rgba(150,170,200,0.45)'};"><span style="width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${p.present.known?'#aee7ff':'rgba(140,160,190,0.4)'};${p.present.known?'box-shadow:0 0 7px #aee7ff;':''}"></span><span style="letter-spacing:0.1em;font-size:7px;color:rgba(150,180,255,0.55);">PRESENT</span> ${esc(p.present.text)}</div>
         <div style="display:grid;grid-template-columns:minmax(84px,auto) auto auto;justify-content:start;gap:18px;align-items:end;margin-bottom:12px;">
           <div>${seenCell(p, 26, 16)}<div class="m" style="font-size:7px;letter-spacing:0.14em;color:rgba(150,180,255,0.55);margin-top:5px;">SEEN</div></div>
@@ -728,7 +737,7 @@ function refreshScreen() {
             <td class="m" style="padding:9px 12px 9px 0;color:rgba(174,231,255,0.8);white-space:nowrap;">${dtstr(p.m.last_seen)}</td>
             <td class="m" style="padding:9px 12px 9px 0;color:rgba(156,192,255,0.7);white-space:nowrap;">${esc(p.total)}</td>
             <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.m.human || '—')}</td>
-            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '—'}</td>
+            <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '—'}</td>
             <td class="m" style="padding:9px 12px 9px 0;color:rgba(160,195,255,0.62);white-space:nowrap;">${esc(p.m.connectivity || '—')}</td>
           </tr>`).join('')}</tbody>
       </table></div>`;
@@ -1305,7 +1314,7 @@ function refreshScreen() {
       ${row('JOINED', dstr(m.first_seen))}
       ${row('PRESENT', p.present.text)}
       ${row('SERVES', ((m.human && m.human.toLowerCase() !== p.name.toLowerCase()) ? m.human : '') + (m.interactive ? ' · interactive' : ''))}
-      ${row('POSITION', p.located ? p.lat.toFixed(4)+'°, '+p.lon.toFixed(4)+'°' : p.hasAnchor ? '≈ near mesh' : '—')}
+      ${row('POSITION', p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(4)+'°, '+p.lon.toFixed(4)+'°' + (p.m.geo_device ? '' : ' (estimated)') : p.hasAnchor ? '≈ near mesh' : '—')}
       ${p.located && p.locationAt > 0 ? row('LAST FIX', p.locationAgo < 90 ? 'just now' : dur(p.locationAgo) + ' ago · ' + dtstr(p.locationAt)) : ''}
       ${row('ADDRESS', m.addr)}
       ${row('OFFERS', (m.tools||0) + ' tools · ' + (m.patterns||0) + ' patterns')}
@@ -1331,12 +1340,49 @@ function refreshScreen() {
     if (S.answeringThread && document.activeElement && document.activeElement.id === 'thanswer') return;
     const sc = (st) => st==='answered' ? '#3ddc97' : st==='pursued' ? '#6c9bff' : st==='open' ? '#ffb15a' : 'rgba(210,150,155,0.85)';
     const stage = (st) => ({ open:38, pursued:70, answered:100, abandoned:16, marginalized:10 }[st] ?? 30);
+    // Each theory drills down into its whole life (Ian, 2026-08-14): born → asked and
+    // answered → the work (candidate generations, trials, tools) → its acts in the
+    // world → where it stands. Open state lives in S so the poll can't slam it shut.
+    S.theoryOpen = S.theoryOpen || {};
+    const stageHead = (label) => `<div class="m" style="font-size:8px;letter-spacing:0.18em;color:rgba(150,180,255,0.55);margin:13px 0 6px;">${label}</div>`;
+    const drill = (th) => `
+      <div style="border-top:1px solid rgba(120,190,255,0.1);margin-top:10px;">
+        ${stageHead('BORN')}
+        <div class="m" style="font-size:10.5px;color:rgba(188,210,255,0.8);line-height:1.5;">
+          ${dstr(th.created_at)}${th.seeded_by ? ` · grew from ${th.seeded_by} observation${th.seeded_by === 1 ? '' : 's'}` : ''}
+          ${th.direction ? `<div style="color:rgba(174,231,255,0.7);margin-top:3px;">direction: ${esc(th.direction)}</div>` : ''}
+        </div>
+        ${(th.work || []).length ? stageHead('THE WORK') + (th.work || []).map(w => `
+          <div style="padding:9px 12px;border-radius:10px;background:rgba(20,44,80,0.2);border:1px solid rgba(120,190,255,0.1);margin-bottom:7px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="m" style="font-size:9px;color:#9cc0ff;">gen ${w.generation}</span>
+              <span style="font-size:12px;color:rgba(228,240,252,0.9);flex:1;">${esc(w.hypothesis)}</span>
+              ${chip((w.status || '?').toUpperCase(), w.status === 'active' ? '#9fe8c0' : '#bcd2ff')}
+              ${w.tool ? chip('⚒ ' + esc(w.tool), '#c9a3ff') : ''}
+            </div>
+            ${w.mutation_reason ? `<div class="m" style="font-size:9px;color:rgba(160,195,255,0.55);margin-top:3px;">${esc(w.mutation_reason)}</div>` : ''}
+            ${(w.trials || []).map(tr => `<div class="m" style="font-size:9.5px;color:${/^pass/.test(tr) ? 'rgba(142,240,198,0.8)' : /^fail/.test(tr) ? 'rgba(255,143,163,0.8)' : 'rgba(188,210,255,0.7)'};margin:4px 0 0 14px;">◦ ${esc(tr)}</div>`).join('')}
+          </div>`).join('') : ''}
+        ${(th.acts || []).length ? stageHead('IN THE WORLD') + (th.acts || []).map(a => `
+          <div style="display:flex;align-items:baseline;gap:9px;margin-bottom:4px;">
+            <span class="m" style="font-size:8.5px;color:rgba(150,180,255,0.5);white-space:nowrap;">${dtstr(a.at)}</span>
+            <span class="m" style="font-size:10px;color:${a.kind === 'actuated' ? '#aee7ff' : a.kind === 'demoted' ? '#ff8fa3' : '#ffcf9e'};">${esc(a.kind)}</span>
+            <span class="m" style="font-size:10px;color:rgba(188,210,255,0.75);">${esc(a.line)}</span>
+          </div>`).join('') : ''}
+        ${stageHead('NOW')}
+        <div class="m" style="font-size:10.5px;color:${sc(th.status)};">
+          ${th.status}${th.status_at ? ' since ' + dstr(th.status_at) : ''}${th.last_worked_at > 0 ? ' · last worked ' + dstr(th.last_worked_at) : ''}
+        </div>
+      </div>`;
     el.innerHTML = `<div style="max-width:820px;">` + (v.theories || []).map(th => `
-      <div style="position:relative;padding:16px 18px 16px 26px;border-radius:16px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,0.14);margin-bottom:12px;">
+      <div style="position:relative;padding:16px 18px 16px 26px;border-radius:16px;background:rgba(16,34,60,0.28);border:1px solid rgba(120,190,255,${S.theoryOpen[th.id] ? '0.26' : '0.14'});margin-bottom:12px;">
         <span style="position:absolute;left:11px;top:20px;width:6px;height:6px;border-radius:50%;background:${sc(th.status)};box-shadow:0 0 10px ${sc(th.status)};"></span>
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px;">
+        <div onclick="sphereTheoryToggle('${th.id}')" style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px;cursor:pointer;">
           <span style="font-size:clamp(15px,1.7vw,18px);font-weight:600;letter-spacing:-0.01em;line-height:1.25;">${esc(th.theory)}</span>
-          <span class="m" style="font-size:9px;letter-spacing:0.06em;color:rgba(150,180,255,0.5);white-space:nowrap;">${th.status} ${dstr(th.status_at || th.created_at)}</span>
+          <span style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span class="m" style="font-size:9px;letter-spacing:0.06em;color:rgba(150,180,255,0.5);white-space:nowrap;">${th.status} ${dstr(th.status_at || th.created_at)}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:12px;height:12px;color:rgba(160,195,255,0.45);transform:rotate(${S.theoryOpen[th.id] ? '180deg' : '0'});"><path d="M6 9l6 6 6-6"/></svg>
+          </span>
         </div>
         <div onclick="sphereAnswerThread('${th.id}')" style="font-size:13px;color:rgba(174,231,255,0.85);line-height:1.5;margin-bottom:8px;cursor:pointer;">${esc(th.question)}</div>
         ${(th.answers||[]).map(a => `<div class="m" style="font-size:11px;color:rgba(142,240,198,0.75);line-height:1.5;margin:0 0 6px 12px;">↳ ${esc(a)}</div>`).join('')}
@@ -1349,6 +1395,7 @@ function refreshScreen() {
           <div style="flex:1;height:5px;border-radius:5px;background:rgba(255,255,255,0.06);overflow:hidden;"><div style="height:100%;width:${stage(th.status)}%;border-radius:5px;background:${sc(th.status)};box-shadow:0 0 8px ${sc(th.status)};"></div></div>
           <span class="m" style="font-size:9px;color:rgba(150,180,255,0.6);">${dstr(th.created_at)}${th.last_worked_at>0?' → '+dstr(th.last_worked_at):''}</span>
         </div>
+        ${S.theoryOpen[th.id] ? drill(th) : ''}
       </div>`).join('') + `</div>`;
     const inp = $('thanswer');
     if (inp) {
@@ -1688,7 +1735,7 @@ function renderCallouts() {
           ${servedWord(p.m) ? `<span style="font-size:11px;font-weight:600;color:#9fe8c0;">${esc(servedWord(p.m))}</span>` : ''}
           <span class="m" style="font-size:7.5px;letter-spacing:0.1em;padding:2px 5px;border-radius:5px;background:${p.local?'rgba(174,231,255,0.16)':'rgba(120,160,255,0.16)'};color:${p.local?'#cdeeff':'#bcd2ff'};">${p.kindWord}</span>
         </div>
-        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.located ? p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};white-space:nowrap;">${esc(p.seenFull)}</span></div>
+        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};white-space:nowrap;">${esc(p.seenFull)}</span></div>
       </div>
     </div>`).join('') + F.map((fn) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;opacity:0.55;">
@@ -1731,6 +1778,7 @@ window.sphereNode = (i) => { S.nodeIdx = i; S.activeScreen = 'node'; S.holoHidde
 // Toggle the live roster against the record of members not seen in over a day.
 window.sphereRosterHistory = () => { S.rosterHistory = !S.rosterHistory; refreshScreen(); };
 window.sphereRosterToggle = (id) => { S.rosterOpen = S.rosterOpen || {}; S.rosterOpen[id] = !S.rosterOpen[id]; refreshScreen(); };
+window.sphereTheoryToggle = (id) => { S.theoryOpen = S.theoryOpen || {}; S.theoryOpen[id] = !S.theoryOpen[id]; refreshScreen(); };
 // Inline handlers resolve on window, never module scope — every act the HTML strings call
 // must live here (the badge's bare `S.gameNav=` threw ReferenceError on click).
 window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
@@ -2063,9 +2111,9 @@ const ROTATE_MS = 900, ZOOM_MS = 3200;
 // The roll matters too: we hand off to an MKMapCamera with heading 0 (north up), so the sphere
 // has to arrive north-up as well or the satellite and the map sit rotated against each other for
 // the whole crossfade.
-function diveAimQ() {
+function aimQFor(dir) {
   const camDir = G.camera.position.clone().normalize();
-  const q = new THREE.Quaternion().setFromUnitVectors(G.diveDir, camDir);
+  const q = new THREE.Quaternion().setFromUnitVectors(dir, camDir);
   const up = G.camera.up.clone();
   const screenUp = up.sub(camDir.clone().multiplyScalar(up.dot(camDir)));
   const north = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
@@ -2078,6 +2126,21 @@ function diveAimQ() {
   }
   return q;
 }
+function diveAimQ() { return aimQFor(G.diveDir); }
+// A tap on a cluster bubble zooms a step toward it (the standard map gesture the globe
+// was missing — zoomed out, the counted circles were dead ends). Each step rotates the
+// centroid under the camera and closes ~40% of the distance; clusters separate back into
+// callouts as the cluster radius collapses, and the individual dives take over.
+window.sphereClusterZoom = (dir) => {
+  if (!dir || !G.camera || !G.group || G.diving) return;
+  G.zoomAnim = {
+    dir: dir.clone().normalize(),
+    q0: G.group.quaternion.clone(),
+    z0: G.camera.position.length(),
+    z1: Math.max(2.12, G.camera.position.length() * 0.58),
+    t0: performance.now(),
+  };
+};
 function beginDive(target, dir) {
   S.holoHidden = true; renderChrome();
   if (!G.group) { handoff(target); return; }
@@ -2253,6 +2316,14 @@ function initThree() {
         if (dp >= 1) G.diving = false;
       }
     }
+    if (G.zoomAnim && !G.diving) {
+      const z = G.zoomAnim;
+      const p = Math.min(1, (performance.now() - z.t0) / 750);
+      const e = p < 0.5 ? 2*p*p : 1 - Math.pow(-2*p + 2, 2)/2;
+      group.quaternion.copy(z.q0).slerp(aimQFor(z.dir), e);
+      camera.position.setLength(z.z0 + (z.z1 - z.z0) * e);
+      if (p >= 1) G.zoomAnim = null;
+    }
     if (earthMat.userData.sh) earthMat.userData.sh.uniforms.uSun.value = sunDir;
     const breath = 1 + Math.sin(t * (Math.PI*2/6)) * 0.012;
     group.scale.setScalar(breath);
@@ -2285,7 +2356,7 @@ function initThree() {
         if (worldNorm.dot(camDir) >= -0.12) { el.style.display = 'none'; continue; } // backface
         worldPos.copy(worldNorm).multiplyScalar(1.02 * breath);
         const proj = worldPos.clone().project(camera);
-        pts.push({ el, x: (proj.x * 0.5 + 0.5) * rect.width, y: (-proj.y * 0.5 + 0.5) * rect.height });
+        pts.push({ el, dir: dirs[i], x: (proj.x * 0.5 + 0.5) * rect.width, y: (-proj.y * 0.5 + 0.5) * rect.height });
       }
       // Greedy screen-space clustering.
       const clusters = [];
@@ -2312,20 +2383,29 @@ function initThree() {
           p.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
           continue;
         }
-        // A real cluster: hide its members, show one counted bubble at the centroid.
+        // A real cluster: hide its members, show one counted bubble at the centroid —
+        // CLICKABLE: a tap zooms a step toward the cluster (the container is
+        // pointer-events:none, so the bubble itself must opt back in).
         let cx = 0, cy = 0;
-        for (const m of members) { m.el.style.display = 'none'; cx += m.x; cy += m.y; }
+        const cdir = new THREE.Vector3();
+        for (const m of members) { m.el.style.display = 'none'; cx += m.x; cy += m.y; if (m.dir) cdir.add(m.dir); }
         cx /= members.length; cy /= members.length;
         let b = bubbles[bi];
         if (!b) {
           b = document.createElement('div');
           b.dataset.cluster = '1';
-          b.style.cssText = 'position:absolute;left:0;top:0;transform-origin:center;will-change:transform;';
+          b.style.cssText = 'position:absolute;left:0;top:0;transform-origin:center;will-change:transform;pointer-events:auto;cursor:pointer;';
+          b.onclick = () => window.sphereClusterZoom(b._dir);
           cc.appendChild(b);
         }
+        b._dir = cdir.lengthSq() > 1e-8 ? cdir.normalize().clone() : null;
         b.style.display = 'flex';
         b.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px) translate(-50%,-50%)`;
-        b.innerHTML = `<div style="min-width:30px;height:30px;padding:0 8px;border-radius:16px;background:rgba(20,44,80,0.62);border:1px solid rgba(120,190,255,0.5);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;box-shadow:0 0 16px rgba(90,160,255,0.4);"><span class="m" style="font-size:12px;font-weight:600;color:#cfe4ff;">${members.length}</span></div>`;
+        const label = `${members.length}`;
+        if (b._count !== label) {
+          b._count = label;
+          b.innerHTML = `<div style="min-width:30px;height:30px;padding:0 8px;border-radius:16px;background:rgba(20,44,80,0.62);border:1px solid rgba(120,190,255,0.5);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;box-shadow:0 0 16px rgba(90,160,255,0.4);"><span class="m" style="font-size:12px;font-weight:600;color:#cfe4ff;">${label}</span></div>`;
+        }
         bi++;
       }
       for (let k = bi; k < bubbles.length; k++) bubbles[k].style.display = 'none';
