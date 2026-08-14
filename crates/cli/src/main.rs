@@ -1604,6 +1604,54 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             }
         }
+        Some("device") => {
+            // `mesh device name <node_id> <name>` — the DEVICE's own name (ADR-0039:
+            // SystemName, "Codex", "Aphelion"), distinct from `mesh name` which binds the
+            // establishment to a HUMAN. Prefixes resolve through the membership records;
+            // the name replicates door-to-door on the device-sync channel.
+            match args.get(1).map(String::as_str) {
+                Some("name") => {
+                    let (Some(node_id), Some(name)) = (
+                        args.get(2).filter(|a| !a.starts_with("--")),
+                        args.get(3).filter(|a| !a.starts_with("--")),
+                    ) else {
+                        eprintln!("mesh: usage: familiar mesh device name <node_id> <name>");
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::device::set_name(&dir, node_id, name, now_secs()) {
+                        Ok(rec) => {
+                            println!("✓ {} is named “{}”", rec.device_id, rec.name);
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Some("show") => {
+                    for d in familiar_mesh::device::load_all(&dir) {
+                        println!(
+                            "{}  {}  {} {} {}",
+                            d.device_id,
+                            if d.name.is_empty() {
+                                "(unnamed)"
+                            } else {
+                                &d.name
+                            },
+                            d.kind,
+                            d.os,
+                            d.arch
+                        );
+                    }
+                    ExitCode::SUCCESS
+                }
+                _ => {
+                    eprintln!("mesh: usage: familiar mesh device <name <node_id> <name> | show>");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("name") => {
             // `mesh name <node_id> <handle>` — the human at this door naming an established
             // device whose establishment carries no handle (the roll migration deliberately
@@ -1898,7 +1946,8 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | escrow-export | escrow-restore | reduce-to-covenant --yes \
                  | standing [show | grant <node_id> [--note N] | revoke <node_id>] \
                  | sever|hold|disestablish|restore <node_id> [--reason R] \
-                 | name <node_id> <handle> | invite-token [--handle H] | warrant <node_id> <pubkey> | warrant-install <json> \
+                 | name <node_id> <handle> | device <name <node_id> <name> | show> \
+                 | invite-token [--handle H] | warrant <node_id> <pubkey> | warrant-install <json> \
                  | migrate-records | doctor>"
             );
             ExitCode::FAILURE
