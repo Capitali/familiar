@@ -314,6 +314,13 @@ this file is the human-readable summary.
   requirements; Law III in SOUL gains an "operational restraint" note.
 
 ### Fixed
+- **A device can no longer be silently exiled by its own coordinates.** One
+  full-precision longitude, printed exactly and re-parsed a hair off, made every signed
+  status brief from a device fail verification at every door — including its own — with
+  nothing anywhere saying so. Floats on signed payloads now parse exactly and are sent at
+  honest precision, and a door's refusal is finally said out loud in the daemon's log
+  instead of counting as a successful exchange. *Validated by a regression carrying the
+  exact live coordinates through both wire formats.*
 - **A released identity stays released — and a rename lands.** Renaming a device
   (release → re-grant → name) inside one second left the record a guest wearing its own
   new name on every welcome screen, and a release could leave a stale admission behind

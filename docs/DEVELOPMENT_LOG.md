@@ -6,6 +6,50 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-13 (later night) — One longitude, one ULP, eight hours off the mesh
+
+### What changed
+
+- **The hunt.** After the record repair, MacOnStick's daemon still wouldn't converge: the
+  lighthouse showed this node entirely absent from its peer table since ~17:35 while raw
+  TLS reached the door in 200 ms. Hand-posting the daemon's own outbox brief got the
+  truth the logs never carried: **HTTP 403 — node signature did not verify** — from the
+  lighthouse, and then from this daemon's own door against its own outbox. Offline
+  bisection (sign-time byte dump vs re-parsed canonical bytes) found the whole story in
+  one byte: the brief signed `"lon":-93.39668839065929` and every verifier re-parsed it
+  1 ULP off, re-serializing `…28`. serde_json's default float parse is fast, not exact;
+  `verify_brief` re-serializes the parsed body; the signature could never verify. The
+  coordinates had sat in geo.json since 11:45 — the outage began the moment they started
+  riding the brief.
+- **Three fixes, one lesson each.**
+  1. `serde_json` now carries **`float_roundtrip`** workspace-wide: a float parses to the
+     exact value its digits name, so signing_bytes(parse(wire)) is the signed bytes again.
+  2. Brief coordinates are **quantized to six decimals** (~10 cm) at build: short literals
+     re-parse exactly under every parser the fleet has ever shipped, so an upgraded sender
+     verifies at doors that haven't upgraded yet — deploy order stops mattering.
+  3. `exchange_with` **no longer swallows a refusal as success**: a 4xx/5xx reply logs the
+     door's own words once per round and counts the peer unreached. The bug was one ULP;
+     the outage was the silence.
+- Pinned by `a_brief_carrying_hostile_floats_still_verifies_after_the_wire` — the exact
+  live coordinates, through both the compact wire and the pretty outbox file.
+
+### Checks run
+
+- Green bar (fmt, clippy `-D warnings`, full workspace tests — 31 suites; the new float
+  regression fails without the feature and passes with it); release build. Live: the
+  daemon's real outbox reproduced the 403 against its own door before the fix; the fixed
+  binary's re-admission to the mesh is the deploy's acceptance test.
+
+### Next
+
+- Deploy the fixed daemon to the lighthouse and wildhorse (senders there may carry their
+  own hostile floats the moment their geo moves; the receive-side parse fix is what makes
+  the fleet safe for good).
+- The deeper design note, for a quieter day: `verify_brief` verifies a **re-serialization**
+  rather than the received bytes. Signing the raw wire bytes (as every other mesh
+  endpoint already does via `X-Familiar-Sig`) would retire this entire class. Wire-format
+  change — wants its own ADR.
+
 ## 2026-08-13 (night) — A release spends what it means to spend, and nothing else
 
 ### What changed
