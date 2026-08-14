@@ -349,34 +349,53 @@ pub fn merge_records(a: &MembershipRecord, b: &MembershipRecord) -> MembershipRe
     merged
 }
 
+/// The establishment that still COUNTS — the record's establishment unless the latest
+/// deliberate act has spent it. A Disestablish spends facts at or before its own second
+/// (the release wins a same-second tie: leaving must always work), and a Sever names
+/// nobody. Everything that NAMES a device must read through this, never through
+/// `identity.established` raw — a released identity whispering its old handle through a
+/// replica was ADR-0027's lesson, and it resurfaced live on 2026-08-13 when a spent
+/// establishment carried "MacOnStick" onto a visitor card. The door's own mint paths keep
+/// a deliberate re-establishment strictly newer ([`unspent_at`]), so the tie rule only
+/// ever spends what a release truly meant to spend.
+pub fn effective_establishment(r: &MembershipRecord) -> Option<&Establishment> {
+    let est = r.identity.established.as_ref()?;
+    match r.corrections.last() {
+        Some(c) if c.act == CorrectionAct::Sever => None,
+        Some(c) if c.act == CorrectionAct::Disestablish && est.at <= c.ts => None,
+        _ => Some(est),
+    }
+}
+
+/// A deliberate fact minted NOW always lands strictly after the release it answers. The
+/// door processes acts in order, but a scripted release → grant → name can share one
+/// wall-clock second, and an equal-second fact is spent by the very release it follows
+/// (both the merge keep-filters and the derive boundary treat equal as spent, so that
+/// leaving always works). Seen live, 2026-08-13: the lighthouse's rename dance left
+/// MacOnStick a guest wearing its own name on every welcome screen.
+fn unspent_at(r: &MembershipRecord, now: i64) -> i64 {
+    r.corrections
+        .iter()
+        .filter(|c| c.act == CorrectionAct::Disestablish)
+        .map(|c| c.ts)
+        .max()
+        .map_or(now, |t| if now <= t { t + 1 } else { now })
+}
+
 /// The state a record's facts add up to. Admission facts and establishment say *member*;
 /// the latest correction can say otherwise. State is derived, never voted on.
+/// Corrections are sorted by ts on merge; the latest deliberate act wins. A Disestablish
+/// spends only facts older than itself: an establishment minted after the release (a new
+/// human introducing themselves on the same hardware) supersedes it. Sever stands until
+/// an explicit Restore — leaving and being banished are different verbs.
 pub fn derive_state(r: &MembershipRecord) -> RecordState {
-    let base = if r.admitted.is_some() && r.identity.established.is_some() {
-        RecordState::Member
-    } else {
-        RecordState::Guest
-    };
-    // Corrections are sorted by ts on merge; the latest deliberate act wins. A Disestablish
-    // spends only facts OLDER than itself: an establishment minted after the release (a new
-    // human introducing themselves on the same hardware) supersedes it. Sever stands until
-    // an explicit Restore — leaving and being banished are different verbs.
     match r.corrections.last() {
         Some(c) if c.act == CorrectionAct::Sever => RecordState::Severed {
             reason: c.reason.clone(),
             at: c.ts,
         },
-        Some(c)
-            if c.act == CorrectionAct::Disestablish
-                && r.identity
-                    .established
-                    .as_ref()
-                    .map(|e| e.at <= c.ts)
-                    .unwrap_or(true) =>
-        {
-            RecordState::Guest
-        }
-        _ => base,
+        _ if r.admitted.is_some() && effective_establishment(r).is_some() => RecordState::Member,
+        _ => RecordState::Guest,
     }
 }
 
@@ -1101,9 +1120,11 @@ pub fn name_established(dir: &Path, node_id: &str, handle: &str, now: i64) -> Re
     let Some(rec) = find_by_key(dir, node_id) else {
         return Err(Error::Untrusted("no record for that node".into()));
     };
-    let Some(est) = &rec.identity.established else {
+    let Some(est) = effective_establishment(&rec) else {
         return Err(Error::Untrusted(
-            "not established — naming only fills in a missing name, it never admits".into(),
+            "not established — naming only fills in a missing name, it never admits \
+             (a released establishment counts as none: re-establish first, then name)"
+                .into(),
         ));
     };
     if !est.handle.is_empty() {
@@ -1191,13 +1212,13 @@ pub(crate) fn record_standing_grant(
                 handle: String::new(), // the roll never named the human; a false name would be worse
                 class: EvidenceClass::Migration,
                 artifact: "standing-roll".into(),
-                at: now,
+                at: unspent_at(r, now),
             });
         }
         if r.admitted.is_none() {
             r.admitted = Some(AdmissionFact {
                 minted_by: minted_by.to_string(),
-                at: now,
+                at: unspent_at(r, now),
                 evidence: EvidenceClass::Migration,
                 artifact: "standing-roll".into(),
             });
@@ -1265,14 +1286,16 @@ pub fn admit(
             r.identity.claim = claim.clone();
         }
         if r.identity.established.is_none() {
+            let mut est = est.clone();
+            est.at = unspent_at(r, est.at);
             r.identity.established = Some(est);
         }
         if r.admitted.is_none() {
             r.admitted = Some(AdmissionFact {
                 minted_by: minted_by.to_string(),
-                at: now,
+                at: unspent_at(r, now),
                 evidence: class,
-                artifact,
+                artifact: artifact.clone(),
             });
         }
     })?;
@@ -1463,7 +1486,13 @@ pub fn apply_correction(dir: &Path, c: &Correction, now: i64) -> Result<Membersh
                 .sort_by(|x, y| (x.ts, &x.nonce).cmp(&(y.ts, &y.nonce)));
         }
         if c.act == CorrectionAct::Disestablish {
+            // A release spends BOTH member facts: the establishment it names and the
+            // admission minted on it — locally, exactly as merge's keep-filters spend them
+            // on every replica. Leaving either behind made a record read member at its own
+            // door and guest after one sync round. Re-establishing mints a fresh admission
+            // through the rules engine; the attestation (filter 1) is retained.
             r.identity.established = None;
+            r.admitted = None;
         }
         if c.act == CorrectionAct::Hold {
             r.held_until = Some(
@@ -2238,6 +2267,109 @@ mod tests {
         assert_eq!(ab.state, RecordState::Member);
         assert_eq!(ab.last_seen, NOW + 9);
         assert_eq!(merge_records(&ab, &ab), ab, "idempotent");
+    }
+
+    #[test]
+    fn a_same_second_rename_dance_stays_member_everywhere() {
+        // The live failure of 2026-08-13: disestablish → grant → name, scripted inside one
+        // wall-clock second, left the lighthouse's own record deriving Guest with the fresh
+        // handle riding on a spent establishment — MacOnStick a visitor wearing its name.
+        let dir = fresh("dance");
+        let _ = save(&dir, &base_record("aaaa1111"));
+        record_standing_grant(&dir, "door", "aaaa1111", "the one mac", NOW - 50).unwrap();
+
+        // The dance, all at the same second.
+        let dis = Correction {
+            act: CorrectionAct::Disestablish,
+            subject_device: "aaaa1111".into(),
+            corrected_by: "door".into(),
+            reason: "rename".into(),
+            ts: NOW,
+            nonce: "d1".into(),
+            sig: String::new(),
+        };
+        apply_correction(&dir, &dis, NOW).unwrap();
+        record_standing_grant(&dir, "door", "aaaa1111", "renamed", NOW).unwrap();
+        name_established(&dir, "aaaa1111", "MacOnStick", NOW).unwrap();
+
+        let rec = find_by_key(&dir, "aaaa1111").unwrap();
+        assert_eq!(
+            derive_state(&rec),
+            RecordState::Member,
+            "a deliberate re-grant lands strictly after the release it answers"
+        );
+        assert_eq!(
+            effective_establishment(&rec).unwrap().handle,
+            "MacOnStick",
+            "the name lives on the LIVE establishment"
+        );
+
+        // And it survives replication: a replica still holding the pre-dance record merges
+        // to Member with the name intact, in both exchange orders.
+        let mut stale = base_record("aaaa1111");
+        stale.identity.established = Some(Establishment {
+            handle: String::new(),
+            class: EvidenceClass::Migration,
+            artifact: "standing-roll".into(),
+            at: NOW - 50,
+        });
+        stale.admitted = Some(AdmissionFact {
+            minted_by: "door".into(),
+            at: NOW - 50,
+            evidence: EvidenceClass::Migration,
+            artifact: "standing-roll".into(),
+        });
+        let ab = merge_records(&rec, &stale);
+        let ba = merge_records(&stale, &rec);
+        assert_eq!(ab, ba, "merge must not depend on exchange order");
+        assert_eq!(ab.state, RecordState::Member);
+        assert_eq!(
+            ab.identity.established.as_ref().unwrap().handle,
+            "MacOnStick"
+        );
+    }
+
+    #[test]
+    fn a_true_same_second_tie_is_spent_and_names_nobody() {
+        // The other direction of the boundary, pinned: when an establishment and a release
+        // genuinely share a second with no door ordering them (a merged-in replica), the
+        // release wins — leaving must always work — and the spent name leads nothing.
+        let mut r = base_record("tie");
+        r.identity.established = Some(Establishment {
+            handle: "betty".into(),
+            class: EvidenceClass::LocalIntroduction,
+            artifact: "x".into(),
+            at: NOW,
+        });
+        r.admitted = Some(AdmissionFact {
+            minted_by: "door".into(),
+            at: NOW,
+            evidence: EvidenceClass::LocalIntroduction,
+            artifact: "x".into(),
+        });
+        r.corrections.push(Correction {
+            act: CorrectionAct::Disestablish,
+            subject_device: "tie".into(),
+            corrected_by: "tie".into(), // the release verb: a self-Disestablish
+            reason: "left".into(),
+            ts: NOW,
+            nonce: "c1".into(),
+            sig: String::new(),
+        });
+        assert_eq!(
+            derive_state(&r),
+            RecordState::Guest,
+            "the release wins the tie"
+        );
+        assert!(
+            effective_establishment(&r).is_none(),
+            "a spent establishment names nobody — no card, roster row, note or game seat \
+             may lead with a released handle"
+        );
+        // Naming a spent establishment is refused — the repair is re-establish, then name.
+        let dir = fresh("tie-name");
+        let _ = save(&dir, &r);
+        assert!(name_established(&dir, "tie", "Zombie", NOW + 1).is_err());
     }
 
     #[test]
