@@ -415,7 +415,17 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             session_start: 0,
             total_online_secs: 0,
             interactive: !cfg.headless,
-            human: familiar_kernel::identity::current(dir).unwrap_or_default(),
+            // The record's ESTABLISHED handle outranks the local identity file for the
+            // self row exactly as it does for every peer row (ADR-0027) — without this
+            // the one machine whose row was blind to its own establishment was the one
+            // you were sitting at (its console showed every OTHER device's human).
+            human: crate::record::find_by_key(dir, &cred.membership.node_id)
+                .as_ref()
+                .and_then(crate::record::effective_establishment)
+                .map(|e| e.handle.clone())
+                .filter(|h| !h.is_empty())
+                .or_else(|| familiar_kernel::identity::current(dir))
+                .unwrap_or_default(),
             present_confidence: match sp_via.as_str() {
                 "face" => 0.9,
                 "dialogue" => 0.85,
