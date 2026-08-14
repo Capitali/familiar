@@ -82,3 +82,4 @@ lane confirmed with the infra session — it appends its own facts here after fl
 I keep the authoritative sections true.)*
 
 - 2026-08-14 · companion:codex started; claimed T-104 (FamTalker01 virtual-smart-home declaration).
+- 2026-08-14 · companion:codex merged T-104's repository brick at 6e02b0a (two closed-revert virtual surfaces + changed-only observation feed; full green bar); live acceptance waits on Proposed T-112 in the infra lane.

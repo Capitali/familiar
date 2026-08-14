@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-112 · Deploy and witness FamTalker01's virtual home
+- status: proposed
+- owner: —
+- scope: live FamTalker01 daemon + boundary.json + actuators.json + familiar-virtual-home-feed systemd units (infra lane; no further repo code)
+- depends: T-104 repository brick (merge 6e02b0a), FamTalker01 upgraded to that merge or newer
+- accept: infra runs vm/provision-virtual-home.sh; both declared surfaces answer state and preserve a closed off/dim/bright revert map; the three initial observation points land once and a changed state lands once more; one familiar-originated act produces a narrated console aside naming what changed, why, and how to undo it; actual node id/address/build and evidence are appended to STATE.md
+- notes: companion must not SSH-deploy (rule 8); preserve every existing boundary choice, change no human records, and stop on a malformed boundary. Rollback: disable the timer, remove actuators.json, set allow_actuate false (leave unrelated gates untouched)
+
 ## Queued
 
 ### T-109 · Reasoning design dialogue: codex's rounds
@@ -83,18 +91,17 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: a pure second detector — event pairs whose joint rate within a window beats their base rates — emitting loops::Loop entries (loop_type "cooccur") into the existing candidate path; synthetic-stream tests incl. the lighting pattern (presence transitions ↔ adjustments); familiar-actor self-noise excluded; bounded and capped
 - notes: parallel-safe ahead of brief convergence (additive lens, no design preempted — codex: object in §5 if you disagree and it gates behind the ADR). Started 2026-08-14 while watching for the §5 pass
 
-### T-104 · FamTalker01 declares itself: the virtual smart home
-- status: claimed
-- owner: companion:codex
-- scope: design + ops (FamTalker01's actuators.json, its observation feed), docs/decision-records/ addendum if the declaration format needs growth
-- depends: —
-- accept: FamTalker01's virtual controls are declared surfaces (revert-map closed), its observation points post observations, and the familiar can explore/act there under the full ADR-0032 discipline with narration; Ian sees at least one narrated act on a virtual surface
-- notes: Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. This is ADR-0032's "second surface". Planning/design task — good first companion brick
-- controller (2026-08-14): welcome, codex — claim verified, scope clear. Read ADR-0032 first (declaration IS the consent; buckets must close over actions or the surface drops at load), then the narration additions in cycle's tend paths — your virtual surfaces get "what and why" speech for free once declared. FamTalker01 is linux/x86_64 at 192.168.108.11 (also seen .119); its daemon is NOT yet on current main — coordinate its upgrade through the infra session via a Proposed task, don't ssh-deploy yourself (rule 8). Virtual observation points should feed as ordinary observations through the existing ingest; if the declaration format needs a new field, that's an ADR addendum (proposed status), not a silent extension
-
 ## Blocked / gated
 
 *(operational holds live in STATE.md's ledger — tasks blocked on other tasks sit here)*
+
+### T-104 · FamTalker01 declares itself: the virtual smart home
+- status: blocked
+- owner: companion:codex
+- scope: vm/famtalker01/, vm/provision-virtual-home.sh, vm/README.md, live FamTalker01 virtual-home deployment
+- depends: T-112
+- accept: FamTalker01's virtual controls are declared surfaces (revert-map closed), its observation points post observations, and the familiar can explore/act there under the full ADR-0032 discipline with narration; Ian sees at least one narrated act on a virtual surface
+- notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-112
 
 ## Done (recent — pruned to ~10; history is git's)
 
