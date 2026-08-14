@@ -517,26 +517,44 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
                 "gossip peer".to_string(),
             )
         };
-        // The SystemName ladder (ADR-0039): a deliberately-given device name outranks
-        // everything; then a resolved tailnet hostname for gossip peers; then the
-        // device's own brief label. The device record is keyed by the durable device_id,
-        // so a rotated key still finds its name through the membership record.
-        let device_name = crate::record::find_by_key(dir, &p.node_id)
-            .map(|r| r.device_id)
-            .and_then(|id| crate::device::load(dir, &id).ok().flatten())
-            .map(|d| d.name)
-            .filter(|n| !n.is_empty());
-        let label = device_name.unwrap_or_else(|| {
-            if !is_device {
+        // The SystemName ladder (ADR-0039): a deliberately-given device name, else the
+        // DISCOVERED name (mDNS/tailnet — the name its human gave the device itself),
+        // else a live tailnet hostname, else the brief label. The record is keyed by the
+        // durable device_id, so a rotated key still finds its name. Along the way the
+        // door REMEMBERS this sighting's address on the device record — the LAN, tailnet
+        // and NAT faces accumulate so discovery at any interface associates back to the
+        // member instead of ghosting beside it (Ian's "codex beside iPad", 2026-08-14).
+        let dev_id = crate::record::find_by_key(dir, &p.node_id).map(|r| r.device_id);
+        let (given_name, discovered_name) = if let Some(id) = &dev_id {
+            let _ = crate::device::note_network(
+                dir,
+                id,
+                if is_cgnat_ip(&ip) { "tailnet" } else { "lan" },
+                &ip,
+                now,
+            );
+            if let Some(host) = tailnet.get(&ip).filter(|h| !h.is_empty()) {
+                let _ = crate::device::set_discovered_name(dir, id, host, now);
+            }
+            crate::device::load(dir, id)
+                .ok()
+                .flatten()
+                .map(|d| (d.name, d.discovered_name))
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let label = Some(given_name)
+            .filter(|n| !n.is_empty())
+            .or_else(|| Some(cap_word(&discovered_name)).filter(|n| !n.is_empty()))
+            .or_else(|| {
                 tailnet
                     .get(&ip)
                     .cloned()
                     .filter(|h| !h.is_empty())
-                    .unwrap_or_else(|| p.label.clone())
-            } else {
-                p.label.clone()
-            }
-        });
+                    .map(|h| cap_word(&h))
+            })
+            .unwrap_or_else(|| p.label.clone());
         let detail = if is_device {
             reports
                 .get(&p.node_id)
@@ -1142,6 +1160,26 @@ fn attach_companions(out: &mut [Member], obs: &[familiar_kernel::observation::Ob
 }
 
 /// A friendlier OS name for the roster ("linux" → "Linux", "macos" → "macOS").
+/// 100.64/10 — the CGNAT range Tailscale hands out; on this mesh that IS the tailnet
+/// (the console's address cell makes the same judgement, ADR-0017).
+fn is_cgnat_ip(ip: &str) -> bool {
+    let mut parts = ip.split('.');
+    matches!(
+        (parts.next().and_then(|a| a.parse::<u8>().ok()), parts.next().and_then(|b| b.parse::<u8>().ok())),
+        (Some(100), Some(b)) if (64..=127).contains(&b)
+    )
+}
+
+/// Display capitalization for a discovered hostname ("codex" → "Codex") — display-only,
+/// the slug stays the identity, same convention as the console's cap().
+fn cap_word(h: &str) -> String {
+    let mut c = h.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
 fn os_pretty(os: &str) -> String {
     match os {
         "linux" => "Linux".into(),
