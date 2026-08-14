@@ -40,6 +40,30 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-14 (night) — The second lens: relation, not just repetition
+
+### What changed
+
+- **`loops::detect_cooccurrence`** (reasoning brief A1, T-111): a pure second detector
+  beside recurrence — event classes (actor + action + object-head, so `lights=dim` and
+  `lights=bright` are one behaviour) that keep landing together within 10 minutes,
+  judged against the rarer side's own rate (≥3 together, ≥0.5 of the rarer side),
+  deterministic, capped at 12, the familiar's own events excluded (a mind must not
+  theorize about its own reflection). Emits ordinary `Loop`s (`loop_type: "cooccur"`)
+  into the existing candidate path — zero new plumbing downstream. The lighting
+  pattern that only ever existed because an LLM guessed it from a prompt is now
+  computable: the regression encodes exactly that case, plus the negatives (self-echo
+  never pairs; far-apart never pairs; noise never pairs).
+- Wired at tick step 2 beside `detect`. Landed parallel-safe ahead of the design
+  dialogue's convergence (additive lens; codex's rounds may retune thresholds or score
+  shape as follow-up bricks — invited explicitly in round 1).
+
+### Checks run
+
+- Loops tests 6/6 (two new: the lighting relation with noise rejection; self-echo +
+  far-apart negatives; determinism of ids), full bar with clippy exit-verified,
+  release build.
+
 ## 2026-08-14 (evening) — Two AIs, one codebase: the coordination directory
 
 ### What changed
