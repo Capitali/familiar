@@ -2226,7 +2226,19 @@ fn cmd_rules(args: &[String]) -> ExitCode {
     use familiar_kernel::reaction_rule as rules;
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
-    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    // Positionals with flag VALUES skipped (`--data-dir <path>` contributes neither).
+    let mut positional: Vec<&String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i].starts_with("--") {
+            if !args[i].contains('=') && args.get(i + 1).is_some_and(|v| !v.starts_with("--")) {
+                i += 1;
+            }
+        } else {
+            positional.push(&args[i]);
+        }
+        i += 1;
+    }
     match positional.first().map(|s| s.as_str()) {
         None | Some("list") => {
             let file = rules::load(&dir);
