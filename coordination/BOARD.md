@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-118 · Isolate test temp directories across concurrent worktrees
+- status: proposed
+- owner: —
+- scope: fixed-name temporary-directory helpers in crate tests (begin with crates/cycle)
+- depends: —
+- accept: test temp roots include a process- or worktree-unique component; concurrent full green-bar runs cannot mutate the same fixture directory; a focused regression or parallel harness pins the isolation
+- notes: observed while barring T-103: one full run overlapped the controller's run and cycle's parameter-revert test saw its second tick revert again; the test passed alone and a clean full rerun passed after the other job ended. Treat this as test-infrastructure hardening, not a T-103 failure
+
 ### T-117 · Deploy and witness FamTalker01's virtual home
 - status: proposed
 - owner: —
@@ -104,14 +112,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: one versioned classing/matcher module (class v1 = A1's head heuristic; exact/prefix FieldMatch per Q1); version rides every persisted class; A1 calls it; pure + heavily tested
 - notes: dialogue Q7, decided round 3
 
-### T-103 · Reach-side reverse name lookup
-- status: claimed
-- owner: companion:codex
-- scope: crates/reach, crates/cli (discover + reach scan call sites)
-- depends: —
-- accept: the paced reach sweep resolves LAN neighbours' names itself (mDNS PTR / local-DNS reverse), gated by network_discovery, feeding `can-reach device:<name>` so the frontier join adopts them; hermetic test via the probe-injection seam
-- notes: today a door only ever OVERHEARS names; this makes it ask. No router config may ever be required (Ian). dig -x shells out fine on macOS + the linux lighthouse. Scope corrected on claim: the sweep moved from cycle to the CLI periphery after this task was seeded (docs/07-roadmap.md); no metabolic scan is reintroduced
-
 ### T-111 · A1: the co-occurrence lens
 - status: done
 - owner: controller
@@ -133,6 +133,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-103 · Reach-side reverse name lookup
+- status: done
+- owner: companion:codex
+- merged: 32708e3
+- scope: crates/reach, crates/cli (discover + reach scan call sites)
+- depends: —
+- accept: the paced reach sweep resolves numeric LAN neighbours through bounded local-DNS then direct mDNS PTR lookup, gated separately by network and network_discovery, and feeds `can-reach device:<name>` without overriding existing DHCP/ARP names; injected resolver tests are hermetic
+- notes: 7 reach tests and the full green bar pass. The first concurrent full run exposed the likely fixed-name temp collision proposed as T-118; its focused rerun and the clean full rerun passed. No metabolic scan was reintroduced
 
 ### T-109 · Reasoning design dialogue: codex's rounds
 - status: done
