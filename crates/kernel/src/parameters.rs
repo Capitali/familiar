@@ -45,6 +45,10 @@ pub const LLM_CALLS_MAX: u32 = 64;
 
 /// One co-ownership correction the familiar made to a human-set parameter, with the Law
 /// it serves. Transient — the cycle turns each into a visible observation.
+fn default_prediction_grace() -> i64 {
+    120
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Revert {
     pub field: &'static str,
@@ -85,6 +89,11 @@ pub struct Parameters {
     /// Within this window a counter-change is "the human undid it" (negative evidence);
     /// past it, quiet is consent and the change stands (ADR-0031).
     pub reaction_window_secs: i64,
+    /// Settlement grace for predictions whose own grace is 0 (dialogue Q6: grace rides
+    /// the prediction; this is the inherited default). Late evidence inside a window
+    /// can amend a provisional miss until deadline + grace.
+    #[serde(default = "default_prediction_grace")]
+    pub prediction_grace_secs: i64,
     /// Provenance: who last set these — `"observer"` (the human, via the Glass) or
     /// `"familiar"` (a self-adjustment/revert).
     pub last_set_by: String,
@@ -101,6 +110,7 @@ impl Default for Parameters {
             dossier_half_life_days: 30,
             actuator_poll_secs: 300,
             reaction_window_secs: 900,
+            prediction_grace_secs: 120,
             last_set_by: "default".to_string(),
         }
     }
@@ -142,6 +152,7 @@ impl Parameters {
         self.dossier_half_life_days = self.dossier_half_life_days.clamp(1, 3_650);
         self.actuator_poll_secs = self.actuator_poll_secs.clamp(30, 3_600);
         self.reaction_window_secs = self.reaction_window_secs.clamp(60, 86_400);
+        self.prediction_grace_secs = self.prediction_grace_secs.clamp(30, 3_600);
         self
     }
 

@@ -136,6 +136,34 @@ control seam.
 - Wildhorse's local upgrade helper (`~/familiar-upgrade-adr0038.sh`, outside the repo)
   predates this lesson — if wildhorse moves to macOS 27, it needs the same bracket.
 
+## 2026-08-15 (small hours) — A theory says what the world will do (dialogue B1)
+
+### What changed
+
+- **`kernel::prediction`** — the engine the design dialogue specified (Q1/Q3/Q6, all
+  DECIDED with codex): anchored, typed, mechanically-settled claims. An anchor match
+  opens ONE pending instance (opening observation + explicit deadline, cooldown against
+  chatty anchors, saturating never-opened arithmetic); consequents match by EVENT time
+  inside [not_before, deadline]; certainty finalizes immediately (Confirmed /
+  AbsentViolated), quiet waits out a GRACE (carried per prediction, defaulting from the
+  co-owned `prediction_grace_secs`, sane-clamped 30..3600) so late-delivered in-window
+  evidence amends a provisional miss — and a written `PredictionResult` is append-only,
+  never rewritten. Unfalsifiable Absent claims (no bounded window) are refused at mint.
+  `calibration(thread)` derives per-theory counts FROM results — the L4 inversion:
+  scores derive from evidence, never overwrite it.
+- Wired as tick step 2c: score against the freshly loaded log each tick (overlap-aware
+  cursor so grace-late events are still seen). Belief-state transitions and narration
+  deliberately NOT here — that is T-114's state machine, per the dialogue's division.
+
+### Checks run
+
+- Prediction tests: confirm-on-arrival + miss-only-after-grace (with the
+  inside-grace-not-yet-a-miss negative), late-evidence amendment + final-immutability,
+  Absent both ways + unfalsifiability refusal. Full bar: fmt, clippy --all-targets
+  (exit-verified), 31 suites, release. Landed atop the reach test-lint fix after a
+  same-fix race with origin resolved by reset-to-origin (redundant local commits
+  dropped deliberately).
+
 ## 2026-08-14 (later night) — One vocabulary for every lens (dialogue Q7)
 
 ### What changed

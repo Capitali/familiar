@@ -3737,6 +3737,17 @@ pub fn tick(
     detected.extend(loops::detect_cooccurrence(&obs));
     loops::save_all(dir, &detected)?;
 
+    // 2c. Score the theories' PREDICTIONS against what actually arrived (dialogue
+    //     Q1/Q3/Q6; brief B1): anchors open windows, event-time evidence settles them,
+    //     results append to the calibration record. Pure bookkeeping here — belief
+    //     transitions and their narration are the state machine's job (T-114).
+    {
+        let grace = Parameters::load_or_default(dir)
+            .sane()
+            .prediction_grace_secs;
+        let _ = familiar_kernel::prediction::score(dir, &obs, now, grace);
+    }
+
     // 2b. Remember the people (ADR-0022): fold new observations into the per-human
     //     dossier — its own resumable cursor also catches what device agents POSTed
     //     between ticks. Best-effort like reflection: a derived, rebuildable view must
