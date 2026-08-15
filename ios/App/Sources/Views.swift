@@ -71,13 +71,20 @@ struct EnrollView: View {
                         .font(.system(size: 26, weight: .semibold)).foregroundStyle(Fam.ink)
 
                     if model.enrolling {
-                        // Auto-enroll (or a manual request) is in flight — show the code to match.
+                        // Auto-enroll (or a manual request) is in flight — say what is being
+                        // tried (T-120: progress, not silence), and show the code to match.
                         Panel {
                             VStack(spacing: 12) {
                                 HStack(spacing: 10) {
                                     ProgressView().tint(Fam.blueSoft)
-                                    Text("Waiting for the mesh to admit this device…")
+                                    Text(model.joinProgress.detail.isEmpty
+                                         ? "Waiting for the mesh to admit this device…"
+                                         : model.joinProgress.detail)
                                         .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.8))
+                                }
+                                if model.joinProgress.stage == .awaitingAdmission, model.joinProgress.tries > 0 {
+                                    Text("still asking — \(model.joinProgress.tries) checks, ~\(max(1, model.joinProgress.tries * 2 / 60)) min")
+                                        .font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.7))
                                 }
                                 Text("CONFIRMATION CODE").font(Fam.mono(9)).tracking(2).foregroundStyle(Fam.monoDim.opacity(0.6))
                                 Text(model.confirmationCode)
@@ -87,19 +94,34 @@ struct EnrollView: View {
                                     .multilineTextAlignment(.center)
                             }
                         }.padding(.horizontal, 22)
-                    } else if !model.autoEnrollTried {
+                    } else if !model.autoEnrollTried || model.joinProgress.stage == .seekingDirectory {
+                        // Directory lookup in flight — autoEnrollTried flips true before the
+                        // fetch, so without the stage check this screen read "couldn't reach"
+                        // DURING the first, possibly slow, lighthouse call (T-120).
                         Panel {
                             HStack(spacing: 10) { ProgressView().tint(Fam.blueSoft)
-                                Text("Looking for the mesh…").font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
+                                Text(model.joinProgress.stage == .seekingDirectory && !model.joinProgress.detail.isEmpty
+                                     ? model.joinProgress.detail : "Looking for the mesh…")
+                                    .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.75)) }
                         }.padding(.horizontal, 22)
                     } else {
                         // Severed by the human: the device waits for an explicit ask — it must
                         // never quietly rejoin (there was no way to leave, or to test arriving).
                         Text(model.severedByHuman
                              ? "Severed, by your hand. This device holds its key but sends nothing — it rejoins only when you ask."
-                             : "Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see.")
+                             : (model.joinProgress.detail.isEmpty
+                                ? "Couldn't reach the mesh automatically. Retry, or use an invite from a peer you can see."
+                                : model.joinProgress.detail))
                             .font(.system(size: 14)).foregroundStyle(Fam.ink.opacity(0.6))
                             .multilineTextAlignment(.center).padding(.horizontal, 28)
+                        if !model.severedByHuman, !model.joinProgress.causes.isEmpty {
+                            // Name WHAT failed, per address — a diagnosable refusal, not a shrug.
+                            VStack(alignment: .leading, spacing: 3) {
+                                ForEach(model.joinProgress.causes.prefix(4), id: \.self) {
+                                    Text($0).font(Fam.mono(10)).foregroundStyle(Fam.monoDim.opacity(0.65))
+                                }
+                            }.padding(.horizontal, 28)
+                        }
                         Button {
                             model.severedByHuman = false
                             model.autoEnrollTried = false

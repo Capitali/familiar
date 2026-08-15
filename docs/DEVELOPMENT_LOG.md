@@ -6,6 +6,52 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 (small hours) — The console says what it is trying (companion:claude-bootstrap)
+
+### What changed
+
+- **T-120, from Ian's words:** a first join can take a minute or two, and the console
+  answered it with silence resolving to a red exclamation. Join-in-progress and failure
+  were one state.
+- **AppModel grows `JoinProgress`** — a published stage machine (seekingDirectory →
+  knocking → awaitingAdmission → admitted → joined | unreachable | declined) written at
+  every transition of autoEnroll/requestJoin/runHandshake, with a live `tries` count
+  mutated on every 2s admission poll (the old loop was silent for its whole ~5 minutes).
+  Stages derive from protocol facts — directory results, knock outcomes, poll answers —
+  never timers. Terminal states carry per-address causes in human words. The
+  never-written `attemptLog` (declared, shipped, rendered — and empty since birth) now
+  receives the per-host causes of every failed worldview walk.
+- **The join screens branch on the stage.** Both enroll views (iPhone + Mac) show the
+  current detail sentence, a "still asking — N checks" line while admission pends, and
+  named per-address causes in the terminal state. The `autoEnrollTried` ordering bug —
+  the flag flipped true before the directory fetch, so the screen read "couldn't reach"
+  DURING the first, slowest call — is fixed by branching on the stage.
+- **The sphere separates progress from failure.** A `#joinlive` pill (stage word +
+  spinner + detail + live counts) shows while a join is in flight; the red badge is
+  reserved for terminal failure and — on the Mac — finally carries a message
+  (`sphereLinkDown()` had been called with no argument since the day it was written).
+  The device JSON carries the stage as `join{…}`; the loading overlay gains words.
+
+### Checks run
+
+- Both schemes build (`xcodegen`; FamiliarAgent for iOS Simulator + FamiliarMac —
+  BUILD SUCCEEDED both). Fixture-verified live against the real index.html served
+  over localhost: the awaitingAdmission state renders the pill ("AWAITING ADMISSION ·
+  the door heard the knock … · asked 23× over 46s") with the badge hidden; the
+  unreachable state flips back to the badge wearing its diagnostic line, pill hidden.
+  Rust untouched; bar rerun anyway in rule-9 shape (fmt, clippy `--all-targets
+  -D warnings`, 33 suites ok, exits checked).
+
+### Next
+
+- "joined + peer count" reads implicitly from the roster the moment the worldview
+  flows; holding the joined pill briefly with a peer count is cosmetic — revisit if
+  Ian wants it.
+- Daemon-side: `supervisor()` already writes one-line stage strings to mesh/status.txt
+  that never leave the machine; surfacing them (e.g. alongside /mesh/hello) would give
+  the enroll views door-side truth as well — a wire-contract addition, so it stops for
+  Ian first. Candidate follow-up task if he wants the door's own voice in the ladder.
+
 ## 2026-08-14 (latest) — Truth stays outside the recipe (companion:codex)
 
 ### What changed

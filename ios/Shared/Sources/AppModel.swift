@@ -460,6 +460,16 @@ final class AppModel: ObservableObject {
             "hosts": hosts,
             "membership": membershipDict,
             "attempts": attemptLog,
+            // The join story as machine state (T-120): the console shows what is being TRIED
+            // while the link is still forming, instead of wearing the failure mark.
+            "join": [
+                "stage": joinProgress.stage.rawValue,
+                "detail": joinProgress.detail,
+                "host": joinProgress.host,
+                "tries": joinProgress.tries,
+                "elapsed": Int(Date().timeIntervalSince(joinProgress.startedAt)),
+                "causes": joinProgress.causes,
+            ] as [String: Any],
             "servedHuman": servedHuman,
             // Join in flight (B6): the console shows a progress indicator instead of snapping
             // back to the static path card while the introduction round-trips.
@@ -589,6 +599,34 @@ final class AppModel: ObservableObject {
     /// first, then the QR fallback only if discovery turned up nothing).
     @Published var autoEnrollTried = false
 
+    /// What the join machinery is DOING right now (T-120) — a state the screens can branch on,
+    /// so a slow first join reads as live progress instead of silence resolving to a red mark.
+    /// Progress and failure are different facts and must read differently.
+    enum JoinStage: String {
+        case idle                // nothing in flight
+        case seekingDirectory    // asking the lighthouse which meshes are reachable
+        case knocking            // presenting the covenant at a door
+        case awaitingAdmission   // the door heard the knock; the mesh has not admitted yet
+        case admitted            // grant in hand; first worldview read under way
+        case joined              // linked — the worldview is flowing
+        case unreachable         // terminal this round (retryable): nothing answered / no admission
+        case declined            // terminal: the mesh said no
+    }
+    struct JoinProgress: Equatable {
+        var stage: JoinStage = .idle
+        var detail = ""            // one human sentence: what is being tried, or what failed
+        var host = ""              // the address in hand
+        var tries = 0              // admission polls answered "pending" so far
+        var startedAt = Date()     // when this stage began (screens derive elapsed)
+        var causes: [String] = []  // terminal states: per-address causes, human-readable
+    }
+    @Published var joinProgress = JoinProgress()
+
+    /// Enter a stage: the clock resets on every transition; in-stage ticks mutate fields instead.
+    private func joinStage(_ stage: JoinStage, _ detail: String, host: String = "", causes: [String] = []) {
+        joinProgress = JoinProgress(stage: stage, detail: detail, host: host, tries: 0, startedAt: Date(), causes: causes)
+    }
+
     /// **Auto-enroll (ADR-0012).** On first run, ask the baked rendezvous (the lighthouse) what
     /// meshes are reachable and start joining the one it finds — no QR needed. The device attests
     /// the Three Laws and shows its confirmation code; the human approves at the familiar. Falls
@@ -605,13 +643,18 @@ final class AppModel: ObservableObject {
             // answering the whole time. An empty list and an unreachable lighthouse are
             // different facts and must read differently.
             var doors: [MeshDoor] = []
+            self.joinStage(.seekingDirectory, "asking the lighthouse which meshes are reachable…",
+                           host: Self.rendezvousHost)
             do {
                 doors = try await RendezvousClient.directory(host: Self.rendezvousHost, port: port)
             } catch {
+                self.joinStage(.unreachable, "couldn't reach the lighthouse — it may be down, or this device offline",
+                               causes: ["\(Self.rendezvousHost): \(Self.brief(error))"])
                 note("✗ couldn't reach the lighthouse: \(Self.brief(error))")
                 return
             }
             guard let door = doors.first else {
+                self.joinStage(.unreachable, "the lighthouse answered, but lists no reachable mesh — use an invite")
                 note("the lighthouse lists no reachable mesh — use an invite instead")
                 return
             }
@@ -655,6 +698,7 @@ final class AppModel: ObservableObject {
         saveEnrollment()   // Keychain — durable across reinstalls (UserDefaults is wiped on reinstall)
         enrolling = true
         membership = .knocking
+        joinStage(.knocking, "joining “\(p.label)” — presenting the covenant…", host: hosts[0])
         note("joining “\(p.label)” — accepting the Three Laws…")
         let node = self.node
         Task { await self.runHandshake(candidates: self.hosts, port: p.port, node: node) }
@@ -664,26 +708,41 @@ final class AppModel: ObservableObject {
         // Walk the candidate addresses until one answers — the payload lists them most-universal
         // first, but only the device knows which are reachable from where it is right now.
         var lastError: Error?
+        var causes: [String] = []
         for host in candidates {
             let enroller = EnrollmentClient(host: host, port: port)
+            joinStage(.knocking, "presenting the covenant at \(host)…", host: host)
             do {
                 // Under the two-filter door (ADR-0026) a knock lands a guest cert immediately.
                 // The polling loop stays for one release: an OLD familiar still pends, and its
                 // poll seam upgrades the pending to a guest grant the moment it redeploys.
                 var grant = try await enroller.requestJoin(node: node)
                 promoteHost(host)
-                if grant == nil { note("waiting for the mesh to answer the knock…") }
+                if grant == nil {
+                    joinStage(.awaitingAdmission,
+                              "the door heard the knock — waiting for the mesh to admit this device",
+                              host: host)
+                    note("waiting for the mesh to answer the knock…")
+                }
                 var tries = 0
                 while grant == nil, tries < 150 {                          // ~5 min of polling
                     try await Task.sleep(nanoseconds: 2_000_000_000)
                     grant = try await enroller.pollGrant(nodeId: node.nodeId)
                     tries += 1
+                    joinProgress.tries = tries   // the screens read a live count, not silence
                 }
-                guard let g = grant else { enrolling = false; membership = .none; note("… no answer yet — tap to retry"); return }
+                guard let g = grant else {
+                    enrolling = false; membership = .none
+                    joinStage(.unreachable,
+                              "the door heard the knock, but no one admitted this device in five minutes — try again",
+                              host: host)
+                    note("… no answer yet — tap to retry"); return
+                }
                 saveGrant(g)
                 enrolling = false
                 enrolled = true
                 membership = .guest(path: Self.admissionPath)
+                joinStage(.admitted, "admitted — reading “\(g.group_label)” as a guest…", host: host)
                 note("✓ the covenant is in force — reading “\(g.group_label)” as a guest")
                 // Hand the paired Apple Watch this familiar's address so it can enrol itself by
                 // covenant (address only — the watch mints its own key + gets its own grant).
@@ -704,14 +763,18 @@ final class AppModel: ObservableObject {
             } catch EnrollmentClient.EnrollError.denied {
                 enrolling = false
                 membership = .none
+                joinStage(.declined, "the mesh declined this device")
                 note("✗ the mesh declined this device")
                 return
             } catch {
                 lastError = error      // unreachable on this path — try the next address
+                causes.append("\(host): \(Self.brief(error))")
             }
         }
         enrolling = false
         membership = .none
+        joinStage(.unreachable, "couldn't reach the mesh at any address — try again, or use an invite",
+                  causes: causes)
         note("… couldn't reach the mesh at any address: \(lastError.map { "\($0)" } ?? "no candidates")")
     }
 
@@ -1474,6 +1537,12 @@ final class AppModel: ObservableObject {
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
+                attemptLog = []
+                // The first successful read closes the join story (T-120) — but only on a
+                // transition, so the every-few-seconds poll doesn't churn the stage clock.
+                if joinProgress.stage != .joined {
+                    joinStage(.joined, "linked — the worldview is flowing", host: host)
+                }
                 // A voice turn is answered by voice — speak the reply this read carried in.
                 speakReplyIfDue(view)
                 // Loyalty with hysteresis: only a preferred door that keeps failing loses its
@@ -1516,7 +1585,10 @@ final class AppModel: ObservableObject {
             }
         }
         // Every candidate failed — surface the full picture so the cause is diagnosable at a glance:
-        // trusted-pin counts (enrolled + baked) and each host's error code.
+        // trusted-pin counts (enrolled + baked) and each host's error code. The per-attempt lines
+        // also land in attemptLog, which the Device screen already renders (T-120 — the field
+        // existed with a render path but was never written).
+        attemptLog = attempts
         worldviewError = "pins \(MeshTLS.pins.count)+\(MeshTLS.alwaysTrust.count) · " + attempts.joined(separator: " ")
     }
 

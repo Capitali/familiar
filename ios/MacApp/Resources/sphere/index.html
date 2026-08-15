@@ -92,6 +92,16 @@
     <div id="linkmsg" class="m" style="max-width:70vw;font-size:9px;color:rgba(255,160,160,0.85);background:rgba(30,8,12,0.55);padding:3px 8px;border-radius:7px;text-align:center;"></div>
   </div>
 
+  <!-- first-join progress (T-120): while a join is in flight the console says what it is
+       DOING instead of wearing the failure mark — progress and failure are different facts. -->
+  <div id="joinlive" style="display:none;position:absolute;top:calc(84px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:9;flex-direction:column;align-items:center;gap:5px;pointer-events:none;">
+    <div style="display:flex;align-items:center;gap:8px;background:rgba(10,22,44,0.6);border:1px solid rgba(108,155,255,0.4);backdrop-filter:blur(12px);padding:6px 12px;border-radius:16px;">
+      <div style="width:12px;height:12px;border-radius:50%;border:2px solid rgba(108,155,255,0.25);border-top-color:#6c9bff;animation:spin 1s linear infinite;"></div>
+      <span id="joinstage" class="m" style="font-size:9px;letter-spacing:0.16em;color:#9dc0ff;"></span>
+    </div>
+    <div id="joindetail" class="m" style="max-width:70vw;font-size:9px;color:rgba(174,203,255,0.85);background:rgba(8,16,32,0.55);padding:3px 8px;border-radius:7px;text-align:center;"></div>
+  </div>
+
   <div id="screenbtns"></div>
 
   <!-- top:53% + 78vh: the holo's top edge clears the ring's top-centre glyph (the odd-count
@@ -169,9 +179,10 @@
     </svg>
   </button>
 
-  <!-- loading: spinner only -->
-  <div id="loading" style="position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:#03050a;">
+  <!-- loading: spinner + a word, so even the first seconds are not silence (T-120) -->
+  <div id="loading" style="position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#03050a;">
     <div style="position:relative;width:58px;height:58px;"><div style="position:absolute;inset:0;border-radius:50%;border:2px solid rgba(90,140,255,0.18);border-top-color:#6c9bff;animation:spin 1s linear infinite;"></div></div>
+    <div class="m" style="font-size:9px;letter-spacing:0.18em;color:rgba(140,170,230,0.55);">WAKING THE SPHERE</div>
   </div>
 </div>
 
@@ -1708,11 +1719,31 @@ function renderChrome() {
       }
     }
   }
-  const showBadge = !S.linkOk || !!S.jsErr;
+  // T-120: while the link is down because a JOIN is still in flight, the console says what
+  // it is trying instead of wearing the failure mark — the badge is for terminal failure.
+  const jp = (S.device && S.device.join) || null;
+  const joining = !S.linkOk && jp &&
+    ['seekingDirectory', 'knocking', 'awaitingAdmission', 'admitted'].includes(jp.stage);
+  const showBadge = (!S.linkOk || !!S.jsErr) && !joining;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
   const lm = $('linkmsg');
   const msg = (!S.linkOk && S.linkErr) ? S.linkErr : (S.jsErr || '');
-  lm.textContent = msg; lm.style.display = msg ? 'block' : 'none';
+  lm.textContent = msg; lm.style.display = (showBadge && msg) ? 'block' : 'none';
+  const jl = $('joinlive');
+  if (jl) {
+    if (joining) {
+      const stageWord = { seekingDirectory: 'SEEKING THE MESH', knocking: 'KNOCKING',
+        awaitingAdmission: 'AWAITING ADMISSION', admitted: 'ADMITTED — FIRST READ' }[jp.stage] || 'JOINING';
+      const extra = jp.stage === 'awaitingAdmission' && jp.tries
+        ? ' · asked ' + jp.tries + '× over ' + dur(jp.elapsed || 0)
+        : ((jp.elapsed || 0) > 3 ? ' · ' + dur(jp.elapsed) : '');
+      jl.style.display = 'flex';
+      $('joinstage').textContent = stageWord;
+      const jd = $('joindetail');
+      jd.textContent = (jp.detail || '') + extra;
+      jd.style.display = jd.textContent ? 'block' : 'none';
+    } else jl.style.display = 'none';
+  }
 }
 
 function renderCallouts() {
