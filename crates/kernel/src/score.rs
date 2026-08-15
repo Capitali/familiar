@@ -190,6 +190,7 @@ mod tests {
             superseded_by: String::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         }
     }
 

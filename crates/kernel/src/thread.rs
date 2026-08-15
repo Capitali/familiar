@@ -100,6 +100,11 @@ pub struct Thread {
     /// evidence or human attention renews — a daemon tick or another paraphrase does not.
     #[serde(default)]
     pub expires_at: i64,
+    /// The typed both-edges policy this theory proposes (T-102): carried until the
+    /// human's explicit assent on an acted thread mints it as a paired ReactionRule
+    /// policy. None on legacy rows and prose paths.
+    #[serde(default)]
+    pub rule_proposal: Option<crate::reaction_rule::RuleProposal>,
 }
 
 /// How long an unrenewed Inquiry stands before it expires (dialogue Q3: seven days).
@@ -168,6 +173,8 @@ pub struct Mint {
     /// Unix secs an Inquiry expires (0 = never; theories always 0).
     pub expires_at: i64,
     pub predictions_sig: Vec<String>,
+    /// Typed both-edges policy the theory carries toward assent (T-102).
+    pub rule_proposal: Option<crate::reaction_rule::RuleProposal>,
 }
 
 /// What the mint decided (dialogue Q1): a brand-new thought, a competing alternative
@@ -281,6 +288,7 @@ pub fn mint(dir: &Path, m: Mint, now: i64) -> io::Result<Disposition> {
         superseded_by: String::new(),
         kind: m.kind,
         expires_at: m.expires_at,
+        rule_proposal: m.rule_proposal,
     };
     append(dir, &t)?;
     let competes = !fam.is_empty()
@@ -467,6 +475,7 @@ mod tests {
             superseded_by: String::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         };
         append(&p, &t).unwrap();
         assert_eq!(load(&p).unwrap(), vec![t.clone()]);
@@ -505,6 +514,7 @@ mod tests {
             superseded_by: String::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         }
     }
 
@@ -571,6 +581,7 @@ mod tests {
             predictions_sig: vec!["ian|adjusted|lighting:|absent|7200".into()],
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         }
     }
 
@@ -652,6 +663,7 @@ mod tests {
             predictions_sig: Vec::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         };
         assert!(matches!(
             mint(&p, unkeyed("a"), 100).unwrap(),
