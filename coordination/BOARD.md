@@ -94,7 +94,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Queued
 
 ### T-133 · Remote positive gate grants are refused (D1, priority zero)
-- status: queued
+- status: queued — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
 - owner: — (either lane; codex may claim)
 - scope: crates/mesh (apply_authority_grant + brief AuthorityGrant path), crates/kernel/boundary write path
 - depends: T-139 harness (shares its adversarial fixtures)
@@ -133,8 +133,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: one shared ProvenanceRef vocabulary; strict per-domain envelopes (name claim, prediction result, derived belief, convention); discredited stamps supersede without rewriting history; shared lineage is a consented pseudonymous projection
 - notes: D5 (codex C-D + claude P-N unified)
 
-### T-138 · ADR: coordination is for conventions, never truth (D6 — PROPOSED, needs Ian)
-- status: proposed
+### T-138 · ADR: coordination is for conventions, never truth (D6)
+- status: done — ADR-0041 written (proposed for Ian's acceptance of the text; he approved D6 in principle 2026-08-15)
 - owner: —
 - scope: docs/decision-records
 - depends: T-140 (hard gate before any implementation)
