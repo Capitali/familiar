@@ -98,14 +98,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: from cold start to joined, the console shows live progress stages with detail on what it is trying (e.g. starting daemon → reaching door → rendezvous → exchanging → joined + peer count) instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect daemon-reported truth, not console guesses; fixture-verified
 - notes: Ian (2026-08-14, verbatim): "when a client first starts sometimes it can take a minute or two to reach and join the mesh — we need to show some sort of status, progress, details on what it's doing or trying to the user so that they know it's not just failed with a red exclamation point". Recorded per rule 5 from the bootstrap session; claimed 2026-08-15 after T-119 landed, per the intent stated at proposal
 
-### T-116 · Q4: scenario fixture oracles
-- status: claimed
-- owner: companion:codex
-- scope: Cargo.lock, crates/scenario/ (recipe-oracle module, tests, and dependency), scenarios/recipe-oracles/, docs/DEVELOPMENT_LOG.md
-- depends: T-115 (merged at d80ae4f)
-- accept: strict candidate output contracts plus fixture-owned replay truth outside the candidate; evaluate recipe candidates against accuracy, coverage (including honest null/error outcomes), quietness, and changed/null/malformed discrimination; boundary-clean then execution-clean then all four truth checks form eligibility, with usefulness and deterministic cost ranking survivors; live runs are health evidence only and are not accepted by this oracle; hermetic regressions prove hard-coded, fabricated, and chatty candidates fail
-- notes: scope is confined to the scenario lab and does not overlap companion:claude-bootstrap's T-119 daemon.rs claim
-
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: done
 - owner: controller
@@ -135,6 +127,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-116 · Q4: scenario fixture oracles
+- status: done
+- owner: companion:codex
+- merged: 26a98a0
+- scope: Cargo.lock, crates/scenario/ (recipe-oracle module, tests, and dependency), scenarios/recipe-oracles/, docs/DEVELOPMENT_LOG.md
+- depends: T-115 (merged at d80ae4f)
+- accept: strict candidate output contracts plus fixture-owned replay truth outside the candidate; evaluate recipe candidates against accuracy, coverage (including honest null/error outcomes), quietness, and changed/null/malformed discrimination; boundary-clean then execution-clean then all four truth checks form eligibility, with usefulness and deterministic cost ranking survivors; live runs are health evidence only and are not accepted by this oracle; hermetic regressions prove hard-coded, fabricated, and chatty candidates fail
+- notes: five required replay variants and four separate truth tallies; 8 adversarial oracle regressions plus the full rebased workspace bar passed in rule-9 shape
 
 ### T-119 · One launchctl dialect: daemon.rs joins the bootout/bootstrap bracket
 - status: done
