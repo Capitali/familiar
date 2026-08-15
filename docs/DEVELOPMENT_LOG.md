@@ -6,6 +6,46 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — A console is not its machine (companion:claude-bootstrap)
+
+### What changed
+
+- **T-130 (Ian's screenshot: both Macs standing twice on the roster).** The pairing
+  key was being destroyed BEFORE the pairing ran: a console shares its machine's
+  tailnet IP, so the SystemName ladder's IP-keyed hostname rung renamed "Wildhorse
+  console" to "Wildhorse" — erasing the " console" stem `attach_consoles` pairs on —
+  and PERSISTED the damage onto the console's DeviceRecord. Separately, the sphere's
+  SELF row never nested, even under a correct attribution, so the local pair stood
+  twice by design. (Evidence: the lighthouse — no tailnet map — still held the intact
+  "Wildhorse console" label; tailnet-member doors held the renamed one.)
+- **The ladder learns what a console is.** `ladder_label` (now a pure function):
+  a console-shaped peer (self-reported " console" label or a mac:* actor) never takes
+  machine-derived names — discovered/tailnet rungs skipped, `set_discovered_name`
+  never stamped — and its own report outranks a record already carrying the sticky
+  damage (self-healing). The human's explicit given name still outranks everything.
+  `attach_consoles` and `is_gossipable_addr` are UNTOUCHED: the T-090 shared-NAT
+  refusal stands exactly as built.
+- **The SELF row may come home — when the host vouches.** The sphere nests a SELF
+  console under its own machine ONLY when the host card wears the console chip the
+  same door set when it attached the pair (one door, two matching writes). A stale
+  one-sided attribution — the T-090 scenario — carries no chip on the true host, so
+  read-loyalty against old doors survives without every SELF row being an orphan.
+
+### Checks run
+
+- `a_console_is_not_its_machine` pins all four ladder truths (rename refused, sticky
+  damage outranked, daemons still take tailnet names, Ian's word wins). Live sphere
+  fixture over localhost: the four-row fixture reproducing Ian's screenshot collapses
+  to ONE card per Mac with the chip; the stale-unvouched fixture leaves SELF standing
+  alone. Full bar in rule-9 shape, tests twice; both schemes build.
+
+### Next
+
+- The durable key remains a typed host identity (additive `machine` on MemberStatus —
+  Swift hostname stem vs the daemon's `uname -n` stem): T-131 review proposal P-I;
+  also unblocks dedup_devices's two-Macs-one-lineage flaw. Doors need this deploy for
+  labels; consoles need next build for the SELF nesting.
+
 ## 2026-08-15 — One assent, both edges: the lights get managed (companion:claude-bootstrap)
 
 ### What changed

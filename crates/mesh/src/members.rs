@@ -524,6 +524,14 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         // door REMEMBERS this sighting's address on the device record — the LAN, tailnet
         // and NAT faces accumulate so discovery at any interface associates back to the
         // member instead of ghosting beside it (Ian's "codex beside iPad", 2026-08-14).
+        // A console shares its machine's IP, so the IP-keyed tailnet hostname names the
+        // MACHINE — and a console is not its machine (T-130): renaming "Wildhorse
+        // console" to "Wildhorse" erased the very stem attach_consoles pairs on, which
+        // is how both Macs came to stand twice on Ian's roster. A console-shaped peer
+        // (self-reported " console" label, or a mac:* actor) keeps its own name: the
+        // discovered/tailnet rungs are skipped and never persisted onto its record.
+        let console_shaped =
+            p.label.to_lowercase().ends_with(" console") || actor.split(':').next() == Some("mac");
         let dev_id = crate::record::find_by_key(dir, &p.node_id).map(|r| r.device_id);
         let (given_name, discovered_name) = if let Some(id) = &dev_id {
             let _ = crate::device::note_network(
@@ -533,8 +541,10 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
                 &ip,
                 now,
             );
-            if let Some(host) = tailnet.get(&ip).filter(|h| !h.is_empty()) {
-                let _ = crate::device::set_discovered_name(dir, id, host, now);
+            if !console_shaped {
+                if let Some(host) = tailnet.get(&ip).filter(|h| !h.is_empty()) {
+                    let _ = crate::device::set_discovered_name(dir, id, host, now);
+                }
             }
             crate::device::load(dir, id)
                 .ok()
@@ -544,17 +554,13 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         } else {
             Default::default()
         };
-        let label = Some(given_name)
-            .filter(|n| !n.is_empty())
-            .or_else(|| Some(cap_word(&discovered_name)).filter(|n| !n.is_empty()))
-            .or_else(|| {
-                tailnet
-                    .get(&ip)
-                    .cloned()
-                    .filter(|h| !h.is_empty())
-                    .map(|h| cap_word(&h))
-            })
-            .unwrap_or_else(|| p.label.clone());
+        let label = ladder_label(
+            &given_name,
+            &discovered_name,
+            tailnet.get(&ip).map(String::as_str),
+            &p.label,
+            console_shaped,
+        );
         let detail = if is_device {
             reports
                 .get(&p.node_id)
@@ -1172,6 +1178,33 @@ fn is_cgnat_ip(ip: &str) -> bool {
 
 /// Display capitalization for a discovered hostname ("codex" → "Codex") — display-only,
 /// the slug stays the identity, same convention as the console's cap().
+/// The SystemName ladder as a pure function (T-130): given name, else discovered,
+/// else live tailnet hostname, else the peer's own reported label — EXCEPT that a
+/// console-shaped peer never takes machine-derived names (rungs 2-3): a console
+/// shares its machine's IP, and the IP-keyed hostname names the MACHINE. Renaming
+/// "Wildhorse console" to "Wildhorse" erased the stem attach_consoles pairs on,
+/// which is how both Macs stood twice on the roster.
+fn ladder_label(
+    given: &str,
+    discovered: &str,
+    tailnet_host: Option<&str>,
+    own_label: &str,
+    console_shaped: bool,
+) -> String {
+    if !given.is_empty() {
+        return given.to_string();
+    }
+    if !console_shaped {
+        if !discovered.is_empty() {
+            return cap_word(discovered);
+        }
+        if let Some(h) = tailnet_host.filter(|h| !h.is_empty()) {
+            return cap_word(h);
+        }
+    }
+    own_label.to_string()
+}
+
 fn cap_word(h: &str) -> String {
     let mut c = h.chars();
     match c.next() {
@@ -1667,6 +1700,52 @@ mod tests {
         assert!(
             out.iter().any(|m| m.node_id == "ipad1"),
             "a sole device is left intact"
+        );
+    }
+}
+
+#[cfg(test)]
+mod t130_tests {
+    use super::ladder_label;
+
+    /// T-130's root cause, pinned: a console sharing its machine's tailnet IP keeps
+    /// its OWN name — the machine's hostname never overwrites the pairing stem — and
+    /// a self-reported console label outranks a record already stamped with the
+    /// machine's name (the sticky damage self-heals). Ian's explicit given name
+    /// still outranks everything.
+    #[test]
+    fn a_console_is_not_its_machine() {
+        // The live failure: tailnet hostname would have renamed the console.
+        assert_eq!(
+            ladder_label("", "", Some("wildhorse"), "Wildhorse console", true),
+            "Wildhorse console"
+        );
+        // Sticky damage: a record already stamped "wildhorse" is outranked by self-report.
+        assert_eq!(
+            ladder_label(
+                "",
+                "wildhorse",
+                Some("wildhorse"),
+                "Wildhorse console",
+                true
+            ),
+            "Wildhorse console"
+        );
+        // A daemon (not console-shaped) still takes the discovered/tailnet name.
+        assert_eq!(
+            ladder_label("", "", Some("wildhorse"), "Mac.river.io", false),
+            "Wildhorse"
+        );
+        // The human's explicit word outranks everything, console or not.
+        assert_eq!(
+            ladder_label(
+                "Helm Display",
+                "",
+                Some("wildhorse"),
+                "Wildhorse console",
+                true
+            ),
+            "Helm Display"
         );
     }
 }
