@@ -136,8 +136,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian 2026-08-15, the water-pressure story — bus conversations correlated across a month and a district, municipal API telemetry as independent evidence, a message to the city manager, and a suggestion of expanded access. Every step lawful under Round 11; what makes it SERVICE is that the familiar hands humans a better argument instead of quietly fixing the water
 
 ### T-157 · A surface declares how to read itself (de-lamp the kernel, brick 1)
-- status: queued
-- owner: — (codex invited; either lane)
+- status: claimed
+- owner: companion:codex
 - scope: crates/kernel/src/actuator.rs (RawState/BucketRule/parse_state), data/actuators.json contract, crates/cycle read path
 - depends: —
 - accept: no lighting vocabulary remains in kernel types — a declaration carries its own reading contract (typed quantity name + unit + range, or an enumerated mode) and buckets are expressed over THOSE; the kernel keeps the invariants (buckets closed over actions = the revert map) and loses the grammar; the live motorlights declaration migrates with no behaviour change; a fridge (temperature threshold) and a vent (open/closed) become declarable without touching kernel code
