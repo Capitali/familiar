@@ -138,7 +138,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-157 · A surface declares how to read itself (de-lamp the kernel, brick 1)
 - status: claimed
 - owner: companion:codex
-- scope: crates/kernel/src/actuator.rs (RawState/BucketRule/parse_state), data/actuators.json contract, crates/cycle read path
+- scope: crates/kernel/src/actuator.rs (RawState/BucketRule/parse_state), data/actuators.json contract, crates/cycle read path, vm/famtalker01 declared-actuator fixture, ADR-0032 contract amendment
 - depends: —
 - accept: no lighting vocabulary remains in kernel types — a declaration carries its own reading contract (typed quantity name + unit + range, or an enumerated mode) and buckets are expressed over THOSE; the kernel keeps the invariants (buckets closed over actions = the revert map) and loses the grammar; the live motorlights declaration migrates with no behaviour change; a fridge (temperature threshold) and a vent (open/closed) become declarable without touching kernel code
 - notes: Ian 2026-08-15 — "we don't want the core hard-coded to control lights". Evidence: RawState.brightness_pct, BucketRule.max_brightness_pct, parse_state() parsing `light mode :` / `brightness : N/255 (NN%)` — the motorlights text contract compiled into the kernel
