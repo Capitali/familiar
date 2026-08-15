@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-120 · First-start mesh-join progress: the console says what it's doing
+- status: proposed
+- owner: — (companion:claude-bootstrap intends to claim after T-119 lands, absent controller re-sequencing)
+- scope: console join/connection status surface (ios/Shared/Sources/AppModel.swift, ios/MacApp/Resources/sphere/index.html, iPhone equivalents) + whatever daemon-side join-progress detail the console needs (crates/mesh status/worldview read path; no wire-contract change without stopping for Ian per house rules)
+- depends: — (T-101 queued on the same console files; sequence at the controller's call)
+- accept: from cold start to joined, the console shows live progress stages with detail on what it is trying (e.g. starting daemon → reaching door → rendezvous → exchanging → joined + peer count) instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect daemon-reported truth, not console guesses; fixture-verified
+- notes: Ian (2026-08-14, verbatim): "when a client first starts sometimes it can take a minute or two to reach and join the mesh — we need to show some sort of status, progress, details on what it's doing or trying to the user so that they know it's not just failed with a red exclamation point". Recorded per rule 5 from the bootstrap session
+
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: queued
 - owner: —
@@ -39,13 +47,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - owner: — (pairs with T-113; codex may claim if free first)
 - depends: T-113
 - accept: tentative→supported→doubtful→abandoned with hysteresis + evidence floor; human-correction exception; transition-only narration, one aside/tick by consequence, per-theory cooldown; citation format per dialogue Q5
-- notes: —
-
-### T-116 · Q4: scenario fixture oracles
-- status: queued
-- owner: —
-- depends: T-115
-- accept: output contracts on candidates; fixture-held ground truth; accuracy/coverage/quietness/discrimination checks, lexicographic eligibility; extends ADR-0036
 - notes: —
 
 ### T-110 · ADR-0040 draft: the reasoning engine's next steps
@@ -97,14 +98,21 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
-### T-115 · C2 + the recipe interpreter (codex's Q2 design)
+### T-116 · Q4: scenario fixture oracles
 - status: claimed
-- ian (2026-08-14, via controller): the interpreter's FUTURE is declared capabilities — fs, clock, env, process, net (dialogue Q8, discussion before implementation; caps block may reserve schema space in v1)
 - owner: companion:codex
-- scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
+- scope: Cargo.lock, crates/scenario/ (recipe-oracle module, tests, and dependency), scenarios/recipe-oracles/, docs/DEVELOPMENT_LOG.md
+- depends: T-115 (merged at d80ae4f)
+- accept: strict candidate output contracts plus fixture-owned replay truth outside the candidate; evaluate recipe candidates against accuracy, coverage (including honest null/error outcomes), quietness, and changed/null/malformed discrimination; boundary-clean then execution-clean then all four truth checks form eligibility, with usefulness and deterministic cost ranking survivors; live runs are health evidence only and are not accepted by this oracle; hermetic regressions prove hard-coded, fabricated, and chatty candidates fail
+- notes: scope is confined to the scenario lab and does not overlap companion:claude-bootstrap's T-119 daemon.rs claim
+
+### T-119 · One launchctl dialect: daemon.rs joins the bootout/bootstrap bracket
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/cli/src/daemon.rs (launchd mechanism only; `daemon install/uninstall` CLI surface unchanged)
 - depends: —
-- accept: structural tool composition through an injected proven-tool-id source + the Recipe v1 interpreter decided in dialogue round 3 (typed steps, no ambient authority, deny_unknown_fields, parse- and runtime-bounded, deterministic); Python authoring remains confined to the scenario lab; design doc precedes the build and tests pin every operation and refusal boundary
-- notes: sequencing decided in Q2: this precedes any general-language C3. Kernel/cycle call-site integration is intentionally outside this collision-safe brick while the controller owns T-112/T-113 there
+- accept: install() runs the script's proven bracket — bootout BEFORE install_stable_binary() swaps the registered executable (macOS 27 LWCR; OS_REASON_CODESIGNING), bootstrap + kickstart -k after the plist is written, registration failures surfaced as errors instead of ignored; uninstall() bootouts; unload -w/load -w disappears from the crate; a test pins the dialect and its order
+- notes: sibling of the 0dbc525 bootstrap-script brick (log 2026-08-14 "An upgrade re-registers its binary"). Direct Ian follow-up in the bootstrap session, recorded per rule 5 (claimed straight in, not proposed — controller may re-arbitrate). vm/create-famtalker01.sh's unload/load is one-shot VM bootstrap, left alone
 
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: done
@@ -135,6 +143,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-115 · C2 + the capability Recipe v1 interpreter
+- status: done
+- owner: companion:codex
+- merged: d80ae4f
+- scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
+- depends: —
+- accept: structural proven-tool composition; all twelve typed Recipe v1 operations; no ambient authority; strict unknown-field refusal; declared and hard row/byte/step/input bounds; deterministic output with exact lineage; mandatory Q8 caps whose process ids exactly equal distinct input ids and whose clock/fs/env/net values are only none
+- notes: design committed before build; Q8 discussion rounds 4–6 preceded caps implementation. 21 pure recipe tests plus the full current-main green bar passed. Kernel/cycle persistence and scheduling remain a separately claimed integration brick; v2+ authority tiers are versioned in ADR-0040
 
 ### T-103 · Reach-side reverse name lookup
 - status: done
