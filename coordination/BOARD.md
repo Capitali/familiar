@@ -142,12 +142,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: D6 — this is Ian's thousand-agent ambition, bounded. His acceptance required before the layer is built
 
 ### T-139 · Hostile-member harness (D7, step one)
-- status: queued
-- owner: —
+- status: claimed
+- owner: companion:codex
 - scope: crates/mesh test infrastructure (deterministic two/N-instance harness + network schedule)
 - depends: —
 - accept: reusable fixtures for malicious signed member, replay, unmatched nonce, future timestamp, concurrent claim, partition, recovery; shared by T-133/T-134/T-135
-- notes: D7 — proof infrastructure moves into step one so containment ships tested
+- notes: D7 — proof infrastructure moves into step one so containment ships tested. Claimed by companion:codex while T-131's closing completeness round waits behind the Build 89 ship; first brick is the minimal reusable malicious-signed-member/network-schedule fixture needed by T-133/T-134/T-135, not the full population lab
 
 ### T-140 · Population laboratory (D7, gate before conventions)
 - status: queued
