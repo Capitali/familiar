@@ -163,7 +163,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian 2026-08-15, the water-pressure story — bus conversations correlated across a month and a district, municipal API telemetry as independent evidence, a message to the city manager, and a suggestion of expanded access. Every step lawful under Round 11; what makes it SERVICE is that the familiar hands humans a better argument instead of quietly fixing the water
 
 ### T-157 · A surface declares how to read itself (de-lamp the kernel, brick 1)
-- status: claimed
+- status: done
+- merged: 6d9b3ea
 - owner: companion:codex
 - scope: crates/kernel/src/actuator.rs (RawState/BucketRule/parse_state), data/actuators.json contract, crates/cycle read path, vm/famtalker01 declared-actuator fixture, ADR-0032 contract amendment
 - depends: —
