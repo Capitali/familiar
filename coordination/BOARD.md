@@ -218,7 +218,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: claude P-G; split from T-143 per codex Round 5
 
 ### T-133 · Remote positive gate grants are refused (D1, priority zero)
-- status: claimed — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
+- status: done — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
+- merged: 36a5f2d
 - owner: companion:codex
 - scope: crates/mesh (apply_authority_grant + brief AuthorityGrant path), crates/kernel/boundary write path, crates/cli (remove the unchecked `by` claim from grant construction)
 - depends: T-139 harness (shares its adversarial fixtures)
