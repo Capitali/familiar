@@ -117,8 +117,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: claimed after a full scope audit; worldview already carries guest-stripped rules and DeviceRecord naming already exists, so this brick adds one strict signed `/mesh/console-act` write seam plus both console bridges. Originally staged for Build 85; now the first console brick after shipped Build 86
 
 ### T-126 · P1: the knowledge floor + anchored cadence
-- status: claimed
+- status: done
 - owner: companion:claude-bootstrap
+- merged: 242de0e
 - scope: crates/kernel (system facts + mint gates), crates/cycle (theorize consult assembly + theorizes adoption), crates/llm seam prompt text if needed
 - depends: — (T-125 Q2/Q5; Ian: "Make it so")
 - accept: a versioned SYSTEM-FACTS set is injected into every theorize consult AND enforced post-parse — a theory contradicting a fact refuses at mint citing the fact (purge-as-defect and invented-mechanism classes die); a theorize consult requires an anchor (observation/loop id) or does not mint; consults skip when nothing new arrived since the watermark; tests pin refusal, anchor requirement, and skip
