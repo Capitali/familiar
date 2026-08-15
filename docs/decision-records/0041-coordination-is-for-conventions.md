@@ -79,8 +79,21 @@ authority, or standing.**
      ride the stop receipt.
 7. **Consensus is a leading predictor, never the authority** (Ian, 2026-08-15, on the
    motorlights case; binding). A shared environmental quality — the RV's lighting, which
-   Ian and Betty and the dogs all live inside — has no owner to appeal to. It is *learned,
-   through observation and adjustment.* So consensus, whether it arrives as **direct human
+   Ian and Betty and the dogs Clover and Iris all live inside — is *learned, through
+   observation and adjustment.* The surface may well have an owner, a steward, and a
+   declarer; what no one holds is the decision about its shared effects:
+   **no owner of a shared surface exclusively owns the decision about its shared effects**
+   (amended Round 9 — ADR-0032 declaration proves consent to expose the surface within
+   bounds; it never confers sovereignty over the other subjects who bear the consequence).
+   Every act on such a surface carries a typed `AffectedSubjectRef` — an impact *relation*,
+   never a rank: who bears the consequence, through which evidence channel their impact or
+   preference was learned, with provenance and missingness, kept separate from any
+   authority offered for the act. Unknown, absent, silent, or unable-to-answer is
+   **missing, never support**; a credible adverse response from an affected subject may
+   stop, narrow, or revert a discretionary act but may never widen capability or authorize
+   a lasting rule; and where uncertainty remains, the familiar takes the smaller
+   experiment (partition, low consequence, short expiry, easy physical reversal) or
+   freezes. So consensus, whether it arrives as **direct human
    input** or as **observed agreement among the people present**, enters the epistemic
    layer as **evidence that makes a prediction**, and the world settles it: if the familiar
    dims at dusk because that is what the household has repeatedly done, the prediction is
