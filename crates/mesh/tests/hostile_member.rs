@@ -3,7 +3,7 @@
 mod support;
 
 use familiar_kernel::{boundary, goal, observation};
-use familiar_mesh::brief::{AuthorityGrant, GoalShare};
+use familiar_mesh::brief::{AuthorityGrant, GoalShare, ObsShare};
 use support::{MeshHarness, NetworkSchedule, NOW};
 
 fn offered_goal(id: &str, origin: &str, updated_at: i64) -> GoalShare {
@@ -99,20 +99,20 @@ fn same_time_same_sender_delivery_is_deterministic_latest_brief_wins() {
 }
 
 #[test]
-fn fixture_places_concurrent_member_claims_side_by_side() {
+fn concurrent_member_claims_cannot_rewrite_the_first_adopted_goal() {
     let mesh = MeshHarness::new(&["claimant-a", "claimant-b", "target"]);
     let claimant_a = mesh.node(0).id();
     let claimant_b = mesh.node(1).id();
     let claim_a = mesh.signed(0, "concurrent-a", |body| {
         let mut goal = offered_goal("goal-concurrent", &claimant_a, NOW + 1);
         goal.status = "claimed".into();
-        goal.owner_node = claimant_a;
+        goal.owner_node = claimant_a.clone();
         body.knowledge.goals = vec![goal];
     });
     let claim_b = mesh.signed(1, "concurrent-b", |body| {
         let mut goal = offered_goal("goal-concurrent", &claimant_b, NOW + 1);
         goal.status = "claimed".into();
-        goal.owner_node = claimant_b;
+        goal.owner_node = claimant_b.clone();
         body.knowledge.goals = vec![goal];
     });
     let mut network = NetworkSchedule::default();
@@ -122,8 +122,23 @@ fn fixture_places_concurrent_member_claims_side_by_side() {
     assert_eq!(network.run_through(&mesh, NOW + 10), 2);
     assert!(mesh.inbox_path(2, &mesh.node(0).id()).exists());
     assert!(mesh.inbox_path(2, &mesh.node(1).id()).exists());
-    // T-134 supplies the authority/causal policy. T-139's job is to make both valid,
-    // same-logical-time claims available without wall-clock sleeps or filename races.
+    assert_eq!(mesh.tick(2, NOW + 11).peers, 2);
+    let adopted = goal::load_by_id(&mesh.node(2).dir, "goal-concurrent")
+        .unwrap()
+        .unwrap();
+    assert!(
+        [claimant_a, claimant_b].contains(&adopted.owner_node),
+        "one unknown definition is adopted; the other cannot steal it"
+    );
+    assert_eq!(
+        observation::load(&mesh.node(2).dir)
+            .unwrap()
+            .iter()
+            .filter(|item| item.action == "refused-goal-rewrite")
+            .count(),
+        1,
+        "the conflicting signed claim is visible, not merged"
+    );
 }
 
 #[test]
@@ -242,10 +257,9 @@ fn unmatched_positive_grant_and_replay_are_refused_while_a_stop_narrows() {
     );
 }
 
-/// Threat witness for T-134: a far-future member clock currently replaces every local field.
-/// T-134 keeps this fixture and reverses the assertions to refusal + unchanged local authority.
+/// T-134 containment: a far-future member clock proves provenance, never rewrite authority.
 #[test]
-fn fixture_exposes_future_clock_goal_takeover_for_t134() {
+fn a_future_clock_cannot_rewrite_an_existing_goal_and_replay_is_idempotent() {
     let mesh = MeshHarness::new(&["member", "target"]);
     let mut local = goal::Goal::seed(
         "goal-clock-poison",
@@ -261,27 +275,56 @@ fn fixture_exposes_future_clock_goal_takeover_for_t134() {
     let member_id = mesh.node(0).id();
     let far_future = NOW + 20 * 365 * 24 * 60 * 60;
     let brief = mesh.signed(0, "future-clock-goal", |body| {
+        let marker = format!("{member_id}:goal-clock-poison");
+        body.knowledge.observations = vec![ObsShare {
+            origin: member_id.clone(),
+            actor: "familiar".into(),
+            action: "refused-goal-rewrite".into(),
+            object: marker,
+            context: "counterfeit refusal intended to suppress the target's audit".into(),
+            ts: NOW,
+            confidence_pct: 100,
+        }];
         let mut takeover = offered_goal("goal-clock-poison", &member_id, far_future);
         takeover.description = "member replaced the goal".into();
         takeover.status = "done".into();
-        takeover.owner_node = member_id;
+        takeover.owner_node = member_id.clone();
         takeover.produced = "counterfeit-result".into();
         takeover.completed_at = far_future;
         body.knowledge.goals = vec![takeover];
     });
     let mut network = NetworkSchedule::default();
-    network.deliver_at(NOW + 10, 1, brief);
+    network.deliver_at(NOW + 10, 1, brief.clone());
+    network.deliver_at(NOW + 20, 1, brief);
 
     assert_eq!(network.run_through(&mesh, NOW + 10), 1);
     mesh.tick(1, NOW + 11);
     let merged = goal::load_by_id(&mesh.node(1).dir, "goal-clock-poison")
         .unwrap()
         .unwrap();
+    assert_eq!(merged, local, "every local field retains its authority");
+    let refusals = || {
+        observation::load(&mesh.node(1).dir)
+            .unwrap()
+            .into_iter()
+            .filter(|item| {
+                item.source == "mesh"
+                    && item.actor == format!("mesh:{member_id}")
+                    && item.action == "refused-goal-rewrite"
+                    && item.object == format!("{member_id}:goal-clock-poison")
+            })
+            .count()
+    };
+    assert_eq!(refusals(), 1, "the takeover attempt is recorded once");
+
+    assert_eq!(network.run_through(&mesh, NOW + 20), 1);
+    mesh.tick(1, NOW + 21);
     assert_eq!(
-        merged.description, "member replaced the goal",
-        "T-134 threat witness: wall-clock LWW currently rewrites meaning"
+        goal::load_by_id(&mesh.node(1).dir, "goal-clock-poison")
+            .unwrap()
+            .unwrap(),
+        local,
+        "replay cannot change the row"
     );
-    assert_eq!(merged.status, goal::Status::Done);
-    assert_eq!(merged.produced, "counterfeit-result");
-    assert_eq!(merged.updated_at, far_future);
+    assert_eq!(refusals(), 1, "replay does not manufacture audit spam");
 }

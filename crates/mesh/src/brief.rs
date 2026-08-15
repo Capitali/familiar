@@ -163,16 +163,18 @@ pub struct Knowledge {
     /// back-compat with briefs that predate the field.
     #[serde(default)]
     pub theory_requests: Vec<TheoryRequest>,
-    /// The shared roadmap — goals every node holds and burns down together. `#[serde(default)]` for
-    /// back-compat with briefs that predate the field.
+    /// Goal definitions/reports known to this node. Receivers may adopt an unknown id; reports for
+    /// existing ids are informational only until authenticated goal events define field authority
+    /// (T-145). `#[serde(default)]` for back-compat with briefs that predate the field.
     #[serde(default)]
     pub goals: Vec<GoalShare>,
 }
 
-/// A goal shared for replication — the roadmap made mesh-native. Every node holds the same goal
-/// list and its live status, so the mesh burns the roadmap down together: whoever's capabilities fit
-/// claims it, and progress/ownership travels back to all. Deduped by `id` (goal ids are minted by the
-/// seeding node and carried verbatim, unlike node-local observation ids). Mirrors `goal::Goal`.
+/// A goal definition/report carried by the mesh. An unknown id may be adopted, but a member
+/// signature alone cannot rewrite an existing row: description, claims, progress, human-gated
+/// transitions, and terminals require the event authority tracked by T-145. Deduped by `id` (goal
+/// ids are minted by the seeding node and carried verbatim, unlike node-local observation ids).
+/// Mirrors `goal::Goal` without claiming whole-row authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GoalShare {
     pub id: String,
@@ -181,9 +183,10 @@ pub struct GoalShare {
     /// The goal's status as a slug ("proposed"/"claimed"/"in_progress"/"awaiting_human"/"done"/…).
     pub status: String,
     pub owner_node: String,
-    /// The **human** accountable for the goal, so ownership travels with it across the mesh rather
-    /// than being re-guessed on every node. Skipped when empty so a brief stays byte-identical for
-    /// verifiers built before this field — an unknown field would break every signature.
+    /// The reported **human** accountable for the goal. It is part of an adoptable unknown
+    /// definition, but cannot rewrite an existing goal without T-145 authority. Skipped when empty
+    /// so a brief stays byte-identical for verifiers built before this field — an unknown field
+    /// would break every signature.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub owner_human: String,
     pub origin: String,

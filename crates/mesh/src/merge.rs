@@ -188,10 +188,9 @@ pub fn build_outbox(
                 })
                 .collect()
         };
-        // The shared roadmap: every node carries the same goal list + live status so the mesh burns
-        // it down together. Shared whether or not this node can execute — a theorist still needs to
-        // see (and seed) goals; an executor claims them. Bounded per brief; ids are global so dedup
-        // is exact on the receiver.
+        // Goal discovery: every node offers the goals it knows so peers may adopt unknown
+        // definitions. Existing goal rows are not merged until T-145 supplies signed events and
+        // per-field authority; carrying the row here does not grant rewrite authority.
         let goals = goal::load(dir)
             .unwrap_or_default()
             .into_iter()
@@ -547,78 +546,48 @@ fn merge_one(
         }
     }
 
-    // --- Goals: the shared roadmap. Adopt goals we don't have; for ones we do, take the peer's
-    // version if it is strictly NEWER (last-writer-wins by updated_at) so a claim, a progress note,
-    // or a completion propagates to every node. We never regress our own newer state, and we never
-    // let a peer un-settle a goal we've moved past. Reached only by trusted/throttled peers (a
-    // marginalized peer returned early above), so a slipped peer can't rewrite the roadmap. ---
+    // --- Goals: definitions may be discovered; existing rows are local authority. A member
+    // signature proves who reported a row, not permission to replace description, ownership,
+    // progress, human accountability, or terminal state. Until T-145 supplies authenticated goal
+    // events with per-field authority, every non-identical report for an existing id is refused
+    // and audited once per reporting node/id. Wall time is evidence of neither causality nor
+    // authority. ---
+    let mut refused_goal_rewrites: HashSet<String> = observation::load(dir)
+        .unwrap_or_default()
+        .into_iter()
+        // Only receipts minted by this merge path suppress another receipt. A peer can replicate
+        // an observation with the same action/object, but it arrives with `mesh:<origin>` source
+        // provenance and cannot counterfeit our local audit.
+        .filter(|o| o.source == "mesh" && o.action == "refused-goal-rewrite")
+        .map(|o| o.object)
+        .collect();
     for gs in &brief.body.knowledge.goals {
-        let incoming_status = match gs.status.as_str() {
-            "proposed" => goal::Status::Proposed,
-            "claimed" => goal::Status::Claimed,
-            "in_progress" => goal::Status::InProgress,
-            "awaiting_human" => goal::Status::AwaitingHuman,
-            "done" => goal::Status::Done,
-            "failed" => goal::Status::Failed,
-            "blocked" => goal::Status::Blocked,
-            _ => continue, // an unknown status from a newer peer — leave it be
-        };
-        // Lifecycle dates travel with the goal. A brief from a pre-stamp build sends zeros —
-        // fall back to the best date it *did* send, so every status still carries a date.
-        let goal_from_share = |gs: &crate::brief::GoalShare, local: Option<&goal::Goal>| {
-            let terminal_at = |flag: bool, incoming: i64, kept: i64| {
-                if incoming > 0 {
-                    incoming
-                } else if kept > 0 {
-                    kept
-                } else if flag {
-                    gs.updated_at
-                } else {
-                    0
-                }
-            };
-            goal::Goal {
-                id: gs.id.clone(),
-                description: gs.description.clone(),
-                needs: gs.needs.clone(),
-                status: incoming_status,
-                owner_node: gs.owner_node.clone(),
-                owner_human: gs.owner_human.clone(),
-                origin: gs.origin.clone(),
-                produced: gs.produced.clone(),
-                notes: gs.notes.clone(),
-                created_at: gs.created_at,
-                updated_at: gs.updated_at,
-                status_at: if gs.status_at > 0 {
-                    gs.status_at
-                } else {
-                    gs.updated_at
-                },
-                last_worked_at: gs
-                    .last_worked_at
-                    .max(local.map(|l| l.last_worked_at).unwrap_or(0)),
-                completed_at: terminal_at(
-                    incoming_status == goal::Status::Done,
-                    gs.completed_at,
-                    local.map(|l| l.completed_at).unwrap_or(0),
-                ),
-                ended_at: terminal_at(
-                    incoming_status == goal::Status::Failed,
-                    gs.ended_at,
-                    local.map(|l| l.ended_at).unwrap_or(0),
-                ),
-            }
-        };
         match goal::load_by_id(dir, &gs.id).ok().flatten() {
-            Some(local) if local.updated_at >= gs.updated_at => {} // ours is as-new or newer — keep it
             Some(local) => {
-                let merged = goal_from_share(gs, Some(&local));
-                if goal::update(dir, &merged).is_ok() {
+                if goal_status(&gs.status)
+                    .map(|status| goal_from_share(gs, status) == local)
+                    .unwrap_or(false)
+                {
+                    continue; // an exact echo is idempotent, not a rewrite attempt
+                }
+                let marker = format!("{node_id}:{}", gs.id);
+                if refused_goal_rewrites.insert(marker.clone()) {
+                    record_obs(
+                        dir,
+                        &format!("mesh:{node_id}"),
+                        "refused-goal-rewrite",
+                        &marker,
+                        "a signed member reported different fields for an existing goal; refused until authenticated goal events define per-field authority (T-145)",
+                        now,
+                    );
                     report.observations_ingested += 1;
                 }
             }
             None => {
-                let adopted = goal_from_share(gs, None);
+                let Some(status) = goal_status(&gs.status) else {
+                    continue;
+                };
+                let adopted = goal_from_share(gs, status);
                 if goal::append(dir, &adopted).is_ok() {
                     report.observations_ingested += 1;
                 }
@@ -1069,6 +1038,55 @@ fn apply_authority_grant(
             }
         }
         _ => None,
+    }
+}
+
+fn goal_status(status: &str) -> Option<goal::Status> {
+    match status {
+        "proposed" => Some(goal::Status::Proposed),
+        "claimed" => Some(goal::Status::Claimed),
+        "in_progress" => Some(goal::Status::InProgress),
+        "awaiting_human" => Some(goal::Status::AwaitingHuman),
+        "done" => Some(goal::Status::Done),
+        "failed" => Some(goal::Status::Failed),
+        "blocked" => Some(goal::Status::Blocked),
+        _ => None,
+    }
+}
+
+/// Convert an unknown shared definition into a local goal. Lifecycle dates travel with the
+/// definition; a pre-stamp brief sends zeros, so terminal/status dates fall back to `updated_at`.
+/// This function is deliberately not an update path — T-134 permits it only when the id is absent.
+fn goal_from_share(gs: &crate::brief::GoalShare, status: goal::Status) -> goal::Goal {
+    let terminal_at = |flag: bool, incoming: i64| {
+        if incoming > 0 {
+            incoming
+        } else if flag {
+            gs.updated_at
+        } else {
+            0
+        }
+    };
+    goal::Goal {
+        id: gs.id.clone(),
+        description: gs.description.clone(),
+        needs: gs.needs.clone(),
+        status,
+        owner_node: gs.owner_node.clone(),
+        owner_human: gs.owner_human.clone(),
+        origin: gs.origin.clone(),
+        produced: gs.produced.clone(),
+        notes: gs.notes.clone(),
+        created_at: gs.created_at,
+        updated_at: gs.updated_at,
+        status_at: if gs.status_at > 0 {
+            gs.status_at
+        } else {
+            gs.updated_at
+        },
+        last_worked_at: gs.last_worked_at,
+        completed_at: terminal_at(status == goal::Status::Done, gs.completed_at),
+        ended_at: terminal_at(status == goal::Status::Failed, gs.ended_at),
     }
 }
 
