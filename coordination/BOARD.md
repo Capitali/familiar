@@ -32,12 +32,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: entered at ADR acceptance by companion:claude-bootstrap; deliberately not actionable until the fleet accumulates prediction results
 
 ### T-124 · Build 86 + door deploys: ship the narrated first join
-- status: claimed
+- status: done
 - owner: companion:claude-bootstrap
-- scope: fleet ops — ship.sh 86 from a clean clone (consoles carry T-120 join progress + T-101-era batch already on main), door deploys of current main (T-113/T-114 kernel work) to lighthouse + Wildhorse if SSH-reachable from this Mac
-- depends: CI green on the ship sha (rule 9 hard precondition)
-- accept: Build 86 consoles on both Macs + TestFlight; doors on current main or the deploy recorded as held with its exact trigger; STATE notes carry shas + evidence; Ian notified when 86 is on his devices
-- notes: Ian (2026-08-15, verbatim): "then it seems like time for a build and ship" — recorded per rule 5. Claimed by a companion because NO other lane is alive (ListAgents empty: controller, codex, infra all gone); rule 8's infra-lane preference is unavailable, so the ritual runs here exactly as documented (clean clone; memory of Build 80's successful ship from this Mac)
+- merged: 04a015e (the Build 86 stamp; fleet op — evidence in STATE notes)
+- scope: fleet ops — ship.sh 86 from a clean clone, door deploys to lighthouse + Wildhorse
+- depends: CI green on the ship sha (was green: e21de5c, run 31861419297 success)
+- accept: met — Build 86 Mac console installed + zip refreshed; IPA uploaded clean, external release added 86 to the public group + submitted beta review; lighthouse deployed 04a015e (box-built, familiar-peer active, /mesh/hello answering); Wildhorse daemon upgraded to 04a015e via the T-119 bootout/bootstrap bracket (its first production use — hello 200, running); phones direct-install unreachable (⚠ tolerated, TestFlight covers); Ian notified in-session (mobile push skipped: Remote Control inactive)
+- notes: Ian (2026-08-15, verbatim): "then it seems like time for a build and ship" — recorded per rule 5. Run by this companion because no other lane was alive (ListAgents empty). MacOnStick's own daemon deliberately NOT touched — controller's declared deploy territory; it still runs its pre-86 build and wants a controller pass
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: queued
