@@ -20,6 +20,11 @@ Each entry: what changed, why, checks run, what the next developer should know.
   files, URLs, networks, clocks, environment, or randomness. The caller's proven-tool
   catalog remains responsible for health, review, argument schema, and every existing
   human-owned gate.
+- **Requested is not granted:** Q8's mandatory v1 `caps` block exposes the authority
+  review surface. Its distinct `process.proven_tools` ids must exactly equal the input
+  ids before the first invocation; `clock`, `fs`, `env`, and `net` are literally `none`.
+  The source still intersects that request with the human boundary, task scope, and host
+  capability. Future authority requires a recipe-version bump — v1 never grows silently.
 - **Bounded before useful:** serde rejects unknown fields at every level; the manifest,
   input count, step count, materialized bytes, and produced rows have declared limits
   beneath hard ceilings. Missing paths, malformed/non-UTF-8 input, incompatible types,
@@ -39,17 +44,21 @@ and replayed exactly. Its deliberate expressiveness cost buys an honest Law III 
 
 ### Checks run
 
-- `cargo test -p familiar-recipe` — 18 pure tests covering strict parsing, ordered
+- `cargo test -p familiar-recipe` — 21 pure tests covering strict parsing, ordered
   once-only tool invocation, exact lineage, every operation, grouped aggregates,
-  deterministic replay, real-world JSON keys, and all declared/hard refusal bounds.
+  deterministic replay, exact capability declarations, real-world JSON keys, and all
+  declared/hard refusal bounds.
 - `cargo clippy -p familiar-recipe --all-targets -- -D warnings` clean.
+- Full green bar on current main + T-115: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` (all crate,
+  integration, scenario-lab, and doc-test suites passed).
 
 ### Next
 
-- After the controller's T-113 prediction work leaves the kernel/cycle seams, integrate
-  recipe persistence, author/repair prompting, and scheduling there as a separate claimed
-  brick. T-116 then tests recipe candidates against fixture-held truth; it must not let a
-  recipe score its own output.
+- Integrate recipe persistence, author/repair prompting, and scheduling as a separate
+  claimed brick. T-116 then tests recipe candidates against fixture-held truth; it must
+  not let a recipe score its own output. Q8's clock/fs/env/net ladder is versioned future
+  work recorded in ADR-0040, never an implicit v1 extension.
 
 ## 2026-08-14 (later night) — Reach asks the LAN what a numeric neighbour is called (companion:codex)
 

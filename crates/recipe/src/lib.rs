@@ -25,10 +25,51 @@ pub const MAX_MATERIALIZED_BYTES: usize = 4 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
     pub version: u16,
+    /// Review-visible requested authority. This declaration never grants authority;
+    /// the caller-owned source still intersects it with the human boundary, task scope,
+    /// and host-provided capabilities.
+    pub caps: Capabilities,
     pub inputs: Vec<Input>,
     pub steps: Vec<Step>,
     pub emit: Emit,
     pub limits: Limits,
+}
+
+/// Recipe v1 can request only invocations of literal proven-tool ids. Every other
+/// capability is represented by the sole value `"none"`; adding executable semantics
+/// requires a new recipe version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Capabilities {
+    pub process: ProcessCapability,
+    pub clock: NoCapability,
+    pub fs: NoCapability,
+    pub env: NoCapability,
+    pub net: NoCapability,
+}
+
+impl Capabilities {
+    pub fn process_only(proven_tools: Vec<String>) -> Self {
+        Self {
+            process: ProcessCapability { proven_tools },
+            clock: NoCapability::None,
+            fs: NoCapability::None,
+            env: NoCapability::None,
+            net: NoCapability::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessCapability {
+    pub proven_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoCapability {
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -374,9 +415,11 @@ impl Recipe {
         }
 
         let mut slots = BTreeSet::new();
+        let mut input_tools = BTreeSet::new();
         for input in &self.inputs {
             validate_name("input", &input.name)?;
             validate_tool_id(&input.tool_id)?;
+            input_tools.insert(input.tool_id.clone());
             if !slots.insert(input.name.clone()) {
                 return Err(invalid(format!("duplicate slot {}", input.name)));
             }
@@ -385,6 +428,7 @@ impl Recipe {
                 validate_scalar(value)?;
             }
         }
+        validate_capabilities(&self.caps, &input_tools)?;
         for (index, step) in self.steps.iter().enumerate() {
             validate_step(index, step, &mut slots)?;
         }
@@ -394,6 +438,27 @@ impl Recipe {
         validate_template("context_template", &self.emit.context_template, &slots)?;
         Ok(())
     }
+}
+
+fn validate_capabilities(
+    caps: &Capabilities,
+    input_tools: &BTreeSet<String>,
+) -> Result<(), RecipeError> {
+    let mut declared = BTreeSet::new();
+    for tool_id in &caps.process.proven_tools {
+        validate_tool_id(tool_id)?;
+        if !declared.insert(tool_id.clone()) {
+            return Err(RecipeError::InvalidDocument(format!(
+                "caps.process.proven_tools repeats {tool_id}"
+            )));
+        }
+    }
+    if &declared != input_tools {
+        return Err(RecipeError::InvalidDocument(format!(
+            "caps.process.proven_tools declares {declared:?}, but inputs require {input_tools:?}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_limit(name: &'static str, value: usize, ceiling: usize) -> Result<(), RecipeError> {
@@ -1225,6 +1290,7 @@ mod tests {
     fn base_recipe(steps: Vec<Step>, object: Vec<TemplateSegment>) -> Recipe {
         Recipe {
             version: RECIPE_VERSION,
+            caps: Capabilities::process_only(vec!["tool-0001".to_string()]),
             inputs: vec![Input {
                 name: "input".to_string(),
                 tool_id: "tool-0001".to_string(),
@@ -1259,6 +1325,10 @@ mod tests {
 
         let document = json!({
             "version": 1,
+            "caps": {
+                "process":{"proven_tools":["tool-1"]},
+                "clock":"none", "fs":"none", "env":"none", "net":"none"
+            },
             "inputs": [{"name":"input", "tool_id":"tool-1", "args":{}}],
             "steps": [{"op":"parse_lines", "from":"input", "save_as":"lines", "extra":1}],
             "emit": {
@@ -1272,6 +1342,73 @@ mod tests {
             parse_recipe(&serde_json::to_vec(&document).unwrap()),
             Err(RecipeError::Parse(_))
         ));
+    }
+
+    #[test]
+    fn caps_are_mandatory_strict_and_non_process_authority_is_none() {
+        let mut document =
+            serde_json::to_value(base_recipe(Vec::new(), vec![slot("input")])).unwrap();
+        document.as_object_mut().unwrap().remove("caps");
+        assert!(matches!(
+            parse_recipe(&serde_json::to_vec(&document).unwrap()),
+            Err(RecipeError::Parse(_))
+        ));
+
+        let mut document =
+            serde_json::to_value(base_recipe(Vec::new(), vec![slot("input")])).unwrap();
+        document["caps"]["clock"] = json!("live");
+        assert!(matches!(
+            parse_recipe(&serde_json::to_vec(&document).unwrap()),
+            Err(RecipeError::Parse(_))
+        ));
+
+        let mut document =
+            serde_json::to_value(base_recipe(Vec::new(), vec![slot("input")])).unwrap();
+        document["caps"]["process"]["executable"] = json!("/bin/sh");
+        assert!(matches!(
+            parse_recipe(&serde_json::to_vec(&document).unwrap()),
+            Err(RecipeError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn process_caps_must_exactly_match_distinct_input_tools_before_effect() {
+        let mut recipe = base_recipe(Vec::new(), vec![slot("input")]);
+        recipe.caps.process.proven_tools.clear();
+        let mut source = Source::with("tool-0001", "hello");
+        assert!(matches!(
+            execute(&recipe, &mut source),
+            Err(RecipeError::InvalidDocument(_))
+        ));
+        assert!(source.calls.is_empty());
+
+        recipe.caps.process.proven_tools = vec!["tool-0001".to_string(), "tool-0002".to_string()];
+        assert!(matches!(
+            execute(&recipe, &mut source),
+            Err(RecipeError::InvalidDocument(_))
+        ));
+        assert!(source.calls.is_empty());
+
+        recipe.caps.process.proven_tools = vec!["tool-0001".to_string(), "tool-0001".to_string()];
+        assert!(matches!(
+            execute(&recipe, &mut source),
+            Err(RecipeError::InvalidDocument(_))
+        ));
+        assert!(source.calls.is_empty());
+    }
+
+    #[test]
+    fn one_declared_process_cap_may_feed_multiple_literal_inputs() {
+        let mut recipe = base_recipe(Vec::new(), vec![slot("input"), literal("/"), slot("again")]);
+        recipe.inputs.push(Input {
+            name: "again".to_string(),
+            tool_id: "tool-0001".to_string(),
+            args: BTreeMap::from([("sample".to_string(), Scalar::Number(2.0))]),
+        });
+        let mut source = Source::with("tool-0001", "same-proven-tool");
+        let output = execute(&recipe, &mut source).unwrap();
+        assert_eq!(output.object, "same-proven-tool/same-proven-tool");
+        assert_eq!(source.calls.len(), 2);
     }
 
     #[test]
@@ -1305,6 +1442,11 @@ mod tests {
             tool_id: "tool-0002".to_string(),
             args: BTreeMap::new(),
         });
+        recipe
+            .caps
+            .process
+            .proven_tools
+            .push("tool-0002".to_string());
         let mut source = Source {
             outputs: BTreeMap::from([
                 ("tool-0001".to_string(), b"one".to_vec()),

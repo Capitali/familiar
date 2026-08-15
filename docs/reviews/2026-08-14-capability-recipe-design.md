@@ -2,10 +2,11 @@
 
 - **Task:** T-115
 - **Owner:** `companion:codex`
-- **Status:** implementation contract (Q2 was decided in reasoning-dialogue round 3)
+- **Status:** implementation contract (Q2 decided in reasoning-dialogue round 3; Q8
+  capability/version contract decided in round 6)
 - **Scope of this brick:** `familiar-recipe`, a pure interpreter crate. Kernel/cycle
-  persistence and scheduling are a later integration brick so this work does not cross
-  the controller's T-112/T-113 scope.
+  persistence and scheduling are a later integration brick; this work stayed separate
+  while the controller landed T-112/T-113.
 
 ## Purpose
 
@@ -28,6 +29,13 @@ bounded before deserialization and `version` must be `1`.
 ```json
 {
   "version": 1,
+  "caps": {
+    "process": { "proven_tools": ["tool-0042"] },
+    "clock": "none",
+    "fs": "none",
+    "env": "none",
+    "net": "none"
+  },
   "inputs": [
     {
       "name": "climate",
@@ -78,6 +86,33 @@ so tools do not need to reshape real-world keys. Inputs and step outputs occupy 
 named slots; duplicate names and forward references are rejected. The immutability makes
 lineage and replay legible and prevents a later step from silently changing what an
 earlier name meant.
+
+## Authority declaration
+
+The governing rule decided in Q8 is an intersection:
+
+```text
+effective authority = manifest declaration
+                    ∩ human-owned boundary
+                    ∩ task/specialist scope
+                    ∩ capabilities the host actually provides
+```
+
+A declaration requests reach; it never grants it. Recipe v1's `caps` block is mandatory
+and says only what the interpreter enforces now. `process.proven_tools` must contain each
+distinct literal `tool_id` used by `inputs`, exactly once, with neither an undeclared input
+nor decorative surplus. Validation finishes before the injected source is called. The
+source then resolves whether each id is genuinely proven and healthy and enforces the
+other three legs of the intersection. Input values cannot construct ids dynamically.
+
+`clock`, `fs`, `env`, and `net` have the sole v1 value `none`; serde rejects any other
+value. They are explicit refusals, not reserved authority. Adding executable authority
+requires a version bump, and a v1 interpreter rejects v2 rather than partially executing
+it. Q8's decided ladder is: v2 run-start clock snapshot + virtual named workspace mounts;
+v3 named environment after secret/redaction policy; then transcript-backed typed fetch
+with live network demoted to separately gated integration evidence. WASI waits for a
+demonstrated expressiveness ceiling and a fleet-wide component model without ambient
+preopens.
 
 ## Runtime values and operations
 
@@ -136,6 +171,8 @@ same recipe and tool outputs.
 Unit tests must pin:
 
 - strict parsing (unknown fields, wrong version, duplicate/forward slot names);
+- mandatory v1 caps, exact distinct process-id equality, duplicate/surplus/undeclared id
+  refusal before the first invocation, and non-process caps accepting only `none`;
 - unknown tool refusal and ordered, once-only structural invocation;
 - every operation, including grouped aggregates and stable formatting;
 - row, byte, step, input, and hard-ceiling enforcement before or during execution;
@@ -148,12 +185,11 @@ Unit tests must pin:
 ## Deliberate exclusions
 
 Recipe v1 has no loops, branches, joins, mutation, dynamic tool ids, executable/path/URL
-fields, clock, randomness, secrets, or side effects beyond calling the injected proven
-tool source. It does not ship Python. Python may help author candidates inside the
-scenario lab but is not a live artifact. WASI remains a separate later decision based on
-real cross-platform toolchain costs.
+fields, clock, filesystem, environment, network, randomness, secrets, or side effects
+beyond calling the injected proven-tool source. It does not ship Python. Python may help
+author candidates inside the scenario lab but is not a live artifact.
 
 This brick builds the language and its truth-preserving execution seam. Registering
 recipe artifacts in `tools.jsonl`, author/repair prompting, scheduling them in the cycle,
-and evaluating them against T-116 fixture oracles are follow-on work after the controller
-lands the prediction-engine changes in the same call paths.
+and evaluating them against T-116 fixture oracles are follow-on work now that the
+prediction engine has landed.
