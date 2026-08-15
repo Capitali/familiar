@@ -97,6 +97,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
+### T-119 · One launchctl dialect: daemon.rs joins the bootout/bootstrap bracket
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/cli/src/daemon.rs (launchd mechanism only; `daemon install/uninstall` CLI surface unchanged)
+- depends: —
+- accept: install() runs the script's proven bracket — bootout BEFORE install_stable_binary() swaps the registered executable (macOS 27 LWCR; OS_REASON_CODESIGNING), bootstrap + kickstart -k after the plist is written, registration failures surfaced as errors instead of ignored; uninstall() bootouts; unload -w/load -w disappears from the crate; a test pins the dialect and its order
+- notes: sibling of the 0dbc525 bootstrap-script brick (log 2026-08-14 "An upgrade re-registers its binary"). Direct Ian follow-up in the bootstrap session, recorded per rule 5 (claimed straight in, not proposed — controller may re-arbitrate). vm/create-famtalker01.sh's unload/load is one-shot VM bootstrap, left alone
+
 ### T-115 · C2 + the recipe interpreter (codex's Q2 design)
 - status: claimed
 - ian (2026-08-14, via controller): the interpreter's FUTURE is declared capabilities — fs, clock, env, process, net (dialogue Q8, discussion before implementation; caps block may reserve schema space in v1)
