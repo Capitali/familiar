@@ -110,12 +110,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: a permitted camera can yield typed observations about the ENVIRONMENT (e.g. a plant's condition) that the co-occurrence lens and predictions can consume; no new sensing reach is taken; what is extracted is legible, contestable, revocable, and minimised; nothing person-identifying is added beyond what allow_face_recognition already governs
 - notes: Ian's example needs the plant's condition to BE an observation before any correlation can exist. Gap 2 of Round 10
 
-### T-156 · ADR draft: observation is an act (expansion by consent)
+### T-156 · ADR draft: perceive freely, retain deliberately (sensing and its duties)
 - status: queued
 - owner: —
 - scope: docs/decision-records
 - depends: codex's Round 11 answers
-- accept: an ADR stating that widening the observation network carries the same duties as widening action (legibility, contestability, revocability, non-substitution); autonomy in NOTICING and PROPOSING, consent for SENSING and ACTING; the deepening-vs-reach line drawn explicitly; the report-to-ask ratio proposed as a health signal (T-150)
+- accept: an ADR stating Ian's corrected principle (Round 11) — perceiving what is openly perceivable needs NO authority; crossing a boundary someone built always does, and technical ability to cross is never the permission; observations lawfully perceived may be used at discretion. The duties (legibility, contestability, revocability, non-substitution) attach to RETENTION and SYNTHESIS, not to perceiving; the boundary file is the household's fence for extending the senses, not a per-look permission; incidental perception across a third-party boundary is dropped unretained; the report-to-ask ratio as a health signal (T-150)
 - notes: Round 10 principle, to be sharpened by the exchange before it is written — not authored unilaterally
 
 ### T-153 · AffectedSubjectRef: impact is typed, moral worth is not awarded by the type
