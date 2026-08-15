@@ -77,7 +77,27 @@ authority, or standing.**
      mechanical settlement still decides empirical belief;
    - **resume, replacement, or widening requires ordinary local authority** and can never
      ride the stop receipt.
-7. **Gate.** No convention layer, and no cross-node belief sharing, ships before the
+7. **Consensus is a leading predictor, never the authority** (Ian, 2026-08-15, on the
+   motorlights case; binding). A shared environmental quality — the RV's lighting, which
+   Ian and Betty and the dogs all live inside — has no owner to appeal to. It is *learned,
+   through observation and adjustment.* So consensus, whether it arrives as **direct human
+   input** or as **observed agreement among the people present**, enters the epistemic
+   layer as **evidence that makes a prediction**, and the world settles it: if the familiar
+   dims at dusk because that is what the household has repeatedly done, the prediction is
+   that no one turns it back up, and the adjustment that follows is the correction. What
+   consensus may never be is the *reason* an act is authorized.
+   - It cannot authorize anything the Three Laws refuse: a unanimous household preference
+     that hollows out one of its members is the comfortable replacement, and it is refused
+     however unanimous it is;
+   - it cannot override a person's stated preference about themselves (a majority is not
+     an argument against a person);
+   - it cannot substitute for assent where assent is required — a standing rule still
+     needs the explicit human yes of ADR-0032/T-102, no matter how strong the pattern;
+   - and its strength is measured by independent origins (clause 4), not by repetition.
+   Consensus therefore *predicts* what would serve, and the Laws *decide* whether it may
+   be done. Those are different jobs and the familiar must never let the first do the
+   second's work.
+8. **Gate.** No convention layer, and no cross-node belief sharing, ships before the
    population laboratory reproduces correlated ancestry, Sybils, amplification,
    unanimity/dissent, tipping, post-manipulation hysteresis, partition healing, and
    redirection latency — with constitutional violations as hard failures and convergence
