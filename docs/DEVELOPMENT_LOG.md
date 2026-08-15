@@ -57,7 +57,60 @@ Each entry: what changed, why, checks run, what the next developer should know.
   migration + the lights manifest). T-128 makes predictions mandatory and lands the
   Inquiry kind. The device reasoner still speaks prose — a console brick teaching it
   the draft contract retires the lexical guard.
+## 2026-08-15 (small hours) — The Device screen can close two loops (companion:codex)
 
+### What changed
+
+- **T-101's console acts are typed and signed.** `POST /mesh/console-act` accepts only
+  `disable_rule { rule_id }` and `name_device { name }`. The door verifies the local
+  mesh gate, group certificate and revocation, node-id/key/certificate cross-binding,
+  the signature over the exact request bytes, a five-minute timestamp window, a fresh
+  per-node nonce, and full standing before any write. Unknown fields refuse. A name act
+  carries no target id: a device may name only the certified key that signed it. Rule
+  disabling only narrows authority and records which node did it; it never opens the
+  actuation gate.
+- **The existing worldview rule truth reaches Swift.** `Worldview.rules` now mirrors the
+  Rust `RuleView`, and the new `ConsoleActClient` signs the same tagged envelope the
+  transport parses. AppModel points acts at the door that supplied its worldview,
+  reports the door's exact answer in working notes, and refreshes after success. Both
+  the iOS and macOS WebKit bridges carry the two messages.
+- **The Device screen shows and changes the facts.** Full members see every standing
+  rule sentence with its enabled/disabled state and retained disabled reason; an enabled
+  rule has a one-tap DISABLE act. The editable device-name field writes
+  `DeviceRecord.name` through the signed door seam and reads the resulting roster label
+  back. Both inputs are focus-protected from the polling renderer. Guest projections
+  remain read-only and receive neither affordance (their worldview already strips rules).
+
+### Why
+
+The stores and read model already existed, but the console stopped at display: a human
+could see neither the standing routines nor the device record they were meant to own.
+This closes those two small loops without making the console an administrator, widening
+a boundary, or adding a generic remote mutation channel.
+
+### Checks run
+
+- Rust seam regressions: full member disables a rule and a replay conflicts; full member
+  names only its signing device; a validly certified guest cannot write (3 passed).
+- `swift test` in FamiliarMesh: 15 passed, including exact tagged payload/signature,
+  live POST response handling, name payload, and worldview rule decoding.
+- The real sphere bundle was served over localhost and driven by a same-origin fixture:
+  member Device view rendered the name field, enabled + disabled rule sentences and the
+  retained reversal reason; clicks emitted exactly `ruleDisable/abcd1234` and
+  `deviceName/Wildhorse`. The temporary fixture was removed.
+- `xcodegen`; FamiliarAgent Release for the generic iOS Simulator and FamiliarMac Release
+  for macOS both built successfully (`xcodebuild` exit 0). Focused mesh clippy passed in
+  all-targets / deny-warnings shape.
+- Final full workspace bar: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` all exited 0;
+  every unit, integration, scenario, and doc-test suite passed.
+
+### Next
+
+- DeviceRecord sync already carries the new name door-to-door on the existing dial; no
+  eager second write path was added. A future HumanRecord brick may narrow rule-disable
+  ownership from “full-standing member” to the routine's associated human once that
+  canonical association exists; this seam stays typed enough to enforce it there.
 ## 2026-08-15 (small hours) — The console says what it is trying (companion:claude-bootstrap)
 
 ### What changed

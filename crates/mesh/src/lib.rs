@@ -31,6 +31,7 @@
 pub mod brief;
 pub mod changeling;
 pub mod config;
+pub mod console_act;
 pub mod consult;
 pub mod device;
 pub mod enroll;

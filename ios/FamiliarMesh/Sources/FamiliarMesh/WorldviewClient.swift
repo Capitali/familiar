@@ -144,6 +144,14 @@ public struct ReflectionView: Codable, Equatable, Identifiable {
     public var created_at: Int64
 }
 
+/// One standing reaction rule — mirrors Rust's `worldview::RuleView`.
+public struct RuleView: Codable, Equatable, Identifiable {
+    public var id: String
+    public var sentence: String
+    public var enabled: Bool
+    public var disabled_reason: String
+}
+
 /// The boundary gates (Law III) — mirrors the Rust `worldview::GateStates`.
 public struct GateStates: Codable, Equatable {
     public var llm: Bool
@@ -226,6 +234,8 @@ public struct Worldview: Codable, Equatable {
     public var theories: [TheoryView]?
     public var theory_quality: Double?
     public var gates: GateStates?
+    /// Standing rules are member-only on the server and absent on older familiars.
+    public var rules: [RuleView]?
     public var tick: Int?
     public var uptime_secs: Int64?
     public var humanity: [ReflectionView]?

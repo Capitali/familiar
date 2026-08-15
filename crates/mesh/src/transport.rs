@@ -1104,6 +1104,22 @@ async fn handle(
             };
             recv_worldview(&dir, &bytes, &sig, &ctx.seen, &peer_ip)
         }
+        // A full-standing member's two narrow console writes: disable one existing standing
+        // rule, or name the certified device making this request. Same raw-body signature and
+        // replay discipline as the worldview seam; guests can read but cannot write.
+        (Method::POST, "/mesh/console-act") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_console_act(&dir, &bytes, &sig, &ctx.seen)
+        }
         (Method::GET, "/local/worldview") => {
             // A peer's own console (e.g. the macOS SwiftUI app) reads the worldview of the node
             // running on the same machine, without a mesh signature — it's reading itself, not a
@@ -1560,6 +1576,22 @@ fn recv_observe(
         Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(_) => text(StatusCode::BAD_REQUEST, "bad batch"),
+    }
+}
+
+/// `POST /mesh/console-act` → verify and apply one deliberately narrow console write.
+fn recv_console_act(
+    dir: &Path,
+    bytes: &[u8],
+    sig: &str,
+    ring: &std::sync::Mutex<crate::observe::IngestGuard>,
+) -> Response<Full<Bytes>> {
+    match crate::console_act::apply(dir, bytes, sig, now_secs(), ring) {
+        Ok(message) => text(StatusCode::OK, message),
+        Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(crate::Error::Malformed(m)) => text(StatusCode::BAD_REQUEST, m),
+        Err(crate::Error::Io(_)) => text(StatusCode::INTERNAL_SERVER_ERROR, "console act write"),
     }
 }
 

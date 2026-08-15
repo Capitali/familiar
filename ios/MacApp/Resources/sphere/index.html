@@ -538,8 +538,10 @@ function refreshScreen() {
   // Don't rebuild the Device screen out from under the SERVING field while it's being typed in —
   // the poll cycle would otherwise recreate the input and drop focus/selection every second.
   if (k === 'device') {
-    const inp = document.getElementById('servedHumanInput');
-    if (inp && document.activeElement === inp) return;
+    const editing = ['servedHumanInput', 'deviceNameInput']
+      .map(id => document.getElementById(id))
+      .some(inp => inp && document.activeElement === inp);
+    if (editing) return;
   }
 
   // Same law for the game's guess/line box: a poll mid-thought wiped the player's typing
@@ -1491,8 +1493,10 @@ function refreshScreen() {
     // A human typing their name outranks the 3s device push — FOCUS-gated only. Gating on a
     // leftover value froze the screen permanently once anything lingered in the box; commit
     // and cancel clear + blur, so focus is the one honest signal that composing is happening.
-    const nameInp = document.getElementById('servedHumanInput');
-    if (nameInp && document.activeElement === nameInp) {
+    const editing = ['servedHumanInput', 'deviceNameInput']
+      .map(id => document.getElementById(id))
+      .some(inp => inp && document.activeElement === inp);
+    if (editing) {
       return;
     }
     const d = S.device;
@@ -1552,7 +1556,7 @@ function refreshScreen() {
     // The visitor's path — ADR-0026's two filters as a literal checklist, with the door's own
     // words and every way in spelled out. A guest should never have to infer what to do next.
     const mem = d.membership || {};
-    const isMac = /console/i.test(d.label || '');
+    const standingRules = v.rules || [];
     const pathCard = (mem.state !== 'guest' && mem.state !== 'held') ? '' : `
       <div style="margin:4px 0 16px;padding:16px 18px;border-radius:15px;background:rgba(255,178,102,0.07);border:1px solid rgba(255,178,102,0.35);">
         <div class="m" style="font-size:8px;letter-spacing:0.18em;color:#ffb266;margin-bottom:10px;">YOUR PATH TO MEMBERSHIP</div>
@@ -1580,8 +1584,32 @@ function refreshScreen() {
         </div>
         <div class="m" style="font-size:9px;color:rgba(160,195,255,0.5);margin-top:9px;">until then you read the mesh as a visitor: real shape, no names — nothing to be fixed, just the house not assuming who you are</div>
       </div>`;
+    const deviceNameCard = mem.state === 'member' ? `
+      <div style="display:flex;align-items:center;gap:9px;margin:4px 0 13px;flex-wrap:wrap;">
+        <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">DEVICE NAME</span>
+        <input id="deviceNameInput" value="${esc(d.deviceName || d.label || '')}" maxlength="64"
+          spellcheck="false" autocapitalize="words" autocomplete="off"
+          style="min-width:220px;flex:1;max-width:360px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:7px 10px;outline:none;"/>
+        <button onclick="sphereSetDeviceName()" class="glybtn" style="height:32px;padding:0 13px;border-radius:8px;">
+          <span class="m" style="font-size:8.5px;letter-spacing:0.13em;">SAVE</span>
+        </button>
+      </div>` : '';
+    const standingRulesCard = mem.state === 'member' ? `
+      <div style="margin-top:22px;">
+        <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:8px;">STANDING RULES</div>
+        ${standingRules.length ? standingRules.map(rule => `
+          <div style="display:flex;align-items:center;gap:11px;padding:11px 13px;margin-bottom:7px;border-radius:11px;background:rgba(16,34,60,0.22);border:1px solid ${rule.enabled?'rgba(120,190,255,0.16)':'rgba(150,170,195,0.11)'};${rule.enabled?'':'opacity:0.58;'}">
+            <span style="width:7px;height:7px;border-radius:50%;background:${rule.enabled?'#7ff0c0':'rgba(160,180,205,0.5)'};box-shadow:${rule.enabled?'0 0 8px rgba(127,240,192,0.65)':'none'};flex-shrink:0;"></span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;line-height:1.4;color:rgba(226,236,250,0.9);">${esc(rule.sentence)}</div>
+              ${!rule.enabled && rule.disabled_reason ? `<div class="m" style="font-size:8.5px;color:rgba(170,190,220,0.55);margin-top:3px;">${esc(rule.disabled_reason)}</div>` : ''}
+            </div>
+            ${rule.enabled ? `<button data-rule-id="${esc(rule.id)}" onclick="sphereDisableRule(this.dataset.ruleId)" class="glybtn" style="height:29px;padding:0 11px;border-radius:8px;border-color:rgba(255,143,163,0.3);color:#ffb0bf;"><span class="m" style="font-size:8px;letter-spacing:0.12em;">DISABLE</span></button>` : `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(170,190,220,0.5);">OFF</span>`}
+          </div>`).join('') : `<div class="m" style="font-size:10px;color:rgba(150,180,255,0.45);">no standing rules</div>`}
+      </div>` : '';
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
+      ${deviceNameCard}
       ${pathCard}
       ${servingRow(d)}
       ${(() => {
@@ -1619,6 +1647,7 @@ function refreshScreen() {
           <span class="m" style="font-size:9px;letter-spacing:0.14em;color:rgba(200,216,248,0.6);">${label}</span>
         </button>`;
       }).join('') + `</div>
+      ${standingRulesCard}
       <div style="margin-top:24px;display:flex;align-items:center;gap:12px;">
         <button id="unenroll" onclick="sphereUnenroll()" style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:rgba(60,10,16,${S.unenrollArmed?'0.55':'0.25'});border:1px solid rgba(255,110,110,${S.unenrollArmed?'0.7':'0.3'});cursor:pointer;">
           <svg viewBox="0 0 24 24" fill="none" stroke="#ff8fa3" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1626,6 +1655,13 @@ function refreshScreen() {
         </button>
       </div>
     </div>`;
+    const deviceNameInput = document.getElementById('deviceNameInput');
+    if (deviceNameInput) {
+      deviceNameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') sphereSetDeviceName();
+        if (event.key === 'Escape') deviceNameInput.blur();
+      });
+    }
 
   }
 }
@@ -1817,6 +1853,14 @@ window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
 // double quotes, which TERMINATE a double-quoted attribute (the MINE button's SyntaxError).
 // Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
 window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
+window.sphereDisableRule = (id) => { if (id) toApp('ruleDisable', { id }); };
+window.sphereSetDeviceName = () => {
+  const input = document.getElementById('deviceNameInput');
+  const name = (input && input.value || '').trim();
+  if (!name) return;
+  toApp('deviceName', { name });
+  if (input) input.blur();
+};
 window.sphereSponsor = (nodeId, handle) => toApp('sponsor', { node_id: nodeId, handle });
 window.sphereRedeemInvite = () => {
   const el = document.getElementById('invitepaste');

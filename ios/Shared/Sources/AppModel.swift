@@ -450,8 +450,14 @@ final class AppModel: ObservableObject {
         case .held(let s): membershipDict = ["state": "held", "path": "held — try again in \(s)s"]
         case .member(let handle): membershipDict = ["state": "member", "path": "", "handle": handle]
         }
+        // The door's DeviceRecord name leads when the latest worldview carries this device;
+        // PlatformDevice.name remains the honest fallback before the first read or on an older
+        // familiar. The editable field writes the record through the signed console-act seam.
+        let deviceName = worldview?.members?.first(where: { $0.node_id == node.nodeId })?.label
+            ?? PlatformDevice.name
         let d: [String: Any] = [
             "label": PlatformDevice.name,
+            "deviceName": deviceName,
             // This device's own node id — the console needs it to know "is it MY turn",
             // "is this claim for MY human", distinct from the daemon's id in the worldview.
             "node_id": node.nodeId,
@@ -557,6 +563,43 @@ final class AppModel: ObservableObject {
         guard !t.isEmpty else { return }
         emit(ObsRecord(actor: servedHuman, action: "answered", object: t, context: "thread:\(id)", confidence: 1.0))
         note("answered theory: \(t)")
+    }
+
+    /// Disable one rule shown by the current worldview. This only narrows standing authority;
+    /// the door still verifies full standing, signature, freshness, and the rule id.
+    func disableRule(_ id: String) async {
+        let ruleId = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ruleId.isEmpty else { return }
+        await sendConsoleAct(.disableRule(ruleId), label: "disable rule")
+    }
+
+    /// Give this certified device its deliberate DeviceRecord name. The wire act carries no
+    /// target id: the door always names the node key that signed it.
+    func setDeviceName(_ value: String) async {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            note("device name needs at least one visible character")
+            return
+        }
+        await sendConsoleAct(.nameDevice(name), label: "name device")
+    }
+
+    private func sendConsoleAct(_ act: ConsoleAct, label: String) async {
+        guard let session = consoleActSession() else {
+            note("\(label) not sent — no enrolled door")
+            return
+        }
+        do {
+            let reply = try await ConsoleActClient(session: session).send(act)
+            note("✓ \(reply)")
+            await refreshWorldview()
+        } catch ConsoleActClient.ActError.http(let status, let body) {
+            note("\(label) refused (\(status)): \(body.prefix(80))")
+        } catch ConsoleActClient.ActError.transport(let message) {
+            note("\(label) could not reach \(host): \(message.prefix(80))")
+        } catch {
+            note("\(label) failed: \(error.localizedDescription)")
+        }
     }
 
     /// A single derived observation from any sensor → the /mesh/observe pipe.
@@ -1341,6 +1384,14 @@ final class AppModel: ObservableObject {
     func worldviewSession() -> ObservationClient.Session? {
         guard let g = storedGrant(), !host.isEmpty,
               let url = WorldviewClient.worldviewURL(host: host, port: enrollPort)
+        else { return nil }
+        return ObservationClient.Session(node: node, membership: g.membership, url: url)
+    }
+
+    /// A signing session pointed at the current door's narrow console write seam.
+    func consoleActSession() -> ObservationClient.Session? {
+        guard let g = storedGrant(), !host.isEmpty,
+              let url = ConsoleActClient.consoleActURL(host: host, port: enrollPort)
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
