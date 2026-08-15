@@ -42,14 +42,17 @@ mkdir -p build
 # The Mac stage authenticates like the iOS stage below: a fresh machine has no signing
 # certificate in its keychain, and the API session lets xcodebuild mint one on the spot.
 # Build output survives in a log — a swallowed diagnostic once cost a ship a debugging round.
-xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac -configuration Release \
+# `pipefail` makes the branch follow xcodebuild/tee exit status; log prose is never a success oracle.
+if ! xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarMac -configuration Release \
   -derivedDataPath build/mac-uni ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
   -allowProvisioningUpdates \
   -authenticationKeyPath /Users/ian/.appstoreconnect/private_keys/AuthKey_SUZJSXVS25.p8 \
   -authenticationKeyID SUZJSXVS25 \
   -authenticationKeyIssuerID 69a6de82-89e3-47e3-e053-5b8c7c11a4d1 build \
-  2>&1 | tee build/mac-build.log | grep -q "BUILD SUCCEEDED" \
-  || { echo "✗ Mac build failed (ios/build/mac-build.log)"; exit 1; }
+  2>&1 | tee build/mac-build.log; then
+  echo "✗ Mac build failed (ios/build/mac-build.log)"
+  exit 1
+fi
 MACAPP="$IOS/build/mac-uni/Build/Products/Release/FamiliarMac.app"
 test -d "$MACAPP" || { echo "✗ Mac app bundle missing"; exit 1; }
 osascript -e 'quit app "FamiliarMac"' 2>/dev/null || true
@@ -63,14 +66,16 @@ echo "✓ Mac installed + zip refreshed"
 # -allowProvisioningUpdates needs an authenticated session; the CLI has no Xcode account,
 # so authenticate with the App Store Connect API key (same one testflight.sh uploads with).
 # Without it, any NEW entitlement (push, build 69) fails the build on a stale team profile.
-xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent -configuration Release \
+if ! xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent -configuration Release \
   -destination 'generic/platform=iOS' -allowProvisioningUpdates \
   -authenticationKeyPath /Users/ian/.appstoreconnect/private_keys/AuthKey_SUZJSXVS25.p8 \
   -authenticationKeyID SUZJSXVS25 \
   -authenticationKeyIssuerID 69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
   -derivedDataPath build/ios-rel build \
-  2>&1 | tee build/ios-build.log | grep -q "BUILD SUCCEEDED" \
-  || { echo "✗ iOS build failed (ios/build/ios-build.log)"; exit 1; }
+  2>&1 | tee build/ios-build.log; then
+  echo "✗ iOS build failed (ios/build/ios-build.log)"
+  exit 1
+fi
 IOSAPP="$IOS/build/ios-rel/Build/Products/Release-iphoneos/FamiliarAgent.app"
 for D in "${DEVICES[@]}"; do
   ok=""

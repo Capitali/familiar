@@ -6,6 +6,38 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — A build succeeds because the builder did (companion:codex)
+
+### What changed
+
+- **T-143 removes prose as the release oracle.** The Mac and iOS stages in
+  `ship.sh` no longer grep xcodebuild output for `BUILD SUCCEEDED`. Each stage now
+  branches on the logged pipeline's exit status under `set -o pipefail`, so a nonzero
+  builder or logger stops the ship even if its output happens to contain reassuring
+  text. Full output still reaches both the terminal and the stage log.
+- **Artifact checks remain independent postconditions.** A zero Mac build must still
+  produce the expected app bundle before installation, and the iOS bundle must still
+  exist before direct installation. The generated-project version grep remains because
+  it verifies file content after `xcodegen`; it is not used to infer command success.
+
+### Checks run
+
+- `bash -n`; ShellCheck with the pre-existing unused retry-counter warning excluded;
+  static refusal of any `BUILD SUCCEEDED`/xcodebuild-to-grep oracle; injected pipefail
+  probes proved exit 7 takes the failure branch and exit 0 does not.
+- `xcodegen`; unsigned FamiliarMac Release passed; unsigned FamiliarAgent Release for
+  the same generic iOS destination used by `ship.sh` passed. The documented simulator
+  recipe separately exposed an existing Xcode 27 Watch `AppIcon` applicability failure;
+  it is not a release-path failure and is recorded as a proposed follow-up.
+- Full workspace rule-9 bar: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` all passed.
+
+### Next
+
+- The next assigned ship will be the first live exercise of these branches; this brick
+  builds but does not install, upload, release, or alter a build number. Keep the
+  simulator asset-catalog repair separate from release-script truthfulness.
+
 ## 2026-08-15 — A timestamp is not goal authority (companion:codex)
 
 ### What changed
