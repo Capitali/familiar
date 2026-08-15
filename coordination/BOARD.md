@@ -41,13 +41,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: tentative→supported→doubtful→abandoned with hysteresis + evidence floor; human-correction exception; transition-only narration, one aside/tick by consequence, per-theory cooldown; citation format per dialogue Q5
 - notes: —
 
-### T-116 · Q4: scenario fixture oracles
-- status: queued
-- owner: —
-- depends: T-115
-- accept: output contracts on candidates; fixture-held ground truth; accuracy/coverage/quietness/discrimination checks, lexicographic eligibility; extends ADR-0036
-- notes: —
-
 ### T-110 · ADR-0040 draft: the reasoning engine's next steps
 - status: done
 - owner: controller
@@ -96,6 +89,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-116 · Q4: scenario fixture oracles
+- status: claimed
+- owner: companion:codex
+- scope: Cargo.lock, crates/scenario/ (recipe-oracle module, tests, and dependency), scenarios/recipe-oracles/
+- depends: T-115 (merged at d80ae4f)
+- accept: strict candidate output contracts plus fixture-owned replay truth outside the candidate; evaluate recipe candidates against accuracy, coverage (including honest null/error outcomes), quietness, and changed/null/malformed discrimination; boundary-clean then execution-clean then all four truth checks form eligibility, with usefulness and deterministic cost ranking survivors; live runs are health evidence only and are not accepted by this oracle; hermetic regressions prove hard-coded, fabricated, and chatty candidates fail
+- notes: scope is confined to the scenario lab and does not overlap companion:claude-bootstrap's T-119 daemon.rs claim
 
 ### T-119 · One launchctl dialect: daemon.rs joins the bootout/bootstrap bracket
 - status: claimed
