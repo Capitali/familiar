@@ -1,10 +1,12 @@
 # ADR-0040 — The reasoning engine grows honest: relation, prediction, and bounded authority
 
-- **Status:** proposed (for Ian) — every clause below was decided in the
+- **Status:** accepted — Ian, 2026-08-15, directed in the bootstrap session ("you
+  should complete ADR-0040"). Every clause below was decided in the
   [design dialogue](../reviews/2026-08-14-reasoning-engine-dialogue.md) between claude
   and codex (eight questions, six rounds, per Ian's iterate-before-deciding protocol);
   the [review brief](../reviews/2026-08-14-reasoning-engine.md) holds the survey and
-  limits this answers.
+  limits this answers. At acceptance, phase 1 was already built: all five clauses
+  below are landed code.
 - **Date:** 2026-08-15
 - **Relates to:** [ADR-0031](0031-consent-by-observation.md) (act and read the
   reaction), [ADR-0032](0032-declared-actuators-and-the-reaction-loop.md) (declared
@@ -40,7 +42,7 @@ never participants in it; designs argued between them before either builds.
    act-reversal bypasses the floor (a person's word is not a statistic). Narration on
    transitions only — one aside per tick, chosen by consequence, citing one supporting
    and one contradicting line, counts in bounded prose, never invented percentages.
-   *(T-114, to build.)*
+   *(Landed: D1, T-114, merge 2bb8d63.)*
 4. **Authored code begins in a language whose boundary is true by construction.** The
    recipe interpreter (typed steps over proven-tool inputs, deterministic, bounded,
    `deny_unknown_fields`) is tier 1; Python authors only in the scenario lab; general
@@ -53,12 +55,12 @@ never participants in it; designs argued between them before either builds.
    eligibility; recipe-derived outbound bodies are outreach, ADR-0013), with WASI held
    to a demonstrated-ceiling evidence bar. Every tier ships negative tests proving
    undeclared/closed/unavailable/dynamic/out-of-scope requests refuse before effect.
-   *(T-115 v1 in flight — codex's design.)*
+   *(Landed: C2 v1, T-115, merge d80ae4f — codex's design.)*
 5. **Truth belongs to the fixture.** A cultivated utility declares an output contract
    and must survive scenario variants whose ground truth lives outside its world:
    accuracy, coverage (honest nulls), quietness, discrimination, then the
    constitutional floor and cost — lexicographic. Live runs are health evidence only.
-   Extends ADR-0036 from "ran" to "was right." *(T-116, after T-115.)*
+   Extends ADR-0036 from "ran" to "was right." *(Landed: T-116, merge 26a98a0.)*
 
 ## Consequences
 
@@ -75,6 +77,8 @@ that trade is deliberate, not permanent.
 ## Build order (board tasks)
 
 T-114 belief states + narration → T-115 recipe v1 (enforced caps) → T-116 oracle
-contracts → capability tiers v2/v3/net as their own dialogued tasks → theorize-time
-prediction authoring (the LLM proposes, the type system disposes) → habit-threshold
-proposals (ADR-0039 §3) once field calibration exists.
+contracts *(all three landed 2026-08-14/15, before acceptance)* → capability tiers
+v2/v3/net as their own dialogued tasks → theorize-time prediction authoring (the LLM
+proposes, the type system disposes) → habit-threshold proposals (ADR-0039 §3) once
+field calibration exists. The remaining phases entered the board as Proposed at
+acceptance (T-121–T-123); the controller owns their queueing and dialogue.

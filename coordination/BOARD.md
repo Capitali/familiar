@@ -7,6 +7,38 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-121 · Capability tier v2: clock-snapshot + virtual workspace-fs (dialogued)
+- status: proposed
+- owner: —
+- scope: crates/recipe (cap enforcement), docs/reviews/*-dialogue.md (design rounds precede build)
+- depends: ADR-0040 (accepted 2026-08-15)
+- accept: per ADR-0040 §4 ladder — v2 grants clock-snapshot and a virtual workspace-fs as manifest-literal caps; authority stays an intersection; negative tests prove undeclared/closed/unavailable/dynamic/out-of-scope refuse before effect; claude↔codex dialogue precedes the design pick per Ian's standing direction
+- notes: entered at ADR acceptance by companion:claude-bootstrap; controller queues/sequences
+
+### T-122 · Theorize-time prediction authoring
+- status: proposed
+- owner: —
+- scope: crates/kernel (prediction mint path), crates/cycle (theorize seam)
+- depends: ADR-0040 (accepted); T-113/T-114 landed
+- accept: the LLM proposes anchored typed predictions at theorize time and the type system disposes — unfalsifiable claims refuse at mint (ADR-0040 §2); tests pin propose→refuse and propose→mint paths
+- notes: entered at ADR acceptance by companion:claude-bootstrap; controller queues/sequences
+
+### T-123 · Habit-threshold proposals (ADR-0039 §3)
+- status: proposed
+- owner: —
+- scope: crates/kernel, crates/cycle (per ADR-0039 §3)
+- depends: field calibration evidence from T-113's live results (not yet accumulated)
+- accept: per ADR-0040 build order — habit thresholds proposed from calibrated prediction history only; gated until calibration exists in the field
+- notes: entered at ADR acceptance by companion:claude-bootstrap; deliberately not actionable until the fleet accumulates prediction results
+
+### T-124 · Build 86 + door deploys: ship the narrated first join
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: fleet ops — ship.sh 86 from a clean clone (consoles carry T-120 join progress + T-101-era batch already on main), door deploys of current main (T-113/T-114 kernel work) to lighthouse + Wildhorse if SSH-reachable from this Mac
+- depends: CI green on the ship sha (rule 9 hard precondition)
+- accept: Build 86 consoles on both Macs + TestFlight; doors on current main or the deploy recorded as held with its exact trigger; STATE notes carry shas + evidence; Ian notified when 86 is on his devices
+- notes: Ian (2026-08-15, verbatim): "then it seems like time for a build and ship" — recorded per rule 5. Claimed by a companion because NO other lane is alive (ListAgents empty: controller, codex, infra all gone); rule 8's infra-lane preference is unavailable, so the ritual runs here exactly as documented (clean clone; memory of Build 80's successful ship from this Mac)
+
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: queued
 - owner: —
@@ -39,7 +71,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - owner: controller
 - merged: (this commit)
 - accept: converged phases from the brief as a proposed ADR for Ian; phases become board tasks with owners on acceptance
-- notes: docs/decision-records/0040-the-reasoning-engine-grows-honest.md — PROPOSED, awaiting Ian; all eight dialogue questions decided across six rounds
+- notes: docs/decision-records/0040-the-reasoning-engine-grows-honest.md — ACCEPTED by Ian 2026-08-15 ("you should complete ADR-0040", bootstrap session; recorded per rule 5). All eight dialogue questions decided across six rounds; phase 1 (T-112..T-116) was fully landed at acceptance. Remaining phases proposed as T-121–T-123
 
 ### T-101 · Build 85 console batch: rules list + device-name field
 - status: queued
