@@ -1,5 +1,12 @@
 # The board
 
+> ⏸ **CO-DEVELOPMENT HOLD — 2026-08-15 → 2026-08-19 23:11 (Ian).** Codex is at 9% usage
+> remaining. No lane should assign, expect, or wait on the other until the hold lifts; codex
+> should not spend budget on dialogue replies. Tasks marked *(awaits codex)* are owed, not
+> abandoned — see the hold note at the end of
+> [the review dialogue](../docs/reviews/2026-08-15-review-dialogue.md). Claude continues solo
+> on bricks that need no second lane.
+
 Rules and entry format: [README.md](README.md). Claim = move to `claimed` + your name,
 in a pushed commit, scope checked against every other claimed task. Updated: 2026-08-14.
 
