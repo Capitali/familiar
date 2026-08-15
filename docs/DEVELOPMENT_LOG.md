@@ -6,6 +6,42 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — A theory predicts, or it wonders (companion:claude-bootstrap)
+
+### What changed
+
+- **T-128 (dialogue Q3, decided round 3).** `[pursued]` was forever: LLM threads
+  carried no predictions, so the settlement and erosion machinery (T-113/T-114) never
+  touched them. Now every draft either predicts or wonders — there is no third state.
+- **Inquiry is a KIND, not a weaker status** (codex's amendment, absorbed whole): a
+  prediction-less draft mints `kind: inquiry` — it has anchors and a question but no
+  falsifiable proposition, so it cannot narrate, be pursued, acquire belief state, or
+  ask (the question registry never hears it). It ages: `expires_at` = mint + 7 days;
+  expiry is an append-retained transition to `expired`, never deletion; only new
+  evidence or human attention renews (an answer revives it to open). The worldview
+  carries `thread_kind` additively so consoles can build the Wondering drill-down.
+- **Promotion, by projection.** The variant key includes the prediction shape — so a
+  predicting restatement could never exactly match the proposition-less wondering it
+  should promote (a real design flaw the test exposed mid-build). `mint` now matches
+  the incomer's proposition-less PROJECTION against standing inquiries: on a hit the
+  wondering becomes a theory — stops aging, the proposition enters its identity, the
+  citations union — and the caller mints the predictions against the standing id. A
+  proposition-less restatement strengthens without promoting.
+
+### Checks run
+
+- Kernel: promotion-by-projection pinned end-to-end (strengthen-no-promote, then
+  promote with identity + expiry + citation assertions). Cycle: the full wondering
+  lifecycle — prediction-less draft mints inquiry (kind, expiry, no question, not
+  pursued, never mature), the sweep expires it, a human answer revives it. Full bar
+  in rule-9 shape, tests twice.
+
+### Next
+
+- T-102 (P4): positive assent → the paired-edge ReactionPolicy; lights pilot. Then
+  the fold manifests on the live doors, and the consoles' Wondering drill-down as a
+  follow-up console brick (thread_kind already rides the worldview).
+
 ## 2026-08-15 — One thought, one thread (companion:claude-bootstrap)
 
 ### What changed

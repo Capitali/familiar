@@ -85,6 +85,11 @@ pub struct TheoryView {
     /// lights=dim", "demoted …"). Capped, oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub acts: Vec<TheoryAct>,
+    /// "" for a theory; "inquiry" for the wondering kind (T-128) — additive, so a
+    /// console that predates it simply doesn't read it. The Wondering drill-down
+    /// consumes this; the mature feed never carries an inquiry at all.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thread_kind: String,
 }
 
 /// One candidate generation in a theory's drill-down: what was tried, how it fared.
@@ -773,6 +778,7 @@ pub fn assemble_worldview(
                 answers: t.answers.clone(),
                 seeded_by,
                 work,
+                thread_kind: t.kind.clone(),
                 acts,
             }
         })

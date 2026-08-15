@@ -990,6 +990,10 @@ fn maybe_theorize(
     } else {
         draft.subject.trim().to_string()
     };
+    // A theory predicts or it wonders (T-128, dialogue Q3): a draft with no
+    // falsifiable proposition mints as an Inquiry — a different KIND, aging toward
+    // expiry, never narrated, never pursued, never asked — not a quieter theory.
+    let is_inquiry = draft.predictions.is_empty();
     let minted = thread::mint(
         dir,
         thread::Mint {
@@ -1007,24 +1011,32 @@ fn maybe_theorize(
             mechanism: draft.mechanism.clone(),
             acts,
             predictions_sig,
+            kind: if is_inquiry {
+                "inquiry".into()
+            } else {
+                String::new()
+            },
+            expires_at: if is_inquiry {
+                now + thread::INQUIRY_EXPIRY_SECS
+            } else {
+                0
+            },
         },
         now,
     )?;
-    let t = match minted {
-        // The exact standing claim, restated: its thread carries the new citation and
-        // the question is NOT re-asked — six-in-five-hours becomes one thread that
-        // grows more sure of itself.
-        thread::Disposition::Strengthened(_) => {
-            dispose(dir, now)?;
-            return Ok(false);
-        }
-        thread::Disposition::New(t) | thread::Disposition::Competes(t) => t,
+    // The exact standing claim, restated, strengthens its thread (the question is NOT
+    // re-asked — six-in-five-hours becomes one thread growing more sure of itself);
+    // if the restatement carries predictions the kernel just promoted the Inquiry, so
+    // the predictions mint against the standing id either way.
+    let (thread_id, minted_new) = match minted {
+        thread::Disposition::Strengthened(id) => (id, false),
+        thread::Disposition::New(t) | thread::Disposition::Competes(t) => (t.id.clone(), true),
     };
-    let thread_id = t.id.clone();
     // The theorized question doesn't go straight to the human — it enters the question
     // registry, where the factory coordinates *all* its questions and decides which to
-    // surface, and when (see `coordinate_questions`). One voice, not a pile.
-    if !q.is_empty() {
+    // surface, and when (see `coordinate_questions`). One voice, not a pile. An
+    // Inquiry never asks at all.
+    if minted_new && !is_inquiry && !q.is_empty() {
         question::add(dir, &q, "llm", now)?;
     }
     // Predictions ride the mint when the draft carries them (optional until T-128) —
@@ -1061,7 +1073,7 @@ fn maybe_theorize(
         );
     }
     dispose(dir, now)?;
-    Ok(true)
+    Ok(minted_new)
 }
 
 /// The theorize batch cursor (T-126, dialogue Q5): the highest observation seq already
@@ -1074,6 +1086,24 @@ fn theorize_cursor(dir: &Path) -> u64 {
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
+}
+
+/// Expire unrenewed Inquiries (T-128): an append-retained transition to `expired`,
+/// never deletion — only genuinely new evidence or human attention renews (an answer
+/// revives via `add_answer`'s revival list). Returns how many aged out.
+fn expire_inquiries(dir: &Path, now: i64) -> io::Result<usize> {
+    let mut expired = 0;
+    for t in thread::load(dir)? {
+        if t.kind == "inquiry"
+            && matches!(t.status.as_str(), "open")
+            && t.expires_at > 0
+            && now >= t.expires_at
+        {
+            thread::update_status(dir, &t.id, "expired", now)?;
+            expired += 1;
+        }
+    }
+    Ok(expired)
 }
 
 /// Match free text against the human's DECLARED surfaces (T-127): the surface name or
@@ -1318,6 +1348,8 @@ fn maybe_theorize_needs(
             mechanism: String::new(),
             acts: Vec::new(),
             predictions_sig: Vec::new(),
+            kind: String::new(),
+            expires_at: 0,
         },
         now,
     )?;
@@ -2242,6 +2274,8 @@ fn adopt_device_theories(
             mechanism: String::new(),
             acts: Vec::new(),
             predictions_sig: Vec::new(),
+            kind: String::new(),
+            expires_at: 0,
         };
         if thread::mint(dir, m, now).is_ok() {
             adopted += 1;
@@ -2272,6 +2306,11 @@ fn pursue_threads(dir: &Path, now: i64) -> io::Result<(usize, usize)> {
     let mut marginalized = 0;
     for t in &threads {
         if t.status != "open" || (t.direction.trim().is_empty() && t.answers.is_empty()) {
+            continue;
+        }
+        // An Inquiry cannot be pursued (T-128): it has no falsifiable proposition yet.
+        // It waits — for evidence, a human answer, or its expiry.
+        if t.kind == "inquiry" {
             continue;
         }
         // Corruption awareness (Law III, outward): a directive from a flagged corruptor —
@@ -4181,6 +4220,10 @@ pub fn tick(
     //     they never abort the tick.
     let mesh = familiar_mesh::federate(dir, now);
 
+    // Inquiries age out on the tick cadence (T-128) — wondering is not forever; only
+    // new evidence or a human answer renews one. Best-effort, like every sweep.
+    let _ = expire_inquiries(dir, now);
+
     // Sweep visitors who never became members and have sat past two hours (B10). Runs on the
     // tick cadence, best-effort; an identified guest is a member and is never touched.
     for gone in familiar_mesh::record::purge_stale_guests(dir, now) {
@@ -4641,6 +4684,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -4950,6 +4995,8 @@ mod tests {
                     family_key: String::new(),
                     variant_key: String::new(),
                     superseded_by: String::new(),
+                    kind: String::new(),
+                    expires_at: 0,
                 },
             )
             .unwrap();
@@ -5022,6 +5069,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -5205,6 +5254,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -5299,6 +5350,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -5350,6 +5403,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -5836,6 +5891,8 @@ mod tests {
             family_key: String::new(),
             variant_key: String::new(),
             superseded_by: String::new(),
+            kind: String::new(),
+            expires_at: 0,
         };
         let existing = vec![held];
         // The same musing in slightly different words is the same musing.
@@ -5981,6 +6038,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -6161,6 +6220,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -6367,6 +6428,8 @@ mod tests {
                     family_key: String::new(),
                     variant_key: String::new(),
                     superseded_by: String::new(),
+                    kind: String::new(),
+                    expires_at: 0,
                 },
             )
             .unwrap();
@@ -6658,6 +6721,44 @@ mod tests {
     }
 
     #[test]
+    fn a_prediction_less_draft_wonders_instead_of_asking() {
+        let t = Temp::new(&format!("inquiry_lifecycle_{}", std::process::id()));
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100);
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"observation","question":"is there a rhythm here?","theory":"mornings look patterned","direction":"watch mornings"}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(theorize_until_disposed(dir, 200, &obs));
+        let ts = thread::load(dir).unwrap();
+        assert_eq!(ts.len(), 1);
+        let w = &ts[0];
+        assert_eq!(w.kind, "inquiry", "no prediction, no theory — it wonders");
+        assert_eq!(w.expires_at, 200 + thread::INQUIRY_EXPIRY_SECS);
+        assert!(!thread::is_mature(w), "wondering never enters the feed");
+        assert!(
+            question::load(dir)
+                .unwrap()
+                .iter()
+                .all(|q| q.text != w.question),
+            "an Inquiry never asks"
+        );
+        // It cannot be pursued…
+        pursue_threads(dir, 300).unwrap();
+        assert_eq!(thread::load(dir).unwrap()[0].status, "open");
+        // …and unrenewed, it ages out — append-retained, never deleted.
+        assert_eq!(expire_inquiries(dir, w.expires_at + 1).unwrap(), 1);
+        assert_eq!(thread::load(dir).unwrap()[0].status, "expired");
+        // Human attention renews: an answer revives it to open.
+        thread::add_answer(dir, &w.id, "yes — watch tuesdays", w.expires_at + 100).unwrap();
+        assert_eq!(thread::load(dir).unwrap()[0].status, "open");
+    }
+
+    #[test]
     fn a_device_theory_proposing_foreign_mechanisms_is_refused_at_adoption() {
         let t = Temp::new("floor_device_guard");
         let dir = &t.0;
@@ -6716,6 +6817,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -6770,6 +6873,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();

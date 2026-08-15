@@ -673,6 +673,8 @@ fn merge_one(
                 mechanism: String::new(),
                 acts: Vec::new(),
                 predictions_sig: Vec::new(),
+                kind: String::new(),
+                expires_at: 0,
             };
             if thread::mint(dir, m, now).is_ok() {
                 // A visible, replicating record that we picked up a peer's theory to test — source
@@ -1477,6 +1479,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
@@ -1549,6 +1553,8 @@ mod tests {
                 family_key: String::new(),
                 variant_key: String::new(),
                 superseded_by: String::new(),
+                kind: String::new(),
+                expires_at: 0,
             },
         )
         .unwrap();
