@@ -119,6 +119,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-182 · The familiar died and nobody said anything
+- status: queued — **highest-value item on this board**
+- owner: —
+- scope: the console's staleness signal; peer-visible node health; whatever surface can honestly say "this node has stopped"
+- depends: —
+- accept: a node whose daemon has stopped is VISIBLY stopped to any human looking at a console, rather than showing a normal-looking roster built from stale data; the mesh's peers, which can already see the gossip stop, surface it; the human learns the familiar is down FROM THE FAMILIAR, not from a downstream symptom
+- notes: Ian 2026-08-15 — reported "the watch sync is broken, my watch became unlinked and it won't relink... messages get from watch to dialog but those seem unanswered as well." BOTH symptoms had ONE cause: the daemon on MacOnStick had been dead for ~7 hours. `launchctl print` gave `last exit reason = OS_REASON_CODESIGNING` — the LWCR class this session opened by fixing (T-119): the binary was replaced at 09:20 without the bootout/bootstrap bracket, so launchd held a code requirement pinned to the old executable and refused the new one. With the daemon dead nothing ran `converse` (hence unanswered) and no door answered the watch's knock (hence unrelinkable). Restored with `daemon install`, which runs the bracket correctly; the door is LISTENING again and the tick resumed (it immediately did 7 hours of deferred visitor purging). `install()` and `start()` were both audited and are correct — the swap came from outside the tool. THE REAL DEFECT IS THE SILENCE: the familiar was dead for seven hours, and the only way its human found out was that a watch stopped working. Same class as T-172 (a watch that cannot say why it failed), T-173 (a device reporting a placeholder as its name), T-180 (a reply that performs attention it does not have) — the system substituting a plausible-looking surface for a missing capability and saying nothing
+
 ### T-181 · The dialogue prompt asks for acknowledgement, which is the thing Ian objected to
 - status: queued — **wants Ian's call on the question rule**
 - owner: —
