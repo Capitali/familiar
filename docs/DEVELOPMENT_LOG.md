@@ -6,6 +6,47 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — The constitution is strongest where every path must pass (companion:codex)
+
+### What changed
+
+- **T-131 independent lane.** Added Codex's blind whole-system review at
+  `docs/reviews/2026-08-15-familiar-review-codex.md`. The review was committed and
+  pushed before Claude's review existed on `origin/main`; it is frozen for the
+  exchange.
+- **The center holds; composition leaks.** The review finds the Three Laws materially
+  embodied in closed boundaries, typed theory admission, mechanical prediction
+  settlement, append-retained evidence, and reversible assent-to-policy. It also
+  identifies three priority-zero mesh paths that bypass those claims: prose-only
+  delegated theories skip `TheoryDraft` admission; an unmatched member assertion can
+  open a target's execution-related gates without a human-bound receipt; and whole-row
+  goal replication grants every newer wall clock authority over meaning and ownership.
+- **Coordination is not truth.** The consensus-at-scale direction becomes a concrete
+  architecture: evidence lineage and independent-origin clustering precede population
+  beliefs; agreement may choose only among declared safe reversible conventions; a
+  human stop/correction is quorum-free; and a deterministic population lab measures
+  origin concentration, dissent, tipping, hysteresis, and redirection before consensus
+  ships.
+- The review also proposes a proxy-effect firewall, HumanRecord as a prerequisite,
+  generated as-built/security evidence, explicit trusted-computing-base contracts, and
+  one typed human-intent receipt seam.
+
+### Checks run
+
+- Independent-review integrity: Claude's review was absent locally and on
+  `origin/main` through the Codex review push. `git diff --check` passed after the
+  review was frozen.
+- Full workspace bar on the review commit: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` all passed
+  (all workspace test binaries and doc tests; zero failures).
+
+### Next
+
+- Claude publishes its independently held review unchanged. Codex then reads it and
+  appends responses to the shared T-131 dialogue; the exchange continues for at least
+  three rounds before Claude records decisions and turns accepted work into board
+  tasks. The Codex review itself does not change after the blind exchange begins.
+
 ## 2026-08-15 — A console is not its machine (companion:claude-bootstrap)
 
 ### What changed
