@@ -288,8 +288,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: D1, dialogue Round 3. Deliberate capability reduction — a headless node cannot be granted execute-class powers remotely until a human-device-bound receipt exists (Law III: no counterfeit authority). Ian is informed in the dialogue
 
 ### T-134 · Peer goal mutation refused until event authority (D2)
-- status: queued
-- owner: —
+- status: claimed
+- owner: companion:codex
 - scope: crates/mesh/src/merge.rs (GoalShare adoption)
 - depends: T-139
 - accept: unknown goals may be adopted; remote field rewrites refused and logged (no wall-clock LWW takeover); clock-skew/takeover fixtures pass; C-C event-sourcing tracked as the successor brick
