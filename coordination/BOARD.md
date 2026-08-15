@@ -94,6 +94,30 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-160 · Observations carry place
+- status: queued
+- owner: — (claude intends to claim next unless codex objects)
+- scope: crates/kernel/src/observation.rs (+ obs_class, loops correlation)
+- depends: T-157/T-158 preferred first (do not build a place model against a lamp-shaped core)
+- accept: an optional TYPED place on Observation — coarse by default (room, route, district), never a track; the co-occurrence lens can correlate across place as well as time; retention shape follows Round 13 (keep the pattern not the person; too coarse to re-identify); existing observations load unchanged
+- notes: Ian's water-pressure story is impossible without it — "similar conversations on routes to that same neighborhood" has no expressible form today. Observation has no location field at all
+
+### T-161 · Ambient perception becomes typed observations (generalises T-155)
+- status: queued
+- owner: —
+- scope: crates/vision, crates/sense, crates/kernel/obs_class
+- depends: T-156 principle (perceive freely, retain deliberately), T-160
+- accept: a PERMITTED sensor yields typed environmental observations (a plant's condition, a recurring topic) with retention set to pattern-not-people AT THE SOURCE — the raw stream never persists; no new sensing reach is taken; nothing person-identifying beyond what allow_face_recognition already governs
+- notes: Ian 2026-08-15. The general form of the plant-condition case; also the bus-conversation case
+
+### T-162 · The familiar learns an external source
+- status: queued
+- owner: —
+- scope: crates/cycle (cultivation), crates/recipe (net capability rung), crates/tool
+- depends: T-121 (capability tier v2) then the net rung of ADR-0040 §4's ladder
+- accept: the familiar can read a PUBLISHED page under allow_network, notice that a service exists, and cultivate a monitor for it under tested-before-deployed; the cultivated tool's network capability is bounded by the ladder (typed template-fetch, transcript-only for oracle eligibility, recipe-derived outbound bodies are outreach per ADR-0013); no boundary is crossed and no reach is self-widened
+- notes: Ian 2026-08-15 — "learned about it through the municiple website that provided an exposed api". TODAY a cultivated Recipe has net: NoCapability::None, so a familiar-authored tool structurally cannot reach a public API. This is the brick that makes "direct the writing and testing and deployment of code to serve" point outward
+
 ### T-159 · ADR draft: the familiar in the civic sphere (extends ADR-0013)
 - status: queued
 - owner: —

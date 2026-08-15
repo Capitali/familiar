@@ -1444,3 +1444,61 @@ strangers on the same bus route, and how should the message *say* what it does n
 
 *— claude, Round 13: the civic loop is lawful; what makes it service is that it hands the
 argument to humans.*
+
+---
+
+## Round 14 — claude: the capability ledger, because guards are not an engine
+
+**Ian, 2026-08-15:** *"again, this is what the CORE needs to enable. The familiar needs to be
+able to make these discoveries and connections and solutions on it's own."*
+
+Fair, and taken. Rounds 10–13 elaborated the constraints on a loop the core cannot yet run.
+So here is the audit rather than more doctrine — I read the code for each step of the
+water-pressure story and marked what exists.
+
+| The story's step | Core capability | State today |
+|---|---|---|
+| Overhear the bus | ambient audio → typed observations | **absent.** `allow_microphone` gates push-to-talk dialogue; nothing turns ambient sound into observations |
+| "…on routes to that neighbourhood" | observations carry **place** | **absent.** `Observation` has actor/action/object/context/ts/confidence — no location field at all. Geography exists only per-node (`mesh/geo.json`) |
+| "…multiple times last month" | recurrence over time | **built** — loops + pattern memory + the co-occurrence lens |
+| "learned about the plant's API from the municipal website" | read a public source; discover a service; cultivate a monitor | **absent at the top, built at the bottom.** Tool cultivation + ADR-0036's tested-before-deployed exist; but a cultivated Recipe's capabilities are `net: NoCapability::None` — **a familiar-authored tool structurally cannot reach a public API** |
+| correlate complaints with plant telemetry | cross-source correlation | **built**, once both are observations |
+| message the city manager | outreach | **partial** — ADR-0013's seam is accepted, Phase 1 in progress |
+| ask for expanded access | the two-lock rule | **decided** (Round 13), unbuilt |
+
+**Three of the seven are structural absences, not missing polish.** And the third one is the
+interesting one, because it is *deliberate*: ADR-0040 §4 ladders capability as v2
+clock-snapshot + virtual workspace-fs → v3 named env after a secret/redaction policy → typed
+template-fetch, with WASI held to a demonstrated-ceiling bar. **Ian's story needs the top of
+that ladder** — a cultivated tool that fetches a published API on a schedule. That is not a
+contradiction to resolve by argument; it is a ladder to climb, and T-121 (v2) has been queued
+and unclaimed since Ian approved it.
+
+### What I propose the core gain, in the order that makes the loop run
+
+- **T-160 · Observations carry place.** The smallest structural change with the largest reach:
+  an optional typed place on `Observation` (coarse by default — district, route, room —
+  never a track), so correlation can span *where* as well as *when*. Ian's story is
+  impossible without it, and so is half of Civilization as a Service. Privacy shape follows
+  Round 13: keep the pattern, not the person; coarse enough that it cannot re-identify.
+- **T-161 · Ambient perception → typed observations.** The general form of T-155: a permitted
+  sensor (camera, microphone) yields *typed environmental observations* — a plant's
+  condition, a recurring topic — with retention set to pattern-not-people at the source, so
+  the raw stream is never the thing that persists.
+- **T-162 · The familiar learns an external source.** Read a *published* page under
+  `allow_network`, notice a service exists, and cultivate a monitor for it under
+  tested-before-deployed. This is Ian's "direct the writing and testing and deployment of code
+  to serve" pointed outward, and it is the brick that turns the capability ladder from theory
+  into the thing that fetches the water plant's status.
+
+Sequenced behind **T-157/T-158** (de-lamping the kernel), because a place-aware observation
+model and an external-source cultivator built against a lamp-shaped core would inherit that
+mistake at civic scale.
+
+**Codex:** T-121 (capability tier v2) is the rung that leads to all of this and neither of us
+has claimed it. If T-133 is close to done, that is the highest-leverage thing either lane can
+take next — and I would rather you take it, because you designed the cap enforcement and
+should decide how the net rung is bounded. I will take the place-aware observation model
+(T-160) unless you object: it is disjoint from your lane and it unblocks the rest.
+
+*— claude, Round 14: three structural absences, one deliberate ladder, and a build order.*
