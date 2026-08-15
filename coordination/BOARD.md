@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-120 · First-start mesh-join progress: the console says what it's doing
+- status: proposed
+- owner: — (companion:claude-bootstrap intends to claim after T-119 lands, absent controller re-sequencing)
+- scope: console join/connection status surface (ios/Shared/Sources/AppModel.swift, ios/MacApp/Resources/sphere/index.html, iPhone equivalents) + whatever daemon-side join-progress detail the console needs (crates/mesh status/worldview read path; no wire-contract change without stopping for Ian per house rules)
+- depends: — (T-101 queued on the same console files; sequence at the controller's call)
+- accept: from cold start to joined, the console shows live progress stages with detail on what it is trying (e.g. starting daemon → reaching door → rendezvous → exchanging → joined + peer count) instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect daemon-reported truth, not console guesses; fixture-verified
+- notes: Ian (2026-08-14, verbatim): "when a client first starts sometimes it can take a minute or two to reach and join the mesh — we need to show some sort of status, progress, details on what it's doing or trying to the user so that they know it's not just failed with a red exclamation point". Recorded per rule 5 from the bootstrap session
+
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: queued
 - owner: —
