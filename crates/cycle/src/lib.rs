@@ -944,7 +944,7 @@ fn maybe_theorize(
     }
     // A musing that substantially repeats a standing thread is not a new thought —
     // it is the same thought asked louder. Hold it; the standing thread carries it.
-    // (Attentional guard only — typed family/variant identity lands with T-127.)
+    // (Attentional guard; the typed family/variant identity below is the real gate.)
     let existing = thread::load(dir)?;
     if let Some(id) = similar_thread_id(&existing, &theory, &direction) {
         // The muse reached the same idea again — reinforce the survivor (C5) so a recurring
@@ -954,34 +954,79 @@ fn maybe_theorize(
         dispose(dir, now)?;
         return Ok(false);
     }
+    // Typed identity (T-127, dialogue Q1): anchor classes from the cited observations,
+    // target + acts matched against the human's DECLARED surfaces (typed against the
+    // declaration, not free prose), prediction shape from the draft.
+    let anchor_classes: Vec<String> = draft
+        .anchors
+        .iter()
+        .filter_map(|a| {
+            if a.starts_with("loop:") {
+                Some(a.clone())
+            } else {
+                obs.iter()
+                    .find(|o| &o.id == a)
+                    .map(familiar_kernel::obs_class::class_key)
+            }
+        })
+        .collect();
+    let (target, acts) = declared_match(dir, &format!("{direction} {theory}"));
+    let predictions_sig: Vec<String> = draft
+        .predictions
+        .iter()
+        .map(|p| {
+            format!(
+                "{}|{}|{}|{}|{}",
+                p.then_actor.trim(),
+                p.then_action.trim(),
+                p.then_object_prefix.trim(),
+                p.polarity.trim(),
+                p.within_secs
+            )
+        })
+        .collect();
+    let subject = if draft.subject.trim().is_empty() {
+        observer_phrase(dir)
+    } else {
+        draft.subject.trim().to_string()
+    };
+    let minted = thread::mint(
+        dir,
+        thread::Mint {
+            question: q.clone(),
+            theory,
+            direction,
+            origin: "llm".to_string(),
+            origin_human: String::new(),
+            actor: "familiar".to_string(),
+            anchors: draft.anchors.clone(),
+            facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+            subject,
+            anchor_classes,
+            target,
+            mechanism: draft.mechanism.clone(),
+            acts,
+            predictions_sig,
+        },
+        now,
+    )?;
+    let t = match minted {
+        // The exact standing claim, restated: its thread carries the new citation and
+        // the question is NOT re-asked — six-in-five-hours becomes one thread that
+        // grows more sure of itself.
+        thread::Disposition::Strengthened(_) => {
+            dispose(dir, now)?;
+            return Ok(false);
+        }
+        thread::Disposition::New(t) | thread::Disposition::Competes(t) => t,
+    };
+    let thread_id = t.id.clone();
     // The theorized question doesn't go straight to the human — it enters the question
     // registry, where the factory coordinates *all* its questions and decides which to
     // surface, and when (see `coordinate_questions`). One voice, not a pile.
     if !q.is_empty() {
         question::add(dir, &q, "llm", now)?;
     }
-    let seq = existing.len() + 1;
-    let thread_id = format!("thread-{seq:04}");
-    thread::append(
-        dir,
-        &Thread {
-            id: thread_id.clone(),
-            question: q,
-            theory,
-            direction,
-            created_at: now,
-            status: "open".to_string(),
-            status_at: now,
-            last_worked_at: 0,
-            reinforced: 0,
-            answers: Vec::new(),
-            origin: "llm".to_string(),
-            origin_human: String::new(),
-            actor: "familiar".to_string(),
-            anchors: draft.anchors.clone(),
-            facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
-        },
-    )?;
     // Predictions ride the mint when the draft carries them (optional until T-128) —
     // prediction::mint's first production caller; an unfalsifiable window refuses
     // there and the theory stands without it.
@@ -1029,6 +1074,33 @@ fn theorize_cursor(dir: &Path) -> u64 {
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
+}
+
+/// Match free text against the human's DECLARED surfaces (T-127): the surface name or
+/// its keywords name the target; action labels found in the text are the typed acts.
+/// Matching against declaration literals keeps identity auditable — "dim" and "off"
+/// are different claims because the declaration says they are different actions.
+fn declared_match(dir: &Path, text: &str) -> (String, Vec<String>) {
+    let t = text.to_lowercase();
+    let Ok((surfaces, _)) = familiar_kernel::actuator::load(dir) else {
+        return (String::new(), Vec::new());
+    };
+    for a in &surfaces {
+        let named = t.contains(&a.surface.to_lowercase())
+            || a.keywords
+                .split_whitespace()
+                .any(|k| !k.is_empty() && t.contains(&k.to_lowercase()));
+        if named {
+            let acts: Vec<String> = a
+                .actions
+                .keys()
+                .filter(|label| t.contains(&label.to_lowercase()))
+                .cloned()
+                .collect();
+            return (a.surface.clone(), acts);
+        }
+    }
+    (String::new(), Vec::new())
 }
 
 fn write_theorize_cursor(dir: &Path, seq: u64) -> io::Result<()> {
@@ -1226,30 +1298,34 @@ fn maybe_theorize_needs(
         let _ = thread::reinforce(dir, &id, now); // recurrence reinforces the survivor (C5)
         return Ok(false);
     }
-    let thread_id = format!("thread-{:04}", existing.len() + 1);
-    if !confirm_q.is_empty() {
-        question::add_addressed(dir, &confirm_q, "need", &handle, &thread_id, now)?;
-    }
-    thread::append(
+    // Unkeyed mint (T-127): the needs muse still speaks prose, so it carries no typed
+    // identity — but its ids now come from the store's sequence like every minter's,
+    // and the addressed question binds to the id the store actually issued.
+    let minted = thread::mint(
         dir,
-        &Thread {
-            id: thread_id,
-            question: confirm_q,
+        thread::Mint {
+            question: confirm_q.clone(),
             theory: need,
             direction,
-            created_at: now,
-            status: "open".to_string(),
-            status_at: now,
-            last_worked_at: 0,
-            reinforced: 0,
-            answers: Vec::new(),
             origin: "llm".to_string(),
-            origin_human: handle,
+            origin_human: handle.clone(),
             actor: "familiar".to_string(),
             anchors: Vec::new(),
             facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+            subject: handle.clone(),
+            anchor_classes: Vec::new(),
+            target: String::new(),
+            mechanism: String::new(),
+            acts: Vec::new(),
+            predictions_sig: Vec::new(),
         },
+        now,
     )?;
+    if let thread::Disposition::New(t) | thread::Disposition::Competes(t) = minted {
+        if !confirm_q.is_empty() {
+            question::add_addressed(dir, &confirm_q, "need", &handle, &t.id, now)?;
+        }
+    }
     Ok(true)
 }
 
@@ -2125,7 +2201,6 @@ fn adopt_device_theories(
         .iter()
         .map(|t| t.direction.trim().to_lowercase())
         .collect();
-    let mut seq = existing.len();
     let mut adopted = 0;
     let mut fresh: std::collections::HashSet<String> = std::collections::HashSet::new();
     for o in obs {
@@ -2149,26 +2224,26 @@ fn adopt_device_theories(
             refuse_theory(dir, now, r.fact_id, &r.why);
             continue;
         }
-        seq += 1;
-        let t = thread::Thread {
-            id: format!("thread-{seq:04}"),
+        // Unkeyed mint (T-127): prose in, so no typed identity — but the id comes from
+        // the store's sequence, closing the race this loop's own counter used to run.
+        let m = thread::Mint {
             question: o.context.clone(),
             theory: format!("reasoned by {}", o.actor),
             direction: o.object.clone(),
-            created_at: now,
-            status: "open".into(),
-            status_at: now,
-            last_worked_at: 0,
-            reinforced: 0,
-            answers: Vec::new(),
             origin: "device".into(),
             origin_human: String::new(),
             // Attribute to the reasoning device so corruption-awareness governs it.
             actor: o.actor.clone(),
             anchors: Vec::new(),
             facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+            subject: String::new(),
+            anchor_classes: Vec::new(),
+            target: String::new(),
+            mechanism: String::new(),
+            acts: Vec::new(),
+            predictions_sig: Vec::new(),
         };
-        if thread::append(dir, &t).is_ok() {
+        if thread::mint(dir, m, now).is_ok() {
             adopted += 1;
         }
     }
@@ -4562,6 +4637,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -4867,6 +4946,10 @@ mod tests {
                     actor: "familiar".into(),
                     anchors: Vec::new(),
                     facts_rev: 0,
+                    v: 0,
+                    family_key: String::new(),
+                    variant_key: String::new(),
+                    superseded_by: String::new(),
                 },
             )
             .unwrap();
@@ -4935,6 +5018,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -5114,6 +5201,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -5204,6 +5295,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -5251,6 +5346,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -5733,6 +5832,10 @@ mod tests {
             actor: "familiar".into(),
             anchors: Vec::new(),
             facts_rev: 0,
+            v: 0,
+            family_key: String::new(),
+            variant_key: String::new(),
+            superseded_by: String::new(),
         };
         let existing = vec![held];
         // The same musing in slightly different words is the same musing.
@@ -5874,6 +5977,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -6050,6 +6157,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -6252,6 +6363,10 @@ mod tests {
                     actor: actor.into(),
                     anchors: Vec::new(),
                     facts_rev: 0,
+                    v: 0,
+                    family_key: String::new(),
+                    variant_key: String::new(),
+                    superseded_by: String::new(),
                 },
             )
             .unwrap();
@@ -6597,6 +6712,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -6647,6 +6766,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
