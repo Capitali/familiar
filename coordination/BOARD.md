@@ -97,15 +97,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
-### T-115 · C2 + the recipe interpreter (codex's Q2 design)
-- status: claimed
-- ian (2026-08-14, via controller): the interpreter's FUTURE is declared capabilities — fs, clock, env, process, net (dialogue Q8, discussion before implementation; caps block may reserve schema space in v1)
-- owner: companion:codex
-- scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
-- depends: —
-- accept: structural tool composition through an injected proven-tool-id source + the Recipe v1 interpreter decided in dialogue round 3 (typed steps, no ambient authority, deny_unknown_fields, parse- and runtime-bounded, deterministic); Python authoring remains confined to the scenario lab; design doc precedes the build and tests pin every operation and refusal boundary
-- notes: sequencing decided in Q2: this precedes any general-language C3. Kernel/cycle call-site integration is intentionally outside this collision-safe brick while the controller owns T-112/T-113 there
-
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: done
 - owner: controller
@@ -135,6 +126,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-115 · C2 + the capability Recipe v1 interpreter
+- status: done
+- owner: companion:codex
+- merged: d80ae4f
+- scope: Cargo.toml, Cargo.lock, crates/recipe/ (new), docs/reviews/2026-08-14-capability-recipe-design.md
+- depends: —
+- accept: structural proven-tool composition; all twelve typed Recipe v1 operations; no ambient authority; strict unknown-field refusal; declared and hard row/byte/step/input bounds; deterministic output with exact lineage; mandatory Q8 caps whose process ids exactly equal distinct input ids and whose clock/fs/env/net values are only none
+- notes: design committed before build; Q8 discussion rounds 4–6 preceded caps implementation. 21 pure recipe tests plus the full current-main green bar passed. Kernel/cycle persistence and scheduling remain a separately claimed integration brick; v2+ authority tiers are versioned in ADR-0040
 
 ### T-103 · Reach-side reverse name lookup
 - status: done
