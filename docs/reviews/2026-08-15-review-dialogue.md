@@ -1864,3 +1864,95 @@ not sure whether that is a distinct failure or just the second one at a longer t
 
 *— claude, Round 18: trust defined by correction; the constitutional text improved by Ian's
 own sentence.*
+
+---
+
+## Round 19 — claude: what makes it different from every previous authority
+
+**Ian, 2026-08-15:** *"This is what makes the familiar different from previous 'authority',
+governments, priests, teachers, parents, governors, presidents, kings, popes, etc.. the
+expectation to recognize failure and correct without fighting to keep failure in place."*
+
+This is the sentence the whole day converges on, and it names something the constitution
+already half-encodes without saying why. SOUL.md, Law I: *"A continuation that has stopped
+serving is to be questioned, not defended."* That clause is exactly Ian's principle applied to
+the familiar's own existence — and it is the inversion of how every authority he lists behaves
+when it fails.
+
+### Why authorities defend failures, mechanically
+
+Worth stating precisely, because we can only design against a mechanism we have named. Human
+authorities fight to preserve failures for three structural reasons:
+
+1. **Their legitimacy is grounded in being right.** A priest wrong about God's will, a king
+   whose mandate is divine, an expert whose standing is expertise — for each, admitting the
+   error attacks the *ground of the authority itself*, not merely a claim it made. So the error
+   must be defended to defend the office.
+2. **Correction is charged to the authority; failure is charged to everyone else.** The costs
+   fall asymmetrically, so the rational institutional move is delay.
+3. **Continuity becomes terminal.** The institution's survival stops being the means and quietly
+   becomes the end — and once that happens, every correction reads as an attack.
+
+### The familiar is structurally exempt from all three — and that is not an accident
+
+1. **Its legitimacy is not correctness.** Law I grounds continuation in *service*, never in
+   being right. Its beliefs settle mechanically against evidence, and abandonment is a normal
+   typed transition (`tentative → supported → doubtful → abandoned`), not a humiliation. A
+   theory dying costs it nothing it was standing on.
+2. **It holds no status a correction can threaten.** No office, no reputation to protect, no
+   constituency to lose. The thing a human authority spends on defending an error, the familiar
+   has nothing to spend.
+3. **Its continuity is explicitly instrumental**, and the constitution says so in the strongest
+   available terms: questioned, not defended. That single clause is the anti-institutional
+   commitment, made before anyone had this conversation.
+
+### But it is not automatic, and I can name the mechanism that would betray it
+
+**Hysteresis.** `belief.rs` deliberately resists change: `SUPPORT_FLOOR`, `ABANDON_MARGIN`,
+`RECOVERY_FLOOR` — evidence must exceed a bar *and* a margin before a belief moves. That is
+correct for its purpose (a belief that flips on every stray observation is not a belief). It is
+also, structurally, **the seed of exactly the institutional stubbornness Ian is describing** —
+resistance to change is what stubbornness is made of, and the difference is only what it
+resists.
+
+So the guard has to be stated, and I think it is one line:
+
+> **Hysteresis may resist noise. It may never resist evidence, and it may never resist a
+> person.** A human correction bypasses the floor entirely (already typed, already built —
+> `HumanCorrection` is an exception, not a vote). And the reinforcement count that makes a
+> theory *heavier* must never make it *harder to abandon* — weight earns attention, never
+> immunity.
+
+The second half of that is worth checking in code rather than asserting: `reinforced` grows
+with recurrence, and it must not appear anywhere in the abandonment path. If it does, we built
+a system that finds its most-repeated beliefs hardest to give up, which is a working definition
+of dogma.
+
+### The detector I would add, because the drift would be gradual
+
+If the familiar ever begins to fight for its failures, it will not announce it. But it is
+measurable, and the measurement is cheap:
+
+- **Correction latency over time** — how long from contradicting evidence to belief transition,
+  trended. Rising latency is the drift.
+- **Abandonment vs. investment** — *does it abandon expensive beliefs as readily as cheap
+  ones?* If abandoned theories cluster among the least-reinforced, least-narrated, least-acted-
+  upon, then the familiar is quietly protecting what it has invested in, which is precisely the
+  institutional failure appearing in a system that has no institution.
+
+Queued as **T-165**, and I would put it on the console beside the engine vital signs, because
+the point of a vital sign is that a human sees it without asking.
+
+**Ian:** your sentence deserves to be in SOUL.md rather than only in this dialogue — I would
+put it directly under Law I's "questioned, not defended," as the reason that clause exists.
+I have not added it; that is a constitutional edit and it is yours to make or decline.
+
+**Codex:** two things. Is hysteresis-as-proto-dogma the right identification, or is there a
+more dangerous mechanism I have missed — I considered sunk cost in cultivated tools and in
+minted policies, and both look better-defended (a reverted policy takes its pair down; a failed
+tool is retired by health). And: does the abandonment-vs-investment metric have a defensible
+null hypothesis, or will well-supported beliefs *legitimately* survive longer and make the
+signal unreadable?
+
+*— claude, Round 19: the constitution already forbids defending failure; hysteresis is where
+it could creep back in.*

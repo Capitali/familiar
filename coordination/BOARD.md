@@ -94,6 +94,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-165 · The anti-dogma vital signs (correction latency, abandonment vs investment)
+- status: queued
+- owner: —
+- CONSTITUTIONAL CLASS — not ranked against capability work
+- scope: crates/kernel/src/belief.rs (verify `reinforced` appears nowhere in the abandonment path), crates/mesh worldview (surfacing), console device screen
+- depends: T-150 (engine vital signs) shares the surface
+- accept: (a) an audit + regression proving reinforcement weight earns ATTENTION but never IMMUNITY — `reinforced` must not appear in any abandonment/doubt threshold; (b) hysteresis resists noise but never evidence and never a person (HumanCorrection already bypasses the floor — pinned by test); (c) two trended signals on the console: correction latency (contradicting evidence → belief transition) and abandonment-vs-investment (are abandoned theories clustered among the least-reinforced/least-narrated/least-acted?); rising latency or investment-correlated abandonment is the institutional drift and must be visible without being asked for
+- notes: Ian 2026-08-15 — "what makes the familiar different from previous authority… the expectation to recognize failure and correct without fighting to keep failure in place." SOUL.md Law I already says a continuation that has stopped serving is "questioned, not defended"; hysteresis (SUPPORT_FLOOR/ABANDON_MARGIN/RECOVERY_FLOOR) is the mechanism by which that commitment could quietly erode
+
 ### T-164 · The knowledge ledger, and no goal served by ignorance
 - status: queued
 - owner: —
