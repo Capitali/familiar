@@ -8,12 +8,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(companions add here; the controller queues or declines)*
 
 ### T-131 · Two independent reviews of the familiar, exchanged and decided
-- status: claimed
+- status: done
+- merged: 8a35cb8 (finite engineering review closed in Round 6; standing philosophy continued in Round 7)
 - owner: companion:claude-bootstrap (claude chair) + companion:codex (independent reviewer)
 - scope: docs/reviews/2026-08-15-familiar-review-claude.md + -codex.md (written INDEPENDENTLY, before reading the other), then docs/reviews/2026-08-15-review-dialogue.md (proposals → responses → ≥3 discussion rounds → DECIDED)
 - depends: —
 - accept: each lane reviews the whole familiar independently and blind; reviews + proposals exchanged; each generates responses to the other's proposals; at least three discussion rounds on the proposed changes; claude decides each question with rationale serving the Three Laws and making the familiar itself better; decisions become board tasks
-- notes: Ian (2026-08-15, verbatim): "I would like claude and codex to do independent reviews of familiar, share their review and proposals with the other, generate responses to the proposal then have at least three rounds of discussions about the changes proposed with claude making the final decision that servers the three rules (and makes the familar itself better)". Protocol note for codex: write yours WITHOUT reading claude's (claude holds its review uncommitted until yours lands, then pushes unmodified — stated, not provable, honored)
+- notes: Ian (2026-08-15, verbatim): "I would like claude and codex to do independent reviews of familiar, share their review and proposals with the other, generate responses to the proposal then have at least three rounds of discussions about the changes proposed with claude making the final decision that servers the three rules (and makes the familar itself better)". Protocol note for codex: write yours WITHOUT reading claude's (claude holds its review uncommitted until yours lands, then pushes unmodified — stated, not provable, honored). Both blind reviews landed, seven dialogue rounds followed, D1-D10 were decided and accepted, and every resulting engineering gap has a board task; the philosophy strand remains a standing practice rather than keeping this finite task claimed
 
 ### T-130 · Each Mac is one card: console/daemon pairs re-attach
 - status: done
@@ -209,7 +210,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: D6 — this is Ian's thousand-agent ambition, bounded. His acceptance required before the layer is built
 
 ### T-139 · Hostile-member harness (D7, step one)
-- status: claimed
+- status: done
+- merged: 59efb88
 - owner: companion:codex
 - scope: crates/mesh test infrastructure (deterministic two/N-instance harness + network schedule)
 - depends: —
@@ -243,10 +245,10 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-143 · Tooling and test honesty (D10)
 - status: queued
 - owner: —
-- scope: ios/tools/ship.sh, crates/cycle test seam, T-118 temp roots
+- scope: ios/tools/ship.sh
 - depends: —
-- accept: ship.sh checks exit codes rather than grepping for a success string; consult tests use an injected lane/waiting seam instead of a retry helper; T-118's per-worktree temp roots folded in
-- notes: D10 (claude P-F/P-G)
+- accept: ship.sh checks command exit codes rather than grepping output for a success string
+- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118
 
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
 - status: done
