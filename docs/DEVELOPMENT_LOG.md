@@ -6,6 +6,49 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — One thought, one thread (companion:claude-bootstrap)
+
+### What changed
+
+- **T-127 (dialogue Q1, decided round 3).** Nothing keyed a thread by content, so the
+  same proposal minted as many times as the reasoner ran — and four independent
+  minters each derived ids from `len()+1`, so one id could be issued twice under
+  concurrency and `update_by_id` would then edit the wrong row.
+- **`thread::mint` — the one way a thread is born.** All four minters (the muse, the
+  needs muse, device adoption, mesh delegation) now route through one kernel
+  chokepoint. Ids come from `store::next_seq` (the race closes as a side effect).
+  Typed identity per codex's two-key design: `family_key` (subject + sorted anchor
+  classes + target) names what the thought is ABOUT; `variant_key` (mechanism +
+  declared acts + prediction shape) names the actual claim. Raw joined strings, not
+  hashes — auditable. Question prose is never identity.
+- **Strengthen / compete / new.** An exact variant match STRENGTHENS the standing
+  thread — reinforced increments and the new citations UNION in, so the count derives
+  from evidence; six-in-five-hours becomes one thread growing more sure of itself.
+  Same family with a different declared act ("dim" vs "off" — different actions in
+  the human's own declaration) mints a COMPETING sibling sharing the family key,
+  never merged. Prose-only paths mint UNKEYED (empty keys never match), keeping
+  their own dedup rather than falsely colliding.
+- **The conservative fold.** `thread::fold` + `familiar theories fold <manifest.json>`:
+  an explicit, human-reviewed manifest names survivor and members; members become
+  append-retained tombstones (`superseded`, `superseded_by` pointing home, excluded
+  from every human-facing view) and the survivor unions every citation and answer.
+  Idempotent — a re-run manifest re-folds nothing. Never driven by a model or a
+  fuzzy threshold. Thread rows gain `v` (schema version 1) in the same pass.
+
+### Checks run
+
+- New kernel tests: same-variant strengthens with citation union; different-act
+  competes in one family; unkeyed mints never collide and take store-issued ids;
+  fold leaves idempotent tombstones that point home and never surface. Full bar in
+  rule-9 shape, tests twice.
+
+### Next
+
+- T-128: predictions mandatory + the Inquiry kind. Then the fold manifests for the
+  live corpora (lighthouse ~304 threads, the lights six first) — authored from the
+  real rows, reviewed, applied via the new CLI on each door: a fleet op, recorded in
+  STATE when run.
+
 ## 2026-08-15 — The floor holds what the mind may claim (companion:claude-bootstrap)
 
 ### What changed

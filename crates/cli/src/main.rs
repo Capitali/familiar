@@ -2193,6 +2193,64 @@ fn cmd_capacities(args: &[String]) -> ExitCode {
 fn cmd_theories(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    // `theories fold <manifest.json>` — T-127's conservative migration: an explicit,
+    // human-reviewed manifest names the survivor and its members; members become
+    // append-retained tombstones (`superseded`, pointing home) and the survivor unions
+    // every citation. Never driven by a model or a fuzzy threshold.
+    if args.first().map(String::as_str) == Some("fold") {
+        let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else {
+            eprintln!("usage: theories fold <manifest.json> [--data-dir DIR]");
+            eprintln!("manifest: {{\"survivor\":\"thread-0297\",\"members\":[\"thread-0300\",…],\"reason\":\"…\"}}");
+            return ExitCode::FAILURE;
+        };
+        let manifest = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("theories fold: {path}: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let m: serde_json::Value = match serde_json::from_str(&manifest) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("theories fold: manifest did not parse: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let survivor = m.get("survivor").and_then(|v| v.as_str()).unwrap_or("");
+        let members: Vec<String> = m
+            .get("members")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let reason = m.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+        if survivor.is_empty() || members.is_empty() {
+            eprintln!("theories fold: manifest needs a survivor and members");
+            return ExitCode::FAILURE;
+        }
+        return match thread::fold(&dir, survivor, &members, now_secs()) {
+            Ok(n) => {
+                println!(
+                    "folded {n} of {} into {survivor} — tombstones point home{}",
+                    members.len(),
+                    if reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({reason})")
+                    }
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("theories fold: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match thread::load(&dir) {
         Ok(ts) if ts.is_empty() => {
             println!("(no theories yet — the factory forms them as it observes, when the boundary allows the LLM)");

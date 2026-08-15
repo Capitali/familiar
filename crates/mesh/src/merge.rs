@@ -641,7 +641,6 @@ fn merge_one(
             .iter()
             .map(|t| format!("{}\u{1}{}", t.actor, t.direction.trim().to_lowercase()))
             .collect();
-        let mut tseq = existing.len();
         for req in &brief.body.knowledge.theory_requests {
             if req.origin == cred.membership.node_id || req.direction.trim().is_empty() {
                 continue; // our own, echoed back
@@ -655,18 +654,12 @@ fn merge_one(
             if held.contains(&key) {
                 continue; // already adopted this peer's theory
             }
-            tseq += 1;
-            let t = thread::Thread {
-                id: format!("thread-{tseq:04}"),
+            // Unkeyed mint (T-127): a delegated theory arrives as prose; its id comes
+            // from the store's sequence — the fourth minter joins the one chokepoint.
+            let m = thread::Mint {
                 question: req.question.clone(),
                 theory: format!("delegated by {}", short(&req.origin)),
                 direction: req.direction.clone(),
-                created_at: now,
-                status: "open".into(),
-                status_at: now,
-                last_worked_at: 0,
-                reinforced: 0,
-                answers: Vec::new(),
                 origin: "mesh".into(),
                 origin_human: String::new(),
                 // Attribute to the originating node so corruption-awareness still governs it and its
@@ -674,8 +667,14 @@ fn merge_one(
                 actor: origin_actor.clone(),
                 anchors: Vec::new(),
                 facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+                subject: String::new(),
+                anchor_classes: Vec::new(),
+                target: String::new(),
+                mechanism: String::new(),
+                acts: Vec::new(),
+                predictions_sig: Vec::new(),
             };
-            if thread::append(dir, &t).is_ok() {
+            if thread::mint(dir, m, now).is_ok() {
                 // A visible, replicating record that we picked up a peer's theory to test — source
                 // "familiar" so it originates here and flows back to the peer via observation sharing.
                 record_obs(
@@ -1474,6 +1473,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
@@ -1542,6 +1545,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();

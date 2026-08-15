@@ -4815,6 +4815,10 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                v: 0,
+                family_key: String::new(),
+                variant_key: String::new(),
+                superseded_by: String::new(),
             },
         )
         .unwrap();
