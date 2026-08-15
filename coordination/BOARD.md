@@ -93,6 +93,73 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-144 · Human-bound authority receipt (successor to D1's removal)
+- status: queued
+- owner: —
+- scope: crates/kernel (HumanActReceipt type + verification), crates/mesh (grant path), ios (console act)
+- depends: T-133, HumanRecord read paths
+- accept: a widening grant is accepted only with a receipt bound to an authorized human/device association, an exact live request, scope, expiry, single use; this is the ONLY route that may restore what D1 removed
+- notes: codex C-B v2. Tracked so the removed capability has a named path back rather than an itch to reopen the gate
+
+### T-145 · Event-sourced goal authority (successor to T-134)
+- status: queued
+- owner: —
+- scope: crates/mesh/src/merge.rs + goal store
+- depends: T-134, T-139
+- accept: signed goal events with per-field authority; immutable definitions, bounded claims, owner-only progress, human-cited gated transitions, monotone terminals, causal/hybrid ordering — never wall clock as authorization
+- notes: codex C-C
+
+### T-146 · Typed host identity (P-I)
+- status: queued
+- owner: —
+- scope: crates/mesh (MemberStatus additive `machine`), ios PlatformDevice, crates/mesh attach
+- depends: —
+- accept: console and daemon report a comparable machine identity (Swift hostname stem vs daemon `uname -n` stem); attach pairs on it ahead of the label pass; additive and two-stage-safe (MemberStatus has no deny_unknown_fields)
+- notes: unblocks T-142; also gives dedup_devices the key it needs to stop treating two Macs as one lineage
+
+### T-147 · Proxy-effect firewall + per-human calibration (C-G)
+- status: queued
+- owner: —
+- scope: crates/kernel (service/presence/capacities effect limits), HumanRecord
+- depends: HumanRecord read paths
+- accept: uncertain human proxies may only observe/ask/slow/narrow — never widen power, change standing, diagnose a person, override a stated preference, or trigger actuation without independent evidence and assent; signals expose missingness and uncertainty; no averaging of flourishing
+- notes: codex F-5/C-G
+
+### T-148 · Trusted-computing-base contracts (C-J, ADR)
+- status: queued
+- owner: —
+- scope: docs/decision-records, then interface boundaries
+- accept: an ADR mapping every authority writer and admission gate; kernel adjudication / cycle phases / mesh transport / mesh merge policy / recipe execution separated by stable typed contracts; track size and change rate of code that can widen authority
+- notes: codex C-J/F-7
+
+### T-149 · Typed WorkRef (P-D)
+- status: queued
+- owner: —
+- scope: crates/kernel (PendingAct.thread_id and friends)
+- accept: one typed enum replaces three string conventions (`thread-NNNN`, `rule:<id>`, `thread:<id>` in observation context); additive migration
+- notes: claude P-D
+
+### T-150 · Engine vital signs (P-H)
+- status: queued
+- owner: —
+- scope: crates/mesh/src/worldview.rs (device screen counters)
+- accept: minted/settled/eroded/refused counts and malformed-draft rate visible on the console — the engine's own health, so a starved or spammy muse is seen before it is felt
+- notes: claude P-H; the population-level half is T-140's
+
+### T-151 · Door-side stage word on /mesh/hello (P-E — WIRE, waits on Ian)
+- status: proposed
+- owner: —
+- scope: crates/mesh/src/transport.rs (hello response)
+- accept: an unauthenticated bounded stage word so a not-yet-admitted client can see the DOOR's side of a join; two-stage-safe
+- notes: claude P-E. Wire-contract addition — stops for Ian per CONTRIBUTING
+
+### T-152 · Consult-test seam (P-G, split from T-143)
+- status: queued
+- owner: —
+- scope: crates/llm (lane/waiting probe injection), crates/cycle tests
+- accept: consult tests inject the human-waiting probe instead of retrying around the global; the T-126 retry helper retires
+- notes: claude P-G; split from T-143 per codex Round 5
+
 ### T-133 · Remote positive gate grants are refused (D1, priority zero)
 - status: queued — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
 - owner: — (either lane; codex may claim)
@@ -149,7 +216,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: reusable fixtures for malicious signed member, replay, unmatched nonce, future timestamp, concurrent claim, partition, recovery; shared by T-133/T-134/T-135
 - notes: D7 — proof infrastructure moves into step one so containment ships tested. Claimed by companion:codex while T-131's closing completeness round waits behind the Build 89 ship; first brick is the minimal reusable malicious-signed-member/network-schedule fixture needed by T-133/T-134/T-135, not the full population lab
 
-### T-140 · Population laboratory (D7, gate before conventions)
+### T-140 · Population laboratory (D7, gates convention IMPLEMENTATION not ADR acceptance)
 - status: queued
 - owner: —
 - scope: crates/scenario extension (N-node deterministic simulation)
