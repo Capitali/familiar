@@ -1,9 +1,11 @@
 //! The capability boundary — **the human's lever** (see `docs/boundaries.md`).
 //!
 //! The factory acts freely *within* this boundary and **can never widen it**: there
-//! is deliberately no save/write function here. The boundary is a plain JSON policy
-//! the human edits; the factory only ever reads it. A missing or unreadable policy is
-//! treated as **fully closed** (fail-safe) — no outward capability by default.
+//! is deliberately no general save/write function here. The boundary is a plain JSON
+//! policy the human edits. The sole non-human write primitive, [`narrow_gate`], can only
+//! turn a named capability off; its type and tests make opening impossible. A missing or
+//! unreadable policy is treated as **fully closed** (fail-safe) — no outward capability
+//! by default.
 //!
 //! This makes Law III operational: a steward does not expand its own power. Reach is
 //! enabled only by a human editing `boundary.json`.
@@ -318,6 +320,59 @@ pub fn load(dir: &Path) -> io::Result<Boundary> {
     Ok(store::load_one::<Boundary>(dir, BOUNDARY_FILE)?.unwrap_or_else(Boundary::closed))
 }
 
+/// Persist one fail-safe boundary narrowing. This is deliberately **not** a setter: callers can
+/// name a boolean capability to close, but cannot supply a value and cannot open anything. Parent
+/// gates also close their sharper dependent gates so a later local reopen cannot revive authority
+/// that the stop already withdrew.
+///
+/// Returns `true` when the persisted policy changed and `false` when it was already at least this
+/// narrow. An unknown gate is an error and leaves the policy untouched.
+pub fn narrow_gate(dir: &Path, gate: &str) -> io::Result<bool> {
+    let mut boundary = load(dir)?;
+    let changed = match gate {
+        "allow_network" => take(&mut boundary.allow_network),
+        "allow_llm" => take(&mut boundary.allow_llm) | take(&mut boundary.allow_llm_cloud),
+        "allow_llm_cloud" => take(&mut boundary.allow_llm_cloud),
+        "allow_tool_install" => take(&mut boundary.allow_tool_install),
+        "allow_execute" => {
+            take(&mut boundary.allow_execute) | take(&mut boundary.allow_authored_execute)
+        }
+        "allow_authored_execute" => take(&mut boundary.allow_authored_execute),
+        "allow_camera" => {
+            take(&mut boundary.allow_camera) | take(&mut boundary.allow_face_recognition)
+        }
+        "allow_microphone" => take(&mut boundary.allow_microphone),
+        "allow_location" => take(&mut boundary.allow_location),
+        "allow_motion" => take(&mut boundary.allow_motion),
+        "allow_network_discovery" => take(&mut boundary.allow_network_discovery),
+        "allow_face_recognition" => take(&mut boundary.allow_face_recognition),
+        "allow_mesh" => take(&mut boundary.allow_mesh),
+        "allow_agent" => take(&mut boundary.allow_agent),
+        "allow_self_upgrade" => take(&mut boundary.allow_self_upgrade),
+        "allow_outreach" => take(&mut boundary.allow_outreach),
+        "allow_actuate" => take(&mut boundary.allow_actuate),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unknown boundary gate: {gate}"),
+            ));
+        }
+    };
+    if !changed {
+        return Ok(false);
+    }
+    let json = serde_json::to_vec_pretty(&boundary)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    std::fs::write(dir.join(BOUNDARY_FILE), json)?;
+    Ok(true)
+}
+
+/// Set a gate false and report whether it changed. Kept private so the only public mutation is the
+/// narrowing operation above.
+fn take(gate: &mut bool) -> bool {
+    std::mem::replace(gate, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,5 +631,42 @@ mod tests {
         let t = Temp::new("malformed");
         fs::write(t.0.join(BOUNDARY_FILE), "{ not json").unwrap();
         assert!(load(&t.0).is_err());
+    }
+
+    #[test]
+    fn a_persisted_narrowing_can_only_close_and_cascades_sharper_gates() {
+        let t = Temp::new("persisted_narrowing");
+        let mut b = Boundary::closed();
+        b.phase = "human-authored".into();
+        b.allow_mesh = true;
+        b.allow_network = true;
+        b.allow_execute = true;
+        b.allow_authored_execute = true;
+        b.fs_read = vec!["/kept".into()];
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            serde_json::to_vec_pretty(&b).unwrap(),
+        )
+        .unwrap();
+
+        assert!(narrow_gate(&t.0, "allow_execute").unwrap());
+        let narrowed = load(&t.0).unwrap();
+        assert!(!narrowed.allow_execute && !narrowed.allow_authored_execute);
+        assert!(narrowed.allow_mesh && narrowed.allow_network);
+        assert_eq!(narrowed.phase, "human-authored");
+        assert_eq!(narrowed.fs_read, vec!["/kept"]);
+
+        assert!(
+            !narrow_gate(&t.0, "allow_execute").unwrap(),
+            "an already-held stop is an idempotent no-op"
+        );
+        assert!(narrow_gate(&t.0, "allow_network").unwrap());
+        assert!(!load(&t.0).unwrap().allow_network);
+
+        assert!(narrow_gate(&t.0, "not-a-gate").is_err());
+        assert!(
+            !load(&t.0).unwrap().allow_network,
+            "an invalid name cannot rewrite the policy"
+        );
     }
 }

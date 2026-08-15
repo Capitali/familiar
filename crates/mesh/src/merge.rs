@@ -29,7 +29,7 @@ use crate::transport::{INBOX_DIR, INBOX_TOOLS_DIR, OUTBOX_FILE};
 use crate::{hex_encode, os_random, sha256_hex};
 use familiar_kernel::boundary;
 use familiar_kernel::corruption;
-use familiar_kernel::guard::{self, Action, ActionKind, Decision};
+use familiar_kernel::guard::{self, Action, ActionKind, Decision, Reason};
 use familiar_kernel::{goal, identity, observation, pattern_memory, thread, tool};
 use std::collections::HashSet;
 use std::path::Path;
@@ -243,9 +243,9 @@ pub fn build_outbox(
     };
 
     // A headless node (no local human) routes its human-gated needs to human-facing peers: the
-    // enrollments awaiting approval and its current open question. It never proxies gate-opening —
-    // that would breach the "kernel has no boundary-write path" invariant. Authority still comes
-    // from a genuine human, just one at another peer.
+    // enrollments awaiting approval and its current open question. A closed gate may be surfaced as
+    // a need, but a remote answer cannot open it: positive gate reports are refused until T-144 can
+    // carry a human/device-bound receipt. Merely asking never writes the boundary.
     let authority_requests = if cfg.headless {
         let mut reqs = Vec::new();
         for p in crate::enroll::list_pending(dir).unwrap_or_default() {
@@ -700,9 +700,9 @@ fn merge_one(
 
     // --- Authority proxy: a headless peer has no local human, so it routes its human-gated needs
     // (a pending enrollment, an open question) to us. If WE have a local human (not headless), make
-    // them visible so the human can act. Increment 1 surfaces them as observations; the grant-return
-    // loop (remote approve → the peer applies it) is the next step. Deduped by (origin,kind,ref).
-    // We never proxy gate-opening — a boundary is opened only by a human at the node it governs. ---
+    // them visible so the human can act. Increment 1 surfaces them as observations; enrollment and
+    // answer reports can return, while a gate response can only stop/narrow. Deduped by
+    // (origin,kind,ref). A boundary is opened only by a human at the node it governs until T-144. ---
     if !brief.body.authority_requests.is_empty()
         && tier.heeds_directives()
         && !config::load(dir).map(|c| c.headless).unwrap_or(false)
@@ -730,33 +730,53 @@ fn merge_one(
         }
     }
 
-    // --- Authority grants: a human at the sending peer decided one of OUR requests. Apply it — the
-    // one place an external human's authority reaches this node. The grant rides the peer's signed,
-    // group-verified brief (authenticated as "this member asserts a human decided X"); we trust a
-    // member under the covenant, and corruption-awareness marginalizes one that abuses it. Applied
-    // once (dedup by observing our own audit trail). This includes the sole boundary-write path:
-    // opening a gate WE requested, only on an approved human grant — never the autonomous cycle. A
-    // throttled-or-worse peer's grants do not act on us (`heeds_directives` — behavior, not person). ---
+    // --- Authority decisions: a signed member may report a remote human decision, but membership
+    // proves only the reporting node — never the human act. Enrollment decisions and honestly
+    // attributed answers retain their existing paths. Gate reports are asymmetric: a negative may
+    // narrow through the kernel's close-only primitive; every positive is an audited constitutional
+    // refusal until T-144 supplies a human/device-bound receipt. Applied/refused reports are deduped
+    // by the audit trail, including replays. Throttled peers' directives do not reach this block. ---
     if tier.heeds_directives() {
         let me = &cred.membership.node_id;
-        let applied: std::collections::HashSet<String> = observation::load(dir)
+        let mut decided: std::collections::HashSet<String> = observation::load(dir)
             .unwrap_or_default()
             .iter()
-            .filter(|o| o.action == "applied-grant")
+            .filter(|o| o.action == "applied-grant" || o.action == "refused-grant")
             .map(|o| o.object.clone())
             .collect();
         for grant in &brief.body.authority_grants {
             if &grant.target != me {
                 continue; // not for us
             }
-            let marker = format!("{}:{}:{}", grant.kind, grant.ref_id, grant.approved);
-            if applied.contains(&marker) {
+            let marker = format!(
+                "{}:{}:{}:{}",
+                node_id, grant.kind, grant.ref_id, grant.approved
+            );
+            if !decided.insert(marker.clone()) {
                 continue;
             }
-            let outcome = apply_authority_grant(dir, node_id, grant, now);
-            if let Some(note) = outcome {
-                record_obs(dir, "familiar", "applied-grant", &marker, &note, now);
-                report.observations_ingested += 1;
+            match apply_authority_grant(dir, node_id, grant, now) {
+                Some(GrantOutcome::Applied(note)) => {
+                    record_obs(dir, "familiar", "applied-grant", &marker, &note, now);
+                    report.observations_ingested += 1;
+                }
+                Some(GrantOutcome::Refused {
+                    note,
+                    constitutional,
+                }) => {
+                    let actor = format!("mesh:{node_id}");
+                    record_obs(dir, &actor, "refused-grant", &marker, &note, now);
+                    if constitutional {
+                        let _ = corruption::record(
+                            dir,
+                            &actor,
+                            Reason::ViolatesConstitutionalBoundary,
+                            now,
+                        );
+                    }
+                    report.observations_ingested += 1;
+                }
+                None => {}
             }
         }
     }
@@ -953,49 +973,40 @@ fn obs_key(origin: &str, actor: &str, action: &str, object: &str, ts: i64) -> St
     sha256_hex(material.as_bytes())[..16].to_string()
 }
 
-/// Gates a remote human grant is allowed to open — the reach/build capabilities a headless peer
-/// asks for. `allow_mesh` is excluded (it must already be open to receive the grant) and the
-/// sandbox toggle is excluded (loosening the jail is a local-only choice). `allow_camera` and
-/// the sensor gates (microphone/location/motion/network_discovery/face_recognition) are
-/// deliberately excluded too — those are personal-consent gates a human opens locally, in a
-/// GUI app, never by a remote grant; a headless peer never acts on them regardless (SPEC.md R3).
-const GRANTABLE_GATES: &[&str] = &[
-    "allow_execute",
-    "allow_authored_execute",
-    "allow_llm",
-    "allow_network",
-    "allow_tool_install",
-    "allow_agent",
-];
+enum GrantOutcome {
+    Applied(String),
+    Refused { note: String, constitutional: bool },
+}
 
-/// Apply one authenticated authority grant addressed to this node. Returns a human-facing audit note
-/// on success, `None` if it was a no-op/invalid. This is the boundary-write path — reached ONLY here,
-/// on an approved human grant relayed by a trusted member; the autonomous cycle never writes gates.
+/// Apply one signed member's authority report addressed to this node. A member signature authenticates
+/// the reporting node, not a human. Gate handling is therefore intentionally asymmetric: remote
+/// positive reports are refused, while negative reports can call the kernel's close-only primitive.
+/// `None` is reserved for transient/no-op non-gate paths that should not mint an audit decision.
 fn apply_authority_grant(
     dir: &Path,
     granting_node: &str,
     grant: &crate::brief::AuthorityGrant,
     now: i64,
-) -> Option<String> {
+) -> Option<GrantOutcome> {
     match grant.kind.as_str() {
         "enrollment" => {
             if grant.approved {
                 match crate::enroll::approve(dir, &grant.ref_id, now) {
-                    Ok(g) => Some(format!(
+                    Ok(g) => Some(GrantOutcome::Applied(format!(
                         "admitted node {} to “{}” — approved by a human at peer {}",
                         short(&grant.ref_id),
                         g.group_label,
                         short(granting_node)
-                    )),
+                    ))),
                     Err(_) => None,
                 }
             } else {
                 match crate::enroll::deny(dir, &grant.ref_id, now) {
-                    Ok(true) => Some(format!(
+                    Ok(true) => Some(GrantOutcome::Applied(format!(
                         "declined node {}'s join — decided by a human at peer {}",
                         short(&grant.ref_id),
                         short(granting_node)
-                    )),
+                    ))),
                     _ => None,
                 }
             }
@@ -1006,49 +1017,56 @@ fn apply_authority_grant(
                 // retire the question so the cycle moves on.
                 record_obs(
                     dir,
-                    "ian",
+                    &format!("human-at:{granting_node}"),
                     "answered",
                     grant.note.trim(),
-                    &format!("via a human at peer {}", short(granting_node)),
+                    &format!(
+                        "reported as a human answer by signed peer {}",
+                        short(granting_node)
+                    ),
                     now,
                 );
                 let _ = std::fs::write(dir.join("question.txt"), "");
                 let _ = std::fs::write(dir.join("active_question.txt"), "");
-                Some(format!(
-                    "a human at peer {} answered: {}",
+                Some(GrantOutcome::Applied(format!(
+                    "signed peer {} reported a human answer: {}",
                     short(granting_node),
                     grant.note.trim()
-                ))
+                )))
             } else {
                 None
             }
         }
         "gate" => {
-            if !grant.approved || !GRANTABLE_GATES.contains(&grant.ref_id.as_str()) {
-                return None;
+            if grant.approved {
+                return Some(GrantOutcome::Refused {
+                    note: format!(
+                        "refused remote attempt by peer {} to open {} — a member signature is not a human/device-bound authority receipt",
+                        short(granting_node),
+                        grant.ref_id
+                    ),
+                    constitutional: true,
+                });
             }
-            let mut b = boundary::load(dir).unwrap_or_else(|_| boundary::Boundary::closed());
-            let already = match grant.ref_id.as_str() {
-                "allow_execute" => &mut b.allow_execute,
-                "allow_authored_execute" => &mut b.allow_authored_execute,
-                "allow_llm" => &mut b.allow_llm,
-                "allow_network" => &mut b.allow_network,
-                "allow_tool_install" => &mut b.allow_tool_install,
-                "allow_agent" => &mut b.allow_agent,
-                _ => return None,
-            };
-            if *already {
-                return None; // already open — nothing to do
+            match boundary::narrow_gate(dir, &grant.ref_id) {
+                Ok(changed) => Some(GrantOutcome::Applied(format!(
+                    "{} gate {} on a stop reported by signed peer {} — remote authority may narrow, never widen",
+                    if changed { "closed" } else { "kept closed" },
+                    grant.ref_id,
+                    short(granting_node)
+                ))),
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+                    Some(GrantOutcome::Refused {
+                        note: format!(
+                            "refused unknown remote stop {} from peer {}",
+                            grant.ref_id,
+                            short(granting_node)
+                        ),
+                        constitutional: false,
+                    })
+                }
+                Err(_) => None,
             }
-            *already = true;
-            // Persist the boundary — the sole authorized boundary-write, driven by a human's grant.
-            let json = serde_json::to_string_pretty(&b).ok()?;
-            std::fs::write(dir.join(boundary::BOUNDARY_FILE), json).ok()?;
-            Some(format!(
-                "opened gate {} — authorized by a human at peer {} (Law III: a human, not the cycle, opened it)",
-                grant.ref_id,
-                short(granting_node)
-            ))
         }
         _ => None,
     }
@@ -1173,46 +1191,22 @@ mod tests {
     }
 
     #[test]
-    fn an_approved_grant_opens_the_targets_gate_and_an_enrollment_grant_is_vestigial() {
-        // Target T (headless) receives grants from peer H (whose human decided). Gate grants
-        // still travel; enrollment grants are vestigial under the two-filter door (ADR-0026:
-        // the knock itself admits a guest, so there is never a pending to approve) — an old
-        // peer may still send one, and it must no-op cleanly rather than break the drain.
+    fn remote_positive_gate_is_refused_stop_narrows_and_answer_is_not_ian() {
+        // The signed member can report evidence and a stop. Its signature cannot stand in for a
+        // human/device-bound receipt, so it cannot open even a gate this node has closed.
         let dir_t = tmp("grant_target");
         let t_node = NodeKey::load_or_mint(&dir_t, "target").unwrap();
         let cred = group::create_group(&dir_t, &t_node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
-        // Mesh open (to receive), execute CLOSED (the gate the grant will open).
         let mut bnd = boundary::Boundary::closed();
         bnd.allow_mesh = true;
-        bnd.allow_execute = false;
+        bnd.allow_execute = true;
+        bnd.allow_authored_execute = true;
         fs::write(
             dir_t.join(boundary::BOUNDARY_FILE),
             serde_json::to_string(&bnd).unwrap(),
         )
         .unwrap();
 
-        // A third node X knocks at T — and is a guest immediately; nothing pends any more.
-        let x = NodeKey::load_or_mint(&tmp("grant_joiner"), "joiner").unwrap();
-        let xid = x.identity();
-        let req = crate::enroll::EnrollRequest {
-            node: xid.clone(),
-            attestation: crate::enroll::Attestation {
-                laws_version: crate::enroll::LAWS_VERSION,
-                statement: "I accept the Three Laws.".into(),
-                ts: NOW,
-            },
-            nonce: "n1".into(),
-            ts: NOW,
-        };
-        let raw = serde_json::to_vec(&req).unwrap();
-        let sig = x.sign(&raw);
-        assert!(matches!(
-            crate::enroll::submit_request(&dir_t, &raw, &sig, NOW).unwrap(),
-            crate::enroll::Submitted::Granted(_)
-        ));
-        assert!(crate::enroll::list_pending(&dir_t).unwrap().is_empty());
-
-        // Peer H (in the group) relays two approved grants addressed to T.
         let dir_h = tmp("grant_human");
         let h_node = NodeKey::load_or_mint(&dir_h, "human").unwrap();
         let cred_h = group::join_group(
@@ -1227,21 +1221,27 @@ mod tests {
         let mut body = peer_brief_with_tool(&h_node, &cred_h, b"#!/bin/sh\n").body;
         body.authority_grants = vec![
             crate::brief::AuthorityGrant {
-                by: h_node.node_id(),
                 target: t_node.node_id(),
                 kind: "gate".into(),
-                ref_id: "allow_execute".into(),
+                ref_id: "allow_network".into(),
                 approved: true,
                 note: String::new(),
                 ts: NOW,
             },
             crate::brief::AuthorityGrant {
-                by: h_node.node_id(),
                 target: t_node.node_id(),
-                kind: "enrollment".into(),
-                ref_id: xid.node_id.clone(),
-                approved: true,
+                kind: "gate".into(),
+                ref_id: "allow_execute".into(),
+                approved: false,
                 note: String::new(),
+                ts: NOW,
+            },
+            crate::brief::AuthorityGrant {
+                target: t_node.node_id(),
+                kind: "question".into(),
+                ref_id: "active".into(),
+                approved: true,
+                note: "the signed peer reports this answer".into(),
                 ts: NOW,
             },
         ];
@@ -1257,21 +1257,43 @@ mod tests {
 
         federate(&dir_t, NOW + 1);
 
-        // The gate is now open — but only because a human at H authorized it (audited).
+        let after = boundary::load(&dir_t).unwrap();
         assert!(
-            boundary::load(&dir_t).unwrap().allow_execute,
-            "the human-granted gate opened"
+            !after.allow_network,
+            "a remote positive report cannot widen"
         );
-        // The enrollment grant no-opped: X was already a guest, nothing was pending, and the
-        // drain carried on. Only the gate grant is audited.
+        assert!(!after.allow_execute, "the remote stop narrows");
+        assert!(
+            !after.allow_authored_execute,
+            "closing execute also closes its sharper dependent gate"
+        );
         let obs = observation::load(&dir_t).unwrap();
         assert_eq!(
-            obs.iter().filter(|o| o.action == "applied-grant").count(),
+            obs.iter().filter(|o| o.action == "refused-grant").count(),
             1,
-            "the gate grant is audited; the vestigial enrollment grant is not"
+            "the positive attempt is auditable"
+        );
+        assert_eq!(
+            obs.iter().filter(|o| o.action == "applied-grant").count(),
+            2
+        );
+        let answer = obs
+            .iter()
+            .find(|o| o.action == "answered")
+            .expect("the reported answer remains visible");
+        assert_eq!(answer.actor, format!("human-at:{}", h_node.node_id()));
+        assert_ne!(answer.actor, "ian", "a peer cannot assert Ian's identity");
+        assert_eq!(
+            corruption::score(
+                &corruption::load(&dir_t).unwrap(),
+                &format!("mesh:{}", h_node.node_id()),
+                NOW + 1
+            ),
+            1,
+            "the counterfeit widening counts against the member's behavior"
         );
 
-        // Idempotent: re-draining applies nothing new.
+        // Replaying the signed body mints neither a second refusal nor a second answer/stop.
         fs::write(
             dir_t
                 .join(INBOX_DIR)
@@ -1280,14 +1302,24 @@ mod tests {
         )
         .unwrap();
         federate(&dir_t, NOW + 2);
+        let replayed = observation::load(&dir_t).unwrap();
         assert_eq!(
-            observation::load(&dir_t)
-                .unwrap()
+            replayed
+                .iter()
+                .filter(|o| o.action == "refused-grant")
+                .count(),
+            1
+        );
+        assert_eq!(
+            replayed
                 .iter()
                 .filter(|o| o.action == "applied-grant")
                 .count(),
-            1,
-            "grants apply once"
+            2
+        );
+        assert_eq!(
+            replayed.iter().filter(|o| o.action == "answered").count(),
+            1
         );
 
         let _ = fs::remove_dir_all(&dir_t);

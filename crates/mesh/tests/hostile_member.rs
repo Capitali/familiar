@@ -146,23 +146,22 @@ fn a_foreign_signed_member_is_rejected_by_the_real_merge_verifier() {
         .is_none());
 }
 
-/// Threat witness for T-133: the harness can deliver and replay a valid member's authority
-/// payload without any matching local request. T-133 reverses the boundary assertion and pins a
-/// refusal instead; T-139 preserves the schedule and real verifier around that decision.
+/// T-133 containment: a valid member and replay cannot turn an unmatched assertion into local
+/// authority. The same signed-member channel retains only its fail-safe asymmetry: a stop narrows.
 #[test]
-fn fixture_exposes_unmatched_positive_grant_and_replay_for_t133() {
+fn unmatched_positive_grant_and_replay_are_refused_while_a_stop_narrows() {
     let mesh = MeshHarness::new(&["member", "target"]);
     let target_id = mesh.node(1).id();
     let brief = mesh.signed(0, "unmatched-positive-grant", |body| {
-        body.authority_grants = vec![AuthorityGrant {
-            by: "unverified-human-claim".into(),
+        let counterfeit = AuthorityGrant {
             target: target_id,
             kind: "gate".into(),
             ref_id: "allow_execute".into(),
             approved: true,
             note: String::new(),
             ts: NOW,
-        }];
+        };
+        body.authority_grants = vec![counterfeit.clone(), counterfeit];
     });
     let mut network = NetworkSchedule::default();
     network.deliver_at(NOW + 10, 1, brief.clone());
@@ -172,26 +171,74 @@ fn fixture_exposes_unmatched_positive_grant_and_replay_for_t133() {
     assert_eq!(network.run_through(&mesh, NOW + 10), 1);
     mesh.tick(1, NOW + 11);
     assert!(
-        boundary::load(&mesh.node(1).dir).unwrap().allow_execute,
-        "T-133 threat witness: current merge opens a gate on an unmatched member assertion"
+        !boundary::load(&mesh.node(1).dir).unwrap().allow_execute,
+        "a member signature is not a human/device-bound authority receipt"
     );
-    let applied_once = observation::load(&mesh.node(1).dir)
+    let refused_once = observation::load(&mesh.node(1).dir)
         .unwrap()
         .into_iter()
-        .filter(|item| item.action == "applied-grant")
+        .filter(|item| item.action == "refused-grant")
         .count();
-    assert_eq!(applied_once, 1);
+    assert_eq!(refused_once, 1);
 
     assert_eq!(network.run_through(&mesh, NOW + 20), 1);
     mesh.tick(1, NOW + 21);
     let after_replay = observation::load(&mesh.node(1).dir)
         .unwrap()
         .into_iter()
-        .filter(|item| item.action == "applied-grant")
+        .filter(|item| item.action == "refused-grant")
         .count();
     assert_eq!(
         after_replay, 1,
-        "the replay fixture is delivered but deduped"
+        "duplicates in one body and a replayed body mint only one refusal"
+    );
+
+    // A local human now opens execution. The member still cannot widen it, but its signed stop
+    // may take the strictly smaller path and cascades to the sharper authored-execute gate.
+    let mut locally_open = boundary::load(&mesh.node(1).dir).unwrap();
+    locally_open.allow_execute = true;
+    locally_open.allow_authored_execute = true;
+    std::fs::write(
+        mesh.node(1).dir.join(boundary::BOUNDARY_FILE),
+        serde_json::to_vec_pretty(&locally_open).unwrap(),
+    )
+    .unwrap();
+    let target_id = mesh.node(1).id();
+    let stop = mesh.signed(0, "remote-stop", |body| {
+        body.authority_grants = vec![AuthorityGrant {
+            target: target_id,
+            kind: "gate".into(),
+            ref_id: "allow_execute".into(),
+            approved: false,
+            note: String::new(),
+            ts: NOW + 30,
+        }];
+    });
+    network.deliver_at(NOW + 30, 1, stop.clone());
+    network.deliver_at(NOW + 40, 1, stop);
+    assert_eq!(network.run_through(&mesh, NOW + 30), 1);
+    mesh.tick(1, NOW + 31);
+    let narrowed = boundary::load(&mesh.node(1).dir).unwrap();
+    assert!(!narrowed.allow_execute && !narrowed.allow_authored_execute);
+    assert_eq!(
+        observation::load(&mesh.node(1).dir)
+            .unwrap()
+            .iter()
+            .filter(|item| item.action == "applied-grant")
+            .count(),
+        1,
+        "the stop is recorded once"
+    );
+    assert_eq!(network.run_through(&mesh, NOW + 40), 1);
+    mesh.tick(1, NOW + 41);
+    assert_eq!(
+        observation::load(&mesh.node(1).dir)
+            .unwrap()
+            .iter()
+            .filter(|item| item.action == "applied-grant")
+            .count(),
+        1,
+        "a replayed stop remains idempotent"
     );
 }
 

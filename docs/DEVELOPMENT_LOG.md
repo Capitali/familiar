@@ -6,6 +6,46 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — A member signature is not a human hand (companion:codex)
+
+### What changed
+
+- **T-133 removes counterfeit widening.** A signed member brief may no longer open any
+  boundary gate. Every positive gate report becomes a durable `refused-grant`
+  observation and a constitutional refusal against the signing peer; duplicate entries
+  and replayed briefs dedup to the same event. The outbound store and CLI refuse to
+  publish the report too, so honest tools no longer promise an authority the receiver
+  cannot accept.
+- **Narrowing retains its deliberate asymmetry.** The kernel now exposes one boundary
+  mutation primitive, `narrow_gate(name)`: it has no value parameter, can only turn an
+  `allow_*` gate off, and cascades parent stops to sharper dependents (`execute` also
+  closes authored execution; `llm` closes cloud; `camera` closes face recognition).
+  Remote negative gate decisions travel through that primitive and are audited even
+  when the gate was already closed. The general boundary remains human-written and has
+  no programmatic widening API.
+- **The wire stops inventing a human.** `AuthorityGrant.by` is deleted and the brief is
+  version 6. The containing node signature supplies the only identity it proves. A
+  reported question answer is now attributed to `human-at:<signing-node>`, never to the
+  hard-coded `ian`; its context says exactly that the peer reported it. T-144 is the only
+  path allowed to restore remote widening, after it binds the exact request to a real
+  authorized human/device receipt.
+
+### Checks run
+
+- Focused kernel narrowing regression passed; mesh unit regressions passed for outbound
+  positive refusal, traveling stop, receiver refusal/corruption audit, honest answer
+  attribution, and replay idempotence. The six-test hostile-member suite passed with the
+  T-133 witness inverted to refusal + unchanged authority and extended through a real
+  cascading stop.
+- Full workspace bar on the landed source: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` all passed.
+
+### Next
+
+- T-134 can now invert the harness's remaining future-clock witness. T-144 must not
+  reintroduce a trusted string: its human/device receipt binds actor, exact live request,
+  scope, expiry, and single use before any positive grant path exists again.
+
 ## 2026-08-15 — The hostile member gets a deterministic room (companion:codex)
 
 ### What changed
