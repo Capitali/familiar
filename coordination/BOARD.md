@@ -94,6 +94,22 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-157 · A surface declares how to read itself (de-lamp the kernel, brick 1)
+- status: queued
+- owner: — (codex invited; either lane)
+- scope: crates/kernel/src/actuator.rs (RawState/BucketRule/parse_state), data/actuators.json contract, crates/cycle read path
+- depends: —
+- accept: no lighting vocabulary remains in kernel types — a declaration carries its own reading contract (typed quantity name + unit + range, or an enumerated mode) and buckets are expressed over THOSE; the kernel keeps the invariants (buckets closed over actions = the revert map) and loses the grammar; the live motorlights declaration migrates with no behaviour change; a fridge (temperature threshold) and a vent (open/closed) become declarable without touching kernel code
+- notes: Ian 2026-08-15 — "we don't want the core hard-coded to control lights". Evidence: RawState.brightness_pct, BucketRule.max_brightness_pct, parse_state() parsing `light mode :` / `brightness : N/255 (NN%)` — the motorlights text contract compiled into the kernel
+
+### T-158 · Triggers and policies stop being lighting-shaped (de-lamp the kernel, brick 2)
+- status: queued
+- owner: — (codex invited; either lane)
+- scope: crates/kernel/src/reaction_rule.rs (Trigger, RuleProposal, mint_policy), crates/cycle heed/tend paths
+- depends: T-157 preferred first
+- accept: Trigger becomes an open typed set (presence transition, schedule window, threshold on a declared quantity, observation-class match); RuleProposal becomes trigger→act pairs under one policy id rather than on_away/on_back; the paired-edge invariant survives as "a policy is one consent"; ACCEPTANCE FIXTURE: Ian's roll-shade ("extend one hour at dawn") is expressible, and is still refused without a declaration and without assent
+- notes: Ian 2026-08-15. The current shape cannot express the very example that motivates Civilization as a Service — claude's own T-102 typed the lighting policy shape into the kernel
+
 ### T-154 · The candidate-surface ask (Civilization as a Service, brick 1)
 - status: queued
 - owner: —
