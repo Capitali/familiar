@@ -119,6 +119,18 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-185 · "I AM <name>" never reaches the door — the identity filter has no client
+- status: queued — **the registration bug Ian hit; wiring, NOT a design change**
+- owner: —
+- scope: ios/Shared/Sources/AppModel.swift (setServedHuman), the console's setHuman bridge on both shells, a client for POST /mesh/introduce
+- depends: —
+- accept: naming yourself on a device running the app mints a signed Introduction, posts it to the door, and the device becomes a MEMBER without any further human act when the door accepts; a refusal is shown with the door's own reason; the guest nudge stops firing at someone who has already given their name
+- notes: Ian 2026-08-15, adding an iPad locally: "I enter the name, set to mine, enable all the gates... then opened the roster.... and was immediate presented with a 'you need to choose a name dialog'... it took me to the device screen and the name I had choosen was there still... No approval check ever appears in the welcome screen either -- so this might explain the repeated non joins."
+- ROOT CAUSE: the console's I AM field calls `setHuman`, which reaches `AppModel.setServedHuman` — and that function sets `servedHuman`, `DeviceActor.human`, a local note, and syncs the watch. **It never tells the door.** So filter 1 (covenant) holds from the enroll request while filter 2 (establishment) never does, and `derive_state` keeps returning Guest: `admitted.is_some() && effective_establishment(r).is_some() => Member`. Every symptom follows — the name shows on the device screen because it is local; the nudge fires because the state is still `guest`; no approval appears because nothing was ever sent
+- THE MACHINERY IS ALL BUILT AND UNUSED: `EvidenceClass::LocalIntroduction`, `Evidence::Introduction { intro, provenance }`, and `POST /mesh/introduce` (`recv_introduce`) all exist and are tested. **Nothing outside the door's own tests has ever called that endpoint** — no iOS client, no Mac console, no CLI. The door built the identity filter and no client ever knocks on it
+- WHY IAN'S ASK NEEDS NO LOOSENING: he asked for "a user that names and is on a device running the app to be approved". That IS the existing design, with its guards already in place — `Provenance::Remote` is refused outright ("made from nowhere the mesh inhabits"), an empty name is refused, and claiming an ALREADY-EXISTING handle is refused (that requires a voucher, handoff, or invite naming it), so nobody can introduce themselves as "ian". The door's own observation of where the introduction came from outranks whatever provenance the introducer claimed. ADR-0026 already promises exactly this: both filters holding means admission is automatic, "the welcome is a greeting, not a gate". Ian's trust argument (anti-corruption routines, other members who can call out bad behaviour, correction as the safety net) is the design that is already written — it simply has no client
+- LIKELY FEEDS T-184: Ian's own unestablished devices sit as guests until the two-hour purge, so this may be generating some of the visitor churn
+
 ### T-183 · Console surfaces earn their place
 - status: DONE (pending ship) — zoom retired, Network + Signals are Mac-only, Vision hidden until built
 - owner: claude
