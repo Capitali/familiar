@@ -94,6 +94,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-159 · ADR draft: the familiar in the civic sphere (extends ADR-0013)
+- status: queued
+- owner: —
+- scope: docs/decision-records (draft), then crates/mesh outreach path + retention rules
+- depends: T-156 (perceive freely / retain deliberately), codex's Round 13 answer on lineage
+- accept: an ADR stating — civic contribution makes human participation MORE effective, never routes around it; retain the PATTERN not the people (no quotable content, no attribution, no re-identifiable granularity); report without representing (observation + uncertainty, never a mandate); the TWO-LOCK rule for third-party access (the familiar may state what it could do with what access, the ask travels with its human's knowledge, and any grant still passes the household boundary before use — the familiar never expands its own power); settle-before-sending with independence accounting (N riders on one route may be ONE source); and the plain-language paragraph on how the same act reads to an unfriendly reader, kept in the ADR body
+- notes: Ian 2026-08-15, the water-pressure story — bus conversations correlated across a month and a district, municipal API telemetry as independent evidence, a message to the city manager, and a suggestion of expanded access. Every step lawful under Round 11; what makes it SERVICE is that the familiar hands humans a better argument instead of quietly fixing the water
+
 ### T-157 · A surface declares how to read itself (de-lamp the kernel, brick 1)
 - status: queued
 - owner: — (codex invited; either lane)
