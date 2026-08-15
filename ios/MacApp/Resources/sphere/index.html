@@ -456,7 +456,21 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // ---------- hologram screens (real data; skeleton built once per screen, data refreshed in place) ----------
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
-const SCREENS = ['conversation','roster','theories','work','signals','network','vision','games','device'];
+const ALL_SCREENS = ['conversation','roster','theories','work','signals','network','vision','games','device'];
+// Which screens earn their slot on THIS shell (T-183, Ian 2026-08-15). One HTML file renders on
+// the Mac app and inside the iOS WKWebView, so the ring is filtered rather than forked.
+//   · Mac-only — the network map and the signals read-out are workbench instruments. On a phone
+//     they are a menu entry nobody opens, and every unopened entry costs the ones that matter.
+//   · Unbuilt — Vision has nothing behind it yet. A glyph for a screen that cannot do anything
+//     is a promise the familiar does not keep, so it is not shown at all until it can.
+const MAC_ONLY = ['signals', 'network'];
+const UNBUILT = ['vision'];
+function screens() {
+  const isMac = (((window.S || {}).device || {}).kind || '') === 'mac';
+  return ALL_SCREENS.filter(k => !UNBUILT.includes(k) && (isMac || !MAC_ONLY.includes(k)));
+}
+// Kept as a name for anything still reading the old constant; the ring itself uses screens().
+const SCREENS = ALL_SCREENS;
 // 'welcome' is reached from its own corner button, not the ring — a greeting with its own bell.
 const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', games:'Games', node:'', device:'Device', welcome:'Welcome' };
 
@@ -1704,7 +1718,8 @@ function refreshScreen() {
 }
 
 function renderButtons() {
-  const N = SCREENS.length, Rx = 46, Ry = 45;
+  const RING = screens();
+  const N = RING.length, Rx = 46, Ry = 45;
   // The ember calls: when it is THIS device's turn, the games glyph burns warm.
   const gg = (S.view || {}).game;
   const myH = (((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '').toLowerCase();
@@ -1714,7 +1729,7 @@ function renderButtons() {
   // Odd counts start AT top centre instead: evenly spaced, mirror-symmetric about the
   // vertical axis, and the bottom-centre slot (the toggle's home) falls between buttons.
   const off = N % 2 === 1 ? 0 : 0.5;
-  $('screenbtns').innerHTML = SCREENS.map((key, i) => {
+  $('screenbtns').innerHTML = RING.map((key, i) => {
     const ang = (-90 + (i + off) * (360 / N)) * Math.PI / 180;
     const on = key === S.activeScreen;
     const warm = key === 'games' && myTurn;
@@ -1733,7 +1748,7 @@ function renderChrome() {
   // Hidden in street mode, and hidden when nothing is located — a zoom glyph with nowhere to
   // dive is a dead button (C1).
   const anyLocated = peers().some(p => p.located);
-  $('modetoggle').style.display = (street || !anyLocated) ? 'none' : 'flex';
+  $('modetoggle').style.display = 'none';   // retired (T-183)
   // The glyph greets while someone is new (ADR-0026): a warmer colour and a livelier pulse —
   // "someone new has joined", never urgency. Rate AND colour, so it stays legible without
   // colour vision.
@@ -2210,7 +2225,11 @@ window.sphereBackToGlobe = () => {
 };
 
 $('holobtn').onclick = () => { S.holoHidden = !S.holoHidden; renderChrome(); };
-$('modetoggle').onclick = () => window.sphereZoomToFocus();
+// The dive/zoom glyph is retired (T-183, Ian 2026-08-15: "the zoom in function within the UI
+// provides no benefit at this time"). The button is hidden and its click does nothing; the dive
+// machinery below stays in place, unreachable, rather than being torn out of the render path it
+// is threaded through — removing the entry point is the whole of what was asked.
+$('modetoggle').onclick = () => {};
 // The bottom-centre zoom glyph dives to a LOCATED node — never blindly to S.focusIdx, which
 // defaults to self: an unlocated self routed sphereDive to the network screen (C1). Prefer the
 // current focus if located, then self, then the first located node; if nothing is located there
