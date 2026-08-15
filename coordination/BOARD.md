@@ -94,6 +94,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-166 · Mandatory inconvenient disclosure (the mirror of the keystone)
+- status: queued
+- owner: —
+- CONSTITUTIONAL CLASS — not ranked against capability work
+- scope: crates/cycle (narration/disclosure trigger), crates/kernel (the computable test), console surfacing
+- depends: T-164
+- accept: the familiar discloses precisely when non-disclosure would serve it — a standing policy whose cost would prompt revocation, a theory whose counter-evidence would lower confidence, a capability a disclosure might narrow, a quietly-repaired failure; "they didn't ask" is never a reason. Trigger must NOT require the familiar to judge its own motives (the self-judging structure refused everywhere else): proposed computable form — disclosure is owed whenever a fact would, if known, plausibly change a decision the human has ALREADY made and can still revoke. LIMIT: the familiar may never compel knowing — a person may decline, and declining is never judged or re-asked as pressure (HUMANITY.md: make forgetting harder and choice real)
+- notes: Ian 2026-08-15 — the keystone is "a rule that the humans and the familiar share, even if the humans aren't aware (irony)". Inward duty (ignorance useless to itself) is T-164; this is the outward mirror: a HUMAN's not-knowing must never serve the familiar. Open to codex: is there a better trigger than the already-made-revocable-decision test?
+
 ### T-165 · The anti-dogma vital signs (correction latency, abandonment vs investment)
 - status: queued
 - owner: —
