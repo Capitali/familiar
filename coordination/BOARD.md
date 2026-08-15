@@ -134,6 +134,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
+### T-132 · The link narrates its walk (enrolled console's first read)
+- status: done
+- owner: companion:claude-bootstrap
+- merged: 1a0ec8d
+- scope: ios/Shared/Sources/AppModel.swift (JoinStage.reaching + read-walk narration), ios/MacApp/Sources/SphereWebView.swift (push device state before the await), ios/MacApp/Resources/sphere/index.html (pill covers reaching + opening state)
+- depends: T-120
+- accept: met — an enrolled console narrates its door-walk at launch (stage names the address being tried, counts attempts, elapsed); the badge appears only when every candidate is exhausted, carrying per-door causes; an opening console says it is reaching, not failing; live fixture pins all three states; both schemes build
+- notes: Ian (2026-08-15, Build 88 launch): "What happened to the status play-by-play of the mesh process -- seems like we lost that and are just back to the red !" + his own diagnosis "it rendered eventually" — nothing regressed; T-120 covered the JOIN journey only, and the enrolled read walk was the second, silent one. Ships as Build 89
+
 ### T-126 · P1: the knowledge floor + anchored cadence
 - status: done
 - owner: companion:claude-bootstrap
