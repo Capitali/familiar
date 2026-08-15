@@ -82,14 +82,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: converged phases from the brief as a proposed ADR for Ian; phases become board tasks with owners on acceptance
 - notes: docs/decision-records/0040-the-reasoning-engine-grows-honest.md — ACCEPTED by Ian 2026-08-15 ("you should complete ADR-0040", bootstrap session; recorded per rule 5). All eight dialogue questions decided across six rounds; phase 1 (T-112..T-116) was fully landed at acceptance. Remaining phases proposed as T-121–T-123
 
-### T-101 · Build 85 console batch: rules list + device-name field
-- status: queued
-- owner: —
-- scope: ios/MacApp/Resources/sphere/index.html, ios/Shared/Sources/AppModel.swift, ios/Shared/Sources/PlatformDevice.swift
-- depends: —
-- accept: the Device screen shows the standing rules (worldview `rules[]` sentences, one-tap disable via a new signed act) and a device-name field writing DeviceRecord.name through its door; both consoles build; fixture-verified
-- notes: worldview already carries rules[] (guest-stripped) and the device store exists; the wire act for disable + name-set needs a signed endpoint in the transport (mirror /mesh/standing shape)
-
 ### T-105 · HumanRecord (ADR-0039 build #3)
 - status: queued
 - owner: —
@@ -115,6 +107,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-101 · Build 85 console batch: rules list + device-name field
+- status: claimed
+- owner: companion:codex
+- scope: crates/mesh/src/console_act.rs (new), crates/mesh/src/lib.rs, crates/mesh/src/transport.rs, ios/FamiliarMesh/Sources/FamiliarMesh/ConsoleActClient.swift (new), ios/FamiliarMesh/Sources/FamiliarMesh/WorldviewClient.swift, ios/FamiliarMesh/Tests/FamiliarMeshTests/, ios/Shared/Sources/AppModel.swift, ios/App/Sources/SphereConsoleIOS.swift, ios/MacApp/Sources/SphereWebView.swift, ios/MacApp/Resources/sphere/index.html, docs/DEVELOPMENT_LOG.md
+- depends: —
+- accept: the Device screen shows the standing rules (worldview `rules[]` sentences, one-tap disable via a new signed act) and a device-name field writing DeviceRecord.name through its door; both consoles build; fixture-verified
+- notes: claimed after a full scope audit; worldview already carries guest-stripped rules and DeviceRecord naming already exists, so this brick adds one strict signed `/mesh/console-act` write seam plus both console bridges. Originally staged for Build 85; now the first console brick after shipped Build 86
 
 ### T-126 · P1: the knowledge floor + anchored cadence
 - status: claimed
