@@ -2,6 +2,9 @@ import Foundation
 import SwiftUI
 import AVFoundation
 import FamiliarMesh
+#if os(iOS)
+import WatchConnectivity
+#endif
 
 /// The agent's whole state: enrollment (via the covenant handshake), the signing session, consent,
 /// and a small activity log. Thin — the crypto/wire logic lives in FamiliarMesh; sensing lives in
@@ -455,6 +458,21 @@ final class AppModel: ObservableObject {
         // familiar. The editable field writes the record through the signed console-act seam.
         let deviceName = worldview?.members?.first(where: { $0.node_id == node.nodeId })?.label
             ?? PlatformDevice.name
+        // T-171 is deliberately phone-local: the shared Device screen may render what the
+        // iPhone already knows about its paired watch, but no observation/worldview field is
+        // created here. T-169 owns any later, retention-governed mesh report.
+        let watchDict: [String: Any]
+        #if os(iOS)
+        let watch = PhoneWatchLink.shared
+        watchDict = [
+            "supported": WCSession.isSupported(),
+            "paired": watch.paired,
+            "appInstalled": watch.appInstalled,
+            "lastSent": watch.lastSent ?? "",
+        ]
+        #else
+        watchDict = ["supported": false]
+        #endif
         let d: [String: Any] = [
             "label": PlatformDevice.name,
             "deviceName": deviceName,
@@ -499,6 +517,7 @@ final class AppModel: ObservableObject {
             "oracle": ConsultRunner.state,
             // Push-to-talk is wired on this shell — the dialogue screen shows its mic.
             "voice": dialogueVoiceAvailable,
+            "watch": watchDict,
             // The app's recent working notes — the door's verbatim replies to this device's own
             // acts (game moves, vouches, invites). The console shows the newest one; without
             // this, a refused BEGIN looked like a dead button (the door's words landed in a

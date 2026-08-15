@@ -15,6 +15,7 @@ import FamiliarMesh
 struct SphereConsoleIOS: View {
     @EnvironmentObject var model: AppModel
     @StateObject private var bridge = SphereBridgeIOS()
+    @ObservedObject private var watch = PhoneWatchLink.shared
     // Push-to-talk for the dialogue screen. The deliver closure goes unused — a dialogue
     // utterance routes through onFinal into the console-answer pipe, not a `said` observation.
     @StateObject private var voice = VoiceSensing { _ in }
@@ -135,6 +136,15 @@ struct SphereConsoleIOS: View {
                     if let model { bridge?.pushDevice(model.deviceStateJSON()) }
                 }
             }
+            bridge.onWatchRelink = { [weak model, weak bridge] in
+                model?.syncWatch()
+                // PhoneWatchLink publishes its WCSession snapshot asynchronously. Push once
+                // after this event-loop turn for immediate button feedback; objectWillChange
+                // below pushes again when the real paired/install/sent facts arrive.
+                DispatchQueue.main.async {
+                    if let model { bridge?.pushDevice(model.deviceStateJSON()) }
+                }
+            }
             // A member's QR carries a fresh single-use invite token (ADR-0026) — the scanner
             // is admitted in one motion. A guest's falls back to the plain address.
             bridge.onInvite = { [weak model] in model?.invitePayload(handoff: false) }
@@ -154,6 +164,13 @@ struct SphereConsoleIOS: View {
         }
         .onReceive(voice.$listening) { on in
             bridge.pushVoiceState(on)
+        }
+        .onReceive(watch.objectWillChange) { _ in
+            // @Published announces in willSet. Defer one main-loop turn so serialization reads
+            // the new value rather than the value it is replacing.
+            DispatchQueue.main.async {
+                bridge.pushDevice(model.deviceStateJSON())
+            }
         }
     }
 }
@@ -221,6 +238,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onDeviceRole: ((String, String) -> Void)?
     var onRuleDisable: ((String) -> Void)?
     var onDeviceName: ((String) -> Void)?
+    var onWatchRelink: (() -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -234,6 +252,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     }
 
     private var lastJSON: String?
+    private var lastDeviceJSON: String?
 
     func push(worldviewJSON: String) {
         lastJSON = worldviewJSON
@@ -246,6 +265,11 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             if let json = self.lastJSON {
                 webView.evaluateJavaScript("window.sphereUpdate(\(json))", completionHandler: nil)
             }
+            if let json = self.lastDeviceJSON {
+                webView.evaluateJavaScript(
+                    "window.sphereDevice && window.sphereDevice(\(json))",
+                    completionHandler: nil)
+            }
         }
     }
     func pushLinkDown(_ message: String = "") {
@@ -255,6 +279,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     }
 
     func pushDevice(_ json: String) {
+        lastDeviceJSON = json
         web?.evaluateJavaScript("window.sphereDevice && window.sphereDevice(\(json))", completionHandler: nil)
     }
 
@@ -453,6 +478,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 if let name = body["name"] as? String, !name.isEmpty {
                     self.onDeviceName?(name)
                 }
+            case "watchRelink":
+                self.onWatchRelink?()
             case "gate":
                 break   // boundary writes are a local human act at the familiar, never from a device
             default: break
