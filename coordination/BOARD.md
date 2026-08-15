@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-168 · Mol's watch has never reached the mesh
+- status: proposed
+- owner: — (diagnosis only; mol's devices are NOT claude's to modify)
+- scope: diagnosis — ios/App/Sources/Views.swift StatusView watch section, PhoneWatchLink, mol's device builds
+- depends: —
+- accept: mol's watch appears as a device_agent attached to her iPhone, and the watch app opens its talk interface
+- notes: Ian 2026-08-15. EVIDENCE: no watch-shaped peer has EVER contacted the lighthouse door except Ian's ("Apple Watch", human=ian, attached_to d5c31472/Aphelion — so the mechanism works). Mol's iPhone is node ad4c704d, human=mol, live (seen 0.1h) but running **v77** while the fleet is on 89. `syncWatch()` (re-hands the address to a watch that connects after the phone enrolled) shipped 2026-07-28, so v77 HAS it — meaning the likely causes are (a) the watch app build is old/not installed from TestFlight, or (b) the WCSession link never activated. The iPhone's Status screen self-diagnoses: it shows "No paired watch detected" / "Watch paired — install the Familiar watch app" / "linked|linking…" plus a **Re-link watch** button. First action is mol opening that screen, not a code change
+
 ### T-131 · Two independent reviews of the familiar, exchanged and decided
 - status: done
 - merged: 8a35cb8 (finite engineering review closed in Round 6; standing philosophy continued in Round 7)
@@ -95,7 +103,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Queued
 
 ### T-167 · `theories retire` — a clean slate that keeps the record
-- status: claimed
+- status: done — applied fleet-wide: 14 (MacOnStick) + 299 (lighthouse) + 130 (Wildhorse) = 443 pre-engine theories retired, 3 engine-minted survivors
 - owner: companion:claude-bootstrap
 - scope: crates/kernel/src/thread.rs (retire + status exclusions), crates/cli (theories retire)
 - depends: —
