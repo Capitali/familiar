@@ -119,6 +119,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-181 · The dialogue prompt asks for acknowledgement, which is the thing Ian objected to
+- status: queued — **wants Ian's call on the question rule**
+- owner: —
+- scope: crates/cycle/src/lib.rs (the `converse` prompt); LAW_III_VOICE itself is sound and stays
+- depends: a mind being installed (no effect until `allow_llm` is open)
+- accept: the reply engages with the SUBSTANCE of what was said — naming the specific thing, or what it now understands differently — rather than acknowledging that something was said; a reply that could be sent verbatim in response to a different utterance is a failure
+- notes: found while fixing T-180. The fallback was only half the problem; the LLM prompt is the other half and governs every reply once a mind exists. It currently says: "Reply directly, warmly, and briefly - ONE or two sentences that ACKNOWLEDGE WHAT THEY SAID and, where it fits, what you'll do with it. DO NOT ASK A QUESTION (that comes separately)." Two problems: (1) "acknowledge what they said" instructs the model to produce exactly the vague acknowledgement Ian objected to - it is the LLM-side twin of the ACKS bug, phrased as a requirement; (2) forbidding questions removes the single strongest evidence of attention there is. A person who asks a follow-up is demonstrably listening. THE NO-QUESTION RULE IS IAN'S CALL, not mine - questions currently come through the separate inquiry path by design, and letting the reply engage conversationally changes the familiar's character. But it sits oddly beside his own station directive (2026-08-15): the familiar should ASK who it is talking to, because names are how relationships are made and kept. A familiar that may never ask anything in the moment cannot do that
+
 ### T-180 · A reply that has not thought says so
 - status: DONE (build 92) — the fallback is honest; the SILENCE behind it is Ian's gate to open
 - owner: claude
