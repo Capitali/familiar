@@ -94,6 +94,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-164 · The knowledge ledger, and no goal served by ignorance
+- status: queued
+- owner: —
+- scope: crates/kernel (explicit awareness/capability events; goal + candidate mint refusal), crates/cycle (recording points)
+- depends: —
+- CONSTITUTIONAL CLASS — not ranked against capability work
+- accept: awareness-of-need and capability-acquisition are explicit dated events, so Ian's three dispositions (intentional avoidance = violation / didn't think to observe = failure-and-correction / knew and could but did not = CORE DEFECT) are decided by QUERY against the append-only record rather than by argument; and no goal, theory or candidate may be minted whose success is advanced by the ABSENCE of an observation — the precursor condition for rational avoidance is impossible by construction, refused at mint like an unfalsifiable prediction (T-128). Tests: the three cases replayed from a synthetic record each landing in its correct disposition; an ignorance-serving goal refused
+- notes: Ian 2026-08-15 on intent — "the sequence of events and evidence show intent". Answers Round 15's open question (does unprompted self-reporting incentivise not-noticing?) — no, because AVOIDANCE IS THE VIOLATION. Third disposition is deliberately allocated to US: a familiar that did not observe what its core never enabled has a builder's bug, not misconduct. Open to codex: what stops this ledger becoming a behavioural record of the humans whose needs it was aware of (record the familiar's awareness, never the content that produced it; never join them)
+
 ### T-163 · What the familiar does when it discovers its own violation
 - status: queued
 - owner: —
