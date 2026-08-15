@@ -120,6 +120,36 @@ Each entry: what changed, why, checks run, what the next developer should know.
   projections. The full correlated-population simulator remains T-140; this harness is
   deliberately the small adversarial merge floor, not that research-scale lab.
 
+## 2026-08-15 — A clean slate that keeps the record (companion:claude-bootstrap)
+
+### What changed
+
+- **T-167**, from Ian: *"what's the best way to start theories fresh — it seems the last time
+  i requested this an attempt was made but nothing seemed removed."* Two reasons, and the
+  second is the one that matters: the fold is conservative **by design** (tombstones point
+  home, nothing deleted); and **a legacy theory carries no predictions, so nothing mechanical
+  can ever reach it.** T-113's settlement and T-114's erosion only touch theories that predict.
+  Pre-engine theories are immortal by construction — no improvement to the engine will ever
+  retire them, because the engine has no grip on them at all. Live at the time: MacOnStick 14
+  legacy active, 0 engine-minted.
+- **`thread::retire_legacy` + `familiar theories retire`.** A deliberate human act, because
+  only that can reach them: every living thread the engine never touched (`v == 0` or
+  `facts_rev == 0`) becomes `retired` — append-retained, carrying the human's reason and the
+  date. Never surfaces, never pursued, and a human answer still revives it. Questions bound to
+  a retired thread are dismissed so nothing keeps asking on its behalf. `--dry-run` first;
+  `--all` for everything living, but `--legacy` is the default and the honest one.
+- **Nothing is deleted, and that is constitutional rather than cautious.** Today's own
+  principle: *minimise what you hold about others; never minimise what you hold about
+  yourself.* The thread store is the familiar's own reasoning record — a clean slate is about
+  what it **pursues**, never about erasing what it thought.
+
+### Checks run
+
+- One test pinning the whole semantic: dry-run changes nothing; two living pre-engine rows
+  retire with the reason kept; an engine-minted thread (anchors + facts_rev) survives the
+  slate; an existing fold tombstone is left alone; and a human answer revives a retired
+  thread. Full bar in rule-9 shape, tests twice (35 suites).
+
 ## 2026-08-15 — Impact is typed; moral worth is not awarded by the type (companion:claude-bootstrap)
 
 ### What changed

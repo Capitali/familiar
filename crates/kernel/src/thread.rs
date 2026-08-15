@@ -25,7 +25,7 @@ pub struct Thread {
     #[serde(default)]
     pub direction: String,
     pub created_at: i64,
-    /// open | pursued | answered | abandoned | marginalized | superseded | expired
+    /// open | pursued | answered | abandoned | marginalized | superseded | expired | retired
     pub status: String,
     /// When the thread entered its *current* status (unix secs) — whatever state a theory
     /// is in, it carries the date it got there. Backfilled to `created_at` for old rows.
@@ -375,6 +375,49 @@ pub fn fold(dir: &Path, survivor_id: &str, member_ids: &[String], now: i64) -> i
     Ok(folded)
 }
 
+/// Retire the theories minted before the honest engine (T-167). A thread with no
+/// predictions can never be settled by [`crate::prediction`] nor eroded by
+/// [`crate::belief`] — **pre-engine theories are immortal by construction**, so only a
+/// deliberate human act can close them. This is that act.
+///
+/// Append-retained, never deleted: the row stays, wearing `retired` and carrying the
+/// human's reason and the date. The familiar's own reasoning record is the one thing it
+/// must never minimise (SOUL.md, 2026-08-15) — a clean slate is about what it *pursues*,
+/// never about erasing what it thought.
+///
+/// `legacy_only` selects rows the engine never touched (`v == 0` or `facts_rev == 0`).
+/// Returns the ids retired, so the caller can report and dismiss dependent questions.
+pub fn retire_legacy(
+    dir: &Path,
+    reason: &str,
+    legacy_only: bool,
+    dry_run: bool,
+    now: i64,
+) -> io::Result<Vec<String>> {
+    let mut retired = Vec::new();
+    for t in load(dir)? {
+        // Only living theories are retired; a tombstone or a settled thread is left alone.
+        if !matches!(t.status.as_str(), "open" | "pursued") {
+            continue;
+        }
+        if legacy_only && !(t.v == 0 || t.facts_rev == 0) {
+            continue;
+        }
+        retired.push(t.id.clone());
+        if dry_run {
+            continue;
+        }
+        let Some(mut row) = store::load_by_id::<Thread>(dir, THREADS_FILE, &t.id)? else {
+            continue;
+        };
+        row.status = "retired".into();
+        row.status_at = now;
+        row.answers.push(format!("[retired {now}] {reason}"));
+        store::update_by_id(dir, THREADS_FILE, &t.id, &row)?;
+    }
+    Ok(retired)
+}
+
 /// How many recurrences (or a progression to pursued/answered) a theory needs before it is
 /// worth a human's eyes (C5). Below this it churns in the background; connectivity noise never
 /// clears it because each variant reinforces the same thread rather than adding a new one.
@@ -385,7 +428,7 @@ pub const MATURITY_THRESHOLD: u32 = 3;
 pub fn is_mature(t: &Thread) -> bool {
     if matches!(
         t.status.as_str(),
-        "abandoned" | "marginalized" | "superseded" | "expired"
+        "abandoned" | "marginalized" | "superseded" | "expired" | "retired"
     ) {
         return false;
     }
@@ -415,7 +458,7 @@ pub fn add_answer(dir: &Path, id: &str, text: &str, now: i64) -> io::Result<bool
     t.last_worked_at = now;
     if matches!(
         t.status.as_str(),
-        "abandoned" | "marginalized" | "answered" | "expired"
+        "abandoned" | "marginalized" | "answered" | "expired" | "retired"
     ) {
         // Human attention renews — an expired Inquiry a person answers stands again
         // (T-128), exactly as a human answer outranks the factory's earlier triage.
@@ -741,6 +784,79 @@ mod tests {
             t.anchors,
             vec!["obs-0001", "obs-0002", "obs-0003"],
             "every arrival's citation carried in"
+        );
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    /// A fresh start closes what the engine can never settle, and keeps every word of it.
+    /// Pre-engine theories carry no predictions, so nothing mechanical can ever reach them —
+    /// only a human act can. That act retires; it does not erase (SOUL.md: minimise what you
+    /// hold about others, never what you hold about yourself).
+    #[test]
+    fn retiring_the_legacy_keeps_the_record_and_spares_the_engines_own() {
+        let p = std::env::temp_dir().join(format!("thread_retire_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        // Two pre-engine rows (one open, one already pursued) and one minted by the engine.
+        for (id, status) in [("thread-0001", "open"), ("thread-0002", "pursued")] {
+            let mut t = need_thread(id);
+            t.status = status.into();
+            append(&p, &t).unwrap();
+        }
+        let mut modern = need_thread("thread-0003");
+        modern.v = THREAD_VERSION;
+        modern.facts_rev = 1;
+        modern.anchors = vec!["obs-0007".into()];
+        append(&p, &modern).unwrap();
+        // A tombstone from an earlier fold must not be touched twice.
+        let mut folded = need_thread("thread-0004");
+        folded.status = "superseded".into();
+        append(&p, &folded).unwrap();
+
+        let dry = retire_legacy(&p, "fresh start", true, true, 900).unwrap();
+        assert_eq!(dry.len(), 2, "dry run names the two living pre-engine rows");
+        assert!(
+            load(&p).unwrap().iter().all(|t| t.status != "retired"),
+            "dry run changes nothing"
+        );
+
+        let done = retire_legacy(&p, "fresh start", true, false, 1000).unwrap();
+        assert_eq!(done.len(), 2);
+        let rows = load(&p).unwrap();
+        for id in ["thread-0001", "thread-0002"] {
+            let t = rows.iter().find(|t| t.id == id).unwrap();
+            assert_eq!(t.status, "retired");
+            assert_eq!(t.status_at, 1000);
+            assert!(
+                t.answers.iter().any(|a| a.contains("fresh start")),
+                "the reason is kept with it"
+            );
+            assert!(!is_mature(t), "a retired theory never surfaces");
+            assert!(
+                !t.theory.is_empty(),
+                "and its thinking is still there — retired, not erased"
+            );
+        }
+        assert_eq!(
+            rows.iter().find(|t| t.id == "thread-0003").unwrap().status,
+            "open",
+            "what the engine minted with anchors and facts survives the slate"
+        );
+        assert_eq!(
+            rows.iter().find(|t| t.id == "thread-0004").unwrap().status,
+            "superseded",
+            "an existing tombstone is left alone"
+        );
+        // A human's answer still revives a retired thread — closing is not deletion.
+        add_answer(&p, "thread-0001", "actually, keep looking at this", 1100).unwrap();
+        assert_eq!(
+            load(&p)
+                .unwrap()
+                .iter()
+                .find(|t| t.id == "thread-0001")
+                .unwrap()
+                .status,
+            "open"
         );
         let _ = fs::remove_dir_all(&p);
     }
