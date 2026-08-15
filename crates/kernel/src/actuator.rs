@@ -189,6 +189,33 @@ pub fn save_state(dir: &Path, m: &BTreeMap<String, SurfaceState>) -> io::Result<
 /// Does an answer read as *no*? Deterministic and whole-word on purpose — no model
 /// judges a reaction; when in doubt the answer is not negative and the change stands,
 /// because the human can always still undo it by hand (which the poller honors).
+/// Does an answer read as an explicit *yes*? Deterministic and whole-word, like
+/// [`is_negative`] — no model judges consent. Minting a STANDING policy demands this
+/// (T-102): silence and mere non-negativity keep a one-shot act, but a rule that will
+/// fire forever needs the human to have actually said so. Callers must also check
+/// `!is_negative` — "no, not okay" contains "okay".
+pub fn is_affirmative(text: &str) -> bool {
+    let t = text.to_lowercase();
+    if t.contains("do it") || t.contains("go ahead") || t.contains("sounds good") {
+        return true;
+    }
+    t.split(|c: char| !c.is_alphanumeric() && c != '\'')
+        .any(|w| {
+            matches!(
+                w,
+                "yes"
+                    | "yeah"
+                    | "yep"
+                    | "sure"
+                    | "please"
+                    | "ok"
+                    | "okay"
+                    | "absolutely"
+                    | "definitely"
+            )
+        })
+}
+
 pub fn is_negative(text: &str) -> bool {
     let t = text.to_lowercase();
     if t.contains("put it back") || t.contains("leave it") {

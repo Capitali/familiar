@@ -675,6 +675,7 @@ fn merge_one(
                 predictions_sig: Vec::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             };
             if thread::mint(dir, m, now).is_ok() {
                 // A visible, replicating record that we picked up a peer's theory to test — source
@@ -1481,6 +1482,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -1555,6 +1557,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();

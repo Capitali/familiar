@@ -115,6 +115,10 @@ pub struct TheoryDraft {
     pub direction: String,
     #[serde(default)]
     pub predictions: Vec<PredictionDraft>,
+    /// The typed both-edges policy this theory proposes (T-102) — validated against
+    /// the declared surface at admission, minted only on the human's explicit assent.
+    #[serde(default)]
+    pub rule_proposal: Option<crate::reaction_rule::RuleProposal>,
 }
 
 impl TheoryDraft {
@@ -239,6 +243,7 @@ mod tests {
             theory: "t".into(),
             direction: "d".into(),
             predictions: Vec::new(),
+            rule_proposal: None,
         }
     }
 

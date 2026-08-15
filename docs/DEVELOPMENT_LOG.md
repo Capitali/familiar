@@ -6,6 +6,46 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — One assent, both edges: the lights get managed (companion:claude-bootstrap)
+
+### What changed
+
+- **T-102 (P4, dialogue Q4 — the brick Ian's Build-86 review pointed at).** Theories
+  could propose forever and never act: assent detection was `!is_negative` (quiet
+  counted as consent — far too weak to mint a rule that fires forever), and a rule
+  minted alone could leave "dim on away" live without its "restore on back" half.
+- **`RuleProposal`, typed, carried by the theory.** The draft contract gains an
+  optional `rule_proposal { subject, surface, on_away, on_back }` — validated at
+  admission against the DECLARATION (surface must be declared, both edges must be its
+  literal action labels; otherwise refused citing SF-3). Bound to the person's
+  presence judgment, never to today's Wi-Fi sensor.
+- **Explicit assent, paired mint.** `actuator::is_affirmative` — deterministic,
+  whole-word, no model — and only an explicit yes on an ACTED thread mints;
+  `reaction_rule::mint_policy` mints BOTH edges atomically under one `policy_id`
+  (Away/Back — the existing trigger vocabulary sufficed, as codex argued). One
+  standing policy per surface until field calibration; the same subject re-assenting
+  re-points both edges; reverting EITHER edge disables the pair ("a policy is one
+  consent"). Provenance `minted_from: thread:<id>`; the adoption lands as an
+  observation. Gated by `allow_actuate` like every surface act.
+- **A latent id collision fixed in passing:** rule ids derived from `now` alone — two
+  edges minted in the same second shared an id. Salted by row count (the prediction
+  store's own idiom).
+
+### Checks run
+
+- Kernel: pair-under-one-id + re-point on re-assent; the one-per-surface cap refuses
+  a second subject; reverting either edge takes down the pair. Cycle, end-to-end on
+  the real heed fixture: explicit yes mints the paired policy with thread provenance
+  and narration; a neutral non-negative answer keeps the one-shot act and mints
+  NOTHING. Full bar in rule-9 shape, tests twice.
+
+### Next
+
+- The live pilot: deploy the doors, author the lights fold manifest from the
+  lighthouse's real rows (the six-in-five-hours cluster), fold — then the ONE
+  collapsed lights thread asks once, Ian assents once, and the familiar manages the
+  motorlights. Console Wondering drill-down remains a follow-up brick.
+
 ## 2026-08-15 — A theory predicts, or it wonders (companion:claude-bootstrap)
 
 ### What changed

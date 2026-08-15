@@ -878,7 +878,12 @@ fn maybe_theorize(
          \"then_object_prefix\":\"…\",\"within_secs\":3600,\"polarity\":\"expect|expect_absent\"}}]}}. \
          `defect_claims` lists observation classes (actor|action) your theory says are \
          MALFUNCTIONING — leave it empty unless you truly claim a defect. Predictions are \
-         optional but a theory that predicts nothing settles nothing.",
+         optional but a theory that predicts nothing settles nothing. When (and only \
+         when) your direction proposes a standing presence-bound automation on a \
+         DECLARED surface, add \"rule_proposal\":{{\"subject\":\"<who>\",\"surface\":\
+         \"<declared>\",\"on_away\":\"<its action label>\",\"on_back\":\"<its action \
+         label>\"}} — both edges, labels exactly from the declaration; it is minted \
+         only if the human explicitly assents.",
         recent.join("\n"),
         loops_s.join("\n"),
         if readings.is_empty() {
@@ -932,6 +937,30 @@ fn maybe_theorize(
         refuse_theory(dir, now, r.fact_id, &r.why);
         dispose(dir, now)?;
         return Ok(false);
+    }
+    // A carried rule proposal must be literal against the DECLARATION (T-102, SF-3):
+    // its surface must be declared and both edges must be that surface's own action
+    // labels — a proposal naming an unheard-of act refuses before it can ever ask.
+    if let Some(rp) = &draft.rule_proposal {
+        let (surfaces, _) = familiar_kernel::actuator::load(dir)?;
+        let ok = surfaces.iter().any(|a| {
+            a.surface == rp.surface
+                && a.actions.contains_key(&rp.on_away)
+                && a.actions.contains_key(&rp.on_back)
+        });
+        if !ok {
+            refuse_theory(
+                dir,
+                now,
+                "SF-3",
+                &format!(
+                    "rule proposal names {}:{}/{} — not a declared surface/action pair",
+                    rp.surface, rp.on_away, rp.on_back
+                ),
+            );
+            dispose(dir, now)?;
+            return Ok(false);
+        }
     }
     let (q, theory, direction) = (
         draft.question.trim().to_string(),
@@ -1021,6 +1050,7 @@ fn maybe_theorize(
             } else {
                 0
             },
+            rule_proposal: draft.rule_proposal.clone(),
         },
         now,
     )?;
@@ -1350,6 +1380,7 @@ fn maybe_theorize_needs(
             predictions_sig: Vec::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         },
         now,
     )?;
@@ -2276,6 +2307,7 @@ fn adopt_device_theories(
             predictions_sig: Vec::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         };
         if thread::mint(dir, m, now).is_ok() {
             adopted += 1;
@@ -2793,6 +2825,63 @@ fn heed_reactions(dir: &Path, now: i64) -> io::Result<usize> {
                 .iter()
                 .any(|ans| familiar_kernel::actuator::is_negative(ans));
         if !negative {
+            // T-102 (dialogue Q4): an EXPLICIT yes on an acted thread that carries a
+            // typed proposal mints the standing policy — both edges, one consent, one
+            // object to kill. Silence keeps the one-shot act but never mints a rule
+            // that would fire forever; the human-owned boundary gates it like every
+            // surface act. Refusals (surface occupied, gates closed) are on the record.
+            let affirmative = new_answers
+                .iter()
+                .any(|ans| familiar_kernel::actuator::is_affirmative(ans));
+            if affirmative {
+                if let Some(rp) = &t.rule_proposal {
+                    let gated = familiar_kernel::boundary::load(dir)
+                        .map(|b| b.allow_actuate)
+                        .unwrap_or(false);
+                    if gated {
+                        match familiar_kernel::reaction_rule::mint_policy(
+                            dir,
+                            rp,
+                            &format!("thread:{}", t.id),
+                            now,
+                        ) {
+                            Ok((away, back)) => {
+                                observation::record(
+                                    dir,
+                                    observation::Observation::new(
+                                        "familiar",
+                                        "adopted",
+                                        format!("policy:{}", away.policy_id),
+                                        format!(
+                                            "{} · {} — minted on assent, thread:{}",
+                                            away.sentence(),
+                                            back.sentence(),
+                                            t.id
+                                        ),
+                                        "familiar",
+                                        now,
+                                        1.0,
+                                    ),
+                                )?;
+                            }
+                            Err(e) => {
+                                observation::record(
+                                    dir,
+                                    observation::Observation::new(
+                                        "familiar",
+                                        "reports",
+                                        format!("policy-refused:{}", rp.surface),
+                                        e.to_string(),
+                                        "familiar",
+                                        now,
+                                        1.0,
+                                    ),
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
             close_act_positive(
                 dir,
                 &act,
@@ -4686,6 +4775,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -4922,6 +5012,82 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_yes_on_a_proposing_thread_mints_the_paired_policy() {
+        let t = Temp::new("act_assent_policy");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, _cid) = seed_pursued_need(dir, 1000);
+        // The thread carries the typed proposal an admitted draft would have set.
+        let mut th = thread::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == tid)
+            .unwrap();
+        th.rule_proposal = Some(familiar_kernel::reaction_rule::RuleProposal {
+            subject: "ian".into(),
+            surface: "lights".into(),
+            on_away: "dim".into(),
+            on_back: "bright".into(),
+        });
+        familiar_kernel::store::update_by_id(dir, thread::THREADS_FILE, &tid, &th).unwrap();
+        tend_actuators(dir, 1000).unwrap();
+        // Ian says an EXPLICIT yes — not mere silence, not just non-negative.
+        thread::add_answer_from(dir, &tid, "yes please — keep doing that", "phone:ian", 1100)
+            .unwrap();
+        assert_eq!(heed_reactions(dir, 1100).unwrap(), 1);
+        let rules = familiar_kernel::reaction_rule::load(dir).rules;
+        assert_eq!(rules.len(), 2, "both edges minted, or nothing");
+        assert!(
+            rules
+                .iter()
+                .all(|r| r.enabled && !r.policy_id.is_empty() && r.policy_id == rules[0].policy_id),
+            "one policy id pairs the edges"
+        );
+        assert!(
+            rules
+                .iter()
+                .all(|r| r.minted_from == format!("thread:{tid}")),
+            "the consent's provenance is the thread"
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(
+            obs.iter()
+                .any(|o| o.action == "adopted" && o.object.starts_with("policy:")),
+            "the adoption is narrated on the record"
+        );
+    }
+
+    #[test]
+    fn silence_keeps_the_act_but_never_mints_a_standing_policy() {
+        let t = Temp::new("act_silence_no_policy");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, _cid) = seed_pursued_need(dir, 1000);
+        let mut th = thread::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == tid)
+            .unwrap();
+        th.rule_proposal = Some(familiar_kernel::reaction_rule::RuleProposal {
+            subject: "ian".into(),
+            surface: "lights".into(),
+            on_away: "dim".into(),
+            on_back: "bright".into(),
+        });
+        familiar_kernel::store::update_by_id(dir, thread::THREADS_FILE, &tid, &th).unwrap();
+        tend_actuators(dir, 1000).unwrap();
+        // A neutral, non-negative answer: the one-shot act stands; no rule fires forever.
+        thread::add_answer_from(dir, &tid, "hm, interesting", "phone:ian", 1100).unwrap();
+        assert_eq!(heed_reactions(dir, 1100).unwrap(), 1);
+        assert!(
+            familiar_kernel::reaction_rule::load(dir).rules.is_empty(),
+            "non-affirmative words never mint a standing policy"
+        );
+    }
+
+    #[test]
     fn a_negative_answer_makes_the_familiar_revert_and_rest_the_surface() {
         let t = Temp::new("act_negative_word");
         let dir = &t.0;
@@ -4997,6 +5163,7 @@ mod tests {
                     superseded_by: String::new(),
                     kind: String::new(),
                     expires_at: 0,
+                    rule_proposal: None,
                 },
             )
             .unwrap();
@@ -5071,6 +5238,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -5256,6 +5424,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -5352,6 +5521,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -5405,6 +5575,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -5893,6 +6064,7 @@ mod tests {
             superseded_by: String::new(),
             kind: String::new(),
             expires_at: 0,
+            rule_proposal: None,
         };
         let existing = vec![held];
         // The same musing in slightly different words is the same musing.
@@ -6040,6 +6212,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -6222,6 +6395,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -6430,6 +6604,7 @@ mod tests {
                     superseded_by: String::new(),
                     kind: String::new(),
                     expires_at: 0,
+                    rule_proposal: None,
                 },
             )
             .unwrap();
@@ -6819,6 +6994,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();
@@ -6875,6 +7051,7 @@ mod tests {
                 superseded_by: String::new(),
                 kind: String::new(),
                 expires_at: 0,
+                rule_proposal: None,
             },
         )
         .unwrap();

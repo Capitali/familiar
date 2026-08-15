@@ -64,6 +64,97 @@ pub struct ReactionRule {
     pub disabled_reason: String,
     #[serde(default)]
     pub last_fired: i64,
+    /// Pairs the two edges of one consent (T-102, dialogue Q4): "dim on away" without
+    /// its "restore on back" half is a half-state — the policy is ONE object; reverting
+    /// or disabling either edge takes down both. Empty on legacy single rules.
+    #[serde(default)]
+    pub policy_id: String,
+}
+
+/// The typed proposal a theory carries toward assent (T-102): both edges of a
+/// presence-bound policy, actions LITERAL members of the declared surface. Bound to
+/// the person's presence judgment, never to today's sensor (codex, round 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuleProposal {
+    pub subject: String,
+    pub surface: String,
+    pub on_away: String,
+    pub on_back: String,
+}
+
+/// Mint BOTH edges of a presence policy atomically under one policy id — the honest
+/// meaning of "one standing rule per surface": a second subject's (or a different)
+/// policy on an occupied surface refuses until the standing one is disabled; the SAME
+/// subject re-assenting re-points both edges (the human's newest word is the rule).
+pub fn mint_policy(
+    dir: &Path,
+    p: &RuleProposal,
+    minted_from: &str,
+    now: i64,
+) -> io::Result<(ReactionRule, ReactionRule)> {
+    let (subject, surface) = (p.subject.trim(), p.surface.trim());
+    let (on_away, on_back) = (p.on_away.trim(), p.on_back.trim());
+    if subject.is_empty() || surface.is_empty() || on_away.is_empty() || on_back.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "a policy needs a subject, a surface, and both edges",
+        ));
+    }
+    let f = load(dir);
+    if f.rules
+        .iter()
+        .any(|r| r.enabled && r.surface == surface && r.subject != subject)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{surface} already carries a standing policy — one per surface until field calibration; disable it first"),
+        ));
+    }
+    drop(f);
+    let policy_id = format!(
+        "pol-{:08x}",
+        (now as u64).wrapping_mul(0x9e37_79b9) & 0xffff_ffff
+    );
+    let away = mint(
+        dir,
+        subject,
+        Trigger::Away,
+        surface,
+        on_away,
+        minted_from,
+        now,
+    )?;
+    let back = mint(
+        dir,
+        subject,
+        Trigger::Back,
+        surface,
+        on_back,
+        minted_from,
+        now,
+    )?;
+    let mut f = load(dir);
+    for r in f.rules.iter_mut() {
+        if r.id == away.id || r.id == back.id {
+            r.policy_id = policy_id.clone();
+        }
+    }
+    save(dir, &f)?;
+    let read = load(dir);
+    let a = read
+        .rules
+        .iter()
+        .find(|r| r.id == away.id)
+        .cloned()
+        .unwrap_or(away);
+    let b = read
+        .rules
+        .iter()
+        .find(|r| r.id == back.id)
+        .cloned()
+        .unwrap_or(back);
+    Ok((a, b))
 }
 
 impl ReactionRule {
@@ -142,9 +233,14 @@ pub fn mint(
         return Ok(out);
     }
     let rule = ReactionRule {
+        // Salted by the row count like prediction ids — two edges minted in the same
+        // second (a policy pair) must never share an id (T-102 exposed this).
         id: format!(
             "{:08x}",
-            (now as u64).wrapping_mul(0x9e37_79b9) & 0xffff_ffff
+            (now as u64)
+                .wrapping_mul(0x9e37_79b9)
+                .wrapping_add(f.rules.len() as u64)
+                & 0xffff_ffff
         ),
         subject: subject.to_string(),
         trigger,
@@ -155,6 +251,7 @@ pub fn mint(
         enabled: true,
         disabled_reason: String::new(),
         last_fired: 0,
+        policy_id: String::new(),
     };
     f.rules.push(rule.clone());
     save(dir, &f)?;
@@ -187,6 +284,19 @@ pub fn disable_reverted(dir: &Path, id: &str, now: i64) -> io::Result<Option<Str
     r.enabled = false;
     r.disabled_reason = format!("reverted by hand at {now}");
     let s = r.sentence();
+    let policy = r.policy_id.clone();
+    // A policy is ONE consent (T-102): reverting either edge takes down its pair —
+    // "dim on away" must never stay live without its "restore on back" half.
+    if !policy.is_empty() {
+        for peer in f
+            .rules
+            .iter_mut()
+            .filter(|p| p.policy_id == policy && p.enabled)
+        {
+            peer.enabled = false;
+            peer.disabled_reason = format!("policy peer reverted at {now}");
+        }
+    }
     save(dir, &f)?;
     Ok(Some(s))
 }
@@ -299,5 +409,66 @@ mod tests {
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].act, "off");
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    fn proposal() -> RuleProposal {
+        RuleProposal {
+            subject: "ian".into(),
+            surface: "lights".into(),
+            on_away: "dim".into(),
+            on_back: "bright".into(),
+        }
+    }
+
+    #[test]
+    fn a_policy_mints_both_edges_under_one_id_and_repoints_on_reassent() {
+        let p = std::env::temp_dir().join(format!("rules_policy_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        let (a, b) = mint_policy(&p, &proposal(), "thread:thread-0007", 100).unwrap();
+        assert_eq!(a.trigger, Trigger::Away);
+        assert_eq!(b.trigger, Trigger::Back);
+        assert_eq!(a.policy_id, b.policy_id);
+        assert!(!a.policy_id.is_empty());
+        // The same subject re-assents with different edges: both re-point, still paired.
+        let mut again = proposal();
+        again.on_away = "off".into();
+        let (a2, b2) = mint_policy(&p, &again, "thread:thread-0009", 200).unwrap();
+        assert_eq!(a2.act, "off", "the human's newest word is the rule");
+        assert_eq!(a2.policy_id, b2.policy_id);
+        assert_eq!(load(&p).rules.len(), 2, "re-pointed, not duplicated");
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn one_standing_policy_per_surface_until_calibration() {
+        let p = std::env::temp_dir().join(format!("rules_cap_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        mint_policy(&p, &proposal(), "thread:thread-0001", 100).unwrap();
+        let mut betty = proposal();
+        betty.subject = "betty".into();
+        let e = mint_policy(&p, &betty, "thread:thread-0002", 200).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn reverting_either_edge_takes_down_the_pair() {
+        let p = std::env::temp_dir().join(format!("rules_pair_down_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        let (away, back) = mint_policy(&p, &proposal(), "thread:thread-0001", 100).unwrap();
+        disable_reverted(&p, &away.id, 200).unwrap();
+        let f = load(&p);
+        let b = f.rules.iter().find(|r| r.id == back.id).unwrap();
+        assert!(!b.enabled, "a policy is ONE consent — no half-states");
+        assert!(b.disabled_reason.contains("policy peer"));
+        let _ = std::fs::remove_dir_all(&p);
     }
 }
