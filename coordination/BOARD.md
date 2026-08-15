@@ -119,6 +119,48 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-177 · A station asks who it is talking to
+- status: queued
+- owner: —
+- scope: the station's dialogue surface; presence evidence from carried devices on the same network/BLE range; place-attribution for unidentified turns
+- depends: T-175, ADR-0042 §4
+- accept: a station that does not know who it is speaking with ASKS, in the ordinary way ("who am I speaking with?"), and uses the name once it has it; a carried personal device present on the same network contributes real but confidence-carrying presence evidence, never flattened to certainty; what an UNIDENTIFIED person says or does is attributed to the PLACE and never filed under a probable name; no voice-print identification is introduced
+- notes: Ian 2026-08-15, verbatim: "the familiar still would like to know who it's talking to and the name. names are important, we establish relationships with names and maintain them with names. **Names should be known as a priority.**" This corrects an earlier draft of the station model that treated "someone is here, identity unknown" as a comfortable resting state — it is a known unknown the familiar OWES an effort to resolve, or it is exactly the not-knowing that serves the familiar. The carried-device rung is the elegant one: it costs no new biometrics and no new consent, reusing what the mesh already knows, and it is why a household of carried devices makes its stations smarter. Voice identification is refused DELIBERATELY here (biometric identification of every guest who speaks in a shared room) so that it cannot be acquired by drift
+
+### T-178 · Pairing, unpairing, and how a station shows in the roster
+- status: queued
+- owner: —
+- scope: DeviceRecord.humans associations (already plural, ADR-0039); the roster row for a fixed device
+- depends: T-175, ADR-0042 §5-6
+- accept: a human associates with a station in one act and ends that association in one act; several humans pair with one station (the normal case) and none of it confers ownership or exclusivity; "that wasn't me" is ONE act that both retracts the attribution and teaches that the inference was wrong; a station appears in the roster as itself — its name, its place, its posture — never nested under a human and never duplicating one; "nobody identified" is shown honestly rather than left blank or filled with a guess
+- notes: Ian 2026-08-15 asked for the future plan on "how that device's identity is paired or unpaired, and displayed in the familiar roster". Correction being one act is not a convenience: trust is defined in part by the ability and requirement to correct, and a station that is hard to correct will quietly accumulate errors about people. Roster caution: the label-ladder bug (2026-08-15) was precisely a roster collapsing two genuinely different things into one row
+
+### T-179 · What a station can observe that a pocket never could
+- status: queued
+- owner: —
+- scope: continuous ambient baseline for one place; permanent LAN discovery vantage; presence anchor; shared-surface control
+- depends: T-175, ADR-0042 §7
+- accept: a station contributes a CONTINUOUS ambient baseline for its place (light level, sound level as environment not content) inside the existing consent gates; discovery of shared things (JBL speaker, motorlights, Victron) no longer depends on someone walking past with a phone; the station is never the sole path to anything the household depends on, and may not hold a role whose failure is silent
+- notes: Ian 2026-08-15 — "there should be some enhanced observation capabilities on this type of device as it will be a fixed location, always powered on/plugged in, and on network if network is available, **it does not have cellular service**." The no-cellular constraint is a design bound, not a footnote: a station is blind AND unreachable when the network is down. This is the PRIZE of the station model rather than its consolation — the familiar's first fixed sense organ, and what Civilization as a Service actually needs, since a carried phone's observations are about wherever its human happens to be while a station's are about the dinette, always. Counterweight (HUMANITY.md): always-on sensing in a shared room is the sharpest form of the comfortable-replacement risk, so the vital sign applies here most of all — report what it noticed and would do more often than it asks to take something over
+
+### T-175 · A station is a device bound to a place, not a device owned by "shared"
+- status: queued — **proposed model, wants Ian's read before implementation**
+- owner: —
+- scope: crates/mesh/src/device.rs (DeviceRecord posture), crates/mesh/src/members.rs (the presence gate), docs/decision-records/0042-*
+- depends: ADR-0042 acceptance (docs/decision-records/0042-the-station.md — written 2026-08-15, proposed)
+- accept: a fixed device's activity beacon NEVER produces presence evidence about a person; a station carries no `human` and no invented human record; `DeviceRecord.humans` (already plural, ADR-0039) carries who uses it; presence at a station is answered only by face/dialogue/motion evidence, and "someone is here, identity unknown" is a representable, useful state; misclassification is correctable by the human in one act
+- notes: Ian 2026-08-15, testing build 90 — renamed the spare iPhone MotorStation, set its name to "shared", and said plainly "This is not the solution to this device." He is right, and the harm is concrete: `service::is_personal_device_report` matches on the ACTOR PREFIX alone (`phone:`/`watch:`/`ipad:`/`iphone:`), and the inference above it is commented "a carried personal device sensing its owner". A wall-mounted station is always powered and always reporting, so every heartbeat becomes `("activity", human)` presence at 0.4 confidence — the mesh would permanently believe a person named "shared" is sitting at the dinette. That is a false fact manufactured by the model, and it poisons exactly the observation stream the motorlights shared-environment consensus depends on.
+- the model: hardware `kind` ("phone") and POSTURE (carried vs fixed) are orthogonal axes, and today only the first exists — which is what forces a human-shaped answer to a device-shaped question. ADR-0039 already designed `humans: Vec<Association>` as plural precisely so a device need not have one owner; "shared" collapses that list into a fake person.
+- the prize (not just the fix): a station is the familiar's first FIXED sense organ. A carried phone's observations are about wherever its human happens to be; a station's are about the dinette, always. For Civilization as a Service that is worth more than another roaming sensor, and it changes the presence question from "whose device is this" to "who is at this place now"
+
+### T-176 · A device proposes its own posture from what it can observe about itself
+- status: queued
+- owner: —
+- scope: ios/Shared/Sources/PlatformDevice.swift (self-observation), the theory engine (proposal), never silent reclassification
+- depends: T-175
+- accept: a device observes its own stationarity — location unchanged over days, continuously powered, no carry-motion correlation — and PROPOSES "I believe I am a station" for a human to confirm; declaration always governs; the familiar never silently reclassifies a device
+- notes: Ian's standing directive that the core must ENABLE discovery rather than hard-code behaviour — the familiar should work out that MotorStation is a station by observing it, the same way it should work out anything else. Guardrails first (Ian, 2026-08-15): declaration governs and observation only proposes, because the two misclassifications fail in opposite directions — personal-read-as-station silently SUPPRESSES real presence (a failure of service), station-read-as-personal manufactures false presence (a failure of truth). Neither may be entered silently. Pairs with T-173: both are the device knowing itself
+
 ### T-172 · The watch never says why it failed to join
 - status: DONE (build 90) — the wrist now names its own failure and owns its retry
 - owner: claude
