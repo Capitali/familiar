@@ -6,6 +6,40 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — A timestamp is not goal authority (companion:codex)
+
+### What changed
+
+- **T-134 removes whole-row last-writer-wins from goal federation.** A signed member
+  may still offer a goal id this node does not know, and that definition is adopted.
+  Once the id exists, however, no peer timestamp can replace its description,
+  capability needs, ownership, progress, human accountability, or lifecycle state.
+  Exact echoes are idempotent; every differing report is left untouched and recorded
+  as `refused-goal-rewrite` once per reporting node and goal.
+- **The refusal is local evidence, not peer-asserted evidence.** Replicated
+  observations retain their `mesh:<origin>` source and cannot counterfeit the local
+  receipt used for replay deduplication. Refusal does not mark an otherwise honest
+  older peer corrupt: current deployed versions still report whole rows under the
+  superseded contract, so containment remains visible without manufacturing intent.
+- **The hostile witnesses now prove the boundary.** Concurrent valid claimants can
+  cause one unknown definition to be adopted, but the second cannot steal it. A signed
+  far-future completion cannot change any field, and neither replay nor a forged
+  refusal observation can suppress or multiply the target's audit receipt.
+
+### Checks run
+
+- Focused hostile-member suite: 6/6 passed. Full `familiar-mesh` crate: 204 unit tests,
+  hostile-member 6, loopback 2+1, and doc-tests passed with zero failures.
+- Full workspace rule-9 bar on the landed source: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` all passed.
+
+### Next
+
+- T-145 replaces this deliberate freeze with authenticated goal events: immutable
+  definitions, bounded claims, owner-only progress, human-cited gated transitions,
+  monotone terminals, and causal/hybrid ordering. It must not reintroduce wall time as
+  authorization.
+
 ## 2026-08-15 — The surface teaches the core how to read (companion:codex)
 
 ### What changed
