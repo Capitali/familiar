@@ -11,7 +11,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
-### T-172 · Restore the documented iOS simulator build under Xcode 27
+### T-174 · Restore the documented iOS simulator build under Xcode 27
 - status: proposed
 - owner: —
 - scope: ios/Watch/Assets.xcassets, ios/project.yml, ios/README.md
@@ -128,14 +128,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - depends: Apple granting `com.apple.developer.device-information.user-assigned-device-name`
 - accept: an iOS device reports the name its human actually gave it ("Leif's iPhone"), not the generic model string; the ladder prefers a genuine self-reported name over a tailnet-discovered one where both exist; a device off the tailnet is still properly named
 - notes: Ian 2026-08-15 — "shouldn't leif's own device be able to discover it's own local friendly name… the familiar should at minimum be able to know everything about the device it is running on". ROOT CAUSE FOUND: `PlatformDevice.name` returns `UIDevice.current.name`, which since **iOS 16** yields the generic model name unless the app holds the user-assigned-device-name entitlement — and ours carries only `aps-environment`. That is why Ian's phones read "Aphelion"/"Codex" (named via the TAILNET discovery rung) while Leif's Arizona phone reads bare "iPhone": it is off the tailnet, so the only rung left is a self-report Apple withholds. Apple grants this entitlement by request for multi-device/management apps; the request is Ian's to make from his developer account
-
-### T-171 · StatusView is unreachable — the watch diagnostics and Re-link button never ship
-- status: claimed
-- owner: companion:codex
-- scope: ios/Shared/Sources/AppModel.swift (phone-local device JSON only), ios/App/Sources/SphereConsoleIOS.swift (watch-state refresh + re-link bridge), ios/MacApp/Resources/sphere (Device screen + pure watch-link presentation), ios/tools/watch-link.test.cjs
-- depends: —
-- accept: the watch state the phone ALREADY knows (paired / app installed / address last sent) is reachable by a human — either StatusView is presented from the console, or (better, since the sphere is the standard console on every screened peer) the Device screen shows the watch row with a Re-link action; a household member can see WHY their watch is unlinked and fix it without a developer
-- notes: Ian 2026-08-15, Leif's watch. `StatusView` (Views.swift:274) contains the whole Apple Watch section — the three self-diagnosing states and the "Re-link watch" button — and **nothing in the app ever presents it**: RootView shows SphereConsoleIOS when enrolled and EnrollView otherwise. So the only watch trigger that actually ships is `model.syncWatch()` on RootView.onAppear. Leif cannot be directed to that screen because none is reachable. Pairs with T-169 (the familiar cannot SEE the unlinked watch either) — between them, nobody can see it: not the human, not the familiar. companion:codex claimed after T-143; scope expanded before code so the standard Device screen receives and refreshes phone-local Watch state through its native bridge. No observation, worldview field, or mesh report is added; T-169 remains separate
 
 ### T-170 · Mesh membership is not household membership (scoping the affected-subject model)
 - status: queued
@@ -537,6 +529,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-171 · StatusView is unreachable — the watch diagnostics and Re-link button never ship
+- status: done
+- owner: companion:codex
+- merged: 882d76a
+- scope: ios/Shared/Sources/AppModel.swift (phone-local device JSON only), ios/App/Sources/SphereConsoleIOS.swift (watch-state refresh + re-link bridge), ios/MacApp/Resources/sphere (Device screen + pure watch-link presentation), ios/tools/watch-link.test.cjs
+- depends: —
+- accept: the watch state the phone ALREADY knows (paired / app installed / address last sent) is reachable by a human — either StatusView is presented from the console, or (better, since the sphere is the standard console on every screened peer) the Device screen shows the watch row with a Re-link action; a household member can see WHY their watch is unlinked and fix it without a developer
+- notes: the shipping Device screen now distinguishes unpaired, app absent, address pending, and address queued, names the next action, and routes Re-link through `AppModel.syncWatch()`. The state is phone-local only; T-169's mesh report remains separate. Four presentation fixtures, JavaScript parse/bundle checks, both unsigned Release schemes, and the exact workspace bar passed; no install, ship, upload, release, or deploy was performed
 
 ### T-143 · Tooling and test honesty (D10)
 - status: done
