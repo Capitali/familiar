@@ -115,8 +115,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Queued
 
 ### T-172 · The watch never says why it failed to join
-- status: queued
-- owner: —
+- status: DONE (build 90) — the wrist now names its own failure and owns its retry
+- owner: claude
 - scope: ios/Watch/Sources/WatchModel.swift (the `log`), ios/Watch/Sources/WatchApp.swift (the un-enrolled and joining states)
 - depends: —
 - accept: a watch that tried and failed to join SAYS SO on its own screen — the reason (`join failed: <error>`, `no approval yet`) is rendered under the orb, with what it is trying and the address it is trying, so a human can report or fix it without a developer; the joining state shows progress rather than a bare word; a retry is reachable by tapping
