@@ -102,6 +102,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-169 · The familiar can see an unlinked watch (a service opportunity it currently misses)
+- status: queued
+- owner: —
+- scope: ios/Shared/Sources/AppModel.swift (deviceStateJSON + a reported observation), ios/App/Sources/PhoneWatchLink.swift, crates/mesh worldview
+- depends: —
+- accept: a phone reports its watch-link state (paired / app installed / address last sent) as a typed observation, so the familiar can notice "a member's watch is paired and the app installed but has NEVER linked" and offer help once — narrated, not nagged, and never re-asked as pressure; the roster can show a paired-but-unlinked watch beside its phone
+- notes: Ian 2026-08-15, Leif's (mol's) watch. PhoneWatchLink ALREADY tracks paired/appInstalled/lastSent locally — none of it reaches the mesh, so the familiar is structurally blind to the exact condition, and a human had to notice and ask. This is Civilization as a Service failing at household scale: the information was already on the device. Retention shape per Round 13: a state flag, not a behavioural record
+
 ### T-167 · `theories retire` — a clean slate that keeps the record
 - status: done — applied fleet-wide: 14 (MacOnStick) + 299 (lighthouse) + 130 (Wildhorse) = 443 pre-engine theories retired, 3 engine-minted survivors
 - owner: companion:claude-bootstrap
