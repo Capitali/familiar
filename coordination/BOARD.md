@@ -114,6 +114,21 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-172 · The watch never says why it failed to join
+- status: queued
+- owner: —
+- scope: ios/Watch/Sources/WatchModel.swift (the `log`), ios/Watch/Sources/WatchApp.swift (the un-enrolled and joining states)
+- depends: —
+- accept: a watch that tried and failed to join SAYS SO on its own screen — the reason (`join failed: <error>`, `no approval yet`) is rendered under the orb, with what it is trying and the address it is trying, so a human can report or fix it without a developer; the joining state shows progress rather than a bare word; a retry is reachable by tapping
+- notes: Ian 2026-08-15 (Leif's watch: "he opens the app sees the globe and orbiting dot"). WatchModel::enroll already captures the reason — `note("join failed: \(error)")` — and `note()` writes to an in-memory `log` that NO watch view ever renders. So a failed join is pixel-identical to a never-attempted one, and the orb appears in all three states. This is exactly the T-120/T-132 doctrine (progress and failure are different facts, and silence must never resolve into an unexplained mark) — never applied to the wrist
+
+### T-173 · A device must know its own name (Ian: the familiar should know everything about the device it runs on)
+- status: queued — **one step is Ian's: the entitlement request to Apple**
+- scope: ios/App/Support/Familiar.entitlements, ios/Shared/Sources/PlatformDevice.swift, and the SystemName ladder's self-report rung
+- depends: Apple granting `com.apple.developer.device-information.user-assigned-device-name`
+- accept: an iOS device reports the name its human actually gave it ("Leif's iPhone"), not the generic model string; the ladder prefers a genuine self-reported name over a tailnet-discovered one where both exist; a device off the tailnet is still properly named
+- notes: Ian 2026-08-15 — "shouldn't leif's own device be able to discover it's own local friendly name… the familiar should at minimum be able to know everything about the device it is running on". ROOT CAUSE FOUND: `PlatformDevice.name` returns `UIDevice.current.name`, which since **iOS 16** yields the generic model name unless the app holds the user-assigned-device-name entitlement — and ours carries only `aps-environment`. That is why Ian's phones read "Aphelion"/"Codex" (named via the TAILNET discovery rung) while Leif's Arizona phone reads bare "iPhone": it is off the tailnet, so the only rung left is a self-report Apple withholds. Apple grants this entitlement by request for multi-device/management apps; the request is Ian's to make from his developer account
+
 ### T-171 · StatusView is unreachable — the watch diagnostics and Re-link button never ship
 - status: claimed
 - owner: companion:codex
