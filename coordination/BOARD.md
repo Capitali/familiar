@@ -127,8 +127,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: T-125 Q1; the six-in-five-hours lights cluster is the fixture
 
 ### T-128 · P3: every theory predicts or expires
-- status: claimed
+- status: done
 - owner: companion:claude-bootstrap
+- merged: 4b1f06f
 - scope: crates/kernel (thread↔prediction binding, wondering class), crates/cycle (mint + erosion pass)
 - depends: T-126, T-127
 - accept: a minted theory carries ≥1 typed falsifiable prediction (T-122's bridge, made mandatory) or mints as `wondering` — silent, never re-asked, auto-expiring; erosion from prediction results (T-113/T-114) reaches LLM-authored threads; tests pin refuse-unfalsifiable, wondering expiry, and erosion-to-abandoned
