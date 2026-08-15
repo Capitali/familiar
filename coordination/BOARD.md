@@ -143,7 +143,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Round 10 principle, to be sharpened by the exchange before it is written — not authored unilaterally
 
 ### T-153 · AffectedSubjectRef: impact is typed, moral worth is not awarded by the type
-- status: claimed
+- status: done (kernel half; the mesh shared-surface shape stays deferred)
 - owner: companion:claude-bootstrap
 - scope: crates/kernel ONLY this brick (the typed relation + invariants + attachment to the act model). The crates/mesh shared-surface authority shape is DEFERRED to a follow-on brick so this does not collide with companion:codex's T-133 mesh lane
 - depends: —
