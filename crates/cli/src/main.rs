@@ -2194,6 +2194,64 @@ fn cmd_capacities(args: &[String]) -> ExitCode {
 fn cmd_theories(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    // `theories retire [--legacy] [--dry-run] --reason "…"` — T-167. A thread with no
+    // predictions can never be settled or eroded: pre-engine theories are immortal by
+    // construction, so a fresh start needs a deliberate human act. Append-retained —
+    // the rows stay, wearing `retired` and carrying the reason (the familiar's own
+    // reasoning record is the one thing it must never minimise).
+    if args.first().map(String::as_str) == Some("retire") {
+        let legacy_only = !args.iter().any(|a| a == "--all");
+        let dry_run = args.iter().any(|a| a == "--dry-run");
+        let reason = f
+            .get("reason")
+            .cloned()
+            .unwrap_or_else(|| "retired by hand for a fresh start".to_string());
+        let now = now_secs();
+        let ids = match thread::retire_legacy(&dir, &reason, legacy_only, dry_run, now) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("theories retire: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let scope = if legacy_only {
+            "pre-engine (no anchors, no facts revision, no predictions)"
+        } else {
+            "ALL living"
+        };
+        if dry_run {
+            println!("would retire {} {scope} theories:", ids.len());
+        } else {
+            // A question bound to a retired thread must not keep asking on its behalf.
+            let mut dismissed = 0;
+            if let Ok(qs) = familiar_kernel::question::load(&dir) {
+                for q in qs.iter().filter(|q| ids.contains(&q.thread_id)) {
+                    if familiar_kernel::question::record_dismissed(
+                        &dir,
+                        &q.id,
+                        now,
+                        "its theory was retired",
+                    )
+                    .unwrap_or(false)
+                    {
+                        dismissed += 1;
+                    }
+                }
+            }
+            println!(
+                "retired {} {scope} theories (kept, marked `retired`); dismissed {dismissed} bound question(s)",
+                ids.len()
+            );
+        }
+        for id in ids.iter().take(20) {
+            println!("  {id}");
+        }
+        if ids.len() > 20 {
+            println!("  … and {} more", ids.len() - 20);
+        }
+        return ExitCode::SUCCESS;
+    }
+
     // `theories fold <manifest.json>` — T-127's conservative migration: an explicit,
     // human-reviewed manifest names the survivor and its members; members become
     // append-retained tombstones (`superseded`, pointing home) and the survivor unions
