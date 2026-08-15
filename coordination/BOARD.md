@@ -406,14 +406,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: console instances carry device/host lineage (never a human actor as identity); mesh doctor NAMES stale same-label console candidates; no automatic merge or severance — severance remains a human act
 - notes: D9 (claude P-O + codex Answer 3). Live evidence: a Build-78 "Wildhorse console" ghost sits beside the live one
 
-### T-143 · Tooling and test honesty (D10)
-- status: claimed
-- owner: companion:codex
-- scope: ios/tools/ship.sh
-- depends: —
-- accept: ship.sh checks command exit codes rather than grepping output for a success string
-- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118. HOLD CHECKPOINT: `origin/claude/codex-t143` at `8baefe5` is implementation-complete and green (shell probes, both release-relevant Xcode schemes, exact workspace bar); it is deliberately NOT merged under Ian's co-development hold and resumes after 2026-08-19 23:11
-
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
 - status: done
 - owner: controller
@@ -530,6 +522,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-143 · Tooling and test honesty (D10)
+- status: done
+- owner: companion:codex
+- merged: 5186d1f
+- scope: ios/tools/ship.sh
+- depends: —
+- accept: ship.sh checks command exit codes rather than grepping output for a success string
+- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118. Both xcodebuild pipelines now trust the builder's pipefail-propagated exit status while retaining full tee logs and the bundle/version postcondition. Shell syntax, shellcheck (with the pre-existing SC2034 exclusion), injected pipe-status probes, unsigned FamiliarMac and generic-iOS Release builds, and the exact combined workspace bar passed; no ship, install, upload, release, or deploy was performed
 
 ### T-134 · Peer goal mutation refused until event authority (D2)
 - status: done
