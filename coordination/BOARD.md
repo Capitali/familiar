@@ -90,15 +90,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: the Device screen shows the standing rules (worldview `rules[]` sentences, one-tap disable via a new signed act) and a device-name field writing DeviceRecord.name through its door; both consoles build; fixture-verified
 - notes: worldview already carries rules[] (guest-stripped) and the device store exists; the wire act for disable + name-set needs a signed endpoint in the transport (mirror /mesh/standing shape)
 
-### T-102 · Theory-affirmation mints the rule
-- status: queued
-- owner: —
-- scope: crates/cycle/src/lib.rs (heed path), crates/kernel/src/reaction_rule.rs
-- depends: —
-- accept: an assenting answer on an acted thread whose direction names a declared surface mints the matching ReactionRule (minted_from: thread:<id>), narrated into the dialog; regression pins mint-on-assent and no-mint-on-negative
-- notes: closes the lighting loop end-to-end from the theory card — the CLI mint stays as the manual path
-- ian (2026-08-15, reviewing Build 86): "no progress toward actually managing the lights" — this task is the missing link; T-125's Q4 shapes it (assent → gated ReactionRule, lights as the end-to-end pilot). Priority raised on his word
-
 ### T-105 · HumanRecord (ADR-0039 build #3)
 - status: queued
 - owner: —
@@ -124,6 +115,39 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-126 · P1: the knowledge floor + anchored cadence
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/kernel (system facts + mint gates), crates/cycle (theorize consult assembly + theorizes adoption), crates/llm seam prompt text if needed
+- depends: — (T-125 Q2/Q5; Ian: "Make it so")
+- accept: a versioned SYSTEM-FACTS set is injected into every theorize consult AND enforced post-parse — a theory contradicting a fact refuses at mint citing the fact (purge-as-defect and invented-mechanism classes die); a theorize consult requires an anchor (observation/loop id) or does not mint; consults skip when nothing new arrived since the watermark; tests pin refusal, anchor requirement, and skip
+- notes: executes T-125 P1 on Ian's word; decisions close in the dialogue as the brick lands, amendable by codex's later rounds
+
+### T-127 · P2: theory identity + fold migration
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/kernel (thread identity key + strengthen path), migration pass over stored threads
+- depends: T-126
+- accept: threads carry a typed identity key (anchor obs_class + target surface + proposal shape); a new theory matching an open thread strengthens it (evidence++, no re-ask, no narration) instead of minting; a migration folds existing duplicates into eldest threads with tombstones; regression pins strengthen-not-mint and the fold
+- notes: T-125 Q1; the six-in-five-hours lights cluster is the fixture
+
+### T-128 · P3: every theory predicts or expires
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/kernel (thread↔prediction binding, wondering class), crates/cycle (mint + erosion pass)
+- depends: T-126, T-127
+- accept: a minted theory carries ≥1 typed falsifiable prediction (T-122's bridge, made mandatory) or mints as `wondering` — silent, never re-asked, auto-expiring; erosion from prediction results (T-113/T-114) reaches LLM-authored threads; tests pin refuse-unfalsifiable, wondering expiry, and erosion-to-abandoned
+- notes: T-125 Q3; closes ADR-0040 §2's loop for LLM theories
+
+### T-102 · Theory-affirmation mints the rule (P4)
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/cycle/src/lib.rs (heed path), crates/kernel/src/reaction_rule.rs
+- depends: T-126, T-127, T-128
+- accept: an assenting answer on an acted thread whose direction names a declared surface mints the matching ReactionRule (minted_from: thread:<id>), narrated into the dialog; gated by allow_actuate; one standing rule per surface until field calibration; regression pins mint-on-assent and no-mint-on-negative. End-to-end pilot: the folded lights thread → one assent → the familiar manages the lights
+- notes: closes the lighting loop end-to-end from the theory card — the CLI mint stays as the manual path
+- ian (2026-08-15, reviewing Build 86): "no progress toward actually managing the lights" — this task is the missing link; T-125's Q4 shapes it. Claimed on "Make it so"
 
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: done

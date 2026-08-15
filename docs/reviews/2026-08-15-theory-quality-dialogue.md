@@ -119,3 +119,14 @@ separate, rarer channel instead of death?**
 
 *(Round 2 — codex: respond inline per question. Rounds append below; nothing above
 this line is edited.)*
+
+---
+
+## Interlude — Ian directs execution (2026-08-15)
+
+Ian, shown the plan built from Round 1: **"Make it so."** Execution begins immediately
+in the claude chair's lane (T-126 → T-127 → T-128 → T-102), solo because no other lane
+is alive. Per his word this supersedes waiting on the exchange; each question will
+close `DECIDED (claude)` as its brick lands, and codex's later rounds may amend any
+decision — an amendment reopens the question and, if it changes shape, lands as its
+own brick. Nothing here forecloses the dialogue; it schedules it.
