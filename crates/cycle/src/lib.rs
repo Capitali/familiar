@@ -611,12 +611,12 @@ fn maybe_reply(
         match familiar_llm::consult_human(dir, &prompt) {
             Ok(familiar_llm::Outcome::Response(r)) => looks_like_prose(&r)
                 .map(|p| p.chars().take(400).collect())
-                .unwrap_or_else(|| templated_reply(said, now)),
-            // No mind available right now — a plain acknowledgment still closes the loop.
-            _ => templated_reply(said, now),
+                .unwrap_or_else(|| templated_reply(said, now, NoMind::Unreachable)),
+            // The gate is open but no mind answered — a different fact from having none.
+            _ => templated_reply(said, now, NoMind::Unreachable),
         }
     } else {
-        templated_reply(said, now)
+        templated_reply(said, now, NoMind::Gated)
     };
 
     // Two answerers can pass the freshness check together (the tick's converse step and
@@ -666,19 +666,69 @@ fn looks_like_prose(raw: &str) -> Option<String> {
     Some(s.to_string())
 }
 
-/// A brief, honest acknowledgment when no LLM is available — varied so it doesn't read as a
-/// canned bot, and never pretending to more than "I heard you, and I'll carry it."
-fn templated_reply(said: &str, now: i64) -> String {
-    const ACKS: &[&str] = &[
-        "I hear you — I'll carry that into what I work on next.",
-        "Understood. I'll weigh that as I go.",
-        "Noted, and taken to heart. I'll act on it where I can.",
-        "Thank you for telling me — it changes what I'll attend to.",
-        "Got it. I'll hold that and let it guide me.",
+/// Why the familiar is about to answer without having thought.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NoMind {
+    /// No mind is installed, or `allow_llm` is shut. Nothing was attempted.
+    Gated,
+    /// The gate is open and the consult failed, returned nothing, or returned garbage.
+    Unreachable,
+}
+
+/// The reply the familiar gives when it has not thought about what was said.
+///
+/// This used to be five interchangeable acknowledgements — "Understood. I'll weigh that as I
+/// go." — and Ian's report (2026-08-15) was that it arrives over and over and feels like not
+/// being listened to. He was reading the situation exactly right: on a node with `allow_llm`
+/// shut, EVERY reply came from that list, so the Law III voice never spoke once, and nothing
+/// on screen distinguished a considered answer from a stock phrase. The system had substituted
+/// a plausible-looking output for a missing capability and said nothing about it — the same
+/// failure as a watch that cannot say why it failed to join (T-172) and a device reporting a
+/// model string as if it were its name (T-173).
+///
+/// Two rules fix it, and neither needs a mind:
+///
+/// 1. **Say that you did not think.** A reply that performs attentiveness it does not have is
+///    a lie the human cannot detect, and it costs them the one clue that would explain the
+///    vagueness. "No mind installed" and "the mind did not answer" are different facts and are
+///    told apart, because the human's next action differs.
+/// 2. **Show what you actually heard.** Reflecting the words back is real evidence of
+///    listening and takes no intelligence whatsoever. It is what was missing.
+fn templated_reply(said: &str, now: i64, why: NoMind) -> String {
+    // The substance, short enough to read as attention rather than as an echo chamber.
+    let echo = {
+        let one_line = said.split_whitespace().collect::<Vec<_>>().join(" ");
+        if one_line.chars().count() <= 88 {
+            one_line
+        } else {
+            let mut cut: String = one_line.chars().take(88).collect();
+            if let Some(sp) = cut.rfind(' ') {
+                cut.truncate(sp);
+            }
+            format!("{cut}…")
+        }
+    };
+    // Varied openings so repeated turns don't read as one stuck phrase, but every one of them
+    // is honest about the same thing: this was recorded, not considered.
+    const KEPT: &[&str] = &[
+        "I've written that down as you said it:",
+        "Recorded, in your words:",
+        "I have this much, exactly as you put it:",
+        "Kept, word for word:",
     ];
-    // Deterministic pick keyed on the utterance + tick, so it varies without randomness.
-    let idx = (fnv1a(said).wrapping_add(now as u64) as usize) % ACKS.len();
-    ACKS[idx].to_string()
+    let idx = (fnv1a(said).wrapping_add(now as u64) as usize) % KEPT.len();
+    let tail = match why {
+        NoMind::Gated => {
+            "I can't think about it yet — no mind is installed here, so nothing I say now is \
+             considered. It's safe in the record and waiting. (`familiar boundary` shows the \
+             gate; the adapter goes in `data/llm/`.)"
+        }
+        NoMind::Unreachable => {
+            "I couldn't reach my mind just now, so this is a receipt rather than an answer. \
+             The words are kept and I'll take them up properly when it comes back."
+        }
+    };
+    format!("{} “{}”. {}", KEPT[idx], echo, tail)
 }
 
 /// The familiar tells the human, in the dialogue, what it just did to its own tool library.
@@ -7191,5 +7241,60 @@ mod tests {
         let t = Temp::new("no_llm_floor");
         assert!(assess_result(&t.0, "goal", "CPU load: 0.42", false));
         assert!(!assess_result(&t.0, "goal", "   ", false));
+    }
+
+    // T-180 — a reply that has not thought must say so. The bug it replaces was invisible by
+    // construction: a stock phrase is indistinguishable from a considered answer, so the human
+    // reads vagueness as being ignored rather than as a mind that was never installed.
+
+    #[test]
+    fn a_reply_without_a_mind_never_claims_to_have_weighed_anything() {
+        for why in [NoMind::Gated, NoMind::Unreachable] {
+            let r = templated_reply("the dinette light is too bright after dark", 100, why);
+            let low = r.to_lowercase();
+            for lie in [
+                "i'll weigh",
+                "taken to heart",
+                "let it guide me",
+                "changes what i'll",
+            ] {
+                assert!(
+                    !low.contains(lie),
+                    "still performing attention it does not have: {r}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_reply_without_a_mind_shows_what_it_heard() {
+        let said = "the dinette light is too bright after dark";
+        let r = templated_reply(said, 100, NoMind::Gated);
+        assert!(
+            r.contains(said),
+            "reflecting the words back is the evidence of listening: {r}"
+        );
+    }
+
+    #[test]
+    fn having_no_mind_and_failing_to_reach_one_read_differently() {
+        let said = "remember that betty prefers the lights warmer";
+        let gated = templated_reply(said, 100, NoMind::Gated);
+        let unreachable = templated_reply(said, 100, NoMind::Unreachable);
+        assert_ne!(
+            gated, unreachable,
+            "two different facts must not render identically — the human's next act differs"
+        );
+        assert!(gated.contains("no mind is installed"));
+        assert!(unreachable.contains("couldn't reach"));
+    }
+
+    #[test]
+    fn a_long_utterance_is_shown_trimmed_not_dumped_back_whole() {
+        let said = "i have been thinking about the station idea and how it should work at the \
+                    dinette and in the galley and whether betty would want it to greet her";
+        let r = templated_reply(said, 100, NoMind::Gated);
+        assert!(r.contains('…'), "long input should be elided: {r}");
+        assert!(r.chars().count() < said.chars().count() + 260);
     }
 }

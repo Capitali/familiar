@@ -119,6 +119,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-180 · A reply that has not thought says so
+- status: DONE (build 92) — the fallback is honest; the SILENCE behind it is Ian's gate to open
+- owner: claude
+- notes: Ian 2026-08-15 on build 91 — "Understood, i'll weigh that as I go... doesn't at all feel like im being listened to." Root cause: `allow_llm` shut + no adapter in `data/llm/`, so `converse` never reached the LLM branch and LAW_III_VOICE was built into a prompt that was never sent; all 8 recent `replied` observations were verbatim ACKS entries. The five acks each CLAIMED attention while containing no evidence of understanding, and were indistinguishable from a considered answer — the system hiding its own incapacity, same class as T-172 and T-173
+
 ### T-177 · A station asks who it is talking to
 - status: queued
 - owner: —

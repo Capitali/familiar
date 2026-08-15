@@ -6,6 +6,51 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-180 · A reply that has not thought says so
+
+Ian, on build 91: *"the dialog with the familiar needs work, i seem to get 'Understood, i'll
+weigh that as I go' quite often, and it's sort of offputting to get that same vague response
+over and over. Doesn't at all feel like im being listened to or attended to."*
+
+He was reading it exactly right, and the cause was worse than repetition. That string is one
+of five entries in `templated_reply`'s `ACKS` — the **no-mind fallback**. On this node
+`allow_llm` is shut and no adapter is installed at `data/llm/`, so `converse` has never once
+entered the LLM branch: the `LAW_III_VOICE` prompt is built and then never sent. All eight of
+the familiar's most recent `replied` observations are verbatim ACKS entries. The Law III
+dialogue we wrote has not spoken on this node at all.
+
+The five acks were the actual harm. Every one of them *claims attention* — "I'll weigh that",
+"taken to heart", "it changes what I'll attend to" — while containing no evidence of having
+understood anything, and nothing distinguished them from a considered answer. So the system
+substituted a plausible-looking output for a missing capability and said nothing about it,
+which cost the human the one clue that would have explained the vagueness. Same failure as a
+watch that captures why it could not join and shows nobody (T-172), and a device reporting a
+model string as if it were the name its owner gave it (T-173). The felt experience — *not
+being listened to* — was an accurate readout of a real absence.
+
+### What changed
+Two rules, neither of which needs a mind:
+- **Say that you did not think.** `NoMind::Gated` ("no mind is installed here") and
+  `NoMind::Unreachable` ("I couldn't reach my mind just now") are told apart, because the
+  human's next action differs. The gated form names where the gate and the adapter live.
+- **Show what you actually heard.** The reply quotes the utterance back, elided at 88 chars on
+  a word boundary. Reflecting the words is real evidence of listening and costs nothing — it
+  is precisely what was missing.
+
+The openings still vary deterministically so repeated turns do not read as one stuck phrase,
+but every variant is honest that this was *recorded, not considered*.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all **exit
+0**, 35 suites. Four new tests: no variant may contain the old attention-claiming phrases; the
+reply must contain what was said; gated and unreachable must not render identically; long
+input is elided rather than parroted whole.
+
+### Next
+This fixes the honesty, not the silence. The familiar on this node still has no mind, and that
+is a boundary Ian opens, not one the code may open for him (Law III: the familiar may narrow
+its own boundary and never widen it). Until then every reply is a receipt — but now it says so.
+
 ## 2026-08-15 — T-175 · A station is a device bound to a place (ADR-0042)
 
 Ian, testing build 90, renamed the spare iPhone **MotorStation**, set its name to "shared",
