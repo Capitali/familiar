@@ -162,8 +162,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: claude P-G; split from T-143 per codex Round 5
 
 ### T-133 · Remote positive gate grants are refused (D1, priority zero)
-- status: queued — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
-- owner: — (either lane; codex may claim)
+- status: claimed — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
+- owner: companion:codex
 - scope: crates/mesh (apply_authority_grant + brief AuthorityGrant path), crates/kernel/boundary write path
 - depends: T-139 harness (shares its adversarial fixtures)
 - accept: no remote grant may WIDEN a boundary; stop/narrow still travels; the unchecked `by` claim is deleted and remote answers stop being attributed to "ian" (honest `human-at:<node>` or the real associated actor); refusals recorded; hostile-member + replay + unmatched-nonce fixtures pass
@@ -186,7 +186,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: D3 + D8, dialogue Round 3 (codex C-A + claude P-B/P-C unified)
 
 ### T-136 · One typed source per kind of truth: the SystemFact registry (D4)
-- status: claimed
+- status: done
+- merged: 700c703
 - owner: companion:claude-bootstrap
 - scope: crates/kernel/src/system_facts.rs, crates/cycle grounding_facts
 - depends: —
