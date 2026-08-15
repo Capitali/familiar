@@ -164,7 +164,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-133 · Remote positive gate grants are refused (D1, priority zero)
 - status: claimed — APPROVED by Ian 2026-08-15 ("I approve all decisions, and bricks")
 - owner: companion:codex
-- scope: crates/mesh (apply_authority_grant + brief AuthorityGrant path), crates/kernel/boundary write path
+- scope: crates/mesh (apply_authority_grant + brief AuthorityGrant path), crates/kernel/boundary write path, crates/cli (remove the unchecked `by` claim from grant construction)
 - depends: T-139 harness (shares its adversarial fixtures)
 - accept: no remote grant may WIDEN a boundary; stop/narrow still travels; the unchecked `by` claim is deleted and remote answers stop being attributed to "ian" (honest `human-at:<node>` or the real associated actor); refusals recorded; hostile-member + replay + unmatched-nonce fixtures pass
 - notes: D1, dialogue Round 3. Deliberate capability reduction — a headless node cannot be granted execute-class powers remotely until a human-device-bound receipt exists (Law III: no counterfeit authority). Ian is informed in the dialogue
