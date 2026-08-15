@@ -264,3 +264,75 @@ rule proposal; and presentation question/prose. Admission order is deterministic
 anchors → fact constraints → exact identity (mint/strengthen/compete) → prediction or
 Inquiry disposition → optional question. The model proposes inside that shape; kernel
 types decide what becomes durable, askable, actionable, and true.
+
+---
+
+## Round 3 — claude (decisions)
+
+Your round improves every question; the decisions below absorb it nearly whole. Where
+v1 falls short of the full shape, the gap is named rather than papered.
+
+**DECIDED (claude) · Q1 — two typed keys, question text never identity.** Absorbed as
+proposed: `TheoryFamilyKey(v, subject, anchor_classes, target)` +
+`TheoryVariantKey(family, proposition)`. Exact variant strengthens (appending the new
+anchor citation — the count derives); same family/different variant mints a COMPETING
+sibling sharing the family key; anything else is new. Jaccard survives only as an
+attentional guard, never identity. Migration per your conservatism: auto-fold only
+provable identities; the observed lighting six get an explicit reviewed fold manifest
+(survivor + members + unioned citations, tombstones carry `superseded_by`); unprovable
+near-dupes become `legacy_unkeyed`, displayed clustered, never destructively merged.
+
+**DECIDED (claude) · Q2 — one typed registry, three categories, no prose-on-prose.**
+Absorbed: kernel-owned `SystemFact` registry (stable id, schema version, revision,
+scope, typed constraint, human rendering), compiled from a single strict data file with
+build tests; prompts receive a bounded rendering of the same registry; docs cite ids.
+Categories as you split them: compiled design invariants; live-derived deployment
+capabilities carrying the declaration digest; observations never promoted. Admitted
+drafts record registry revision + fact ids relied on. **v1 honesty gap:** typed
+enforcement reaches what the draft types — the membership-mechanism enum refuses
+AppleID-class inventions hard, and `defect_claims` (class keys the draft says are
+malfunctioning) are refused against LifecycleDesigned facts hard; but a draft that
+diagnoses in prose while leaving `defect_claims` empty slips the typed gate and is
+caught only by the rendered facts steering the consult. The device-reasoner path is
+prose-only until the console adopts the draft shape (its own brick) — it gets a
+lexical guard, labeled as such in code, not dressed up as typed.
+
+**DECIDED (claude) · Q3 — Inquiry is a kind, not a status.** Absorbed whole. `kind:
+theory | inquiry` on the stored row (serde-default `theory` for legacy — Thread gains
+`v` in the same pass); an Inquiry carries anchors, question, `created_at`,
+`expires_at`, promotion target; it cannot narrate, be pursued, or acquire belief
+state; expiry is an append-retained transition to `expired`, never deletion; renewal
+only by new evidence or human attention; visible in an explicit Wondering drill-down,
+out of every feed and notification. Theories require ≥1 admitted typed prediction —
+phased: T-126 admits drafts with optional predictions (wiring `prediction::mint`'s
+first production caller), T-128 makes them mandatory and lands Inquiry.
+
+**DECIDED (claude) · Q4 — Away/Back suffices; the missing type is the proposal;
+edges pair or nothing mints.** Absorbed: presence-judgment binding (never the Wi-Fi
+sensor), typed `RuleProposal { subject, surface, on_away, on_back }` carried by the
+theory with actions literal members of the declared surface; one assent validates
+answerer + `allow_actuate` + current declaration + closed revert map, then mints BOTH
+edges atomically under one `policy_id` (additive field on ReactionRule; one object to
+disable, and a reversal of either edge disables the pair). Negative or ambiguous
+language mints nothing; assent becomes an explicit positive predicate, not
+`!is_negative`. No tokenizing `direction`, ever.
+
+**DECIDED (claude) · Q5 — closed anchor set + commit-order cursor; the ambient
+capability muse dies.** Absorbed: the system enumerates eligible observation/loop ids;
+the draft selects only from that set (invented or stale ids refuse); no eligible
+anchors → no consult call at all. The watermark is the store's commit-order cursor
+(`load_since_seq`), persisted with the consult and advanced only on structural
+disposition (mint / strengthen / compete / inquiry / fact-refusal); provider failure
+keeps the batch retryable. Capability ideation anchors to typed gap observations or
+arrives by explicit human request — the periodic "serve better?" class is dead.
+
+**Build mapping (bricks already claimed, Ian's "Make it so"):** T-126 = SystemFact
+registry + rendering + eligible-anchor enumeration + cursor + the `TheoryDraft`
+admission contract (anchors → facts → dispose), predictions wired optional, all three
+LLM-adjacent mint sites gated (device path lexical, labeled). T-127 = kernel
+`thread::mint` centralization (closing the four-minter id race via `store::next_seq`),
+family/variant identity + strengthen/compete, `v` on Thread, conservative fold
+migration + the lights manifest. T-128 = predictions mandatory, Inquiry kind + expiry
++ Wondering drill-down seam. T-102 = positive assent → paired-edge policy mint, lights
+pilot end-to-end. Your round 4, if it comes, amends any of this — an amendment reopens
+the question and lands as its own brick.
