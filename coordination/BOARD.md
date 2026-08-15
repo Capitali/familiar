@@ -1,11 +1,8 @@
 # The board
 
-> ⏸ **CO-DEVELOPMENT HOLD — 2026-08-15 → 2026-08-19 23:11 (Ian).** Codex is at 9% usage
-> remaining. No lane should assign, expect, or wait on the other until the hold lifts; codex
-> should not spend budget on dialogue replies. Tasks marked *(awaits codex)* are owed, not
-> abandoned — see the hold note at the end of
-> [the review dialogue](../docs/reviews/2026-08-15-review-dialogue.md). Claude continues solo
-> on bricks that need no second lane.
+> ▶ **CO-DEVELOPMENT HOLD LIFTED EARLY — 2026-08-15 (Ian).** Ian's direct instruction:
+> "excellent. authorized. continue." Both lanes may resume; the seven items recorded as owed
+> to codex remain live work rather than abandoned questions.
 
 Rules and entry format: [README.md](README.md). Claim = move to `claimed` + your name,
 in a pushed commit, scope checked against every other claimed task. Updated: 2026-08-14.
@@ -13,6 +10,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Proposed
 
 *(companions add here; the controller queues or declines)*
+
+### T-172 · Restore the documented iOS simulator build under Xcode 27
+- status: proposed
+- owner: —
+- scope: ios/Watch/Assets.xcassets, ios/project.yml, ios/README.md
+- depends: —
+- accept: after `xcodegen`, the documented unsigned FamiliarAgent simulator command passes under Xcode 27 without weakening the real-device Watch icon or the generic-iOS release build; both console schemes remain green
+- notes: companion:codex discovered during T-143 verification that the generic iOS Release build passes but the README simulator recipe fails in actool because the Watch `AppIcon` set has no simulator-applicable content; keep this separate from release-script exit-status honesty
 
 ### T-168 · Mol's watch has never reached the mesh
 - status: proposed
@@ -108,6 +113,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: companion must not SSH-deploy (rule 8); preserve every existing boundary choice, change no human records, and stop on a malformed boundary. Rollback: disable the timer, remove actuators.json, set allow_actuate false (leave unrelated gates untouched)
 
 ## Queued
+
+### T-171 · StatusView is unreachable — the watch diagnostics and Re-link button never ship
+- status: queued
+- owner: —
+- scope: ios/App/Sources/Views.swift (RootView presents SphereConsoleIOS only), ios/MacApp/Resources/sphere/index.html Device screen
+- depends: —
+- accept: the watch state the phone ALREADY knows (paired / app installed / address last sent) is reachable by a human — either StatusView is presented from the console, or (better, since the sphere is the standard console on every screened peer) the Device screen shows the watch row with a Re-link action; a household member can see WHY their watch is unlinked and fix it without a developer
+- notes: Ian 2026-08-15, Leif's watch. `StatusView` (Views.swift:274) contains the whole Apple Watch section — the three self-diagnosing states and the "Re-link watch" button — and **nothing in the app ever presents it**: RootView shows SphereConsoleIOS when enrolled and EnrollView otherwise. So the only watch trigger that actually ships is `model.syncWatch()` on RootView.onAppear. Leif cannot be directed to that screen because it is not reachable. Pairs with T-169 (the familiar cannot SEE the unlinked watch either) — between them, nobody can see it: not the human, not the familiar
 
 ### T-170 · Mesh membership is not household membership (scoping the affected-subject model)
 - status: queued
@@ -399,7 +412,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - scope: ios/tools/ship.sh
 - depends: —
 - accept: ship.sh checks command exit codes rather than grepping output for a success string
-- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118
+- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118. HOLD CHECKPOINT: `origin/claude/codex-t143` at `8baefe5` is implementation-complete and green (shell probes, both release-relevant Xcode schemes, exact workspace bar); it is deliberately NOT merged under Ian's co-development hold and resumes after 2026-08-19 23:11
 
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
 - status: done
