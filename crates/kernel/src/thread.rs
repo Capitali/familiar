@@ -58,6 +58,17 @@ pub struct Thread {
     /// pursued). `#[serde(default)]` so older threads still load.
     #[serde(default)]
     pub actor: String,
+    /// Citations this theory stands on (T-126): observation ids ("obs-0042") or loop
+    /// names, chosen from the eligible set the SYSTEM enumerated at consult time —
+    /// never invented. Empty on legacy rows and prose-only paths (device theories,
+    /// the needs muse) until those adopt the draft contract.
+    #[serde(default)]
+    pub anchors: Vec<String>,
+    /// The system-facts registry revision this thread was validated against at mint
+    /// (T-126). 0 = predates the floor. A changed fact supersedes a revision; it
+    /// never silently reinterprets old threads.
+    #[serde(default)]
+    pub facts_rev: u32,
 }
 
 pub fn append(dir: &Path, t: &Thread) -> io::Result<()> {
@@ -183,6 +194,8 @@ mod tests {
             origin: "llm".into(),
             origin_human: String::new(),
             actor: "familiar".into(),
+            anchors: Vec::new(),
+            facts_rev: 0,
         };
         append(&p, &t).unwrap();
         assert_eq!(load(&p).unwrap(), vec![t.clone()]);
@@ -213,6 +226,8 @@ mod tests {
             origin: "llm".into(),
             origin_human: "betty".into(),
             actor: "familiar".into(),
+            anchors: Vec::new(),
+            facts_rev: 0,
         }
     }
 

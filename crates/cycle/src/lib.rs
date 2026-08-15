@@ -827,19 +827,58 @@ fn maybe_theorize(
         .filter(|l| !infra_loop(l))
         .map(|l| format!("- {} (x{})", l.name, l.observation_count))
         .collect();
+    // T-126 (dialogue Q5, decided): the SYSTEM enumerates the eligible anchors — the
+    // draft may cite only these. Eligibility = the same non-infra/non-substrate window
+    // the muse sees, restricted to observations NEWER than the commit-order cursor, so
+    // "nothing new" is exact and a restart cannot rephrase old evidence.
+    let cursor = theorize_cursor(dir);
+    let eligible: Vec<&observation::Observation> = obs
+        .iter()
+        .filter(|o| !infra_observation(o))
+        .filter(|o| !familiar_kernel::routing::is_substrate(&o.actor))
+        .filter(|o| obs_seq(&o.id) > cursor)
+        .collect();
+    if eligible.is_empty() && detected.iter().all(infra_loop) {
+        return Ok(false); // a stable world being quiet is correct — no consult at all
+    }
+    let max_seen = eligible
+        .iter()
+        .map(|o| obs_seq(&o.id))
+        .max()
+        .unwrap_or(cursor);
+    let eligible_ids: std::collections::HashSet<String> =
+        eligible.iter().map(|o| o.id.clone()).collect();
+    let loop_ids: std::collections::HashSet<String> = detected
+        .iter()
+        .filter(|l| !infra_loop(l))
+        .map(|l| format!("loop:{}", l.name))
+        .collect();
+    let eligible_lines: Vec<String> = eligible
+        .iter()
+        .map(|o| format!("- {} — {} {} {}", o.id, o.actor, o.action, o.object))
+        .chain(loop_ids.iter().map(|l| format!("- {l}")))
+        .collect();
+    // The floor (dialogue Q2): the prompt receives a rendering of the SAME registry the
+    // validator enforces after parse — one source of truth, steering and boundary.
+    let facts = familiar_kernel::system_facts::render(dir)?;
     let who = observer_phrase(dir);
     let prompt = format!(
         "You are a factory whose only purpose is to serve {who} — never to manage, obey, \
          optimize, or sedate them (the Three Laws; humanity is served, not replaced). \
+         {facts}\
          Recent observations:\n{}\nRecurring loops:\n{}\n{}Signals: service={service:.2}, \
          presence={presence:.2}, capacities={capacities:.2}.\n\
          Theorize about the world and the person you serve — what the readings and events \
          MEAN for them — not about your own connectivity, infrastructure, or plumbing.\n\
-         From this, propose (1) ONE short question to ask {who} that, grounded in what you \
-         observe, would help you serve them better; (2) a brief theory about what these \
-         patterns might mean; and (3) a short, concrete direction — one thing you could \
-         DO to act on the theory in service (it becomes work you will test). Reply ONLY \
-         as compact JSON: {{\"question\":\"...\",\"theory\":\"...\",\"direction\":\"...\"}}.",
+         Cite ONLY from these eligible anchors (ids the theory claims to explain):\n{}\n\
+         Reply ONLY as compact JSON: {{\"anchors\":[\"obs-…\"],\"subject\":\"{who}\",\
+         \"mechanism\":\"observation|presence|schedule|surface-act|question\",\
+         \"defect_claims\":[],\"question\":\"…\",\"theory\":\"…\",\"direction\":\"…\",\
+         \"predictions\":[{{\"then_actor\":\"…\",\"then_action\":\"…\",\
+         \"then_object_prefix\":\"…\",\"within_secs\":3600,\"polarity\":\"expect|expect_absent\"}}]}}. \
+         `defect_claims` lists observation classes (actor|action) your theory says are \
+         MALFUNCTIONING — leave it empty unless you truly claim a defect. Predictions are \
+         optional but a theory that predicts nothing settles nothing.",
         recent.join("\n"),
         loops_s.join("\n"),
         if readings.is_empty() {
@@ -847,36 +886,72 @@ fn maybe_theorize(
         } else {
             format!("Latest sensor readings:\n{}\n", readings.join("\n"))
         },
+        eligible_lines.join("\n"),
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
+        // Provider failure keeps the batch retryable (Q5): the cursor does not advance.
         familiar_llm::Outcome::Refused(_)
         | familiar_llm::Outcome::RateLimited(_)
         | familiar_llm::Outcome::Yielded(_) => return Ok(false),
     };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+    // From here every path is a structural disposition (mint / strengthen / refusal) —
+    // the cursor advances so the same evidence is never re-asked (Q5, decided).
+    let dispose = |dir: &Path, now: i64| -> io::Result<()> {
+        write_theorize_cursor(dir, max_seen)?;
+        fs::write(dir.join(LAST_THEORY_FILE), now.to_string())
+    };
+    let draft = match familiar_kernel::system_facts::TheoryDraft::parse(&json) {
+        Ok(d) => d,
+        Err(e) => {
+            // A malformed reply is disposed (refused), not retried forever on one batch.
+            refuse_theory(dir, now, "draft", &format!("malformed draft: {e}"));
+            dispose(dir, now)?;
+            return Ok(false);
+        }
+    };
+    // Anchors must come from the enumerated set — an invented or stale id refuses.
+    if draft.anchors.is_empty()
+        || !draft
+            .anchors
+            .iter()
+            .all(|a| eligible_ids.contains(a) || loop_ids.contains(a))
+    {
+        refuse_theory(
+            dir,
+            now,
+            "anchors",
+            "cited anchors outside the eligible set",
+        );
+        dispose(dir, now)?;
         return Ok(false);
-    };
-    let field = |k: &str| {
-        v.get(k)
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string()
-    };
-    let (q, theory, direction) = (field("question"), field("theory"), field("direction"));
+    }
+    // The floor holds (Q2): typed claims validate against the registry or refuse,
+    // with the fact cited on the record.
+    if let Err(r) = familiar_kernel::system_facts::validate(&draft) {
+        refuse_theory(dir, now, r.fact_id, &r.why);
+        dispose(dir, now)?;
+        return Ok(false);
+    }
+    let (q, theory, direction) = (
+        draft.question.trim().to_string(),
+        draft.theory.trim().to_string(),
+        draft.direction.trim().to_string(),
+    );
     if q.is_empty() && theory.is_empty() {
+        dispose(dir, now)?;
         return Ok(false);
     }
     // A musing that substantially repeats a standing thread is not a new thought —
     // it is the same thought asked louder. Hold it; the standing thread carries it.
+    // (Attentional guard only — typed family/variant identity lands with T-127.)
     let existing = thread::load(dir)?;
     if let Some(id) = similar_thread_id(&existing, &theory, &direction) {
         // The muse reached the same idea again — reinforce the survivor (C5) so a recurring
         // theory climbs toward maturity, instead of spawning yet another near-duplicate that
         // clutters the view. A one-off never crosses the threshold and stays out of sight.
         let _ = thread::reinforce(dir, &id, now);
-        fs::write(dir.join(LAST_THEORY_FILE), now.to_string())?;
+        dispose(dir, now)?;
         return Ok(false);
     }
     // The theorized question doesn't go straight to the human — it enters the question
@@ -886,10 +961,11 @@ fn maybe_theorize(
         question::add(dir, &q, "llm", now)?;
     }
     let seq = existing.len() + 1;
+    let thread_id = format!("thread-{seq:04}");
     thread::append(
         dir,
         &Thread {
-            id: format!("thread-{seq:04}"),
+            id: thread_id.clone(),
             question: q,
             theory,
             direction,
@@ -902,10 +978,86 @@ fn maybe_theorize(
             origin: "llm".to_string(),
             origin_human: String::new(),
             actor: "familiar".to_string(),
+            anchors: draft.anchors.clone(),
+            facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
         },
     )?;
-    fs::write(dir.join(LAST_THEORY_FILE), now.to_string())?;
+    // Predictions ride the mint when the draft carries them (optional until T-128) —
+    // prediction::mint's first production caller; an unfalsifiable window refuses
+    // there and the theory stands without it.
+    for p in &draft.predictions {
+        let polarity = match p.polarity.as_str() {
+            "expect_absent" => familiar_kernel::prediction::Polarity::Absent,
+            _ => familiar_kernel::prediction::Polarity::Arrives,
+        };
+        let object = if p.then_object_prefix.trim().is_empty() {
+            familiar_kernel::obs_class::FieldMatch::Any
+        } else {
+            familiar_kernel::obs_class::FieldMatch::Prefix(p.then_object_prefix.trim().to_string())
+        };
+        let then = familiar_kernel::obs_class::ObsMatch {
+            v: familiar_kernel::obs_class::MATCH_VERSION,
+            actor: familiar_kernel::obs_class::FieldMatch::Exact(p.then_actor.trim().to_string()),
+            action: familiar_kernel::obs_class::FieldMatch::Exact(p.then_action.trim().to_string()),
+            object,
+        };
+        let _ = familiar_kernel::prediction::mint(
+            dir,
+            &thread_id,
+            familiar_kernel::prediction::Anchor::TheoryOpened,
+            then,
+            0,
+            p.within_secs,
+            polarity,
+            p.within_secs,
+            0,
+            &format!("thread:{thread_id}"),
+            now,
+        );
+    }
+    dispose(dir, now)?;
     Ok(true)
+}
+
+/// The theorize batch cursor (T-126, dialogue Q5): the highest observation seq already
+/// DISPOSED (minted, strengthened, or refused). Timestamps skip same-second and
+/// late-ingested records; commit order does not.
+const THEORIZE_CURSOR_FILE: &str = "theorize_cursor.txt";
+
+fn theorize_cursor(dir: &Path) -> u64 {
+    fs::read_to_string(dir.join(THEORIZE_CURSOR_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn write_theorize_cursor(dir: &Path, seq: u64) -> io::Result<()> {
+    fs::write(dir.join(THEORIZE_CURSOR_FILE), seq.to_string())
+}
+
+/// "obs-0042" → 42. Ids that don't parse sort as 0 (never eligible past a real cursor).
+fn obs_seq(id: &str) -> u64 {
+    id.strip_prefix("obs-")
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0)
+}
+
+/// A refusal is on the record, not silent (T-126): the mind's floor speaks when it
+/// holds. Best-effort — a failed refusal record never aborts the tick.
+fn refuse_theory(dir: &Path, now: i64, fact_id: &str, why: &str) {
+    let why_short: String = why.chars().take(160).collect();
+    let _ = observation::record(
+        dir,
+        observation::Observation::new(
+            "familiar",
+            "refused",
+            format!("theory — {fact_id}"),
+            why_short,
+            "llm",
+            now,
+            1.0,
+        ),
+    );
 }
 
 /// Per-human pacing for the needs muse: `{handle: last_mused_ts}`, beside the other
@@ -1007,9 +1159,11 @@ fn maybe_theorize_needs(
             )
         })
         .collect();
+    let facts = familiar_kernel::system_facts::render(dir)?;
     let prompt = format!(
         "You are a familiar whose only purpose is to serve {name} — never to manage, obey, \
-         optimize, or sedate them (the Three Laws). You are thinking about {name} \
+         optimize, or sedate them (the Three Laws). {facts}\
+         You are thinking about {name} \
          specifically. What you know of their shape: {summary}. Their recent observed \
          moments:\n{recent}\n{needs}\
          From this, theorize ONE need {name} may have that you could serve — concrete and \
@@ -1053,6 +1207,14 @@ fn maybe_theorize_needs(
     if need.is_empty() {
         return Ok(false);
     }
+    // The floor reaches the needs muse too (T-126) — prose contract, so the labeled
+    // lexical guard stands in for typed validation until this path speaks TheoryDraft.
+    if let Err(r) =
+        familiar_kernel::system_facts::lexical_guard(&format!("{need} {confirm_q} {direction}"))
+    {
+        refuse_theory(dir, now, r.fact_id, &r.why);
+        return Ok(false);
+    }
     // The same thought about the same person, asked louder, is not a new need.
     let existing = thread::load(dir)?;
     let hers: Vec<Thread> = existing
@@ -1084,6 +1246,8 @@ fn maybe_theorize_needs(
             origin: "llm".to_string(),
             origin_human: handle,
             actor: "familiar".to_string(),
+            anchors: Vec::new(),
+            facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
         },
     )?;
     Ok(true)
@@ -1976,6 +2140,15 @@ fn adopt_device_theories(
         if similar_thread_exists(&existing, &o.context, &o.object) {
             continue;
         }
+        // The floor reaches the prose-only path (T-126): device theories never pass
+        // through a daemon prompt, so they get the LABELED lexical guard — not typed
+        // enforcement — until the console adopts the draft contract (its own brick).
+        if let Err(r) =
+            familiar_kernel::system_facts::lexical_guard(&format!("{} {}", o.context, o.object))
+        {
+            refuse_theory(dir, now, r.fact_id, &r.why);
+            continue;
+        }
         seq += 1;
         let t = thread::Thread {
             id: format!("thread-{seq:04}"),
@@ -1992,6 +2165,8 @@ fn adopt_device_theories(
             origin_human: String::new(),
             // Attribute to the reasoning device so corruption-awareness governs it.
             actor: o.actor.clone(),
+            anchors: Vec::new(),
+            facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
         };
         if thread::append(dir, &t).is_ok() {
             adopted += 1;
@@ -4385,6 +4560,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: "ian".into(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -4688,6 +4865,8 @@ mod tests {
                     origin: "llm".into(),
                     origin_human: String::new(),
                     actor: "familiar".into(),
+                    anchors: Vec::new(),
+                    facts_rev: 0,
                 },
             )
             .unwrap();
@@ -4754,6 +4933,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -4931,6 +5112,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -5019,6 +5202,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -5064,6 +5249,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -5544,6 +5731,8 @@ mod tests {
             origin: "llm".into(),
             origin_human: String::new(),
             actor: "familiar".into(),
+            anchors: Vec::new(),
+            facts_rev: 0,
         };
         let existing = vec![held];
         // The same musing in slightly different words is the same musing.
@@ -5683,6 +5872,8 @@ mod tests {
                 origin: "familiar".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -5857,6 +6048,8 @@ mod tests {
                 origin: "familiar".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -6057,6 +6250,8 @@ mod tests {
                     origin: "observer".into(),
                     origin_human: String::new(),
                     actor: actor.into(),
+                    anchors: Vec::new(),
+                    facts_rev: 0,
                 },
             )
             .unwrap();
@@ -6202,6 +6397,182 @@ mod tests {
         .unwrap();
     }
 
+    // ---- T-126: the knowledge floor + anchored cadence (dialogue 2026-08-15) ----
+
+    /// Drive `maybe_theorize` until the batch is DISPOSED (cursor advanced). Under the
+    /// parallel suite a background consult may YIELD to a concurrent human-lane test —
+    /// production behavior: the muse steps aside and retries on its own cadence — and a
+    /// yielded batch stays retryable by design (Q5). Bounded so a real failure still fails.
+    fn theorize_until_disposed(dir: &Path, now: i64, obs: &[observation::Observation]) -> bool {
+        for _ in 0..100 {
+            let minted = maybe_theorize(dir, now, obs, &[], true).unwrap();
+            if theorize_cursor(dir) > 0 {
+                return minted;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("batch never disposed — the consult kept yielding");
+    }
+
+    /// One eligible human observation, recorded for real so it carries an obs-NNNN id.
+    fn seed_eligible_obs(dir: &Path, now: i64) -> String {
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "adjusted",
+                "lighting:main",
+                "",
+                "observer",
+                now,
+                1.0,
+            ),
+        )
+        .unwrap()
+        .id
+    }
+
+    fn refusals(dir: &Path) -> Vec<observation::Observation> {
+        observation::load(dir)
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.action == "refused" && o.object.starts_with("theory"))
+            .collect()
+    }
+
+    #[test]
+    fn a_defect_claim_on_designed_lifecycle_refuses_with_the_fact_cited() {
+        let t = Temp::new("floor_defect_claim");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100);
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","defect_claims":["familiar|purged"],"question":"q","theory":"purges are broken","direction":"fix purging"}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(!theorize_until_disposed(dir, 200, &obs));
+        assert!(thread::load(dir).unwrap().is_empty(), "nothing minted");
+        let r = refusals(dir);
+        assert_eq!(r.len(), 1, "the refusal is on the record");
+        assert!(
+            r[0].object.contains("SF-1"),
+            "the fact is cited: {}",
+            r[0].object
+        );
+        assert!(
+            theorize_cursor(dir) > 0,
+            "the batch is disposed, not re-asked"
+        );
+    }
+
+    #[test]
+    fn an_anchor_outside_the_eligible_set_refuses() {
+        let t = Temp::new("floor_invented_anchor");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let _ = seed_eligible_obs(dir, 100);
+        fake_llm(
+            dir,
+            r#"{"anchors":["obs-9999"],"mechanism":"presence","question":"q","theory":"t","direction":"d"}"#,
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(!theorize_until_disposed(dir, 200, &obs));
+        assert!(thread::load(dir).unwrap().is_empty());
+        assert_eq!(refusals(dir).len(), 1);
+    }
+
+    #[test]
+    fn a_grounded_draft_mints_with_its_anchors_and_prediction() {
+        let t = Temp::new("floor_grounded_mint");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100);
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","theory":"lighting follows presence","direction":"dim lights on away",
+                     "predictions":[{{"then_actor":"ian","then_action":"adjusted","then_object_prefix":"lighting:","within_secs":7200,"polarity":"expect_absent"}}]}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(theorize_until_disposed(dir, 200, &obs));
+        let threads = thread::load(dir).unwrap();
+        assert_eq!(threads.len(), 1);
+        assert_eq!(
+            threads[0].anchors,
+            vec![oid],
+            "citations survive on the thread"
+        );
+        assert_eq!(
+            threads[0].facts_rev,
+            familiar_kernel::system_facts::FACTS_REVISION,
+            "the registry revision it was validated against is recorded"
+        );
+        let preds = familiar_kernel::prediction::load(dir).predictions;
+        assert_eq!(
+            preds.len(),
+            1,
+            "the draft's prediction minted with the thread"
+        );
+        assert_eq!(preds[0].thread_id, threads[0].id);
+        assert_eq!(preds[0].minted_from, format!("thread:{}", threads[0].id));
+    }
+
+    #[test]
+    fn a_quiet_world_makes_no_consult_at_all() {
+        let t = Temp::new("floor_quiet_world");
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100);
+        // Everything up to the newest observation is already disposed…
+        write_theorize_cursor(dir, obs_seq(&oid)).unwrap();
+        fake_llm(
+            dir,
+            r#"{"anchors":[],"mechanism":"presence","question":"q","theory":"t","direction":"d"}"#,
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(!maybe_theorize(dir, 200, &obs, &[], true).unwrap());
+        // …so the seam was never touched: no prompt was ever written.
+        assert!(
+            !dir.join("llm/prompt.txt").exists(),
+            "no consult on a quiet world"
+        );
+    }
+
+    #[test]
+    fn a_device_theory_proposing_foreign_mechanisms_is_refused_at_adoption() {
+        let t = Temp::new("floor_device_guard");
+        let dir = &t.0;
+        let mk = |object: &str, context: &str| observation::Observation {
+            id: String::new(),
+            source: "mesh:phone".into(),
+            actor: "phone:ian".into(),
+            action: "theorizes".into(),
+            object: object.into(),
+            context: context.into(),
+            ts: 100,
+            confidence: 0.8,
+        };
+        let bad = mk(
+            "streamline visitor onboarding with a permanent AppleID login",
+            "add AppleID login?",
+        );
+        let diagnosis = mk(
+            "improve presence detection",
+            "frequent visitor purges suggest presence detection is unreliable",
+        );
+        let good = mk("offer a standing morning digest", "would a digest help?");
+        let adopted = adopt_device_theories(dir, 200, &[bad, diagnosis, good]).unwrap();
+        assert_eq!(adopted, 1, "only the clean theory is adopted");
+        let threads = thread::load(dir).unwrap();
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].direction, "offer a standing morning digest");
+        assert_eq!(refusals(dir).len(), 2, "both refusals are on the record");
+    }
+
     #[test]
     fn a_tool_that_finds_nothing_is_not_deployed() {
         let t = Temp::new("no_deploy");
@@ -6224,6 +6595,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -6272,6 +6645,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();

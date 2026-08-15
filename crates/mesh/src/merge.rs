@@ -672,6 +672,8 @@ fn merge_one(
                 // Attribute to the originating node so corruption-awareness still governs it and its
                 // outcome can be traced home. A peer's theory, tested on our execution.
                 actor: origin_actor.clone(),
+                anchors: Vec::new(),
+                facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
             };
             if thread::append(dir, &t).is_ok() {
                 // A visible, replicating record that we picked up a peer's theory to test — source
@@ -1470,6 +1472,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: String::new(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
@@ -1536,6 +1540,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: "betty".into(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();

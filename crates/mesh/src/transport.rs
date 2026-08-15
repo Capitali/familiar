@@ -4781,6 +4781,8 @@ mod tests {
                 origin: "llm".into(),
                 origin_human: "betty".into(),
                 actor: "familiar".into(),
+                anchors: Vec::new(),
+                facts_rev: 0,
             },
         )
         .unwrap();
