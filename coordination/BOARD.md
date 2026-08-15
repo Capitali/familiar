@@ -118,8 +118,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: D3 + D8, dialogue Round 3 (codex C-A + claude P-B/P-C unified)
 
 ### T-136 · One typed source per kind of truth: the SystemFact registry (D4)
-- status: queued
-- owner: —
+- status: claimed
+- owner: companion:claude-bootstrap
 - scope: crates/kernel/src/system_facts.rs, crates/cycle grounding_facts
 - depends: —
 - accept: grounding_facts becomes a bounded VIEW of the registry (not a sibling assembly); registry distinguishes compiled invariants / declaration-derived deployment facts with digest / observations-never-promoted; admitted drafts record revision + declaration digest; a short epistemic ADR states the principle
