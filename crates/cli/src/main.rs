@@ -1099,8 +1099,9 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
         Some("grant") => {
             // `mesh grant <target_node> <enrollment|question|gate> <ref> <approve|deny> [note...]`
             // A human's decision on a peer's authority request, relayed back for that peer to apply.
-            // This is a human act — only run it when you've actually decided. For a headless peer that
-            // asked to open its execute gate, `mesh grant <node> gate allow_execute approve`.
+            // Positive gate grants cannot travel: a member signature proves only the reporting node,
+            // not a human act. `gate ... deny` remains a fail-safe stop; widening waits for T-144's
+            // human/device-bound receipt.
             let (Some(target), Some(kind), Some(ref_id), Some(dec)) =
                 (args.get(1), args.get(2), args.get(3), args.get(4))
             else {
@@ -1116,13 +1117,13 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                 }
             };
             let note = args.get(5..).map(|s| s.join(" ")).unwrap_or_default();
-            let by = familiar_mesh::group::load(&dir)
-                .ok()
-                .flatten()
-                .map(|c| c.membership.node_id)
-                .unwrap_or_default();
+            if kind == "gate" && approved {
+                eprintln!(
+                    "mesh: remote positive gate grants are disabled; open the boundary locally"
+                );
+                return ExitCode::FAILURE;
+            }
             let grant = familiar_mesh::brief::AuthorityGrant {
-                by,
                 target: target.to_string(),
                 kind: kind.to_string(),
                 ref_id: ref_id.to_string(),

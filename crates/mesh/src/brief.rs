@@ -20,7 +20,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 /// Wire/brief format version — bump on incompatible changes to the signed body.
-pub const BRIEF_VERSION: u32 = 5;
+pub const BRIEF_VERSION: u32 = 6;
 
 /// `skip_serializing_if` helper: verifiers re-serialize the body ([`BriefBody::signing_bytes`]),
 /// so a field an older peer doesn't know about breaks every signature it checks. Omitting the
@@ -215,8 +215,9 @@ pub struct IdentityShare {
 
 /// A human-gated act a **headless** node can't perform alone (it has no local human), routed to
 /// human-facing peers so a human there can act. Authority always originates from a human — this only
-/// moves *where* that human sits, never removes them. `kind` is "enrollment" | "question" (gate-open
-/// is deliberately NOT proxied yet — that would change the boundary safety invariant).
+/// moves *where* that human sits, never removes them. `kind` is "enrollment" | "question" | "gate".
+/// A gate request may be surfaced as a need, but no positive reply can open the remote boundary;
+/// widening waits for T-144's human/device-bound receipt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorityRequest {
     pub origin: String,
@@ -227,16 +228,13 @@ pub struct AuthorityRequest {
     pub summary: String,
 }
 
-/// A human's decision on an [`AuthorityRequest`], relayed back to the node that asked. Carried in the
-/// **granting node's signed brief**, so it is authenticated as "this member asserts a human here
-/// decided X" — the covenant trust that a member only emits a grant when its human actually acted.
-/// The target applies it: mint/deny an enrollment, record a question's answer, or — the one path that
-/// writes the boundary — open a gate the target requested. That boundary write happens ONLY here, on
-/// an authenticated human grant; the autonomous cycle still has no boundary-write path.
+/// A member's report of a human decision on an [`AuthorityRequest`], relayed back to the node that
+/// asked. The granting node is the signer of the containing brief; there is deliberately no `by`
+/// string that can counterfeit a human identity. A report may carry an enrollment decision or an
+/// attributed answer. For gates it can only carry a stop/narrowing decision: positive remote gate
+/// grants are refused until T-144 supplies a human/device-bound receipt.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorityGrant {
-    /// The node whose human made the decision.
-    pub by: String,
     /// The node the decision is for (applies it).
     pub target: String,
     /// "enrollment" | "question" | "gate".

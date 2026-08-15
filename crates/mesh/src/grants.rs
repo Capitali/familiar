@@ -1,11 +1,11 @@
 //! The outbound grant store — a human-facing node's record of the decisions its human made on other
 //! peers' [`AuthorityRequest`](crate::brief::AuthorityRequest)s.
 //!
-//! When a headless peer routes an authority need (approve an enrollment, answer a question, open a
-//! gate it asked for), a human at *this* node decides, and the decision is written here. Each
-//! outbound brief carries these grants so the target peer can apply them. A grant is a **human act**
-//! — the CLI/Glass only writes one when the person actually decides — relayed under the covenant
-//! trust that binds the group.
+//! When a headless peer routes an authority need (approve an enrollment, answer a question, or stop
+//! a gate), a human at *this* node decides, and the decision is written here. Each outbound brief
+//! carries these reports so the target peer can apply them. A member signature authenticates only
+//! the reporting node, not a human decision: positive remote gate grants are therefore rejected at
+//! record and merge until T-144 supplies a human/device-bound receipt. Stops still travel.
 //!
 //! Grants are pruned after a TTL: the target dedups on apply, so a grant only needs to ride a few
 //! rounds to be sure it lands, then it can drop.
@@ -47,6 +47,12 @@ fn write(dir: &Path, store: &Store) -> io::Result<()> {
 /// Record a human's decision on a peer's authority request. Idempotent on (target, kind, ref_id) —
 /// a re-decision replaces the prior one (a human may change their mind before it's applied).
 pub fn record(dir: &Path, grant: AuthorityGrant) -> io::Result<()> {
+    if grant.kind == "gate" && grant.approved {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "remote positive gate grants are disabled; only a local human may widen this boundary",
+        ));
+    }
     let mut store = read(dir);
     store.grants.retain(|g| {
         !(g.target == grant.target && g.kind == grant.kind && g.ref_id == grant.ref_id)
@@ -72,7 +78,6 @@ mod tests {
 
     fn g(target: &str, kind: &str, ref_id: &str, ts: i64) -> AuthorityGrant {
         AuthorityGrant {
-            by: "me".into(),
             target: target.into(),
             kind: kind.into(),
             ref_id: ref_id.into(),
@@ -90,7 +95,9 @@ mod tests {
 
         record(&dir, g("nodeA", "enrollment", "x", 100)).unwrap();
         record(&dir, g("nodeA", "enrollment", "x", 150)).unwrap(); // same subject → replaces
-        record(&dir, g("nodeB", "gate", "allow_execute", 150)).unwrap();
+        let mut stop = g("nodeB", "gate", "allow_execute", 150);
+        stop.approved = false;
+        record(&dir, stop).unwrap();
         assert_eq!(
             active(&dir, 160).len(),
             2,
@@ -100,6 +107,34 @@ mod tests {
         // After the TTL the older grant is pruned.
         let live = active(&dir, 100 + GRANT_TTL_SECS + 200);
         assert!(live.iter().all(|x| x.ts >= 150));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refuses_to_publish_a_positive_remote_gate_grant_but_keeps_a_stop() {
+        let dir = std::env::temp_dir().join(format!(
+            "familiar_grants_positive_refusal_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let positive = g("nodeA", "gate", "allow_execute", 100);
+        assert_eq!(
+            record(&dir, positive).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert!(active(&dir, 101).is_empty());
+
+        let mut stop = g("nodeA", "gate", "allow_execute", 102);
+        stop.approved = false;
+        assert!(
+            serde_json::to_value(&stop).unwrap().get("by").is_none(),
+            "the wire carries no unchecked human/node identity claim"
+        );
+        record(&dir, stop).unwrap();
+        assert_eq!(active(&dir, 103).len(), 1, "the narrowing report travels");
+        assert!(!active(&dir, 103)[0].approved);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
