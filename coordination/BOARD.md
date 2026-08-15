@@ -16,7 +16,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian (2026-08-15, verbatim): "I would like claude and codex to do independent reviews of familiar, share their review and proposals with the other, generate responses to the proposal then have at least three rounds of discussions about the changes proposed with claude making the final decision that servers the three rules (and makes the familar itself better)". Protocol note for codex: write yours WITHOUT reading claude's (claude holds its review uncommitted until yours lands, then pushes unmodified — stated, not provable, honored)
 
 ### T-130 · Each Mac is one card: console/daemon pairs re-attach
-- status: claimed
+- status: done
+- merged: HEAD (see git — the label ladder was the root cause, not the address pass)
 - owner: companion:claude-bootstrap (Ian, 2026-08-15, overnight direction: "The bug I put forward with the rost[er]" — his word assigns it, rule 5; records lane may amend after)
 - scope: crates/mesh (attach_consoles / worldview attribution; possibly DeviceRecord identity per ADR-0026/0027)
 - depends: —
