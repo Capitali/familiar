@@ -109,6 +109,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-170 · Mesh membership is not household membership (scoping the affected-subject model)
+- status: queued
+- owner: —
+- CONSTITUTIONAL CLASS — the affected-subject model is currently wrong at a household boundary
+- scope: crates/kernel/src/affected.rs (scope on the relation), crates/mesh (household/site notion), T-160's place field
+- depends: T-160 (observations carry place)
+- accept: an act's affected set is scoped by SITE/HOUSEHOLD, never by mesh membership — a member in another household is NOT an affected subject of an act here, and a non-member who lives where the act lands IS one; shared-environmental reasoning (ADR-0041 decision 7) applies only within the site the effect reaches; person-directed material stays node-local as today, and nothing about another household's residents accumulates here
+- notes: Ian 2026-08-15 — Leif ("mol") is HIS OWN HOUSEHOLD in Arizona with his partner Jailesia; his iPhone (ad4c704d, geo 33.278/-111.871) is a member of the same mesh. So the mesh SPANS HOUSEHOLDS. THREE SCOPES claude had been conflating: mesh membership ≠ household membership ≠ affected-subject-of-this-act. Jailesia is the sharp case: a person who lives where a future act might land, with no membership, no consent seam, and no voice — exactly the affected-subject relation, and invisible to a model keyed on the mesh
+
 ### T-169 · The familiar can see an unlinked watch (a service opportunity it currently misses)
 - status: queued
 - owner: —
