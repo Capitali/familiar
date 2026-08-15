@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-129 · Build 87 + doors: the honest mind ships
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: fleet ops — deploy 8903479-era main to lighthouse + Wildhorse; clean-clone ship.sh 87; author + apply the reviewed lights fold manifest on the lighthouse (theories fold CLI); STATE carries shas + evidence
+- depends: CI green on the ship sha (rule 9)
+- accept: doors run the T-126..T-102 engine (facts floor, identity, inquiry, assent-to-policy); Build 87 on Macs + TestFlight; the lighthouse lights cluster folded to its eldest thread with tombstones pointing home; Ian notified
+- notes: Ian (2026-08-15): "I'm looking forward to the new build." Console code unchanged since 86 (worldview already gates is_mature) — 87 is the stamp riding the engine deploy
+
 ### T-125 · Theory-quality dialogue: from echo to action
 - status: claimed
 - owner: companion:claude-bootstrap (claude chair; controller absent — Ian's direction, rule 5)
@@ -136,8 +144,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: T-125 Q3; closes ADR-0040 §2's loop for LLM theories
 
 ### T-102 · Theory-affirmation mints the rule (P4)
-- status: claimed
+- status: done
 - owner: companion:claude-bootstrap
+- merged: 8903479
 - scope: crates/cycle/src/lib.rs (heed path), crates/kernel/src/reaction_rule.rs
 - depends: T-126, T-127, T-128
 - accept: an assenting answer on an acted thread whose direction names a declared surface mints the matching ReactionRule (minted_from: thread:<id>), narrated into the dialog; gated by allow_actuate; one standing rule per surface until field calibration; regression pins mint-on-assent and no-mint-on-negative. End-to-end pilot: the folded lights thread → one assent → the familiar manages the lights
