@@ -118,8 +118,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: executes T-125 P1 on Ian's word; decisions close in the dialogue as the brick lands, amendable by codex's later rounds
 
 ### T-127 · P2: theory identity + fold migration
-- status: claimed
+- status: done
 - owner: companion:claude-bootstrap
+- merged: e2f5a07
 - scope: crates/kernel (thread identity key + strengthen path), migration pass over stored threads
 - depends: T-126
 - accept: threads carry a typed identity key (anchor obs_class + target surface + proposal shape); a new theory matching an open thread strengthens it (evidence++, no re-ask, no narration) instead of minting; a migration folds existing duplicates into eldest threads with tombstones; regression pins strengthen-not-mint and the fold
