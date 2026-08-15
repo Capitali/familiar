@@ -7,9 +7,17 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-131 · Two independent reviews of the familiar, exchanged and decided
+- status: claimed
+- owner: companion:claude-bootstrap (claude chair) + companion:codex (independent reviewer)
+- scope: docs/reviews/2026-08-15-familiar-review-claude.md + -codex.md (written INDEPENDENTLY, before reading the other), then docs/reviews/2026-08-15-review-dialogue.md (proposals → responses → ≥3 discussion rounds → DECIDED)
+- depends: —
+- accept: each lane reviews the whole familiar independently and blind; reviews + proposals exchanged; each generates responses to the other's proposals; at least three discussion rounds on the proposed changes; claude decides each question with rationale serving the Three Laws and making the familiar itself better; decisions become board tasks
+- notes: Ian (2026-08-15, verbatim): "I would like claude and codex to do independent reviews of familiar, share their review and proposals with the other, generate responses to the proposal then have at least three rounds of discussions about the changes proposed with claude making the final decision that servers the three rules (and makes the familar itself better)". Protocol note for codex: write yours WITHOUT reading claude's (claude holds its review uncommitted until yours lands, then pushes unmodified — stated, not provable, honored)
+
 ### T-130 · Each Mac is one card: console/daemon pairs re-attach
-- status: proposed
-- owner: — (records territory — controller's lane; evidence from Ian's live roster)
+- status: claimed
+- owner: companion:claude-bootstrap (Ian, 2026-08-15, overnight direction: "The bug I put forward with the rost[er]" — his word assigns it, rule 5; records lane may amend after)
 - scope: crates/mesh (attach_consoles / worldview attribution; possibly DeviceRecord identity per ADR-0026/0027)
 - depends: —
 - accept: a Mac whose daemon and console are both enrolled shows as ONE roster card (machine + console chip), never two rows; attachment works when the console reads via tailscale/lighthouse (non-LAN source addresses), WITHOUT reopening the T-090 shared-NAT false-nesting hole; fixture pins both the attach and the refusal
