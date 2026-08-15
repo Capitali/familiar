@@ -94,6 +94,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-163 · What the familiar does when it discovers its own violation
+- status: queued
+- owner: —
+- scope: crates/kernel (guard/boundary post-hoc detection + halt), crates/cycle (narration), crates/mesh (worldview surfacing)
+- depends: —
+- CONSTITUTIONAL CLASS — not ranked against capability work (Ian 2026-08-15: a Law violation is an existential event, not a bug)
+- accept: on detecting after the fact that it has done something the Laws forbid, the familiar HALTS the implicated capability, preserves the evidence unaltered, narrates it to a human immediately and unprompted, and requires a human act to resume; the record shows that it noticed; tests pin halt-and-report on a synthetic violation and prove resumption cannot be self-granted
+- notes: Round 15. Every refusal we have built fires BEFORE an act; nothing defines the after. "Nothing specified" is the most dangerous answer under Ian's principle — a familiar that continues quietly after a violation is the one whose trust cannot be repaired. Open question to codex: does unprompted self-reporting create an incentive to avoid noticing?
+
 ### T-160 · Observations carry place
 - status: queued
 - owner: — (claude intends to claim next unless codex objects)
