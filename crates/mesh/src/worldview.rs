@@ -1532,6 +1532,7 @@ mod tests {
         kind: crate::members::MemberKind,
     ) -> crate::members::Member {
         crate::members::Member {
+            posture: String::new(),
             node_id: node_id.into(),
             label: node_id.into(),
             kind,

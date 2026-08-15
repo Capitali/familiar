@@ -31,6 +31,35 @@ full model is visible even before the code lands:
 | **Service / Presence signal** | Law I / Law II measures | computed from observations (and later loops/trials) |
 | **Guard record** | a Law III decision | allow / seek-consent / refuse + rationale, attached to an action |
 
+## Humans and devices: two records, related, never conflated
+
+Added by [ADR-0039](decision-records/0039-humans-and-devices-are-separate-records.md), which
+ended a long-running conflation: one name slot was doing two jobs, so phones established as
+their *human* ("ian") while Macs were named as *machines* ("wildhorse"), and no roster could
+show both facts because the model stored one.
+
+| Record | Is | Key fields |
+|---|---|---|
+| **HumanRecord** | one per human the mesh serves | `handle`, `name`, `devices[]` (associations, current and past), `relationships[]`, `preferences`, `habits`, `routines[]` |
+| **DeviceRecord** | one per device | `device_id`, `name`, `kind`, `posture`, `capabilities`, `observation_interfaces`, `networks[]`, `humans[]` (associations) |
+
+Two properties of this pair carry most of its weight:
+
+- **The relation is plural and time-bounded.** `DeviceRecord.humans` is a list of associations
+  with `since`/`until`, so a device may be used by several people, or by none, without anyone
+  owning it — and the history of who used it survives the association ending.
+- **`kind` and `posture` are different axes.** `kind` is what the device *is* ("phone");
+  `posture` is how it is *held* — `carried` (it follows a person) or `fixed` (a **station**:
+  bound to a place, serving whoever is there,
+  [ADR-0042](decision-records/0042-the-station.md)). Presence inference turns on the second,
+  not the first: a carried device's heartbeat is evidence about its human, a station's is
+  evidence only that it is powered. Posture is declared by a human and never entered by the
+  familiar on its own, because the two possible mistakes fail in opposite directions —
+  reading a personal phone as a station *suppresses* real presence, reading a station as
+  personal *manufactures* it.
+
+The roster is a **view** over these two records, never a third store.
+
 ## Relationships (sketch)
 
 ```

@@ -65,6 +65,12 @@ pub struct Member {
     /// Where it connected from / its address (display only).
     #[serde(default)]
     pub addr: String,
+    /// How the device is held in the world — "fixed" (a station: bound to a place, serving
+    /// whoever is there) | "carried" | "" (not established). ADR-0042. The roster needs this
+    /// because a station's row answers a different question from a personal device's: not
+    /// *whose is this* but *where is this, and who is here now*.
+    #[serde(default)]
+    pub posture: String,
     /// The relationship — how this node participates: "self", "gossip", "reads worldview",
     /// "sensor (direct)", "sensor (via phone)". Human-readable for the roster.
     #[serde(default)]
@@ -237,8 +243,15 @@ const PRESENCE_WINDOW_SECS: i64 = 30 * 60;
 /// strength wins when several are fresh — a recognized face outranks a mere device beacon.
 /// `human` is empty when the evidence shows *someone* is there but not *who* (a bare
 /// dialogue turn, an unnamespaced report).
+/// What one observation says about who is present, and how strongly.
+///
+/// `fixed` is the device's posture (ADR-0042). It removes the two rungs that assume the device
+/// travels with its human, and leaves the two that name a person outright — a station still
+/// learns who is there when a face is recognized or when somebody speaks to it, which is the
+/// path the familiar is supposed to prefer anyway.
 fn presence_evidence(
     o: &familiar_kernel::observation::Observation,
+    fixed: bool,
 ) -> Option<(u8, &'static str, String)> {
     let ns_human = || {
         o.actor
@@ -269,7 +282,14 @@ fn presence_evidence(
     }
     // 3. A carried personal device sensing its owner (motion, heartbeat, sleep) — but the
     //    bare `presence` beacon is only that the device is *active*, the weakest tier.
-    if familiar_kernel::service::is_personal_device_report(o) {
+    //
+    //    Both rungs below read the human out of the ACTOR ("phone:ian" → "ian"), and both are
+    //    sound only because the device travels in a pocket. A station is bolted to a wall and
+    //    powered forever: its heartbeat would name whoever the actor names, every few seconds,
+    //    for as long as it is plugged in — a phantom occupant the mesh could never notice was
+    //    wrong, contaminating the very dinette observations the shared-lighting consensus
+    //    (ADR-0041) is built on. So a fixed device contributes nothing here.
+    if !fixed && familiar_kernel::service::is_personal_device_report(o) {
         if o.action == "reports" && o.object == "presence" {
             return Some((1, "activity", ns_human()));
         }
@@ -284,6 +304,7 @@ fn presence_evidence(
 fn derive_presence(
     obs: &[familiar_kernel::observation::Observation],
     now: i64,
+    fixed: bool,
     belongs: impl Fn(&familiar_kernel::observation::Observation) -> bool,
 ) -> (String, i64, String) {
     // Freshest presence evidence for this node, strongest tier breaking ties.
@@ -292,7 +313,7 @@ fn derive_presence(
         if now - o.ts > PRESENCE_WINDOW_SECS {
             continue;
         }
-        if let Some((strength, via, human)) = presence_evidence(o) {
+        if let Some((strength, via, human)) = presence_evidence(o, fixed) {
             // Strongest establishment wins, freshness breaks ties: a face recognized 20
             // minutes ago says more about *who is here* than a beacon ping one minute ago.
             let better = match &best {
@@ -315,7 +336,7 @@ fn derive_presence(
         .iter()
         .filter(|o| belongs(o) && now - o.ts <= PRESENCE_WINDOW_SECS)
         .filter_map(|o| {
-            presence_evidence(o).and_then(|(_, _, h)| {
+            presence_evidence(o, fixed).and_then(|(_, _, h)| {
                 (human.is_empty() || h.is_empty() || h.eq_ignore_ascii_case(&human)).then_some(o.ts)
             })
         })
@@ -397,12 +418,19 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         let (self_lat, self_lon) = transport::self_geo(dir).unwrap_or((0.0, 0.0));
         // Presence at the host itself: face recognitions and dialogue land here as
         // non-mesh observations (host/observer sources), so select the local stream.
-        let (sp_human, sp_since, sp_via) = derive_presence(&obs, now, |o| {
+        let self_posture = crate::device::load(dir, &cred.membership.node_id)
+            .ok()
+            .flatten()
+            .map(|d| d.posture)
+            .unwrap_or_default();
+        let self_fixed = self_posture.eq_ignore_ascii_case("fixed");
+        let (sp_human, sp_since, sp_via) = derive_presence(&obs, now, self_fixed, |o| {
             !o.source.starts_with("mesh:") && !is_device_actor(&o.actor)
         });
         out.push(Member {
             node_id: cred.membership.node_id.clone(),
             label,
+            posture: self_posture,
             kind: MemberKind::SelfNode,
             os: os_pretty(std::env::consts::OS),
             os_version: crate::merge::os_release(),
@@ -622,9 +650,17 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         };
         // Presence, only for devices (a gossip peer reports its own). Evidence from this
         // device arrives tagged `mesh:<node_id>` in our store.
+        let dev_posture = crate::device::load(dir, &p.node_id)
+            .ok()
+            .flatten()
+            .map(|d| d.posture)
+            .unwrap_or_default();
         let dev_presence = if is_device {
             let src = format!("mesh:{}", p.node_id);
-            derive_presence(&obs, now, |o| o.source == src)
+            // A fixed device (ADR-0042) contributes no activity/motion presence: it is bolted
+            // in place and powered forever, so its heartbeat names nobody.
+            let fixed = dev_posture.eq_ignore_ascii_case("fixed");
+            derive_presence(&obs, now, fixed, |o| o.source == src)
         } else {
             (String::new(), 0, String::new())
         };
@@ -662,6 +698,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             tools: p.tools_offered,
             patterns: p.patterns_offered,
             addr: ip,
+            posture: dev_posture,
             relationship,
             ai: has_ai,
             trust,
@@ -707,7 +744,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         }
         .to_string();
         let src = format!("mesh:{node}");
-        let agent_presence = derive_presence(&obs, now, |o| o.source == src);
+        let agent_fixed = crate::device::load(dir, node)
+            .ok()
+            .flatten()
+            .is_some_and(|d| d.is_fixed());
+        let agent_presence = derive_presence(&obs, now, agent_fixed, |o| o.source == src);
         out.push(Member {
             node_id: node.clone(),
             // A friendly label, not the raw actor — "watch:ian" beside the prominent human
@@ -733,6 +774,7 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
             tools: 0,
             patterns: 0,
             addr: String::new(),
+            posture: String::new(),
             relationship,
             ai: ai_node(node, actor),
             trust: familiar_kernel::corruption::trust(&refusals, actor, now)
@@ -813,6 +855,11 @@ pub fn classify(dir: &Path, now: i64) -> Vec<Member> {
         out.push(Member {
             node_id: r.device_id.clone(),
             label,
+            posture: crate::device::load(dir, &r.device_id)
+                .ok()
+                .flatten()
+                .map(|d| d.posture)
+                .unwrap_or_default(),
             kind: MemberKind::DevicePeer,
             os: String::new(),
             os_version: String::new(),
@@ -1247,6 +1294,99 @@ mod tests {
         assert_eq!(os_from_actor("client"), "");
     }
 
+    // ADR-0042 — the station. Named for the invariant each one pins, because the bug they
+    // exist to prevent is invisible: a phantom occupant looks exactly like a real one.
+
+    #[test]
+    fn a_station_heartbeat_names_nobody() {
+        let src = "mesh:station1";
+        let obs = vec![
+            Observation::new(
+                "phone:shared",
+                "reports",
+                "presence",
+                "",
+                src,
+                NOW - 60,
+                0.9,
+            ),
+            Observation::new(
+                "phone:shared",
+                "reports",
+                "presence",
+                "",
+                src,
+                NOW - 30,
+                0.9,
+            ),
+        ];
+        // Carried, this is the weakest presence rung and still names its human.
+        let (carried_who, _, carried_via) = derive_presence(&obs, NOW, false, |o| o.source == src);
+        assert_eq!(carried_who, "shared");
+        assert_eq!(carried_via, "activity");
+        // Fixed, the same stream says nothing about anybody. A wall-mounted phone reports
+        // forever; believing it names a person is how "shared" became a resident.
+        let (who, _, via) = derive_presence(&obs, NOW, true, |o| o.source == src);
+        assert!(
+            who.is_empty() && via.is_empty(),
+            "a station's heartbeat manufactured a person: {who:?} via {via:?}"
+        );
+    }
+
+    #[test]
+    fn a_station_still_learns_who_speaks_to_it() {
+        let src = "mesh:station1";
+        let obs = vec![Observation::new(
+            "betty",
+            "told the familiar",
+            "turn the lights down",
+            "",
+            src,
+            NOW - 60,
+            0.9,
+        )];
+        let (who, _, via) = derive_presence(&obs, NOW, true, |o| o.source == src);
+        assert_eq!(who, "betty", "a station must learn the name it is given");
+        assert_eq!(via, "dialogue");
+    }
+
+    #[test]
+    fn a_station_still_learns_a_face_it_is_permitted_to_recognize() {
+        let src = "mesh:station1";
+        let obs = vec![Observation::new(
+            "host",
+            "recognized",
+            "face:Ian",
+            "",
+            src,
+            NOW - 60,
+            0.9,
+        )];
+        let (who, _, via) = derive_presence(&obs, NOW, true, |o| o.source == src);
+        assert_eq!(who, "Ian");
+        assert_eq!(via, "face");
+    }
+
+    #[test]
+    fn a_station_that_nobody_has_named_is_honestly_empty() {
+        let src = "mesh:station1";
+        // Motion at a fixed device is not a person walking around with it in a pocket.
+        let obs = vec![Observation::new(
+            "phone:shared",
+            "reports",
+            "motion:walking",
+            "",
+            src,
+            NOW - 60,
+            0.9,
+        )];
+        let (who, _, via) = derive_presence(&obs, NOW, true, |o| o.source == src);
+        assert!(
+            who.is_empty() && via.is_empty(),
+            "unknown must stay unknown rather than resolve to a guess"
+        );
+    }
+
     #[test]
     fn presence_is_derived_by_strength_freshness_and_run_length() {
         let src = "mesh:dev1";
@@ -1261,7 +1401,7 @@ mod tests {
             mk("phone:ian", "reports", "presence", NOW - 5 * 60),
             mk("host", "recognized", "face:Ian", NOW - 60),
         ];
-        let (who, since, via) = derive_presence(&obs, NOW, |o| o.source == src);
+        let (who, since, via) = derive_presence(&obs, NOW, false, |o| o.source == src);
         assert_eq!(who, "Ian");
         assert_eq!(via, "face");
         assert_eq!(
@@ -1272,7 +1412,7 @@ mod tests {
 
         // Nothing fresh → unknown, honestly.
         let stale = vec![mk("phone:ian", "reports", "motion:walking", NOW - 60 * 60)];
-        let (who, since, via) = derive_presence(&stale, NOW, |o| o.source == src);
+        let (who, since, via) = derive_presence(&stale, NOW, false, |o| o.source == src);
         assert!(who.is_empty() && via.is_empty() && since == 0);
 
         // Evidence older than the window is not counted toward the run — `since` is the
@@ -1282,7 +1422,7 @@ mod tests {
             mk("phone:ian", "reports", "motion:still", NOW - 10 * 60),
             mk("phone:ian", "reports", "presence", NOW - 3 * 60),
         ];
-        let (_, since, via) = derive_presence(&mixed, NOW, |o| o.source == src);
+        let (_, since, via) = derive_presence(&mixed, NOW, false, |o| o.source == src);
         assert_eq!(via, "motion");
         assert_eq!(
             since,
@@ -1292,7 +1432,10 @@ mod tests {
 
         // Dialogue names the speaker; the observer channel may not, and that's honest.
         let named = vec![mk("ian", "answered", "thread:1", NOW - 60)];
-        assert_eq!(derive_presence(&named, NOW, |o| o.source == src).0, "ian");
+        assert_eq!(
+            derive_presence(&named, NOW, false, |o| o.source == src).0,
+            "ian"
+        );
         let anon = vec![Observation::new(
             "observer",
             "answered",
@@ -1302,7 +1445,7 @@ mod tests {
             NOW - 60,
             0.9,
         )];
-        let (who, _, via) = derive_presence(&anon, NOW, |_| true);
+        let (who, _, via) = derive_presence(&anon, NOW, false, |_| true);
         assert!(who.is_empty() && via == "dialogue");
     }
 

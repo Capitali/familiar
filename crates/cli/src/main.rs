@@ -1631,10 +1631,42 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                         }
                     }
                 }
+                // `mesh device posture <node_id> fixed|carried` — how the device is HELD
+                // (ADR-0042), which is a different axis from what it is. A `fixed` device is
+                // bound to a place and serves whoever is there, so its heartbeat stops being
+                // read as evidence that any particular person is present.
+                Some("posture") => {
+                    let (Some(node_id), Some(posture)) = (
+                        args.get(2).filter(|a| !a.starts_with("--")),
+                        args.get(3).filter(|a| !a.starts_with("--")),
+                    ) else {
+                        eprintln!(
+                            "mesh: usage: familiar mesh device posture <node_id> <fixed|carried>"
+                        );
+                        return ExitCode::FAILURE;
+                    };
+                    match familiar_mesh::device::set_posture(&dir, node_id, posture, now_secs()) {
+                        Ok(rec) => {
+                            println!("✓ {} is {}", rec.device_id, rec.posture);
+                            if rec.is_fixed() {
+                                println!(
+                                    "  a station: bound to its place, serving whoever is there.\n  \
+                                     its heartbeat no longer names anyone — presence here comes \
+                                     from a face or from being told."
+                                );
+                            }
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("mesh: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
                 Some("show") => {
                     for d in familiar_mesh::device::load_all(&dir) {
                         println!(
-                            "{}  {}  {} {} {}",
+                            "{}  {}  {} {} {} {}",
                             d.device_id,
                             if d.name.is_empty() {
                                 "(unnamed)"
@@ -1642,6 +1674,11 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                                 &d.name
                             },
                             d.kind,
+                            if d.posture.is_empty() {
+                                "posture:unset"
+                            } else {
+                                &d.posture
+                            },
                             d.os,
                             d.arch
                         );
@@ -1649,7 +1686,10 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 _ => {
-                    eprintln!("mesh: usage: familiar mesh device <name <node_id> <name> | show>");
+                    eprintln!(
+                        "mesh: usage: familiar mesh device <name <node_id> <name> | \
+                         posture <node_id> <fixed|carried> | show>"
+                    );
                     ExitCode::FAILURE
                 }
             }
