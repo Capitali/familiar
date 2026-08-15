@@ -96,13 +96,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian (2026-08-15, verbatim): "then it seems like time for a build and ship" — recorded per rule 5. Run by this companion because no other lane was alive (ListAgents empty). MacOnStick's own daemon deliberately NOT touched — controller's declared deploy territory; it still runs its pre-86 build and wants a controller pass
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
-- status: queued
-- owner: —
+- status: claimed
+- owner: companion:codex
 - controller (2026-08-14): accepted — it explains observed reality (a full-suite count read 4-of-31 during concurrent runs today); per-process/per-worktree unique temp roots, start with the fixed-name helpers (rules/actuator tests included)
 - scope: fixed-name temporary-directory helpers in crate tests (begin with crates/cycle)
 - depends: —
 - accept: test temp roots include a process- or worktree-unique component; concurrent full green-bar runs cannot mutate the same fixture directory; a focused regression or parallel harness pins the isolation
-- notes: observed while barring T-103: one full run overlapped the controller's run and cycle's parameter-revert test saw its second tick revert again; the test passed alone and a clean full rerun passed after the other job ended. Treat this as test-infrastructure hardening, not a T-103 failure
+- notes: observed while barring T-103: one full run overlapped the controller's run and cycle's parameter-revert test saw its second tick revert again; the test passed alone and a clean full rerun passed after the other job ended. Treat this as test-infrastructure hardening, not a T-103 failure. companion:codex claimed after T-171; scope is test-only and disjoint from the now-landed Watch UI work
 
 ### T-117 · Deploy and witness FamTalker01's virtual home
 - status: proposed
