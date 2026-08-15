@@ -6,6 +6,58 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — The floor holds what the mind may claim (companion:claude-bootstrap)
+
+### What changed
+
+- **T-126 (dialogue 2026-08-15, Q2 + Q5, decided round 3; Ian: "Make it so").** The
+  reasoner had no self-knowledge and no evidence discipline: ~304 lighthouse threads
+  including six restatements of one lighting proposal in five hours, two inventing
+  "AppleID login" (a mechanism the covenant forbids), each re-diagnosing designed B10
+  visitor purges as defects, and verbatim-duplicate unanchored musings locally.
+- **`kernel::system_facts` — the knowledge floor.** A typed, versioned registry
+  (schema v1, rev 1): SF-1 lifecycle (familiar|purged is hygiene, not defect), SF-2
+  membership (covenant/grants only; no external identity providers), SF-3 derived
+  live from the human's actuators.json (declaration is the consent — never compiled).
+  Every theorize prompt receives a rendering of the SAME registry the validator
+  enforces post-parse; a draft whose typed claims contradict a fact refuses at mint
+  with the fact cited, and the refusal lands as an observation ("familiar refused
+  theory — SF-n"), on the record.
+- **`TheoryDraft` — the strict admission contract** (codex's cross-cutting shape,
+  round 2): anchors (chosen ONLY from a system-enumerated eligible set — invented ids
+  refuse), typed mechanism, defect_claims, question/theory/direction, optional typed
+  predictions. `deny_unknown_fields`. Deterministic admission order: anchors → facts
+  → attentional dedup → dispose. `prediction::mint` gains its FIRST production caller:
+  a draft's predictions mint with the thread (`minted_from: thread:<id>`), so
+  settlement (T-113) and belief erosion (T-114) finally reach LLM theories.
+- **Anchored cadence (Q5).** Eligibility rides the observation store's commit-order
+  ids past a persisted cursor (`theorize_cursor.txt`) that advances ONLY on structural
+  disposition (mint / strengthen / refusal) — provider failure keeps the batch
+  retryable, and an empty eligible set makes NO consult at all: a stable world being
+  quiet is correct. The needs muse and device-theory adoption get the floor too — as
+  a LABELED lexical guard (prose-only paths; the v1 honesty gap is recorded in the
+  dialogue), which kills both observed failure classes at adoption.
+- Thread gains `anchors` + `facts_rev` (serde-default, additive); all four minters
+  stamp them.
+
+### Checks run
+
+- New: 3 kernel tests (registry refusals, lexical guard against the live-observed
+  prose classes, strict contract) + 5 cycle tests (defect-claim refusal with fact
+  cited + cursor disposal; invented-anchor refusal; grounded mint carrying anchors,
+  facts_rev, and its prediction; quiet-world-no-consult proven by the absent prompt
+  file; device adoption refusing AppleID + purge-diagnosis while adopting the clean
+  theory). Full bar in rule-9 shape (fmt, clippy --all-targets -D warnings, workspace
+  tests), counts in the board entry.
+
+### Next
+
+- T-127 centralizes all four minters into kernel `thread::mint` (typed family/variant
+  identity, strengthen/compete, the id race via store::next_seq, the conservative fold
+  migration + the lights manifest). T-128 makes predictions mandatory and lands the
+  Inquiry kind. The device reasoner still speaks prose — a console brick teaching it
+  the draft contract retires the lexical guard.
+
 ## 2026-08-15 (small hours) — The console says what it is trying (companion:claude-bootstrap)
 
 ### What changed
