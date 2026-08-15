@@ -57,7 +57,35 @@ struct WatchRootView: View {
                     .sheet(isPresented: $showTalk) { WatchTalkView(model: model) }
                 }
             } else if model.enrolling {
-                VStack(spacing: 6) { WatchOrbView().frame(width: 90, height: 90); Text("joining…").font(.caption2).foregroundStyle(.secondary) }
+                // Joining can take a minute or two. Say what is being tried and where, so the
+                // wait reads as work in progress rather than as a machine that has stopped.
+                VStack(spacing: 6) {
+                    WatchOrbView().frame(width: 76, height: 76)
+                    Text("joining…").font(.caption2).foregroundStyle(.secondary)
+                    if let door = model.knownDoor {
+                        Text(door).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                    if let step = model.log.first {
+                        Text(step).font(.system(size: 10)).foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center).lineLimit(2)
+                    }
+                }
+            } else if let door = model.knownDoor {
+                // This watch WAS told where to go, tried, and did not get in. Before T-172 this
+                // rendered as the same "open the iPhone app" line as a watch that had never been
+                // told anything — so the wearer had no way to know, or to report, what happened.
+                ScrollView {
+                    VStack(spacing: 7) {
+                        WatchOrbView().frame(width: 68, height: 68).opacity(0.5)
+                        Text("Couldn't join").font(.caption).foregroundStyle(.orange)
+                        Text(model.trouble.isEmpty ? "No answer from the door yet." : model.trouble)
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Text(door).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                        Button("Try again") { model.retry() }.font(.caption2)
+                    }
+                    .padding(.vertical, 4)
+                }
             } else {
                 VStack(spacing: 8) {
                     WatchOrbView().frame(width: 84, height: 84).opacity(0.5)
