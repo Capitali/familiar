@@ -194,7 +194,8 @@ mod tests {
     struct Temp(PathBuf);
     impl Temp {
         fn new(t: &str) -> Self {
-            let p = std::env::temp_dir().join(format!("familiar_tool_test_{t}"));
+            let p =
+                std::env::temp_dir().join(format!("familiar_tool_test_{}_{t}", std::process::id()));
             let _ = fs::remove_dir_all(&p);
             fs::create_dir_all(&p).unwrap();
             Temp(p)

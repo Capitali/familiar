@@ -5393,8 +5393,12 @@ mod tests {
 
     struct Temp(PathBuf);
     impl Temp {
+        fn path(t: &str) -> PathBuf {
+            std::env::temp_dir().join(format!("familiar_cycle_test_{}_{t}", std::process::id()))
+        }
+
         fn new(t: &str) -> Self {
-            let p = std::env::temp_dir().join(format!("familiar_cycle_test_{t}"));
+            let p = Self::path(t);
             let _ = fs::remove_dir_all(&p);
             fs::create_dir_all(&p).unwrap();
             Temp(p)
@@ -5404,6 +5408,18 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn test_roots_are_scoped_to_the_test_process() {
+        let path = Temp::path("isolation");
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains(&std::process::id().to_string()),
+            "a concurrent test process must receive a different fixture root"
+        );
     }
 
     fn seed_recurring(dir: &Path) {

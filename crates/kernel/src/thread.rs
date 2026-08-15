@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        let p = std::env::temp_dir().join("substrate_thread_test");
+        let p = std::env::temp_dir().join(format!("substrate_thread_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         let t = Thread {
@@ -573,7 +573,10 @@ mod tests {
 
     #[test]
     fn a_confirm_answer_from_the_subject_makes_the_need_stated() {
-        let p = std::env::temp_dir().join("substrate_thread_confirm_test");
+        let p = std::env::temp_dir().join(format!(
+            "substrate_thread_confirm_test_{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         append(&p, &need_thread("thread-0001")).unwrap();
@@ -595,7 +598,10 @@ mod tests {
 
     #[test]
     fn an_answer_from_someone_else_flips_nothing() {
-        let p = std::env::temp_dir().join("substrate_thread_noflip_test");
+        let p = std::env::temp_dir().join(format!(
+            "substrate_thread_noflip_test_{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         append(&p, &need_thread("thread-0001")).unwrap();

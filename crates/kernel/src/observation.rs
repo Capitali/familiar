@@ -98,7 +98,8 @@ mod tests {
     struct TempDir(PathBuf);
     impl TempDir {
         fn new(tag: &str) -> Self {
-            let p = std::env::temp_dir().join(format!("substrate_obs_test_{tag}"));
+            let p = std::env::temp_dir()
+                .join(format!("substrate_obs_test_{}_{tag}", std::process::id()));
             let _ = fs::remove_dir_all(&p);
             TempDir(p)
         }

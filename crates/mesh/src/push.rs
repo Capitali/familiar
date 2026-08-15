@@ -297,7 +297,10 @@ mod tests {
 
     #[test]
     fn token_registry_upserts_one_row_per_node() {
-        let d = std::env::temp_dir().join("familiar_push_test_registry");
+        let d = std::env::temp_dir().join(format!(
+            "familiar_push_test_registry_{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         upsert_token(&d, "node-a", "tok1", "sandbox", 100).unwrap();
@@ -314,7 +317,7 @@ mod tests {
     #[test]
     fn provider_jwt_signs_with_a_p256_key() {
         // A throwaway P-256 key in PKCS#8, generated for this test only.
-        let d = std::env::temp_dir().join("familiar_push_test_jwt");
+        let d = std::env::temp_dir().join(format!("familiar_push_test_jwt_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let rng = ring::rand::SystemRandom::new();
