@@ -119,9 +119,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Round 10 principle, to be sharpened by the exchange before it is written — not authored unilaterally
 
 ### T-153 · AffectedSubjectRef: impact is typed, moral worth is not awarded by the type
-- status: queued
-- owner: —
-- scope: crates/kernel (act/event model), crates/mesh (shared-surface authority shape)
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/kernel ONLY this brick (the typed relation + invariants + attachment to the act model). The crates/mesh shared-surface authority shape is DEFERRED to a follow-on brick so this does not collide with companion:codex's T-133 mesh lane
 - depends: —
 - accept: acts on shared surfaces carry a typed impact RELATION (subject ref incl. honest unknown-resident, surface + expected exposure, evidence channel with provenance/confidence/missingness, separate AuthorityRef) never flattened to a score; unknown/absent/silent/unable = missing not support; a credible adverse response may stop/narrow/revert a discretionary act but never widen or authorize a lasting rule; guardianship supplies bounded care authority without erasing the subject's own response; uncertainty takes the smaller experiment or freezes; records obey the Round 5 audit floor
 - notes: codex Round 8 + claude Round 9 concession (HUMANITY.md protects BEINGS capable of suffering/memory/relationship/meaning/choice/love/grief — not only persons; Clover and Iris are subjects who live with the light's effects, not conditions around persons). PREREQUISITE to any standing household policy on a shared surface — until it lands, the motorlights pilot runs as a bounded reversible trial only
