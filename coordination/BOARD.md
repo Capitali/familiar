@@ -298,7 +298,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-134 · Peer goal mutation refused until event authority (D2)
 - status: claimed
 - owner: companion:codex
-- scope: crates/mesh/src/merge.rs (GoalShare adoption)
+- scope: crates/mesh/src/merge.rs (GoalShare adoption), crates/mesh/src/brief.rs GoalShare contract comments, crates/mesh/tests/hostile_member.rs
 - depends: T-139
 - accept: unknown goals may be adopted; remote field rewrites refused and logged (no wall-clock LWW takeover); clock-skew/takeover fixtures pass; C-C event-sourcing tracked as the successor brick
 - notes: D2, dialogue Round 3
