@@ -1988,7 +1988,7 @@ fn cmd_mesh(args: &[String]) -> ExitCode {
                  | escrow-export | escrow-restore | reduce-to-covenant --yes \
                  | standing [show | grant <node_id> [--note N] | revoke <node_id>] \
                  | sever|hold|disestablish|restore <node_id> [--reason R] \
-                 | name <node_id> <handle> | device <name <node_id> <name> | show> \
+                 | name <node_id> <handle> | device <name <node_id> <name> | posture <node_id> <fixed|carried> | show> \
                  | invite-token [--handle H] | warrant <node_id> <pubkey> | warrant-install <json> \
                  | migrate-records | doctor>"
             );
