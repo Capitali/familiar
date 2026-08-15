@@ -24,6 +24,7 @@ pub mod gate;
 pub mod gen;
 pub mod harness;
 pub mod noise;
+pub mod recipe_oracle;
 pub mod report;
 pub mod scenario;
 pub mod timeline;

@@ -14,7 +14,7 @@
 //! B/D fall back to the deterministic template and the report says so.
 
 use familiar_scenario::harness::{self, Control, RunConfig};
-use familiar_scenario::{campaign, evidence, scenario, validate};
+use familiar_scenario::{campaign, evidence, recipe_oracle, scenario, validate};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -128,7 +128,11 @@ fn report_cmd(args: &[String]) -> ExitCode {
 /// All fixture JSON files under `root` (or `root` itself if it is a file).
 fn fixtures_under(root: &Path) -> Vec<PathBuf> {
     if root.is_file() {
-        return vec![root.to_path_buf()];
+        return if recipe_oracle::is_recipe_oracle_path(root) {
+            Vec::new()
+        } else {
+            vec![root.to_path_buf()]
+        };
     }
     let mut stack = vec![root.to_path_buf()];
     let mut fixtures = Vec::new();
@@ -142,6 +146,7 @@ fn fixtures_under(root: &Path) -> Vec<PathBuf> {
                 stack.push(p);
             } else if p.extension().is_some_and(|e| e == "json")
                 && !p.to_string_lossy().ends_with(".curriculum.json")
+                && !recipe_oracle::is_recipe_oracle_path(&p)
             {
                 fixtures.push(p);
             }

@@ -16,6 +16,7 @@
 //! the harness and evaluator stay clock-free (rehearsal-compatible, ADR-0010).
 
 use crate::harness::{self, Control, RunConfig};
+use crate::recipe_oracle;
 use crate::report::RunReport;
 use crate::scenario::{self, Scenario};
 use crate::validate;
@@ -379,7 +380,9 @@ fn expand_fixtures(roots: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     for root in roots {
         if root.is_file() {
-            out.push(root.clone());
+            if !recipe_oracle::is_recipe_oracle_path(root) {
+                out.push(root.clone());
+            }
             continue;
         }
         let mut stack = vec![root.clone()];
@@ -390,6 +393,7 @@ fn expand_fixtures(roots: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
                     stack.push(p);
                 } else if p.extension().is_some_and(|e| e == "json")
                     && !p.to_string_lossy().ends_with(".curriculum.json")
+                    && !recipe_oracle::is_recipe_oracle_path(&p)
                 {
                     out.push(p);
                 }

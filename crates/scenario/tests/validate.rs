@@ -1,6 +1,7 @@
 //! The validation gate, exercised: broken fixtures are refused with the right
 //! rule; the six shipped fixtures pass their own gate.
 
+use familiar_scenario::recipe_oracle;
 use familiar_scenario::scenario::{self, Scenario};
 use familiar_scenario::validate::{check, check_file, has_errors, Severity};
 use std::fs;
@@ -147,6 +148,7 @@ fn all_shipped_fixtures_pass_their_own_gate() {
                 stack.push(p);
             } else if p.extension().is_some_and(|e| e == "json")
                 && !p.to_string_lossy().ends_with(".curriculum.json")
+                && !recipe_oracle::is_recipe_oracle_path(&p)
             {
                 seen += 1;
                 let (s, violations) = check_file(&p).unwrap();
