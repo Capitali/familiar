@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 (small hours) — One launchctl dialect (companion:claude-bootstrap)
+
+### What changed
+
+- **T-119.** `daemon.rs` was the repo's last speaker of `launchctl unload -w`/`load -w` —
+  the pair the bootstrap script has forbidden since before LWCR ("registered-but-
+  stalled"), kept alive here by an "older but functional API" comment. Functional was
+  luck twice over: `install()` swapped the stable binary in place BEFORE unloading —
+  rewriting the running daemon's executable underneath it — and every launchctl exit
+  code was discarded, so a failed registration returned Ok.
+- Now one dialect, shared with `tools/new-mac-bootstrap.sh` (0dbc525): `register_bracket()`
+  builds the three argv lists — `bootout` of the gui service first, while the registered
+  executable is still the old one; then the binary swap and a fresh plist; then
+  `bootstrap` (which records the new binary's Lightweight Code Requirement — the macOS 27
+  lesson) and `kickstart -k`, both exit-checked: an unregistered agent is now a failed
+  install that says so. `uninstall()` boots out. The uid comes from `id -u` like every
+  other process fact in the file — no unsafe, no new dependency.
+- `the_bracket_reregisters_and_never_speaks_load_or_unload` pins the dialect, the order,
+  and the domain scoping, and refuses any argv word containing "load".
+
+### Checks run
+
+- Green bar in rule-9 shape, twice: on the brick alone (31 suites ok) and again after
+  absorbing main's T-115 recipe crate (fmt, clippy `--all-targets -D warnings`, 33
+  suites ok) — each step's exit checked directly, logs kept. The new test seen passing
+  in both runs. CLI surface unchanged: `daemon install/uninstall` signatures and their
+  main.rs call sites untouched.
+
+### Next
+
+- `install_stable_binary()` can still overwrite the file while a MANUALLY `daemon
+  start`ed (pidfile) instance runs it; the launchd path is now bracketed, and the
+  pidfile path was always kill-first. Fine today; worth a thought if install ever
+  learns to migrate a running manual daemon.
+- `vm/create-famtalker01.sh` still unload/loads — one-shot VM bootstrap, left alone
+  deliberately (T-119 notes).
+
 ## 2026-08-14 (latest) — A useful language with no ambient hands (companion:codex)
 
 ### What changed
