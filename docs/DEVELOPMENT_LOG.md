@@ -6,6 +6,41 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — The phone can finally say what its watch needs (companion:codex)
+
+### What changed
+
+- **T-171 moves an existing diagnosis onto the shipping Device screen.** The iPhone
+  now gives the shared sphere console a phone-local WatchConnectivity snapshot:
+  supported, paired, Familiar installed, and the last address queued. The screen
+  distinguishes no paired watch, missing watch app, address not yet sent, and address
+  sent; each state names the next human action instead of collapsing into “linking”.
+- **Re-link is a real bridge act.** The Device screen's button calls back through the
+  iOS WKWebView bridge to `AppModel.syncWatch()`. Watch-state publications refresh the
+  card, and the bridge now replays device JSON after page load so an early snapshot is
+  not silently lost.
+- **The fact stays where it was learned.** macOS reports Watch support false and renders
+  no card. This brick creates no observation or worldview field and sends no Watch fact
+  to the mesh; T-169 remains the separately governed reporting design.
+
+### Checks run
+
+- Four pure presentation fixtures passed: unsupported shell, unpaired phone, missing
+  app, and installed pending/sent handoff. The sidecar and the console module both
+  parsed cleanly, and the sidecar was present in the built macOS and iOS app bundles.
+- `xcodegen`; unsigned FamiliarMac Release and unsigned FamiliarAgent Release for a
+  generic iOS device both exited zero. Xcode 27's pre-existing actor-isolation and
+  embedded-core deployment-version warnings remain outside this brick.
+- Full workspace rule-9 bar passed: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` (cycle 68,
+  kernel 201, mesh 204, hostile-member 6; zero failures, doc-tests clean).
+
+### Next
+
+- T-172 should make the watch itself render its captured join error and a retry. T-169
+  may later let the familiar offer help from a typed, retention-governed mesh fact; it
+  must not mistake “address queued” for evidence that the watch joined.
+
 ## 2026-08-15 — A build succeeds because the builder did (companion:codex)
 
 ### What changed

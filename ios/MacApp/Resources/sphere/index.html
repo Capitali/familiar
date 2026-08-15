@@ -187,6 +187,7 @@
 </div>
 
 <script src="vendor/qrcode.js"></script>
+<script src="watch-link.js"></script>
 <script type="importmap">
 {"imports":{"three":"./vendor/three/three.module.js","three/addons/controls/OrbitControls.js":"./vendor/three/OrbitControls.js"}}
 </script>
@@ -1614,6 +1615,24 @@ function refreshScreen() {
             ${rule.enabled ? `<button data-rule-id="${esc(rule.id)}" onclick="sphereDisableRule(this.dataset.ruleId)" class="glybtn" style="height:29px;padding:0 11px;border-radius:8px;border-color:rgba(255,143,163,0.3);color:#ffb0bf;"><span class="m" style="font-size:8px;letter-spacing:0.12em;">DISABLE</span></button>` : `<span class="m" style="font-size:8px;letter-spacing:0.12em;color:rgba(170,190,220,0.5);">OFF</span>`}
           </div>`).join('') : `<div class="m" style="font-size:10px;color:rgba(150,180,255,0.45);">no standing rules</div>`}
       </div>` : '';
+    const watchView = window.FamiliarWatchLink
+      ? window.FamiliarWatchLink.presentation(d.watch)
+      : null;
+    const watchCard = watchView ? `
+      <div style="margin:16px 0 18px;padding:14px 16px;border-radius:14px;background:rgba(16,34,60,0.24);border:1px solid ${watchView.border};display:flex;align-items:center;gap:13px;flex-wrap:wrap;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="${watchView.tone}" stroke-width="1.5" style="width:27px;height:27px;flex-shrink:0;">
+          <rect x="7" y="5" width="10" height="14" rx="3"/><path d="M9 5V2h6v3M9 19v3h6v-3" opacity="0.65"/>
+          <circle cx="12" cy="12" r="2.3" fill="${watchView.tone}" stroke="none" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.5s ease-in-out infinite;"/>
+        </svg>
+        <div style="flex:1;min-width:210px;">
+          <div class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);margin-bottom:5px;">APPLE WATCH</div>
+          <div style="font-size:12px;color:${watchView.tone};margin-bottom:3px;">${esc(watchView.title)}</div>
+          <div class="m" style="font-size:9px;line-height:1.5;color:rgba(190,210,240,0.62);">${esc(watchView.detail)}</div>
+        </div>
+        <button onclick="sphereRelinkWatch()" class="glybtn" style="height:34px;padding:0 13px;border-radius:9px;border-color:${watchView.border};color:${watchView.tone};">
+          <span class="m" style="font-size:8px;letter-spacing:0.12em;">${S.watchRelinking ? 'RE-LINK SENT' : 'RE-LINK WATCH'}</span>
+        </button>
+      </div>` : '';
     el.innerHTML = `<div style="max-width:720px;">
       <div class="m" style="font-size:10px;color:rgba(150,180,255,0.6);margin-bottom:6px;">${esc(d.label)} · b${esc(d.build)} · ${esc(v.group_label)}</div>
       ${deviceNameCard}
@@ -1645,6 +1664,7 @@ function refreshScreen() {
       <div class="m" style="font-size:9px;color:rgba(150,180,255,0.45);margin-bottom:6px;">${(d.hosts||[]).map((h)=>(h===d.host?'▸':'')+esc(h)+' <span style="color:rgba(174,231,255,0.55);">'+hostNet(h)+'</span>').join(' · ')}</div>
       ${(d.attempts||[]).length ? `<div class="m" style="font-size:9px;color:rgba(150,180,255,0.5);margin-bottom:6px;">${d.attempts.map(esc).join('<br>')}</div>` : ''}
       ${S.jsErr ? `<div class="m" style="font-size:9px;color:rgba(255,160,160,0.8);margin-bottom:6px;">${esc(S.jsErr)}</div>` : ''}
+      ${watchCard}
       <div style="margin-bottom:10px;"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;">` +
       Object.entries(CONSENT_META).map(([key, label]) => {
@@ -1877,6 +1897,15 @@ window.sphereSetDeviceName = () => {
   if (!name) return;
   toApp('deviceName', { name });
   if (input) input.blur();
+};
+window.sphereRelinkWatch = () => {
+  S.watchRelinking = true;
+  toApp('watchRelink', {});
+  refreshScreen();
+  setTimeout(() => {
+    S.watchRelinking = false;
+    if (S.activeScreen === 'device') refreshScreen();
+  }, 3000);
 };
 window.sphereSponsor = (nodeId, handle) => toApp('sponsor', { node_id: nodeId, handle });
 window.sphereRedeemInvite = () => {
