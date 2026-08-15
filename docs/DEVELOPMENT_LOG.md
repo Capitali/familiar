@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — The surface teaches the core how to read (companion:codex)
+
+### What changed
+
+- **T-157 removes the lamp from `kernel::actuator`.** `RawState { on,
+  brightness_pct }`, `BucketRule.off`, `max_brightness_pct`, and the compiled
+  motorlights parser are gone. A surface now declares named fields as bounded,
+  unit-bearing quantities or opaque enumerations, plus a JSON or line extraction
+  source. Ordered bucket predicates operate only on those declared fields.
+- **The generic contract fails closed.** Missing/empty fields, invalid ranges, unknown
+  enum mappings, ill-typed or out-of-range predicates, duplicate buckets, and a missing
+  final fallback all drop the surface. Every bucket still names a restoring action —
+  the revert map remains the license to act — and malformed runtime output stays
+  unknown instead of being clamped or guessed.
+- **Existing edges migrate without changing their devices.** The motorlights text
+  grammar is expressed by its declaration's line sources and enum mapping; the cycle's
+  fake surface and FamTalker01 keep producing the same text. JSON-native fixtures prove
+  a fridge temperature and a vent position can be declared and bucketed without a new
+  kernel type or parser. ADR-0032 now records the device-agnostic contract.
+
+### Checks run
+
+- Kernel actuator regressions (8 passed, including motorlights compatibility plus the
+  fridge/vent and invalid-contract cases); SystemFact declaration regressions (2
+  passed); all 68 cycle tests passed; FamTalker01's 5 Python tests passed.
+- Full workspace rule-9 bar on the rebased source passed: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` (cycle 68,
+  kernel 200, mesh 204, hostile-member 6, loopback 2+1, all remaining suites and
+  doc-tests with zero failures).
+
+### Next
+
+- T-158 can replace the remaining lighting-shaped `Away`/`Back` policy with declared
+  trigger→act pairs; Ian's dawn roll-shade is its acceptance fixture. New adapters
+  should prefer JSON state output. Line extraction exists to keep deployed device
+  grammars at the declaration edge, not to grow another parser inside the kernel.
+
 ## 2026-08-15 — A member signature is not a human hand (companion:codex)
 
 ### What changed

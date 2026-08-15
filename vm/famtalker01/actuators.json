@@ -4,14 +4,45 @@
       "surface": "living-room-lights",
       "description": "FamTalker01's reversible virtual living-room lights",
       "state_cmd": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface living-room-lights state",
+      "state": {
+        "fields": {
+          "power": {
+            "kind": "enum",
+            "values": ["off", "on"],
+            "source": { "kind": "line", "prefix": "light mode :" },
+            "map": [{ "contains": "off", "value": "off" }],
+            "fallback": "on"
+          },
+          "level": {
+            "kind": "quantity",
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "source": {
+              "kind": "line",
+              "prefix": "brightness :",
+              "between": ["(", "%)"]
+            }
+          }
+        }
+      },
       "actions": {
         "off": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface living-room-lights off",
         "dim": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface living-room-lights dim",
         "bright": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface living-room-lights bright"
       },
       "buckets": [
-        { "name": "off", "off": true },
-        { "name": "dim", "max_brightness_pct": 40 },
+        {
+          "name": "off",
+          "when": [{ "op": "eq", "field": "power", "value": "off" }]
+        },
+        {
+          "name": "dim",
+          "when": [
+            { "op": "eq", "field": "power", "value": "on" },
+            { "op": "at_most", "field": "level", "value": 40 }
+          ]
+        },
         { "name": "bright" }
       ],
       "keywords": "living room lamp lighting virtual home"
@@ -20,14 +51,45 @@
       "surface": "greenhouse-lights",
       "description": "FamTalker01's reversible virtual greenhouse lights",
       "state_cmd": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface greenhouse-lights state",
+      "state": {
+        "fields": {
+          "power": {
+            "kind": "enum",
+            "values": ["off", "on"],
+            "source": { "kind": "line", "prefix": "light mode :" },
+            "map": [{ "contains": "off", "value": "off" }],
+            "fallback": "on"
+          },
+          "level": {
+            "kind": "quantity",
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "source": {
+              "kind": "line",
+              "prefix": "brightness :",
+              "between": ["(", "%)"]
+            }
+          }
+        }
+      },
       "actions": {
         "off": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface greenhouse-lights off",
         "dim": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface greenhouse-lights dim",
         "bright": "python3 /usr/local/lib/familiar/virtual_home.py --state-dir /var/lib/familiar/virtual-home surface greenhouse-lights bright"
       },
       "buckets": [
-        { "name": "off", "off": true },
-        { "name": "dim", "max_brightness_pct": 40 },
+        {
+          "name": "off",
+          "when": [{ "op": "eq", "field": "power", "value": "off" }]
+        },
+        {
+          "name": "dim",
+          "when": [
+            { "op": "eq", "field": "power", "value": "on" },
+            { "op": "at_most", "field": "level", "value": 40 }
+          ]
+        },
         { "name": "bright" }
       ],
       "keywords": "greenhouse grow lamp lighting virtual home"

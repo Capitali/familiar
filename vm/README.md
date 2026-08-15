@@ -60,9 +60,10 @@ auto-join work; point it at the default branch once that merges.
 
 ## Declare the virtual smart home
 
-The VM can become ADR-0032's second, wholly reversible practice surface without a
-new declaration format. After its daemon is upgraded to current `main`, copy the
-repository to the guest and run, as root:
+The VM can become ADR-0032's second, wholly reversible practice surface without
+device-specific kernel code. Its declaration owns the line extractors, typed `power`
+mode and `level` percentage, and the bucket predicates. After its daemon is upgraded to
+current `main`, copy the repository to the guest and run, as root:
 
 ```sh
 bash vm/provision-virtual-home.sh
@@ -72,8 +73,8 @@ That human/infra-run step installs two independent virtual lighting surfaces
 (`living-room-lights` and `greenhouse-lights`), writes the human-owned
 `actuators.json`, and opens `allow_execute` plus `allow_actuate` while preserving
 every other boundary choice. Each surface has a closed revert map: `off`, `dim`, and
-`bright` are both observable buckets and restoring actions. No core or declaration
-schema change is involved.
+`bright` are both observable buckets and restoring actions. The helper's output format
+is unchanged; the declaration now tells the generic kernel how to read it.
 
 A systemd timer watches the two surface states and their aggregate virtual power draw.
 It posts a snapshot through `/local/observe` only when one changes, producing ordinary
