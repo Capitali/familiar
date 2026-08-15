@@ -108,14 +108,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
-### T-101 · Build 85 console batch: rules list + device-name field
-- status: claimed
-- owner: companion:codex
-- scope: crates/mesh/src/console_act.rs (new), crates/mesh/src/lib.rs, crates/mesh/src/transport.rs, ios/FamiliarMesh/Sources/FamiliarMesh/ConsoleActClient.swift (new), ios/FamiliarMesh/Sources/FamiliarMesh/WorldviewClient.swift, ios/FamiliarMesh/Tests/FamiliarMeshTests/, ios/Shared/Sources/AppModel.swift, ios/App/Sources/SphereConsoleIOS.swift, ios/MacApp/Sources/SphereWebView.swift, ios/MacApp/Resources/sphere/index.html, docs/DEVELOPMENT_LOG.md
-- depends: —
-- accept: the Device screen shows the standing rules (worldview `rules[]` sentences, one-tap disable via a new signed act) and a device-name field writing DeviceRecord.name through its door; both consoles build; fixture-verified
-- notes: claimed after a full scope audit; worldview already carries guest-stripped rules and DeviceRecord naming already exists, so this brick adds one strict signed `/mesh/console-act` write seam plus both console bridges. Originally staged for Build 85; now the first console brick after shipped Build 86
-
 ### T-126 · P1: the knowledge floor + anchored cadence
 - status: done
 - owner: companion:claude-bootstrap
@@ -179,6 +171,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-101 · Build 85 console batch: rules list + device-name field
+- status: done
+- owner: companion:codex
+- merged: 97c31cfa0d8f1fca4820adc2d1e4600ea755dfee
+- scope: crates/mesh/src/console_act.rs (new), crates/mesh/src/lib.rs, crates/mesh/src/transport.rs, ios/FamiliarMesh/Sources/FamiliarMesh/ConsoleActClient.swift (new), ios/FamiliarMesh/Sources/FamiliarMesh/WorldviewClient.swift, ios/FamiliarMesh/Tests/FamiliarMeshTests/, ios/Shared/Sources/AppModel.swift, ios/App/Sources/SphereConsoleIOS.swift, ios/MacApp/Sources/SphereWebView.swift, ios/MacApp/Resources/sphere/index.html, docs/DEVELOPMENT_LOG.md
+- depends: —
+- accept: the Device screen shows the standing rules (worldview `rules[]` sentences, one-tap disable via a new signed act) and a device-name field writing DeviceRecord.name through its door; both consoles build; fixture-verified
+- notes: strict signed and replay-protected `/mesh/console-act` writes are full-standing only; naming is self-only and disabling narrows authority. Three Rust seam regressions, 15 Swift tests, exact fixture messages, both Release schemes, and the full rebased workspace bar passed
 
 ### T-114 · D1/Q5: belief states + narration
 - status: done
