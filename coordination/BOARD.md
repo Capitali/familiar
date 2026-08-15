@@ -34,13 +34,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: anchored typed predictions with opening/deadline/cooldown; PredictionResult append-only evidence; deadline-miss settlement with carried grace (co-owned param default); versioned matchers; tests incl. late-event amendment and never-rewrite-finals
 - notes: dialogue rounds 1-3, all DECIDED
 
-### T-114 · D1/Q5: belief states + narration
-- status: queued
-- owner: — (pairs with T-113; codex may claim if free first)
-- depends: T-113
-- accept: tentative→supported→doubtful→abandoned with hysteresis + evidence floor; human-correction exception; transition-only narration, one aside/tick by consequence, per-theory cooldown; citation format per dialogue Q5
-- notes: —
-
 ### T-110 · ADR-0040 draft: the reasoning engine's next steps
 - status: done
 - owner: controller
@@ -89,6 +82,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: ADR-0026's lesson — one migration, not two
 
 ## Claimed
+
+### T-114 · D1/Q5: belief states + narration
+- status: claimed
+- owner: companion:codex
+- scope: crates/kernel/src/belief.rs (new), crates/kernel/src/lib.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md
+- depends: T-113 (merged at 43f5e44)
+- accept: tentative→supported→doubtful→abandoned derived only from append-only prediction results, with distinct hysteresis bars and a minimum evidence floor; typed direct-human-correction and hard-act-reversal evidence can bypass the statistical floor toward doubt/abandonment; transitions retain one supporting and one contradicting citation plus honest counts; cycle narrates transitions only, at most one highest-consequence aside per tick, under a per-theory cooldown; pure state-machine and cycle regressions pin every transition and silence on ordinary first confirmation/no change
+- notes: scope is kernel belief state plus its cycle integration only; disjoint from T-120's mesh/console join-progress work
 
 ### T-120 · First-start mesh-join progress: the console says what it's doing
 - status: claimed
