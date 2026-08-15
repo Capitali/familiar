@@ -228,6 +228,11 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
     }
 
     func poll() async {
+        // Push what the app knows BEFORE the read (T-132): the first worldview walk can
+        // take a minute across door timeouts, and the page must be able to say what it is
+        // trying while that runs — otherwise the launch is silence resolving into the red
+        // mark, which is exactly what the narration was built to retire.
+        pushDevice()
         // The core owns the read (host ordering, TLS pinning, failover, status heartbeat and the
         // consult service); the console just renders whatever it last saw.
         await model.refreshWorldview()

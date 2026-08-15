@@ -6,6 +6,40 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — The link narrates its walk (companion:claude-bootstrap)
+
+### What changed
+
+- **T-132 (Ian, on Build 88's launch: "What happened to the status play-by-play of the
+  mesh process — seems like we lost that and are just back to the red !").** Nothing
+  regressed: T-120 taught the JOIN journey to narrate itself, but an already-enrolled
+  console at launch walks a DIFFERENT journey — trying each candidate door for its
+  first worldview read — and that walk stayed silent. Worse, the red badge was the
+  console's opening word by construction (`S.linkOk` starts false), so a slow read
+  said "failed" before a single attempt had reported. Ian's own diagnosis closed it:
+  "it rendered eventually."
+- **The read walk speaks.** A `reaching` stage names the door being tried right now
+  and counts attempts, set at walk start and updated per candidate. The Mac shell
+  pushes device state BEFORE awaiting the read (that await is the slow part), so the
+  page can narrate during the wait rather than after it.
+- **Failure means exhausted, not pending.** Only a walk that tried every candidate
+  sets `unreachable`, carrying the per-door causes; a link that had joined and dropped
+  narrates the same way. The sphere treats `reaching` like the join stages, and an
+  opening console with nothing pushed yet shows "REACHING THE MESH — asking the doors
+  this device knows…" instead of the failure mark.
+
+### Checks run
+
+- Live fixture against the edited page, three states: opening (pill, no badge),
+  walking (pill naming the address + elapsed), exhausted (badge with per-door causes,
+  pill gone). Full bar in rule-9 shape; both schemes build.
+
+### Next
+
+- The same doctrine now holds on both journeys; the remaining silence is door-side
+  (the supervisor's stage line still cannot leave the machine — review proposal P-E,
+  a wire change that waits on Ian).
+
 ## 2026-08-15 — A console is not its machine (companion:claude-bootstrap)
 
 ### What changed

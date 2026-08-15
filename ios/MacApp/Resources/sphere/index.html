@@ -1765,8 +1765,15 @@ function renderChrome() {
   // T-120: while the link is down because a JOIN is still in flight, the console says what
   // it is trying instead of wearing the failure mark — the badge is for terminal failure.
   const jp = (S.device && S.device.join) || null;
-  const joining = !S.linkOk && jp &&
-    ['seekingDirectory', 'knocking', 'awaitingAdmission', 'admitted'].includes(jp.stage);
+  // 'reaching' is the enrolled console's own journey (T-132): walking its doors for a
+  // first read. It narrates exactly like the join stages — the badge is for a walk that
+  // has EXHAUSTED every door, never for one still under way.
+  // Before ANY read has landed and before the app has said what it is doing, the honest
+  // state is "still trying", not "failed" — S.linkOk starts false, so the badge used to be
+  // the console's opening word at every launch.
+  const opening = !S.linkOk && !S.view && !jp;
+  const joining = !S.linkOk && (opening || (jp &&
+    ['reaching', 'seekingDirectory', 'knocking', 'awaitingAdmission', 'admitted'].includes(jp.stage)));
   const showBadge = (!S.linkOk || !!S.jsErr) && !joining;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
   const lm = $('linkmsg');
@@ -1775,15 +1782,18 @@ function renderChrome() {
   const jl = $('joinlive');
   if (jl) {
     if (joining) {
-      const stageWord = { seekingDirectory: 'SEEKING THE MESH', knocking: 'KNOCKING',
-        awaitingAdmission: 'AWAITING ADMISSION', admitted: 'ADMITTED — FIRST READ' }[jp.stage] || 'JOINING';
-      const extra = jp.stage === 'awaitingAdmission' && jp.tries
-        ? ' · asked ' + jp.tries + '× over ' + dur(jp.elapsed || 0)
-        : ((jp.elapsed || 0) > 3 ? ' · ' + dur(jp.elapsed) : '');
+      const stageWord = !jp ? 'REACHING THE MESH'
+        : ({ reaching: 'REACHING THE MESH', seekingDirectory: 'SEEKING THE MESH',
+             knocking: 'KNOCKING', awaitingAdmission: 'AWAITING ADMISSION',
+             admitted: 'ADMITTED — FIRST READ' }[jp.stage] || 'JOINING');
+      const extra = !jp ? ''
+        : (jp.stage === 'awaitingAdmission' && jp.tries
+            ? ' · asked ' + jp.tries + '× over ' + dur(jp.elapsed || 0)
+            : ((jp.elapsed || 0) > 3 ? ' · ' + dur(jp.elapsed) : ''));
       jl.style.display = 'flex';
       $('joinstage').textContent = stageWord;
       const jd = $('joindetail');
-      jd.textContent = (jp.detail || '') + extra;
+      jd.textContent = (jp ? (jp.detail || '') : 'asking the doors this device knows…') + extra;
       jd.style.display = jd.textContent ? 'block' : 'none';
     } else jl.style.display = 'none';
   }

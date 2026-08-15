@@ -647,6 +647,7 @@ final class AppModel: ObservableObject {
     /// Progress and failure are different facts and must read differently.
     enum JoinStage: String {
         case idle                // nothing in flight
+        case reaching            // enrolled: walking the candidate doors for a read
         case seekingDirectory    // asking the lighthouse which meshes are reachable
         case knocking            // presenting the covenant at a door
         case awaitingAdmission   // the door heard the knock; the mesh has not admitted yet
@@ -1428,9 +1429,23 @@ final class AppModel: ObservableObject {
         // member/visitor. Trying the next door is for this round only; only the five-miss
         // hysteresis below may change the preference.
         let candidates = hosts.isEmpty ? [host] : hosts
+        // The SECOND journey narrates too (T-132). An enrolled console at launch is not
+        // joining — it is walking its doors for a first read, and that walk can take a
+        // minute across timeouts. T-120 taught the join to speak; silence here resolved
+        // into the same red mark it was meant to retire. Progress and failure remain
+        // different facts: only a walk that exhausts every candidate is a failure.
+        if joinProgress.stage != .joined {
+            joinStage(.reaching, "reaching the mesh — trying \(candidates.first ?? host)…",
+                      host: candidates.first ?? host)
+        }
         for candidate in candidates {
             host = candidate
             let tried = candidate
+            if joinProgress.stage == .reaching {
+                joinProgress.host = candidate
+                joinProgress.detail = "reaching the mesh — asking \(candidate)…"
+                joinProgress.tries += 1
+            }
             guard let session = worldviewSession() else {
                 worldviewError = "no session: grant=\(storedGrant() != nil) host=\(host.isEmpty ? "empty" : host)"
                 return
@@ -1641,6 +1656,13 @@ final class AppModel: ObservableObject {
         // existed with a render path but was never written).
         attemptLog = attempts
         worldviewError = "pins \(MeshTLS.pins.count)+\(MeshTLS.alwaysTrust.count) · " + attempts.joined(separator: " ")
+        // Every door refused or timed out — NOW it is a failure, and it says which and why
+        // (T-132). A link that had been joined and dropped narrates the same way.
+        if joinProgress.stage == .reaching || joinProgress.stage == .joined {
+            joinStage(.unreachable,
+                      "no door answered — retrying every few seconds",
+                      causes: attempts)
+        }
     }
 
     /// This app's build number ("16") — reported to the familiar so it shows in the roster.
