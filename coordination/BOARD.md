@@ -94,6 +94,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-167 · `theories retire` — a clean slate that keeps the record
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: crates/kernel/src/thread.rs (retire + status exclusions), crates/cli (theories retire)
+- depends: —
+- accept: `familiar theories retire --legacy --reason "…"` mass-retires every ACTIVE thread minted before the honest engine (v=0 or facts_rev=0 — no anchors, no facts validation, no predictions), append-retained as status `retired` carrying the reason and date; questions bound to those threads are dismissed; `--dry-run` prints what would go; retired threads never surface, are never pursued, and a human answer still revives one; nothing is deleted (Round 20: minimise what you hold about others, NEVER what you hold about yourself — the thread store is the familiar's own reasoning record)
+- notes: Ian 2026-08-15 — "what's the best way to start theories fresh… nothing seemed removed". Diagnosis: (1) the fold is conservative BY DESIGN (tombstones point home, nothing deleted); (2) THE REAL CAUSE — a legacy thread carries no predictions, so T-113 settlement and T-114 erosion can never reach it. Pre-engine theories are immortal by construction; only a deliberate human act can close them. Live counts at claim time: MacOnStick 14 legacy active / 0 engine-minted
+
 ### T-166 · Mandatory inconvenient disclosure (the mirror of the keystone)
 - status: queued
 - owner: —
