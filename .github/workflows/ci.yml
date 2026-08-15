@@ -1,6 +1,6 @@
 name: CI
 
-# The green bar, enforced. Mirrors CONTRIBUTING.md: fmt + clippy(-D warnings) +
+# The green bar, enforced. Mirrors CONTRIBUTING.md: fmt + clippy(--all-targets -D warnings) +
 # test, plus a guard that no `unsafe` enters the kernel.
 
 on:

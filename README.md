@@ -177,7 +177,8 @@ cargo run -p familiar-cli -- daemon status # start | stop | reload | install | u
 ```
 
 The green bar — required for every change — is `cargo fmt --check`,
-`cargo clippy -- -D warnings`, and `cargo test`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`cargo clippy --all-targets -- -D warnings`, and `cargo test`, judged by their **exit
+codes**. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
 

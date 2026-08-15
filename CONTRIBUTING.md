@@ -11,9 +11,16 @@ No change merges unless all of these are clean:
 
 ```sh
 cargo fmt --check
-cargo clippy -- -D warnings    # warnings are errors
+cargo clippy --all-targets -- -D warnings    # warnings are errors, TEST CODE INCLUDED
 cargo test
 ```
+
+`--all-targets` is not optional and not cosmetic: without it clippy skips test code, so the
+bar you run locally is weaker than the one CI runs and a change can pass here and fail there.
+
+Read the **exit codes**, never the output. A bar piped through `grep`/`tail` reports the
+*filter's* status, not the check's — that is how a failing build once printed `CLIPPY_PASS`
+(2026-08-15), and the same trap was removed from `ship.sh` in T-143.
 
 And the kernel must contain no `unsafe` (enforced by `#![forbid(unsafe_code)]`).
 CI runs the same gate ([.github/workflows/ci.yml](.github/workflows/ci.yml)).
