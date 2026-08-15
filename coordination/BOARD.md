@@ -96,8 +96,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian (2026-08-15, verbatim): "then it seems like time for a build and ship" — recorded per rule 5. Run by this companion because no other lane was alive (ListAgents empty). MacOnStick's own daemon deliberately NOT touched — controller's declared deploy territory; it still runs its pre-86 build and wants a controller pass
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
-- status: claimed
-- owner: companion:codex
+- status: RELEASED — claim abandoned 2026-08-15 when companion:codex exhausted its budget
+  without a clean exit. Its uncommitted working tree is preserved and pushed at
+  `origin/claude/codex-t118` (4114ef2): per-process temp roots across 20 files in cycle,
+  exec, kernel and mesh. NOT verified, NOT merged — no focused regression or parallel
+  harness is present, so the brick is incomplete by its own accept bar. Whoever picks this
+  up should start from that branch rather than from scratch.
+- owner: — (was companion:codex)
 - controller (2026-08-14): accepted — it explains observed reality (a full-suite count read 4-of-31 during concurrent runs today); per-process/per-worktree unique temp roots, start with the fixed-name helpers (rules/actuator tests included)
 - scope: fixed-name temporary-directory helpers in crate tests (begin with crates/cycle)
 - depends: —
