@@ -93,6 +93,94 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-133 · Remote positive gate grants are refused (D1, priority zero)
+- status: queued
+- owner: — (either lane; codex may claim)
+- scope: crates/mesh (apply_authority_grant + brief AuthorityGrant path), crates/kernel/boundary write path
+- depends: T-139 harness (shares its adversarial fixtures)
+- accept: no remote grant may WIDEN a boundary; stop/narrow still travels; the unchecked `by` claim is deleted and remote answers stop being attributed to "ian" (honest `human-at:<node>` or the real associated actor); refusals recorded; hostile-member + replay + unmatched-nonce fixtures pass
+- notes: D1, dialogue Round 3. Deliberate capability reduction — a headless node cannot be granted execute-class powers remotely until a human-device-bound receipt exists (Law III: no counterfeit authority). Ian is informed in the dialogue
+
+### T-134 · Peer goal mutation refused until event authority (D2)
+- status: queued
+- owner: —
+- scope: crates/mesh/src/merge.rs (GoalShare adoption)
+- depends: T-139
+- accept: unknown goals may be adopted; remote field rewrites refused and logged (no wall-clock LWW takeover); clock-skew/takeover fixtures pass; C-C event-sourcing tracked as the successor brick
+- notes: D2, dialogue Round 3
+
+### T-135 · One admission function for every theory route (D3 + D8)
+- status: queued
+- owner: —
+- scope: crates/kernel (admission contract), crates/mesh (typed AdmittedTheoryProjection), crates/cycle (device/needs/CLI routes), ios (LocalReasoner emits the draft)
+- depends: T-136 preferred first (facts source), T-139
+- accept: mesh, device, needs-muse and CLI all pass one versioned admission function; invalid legacy requests become Inquiries or refusals, never theories; the T-126 lexical guard retires when its last caller is typed; P-C's channel-inconsistency refusal pinned with BOTH the field failure and a benign same-vocabulary case; typed Diagnosis/ChangeClaim is the durable replacement
+- notes: D3 + D8, dialogue Round 3 (codex C-A + claude P-B/P-C unified)
+
+### T-136 · One typed source per kind of truth: the SystemFact registry (D4)
+- status: queued
+- owner: —
+- scope: crates/kernel/src/system_facts.rs, crates/cycle grounding_facts
+- depends: —
+- accept: grounding_facts becomes a bounded VIEW of the registry (not a sibling assembly); registry distinguishes compiled invariants / declaration-derived deployment facts with digest / observations-never-promoted; admitted drafts record revision + declaration digest; a short epistemic ADR states the principle
+- notes: D4, dialogue Round 3 (claude P-A, codex Answer 1)
+
+### T-137 · Provenance vocabulary + domain envelopes (D5, ADR first)
+- status: queued
+- owner: —
+- scope: docs/decision-records (ADR), then crates/kernel + crates/mesh envelopes
+- depends: —
+- accept: one shared ProvenanceRef vocabulary; strict per-domain envelopes (name claim, prediction result, derived belief, convention); discredited stamps supersede without rewriting history; shared lineage is a consented pseudonymous projection
+- notes: D5 (codex C-D + claude P-N unified)
+
+### T-138 · ADR: coordination is for conventions, never truth (D6 — PROPOSED, needs Ian)
+- status: proposed
+- owner: —
+- scope: docs/decision-records
+- depends: T-140 (hard gate before any implementation)
+- accept: an ADR stating that population influence may select only among declared-equivalent, reversible, expiring conventions; belief/Laws/SystemFacts/preferences/standing/boundaries are never votable; admissibility declared only by kernel protocol class or human-authored local declaration; abstention is not defection; the redirection invariant (D7 scoped asymmetry) is a property of the layer
+- notes: D6 — this is Ian's thousand-agent ambition, bounded. His acceptance required before the layer is built
+
+### T-139 · Hostile-member harness (D7, step one)
+- status: queued
+- owner: —
+- scope: crates/mesh test infrastructure (deterministic two/N-instance harness + network schedule)
+- depends: —
+- accept: reusable fixtures for malicious signed member, replay, unmatched nonce, future timestamp, concurrent claim, partition, recovery; shared by T-133/T-134/T-135
+- notes: D7 — proof infrastructure moves into step one so containment ships tested
+
+### T-140 · Population laboratory (D7, gate before conventions)
+- status: queued
+- owner: —
+- scope: crates/scenario extension (N-node deterministic simulation)
+- depends: T-139
+- accept: correlated ancestry, Sybils, amplification, unanimity/dissent, tipping, post-manipulation hysteresis, partitions; constitutional violations are HARD failures, convergence secondary; reports origin concentration, effective independent sample size, dissent, churn, tipping susceptibility, correction/redirection latency
+- notes: D7 — hard gate before D6's convention layer
+
+### T-141 · Truth build + SBOM + CI coverage (D10, C-H)
+- status: queued
+- owner: —
+- scope: tooling/CI, docs labeling
+- depends: —
+- accept: generated as-built inventory (persistence, capabilities, authority writers, wire versions, tests, deps) + machine SBOM; docs labeled normative/as-built/field/historical; CI fails on drift; Rust advisories/licenses, Swift schemes on macOS, console fixture covered
+- notes: D10 (codex C-H)
+
+### T-142 · Console lineage after host identity (D9)
+- status: queued
+- owner: —
+- scope: crates/mesh (device/console association), mesh doctor
+- depends: typed host identity (P-I)
+- accept: console instances carry device/host lineage (never a human actor as identity); mesh doctor NAMES stale same-label console candidates; no automatic merge or severance — severance remains a human act
+- notes: D9 (claude P-O + codex Answer 3). Live evidence: a Build-78 "Wildhorse console" ghost sits beside the live one
+
+### T-143 · Tooling and test honesty (D10)
+- status: queued
+- owner: —
+- scope: ios/tools/ship.sh, crates/cycle test seam, T-118 temp roots
+- depends: —
+- accept: ship.sh checks exit codes rather than grepping for a success string; consult tests use an injected lane/waiting seam instead of a retry helper; T-118's per-worktree temp roots folded in
+- notes: D10 (claude P-F/P-G)
+
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
 - status: done
 - owner: controller
