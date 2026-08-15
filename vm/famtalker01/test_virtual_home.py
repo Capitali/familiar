@@ -70,10 +70,15 @@ class VirtualHomeTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unknown state", result.stderr)
 
-    def test_declaration_is_closed_over_its_revert_actions(self):
+    def test_declaration_owns_its_reading_contract_and_revert_map(self):
         declared = json.loads(DECLARATION.read_text())["actuators"]
         self.assertEqual(len(declared), 2)
         for surface in declared:
+            fields = surface["state"]["fields"]
+            self.assertEqual(fields["power"]["kind"], "enum")
+            self.assertEqual(fields["level"]["unit"], "percent")
+            self.assertEqual(fields["level"]["min"], 0)
+            self.assertEqual(fields["level"]["max"], 100)
             buckets = {bucket["name"] for bucket in surface["buckets"]}
             self.assertEqual(buckets, set(surface["actions"]))
             self.assertEqual(buckets, {"off", "dim", "bright"})

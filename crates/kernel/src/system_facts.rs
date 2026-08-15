@@ -411,13 +411,29 @@ mod t136_tests {
             .join(",");
         let buckets: String = labels
             .iter()
-            .map(|l| format!("{{\"name\":\"{l}\"}}"))
+            .enumerate()
+            .map(|(i, l)| {
+                if i + 1 == labels.len() {
+                    format!("{{\"name\":\"{l}\"}}")
+                } else {
+                    format!(
+                        "{{\"name\":\"{l}\",\"when\":[{{\"op\":\"eq\",\"field\":\"bucket\",\"value\":\"{l}\"}}]}}"
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let values: String = labels
+            .iter()
+            .map(|l| format!("\"{l}\""))
             .collect::<Vec<_>>()
             .join(",");
         fs::write(
             dir.join(ACTUATORS_FILE_FOR_TEST),
             format!(
                 "{{\"actuators\":[{{\"surface\":\"{surface}\",\"state_cmd\":\"true\",\
+                 \"state\":{{\"fields\":{{\"bucket\":{{\"kind\":\"enum\",\"values\":[{values}],\
+                 \"source\":{{\"kind\":\"json\",\"key\":\"bucket\"}}}}}}}},\
                  \"actions\":{{{actions}}},\"buckets\":[{buckets}]}}]}}"
             ),
         )

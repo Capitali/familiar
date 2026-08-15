@@ -2493,8 +2493,9 @@ fn actuator_tool_id(surface: &str, label: &str) -> String {
 /// Materialize each declared surface's acts as library Tools (`origin: "declared"`) so
 /// best_match, health tracking, and the execution gates all apply to them unchanged.
 /// Idempotent: scripts are rewritten only when the declaration changed; Tool rows are
-/// appended once. A surface the load dropped (buckets not closed over actions) is
-/// recorded visibly the first time it is seen — a broken declaration must not be quiet.
+/// appended once. A surface the load dropped (invalid reading contract, predicates, or
+/// revert map) is recorded visibly the first time it is seen — a broken declaration
+/// must not be quiet.
 fn sync_actuator_tools(
     dir: &Path,
     acts: &[familiar_kernel::actuator::Actuator],
@@ -2567,7 +2568,7 @@ fn sync_actuator_tools(
                     "familiar",
                     "declined",
                     format!("actuator:{surface}"),
-                    "declared buckets are not closed over actions — the revert promise cannot hold, surface skipped",
+                    "declared reading contract, bucket predicates, or revert map is invalid — surface skipped",
                     "familiar",
                     now,
                     1.0,
@@ -2703,7 +2704,7 @@ fn poll_actuators(
         let Some(out) = run_surface_tool(dir, &actuator_tool_id(&a.surface, "state"), now)? else {
             continue;
         };
-        let Some(raw) = familiar_kernel::actuator::parse_state(&out) else {
+        let Some(raw) = familiar_kernel::actuator::parse_state(a, &out) else {
             continue;
         };
         let bucket = familiar_kernel::actuator::bucket_of(a, &raw);
@@ -3062,7 +3063,7 @@ fn tend_actuators(dir: &Path, now: i64) -> io::Result<usize> {
         let Some(out) = run_surface_tool(dir, &actuator_tool_id(&a.surface, "state"), now)? else {
             continue; // unreadable surface: no acting blind
         };
-        let Some(raw) = familiar_kernel::actuator::parse_state(&out) else {
+        let Some(raw) = familiar_kernel::actuator::parse_state(a, &out) else {
             continue;
         };
         let prev = familiar_kernel::actuator::bucket_of(a, &raw);
@@ -3174,7 +3175,7 @@ fn tend_rules(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Res
         let Some(out) = run_surface_tool(dir, &actuator_tool_id(&a.surface, "state"), now)? else {
             continue;
         };
-        let Some(raw) = familiar_kernel::actuator::parse_state(&out) else {
+        let Some(raw) = familiar_kernel::actuator::parse_state(a, &out) else {
             continue;
         };
         let prev = familiar_kernel::actuator::bucket_of(a, &raw);
@@ -4724,8 +4725,8 @@ mod tests {
         }
     }
 
-    /// A fake light: state is a text file in the motorlights format; the actions rewrite
-    /// it and say so (a silent tool reads as broken, exactly like the real CLI prints).
+    /// A fake light: its declaration owns the grammar for the text file; the actions
+    /// rewrite it and say so (a silent tool reads as broken, exactly like the real CLI).
     fn write_fake_actuator(dir: &Path) {
         let light = dir.join("light.txt");
         fs::write(&light, light_text("bright")).unwrap();
@@ -4739,8 +4740,33 @@ mod tests {
             "surface": "lights",
             "description": "fake strip",
             "state_cmd": format!("cat {}", light.display()),
+            "state": {"fields": {
+                "power": {
+                    "kind": "enum",
+                    "values": ["off", "on"],
+                    "source": {"kind": "line", "prefix": "light mode :"},
+                    "map": [{"contains": "off", "value": "off"}],
+                    "fallback": "on"
+                },
+                "level": {
+                    "kind": "quantity",
+                    "unit": "percent",
+                    "min": 0,
+                    "max": 100,
+                    "source": {
+                        "kind": "line",
+                        "prefix": "brightness :",
+                        "between": ["(", "%)"]
+                    }
+                }
+            }},
             "actions": {"dim": set("dim", "51", "20"), "bright": set("bright", "204", "80")},
-            "buckets": [{"name": "dim", "max_brightness_pct": 40.0}, {"name": "bright"}],
+            "buckets": [
+                {"name": "dim", "when": [
+                    {"op": "at_most", "field": "level", "value": 40.0}
+                ]},
+                {"name": "bright"}
+            ],
             "keywords": "lamp led evening"
         }]});
         fs::write(

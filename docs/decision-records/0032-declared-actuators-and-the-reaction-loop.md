@@ -1,7 +1,8 @@
 # ADR-0032 — Declared actuators and the reaction loop
 
 - **Status:** accepted — implemented 2026-08-08 (the gate, the declaration format, the
-  poll → heed → tend loop, reaction evidence, habit folding)
+  poll → heed → tend loop, reaction evidence, habit folding); reading contract amended
+  2026-08-15 by T-157 so the kernel no longer contains the first device's grammar
 - **Relates to:** [ADR-0031](0031-consent-by-observation.md) (the philosophy this makes
   concrete), [ADR-0022](0022-the-human-dossier.md) (habit patterns are a dossier kind),
   [ADR-0005](0005-human-owned-capability-boundary.md) (the gate),
@@ -24,16 +25,23 @@ The human writes `actuators.json` in the data dir; the familiar reads it and nev
 writes it. An undeclared device has no path to actuation whatever any gate says — there
 is no discovery-to-actuation pipeline, deliberately. Each declared surface carries:
 
-- `state_cmd` — how to read it (the motorlights text contract: a `light mode :` line
-  and a `brightness : N/255  (NN%)` line);
+- `state_cmd` — how to read it, plus a `state.fields` contract. Every field is either a
+  quantity with a semantic name, unit, and honest range, or an opaque enumeration with
+  its complete accepted values. A source extracts each field from a top-level JSON key
+  (preferred for new adapters) or from declaration-owned line prefixes and delimiters
+  (the compatibility path for existing device output). The kernel validates and
+  evaluates this generic contract; no device vocabulary or output grammar is compiled
+  into it;
 - `actions` — act label → shell command;
-- `buckets` — ordered rules mapping a raw reading to a coarse state, **where every
-  bucket name must be an `actions` key: the bucket set IS the revert map.** A surface
-  whose buckets are not closed over its actions cannot honor the revert promise and is
-  dropped loudly at load. Reversibility is the license to act at all.
-- Buckets are honest about what devices report: the SP548E never echoes its colour and
-  its state block cannot even show *off*, so such a surface declares no `off` bucket —
-  off remains an act it can take, not a state it can verify.
+- `buckets` — ordered, typed predicates (`eq`, `at_most`, `at_least`) over declared
+  fields, with an unconditional final fallback. **Every bucket name must be an
+  `actions` key: the bucket set IS the revert map.** Duplicate buckets, ill-typed or
+  out-of-range predicates, incomplete reading contracts, and maps without a final
+  fallback are dropped loudly. Reversibility is the license to act at all.
+- Buckets remain honest about what devices report. An action that cannot be observed
+  may still exist, but it is not a bucket and therefore cannot be claimed as an exact
+  restoring state. Adding a fridge temperature or vent position is declaration work,
+  not a kernel change.
 
 ### One gate: `allow_actuate`
 
@@ -109,9 +117,9 @@ its first human-reaction dimension.
 - A wrong theory now produces a wrong act in the physical world. Mitigations: declared
   surfaces only, reversible by construction, one act per surface per window, six-hour
   rest after any rejection.
-- Bucket coarseness hides detail (colour, exact levels); the revert restores the
-  *bucket*, not the exact prior state. Declaring finer buckets is the remedy, not
-  cleverer inference.
+- Bucket coarseness hides detail; the revert restores the *bucket*, not the exact prior
+  state. Declaring finer typed fields and buckets is the remedy, not cleverer kernel
+  inference.
 - **The launchd/TCC caveat:** BLE from the daemon (bleak/CoreBluetooth under a spawned
   python) needs Bluetooth permission, and prompt attribution for a launchd agent is
   uncertain. The procedure: run `familiar actuate lights state` once interactively to
@@ -124,5 +132,6 @@ its first human-reaction dimension.
 - Habit-driven initiation (act from a strong habit pattern, not only a need-thread) —
   after the patterns have real depth.
 - Reaction-aware trial scoring beyond pass/fail (duration-weighted standing).
-- A second surface (the declaration format should prove itself against something that
-  is not a light).
+- Field calibration and richer adapters should remain at the declared/cultivated-tool
+  edge. If supporting a new device would require a kernel type naming that device, the
+  declaration is still incomplete.

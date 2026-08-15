@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """A tiny, persistent virtual smart home for FamTalker01.
 
-The actuator side deliberately prints ADR-0032's existing motorlights-shaped state
-contract.  The observation side emits ordinary /local/observe JSON objects.  There is
-no network listener and no hidden control path: the human-installed actuators.json is
-the only route by which the familiar may drive these surfaces.
+The actuator side deliberately preserves its original text output; actuators.json now
+owns the typed extraction contract for that output.  The observation side emits
+ordinary /local/observe JSON objects.  There is no network listener and no hidden
+control path: the human-installed declaration is the only route by which the familiar
+may drive these surfaces.
 """
 
 import argparse
