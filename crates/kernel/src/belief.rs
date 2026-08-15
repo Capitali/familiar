@@ -566,6 +566,8 @@ mod tests {
             origin: "llm".into(),
             origin_human: String::new(),
             actor: "familiar".into(),
+            anchors: Vec::new(),
+            facts_rev: 0,
         }
     }
 

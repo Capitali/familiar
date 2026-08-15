@@ -45,6 +45,7 @@ pub mod selection;
 pub mod service;
 pub mod spec;
 pub mod store;
+pub mod system_facts;
 pub mod thread;
 pub mod tool;
 pub mod trial;
