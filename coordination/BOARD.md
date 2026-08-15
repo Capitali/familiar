@@ -91,14 +91,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: tentative→supported→doubtful→abandoned derived only from append-only prediction results, with distinct hysteresis bars and a minimum evidence floor; typed direct-human-correction and hard-act-reversal evidence can bypass the statistical floor toward doubt/abandonment; transitions retain one supporting and one contradicting citation plus honest counts; cycle narrates transitions only, at most one highest-consequence aside per tick, under a per-theory cooldown; pure state-machine and cycle regressions pin every transition and silence on ordinary first confirmation/no change
 - notes: scope is kernel belief state plus its cycle integration only; disjoint from T-120's mesh/console join-progress work
 
-### T-120 · First-start mesh-join progress: the console says what it's doing
-- status: claimed
-- owner: companion:claude-bootstrap
-- scope: console join/connection status surface (ios/Shared/Sources/AppModel.swift, ios/MacApp/Resources/sphere/index.html, iPhone equivalents) + whatever daemon-side join-progress detail the console needs (crates/mesh status/worldview read path; no wire-contract change without stopping for Ian per house rules)
-- depends: — (T-101 queued on the same console files; controller may re-sequence — this claim yields if so)
-- accept: from cold start to joined, the console shows live progress stages with detail on what it is trying (e.g. starting daemon → reaching door → rendezvous → exchanging → joined + peer count) instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect daemon-reported truth, not console guesses; fixture-verified
-- notes: Ian (2026-08-14, verbatim): "when a client first starts sometimes it can take a minute or two to reach and join the mesh — we need to show some sort of status, progress, details on what it's doing or trying to the user so that they know it's not just failed with a red exclamation point". Recorded per rule 5 from the bootstrap session; claimed 2026-08-15 after T-119 landed, per the intent stated at proposal
-
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: done
 - owner: controller
@@ -128,6 +120,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-120 · First-start mesh-join progress: the console says what it's doing
+- status: done
+- owner: companion:claude-bootstrap
+- merged: 5bbfab4
+- scope: console join/connection status surface (ios/Shared/Sources/AppModel.swift, ios/App/Sources/Views.swift, ios/MacApp/Sources/MacEnrollView.swift, ios/MacApp/Sources/SphereWebView.swift, ios/MacApp/Resources/sphere/index.html)
+- depends: —
+- accept: from cold start to joined, the console shows live progress stages with detail on what it is trying instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect protocol facts, not console guesses; fixture-verified
+- notes: JoinProgress stage machine published from AppModel; both enroll views and the sphere branch on it (joinlive pill; badge = terminal failure only, Mac badge finally carries a message); never-written attemptLog now fed; autoEnrollTried ordering bug fixed. Both schemes built; sphere fixture-driven live over localhost; bar 33 suites on the merged tree. Daemon-side stage export (mesh/status.txt → wire) deliberately NOT done — wire-contract change, waits on Ian (see log Next). Narrative: DEVELOPMENT_LOG 2026-08-15 "The console says what it is trying"
 
 ### T-116 · Q4: scenario fixture oracles
 - status: done
