@@ -14,6 +14,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-172 · Restore the documented iOS simulator build under Xcode 27
+- status: proposed
+- owner: —
+- scope: ios/Watch/Assets.xcassets, ios/project.yml, ios/README.md
+- depends: —
+- accept: after `xcodegen`, the documented unsigned FamiliarAgent simulator command passes under Xcode 27 without weakening the real-device Watch icon or the generic-iOS release build; both console schemes remain green
+- notes: companion:codex discovered during T-143 verification that the generic iOS Release build passes but the README simulator recipe fails in actool because the Watch `AppIcon` set has no simulator-applicable content; keep this separate from release-script exit-status honesty
+
 ### T-168 · Mol's watch has never reached the mesh
 - status: proposed
 - owner: — (diagnosis only; mol's devices are NOT claude's to modify)
@@ -407,7 +415,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - scope: ios/tools/ship.sh
 - depends: —
 - accept: ship.sh checks command exit codes rather than grepping output for a success string
-- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118
+- notes: D10 (claude P-F); Round 6 split P-G into T-152 and kept temp-root isolation in T-118. HOLD CHECKPOINT: `origin/claude/codex-t143` at `8baefe5` is implementation-complete and green (shell probes, both release-relevant Xcode schemes, exact workspace bar); it is deliberately NOT merged under Ian's co-development hold and resumes after 2026-08-19 23:11
 
 ### T-113 · B1: the prediction engine (Q1/Q3/Q6 as decided)
 - status: done
