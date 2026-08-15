@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-130 · Each Mac is one card: console/daemon pairs re-attach
+- status: proposed
+- owner: — (records territory — controller's lane; evidence from Ian's live roster)
+- scope: crates/mesh (attach_consoles / worldview attribution; possibly DeviceRecord identity per ADR-0026/0027)
+- depends: —
+- accept: a Mac whose daemon and console are both enrolled shows as ONE roster card (machine + console chip), never two rows; attachment works when the console reads via tailscale/lighthouse (non-LAN source addresses), WITHOUT reopening the T-090 shared-NAT false-nesting hole; fixture pins both the attach and the refusal
+- notes: Ian (2026-08-15, screenshot): roster shows MacOnStick twice (SELF + "MacOnStick : Mac : Ian" PEER) and Wildhorse twice ("Wildhorse : MacIntel : Ian" + console chip, AND a bare "Wildhorse : Ian" PEER). Hypothesis: attach_consoles requires is_gossipable_addr (household-private) and consoles reading via tailnet/lighthouse present 100.x/public sources, so the pair never folds — the exact conservative edge of the T-090 fix. The known open per-Mac-console-identity question (DEVELOPMENT_LOG 2026-08-13 Next: legacy mac:* roll record + dedup_devices) is likely the real fix's home. Re-check after the T-129 doors settle — device-sync bricks may shift the picture
+
 ### T-129 · Build 87 + doors: the honest mind ships
 - status: claimed
 - owner: companion:claude-bootstrap
