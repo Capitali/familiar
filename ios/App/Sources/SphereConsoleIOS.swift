@@ -123,6 +123,18 @@ struct SphereConsoleIOS: View {
             bridge.onStanding = { [weak model] node, act in
                 Task { await model?.decideStanding(node, act: act) }
             }
+            bridge.onRuleDisable = { [weak model, weak bridge] id in
+                Task {
+                    await model?.disableRule(id)
+                    if let model { bridge?.pushDevice(model.deviceStateJSON()) }
+                }
+            }
+            bridge.onDeviceName = { [weak model, weak bridge] name in
+                Task {
+                    await model?.setDeviceName(name)
+                    if let model { bridge?.pushDevice(model.deviceStateJSON()) }
+                }
+            }
             // A member's QR carries a fresh single-use invite token (ADR-0026) — the scanner
             // is admitted in one motion. A guest's falls back to the plain address.
             bridge.onInvite = { [weak model] in model?.invitePayload(handoff: false) }
@@ -207,6 +219,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onInviteRedeem: ((String) -> Void)?
     var onGame: ((String, String?, String, String, Bool) -> Void)?
     var onDeviceRole: ((String, String) -> Void)?
+    var onRuleDisable: ((String) -> Void)?
+    var onDeviceName: ((String) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -430,6 +444,14 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 if let act = body["act"] as? String, let node = body["node_id"] as? String,
                    !node.isEmpty {
                     self.onStanding?(node, act)
+                }
+            case "ruleDisable":
+                if let id = body["id"] as? String, !id.isEmpty {
+                    self.onRuleDisable?(id)
+                }
+            case "deviceName":
+                if let name = body["name"] as? String, !name.isEmpty {
+                    self.onDeviceName?(name)
                 }
             case "gate":
                 break   // boundary writes are a local human act at the familiar, never from a device

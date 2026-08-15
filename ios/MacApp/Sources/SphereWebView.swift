@@ -507,6 +507,28 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                         await self.poll()
                     }
                 }
+            case "ruleDisable":
+                if let id = body["id"] as? String, !id.isEmpty {
+                    Task {
+                        await self.model.disableRule(id)
+                        self.pushDevice()
+                        if let json = self.model.worldviewJSON {
+                            self.web?.evaluateJavaScript(
+                                "window.sphereUpdate(\(json))", completionHandler: nil)
+                        }
+                    }
+                }
+            case "deviceName":
+                if let name = body["name"] as? String, !name.isEmpty {
+                    Task {
+                        await self.model.setDeviceName(name)
+                        self.pushDevice()
+                        if let json = self.model.worldviewJSON {
+                            self.web?.evaluateJavaScript(
+                                "window.sphereUpdate(\(json))", completionHandler: nil)
+                        }
+                    }
+                }
             default: break
             }
         }
