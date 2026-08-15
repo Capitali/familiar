@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 
 use familiar_exec as exec;
 use familiar_kernel::activity::{self, ActivityTick};
+use familiar_kernel::belief;
 use familiar_kernel::boundary::{self, CapabilityScope};
 use familiar_kernel::candidate::{self, Candidate};
 use familiar_kernel::capabilities;
@@ -695,6 +696,50 @@ fn narrate(dir: &Path, text: String, now: i64) -> io::Result<()> {
         ),
     )?;
     Ok(())
+}
+
+/// Fold mechanically-settled prediction evidence into belief states, apply direct
+/// human corrections as typed exceptions, and emit at most one transition aside.
+/// Ordinary confirmations and unchanged state are silent.
+fn update_beliefs(dir: &Path, now: i64, obs: &[observation::Observation]) -> io::Result<bool> {
+    for transition in belief::evaluate(dir, now)? {
+        if transition.to == belief::BeliefState::Abandoned {
+            let _ = thread::update_status(dir, &transition.thread_id, "abandoned", now)?;
+        }
+    }
+
+    // A direct negative answer aimed at a theory is a correction, not a sample.
+    // Whole-word classification reuses the actuation reaction vocabulary; no model
+    // enters this truth path. Observation ids make the override replay-idempotent.
+    for o in obs.iter().filter(|o| is_human_utterance(o)) {
+        let Some(thread_id) = o.context.strip_prefix("thread:") else {
+            continue;
+        };
+        let words = utterance_text(o);
+        if !familiar_kernel::actuator::is_negative(words) {
+            continue;
+        }
+        let evidence_id = if o.id.is_empty() {
+            format!("human-correction:{}:{}", o.actor, o.ts)
+        } else {
+            o.id.clone()
+        };
+        let _ = belief::apply_override(
+            dir,
+            thread_id,
+            belief::OverrideKind::HumanCorrection,
+            &evidence_id,
+            &format!("{} corrected the theory: {}", o.actor, words),
+            o.ts,
+        )?;
+    }
+
+    let Some(candidate) = belief::next_narration(dir, now)? else {
+        return Ok(false);
+    };
+    narrate(dir, candidate.text, now)?;
+    belief::mark_narrated(dir, &candidate.thread_id, now)?;
+    Ok(true)
 }
 
 /// The factory thinks out loud: grounded in what it has observed, it (LLM-)forms a
@@ -2235,6 +2280,14 @@ fn demote_after_reaction(
     }
     if !act.thread_id.is_empty() {
         thread::update_status(dir, &act.thread_id, "abandoned", now)?;
+        let _ = belief::apply_override(
+            dir,
+            &act.thread_id,
+            belief::OverrideKind::HardActReversal,
+            &format!("act-reversal:{}:{}", act.thread_id, now),
+            notes,
+            now,
+        )?;
     }
     observation::record(
         dir,
@@ -3747,6 +3800,7 @@ pub fn tick(
             .prediction_grace_secs;
         let _ = familiar_kernel::prediction::score(dir, &obs, now, grace);
     }
+    let _ = update_beliefs(dir, now, &obs)?;
 
     // 2b. Remember the people (ADR-0022): fold new observations into the per-human
     //     dossier — its own resumable cursor also catches what device agents POSTed
@@ -4594,9 +4648,152 @@ mod tests {
             "the pursuit is discarded; his words are kept"
         );
         assert_eq!(x.answers, vec!["no, too dark"]);
+        let beliefs = belief::load(dir).unwrap();
+        let held = beliefs
+            .beliefs
+            .iter()
+            .find(|belief| belief.thread_id == tid)
+            .unwrap();
+        assert_eq!(
+            held.state,
+            belief::BeliefState::Abandoned,
+            "a hard act reversal bypasses the statistical floor"
+        );
         let st = &familiar_kernel::actuator::load_state(dir)["lights"];
         assert_eq!(st.bucket, "bright");
         assert!(st.rest_until > 1100);
+    }
+
+    #[test]
+    fn belief_narration_is_transition_only_and_one_highest_consequence_per_tick() {
+        let t = Temp::new("belief_narration");
+        let dir = &t.0;
+        for (id, theory) in [
+            ("thread-doubt", "presence causes the lighting change"),
+            ("thread-stop", "the room prefers dim light"),
+        ] {
+            thread::append(
+                dir,
+                &Thread {
+                    id: id.into(),
+                    question: String::new(),
+                    theory: theory.into(),
+                    direction: String::new(),
+                    created_at: 1,
+                    status: "pursued".into(),
+                    status_at: 1,
+                    last_worked_at: 1,
+                    reinforced: 0,
+                    answers: Vec::new(),
+                    origin: "llm".into(),
+                    origin_human: String::new(),
+                    actor: "familiar".into(),
+                },
+            )
+            .unwrap();
+        }
+        belief::apply_override(
+            dir,
+            "thread-doubt",
+            belief::OverrideKind::HumanCorrection,
+            "obs-correction",
+            "Ian said presence was not the cause",
+            100,
+        )
+        .unwrap();
+        belief::apply_override(
+            dir,
+            "thread-stop",
+            belief::OverrideKind::HardActReversal,
+            "act-reversal",
+            "Ian restored the prior light level",
+            101,
+        )
+        .unwrap();
+
+        assert!(update_beliefs(dir, 200, &[]).unwrap());
+        let first = observation::load(dir).unwrap();
+        let narrated = first
+            .iter()
+            .filter(|observation| observation.action == "narrated")
+            .collect::<Vec<_>>();
+        assert_eq!(narrated.len(), 1, "only one aside is allowed in a tick");
+        assert!(narrated[0].object.contains("I no longer think"));
+        assert!(narrated[0].object.contains("Contradicting evidence:"));
+
+        assert!(update_beliefs(dir, 201, &[]).unwrap());
+        let second = observation::load(dir).unwrap();
+        assert_eq!(
+            second
+                .iter()
+                .filter(|observation| observation.action == "narrated")
+                .count(),
+            2,
+            "the other theory may narrate on the next tick"
+        );
+        assert!(!update_beliefs(dir, 202, &[]).unwrap());
+    }
+
+    #[test]
+    fn one_prediction_does_not_narrate_but_a_direct_correction_does() {
+        let t = Temp::new("belief_first_confirmation");
+        let dir = &t.0;
+        thread::append(
+            dir,
+            &Thread {
+                id: "thread-1".into(),
+                question: String::new(),
+                theory: "the greenhouse load follows the lights".into(),
+                direction: String::new(),
+                created_at: 1,
+                status: "pursued".into(),
+                status_at: 1,
+                last_worked_at: 1,
+                reinforced: 0,
+                answers: Vec::new(),
+                origin: "llm".into(),
+                origin_human: String::new(),
+                actor: "familiar".into(),
+            },
+        )
+        .unwrap();
+        familiar_kernel::store::append(
+            dir,
+            familiar_kernel::prediction::PREDICTION_RESULTS_FILE,
+            &familiar_kernel::prediction::PredictionResult {
+                prediction_id: "pred-1".into(),
+                thread_id: "thread-1".into(),
+                opened_by: "obs-1".into(),
+                opened_at: 10,
+                deadline: 20,
+                settled_by: Some("obs-2".into()),
+                outcome: familiar_kernel::prediction::Outcome::Confirmed,
+                final_at: 30,
+            },
+        )
+        .unwrap();
+        assert!(!update_beliefs(dir, 40, &[]).unwrap());
+
+        let mut correction = observation::Observation::new(
+            "ian",
+            "answered",
+            "no, that is not what happened",
+            "thread:thread-1",
+            "local",
+            50,
+            1.0,
+        );
+        correction.id = "obs-correction".into();
+        assert!(update_beliefs(dir, 50, &[correction.clone()]).unwrap());
+        assert_eq!(
+            belief::load(dir).unwrap().beliefs[0].state,
+            belief::BeliefState::Doubtful
+        );
+        assert!(observation::load(dir).unwrap().iter().any(|observation| {
+            observation.action == "narrated"
+                && observation.object.contains("ian corrected the theory")
+        }));
+        assert!(!update_beliefs(dir, 51, &[correction]).unwrap());
     }
 
     #[test]

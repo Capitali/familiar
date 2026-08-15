@@ -6,7 +6,57 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
-## 2026-08-14 (latest) — Truth stays outside the recipe (companion:codex)
+## 2026-08-14 (latest) — Beliefs earn their words (companion:codex)
+
+### What changed
+
+- **Prediction evidence becomes a belief, never a replacement for its record:** the new
+  `kernel::belief` fold derives a versioned current view from append-only
+  `PredictionResult` rows and retains every state change in an append-only transition
+  log. The pure state machine moves `tentative → supported → doubtful → abandoned`
+  only when new results arrive; abandoned is terminal, so changing a discarded claim
+  means forming a new theory rather than silently rehabilitating the old one.
+- **The bars differ on purpose:** support needs at least three favorable results and a
+  two-result lead; accumulated contradiction moves support to doubt; recovery from doubt
+  needs four favorable results and a three-result lead; abandonment needs four
+  unfavorable results and a two-result lead. These distinct entry, erosion, recovery,
+  and terminal bars prevent one sample from making a newborn theory sound certain or an
+  old result from making it oscillate on every tick.
+- **A person's word is typed evidence, not a sample:** a direct negative answer targeted
+  at a theory moves it immediately to `doubtful`; the existing hard act-reversal seam
+  moves its acted theory immediately to `abandoned`. Both carry replay-idempotent evidence
+  ids, preserve the human line as a contradicting citation, and bypass only the
+  statistical floor—no model participates in the truth path.
+- **Only transitions speak:** after prediction settlement, cycle evaluates beliefs and
+  may narrate one pending transition per tick. Abandonment outranks doubt, which outranks
+  support; a six-hour per-theory cooldown prevents chatter. Bounded prose reports honest
+  favorable/unfavorable counts and retains one supporting and one contradicting line when
+  present. Ordinary first confirmation and unchanged belief state stay silent.
+
+### Why
+
+ADR-0040 Q5 decided that beliefs should become legible without becoming performative.
+This brick lets the familiar change its mind from evidence, admit correction immediately,
+and explain consequential transitions while leaving prediction results load-bearing and
+append-only.
+
+### Checks run
+
+- `cargo test -p familiar-kernel` and `cargo test -p familiar-cycle` cover every
+  statistical transition, the stronger recovery bar, terminal abandonment, append-only
+  folding, typed/idempotent overrides, citations and counts, consequence ordering,
+  per-theory cooldown, transition-only silence, and cycle integration.
+- Full green bar on the T-114 tree: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace`.
+
+### Next
+
+- Belief drill-down can expose this current view and its transition fossil in a later,
+  separately claimed console brick. Prediction authoring remains independent of this
+  evidence fold; it should mint falsifiable claims without gaining any ability to edit
+  their results or belief transitions.
+
+## 2026-08-14 — Truth stays outside the recipe (companion:codex)
 
 ### What changed
 
