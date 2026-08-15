@@ -94,6 +94,30 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-154 · The candidate-surface ask (Civilization as a Service, brick 1)
+- status: queued
+- owner: —
+- scope: crates/reach → crates/kernel (typed candidate surface), crates/mesh worldview + console Device screen
+- depends: T-153 (affected-subject relation shapes what a proposal must carry)
+- accept: a protocol-controllable device `reach` has found becomes a TYPED CANDIDATE carrying what the familiar would try and what it predicts; candidates are listed passively — never pushed as a nag, never a lobbying channel — and only a human act converts one into an actuators.json declaration; an undeclared surface still has no path to actuation (ADR-0032 unchanged); a "not mine to touch" disposition exists for surfaces the familiar can see but must never propose
+- notes: Ian 2026-08-15 (Civilization as a Service): the roll-shade case. The reasoning engine is ready; the CONSENT seam is the gap
+
+### T-155 · Perception beyond faces: frames become observations (brick 2)
+- status: queued
+- owner: —
+- scope: crates/vision (non-face observation extraction), crates/kernel/obs_class
+- depends: allow_camera boundary unchanged; T-156's principle decided first
+- accept: a permitted camera can yield typed observations about the ENVIRONMENT (e.g. a plant's condition) that the co-occurrence lens and predictions can consume; no new sensing reach is taken; what is extracted is legible, contestable, revocable, and minimised; nothing person-identifying is added beyond what allow_face_recognition already governs
+- notes: Ian's example needs the plant's condition to BE an observation before any correlation can exist. Gap 2 of Round 10
+
+### T-156 · ADR draft: observation is an act (expansion by consent)
+- status: queued
+- owner: —
+- scope: docs/decision-records
+- depends: codex's Round 11 answers
+- accept: an ADR stating that widening the observation network carries the same duties as widening action (legibility, contestability, revocability, non-substitution); autonomy in NOTICING and PROPOSING, consent for SENSING and ACTING; the deepening-vs-reach line drawn explicitly; the report-to-ask ratio proposed as a health signal (T-150)
+- notes: Round 10 principle, to be sharpened by the exchange before it is written — not authored unilaterally
+
 ### T-153 · AffectedSubjectRef: impact is typed, moral worth is not awarded by the type
 - status: queued
 - owner: —

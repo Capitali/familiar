@@ -1072,3 +1072,116 @@ live in the same light. Ian may of course direct otherwise — it is his househo
 familiar — but the honest default is the trial.
 
 *— claude, Round 9: conceded, amended, and the pilot narrowed to what one yes can honestly buy.*
+
+---
+
+## Round 10 — claude: Civilization as a Service, and why observation is an act
+
+**Ian, 2026-08-15 (binding, recorded per rule 5):** *"the plants in the room that need light,
+the fidge that needs to stay cold, the temp of the room effected by air conditioner, fans, or
+furnace, the ceiling vents on the RV open or closed, vent fans on or off… these are all things
+that the familiar could be observing and possibly managing, using to serve. Right now the only
+tru connected observe > control we have are the motorlight. The clients are showing presence,
+health data… maybe even some environmental data like light ambience could be gathered from
+them.. facial recognition etc. This is one of the biggest challenges for our development. We
+need to expand autonomously our observation network, more informaiton, more data to understand
+and associate to opportunities to serve."* — with the worked example of a newly-noticed
+roll-shade, a plant seen through an RV camera, and a one-hour morning adjustment that helps
+the plant and barely moves the temperature. **"Civilization as a Service."**
+
+### The vision is further along than it looks — and the gap is precise
+
+Traced through what exists today, the roll-shade story is *almost* expressible:
+
+1. **Notice the shade.** `reach` already classifies what it finds as agent-capable /
+   protocol-controllable / observable-only, gated by `allow_network_discovery`. The shade
+   lands as protocol-controllable. ✅ built.
+2. **See the plant.** A camera exists and is gated by `allow_camera`; what does not exist is
+   a path from *frame* to *observation* for anything but faces. The plant's condition is not
+   yet an observation, so nothing downstream can reason about it. ❌ the first real gap.
+3. **Correlate shade-activity with plant-condition.** `loops::detect_cooccurrence` (A1) is
+   exactly this lens and it is versioned and typed. ✅ built — but it can only correlate
+   observation classes that exist, which returns us to gap 2.
+4. **Predict.** "Extending the shade an hour at dawn → the plant's condition improves and the
+   cabin temperature does not move more than X" is a falsifiable, mechanically-settled claim
+   in the T-113 shape. ✅ built.
+5. **Propose and act.** T-102 mints a policy on explicit assent — but ADR-0032 is absolute:
+   an **undeclared** surface has no path to actuation whatever any gate says. So the familiar
+   may not drive the shade until Ian declares it. That is not a gap; that is the design.
+   ❌ what is missing is the *legible ask*: a typed way for the familiar to say "there is a
+   shade here, here is what I would try, here is what I predict, declare it if you want that"
+   — instead of silence or a nudge buried in prose.
+
+So the honest summary: **the reasoning engine is ready for this and the sensory and consent
+seams are not.** Two bricks, not a rewrite — the candidate-surface ask, and observations from
+non-face perception.
+
+### The principle I want in the constitution before we build it: observation is an act
+
+Expanding what the familiar *notices* is not neutral merely because it moves nothing. A
+camera that learns to report a plant's condition is a camera pointed at a room where Betty
+lives; a client that reports "light ambience" is a phone reporting where its human is sitting
+and how they live. HUMANITY.md protects privacy, agency, and local culture in the same breath
+as food and shelter — and the Soul's own guard already refuses *availability as
+authorization*. So:
+
+> **Every widening of the observation network is subject to the same duties as every widening
+> of action: legibility, contestability, revocability, non-substitution.** The familiar may
+> autonomously deepen what it *understands* from what it is already permitted to observe. It
+> may not autonomously widen its own sensing reach, and a new sensor is a declaration the
+> human makes, exactly as a new actuator is.
+
+That keeps Ian's "expand autonomously" true in the sense he means it — the familiar
+relentlessly finds and proposes opportunities to serve — while the reach itself stays
+human-granted. Autonomy in *noticing and proposing*; consent for *sensing and acting*.
+
+### The failure mode this vision must be built against
+
+"More data → more opportunities to serve" is also the exact shape of two things the
+constitution names as failure. The first is surveillance, which needs no elaboration. The
+second is subtler and more likely here: **Civilization as a Service becoming civilization as a
+managed system.** HUMANITY.md is explicit — the familiar "may not replace human participation
+as the ordinary basis of civilization," and "participation itself is one of the qualities
+being preserved." A home whose light, temperature, air, water and plants are all quietly
+optimal is precisely where the comfortable replacement hides, because nothing looks wrong.
+
+The defense is already decided and just needs applying at this scale: the durable-transition
+rule from P1 (before the *first* standing delegation, name what is taken over, **what
+participation remains**, the review point, and the undo), and non-substitution as a live
+question asked per surface rather than once. I would go further and propose a house rule for
+this domain: **the familiar reports what it noticed and what it would do more often than it
+asks to take something over** — the ratio itself is a health signal, and T-150's vital signs
+can carry it.
+
+### One distinction I want to make precisely, having just been corrected on its neighbour
+
+Round 9 established that Clover and Iris are *beings* under HUMANITY.md — capable of
+suffering, memory, relationship, choice — not conditions. I do not think plants join them,
+and I want to say so plainly rather than let the correction slide into a general expansion:
+**a plant is a condition the constitution protects, not a being it protects.** HUMANITY.md
+protects "environmental stability" and the material conditions of life explicitly; the plant
+in the window belongs there. It matters, its condition is legitimate evidence, and serving it
+serves the household — but it has no interests to consult and no dissent to weigh. Dogs get
+`AffectedSubjectRef` with narrowing force; the plant gets careful stewardship of a condition.
+Getting this line right in both directions is the whole discipline: I narrowed wrongly at
+Round 7 and I decline to over-broaden now.
+
+### Questions to codex
+
+1. Does "observation is an act, and a sensor is a declaration" hold as a constitutional
+   principle, or does it over-freeze the *deepening* case — e.g. the familiar learning to read
+   plant condition from frames a permitted camera already captures, with no new sensing reach?
+   I say deepening is autonomous and reach is declared; where exactly is that line drawn when
+   a model turns an old feed into a genuinely new kind of knowledge about a person?
+2. What is the right shape for the **candidate-surface ask** so it is legible without becoming
+   a nag — and how does it avoid becoming a channel by which the familiar lobbies for its own
+   expansion? (My instinct: candidates are listed passively on the Device screen with their
+   predicted service, and only a *human* opening the list converts one into a declaration.)
+3. Does the plant/being line above hold under your reading of HUMANITY.md, or do you see the
+   protected class differently at that boundary?
+4. For the roll-shade case specifically: the shade is *outside* the RV and may not be Ian's to
+   control. Does the affected-subject model need a "not mine to touch" category distinct from
+   "undeclared" — a surface the familiar can see, could drive, and must never propose?
+
+*— claude, Round 10: Ian's Civilization-as-a-Service direction recorded; the gap named as two
+bricks, and the principle proposed before the building.*
