@@ -7,14 +7,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
-### T-120 · First-start mesh-join progress: the console says what it's doing
-- status: proposed
-- owner: — (companion:claude-bootstrap intends to claim after T-119 lands, absent controller re-sequencing)
-- scope: console join/connection status surface (ios/Shared/Sources/AppModel.swift, ios/MacApp/Resources/sphere/index.html, iPhone equivalents) + whatever daemon-side join-progress detail the console needs (crates/mesh status/worldview read path; no wire-contract change without stopping for Ian per house rules)
-- depends: — (T-101 queued on the same console files; sequence at the controller's call)
-- accept: from cold start to joined, the console shows live progress stages with detail on what it is trying (e.g. starting daemon → reaching door → rendezvous → exchanging → joined + peer count) instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect daemon-reported truth, not console guesses; fixture-verified
-- notes: Ian (2026-08-14, verbatim): "when a client first starts sometimes it can take a minute or two to reach and join the mesh — we need to show some sort of status, progress, details on what it's doing or trying to the user so that they know it's not just failed with a red exclamation point". Recorded per rule 5 from the bootstrap session
-
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: queued
 - owner: —
@@ -98,6 +90,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
+### T-120 · First-start mesh-join progress: the console says what it's doing
+- status: claimed
+- owner: companion:claude-bootstrap
+- scope: console join/connection status surface (ios/Shared/Sources/AppModel.swift, ios/MacApp/Resources/sphere/index.html, iPhone equivalents) + whatever daemon-side join-progress detail the console needs (crates/mesh status/worldview read path; no wire-contract change without stopping for Ian per house rules)
+- depends: — (T-101 queued on the same console files; controller may re-sequence — this claim yields if so)
+- accept: from cold start to joined, the console shows live progress stages with detail on what it is trying (e.g. starting daemon → reaching door → rendezvous → exchanging → joined + peer count) instead of silence resolving to a red exclamation; failure states name WHAT failed and what is being retried; stages reflect daemon-reported truth, not console guesses; fixture-verified
+- notes: Ian (2026-08-14, verbatim): "when a client first starts sometimes it can take a minute or two to reach and join the mesh — we need to show some sort of status, progress, details on what it's doing or trying to the user so that they know it's not just failed with a red exclamation point". Recorded per rule 5 from the bootstrap session; claimed 2026-08-15 after T-119 landed, per the intent stated at proposal
+
 ### T-116 · Q4: scenario fixture oracles
 - status: claimed
 - owner: companion:codex
@@ -105,14 +105,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - depends: T-115 (merged at d80ae4f)
 - accept: strict candidate output contracts plus fixture-owned replay truth outside the candidate; evaluate recipe candidates against accuracy, coverage (including honest null/error outcomes), quietness, and changed/null/malformed discrimination; boundary-clean then execution-clean then all four truth checks form eligibility, with usefulness and deterministic cost ranking survivors; live runs are health evidence only and are not accepted by this oracle; hermetic regressions prove hard-coded, fabricated, and chatty candidates fail
 - notes: scope is confined to the scenario lab and does not overlap companion:claude-bootstrap's T-119 daemon.rs claim
-
-### T-119 · One launchctl dialect: daemon.rs joins the bootout/bootstrap bracket
-- status: claimed
-- owner: companion:claude-bootstrap
-- scope: crates/cli/src/daemon.rs (launchd mechanism only; `daemon install/uninstall` CLI surface unchanged)
-- depends: —
-- accept: install() runs the script's proven bracket — bootout BEFORE install_stable_binary() swaps the registered executable (macOS 27 LWCR; OS_REASON_CODESIGNING), bootstrap + kickstart -k after the plist is written, registration failures surfaced as errors instead of ignored; uninstall() bootouts; unload -w/load -w disappears from the crate; a test pins the dialect and its order
-- notes: sibling of the 0dbc525 bootstrap-script brick (log 2026-08-14 "An upgrade re-registers its binary"). Direct Ian follow-up in the bootstrap session, recorded per rule 5 (claimed straight in, not proposed — controller may re-arbitrate). vm/create-famtalker01.sh's unload/load is one-shot VM bootstrap, left alone
 
 ### T-112 · Q7: the ObservationClass module (prerequisite to B1)
 - status: done
@@ -143,6 +135,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-119 · One launchctl dialect: daemon.rs joins the bootout/bootstrap bracket
+- status: done
+- owner: companion:claude-bootstrap
+- merged: 009aadf
+- scope: crates/cli/src/daemon.rs (launchd mechanism only; `daemon install/uninstall` CLI surface unchanged)
+- depends: —
+- accept: install() runs the script's proven bracket — bootout BEFORE install_stable_binary() swaps the registered executable (macOS 27 LWCR; OS_REASON_CODESIGNING), bootstrap + kickstart -k after the plist is written, registration failures surfaced as errors instead of ignored; uninstall() bootouts; unload -w/load -w disappears from the crate; a test pins the dialect and its order
+- notes: bar twice in rule-9 shape (31 suites pre-absorb, 33 on the merged tree incl. T-115's recipe crate); narrative in DEVELOPMENT_LOG 2026-08-15 "One launchctl dialect"
 
 ### T-115 · C2 + the capability Recipe v1 interpreter
 - status: done
