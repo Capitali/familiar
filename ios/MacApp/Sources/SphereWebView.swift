@@ -235,7 +235,12 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
         if let json = model.worldviewJSON {
             web?.evaluateJavaScript("window.sphereUpdate(\(json))", completionHandler: nil)
         } else {
-            web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown()", completionHandler: nil)
+            // Say WHY the link is down (T-120) — this call used to pass no argument, so the
+            // Mac's badge wore the red mark with an empty message. JSON-encode the bare string
+            // so it lands as a valid JS literal.
+            let why = model.worldviewError ?? "no answer from any door yet"
+            let arg = (try? JSONEncoder().encode(why)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"link down\""
+            web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown(\(arg))", completionHandler: nil)
         }
     }
 
