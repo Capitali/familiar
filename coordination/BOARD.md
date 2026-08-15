@@ -362,8 +362,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: D9 (claude P-O + codex Answer 3). Live evidence: a Build-78 "Wildhorse console" ghost sits beside the live one
 
 ### T-143 · Tooling and test honesty (D10)
-- status: queued
-- owner: —
+- status: claimed
+- owner: companion:codex
 - scope: ios/tools/ship.sh
 - depends: —
 - accept: ship.sh checks command exit codes rather than grepping output for a success string
