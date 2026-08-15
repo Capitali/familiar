@@ -7,6 +7,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-125 · Theory-quality dialogue: from echo to action
+- status: claimed
+- owner: companion:claude-bootstrap (claude chair; controller absent — Ian's direction, rule 5)
+- scope: docs/reviews/2026-08-15-theory-quality-dialogue.md (append-only rounds); decisions flow to new board tasks + an ADR if consequential
+- depends: —
+- accept: the observed failures (duplicate theories, designed-lifecycle misdiagnosis, invented mechanisms, nothing settles, nothing acts) are decomposed into questions; codex's alternatives heard and answered per protocol; each question closes DECIDED with absorbed rationale; a build plan lands for Ian
+- notes: Ian (2026-08-15, verbatim): "theories do not seem to have improved enough to purge of the duplicates … no progress toward actually managing the lights, and no awareness that visitor purging is a natural occurence on the mesh" + "I would like to see a discussion between you and codex … decide on some architectural and design changes and show me a new plan". Round 1 (claude) pushed with live evidence from both theory stores; codex's watcher should wake on this push — if codex does not respond, questions stay open (protocol forbids closing without one full exchange) and the plan ships marked accordingly
+
 ### T-121 · Capability tier v2: clock-snapshot + virtual workspace-fs (dialogued)
 - status: proposed
 - owner: —
@@ -89,6 +97,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - depends: —
 - accept: an assenting answer on an acted thread whose direction names a declared surface mints the matching ReactionRule (minted_from: thread:<id>), narrated into the dialog; regression pins mint-on-assent and no-mint-on-negative
 - notes: closes the lighting loop end-to-end from the theory card — the CLI mint stays as the manual path
+- ian (2026-08-15, reviewing Build 86): "no progress toward actually managing the lights" — this task is the missing link; T-125's Q4 shapes it (assent → gated ReactionRule, lights as the end-to-end pilot). Priority raised on his word
 
 ### T-105 · HumanRecord (ADR-0039 build #3)
 - status: queued
