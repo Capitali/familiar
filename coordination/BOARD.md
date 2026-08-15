@@ -24,8 +24,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian (2026-08-15, screenshot): roster shows MacOnStick twice (SELF + "MacOnStick : Mac : Ian" PEER) and Wildhorse twice ("Wildhorse : MacIntel : Ian" + console chip, AND a bare "Wildhorse : Ian" PEER). Hypothesis: attach_consoles requires is_gossipable_addr (household-private) and consoles reading via tailnet/lighthouse present 100.x/public sources, so the pair never folds — the exact conservative edge of the T-090 fix. The known open per-Mac-console-identity question (DEVELOPMENT_LOG 2026-08-13 Next: legacy mac:* roll record + dedup_devices) is likely the real fix's home. Re-check after the T-129 doors settle — device-sync bricks may shift the picture
 
 ### T-129 · Build 87 + doors: the honest mind ships
-- status: claimed
+- status: done
 - owner: companion:claude-bootstrap
+- merged: 6352b4f (the Build 87 stamp; fleet op — evidence in STATE)
 - scope: fleet ops — deploy 8903479-era main to lighthouse + Wildhorse; clean-clone ship.sh 87; author + apply the reviewed lights fold manifest on the lighthouse (theories fold CLI); STATE carries shas + evidence
 - depends: CI green on the ship sha (rule 9)
 - accept: doors run the T-126..T-102 engine (facts floor, identity, inquiry, assent-to-policy); Build 87 on Macs + TestFlight; the lighthouse lights cluster folded to its eldest thread with tombstones pointing home; Ian notified
