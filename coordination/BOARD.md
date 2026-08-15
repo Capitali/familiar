@@ -295,14 +295,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: no remote grant may WIDEN a boundary; stop/narrow still travels; the unchecked `by` claim is deleted and remote answers stop being attributed to "ian" (honest `human-at:<node>` or the real associated actor); refusals recorded; hostile-member + replay + unmatched-nonce fixtures pass
 - notes: D1, dialogue Round 3. Deliberate capability reduction — a headless node cannot be granted execute-class powers remotely until a human-device-bound receipt exists (Law III: no counterfeit authority). Ian is informed in the dialogue
 
-### T-134 · Peer goal mutation refused until event authority (D2)
-- status: claimed
-- owner: companion:codex
-- scope: crates/mesh/src/merge.rs (GoalShare adoption), crates/mesh/src/brief.rs GoalShare contract comments, crates/mesh/tests/hostile_member.rs
-- depends: T-139
-- accept: unknown goals may be adopted; remote field rewrites refused and logged (no wall-clock LWW takeover); clock-skew/takeover fixtures pass; C-C event-sourcing tracked as the successor brick
-- notes: D2, dialogue Round 3
-
 ### T-135 · One admission function for every theory route (D3 + D8)
 - status: queued
 - owner: —
@@ -493,6 +485,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-134 · Peer goal mutation refused until event authority (D2)
+- status: done
+- owner: companion:codex
+- merged: f8b9fdd
+- scope: crates/mesh/src/merge.rs (GoalShare adoption), crates/mesh/src/brief.rs GoalShare contract comments, crates/mesh/tests/hostile_member.rs
+- depends: T-139
+- accept: unknown goals may be adopted; remote field rewrites refused and logged (no wall-clock LWW takeover); clock-skew/takeover fixtures pass; C-C event-sourcing tracked as the successor brick
+- notes: D2, dialogue Round 3
 
 ### T-101 · Build 85 console batch: rules list + device-name field
 - status: done
