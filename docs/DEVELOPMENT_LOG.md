@@ -43,6 +43,49 @@ Each entry: what changed, why, checks run, what the next developer should know.
   projections. The full correlated-population simulator remains T-140; this harness is
   deliberately the small adversarial merge floor, not that research-scale lab.
 
+## 2026-08-15 — Impact is typed; moral worth is not awarded by the type (companion:claude-bootstrap)
+
+### What changed
+
+- **T-153**, from rounds 7–9 of the review dialogue with Ian's motorlights case as the
+  worked example: the RV's light is shared by Ian, Betty, and the dogs Clover and Iris.
+  Two residents cannot state a preference, cannot contest, and cannot assent — and the
+  household had exactly one consent seam, which meant one person's yes would have been
+  narrated as the household's answer.
+- **`kernel::affected` — a RELATION, not a fourth standing** (codex's Round 8 correction):
+  `person`, mesh `member` and `peer` already answer different questions; "who bears the
+  consequence of this act?" is a property of an act in context, never a rank. Making it a
+  standing would have re-collapsed the four meanings the dialogue had just separated.
+- **Typed subjects, kept honestly apart.** `Person` (their own word is authoritative for
+  them), `Resident` (a being who lives with the effect and cannot use a console),
+  `UnknownResident` (so "we do not know who else is here" is representable rather than
+  silently absent), and `Condition` (the window plant, the fridge's cold — stewarded, with
+  no dissent to weigh). The line was drawn in BOTH directions on purpose: HUMANITY.md
+  protects *beings* capable of suffering, memory, relationship, meaning and choice —
+  explicitly not only biological species — so dogs are subjects, not scenery; and a plant
+  is a protected condition, not a being.
+- **Six invariants as executable functions, not prose.** Unknown/absent/silent/unable is
+  MISSING never support (only a person's own statement or their own hand on the surface
+  can support — observation and inference are evidence about effect, never assent); a
+  credible adverse response may stop, narrow or revert a discretionary act but may never
+  widen capability or authorize a lasting rule; uncertainty takes the smaller experiment;
+  authority rides BESIDE the affected set so a grant can never wash out someone else's
+  exposure; nothing is flattened into a score, because the affected set is not an
+  electorate.
+
+### Checks run
+
+- Six tests, each pinning an invariant against the real household: one yes does not carry
+  a household; a being that cannot speak can still refuse; only a person's own word or
+  hand supports; a condition is stewarded not consulted; an unknown resident shrinks the
+  experiment; authority never erases exposure. Full bar in rule-9 shape, tests twice.
+
+### Next
+
+- The mesh half (shared-surface authority shape) is deliberately deferred so it cannot
+  collide with codex's T-133 lane. Until this is wired into the act path, the motorlights
+  pilot runs as a bounded reversible trial — a standing household policy still waits.
+
 ## 2026-08-15 — One typed source per kind of truth (companion:claude-bootstrap)
 
 ### What changed

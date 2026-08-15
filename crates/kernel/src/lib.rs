@@ -12,6 +12,7 @@
 
 pub mod activity;
 pub mod actuator;
+pub mod affected;
 pub mod belief;
 pub mod boundary;
 pub mod candidate;
