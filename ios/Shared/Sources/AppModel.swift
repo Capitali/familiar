@@ -476,6 +476,10 @@ final class AppModel: ObservableObject {
         let d: [String: Any] = [
             "label": PlatformDevice.name,
             "deviceName": deviceName,
+            // Which shell is rendering — the console HTML is ONE file shared by the Mac app and
+            // the iOS WKWebView, so a screen that belongs only on a Mac needs this to know
+            // (T-183). "mac" | "phone" | "ipad".
+            "kind": PlatformDevice.kind,
             // This device's own node id — the console needs it to know "is it MY turn",
             // "is this claim for MY human", distinct from the daemon's id in the worldview.
             "node_id": node.nodeId,

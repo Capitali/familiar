@@ -119,6 +119,22 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-183 · Console surfaces earn their place
+- status: DONE (pending ship) — zoom retired, Network + Signals are Mac-only, Vision hidden until built
+- owner: claude
+- notes: Ian 2026-08-15 — "we can do away totally with the zoom in function within the UI it provides no benefit at this time"; "only the Mac clients should have the network screen going forward as well, same with the signals menue"; "Vision menu shouldn't be visible anywhere until we impliment something with it". The console is ONE HTML file rendering in both the Mac app and the iOS WKWebView, so the ring is FILTERED by shell rather than forked: `deviceStateJSON` now carries `kind` ("mac"|"phone"|"ipad") and `screens()` drops MAC_ONLY on non-Mac and UNBUILT everywhere. The zoom/dive glyph is hidden and its click is a no-op; the dive machinery is left in place unreachable rather than torn out of the render path it threads through — removing the entry point was the whole of the ask. Read `signals` as Mac-only (not deleted outright); Ian's "-- unecessary" trailed both items and Mac-only is the reversible reading
+- verification: FamiliarMac Release built rc=0; page JS parse compared block-by-block against git HEAD — identical results, so the edit is parse-neutral (two blocks fail under `new Function()` at BASELINE too, being ES modules)
+
+### T-184 · Visitor purge storm — 311 purge records for 12 visitors, and this is what drowned the theories
+- status: queued — **highest-value reasoning bug on the board**
+- owner: —
+- scope: crates/mesh/src/record.rs (purge_stale_guests), the record-sync path that hands a purged guest back, crates/cycle/src/lib.rs (the purge observation)
+- depends: —
+- accept: purging a visitor is recorded ONCE per visitor, not once per tick; a record deleted locally does not return from a peer with its original clock; the observation log stops being dominated by one designed-lifecycle event
+- notes: Ian 2026-08-15 asked "are these duplicate entries or are we really getting that many visitors and purges -- no wonder the familiar was concerned". They are duplicates, and the ratio is severe: **311 `familiar purged` observations for 12 DISTINCT visitors**, one (`7d34f69e`) purged **80 times**. Verified live: `mesh/records/7d34f69e04d897d5.json` was present in one command and gone in the next, so records are being recreated and re-purged continuously. Gaps between repeat purges of one id run 65s, 127s, 253s, 505s, 1020s then reset — EXPONENTIAL BACKOFF, i.e. a client retry cadence, not the 2-hour guest clock. So the purge is losing a fight: the record comes back (peer record-sync per ADR-0027, or a re-knock) carrying its ORIGINAL first_seen, is instantly past GUEST_PURGE_SECS, and is purged again. `purge_stale_guests` documents itself as idempotent and does delete the file, admission scaffolding and peer row — the resurrection is the defect, not the deletion
+- WHY THIS MATTERS BEYOND NOISE: this is very likely the root of Ian's long-standing complaint that theories fixate on visitor purging ("lights.. lights... lights.... no awareness that visitor purging is a natural occurence on the mesh", 2026-08-15). SF-1 taught the engine that guest purging is designed lifecycle, but the engine still reasons over an observation log where this ONE event outnumbers everything else ~26:1. A fact floor cannot save reasoning whose evidence is 96% one duplicated line. Fix the storm and the theory quality may improve on its own
+- Ian's related question (same day): the repeat visitors are almost certainly **Apple App Review testers** connecting from Cupertino and Beijing after each TestFlight submission, who never name a device or user. Their behaviour is correct and the familiar's response is correct — an unidentified visitor SHOULD age out. Nothing needs defending against. What needs fixing is only that each one costs 26 log lines instead of 1
+
 ### T-182 · The familiar died and nobody said anything
 - status: queued — **highest-value item on this board**
 - owner: —
