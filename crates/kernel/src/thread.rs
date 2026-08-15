@@ -69,6 +69,11 @@ pub struct Thread {
     /// never silently reinterprets old threads.
     #[serde(default)]
     pub facts_rev: u32,
+    /// Digest of the DECLARATION the deployment facts were derived from at admission
+    /// (T-136). Empty on rows predating it. A thread admitted against surfaces the human
+    /// has since changed is detectable rather than quietly stale.
+    #[serde(default)]
+    pub facts_digest: String,
     /// Row schema version (T-127). 0 = legacy row written before versioning existed;
     /// rows minted through [`mint`] carry [`THREAD_VERSION`].
     #[serde(default)]
@@ -161,6 +166,8 @@ pub struct Mint {
     pub actor: String,
     pub anchors: Vec<String>,
     pub facts_rev: u32,
+    /// Declaration digest seen at admission (T-136).
+    pub facts_digest: String,
     /// Family: who/what this is about. Empty everywhere = unkeyed (never matches).
     pub subject: String,
     pub anchor_classes: Vec<String>,
@@ -282,6 +289,7 @@ pub fn mint(dir: &Path, m: Mint, now: i64) -> io::Result<Disposition> {
         actor: m.actor,
         anchors: m.anchors,
         facts_rev: m.facts_rev,
+        facts_digest: m.facts_digest,
         v: THREAD_VERSION,
         family_key: fam.clone(),
         variant_key: var,
@@ -469,6 +477,7 @@ mod tests {
             actor: "familiar".into(),
             anchors: Vec::new(),
             facts_rev: 0,
+            facts_digest: String::new(),
             v: 0,
             family_key: String::new(),
             variant_key: String::new(),
@@ -508,6 +517,7 @@ mod tests {
             actor: "familiar".into(),
             anchors: Vec::new(),
             facts_rev: 0,
+            facts_digest: String::new(),
             v: 0,
             family_key: String::new(),
             variant_key: String::new(),
@@ -573,6 +583,7 @@ mod tests {
             actor: "familiar".into(),
             anchors: vec![anchor.into()],
             facts_rev: 1,
+            facts_digest: String::new(),
             subject: "ian".into(),
             anchor_classes: vec!["ian|adjusted|lighting".into()],
             target: "lights".into(),
@@ -655,6 +666,7 @@ mod tests {
             actor: "phone:ian".into(),
             anchors: Vec::new(),
             facts_rev: 1,
+            facts_digest: String::new(),
             subject: String::new(),
             anchor_classes: Vec::new(),
             target: String::new(),

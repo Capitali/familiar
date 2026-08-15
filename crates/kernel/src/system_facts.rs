@@ -194,36 +194,131 @@ pub fn lexical_guard(text: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// The bounded rendering every theorize prompt receives — the SAME registry the
-/// validator enforces (one source of truth), plus the live deployment category:
-/// declared surfaces with their action labels and a digest of the declaration.
-pub fn render(dir: &Path) -> io::Result<String> {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "SYSTEM FACTS (registry v{FACTS_SCHEMA_VERSION} rev{FACTS_REVISION} — these are \
-         how this system is BUILT; never diagnose them as defects, never propose \
-         mechanisms outside them):\n"
-    ));
-    for f in LIFECYCLE_FACTS {
-        out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
+/// Which KIND of truth a fact is (T-136, dialogue Round 2 Answer 1). The categories are
+/// kept apart on purpose: an invariant is compiled and permanent, a deployment fact is
+/// derived from the human's current declaration and changes when they change it, and an
+/// observation is EVIDENCE that never becomes a SystemFact by being rendered beside one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactKind {
+    /// Compiled design invariant (SF-1, SF-2): how the system is built.
+    Invariant,
+    /// Derived live from the human's declaration (SF-3), carrying its digest.
+    Deployment,
+}
+
+/// One fact as the registry holds it — id, kind, and the human rendering.
+#[derive(Debug, Clone)]
+pub struct Fact {
+    pub id: String,
+    pub kind: FactKind,
+    pub rendering: String,
+}
+
+/// The registry's answer to "what is true here, right now", with the identity a draft
+/// records so a later revision can supersede rather than silently reinterpret it.
+#[derive(Debug, Clone)]
+pub struct FactsView {
+    pub schema: u32,
+    pub revision: u32,
+    /// Digest of the DECLARATION the deployment facts were derived from — changes
+    /// whenever the human edits actuators.json, so a thread admitted against surfaces
+    /// that no longer exist is detectable rather than quietly stale.
+    pub declaration_digest: String,
+    pub facts: Vec<Fact>,
+}
+
+/// A small deterministic digest (FNV-1a, 64-bit, hex). Not a security primitive — an
+/// identity for "which declaration did this draft see", compared for equality only.
+fn digest_of(parts: &[String]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for p in parts {
+        for b in p.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h ^= 0xff;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    out.push_str(&format!("- [SF-2] {MEMBERSHIP_RENDERING}\n"));
+    format!("{h:016x}")
+}
+
+/// THE runtime source of system truth (T-136/D4). Every consumer — the theorize prompt,
+/// the request-answering path, any future one — renders a VIEW of this. There is no
+/// sibling assembly of "what is true here"; a second assembly is how a floor starts
+/// lying while every part of it stays individually correct.
+pub fn view(dir: &Path) -> io::Result<FactsView> {
+    let mut facts: Vec<Fact> = LIFECYCLE_FACTS
+        .iter()
+        .map(|f| Fact {
+            id: f.id.to_string(),
+            kind: FactKind::Invariant,
+            rendering: f.rendering.to_string(),
+        })
+        .collect();
+    facts.push(Fact {
+        id: "SF-2".into(),
+        kind: FactKind::Invariant,
+        rendering: MEMBERSHIP_RENDERING.to_string(),
+    });
     let (acts, _skipped) = actuator::load(dir)?;
-    if acts.is_empty() {
-        out.push_str(
-            "- [SF-3] No control surfaces are declared right now — nothing may be acted on.\n",
-        );
+    let mut parts: Vec<String> = Vec::new();
+    let rendering = if acts.is_empty() {
+        "No control surfaces are declared right now — nothing may be acted on.".to_string()
     } else {
         let mut listed: Vec<String> = Vec::new();
         for a in &acts {
             let labels: Vec<&str> = a.actions.keys().map(|s| s.as_str()).collect();
+            parts.push(format!("{}:{}", a.surface, labels.join(",")));
             listed.push(format!("{} ({})", a.surface, labels.join("/")));
         }
-        out.push_str(&format!(
-            "- [SF-3] The ONLY controllable surfaces (declared by the human, ADR-0032): {}. \
-             Proposals act through these or not at all.\n",
+        format!(
+            "The ONLY controllable surfaces (declared by the human, ADR-0032): {}. \
+             Proposals act through these or not at all.",
             listed.join("; ")
-        ));
+        )
+    };
+    facts.push(Fact {
+        id: "SF-3".into(),
+        kind: FactKind::Deployment,
+        rendering,
+    });
+    Ok(FactsView {
+        schema: FACTS_SCHEMA_VERSION,
+        revision: FACTS_REVISION,
+        declaration_digest: digest_of(&parts),
+        facts,
+    })
+}
+
+/// The bounded rendering a THEORIZE prompt receives — a view of [`view`], never its own
+/// assembly. Kept identical in content to what [`validate`] enforces (one source).
+pub fn render(dir: &Path) -> io::Result<String> {
+    let v = view(dir)?;
+    let mut out = format!(
+        "SYSTEM FACTS (registry v{} rev{} decl:{} — these are how this system is BUILT; \
+         never diagnose them as defects, never propose mechanisms outside them):\n",
+        v.schema, v.revision, v.declaration_digest
+    );
+    for f in &v.facts {
+        out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
+    }
+    Ok(out)
+}
+
+/// The bounded rendering the REQUEST-ANSWERING path receives (T-136). Same registry,
+/// different consumer: the answering path previously assembled census/interfaces/
+/// observations with NO design invariants at all, so a question about a designed
+/// behaviour could be answered by a path that had never heard of it. Observations stay
+/// evidence — they are labelled separately and never rendered as system facts.
+pub fn render_for_answering(dir: &Path) -> io::Result<String> {
+    let v = view(dir)?;
+    let mut out = format!(
+        "SYSTEM FACTS (registry v{} rev{} decl:{} — how this system is built and what it \
+         may act on; these are not observations):\n",
+        v.schema, v.revision, v.declaration_digest
+    );
+    for f in &v.facts {
+        out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
     }
     Ok(out)
 }
@@ -293,5 +388,114 @@ mod tests {
         let with_pred = r#"{"anchors":["obs-1"],"mechanism":"presence","question":"q","theory":"t","direction":"d",
             "predictions":[{"then_actor":"ian","then_action":"adjusted","then_object_prefix":"lighting:","within_secs":7200,"polarity":"expect_absent"}]}"#;
         assert_eq!(TheoryDraft::parse(with_pred).unwrap().predictions.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod t136_tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("facts_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn declare(dir: &std::path::Path, surface: &str, labels: &[&str]) {
+        let actions: String = labels
+            .iter()
+            .map(|l| format!("\"{l}\":\"true\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let buckets: String = labels
+            .iter()
+            .map(|l| format!("{{\"name\":\"{l}\"}}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        fs::write(
+            dir.join(ACTUATORS_FILE_FOR_TEST),
+            format!(
+                "{{\"actuators\":[{{\"surface\":\"{surface}\",\"state_cmd\":\"true\",\
+                 \"actions\":{{{actions}}},\"buckets\":[{buckets}]}}]}}"
+            ),
+        )
+        .unwrap();
+    }
+    const ACTUATORS_FILE_FOR_TEST: &str = crate::actuator::ACTUATORS_FILE;
+
+    /// The registry is ONE source with THREE distinguishable kinds: compiled invariants
+    /// stay invariant, the declaration-derived fact is marked deployment and carries a
+    /// digest that MOVES when the human edits their declaration — so a draft admitted
+    /// against surfaces that no longer exist is detectable, not silently stale.
+    #[test]
+    fn one_source_three_kinds_and_a_digest_that_moves() {
+        let d = tmp("kinds");
+        let bare = view(&d).unwrap();
+        assert!(bare
+            .facts
+            .iter()
+            .any(|f| f.id == "SF-1" && f.kind == FactKind::Invariant));
+        assert!(bare
+            .facts
+            .iter()
+            .any(|f| f.id == "SF-2" && f.kind == FactKind::Invariant));
+        let sf3 = bare.facts.iter().find(|f| f.id == "SF-3").unwrap();
+        assert_eq!(
+            sf3.kind,
+            FactKind::Deployment,
+            "declared surfaces are deployment truth"
+        );
+        assert!(sf3.rendering.contains("No control surfaces"));
+
+        declare(&d, "lights", &["dim", "bright"]);
+        let one = view(&d).unwrap();
+        assert_ne!(
+            one.declaration_digest, bare.declaration_digest,
+            "the digest tracks the declaration"
+        );
+        assert!(one
+            .facts
+            .iter()
+            .any(|f| f.id == "SF-3" && f.rendering.contains("lights")));
+
+        declare(&d, "lights", &["dim", "bright", "off"]);
+        let two = view(&d).unwrap();
+        assert_ne!(
+            two.declaration_digest, one.declaration_digest,
+            "adding an action moves it"
+        );
+        // Same declaration, same digest — it is an identity, not a clock.
+        declare(&d, "lights", &["dim", "bright", "off"]);
+        assert_eq!(view(&d).unwrap().declaration_digest, two.declaration_digest);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Both consumers render the SAME registry — the theorize prompt and the answering
+    /// path can no longer hold different pictures of what is true here (T-136/D4).
+    #[test]
+    fn both_renderings_are_views_of_one_registry() {
+        let d = tmp("views");
+        declare(&d, "lights", &["dim", "bright"]);
+        let theorize = render(&d).unwrap();
+        let answering = render_for_answering(&d).unwrap();
+        for id in ["SF-1", "SF-2", "SF-3"] {
+            assert!(theorize.contains(id), "theorize view missing {id}");
+            assert!(
+                answering.contains(id),
+                "answering view missing {id} — the old blindness"
+            );
+        }
+        assert!(
+            answering.contains("lights"),
+            "the answering path sees the declaration"
+        );
+        let digest = view(&d).unwrap().declaration_digest;
+        assert!(
+            theorize.contains(&digest) && answering.contains(&digest),
+            "both renderings name the declaration they stand on"
+        );
+        let _ = fs::remove_dir_all(&d);
     }
 }

@@ -861,6 +861,10 @@ fn maybe_theorize(
     // The floor (dialogue Q2): the prompt receives a rendering of the SAME registry the
     // validator enforces after parse — one source of truth, steering and boundary.
     let facts = familiar_kernel::system_facts::render(dir)?;
+    // The identity of what the draft was shown and validated against (T-136).
+    let facts_view_digest = familiar_kernel::system_facts::view(dir)
+        .map(|v| v.declaration_digest)
+        .unwrap_or_default();
     let who = observer_phrase(dir);
     let prompt = format!(
         "You are a factory whose only purpose is to serve {who} — never to manage, obey, \
@@ -1034,6 +1038,7 @@ fn maybe_theorize(
             actor: "familiar".to_string(),
             anchors: draft.anchors.clone(),
             facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+            facts_digest: facts_view_digest.clone(),
             subject,
             anchor_classes,
             target,
@@ -1372,6 +1377,7 @@ fn maybe_theorize_needs(
             actor: "familiar".to_string(),
             anchors: Vec::new(),
             facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+            facts_digest: String::new(),
             subject: handle.clone(),
             anchor_classes: Vec::new(),
             target: String::new(),
@@ -1426,6 +1432,17 @@ fn review_parameters(dir: &Path, now: i64) -> io::Result<usize> {
 /// (gateway, DNS, listening ports). Recent observations round it out. These are facts the
 /// familiar *perceived*, so an answer drawn from them is `Known`, not guessed.
 fn grounding_facts(dir: &Path, text: &str, now: i64) -> Vec<String> {
+    // The registry is the ONE source of system truth (T-136/D4): this path renders a VIEW
+    // of it rather than assembling a rival set. Before this, the answering path knew the
+    // census and the interfaces but had never heard of a single design invariant — so a
+    // question about designed behaviour (a purge, what may be actuated) was answered by a
+    // path structurally blind to the facts the theorize path had to obey.
+    let mut lines: Vec<String> = familiar_kernel::system_facts::render_for_answering(dir)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.starts_with("- ["))
+        .map(|l| l.to_string())
+        .collect();
     let mut facts: Vec<observation::Observation> = Vec::new();
     facts.extend(sense::census(now));
     facts.extend(sense::interfaces(now));
@@ -1443,21 +1460,28 @@ fn grounding_facts(dir: &Path, text: &str, now: i64) -> Vec<String> {
     {
         facts.extend(sense::network_detail(now));
     }
-    let mut lines: Vec<String> = facts
+    // Observations are EVIDENCE and stay evidence: rendered under their own heading so
+    // nothing here can be mistaken for a system fact by sitting beside one (codex,
+    // Round 2 Answer 1 — observations never become SystemFacts by rendering).
+    let mut observed: Vec<String> = facts
         .iter()
         .map(|o| format!("- {} {} {}", o.actor, o.action, o.object))
         .collect();
     // a little recent observed context, newest first
     if let Ok(obs) = observation::load(dir) {
-        lines.extend(
+        observed.extend(
             obs.iter()
                 .rev()
                 .take(10)
                 .map(|o| format!("- {} {} {}", o.actor, o.action, o.object)),
         );
     }
-    lines.sort();
-    lines.dedup();
+    observed.sort();
+    observed.dedup();
+    if !observed.is_empty() {
+        lines.push("OBSERVED (evidence, not system facts):".to_string());
+        lines.extend(observed);
+    }
     lines
 }
 
@@ -2299,6 +2323,7 @@ fn adopt_device_theories(
             actor: o.actor.clone(),
             anchors: Vec::new(),
             facts_rev: familiar_kernel::system_facts::FACTS_REVISION,
+            facts_digest: String::new(),
             subject: String::new(),
             anchor_classes: Vec::new(),
             target: String::new(),
@@ -4769,6 +4794,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -5157,6 +5183,7 @@ mod tests {
                     actor: "familiar".into(),
                     anchors: Vec::new(),
                     facts_rev: 0,
+                    facts_digest: String::new(),
                     v: 0,
                     family_key: String::new(),
                     variant_key: String::new(),
@@ -5232,6 +5259,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -5418,6 +5446,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -5515,6 +5544,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -5569,6 +5599,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -6058,6 +6089,7 @@ mod tests {
             actor: "familiar".into(),
             anchors: Vec::new(),
             facts_rev: 0,
+            facts_digest: String::new(),
             v: 0,
             family_key: String::new(),
             variant_key: String::new(),
@@ -6206,6 +6238,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -6389,6 +6422,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -6598,6 +6632,7 @@ mod tests {
                     actor: actor.into(),
                     anchors: Vec::new(),
                     facts_rev: 0,
+                    facts_digest: String::new(),
                     v: 0,
                     family_key: String::new(),
                     variant_key: String::new(),
@@ -6988,6 +7023,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),
@@ -7045,6 +7081,7 @@ mod tests {
                 actor: "familiar".into(),
                 anchors: Vec::new(),
                 facts_rev: 0,
+                facts_digest: String::new(),
                 v: 0,
                 family_key: String::new(),
                 variant_key: String::new(),

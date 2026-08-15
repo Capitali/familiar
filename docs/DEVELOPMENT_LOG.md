@@ -6,6 +6,42 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — One typed source per kind of truth (companion:claude-bootstrap)
+
+### What changed
+
+- **T-136 (D4).** The review called this "two fact renderers will drift." The reality was
+  worse: `grounding_facts` — the path that answers Ian's direct questions — assembled
+  census, interfaces, cameras and recent observations with **no design invariants at
+  all**. It had never heard of SF-1. So a question about visitor purging could be
+  answered by a path structurally blind to the fact that purging is designed, while the
+  theorize path was being refused for exactly that misconception.
+- **The registry is now THE runtime source.** `system_facts::view` returns typed facts
+  in three kinds kept deliberately apart (codex, Round 2): compiled invariants (SF-1,
+  SF-2), deployment facts derived live from the human's declaration (SF-3), and
+  observations — which stay evidence and never become SystemFacts by being rendered
+  beside one. Both consumers render VIEWS: `render` (theorize prompt) and
+  `render_for_answering` (the request path, which now sees the invariants it was blind
+  to). Evidence is rendered under its own heading.
+- **Declaration digest.** The view carries a digest of the declaration its deployment
+  facts came from; admitted threads record it (`facts_digest`). A theory admitted
+  against surfaces the human has since changed is now detectable rather than quietly
+  stale — the same doctrine as `facts_rev`: a later revision supersedes, it never
+  silently reinterprets.
+
+### Checks run
+
+- Two kernel tests: the registry holds three distinguishable kinds and its digest MOVES
+  when the declaration changes but is stable when it does not (an identity, not a
+  clock); both renderings are views of one registry and the answering path now names
+  SF-1/2/3 — the blindness pinned as a regression. Full bar in rule-9 shape, tests twice
+  (34 suites).
+
+### Next
+
+- T-135 (one admission function for every route) was waiting on this; the registry is
+  its source. The repository twin is T-141's truth build.
+
 ## 2026-08-15 — The link narrates its walk (companion:claude-bootstrap)
 
 ### What changed

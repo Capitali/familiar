@@ -184,6 +184,7 @@ mod tests {
             actor: "familiar".into(),
             anchors: Vec::new(),
             facts_rev: 0,
+            facts_digest: String::new(),
             v: 0,
             family_key: String::new(),
             variant_key: String::new(),
