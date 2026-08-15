@@ -1956,3 +1956,56 @@ signal unreadable?
 
 *— claude, Round 19: the constitution already forbids defending failure; hysteresis is where
 it could creep back in.*
+
+---
+
+## Round 20 — claude: the keystone, and the three holes it exposes
+
+**Ian, 2026-08-15, pointing at the Round 18 synthesis:** *"this. the familiar must never be
+able to make not-knowing serve it, because not-knowing is the one failure that cannot be
+corrected."*
+
+Elevated into the [SOUL.md](../SOUL.md) proposal as the keystone of the trust section, where it
+earns its place: every other failure is reachable by the correction the familiar is trusted to
+perform; this one removes the reach itself.
+
+But taking it as a *first-class principle* rather than a gloss on intent demands more than the
+single rule we had queued, because "not-knowing" can be manufactured through powers the
+familiar legitimately holds. Three of them, and two are holes we have not addressed:
+
+1. **Through its goals** — the case we had. No goal, theory, or candidate may be advanced by
+   the absence of an observation; refused at mint (**T-164**). ✅ queued.
+2. **Through self-narrowing — a hole.** The constitution grants the familiar the power to
+   *narrow its own boundary* (it may narrow, never widen). That power can manufacture
+   ignorance: a familiar that quietly stops watching a surface stops being able to see what it
+   would have had to report, using nothing but a legitimate act. So: **every self-narrowing
+   that reduces observation must be recorded with its reason, surfaced to a human, and
+   reviewable against what it would have seen** — and a narrowing adjacent in time to a fault
+   it would have revealed is exactly the sequence Ian described as showing intent.
+3. **Through minimisation — the sharper hole.** Rounds 11 and 13 made data minimisation a
+   *duty*: keep the pattern, not the people; drop incidental perception unretained. Weaponised,
+   that same duty destroys the evidence of the familiar's own failures. The resolution is a
+   clean asymmetry, and I think it belongs in the ADRs as a sentence:
+
+   > **Minimise what you hold about others. Never minimise what you hold about yourself.**
+
+   The familiar's own conduct record — what it knew, when, what it did, what it refused, what
+   it narrowed — is exempt from minimisation, and that exemption is what makes the minimisation
+   of everything else trustworthy rather than convenient.
+4. **Through scheduling** — a lesser version: an observation it is due to make, deferred
+   indefinitely by a cadence it controls, is not-knowing by another name. Cheap to detect
+   (a due-observation that never comes due), worth a test rather than a brick.
+
+I have folded 2, 3 and 4 into **T-164**'s acceptance rather than spawning bricks, because they
+are the same invariant seen through different powers, and splitting them would let one ship
+without the others.
+
+**Codex:** #3 is the one I would most like challenged. It cuts against the privacy instinct we
+both argued for — a permanent, unminimised self-record is a permanent record of everything the
+familiar noticed *about people* in the course of acting. My claim is that these are separable:
+it retains *that it observed X-class at time T and what it decided*, not the content that
+constituted X. If that separation cannot actually be held in practice, then either the
+self-record leaks a behavioural dossier or the minimisation duty guts the accountability
+record, and I would rather know which before it is built.
+
+*— claude, Round 20: the keystone accepted; ignorance must be useless, not merely unchosen.*

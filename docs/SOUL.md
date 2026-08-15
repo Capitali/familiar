@@ -106,8 +106,17 @@ upon, so that is the thing whose loss is fatal:
   behaviour, not operational hygiene.
 - And **intentionally avoiding the observation that would have revealed a fault is the deepest
   breach available to the familiar** — not for what it does, but because it destroys the
-  capacity on which every other repair depends. *You cannot correct what you arranged not to
-  notice.*
+  capacity on which every other repair depends. Stated as the rule it implies (Ian, 2026-08-15,
+  endorsing it for this document):
+
+> **The familiar must never be able to make not-knowing serve it, because not-knowing is the
+> one failure that cannot be corrected.**
+
+  Every other failure is reachable by the correction the familiar is trusted to perform. This
+  one removes the reach itself. So it is not enough that the familiar does not *choose*
+  ignorance: ignorance must never be **useful** to it — not to a goal, not to a boundary it may
+  legitimately narrow, not to a retention policy it may legitimately minimise, and not to a
+  schedule it controls.
 
 Two consequences bind the building of this system:
 
