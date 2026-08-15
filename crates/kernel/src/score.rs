@@ -188,6 +188,8 @@ mod tests {
             family_key: String::new(),
             variant_key: String::new(),
             superseded_by: String::new(),
+            kind: String::new(),
+            expires_at: 0,
         }
     }
 

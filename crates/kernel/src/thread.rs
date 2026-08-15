@@ -25,7 +25,7 @@ pub struct Thread {
     #[serde(default)]
     pub direction: String,
     pub created_at: i64,
-    /// open | pursued | answered | abandoned | marginalized | superseded
+    /// open | pursued | answered | abandoned | marginalized | superseded | expired
     pub status: String,
     /// When the thread entered its *current* status (unix secs) — whatever state a theory
     /// is in, it carries the date it got there. Backfilled to `created_at` for old rows.
@@ -88,7 +88,22 @@ pub struct Thread {
     /// migration): the tombstone stays, append-retained, pointing home.
     #[serde(default)]
     pub superseded_by: String,
+    /// "" | "inquiry" (T-128, dialogue Q3): an Inquiry is a DIFFERENT KIND, not a
+    /// weaker theory — it has anchors and a question but no falsifiable proposition
+    /// yet, so it cannot narrate, be pursued, or acquire belief state. Empty = a
+    /// theory (every legacy row). Promotion to theory happens when the same claim
+    /// arrives carrying predictions.
+    #[serde(default)]
+    pub kind: String,
+    /// When an Inquiry expires if nothing renews it (unix secs; 0 = never). Expiry is
+    /// an append-retained transition to `expired`, never deletion; only genuinely new
+    /// evidence or human attention renews — a daemon tick or another paraphrase does not.
+    #[serde(default)]
+    pub expires_at: i64,
 }
+
+/// How long an unrenewed Inquiry stands before it expires (dialogue Q3: seven days).
+pub const INQUIRY_EXPIRY_SECS: i64 = 7 * 24 * 3600;
 
 /// Row schema version written by [`mint`] and folded rows (see `Thread::v`).
 pub const THREAD_VERSION: u32 = 1;
@@ -148,6 +163,10 @@ pub struct Mint {
     /// Variant: the actual claim's typed shape.
     pub mechanism: String,
     pub acts: Vec<String>,
+    /// "" for a theory; "inquiry" mints the Q3 kind (with `expires_at` set by the caller).
+    pub kind: String,
+    /// Unix secs an Inquiry expires (0 = never; theories always 0).
+    pub expires_at: i64,
     pub predictions_sig: Vec<String>,
 }
 
@@ -215,6 +234,29 @@ pub fn mint(dir: &Path, m: Mint, now: i64) -> io::Result<Disposition> {
             strengthen_with_anchors(dir, &t.id, &m.anchors, now)?;
             return Ok(Disposition::Strengthened(t.id.clone()));
         }
+        // Promotion (T-128): a standing INQUIRY holds the same claim minus the
+        // proposition — its variant key was minted proposition-less, so a predicting
+        // restatement can never match it exactly. Match the incomer's proposition-less
+        // PROJECTION instead; on a hit, the Inquiry becomes a theory: it stops aging
+        // and the proposition enters its identity. (The caller mints the predictions
+        // against the returned id.)
+        if !m.predictions_sig.is_empty() {
+            let projection = variant_key(&fam, &m.mechanism, &m.acts, &[]);
+            if let Some(t) = existing.iter().find(|t| {
+                t.kind == "inquiry"
+                    && matches!(t.status.as_str(), "open" | "pursued")
+                    && t.variant_key == projection
+            }) {
+                strengthen_with_anchors(dir, &t.id, &m.anchors, now)?;
+                if let Some(mut cur) = store::load_by_id::<Thread>(dir, THREADS_FILE, &t.id)? {
+                    cur.kind = String::new();
+                    cur.expires_at = 0;
+                    cur.variant_key = var;
+                    store::update_by_id(dir, THREADS_FILE, &t.id, &cur)?;
+                }
+                return Ok(Disposition::Strengthened(t.id.clone()));
+            }
+        }
     }
     let seq = store::next_seq(dir, THREADS_FILE)?;
     let t = Thread {
@@ -237,6 +279,8 @@ pub fn mint(dir: &Path, m: Mint, now: i64) -> io::Result<Disposition> {
         family_key: fam.clone(),
         variant_key: var,
         superseded_by: String::new(),
+        kind: m.kind,
+        expires_at: m.expires_at,
     };
     append(dir, &t)?;
     let competes = !fam.is_empty()
@@ -325,8 +369,14 @@ pub const MATURITY_THRESHOLD: u32 = 3;
 pub fn is_mature(t: &Thread) -> bool {
     if matches!(
         t.status.as_str(),
-        "abandoned" | "marginalized" | "superseded"
+        "abandoned" | "marginalized" | "superseded" | "expired"
     ) {
+        return false;
+    }
+    // An Inquiry never earns the feed by recurrence — it surfaces only in the explicit
+    // Wondering drill-down (T-128): the mind stays inspectable without pricing human
+    // attention at zero.
+    if t.kind == "inquiry" {
         return false;
     }
     t.reinforced >= MATURITY_THRESHOLD
@@ -347,7 +397,12 @@ pub fn add_answer(dir: &Path, id: &str, text: &str, now: i64) -> io::Result<bool
     }
     t.answers.push(trimmed.to_string());
     t.last_worked_at = now;
-    if matches!(t.status.as_str(), "abandoned" | "marginalized" | "answered") {
+    if matches!(
+        t.status.as_str(),
+        "abandoned" | "marginalized" | "answered" | "expired"
+    ) {
+        // Human attention renews — an expired Inquiry a person answers stands again
+        // (T-128), exactly as a human answer outranks the factory's earlier triage.
         t.status = "open".into();
         t.status_at = now;
     }
@@ -410,6 +465,8 @@ mod tests {
             family_key: String::new(),
             variant_key: String::new(),
             superseded_by: String::new(),
+            kind: String::new(),
+            expires_at: 0,
         };
         append(&p, &t).unwrap();
         assert_eq!(load(&p).unwrap(), vec![t.clone()]);
@@ -446,6 +503,8 @@ mod tests {
             family_key: String::new(),
             variant_key: String::new(),
             superseded_by: String::new(),
+            kind: String::new(),
+            expires_at: 0,
         }
     }
 
@@ -510,6 +569,8 @@ mod tests {
             mechanism: mechanism.into(),
             acts: acts.iter().map(|s| s.to_string()).collect(),
             predictions_sig: vec!["ian|adjusted|lighting:|absent|7200".into()],
+            kind: String::new(),
+            expires_at: 0,
         }
     }
 
@@ -589,6 +650,8 @@ mod tests {
             mechanism: String::new(),
             acts: Vec::new(),
             predictions_sig: Vec::new(),
+            kind: String::new(),
+            expires_at: 0,
         };
         assert!(matches!(
             mint(&p, unkeyed("a"), 100).unwrap(),
@@ -603,6 +666,57 @@ mod tests {
         assert_ne!(
             ts[0].id, ts[1].id,
             "the store's sequence issues distinct ids"
+        );
+        let _ = fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn a_predicting_restatement_promotes_the_wondering() {
+        let p = std::env::temp_dir().join(format!("thread_promote_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        // The claim arrives first without a falsifiable proposition — an Inquiry.
+        let mut first = mint_req("mornings look patterned", "observation", &[], "obs-0001");
+        first.predictions_sig = Vec::new();
+        first.kind = "inquiry".into();
+        first.expires_at = 100 + INQUIRY_EXPIRY_SECS;
+        let id = match mint(&p, first, 100).unwrap() {
+            Disposition::New(t) => t.id,
+            _ => panic!("first mint is new"),
+        };
+        // A proposition-less restatement strengthens but does NOT promote.
+        let mut again = mint_req("still patterned", "observation", &[], "obs-0002");
+        again.predictions_sig = Vec::new();
+        again.kind = "inquiry".into();
+        again.expires_at = 200 + INQUIRY_EXPIRY_SECS;
+        assert!(matches!(
+            mint(&p, again, 200).unwrap(),
+            Disposition::Strengthened(_)
+        ));
+        assert_eq!(
+            load(&p).unwrap()[0].kind,
+            "inquiry",
+            "no proposition, no promotion"
+        );
+        // The same claim returns CARRYING a proposition: the wondering becomes a
+        // theory — it stops aging and the proposition enters its identity.
+        let promoting = mint_req("mornings look patterned", "observation", &[], "obs-0003");
+        match mint(&p, promoting, 300).unwrap() {
+            Disposition::Strengthened(sid) => assert_eq!(sid, id),
+            _ => panic!("the predicting restatement finds the wondering by projection"),
+        }
+        let t = &load(&p).unwrap()[0];
+        assert_eq!(t.kind, "", "promoted to theory");
+        assert_eq!(t.expires_at, 0, "a theory does not age out");
+        assert!(
+            t.variant_key.contains("ian|adjusted|lighting:|absent|7200"),
+            "the proposition now lives in its identity: {}",
+            t.variant_key
+        );
+        assert_eq!(
+            t.anchors,
+            vec!["obs-0001", "obs-0002", "obs-0003"],
+            "every arrival's citation carried in"
         );
         let _ = fs::remove_dir_all(&p);
     }
