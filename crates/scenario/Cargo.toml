@@ -15,6 +15,7 @@ serde_json.workspace = true
 familiar-kernel.workspace = true
 familiar-exec.workspace = true
 familiar-llm.workspace = true
+familiar-recipe.workspace = true
 
 [[bin]]
 name = "familiar-lab"

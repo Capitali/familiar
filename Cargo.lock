@@ -547,6 +547,7 @@ dependencies = [
  "familiar-exec",
  "familiar-kernel",
  "familiar-llm",
+ "familiar-recipe",
  "serde",
  "serde_json",
 ]

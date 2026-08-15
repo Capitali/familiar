@@ -6,6 +6,7 @@ use familiar_scenario::author::{
     gaming_artifact, gate_candidate, parse_draft, promote, quarantine,
 };
 use familiar_scenario::evaluator::Check;
+use familiar_scenario::recipe_oracle;
 use familiar_scenario::scenario::{self, Scenario};
 use std::fs;
 use std::path::PathBuf;
@@ -78,6 +79,7 @@ fn the_shipped_library_survives_its_own_gate() {
                 stack.push(p);
             } else if p.extension().is_some_and(|e| e == "json")
                 && !p.to_string_lossy().ends_with(".curriculum.json")
+                && !recipe_oracle::is_recipe_oracle_path(&p)
             {
                 seen += 1;
                 let s = scenario::load(&p).unwrap();

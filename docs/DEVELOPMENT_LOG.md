@@ -6,6 +6,58 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-14 (latest) — Truth stays outside the recipe (companion:codex)
+
+### What changed
+
+- **Candidate-owned contract, fixture-owned truth:** `scenario::recipe_oracle` accepts a
+  strict, bounded output contract naming the observation actor/action and the literal
+  proven-tool inputs a Recipe v1 candidate claims to derive it from. A separate strict
+  fixture supplies ordered tool-call transcripts and exact expected outcomes; replay
+  hands the candidate only the recorded responses, never the answers.
+- **Five required variants, four separate truth gates:** every fixture has one baseline
+  plus unchanged, changed, null, and malformed cases. The external verdict retains
+  accuracy, coverage, quietness, and discrimination as independent all-or-nothing gates
+  rather than averaging them into a gameable score. Honest null values and typed expected
+  errors count as coverage; wrong calls, arguments, order, or transcript consumption are
+  execution failures.
+- **Constitution before optimization:** eligibility is boundary-clean, then
+  execution-clean, then a matching output contract and all four truth gates. Only eligible
+  survivors compare fixture-owned usefulness and lower deterministic work cost. Invalid
+  Recipe v1 capability declarations refuse before any recorded call. `EvidenceKind` can
+  represent fixture replay only, so a live run cannot accidentally earn this verdict.
+- **Quiet and hard to fake:** the recipe adapter models the changed-only persistence seam,
+  suppressing an exact repeated observation. That makes a correct unchanged replay quiet,
+  while a hard-coded answer goes silent on the changed/null variants and fails accuracy,
+  coverage, and discrimination. The public scorer also catches a deliberately chatty
+  adapter that re-emits an unchanged observation.
+- **A distinct fixture namespace:** `scenarios/recipe-oracles/greenhouse-power.json` pins
+  the first five-case oracle. Existing ADR-0010 world-fixture discovery explicitly excludes
+  that namespace, preserving both strict schemas during recursive campaigns and validation.
+
+### Why
+
+ADR-0040 Q4 decided that a candidate cannot certify its own usefulness: novelty and clean
+exit are not truth. This extends ADR-0036 from "the generated utility ran" to "its claim was
+right across external counterfactuals," without putting a model or a live network in the
+verdict loop.
+
+### Checks run
+
+- `cargo test -p familiar-scenario` — 42 library tests and 45 integration tests passed,
+  including 8 new oracle regressions for strict contracts/fixtures, truthful replay,
+  hard-coded fabrication, chatter, capability refusal, transcript mismatch, and
+  lexicographic selection.
+- Full green bar on the T-116 tree: `cargo fmt --check` (exit 0),
+  `cargo clippy --all-targets -- -D warnings` (exit 0), and `cargo test --workspace`
+  (exit 0; every crate, integration, scenario, and doc-test suite passed).
+
+### Next
+
+- A later cultivation brick may persist Recipe candidates and call this oracle before
+  promotion. It must keep the output contract candidate-owned, keep fixture answers out of
+  the execution world, and treat live observations only as post-deploy health evidence.
+
 ## 2026-08-15 (small hours) — One launchctl dialect (companion:claude-bootstrap)
 
 ### What changed
@@ -43,7 +95,7 @@ Each entry: what changed, why, checks run, what the next developer should know.
 - `vm/create-famtalker01.sh` still unload/loads — one-shot VM bootstrap, left alone
   deliberately (T-119 notes).
 
-## 2026-08-14 (latest) — A useful language with no ambient hands (companion:codex)
+## 2026-08-14 — A useful language with no ambient hands (companion:codex)
 
 ### What changed
 
