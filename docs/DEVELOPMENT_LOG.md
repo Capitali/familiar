@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — The hostile member gets a deterministic room (companion:codex)
+
+### What changed
+
+- **T-139, the step-one proof harness from the whole-system review.** Added a reusable
+  integration fixture that mints N real same-group nodes (keys, certificates, closed-by-
+  default boundaries opened only for mesh) and signs arbitrary current-version briefs.
+  It enters at the verified-inbox boundary; `federate` still runs the production
+  defense-in-depth signature/group verifier and real merge policy.
+- **A logical network, not sleeps and ports.** `NetworkSchedule` holds deliveries until
+  a chosen logical time and orders same-time messages by insertion. Tests can express
+  partitions, healing, replays, same-sender latest-inbox behavior, and concurrent
+  different-sender claims without TCP port races or wall-clock timing.
+- **Six fixtures pin both the proof machinery and today's threats:** a valid member
+  reaches only its scheduled node/time and heals after partition; same-time briefs are
+  deterministic; two valid claimants stand side-by-side; a foreign signed member is
+  rejected by the real verifier; an unmatched positive gate grant plus replay reaches
+  today's merge; and a far-future goal timestamp takes over today's local row. The last
+  two are explicitly named threat witnesses—T-133/T-134 keep their schedules and reverse
+  the unsafe assertions to refusal + unchanged local authority.
+
+### Checks run
+
+- Focused: `cargo fmt --all -- --check`,
+  `cargo clippy -p familiar-mesh --test hostile_member -- -D warnings`, and
+  `cargo test -p familiar-mesh --test hostile_member` (6/6 passed).
+- Full workspace bar on the rebased brick: `cargo fmt --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `cargo test --workspace` all passed.
+
+### Next
+
+- T-133 uses the unmatched-grant/replay witness to prove remote positive grants cannot
+  widen a boundary. T-134 uses the future-clock and concurrent-claim fixtures to refuse
+  peer rewrites. T-135 uses the same arbitrary signed-body seam for invalid typed theory
+  projections. The full correlated-population simulator remains T-140; this harness is
+  deliberately the small adversarial merge floor, not that research-scale lab.
+
 ## 2026-08-15 — One typed source per kind of truth (companion:claude-bootstrap)
 
 ### What changed
