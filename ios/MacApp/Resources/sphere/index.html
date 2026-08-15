@@ -394,7 +394,15 @@ function cdText(deadline) {
 // Who is present at a node now, for how long, and how established — or 'unknown' when no
 // evidence is fresh. present_human/via/since are set by members::derive_presence.
 function presentLine(m) {
-  if (!m.present_human && !m.present_via) return { text: 'unknown', known: false };
+  // A station (ADR-0042) is bound to a place and serves whoever is there, so "unknown" reads
+  // as a fault when it is simply the truth: nobody has been identified at the dinette yet.
+  // Naming that honestly is the point — the familiar should go on to ASK who it is talking to,
+  // never quietly settle for not knowing.
+  if (!m.present_human && !m.present_via) {
+    return (m.posture === 'fixed')
+      ? { text: 'nobody identified here yet', known: false }
+      : { text: 'unknown', known: false };
+  }
   const who = m.present_human || 'someone';
   const how = m.present_via ? ' · ' + m.present_via : '';
   const forr = m.present_since > 0 ? ' ' + dur(nowS() - m.present_since) : '';
@@ -1334,7 +1342,9 @@ function refreshScreen() {
       ${row('SYSTEM', p.os)}
       ${row('JOINED', dstr(m.first_seen))}
       ${row('PRESENT', p.present.text)}
-      ${row('SERVES', ((m.human && m.human.toLowerCase() !== p.name.toLowerCase()) ? m.human : '') + (m.interactive ? ' · interactive' : ''))}
+      ${m.posture === 'fixed'
+        ? row('POSTURE', 'station · bound to its place, serving whoever is here')
+        : row('SERVES', ((m.human && m.human.toLowerCase() !== p.name.toLowerCase()) ? m.human : '') + (m.interactive ? ' · interactive' : ''))}
       ${row('POSITION', p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(4)+'°, '+p.lon.toFixed(4)+'°' + (p.m.geo_device ? '' : ' (estimated)') : p.hasAnchor ? '≈ near mesh' : '—')}
       ${p.located && p.locationAt > 0 ? row('LAST FIX', p.locationAgo < 90 ? 'just now' : dur(p.locationAgo) + ' ago · ' + dtstr(p.locationAt)) : ''}
       ${row('ADDRESS', m.addr)}

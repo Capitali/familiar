@@ -144,8 +144,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian 2026-08-15 — "there should be some enhanced observation capabilities on this type of device as it will be a fixed location, always powered on/plugged in, and on network if network is available, **it does not have cellular service**." The no-cellular constraint is a design bound, not a footnote: a station is blind AND unreachable when the network is down. This is the PRIZE of the station model rather than its consolation — the familiar's first fixed sense organ, and what Civilization as a Service actually needs, since a carried phone's observations are about wherever its human happens to be while a station's are about the dinette, always. Counterweight (HUMANITY.md): always-on sensing in a shared room is the sharpest form of the comfortable-replacement risk, so the vital sign applies here most of all — report what it noticed and would do more often than it asks to take something over
 
 ### T-175 · A station is a device bound to a place, not a device owned by "shared"
-- status: queued — **proposed model, wants Ian's read before implementation**
-- owner: —
+- status: DONE (build 91) — posture axis, presence gate, CLI, console row. ADR-0042 remains **proposed**: the model is Ian's to accept, but the phantom-occupant bug was live and is now fixed either way
+- owner: claude
 - scope: crates/mesh/src/device.rs (DeviceRecord posture), crates/mesh/src/members.rs (the presence gate), docs/decision-records/0042-*
 - depends: ADR-0042 acceptance (docs/decision-records/0042-the-station.md — written 2026-08-15, proposed)
 - accept: a fixed device's activity beacon NEVER produces presence evidence about a person; a station carries no `human` and no invented human record; `DeviceRecord.humans` (already plural, ADR-0039) carries who uses it; presence at a station is answered only by face/dialogue/motion evidence, and "someone is here, identity unknown" is a representable, useful state; misclassification is correctable by the human in one act

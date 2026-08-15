@@ -56,6 +56,17 @@ pub struct DeviceRecord {
     /// "phone" | "tablet" | "watch" | "mac" | "linux" | "vps" | "hub" | "" (unknown).
     #[serde(default)]
     pub kind: String,
+    /// How the device is held in the world: `carried` (it follows a person) | `fixed` (it is
+    /// bound to a place and serves whoever is there) | "" (not yet established).
+    ///
+    /// Orthogonal to `kind`, and that is the whole point (ADR-0042). An iPhone on a wall and an
+    /// iPhone in a pocket are the same hardware and completely different things, and until this
+    /// axis existed the only slot that changed any behaviour was the human's name — so a
+    /// device-shaped question got a human-shaped answer ("set the name to shared", Ian
+    /// 2026-08-15). A fixed device has no owner; who uses it lives in `humans`, which ADR-0039
+    /// already made plural for exactly this.
+    #[serde(default)]
+    pub posture: String,
     #[serde(default)]
     pub os: String,
     #[serde(default)]
@@ -143,6 +154,45 @@ pub fn set_name(dir: &Path, node_ref: &str, name: &str, now: i64) -> Result<Devi
     let mut rec = load(dir, &device_id)?.unwrap_or_default();
     rec.device_id = device_id;
     rec.name = name.to_string();
+    rec.updated_at = now;
+    save(dir, &rec)?;
+    Ok(rec)
+}
+
+/// The postures a device may be declared to hold. Anything else is refused rather than stored,
+/// because a posture nobody can read is worse than none: the presence gate would silently fall
+/// back to treating a station as carried, which is the exact bug this axis exists to end.
+pub const POSTURES: &[&str] = &["carried", "fixed"];
+
+impl DeviceRecord {
+    /// Is this device bound to a place rather than carried by a person?
+    ///
+    /// The presence gate turns on this: a fixed device is always powered and always reporting,
+    /// so its heartbeat is evidence that THE STATION IS UP and nothing whatever about who is
+    /// near it. Unknown posture reads as *not* fixed — the familiar keeps the long-standing
+    /// carried behaviour until a human says otherwise, rather than silently reclassifying a
+    /// person's phone and suppressing real presence (ADR-0042 consequences).
+    pub fn is_fixed(&self) -> bool {
+        self.posture.eq_ignore_ascii_case("fixed")
+    }
+}
+
+/// Declare how a device is held in the world. A human act, always — the familiar may propose a
+/// posture from what it observes (T-176) but never enters one on its own, because the two
+/// misclassifications fail in opposite directions: personal-read-as-station SUPPRESSES real
+/// presence, station-read-as-personal MANUFACTURES it.
+pub fn set_posture(dir: &Path, node_ref: &str, posture: &str, now: i64) -> Result<DeviceRecord> {
+    let posture = posture.trim().to_ascii_lowercase();
+    if !POSTURES.contains(&posture.as_str()) {
+        return Err(Error::Untrusted(format!(
+            "posture must be one of {} — got {posture:?}",
+            POSTURES.join(" | ")
+        )));
+    }
+    let device_id = crate::record::resolve_node_id(dir, node_ref)?;
+    let mut rec = load(dir, &device_id)?.unwrap_or_default();
+    rec.device_id = device_id;
+    rec.posture = posture;
     rec.updated_at = now;
     save(dir, &rec)?;
     Ok(rec)
@@ -532,5 +582,28 @@ mod tests {
         assert!(verify_device_sync(&foreign, &gk, &cred.group_id, NOW + 1, &[]).is_err());
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&dir2);
+    }
+
+    // ADR-0042 — posture is the axis that keeps a device-shaped question from getting a
+    // human-shaped answer.
+
+    #[test]
+    fn an_unset_posture_reads_as_carried_never_as_a_station() {
+        let d = DeviceRecord::default();
+        assert!(
+            !d.is_fixed(),
+            "unknown posture must keep the long-standing carried behaviour: reading it as \
+             fixed would silently suppress a real person's presence"
+        );
+    }
+
+    #[test]
+    fn posture_refuses_a_word_the_presence_gate_cannot_read() {
+        let dir = tmp("posture_refuses");
+        let err = set_posture(&dir, "dev1", "shared", 10).unwrap_err();
+        assert!(
+            format!("{err}").contains("carried"),
+            "the refusal must name what is allowed: {err}"
+        );
     }
 }

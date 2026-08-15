@@ -18,6 +18,20 @@ node notices, the mesh knows. It senses what is around it, forms theories about
 what it sees, asks you questions when it is unsure, and remembers which human it
 is serving on a device that many people touch.
 
+Not every device is somebody's. A **station**
+([ADR-0042](docs/decision-records/0042-the-station.md)) is a device bound to a
+*place* rather than a person — the old phone on the wall by the dinette, or
+mounted in the galley — and it serves whoever is there. It has no owner, and the
+mesh never invents one for it: how a device is *held* (`carried` or `fixed`) is
+its own fact, separate from what it *is*, because a phone in a pocket and the
+same phone on a wall are the same hardware and completely different things. A
+carried device's heartbeat is fair evidence its human is nearby; a station's is
+evidence only that the station is plugged in, and reading it otherwise invents a
+resident who does not exist. So a station learns who it is talking to the way a
+person would — by recognising a face it has been permitted to recognise, or by
+being told — and when it does not know, it says so and asks. Names matter: they
+are how relationships are made and kept.
+
 You hold the keys. The group is yours to admit people to and yours to abandon;
 the mesh talks to itself over pinned TLS, and its thinking runs through a
 boundary-gated adapter pointed at a provider you choose — a local model, a

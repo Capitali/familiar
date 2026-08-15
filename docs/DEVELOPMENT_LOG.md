@@ -6,6 +6,63 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-175 · A station is a device bound to a place (ADR-0042)
+
+Ian, testing build 90, renamed the spare iPhone **MotorStation**, set its name to "shared",
+and said: *"This is not the solution to this device."* He was right, and the harm was not
+cosmetic.
+
+`service::is_personal_device_report` matches on the **actor prefix alone** — `phone:`,
+`watch:`, `ipad:`, `iphone:` — and the inference above it in `members.rs` is commented,
+exactly, *"a carried personal device sensing its owner."* Every rung assumes a pocket. A
+station is bolted to a wall and powered forever, so its heartbeat would have named whoever
+the actor named, every few seconds, for as long as it stayed plugged in: a phantom resident
+called "shared" sitting permanently at the dinette, contaminating the very observations the
+shared-lighting consensus (ADR-0041) is built from — and one the mesh could never notice was
+wrong, because nothing about it looks like an error.
+
+The record was never the problem. ADR-0039 already made `DeviceRecord.humans` plural —
+*"humans associated, current and past"* — precisely so a device need not have one owner.
+What was missing is that hardware **kind** was the only axis, doing double duty as
+**posture**. An iPhone on a wall and an iPhone in a pocket are the same `kind` and different
+things, and with no way to say which, the only slot that changed any behaviour was the
+human's name. A device-shaped question got a human-shaped answer. "shared" was not a bad
+guess; it was the only guess the model allowed.
+
+### What changed
+- `DeviceRecord.posture` — `carried` | `fixed` | "" — orthogonal to `kind`, with
+  `is_fixed()` and a validating `set_posture()`. An unset posture reads as *carried*: the
+  familiar keeps long-standing behaviour until a human says otherwise rather than silently
+  reclassifying somebody's phone.
+- The presence gate consults it. A fixed device contributes no `activity` and no `motion`
+  rung — but still learns a face it is permitted to recognise, and still learns a name it is
+  *told*, which is the path the familiar should prefer anyway.
+- `is_personal_device_report` stays a pure actor check in the kernel (it has no directory and
+  should not grow one); the **caller** in `members.rs`, which already has `dir`, gates on the
+  record. Policy lives where the facts are.
+- `familiar mesh device posture <node> <fixed|carried>`, and `device show` now prints it.
+- The console stops asking a station the wrong question: `SERVES` becomes `POSTURE`, and a
+  station with nobody identified says *"nobody identified here yet"* rather than `unknown` —
+  which reads as a fault when it is simply the truth, and is the cue to go and ask.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` all
+**exit 0** (35 suites). Six new tests, named for the invariants they pin, because the bug
+they prevent is invisible — a phantom occupant looks exactly like a real one. The central
+one asserts both directions from one observation stream: carried, it names "shared"; fixed,
+it names nobody.
+
+Note for the next developer: an earlier run of this bar reported `CLIPPY_PASS` while the
+build was failing, because the check was piped through `tail` and the `&&` chain read
+*tail's* exit status. That is the same output-as-success-oracle trap T-143 removed from
+`ship.sh`. Read exit codes, never the prose.
+
+### Next
+T-176 (a device proposes its own posture from observing that it never moves), T-177 (a
+station asks who it is talking to — names are how relationships are kept), T-178 (pairing,
+unpairing, correction in one act), T-179 (what a fixed, always-powered, always-networked
+device can observe that a pocket never could — and the no-cellular bound that comes with it).
+
 ## 2026-08-15 — T-172 · The watch says why it failed
 
 A watch that tried to join and was refused rendered pixel-for-pixel identically to a watch
