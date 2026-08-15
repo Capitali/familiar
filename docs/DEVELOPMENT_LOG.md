@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-172 · The watch says why it failed
+
+A watch that tried to join and was refused rendered pixel-for-pixel identically to a watch
+that had never been told an address: the same dimmed orb, the same "Open the iPhone app to
+link this watch." The reason was not missing — `enroll()` has always captured it
+(`note("join failed: \(error)")`, `note("no approval yet")`) — it was written into an
+in-memory `log` array that **no watch view has ever rendered**. The wearer could see that
+nothing worked and could not see, or report, one word about why.
+
+This is the T-120/T-132 doctrine — progress and failure are different facts, and silence
+must never resolve into an unexplained mark — never applied to the wrist. Found while
+diagnosing Leif's watch, where the symptom reaching us third-hand was "he opens the app,
+sees the globe and orbiting dot": three different states all draw that orb, so the text
+beneath it is the only tell, and in the failure state that text was actively misleading —
+it sent him to the phone when the phone had already done its part.
+
+### What changed
+- `WatchModel.trouble` — the failure in words meant for the wearer, `localizedDescription`
+  rather than `"\(error)"`, because it is read on a 41mm screen by whoever is wearing it
+  and is the only account they will ever get. The raw debug form still goes to `log`.
+- `WatchModel.knownDoor` — nil is a genuinely different state from tried-and-failed, and
+  the two no longer render the same. Nil means the phone never reached this watch (fix is
+  on the phone); non-nil with `trouble` set means the watch knocked and got no answer.
+- `WatchModel.retry()` — the wrist owns its own retry. Previously a failed watch could only
+  be rescued from `StatusView` on the iPhone, and `StatusView` is not reachable from the
+  shipping app at all (T-171) — so in practice it could not be rescued.
+- The joining state now shows the door and the current step instead of a bare "joining…".
+
+### Checks
+xcodegen; FamiliarWatch Release for the generic watchOS Simulator and FamiliarAgent Release
+for the generic iOS Simulator both built (`xcodebuild` exit 0). Swift-only brick; the Rust
+green bar was run unchanged and stayed green.
+
+### Next
+T-171 (StatusView is dead code) and T-169 (watch state never reaches the mesh) are the rest
+of this class: the wrist can now explain itself to its wearer, but the mesh still cannot see
+a watch that is failing, and the iPhone's own watch diagnostics remain unreachable.
 ## 2026-08-15 — The phone can finally say what its watch needs (companion:codex)
 
 ### What changed

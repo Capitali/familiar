@@ -21,6 +21,14 @@ final class WatchModel: NSObject, ObservableObject {
     @Published var sentCount = 0
     @Published var lastHeartRate: Int?
     @Published var log: [String] = []
+    /// Why the last join attempt did not succeed, in words meant for the wearer.
+    ///
+    /// This used to exist only inside `log`, which no watch view has ever rendered — so a watch
+    /// that tried and failed looked exactly like a watch that had never been told an address:
+    /// the same dimmed orb, the same "open the iPhone app". The wearer could see that nothing
+    /// worked and could not see, or report, one word about why (T-172). Failure is a fact the
+    /// familiar owes the person in front of it, in the same way progress is (T-120, T-132).
+    @Published var trouble: String = ""
     /// True right after first enrollment, until the human resolves the consent prompt —
     /// sensing never starts silently on a newly-paired watch. See `consentAsked`.
     @Published var needsConsentPrompt = false
@@ -108,16 +116,50 @@ final class WatchModel: NSObject, ObservableObject {
                 grant = try await enroller.pollGrant(nodeId: node.nodeId)
                 tries += 1
             }
-            guard let g = grant else { enrolling = false; note("no approval yet"); return }
+            guard let g = grant else {
+                enrolling = false
+                trouble = "No one has approved this watch yet."
+                note("no approval yet")
+                return
+            }
             saveGrant(g)
             enrolling = false
             enrolled = true
+            trouble = ""
             note("✓ joined \(g.group_label)")
             startSensing()
         } catch {
             enrolling = false
+            // localizedDescription, not "\(error)": this string is read on a 41mm screen by
+            // whoever is wearing the watch, and it is the ONLY account they will ever get of
+            // why the join failed. "Could not connect to the server." is actionable by a human.
+            // The raw debug form goes to the log beside it, for whoever asks for detail.
+            trouble = (error as NSError).localizedDescription
             note("join failed: \(error)")
         }
+    }
+
+    /// The door this watch has been told to knock on, if a paired phone has ever sent one.
+    ///
+    /// Nil is a genuinely different state from "tried and failed", and the two must not render
+    /// the same: nil means the phone never reached this watch, so the fix is on the phone;
+    /// non-nil with `trouble` set means the watch reached out and was refused or unanswered.
+    var knownDoor: String? { defaults.string(forKey: "watch.enroll.host") }
+
+    /// Try the stored address again, from the wrist, without needing the phone to re-send it.
+    ///
+    /// A watch that failed to join could previously only be rescued from the iPhone — and the
+    /// iPhone screen that offers it (`StatusView`, T-171) is not reachable in the shipping app,
+    /// so in practice it could not be rescued at all. The wrist owns its own retry.
+    func retry() {
+        guard !enrolled, !enrolling else { return }
+        guard let host = defaults.string(forKey: "watch.enroll.host"),
+              let port = Int(defaults.string(forKey: "watch.enroll.port") ?? "") else { return }
+        trouble = ""
+        enrolling = true
+        note("retrying \(host)…")
+        let node = self.node
+        Task { await self.enroll(host: host, port: port, node: node) }
     }
 
     private func startSensing() {
