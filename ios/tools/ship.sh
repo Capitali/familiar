@@ -81,15 +81,53 @@ if ! xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent -configur
   exit 1
 fi
 IOSAPP="$IOS/build/ios-rel/Build/Products/Release-iphoneos/FamiliarAgent.app"
-for D in "${DEVICES[@]}"; do
-  ok=""
+
+# Direct install to the household's own devices, so a build is usable before Apple has
+# finished beta review. Two things used to make this stage useless in silence:
+#
+#   1. The device list was HARDCODED. UDIDs port between Macs in this script; the PAIRING
+#      does not — it lives in the Mac's trust store. On a fresh Mac every UDID is a stranger,
+#      and a device newly added to the household is never installed to at all.
+#   2. The failure was sent to /dev/null, so ten consecutive builds printed "unreachable"
+#      and never once said whether the device was asleep, unpaired, untrusted, or simply not
+#      there. "Unreachable" that cannot say why is not a diagnosis (T-186's lesson).
+#
+# So: DISCOVER what is actually paired, union it with the configured list, and when an
+# install fails, print what the tool said.
+# shellcheck disable=SC2016  # the single quotes are deliberate: the shell must not touch the Python
+DISCOVERED=$(xcrun devicectl list devices --json-output /tmp/familiar-devices.json >/dev/null 2>&1 \
+  && python3 -c '
+import json
+try:
+    devs = json.load(open("/tmp/familiar-devices.json"))["result"]["devices"]
+except Exception:
+    raise SystemExit
+for d in devs:
+    # `sameMachine` is how a simulator presents; a real handset is wired or on the network.
+    if d.get("connectionProperties", {}).get("transportType") == "sameMachine":
+        continue
+    print(d.get("hardwareProperties", {}).get("udid", ""))
+' 2>/dev/null || true)
+
+TARGETS=$(printf '%s\n%s\n' "${DEVICES[*]}" "$DISCOVERED" | tr ' ' '\n' | sed '/^$/d' | sort -u)
+if [ -z "$(printf '%s' "$DISCOVERED")" ]; then
+  echo "⚠ no physical device is paired with this Mac (devicectl sees simulators only)."
+  echo "  Pair once per device: connect by USB, tap Trust on the device, enter its passcode."
+  echo "  Then Xcode → Window → Devices and Simulators → ‘Connect via network’ to keep it."
+fi
+for D in $TARGETS; do
+  ok=""; why=""
   for try in 1 2 3; do
-    if xcrun devicectl device install app --device "$D" "$IOSAPP" >/dev/null 2>&1; then
+    if why=$(xcrun devicectl device install app --device "$D" "$IOSAPP" 2>&1); then
       ok=1; echo "✓ $D installed"; break
     fi
     sleep 5
   done
-  [ -n "$ok" ] || echo "⚠ $D unreachable (TestFlight will cover it)"
+  if [ -z "$ok" ]; then
+    # The last line of devicectl's complaint is the actionable one.
+    echo "⚠ $D not installed — $(printf '%s' "$why" | tail -3 | tr '\n' ' ' | cut -c1-200)"
+    echo "  (TestFlight will still cover it)"
+  fi
 done
 
 ASC_KEY_ID=SUZJSXVS25 ASC_ISSUER_ID=69a6de82-89e3-47e3-e053-5b8c7c11a4d1 \
