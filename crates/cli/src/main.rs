@@ -31,6 +31,9 @@ commands:
   presence       report the presence signal (Law II)
   capacities     report the capacities signal (Law II / HUMANITY.md)
   theories       list the familiar's questions + theories (threads)
+  spend          what the familiar's thinking has cost: per-provider calls and tokens
+                 by day, the trend, and what today is on course to reach against the
+                 self-imposed budget (`spend [--days N]`)
   dossier        what the familiar holds about one person, read by its subject
                  (ADR-0022): `dossier <handle>` — presence shape, standing evidence,
                  needs (stated vs theorized); `dossier withdraw <handle>` removes their
@@ -114,6 +117,7 @@ fn main() -> ExitCode {
         Some("run") => cmd_run(rest),
         Some("daemon") => cmd_daemon(rest),
         Some("boundary") => cmd_boundary(rest),
+        Some("spend") => cmd_spend(rest),
         Some("guard") => cmd_guard(rest),
         Some("consult") => cmd_consult(rest),
         Some("db") => cmd_db(rest),
@@ -3267,6 +3271,135 @@ fn cmd_run(args: &[String]) -> ExitCode {
         }
     }
     mesh.shutdown();
+    ExitCode::SUCCESS
+}
+
+/// What the familiar's thinking has cost, and what today is on course to reach.
+///
+/// The adapter has kept a per-provider daily ledger in `llm/spend.json` since it was written —
+/// calls and tokens, a week deep — and nothing has ever read it back. A budget you cannot see
+/// is not a budget; it is a surprise waiting (T-194). Ian, 2026-08-16: *"I don't have a clear
+/// picture of token usage for claude by the familiar."*
+fn cmd_spend(args: &[String]) -> ExitCode {
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let days: usize = f.get("days").and_then(|d| d.parse().ok()).unwrap_or(7);
+    let path = dir.join("llm").join("spend.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        println!(
+            "spend: no ledger yet at {} — it is written on the first billed call.",
+            path.display()
+        );
+        return ExitCode::SUCCESS;
+    };
+    let Ok(ledger): Result<
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, serde_json::Value>>,
+        _,
+    > = serde_json::from_str(&raw) else {
+        eprintln!("spend: the ledger at {} is not readable", path.display());
+        return ExitCode::FAILURE;
+    };
+    if ledger.is_empty() {
+        println!("spend: the ledger is empty — nothing billed yet.");
+        return ExitCode::SUCCESS;
+    }
+
+    let today = {
+        let secs = now_secs();
+        let days_since_epoch = secs / 86_400;
+        // Civil date from a day count (Howard Hinnant's algorithm) — no chrono dependency.
+        let z = days_since_epoch + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        format!("{y:04}-{m:02}-{d:02}")
+    };
+
+    println!("what the familiar's thinking has cost (UTC days, newest last)\n");
+    let recent: Vec<_> = ledger.iter().rev().take(days).collect::<Vec<_>>();
+    let mut totals: std::collections::BTreeMap<String, (i64, i64)> = Default::default();
+    for (day, provs) in recent.iter().rev() {
+        let mut parts: Vec<String> = Vec::new();
+        for (prov, v) in provs.iter() {
+            let calls = v.get("calls").and_then(|x| x.as_i64()).unwrap_or(0);
+            let toks = v.get("tokens").and_then(|x| x.as_i64()).unwrap_or(0);
+            parts.push(format!("{prov} {calls} calls / {toks} tok"));
+            let e = totals.entry(prov.clone()).or_insert((0, 0));
+            e.0 += calls;
+            e.1 += toks;
+        }
+        let marker = if *day == &today { "  ← today" } else { "" };
+        println!("  {day}   {}{marker}", parts.join(" · "));
+    }
+
+    println!(
+        "\naverage per day over {} day(s) with activity:",
+        recent.len()
+    );
+    for (prov, (calls, toks)) in &totals {
+        let n = recent.len().max(1) as i64;
+        let per_call = if *calls > 0 { toks / calls } else { 0 };
+        println!(
+            "  {prov}: {} calls/day, {} tokens/day ({per_call} tokens per call)",
+            calls / n,
+            toks / n
+        );
+    }
+
+    // Today against the cap the human set — the number that decides whether the mind keeps
+    // answering. The adapter's own default for the paid provider is mirrored here.
+    println!("\ntoday against the self-imposed budget:");
+    if let Some(provs) = ledger.get(&today) {
+        for (prov, v) in provs.iter() {
+            let toks = v.get("tokens").and_then(|x| x.as_i64()).unwrap_or(0);
+            let calls = v.get("calls").and_then(|x| x.as_i64()).unwrap_or(0);
+            let key = format!("{}_DAILY_TOKEN_BUDGET", prov.to_uppercase());
+            let budget = std::env::var(&key)
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .or(if prov == "claude" {
+                    Some(200_000)
+                } else {
+                    None
+                });
+            match budget {
+                Some(b) if b > 0 => {
+                    let pct = (toks as f64 / b as f64) * 100.0;
+                    let state = if toks >= b {
+                        "SPENT — this provider is refused until UTC midnight"
+                    } else if pct >= 80.0 {
+                        "close"
+                    } else {
+                        "ok"
+                    };
+                    println!(
+                        "  {prov}: {toks}/{b} tokens ({pct:.0}%) over {calls} calls — {state}"
+                    );
+                    if toks < b && calls > 0 {
+                        let per_call = toks / calls;
+                        if per_call > 0 {
+                            println!(
+                                "      about {} more call(s) at this size",
+                                (b - toks) / per_call
+                            );
+                        }
+                    }
+                }
+                _ => println!("  {prov}: {toks} tokens over {calls} calls — no daily cap set"),
+            }
+        }
+    } else {
+        println!("  (nothing billed today)");
+    }
+    println!(
+        "\nthe ledger keeps a week; budgets live in llm/key.env as <PROVIDER>_DAILY_TOKEN_BUDGET."
+    );
     ExitCode::SUCCESS
 }
 

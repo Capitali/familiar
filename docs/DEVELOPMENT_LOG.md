@@ -6,6 +6,53 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-194 · What the thinking costs
+
+Ian: *"I don't have a clear picture of token usage for claude by the familiar. Can you help me
+keep track and build some trend lines and estimates of what to expect?"*
+
+The adapter has kept a per-provider daily ledger in `llm/spend.json` since it was written —
+calls and tokens, pruned to a week — and **nothing has ever read it back**. The budget was
+enforced against a number the human could not see. A budget you cannot see is not a budget; it
+is a surprise waiting.
+
+`familiar spend [--days N]` now reports the ledger: per-day per-provider calls and tokens, the
+daily average and tokens-per-call, and today measured against the self-imposed cap with an
+estimate of how many more calls of the current size will fit.
+
+Its first run said the thing worth knowing:
+
+```
+  2026-08-16   claude 3 calls / 3398 tok  ← today
+  claude: 3 calls/day, 3398 tokens/day (1132 tokens per call)
+  claude: 3398/2000 tokens (170%) over 3 calls — SPENT — refused until UTC midnight
+```
+
+`CLAUDE_DAILY_TOKEN_BUDGET=2000` was set before T-187 put eight turns of history and the
+dossier into every dialogue prompt. At ~1130 tokens a call that cap is **two exchanges a day**,
+and it was already spent. The guard was working perfectly; the number was from a different era.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0,
+35 suites. Verified against the live ledger (output above). Civil date computed from the epoch
+day directly (Hinnant) rather than adding a date dependency for one line.
+
+### Also this session — the second familiar
+Ian: *"the dialog box now appears to be two different ai's chatting with each other."* It was
+two familiars. His console utterances were being answered by **Wildhorse**
+(`source=mesh:1c991bc6…`) running a build from the previous morning (`dab16304`, T-167) — which
+still had the pre-T-180 canned acks, and which won the race to reply. The good answers
+(`source=familiar`) came from this Mac.
+
+Wildhorse is now pulled to current, rebuilt (Intel, so it must build locally — and `cargo` is
+not on a non-interactive ssh PATH, which silently produced a no-op build and an "install" of
+the OLD binary before that was caught), adapter refreshed, daemon reinstalled and running with
+`FAMILIAR_EXPECT` present.
+
+**A fleet-wide lesson**: a mesh of peers means a fix is not deployed until it is deployed
+*everywhere that answers*. Nothing surfaces a stale peer — the reply simply comes from the old
+one, in its old voice, and reads as the new code not working.
+
 ## 2026-08-16 — T-193 · A person at the terminal is present too
 
 Ian: *"the human interaction should be interuptive and dealt with right away, thats a design
