@@ -79,6 +79,10 @@ socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda ai: ai[0] 
 
 script_dir, providers_str, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 cloud_ok = len(sys.argv) > 4 and sys.argv[4] == "1"
+# What shape of answer this consult wants (T-192). "json" unless told otherwise, so a
+# hand-run script keeps the strict contract the metabolism depends on.
+expect = os.environ.get("FAMILIAR_EXPECT", "json")
+want_prose = expect == "prose"
 prompt_path = os.path.join(script_dir, "prompt.txt")
 response_path = os.path.join(script_dir, "response.json")
 health_path = os.path.join(script_dir, "health.json")
@@ -204,7 +208,9 @@ def call_gemini(max_tokens):
            f"{model}:generateContent?key={key}")
     payload = {
         "contents": [{"parts": [{"text": prompt_text}]}],
-        "generationConfig": {"response_mime_type": "application/json",
+        # Same as cerebras: an application/json mime type makes prose impossible (T-192).
+        "generationConfig": {**({} if want_prose
+                                else {"response_mime_type": "application/json"}),
                              "maxOutputTokens": max_tokens,
                              "thinkingConfig": {"thinkingBudget": 0}},
     }
@@ -226,9 +232,14 @@ def call_cerebras(max_tokens):
         # only needs a concrete JSON answer, not deep reasoning, so cap the effort low —
         # this drops reasoning from ~500 tokens to ~60 and leaves the budget for content.
         "reasoning_effort": os.environ.get("CEREBRAS_REASONING_EFFORT", "low"),
-        "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": prompt_text}],
     }
+    # Forcing json_object made a PROSE consult impossible: asked for "plain text only, no
+    # quotes, no JSON", the API constraint still compelled JSON and the model emitted
+    # `{"type":"object"}` — which the dialogue then rejected as junk and answered with a
+    # stock acknowledgement. The familiar could never hold a conversation here (T-192).
+    if not want_prose:
+        payload["response_format"] = {"type": "json_object"}
     body = post("https://api.cerebras.ai/v1/chat/completions", payload,
                 {"authorization": f"Bearer {key}"})
     return body["choices"][0]["message"]["content"]
@@ -531,7 +542,14 @@ for name in order:
         continue
     try:
         text = strip_fences(fn(DEFAULT_MAX_TOKENS))
-        json.loads(text)
+        # T-192: only STRUCTURED consults are validated as JSON. The dialogue asks the model
+        # for "plain text only, no quotes, no JSON" — validating that as JSON marked the
+        # provider failed for obeying its instructions, rolled the chain on, and left the human
+        # told the familiar could not reach its mind when it had reached it every time.
+        if expect != "prose":
+            json.loads(text)
+        elif not text.strip():
+            raise ValueError("empty response")
         succeed(health, name)
         if mode == "consult":
             with open(response_path, "w") as f:

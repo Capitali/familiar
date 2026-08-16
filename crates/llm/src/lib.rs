@@ -38,6 +38,22 @@ enum Lane {
     Background,
 }
 
+/// What shape of answer this consult expects back.
+///
+/// The adapter validates every response with `json.loads` and treats a failure as a PROVIDER
+/// error — sound for the metabolism, which asks for structured output, and catastrophic for
+/// the dialogue, which asks for "plain text only, no quotes, no JSON" and then had its
+/// perfectly good prose thrown away as malformed. The provider was marked failed, the chain
+/// rolled on, and when everything had "failed" the human was told the familiar could not reach
+/// its mind. It had reached it every time (T-192).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Expect {
+    /// Structured output — the adapter's JSON validation applies.
+    Json,
+    /// Sentences for a person to read. JSON validation must not apply.
+    Prose,
+}
+
 /// The lane state: one consult runs at a time (`busy`); human-lane arrivals are counted
 /// so both waiting *and running* background consults can see them and step aside.
 struct Lanes {
@@ -128,7 +144,7 @@ pub fn consult(dir: &Path, prompt: &str) -> io::Result<Outcome> {
 /// and runs under the shorter [`HUMAN_TIMEOUT`] — past that the caller should say
 /// something honest rather than keep the person waiting.
 pub fn consult_human(dir: &Path, prompt: &str) -> io::Result<Outcome> {
-    consult_in(dir, prompt, HUMAN_TIMEOUT, Lane::Human)
+    consult_in(dir, prompt, HUMAN_TIMEOUT, Lane::Human, Expect::Prose)
 }
 
 /// [`consult`] with an explicit adapter deadline. A hung adapter must never hang
@@ -136,10 +152,16 @@ pub fn consult_human(dir: &Path, prompt: &str) -> io::Result<Outcome> {
 /// `Refused`. Exit code 2 is the adapter contract for "every provider
 /// rate-limited" and maps to [`Outcome::RateLimited`].
 pub fn consult_with(dir: &Path, prompt: &str, timeout: Duration) -> io::Result<Outcome> {
-    consult_in(dir, prompt, timeout, Lane::Background)
+    consult_in(dir, prompt, timeout, Lane::Background, Expect::Json)
 }
 
-fn consult_in(dir: &Path, prompt: &str, timeout: Duration, lane: Lane) -> io::Result<Outcome> {
+fn consult_in(
+    dir: &Path,
+    prompt: &str,
+    timeout: Duration,
+    lane: Lane,
+    expect: Expect,
+) -> io::Result<Outcome> {
     let _slot = acquire(lane);
     let b = boundary::load(dir)?;
     let verdict = guard::evaluate(&Action::new(ActionKind::Llm, "llm-provider"), &b);
@@ -172,6 +194,13 @@ fn consult_in(dir: &Path, prompt: &str, timeout: Duration, lane: Lane) -> io::Re
         // once the metabolism has spent a free tier's quota: the person then speaks and is
         // refused by a cooldown their own familiar caused. Telling the adapter which lane it
         // is serving lets presence outrank musing in QUOTA too, not only in ordering.
+        .env(
+            "FAMILIAR_EXPECT",
+            match expect {
+                Expect::Json => "json",
+                Expect::Prose => "prose",
+            },
+        )
         .env(
             "FAMILIAR_LANE",
             match lane {

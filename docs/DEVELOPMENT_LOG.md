@@ -6,6 +6,52 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-192 · Prose is a valid answer
+
+Ian: *"the bigger issue at hand is that the familiar has no functioning brain."* It had one.
+Every consult was reaching a model and getting a good answer. The adapter was throwing the
+answer away — and this is why the dialogue has never worked, on any build, for any provider.
+
+Three layers, each hiding the one beneath.
+
+**The API was forced into JSON mode.** `call_cerebras` sent
+`"response_format": {"type": "json_object"}` and `call_gemini` sent
+`"response_mime_type": "application/json"` — unconditionally. The dialogue prompt ends *"Reply
+as plain text only, no quotes, no JSON"*, so the model was given contradictory instructions and
+the API constraint won. With nothing structured to say it emitted `{"type":"object"}`. A prose
+conversation was **impossible on either free provider**, and always had been.
+
+**The adapter then validated prose as JSON.** `json.loads(text)` ran on every response and a
+failure was treated as a PROVIDER error — so a model obeying "plain text" got its provider
+marked failed and the chain rolled on.
+
+**And the failure was misreported.** When everything had "failed", `converse` fell to
+`NoMind::Unreachable` — *"I couldn't reach my mind just now"*. It had reached it every time.
+
+This is the origin of the complaint that opened all of tonight's dialogue work: *"I seem to get
+'Understood, I'll weigh that as I go' quite often."* The LLM branch was running, returning
+`{"type":"object"}`, being rejected by `looks_like_prose`, and falling back to a stock
+acknowledgement. Installing a mind and opening the gate could never have fixed it.
+
+### What changed
+- `Expect::{Json, Prose}` in `crates/llm`, threaded through `consult_in` and exported as
+  `FAMILIAR_EXPECT`. `consult_human` (the dialogue, and `familiar consult` at a terminal) asks
+  for prose; `consult`/`consult_with` (the metabolism) keep JSON.
+- Cerebras and Gemini set their JSON-mode constraint **only when JSON is wanted**.
+- The adapter's `json.loads` validation applies only to structured consults; a prose consult is
+  rejected only when empty.
+- Default remains `json`, so a hand-run adapter keeps the strict contract.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0,
+35 suites. Verified live in both directions: a prose consult now returns a real sentence
+("A familiar is a trusted magical companion…", 124 bytes) where it previously returned
+`{ "type": "object" }`; a structured consult still returns `{"ok": true}` and still parses.
+
+### Next
+The dialogue can finally use T-187's memory — recall and the question-back have never once run
+against a working reply.
+
 ## 2026-08-16 — T-191 · Presence outranks musing in quota, not only in queue order
 
 Ian: *"the bigger issue at hand is that the familiar has no functioning brain."* True, and the
