@@ -6,6 +6,41 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-193 · A person at the terminal is present too
+
+Ian: *"the human interaction should be interuptive and dealt with right away, thats a design
+decision i am good with."*
+
+Most of it was already built. The daemon runs a dedicated dialogue thread that polls
+`dialog::take_wake` every second and answers on the human-priority lane even mid-tick, and the
+mesh door touches that wake-file on every utterance it receives — so through a console or the
+app, a reply has always come within about a second.
+
+What did not wake it was an utterance recorded through `familiar observe` at a terminal. That
+waited for the next scheduled tick, which backs off to 960s when the world is quiet. Presence
+outranks musing wherever the person is standing; the door is not the only place someone can
+speak. (It is also what made every dialogue test tonight look far worse than it was — the test
+method, not the system, was the slow part.)
+
+### What changed
+`cmd_observe` touches the wake-file when the observation it just recorded is a human utterance
+— `told the familiar` or `answered`, from an actor that is neither the familiar nor a mesh
+relay. The same predicate the dialogue itself uses to decide what counts as being spoken to.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0,
+35 suites. Measured end to end against the live daemon: **3 seconds** from `observe` to a
+recorded reply, against a ceiling of 960 before.
+
+### The reply that came back
+> "I don't have any record of what Clover prefers about light. Is Clover someone in your
+> household, or are you asking me to check something I should know?"
+
+Worth keeping. Asked about a household member it holds nothing on, it said so and asked, rather
+than assembling a plausible answer out of nothing. That is the whole doctrine of this project
+arriving in live dialogue on its own: the familiar must never be able to make not-knowing serve
+it. It had every opportunity to bluff and did not.
+
 ## 2026-08-16 — T-192 · Prose is a valid answer
 
 Ian: *"the bigger issue at hand is that the familiar has no functioning brain."* It had one.
