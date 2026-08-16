@@ -6,6 +6,51 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-190 · Direct install discovers its devices, and says why it failed
+
+Ian: *"we should be able to push to the local ipadOS and ioS devices directly correct?"* —
+correct, and `ship.sh` has done it since long before tonight. It has also failed on every
+single build from 86 to 95, printing `⚠ <udid> unreachable (TestFlight will cover it)` and
+nothing else, ten times in a row.
+
+Two faults, both of a familiar shape.
+
+**The list was hardcoded.** `DEVICES=(20369E69-… EE750B79-…)` came across in the wildhorse
+config port, but a UDID is not a pairing: the pairing lives in the Mac's trust store, and it
+did not travel. On this Mac `devicectl list devices` shows **simulators only** — every
+configured UDID is a stranger. A device newly added to the household was never a target at
+all, so the new iPad could not have received a build even if pairing were fine.
+
+**The reason went to `/dev/null`.** `xcrun devicectl … >/dev/null 2>&1` threw away exactly
+the sentence that explains the stage:
+
+```
+ERROR: The specified device was not found. (com.apple.dt.CoreDeviceError error 1000)
+```
+
+"Unreachable" that cannot say whether the device is asleep, unpaired, untrusted, or simply
+not known to this Mac is not a diagnosis — the same defect as the badge in T-186, one layer
+down in the toolchain.
+
+### What changed
+- **Discovery.** Paired devices are read from `devicectl list devices --json-output` and
+  filtered on `connectionProperties.transportType != "sameMachine"`, which is how a simulator
+  presents. Discovered devices are unioned with the configured list, so a newly paired handset
+  becomes a target with no edit.
+- **The error is printed**, trimmed to its last lines.
+- When nothing physical is paired at all the stage says so once, with the fix: connect by USB,
+  tap Trust, enter the passcode, then keep it over the network from Xcode's Devices window.
+
+### Checks
+`bash -n`; `shellcheck -e SC2034` clean (the one SC2016 is suppressed in place — the single
+quotes around the embedded Python are deliberate). Discovery and the error path dry-run
+verified against this Mac's real state: zero physical devices found, both configured UDIDs
+still attempted, `CoreDeviceError 1000` surfaced. Rust untouched and green.
+
+### Next
+Pairing is a physical act — it needs the device in hand and its passcode, so it is Ian's.
+Once done, `devicectl` will list the handsets and the stage needs no configuration.
+
 ## 2026-08-15 — T-189 · An untried provider is not an unhealthy one
 
 Ian added an Anthropic key and put `claude` at the head of the chain
