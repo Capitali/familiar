@@ -24,6 +24,12 @@ p2 = re.sub(r'CURRENT_PROJECT_VERSION: "\d+"', f'CURRENT_PROJECT_VERSION: "{n}"'
 open("project.yml", "w").write(p2)
 assert p2.count(f'CURRENT_PROJECT_VERSION: "{n}"') == 2, "expected exactly two version spots"
 EOF
+# The console's JavaScript must parse before anything is built (T-201). Build 98 shipped a
+# SyntaxError that took every client in the fleet to a spinner, because the old check ran
+# `new Function()` over script blocks that were either empty (`src=`) or not plain JS
+# (`type="module"`), reported FAIL on the real code every time, and was compared against a
+# baseline that also said FAIL. Read the exit code.
+"$IOS/tools/check-sphere.sh"
 xcodegen > /dev/null
 grep -q "CURRENT_PROJECT_VERSION = $BUILD" FamiliarAgent.xcodeproj/project.pbxproj \
   || { echo "✗ pbxproj did not take build $BUILD"; exit 1; }

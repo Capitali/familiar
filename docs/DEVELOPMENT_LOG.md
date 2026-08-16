@@ -6,6 +6,54 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-201 · Build 98 broke every client, and the check could not have caught it
+
+Ian, on two iPhones, Betty's iPad and the Mac: *"it's all just spinning 'waiting on the
+sphere' — no change 1+ minutes."* Build 98 took the whole fleet down.
+
+**The break:** T-198 added `const d = S.device || {};` inside `function servingRow(d)` — whose
+parameter is already `d`. `SyntaxError: Cannot declare a const variable twice: 'd'`. The
+console is one ES module; a syntax error anywhere in it means none of it loads, so every
+surface hung on its loading state. One line, total fleet outage.
+
+**The worse part — the check was structurally blind.** The page has four `<script>` blocks:
+
+| block | what it is | body |
+|---|---|---|
+| 0, 1 | `src="vendor/qrcode.js"`, `src="watch-link.js"` | **empty** — checking these proved nothing |
+| 2 | `type="importmap"` | JSON, not JS |
+| 3 | `type="module"` | **202,536 chars — the entire application** |
+
+Every "page JS parse-identical to baseline" line in this log came from running
+`new Function(body)` over those blocks. `new Function` cannot parse ES module syntax, so block 3
+— the only one that matters — reported FAIL on **every run all session**. Compared against a
+baseline that also said FAIL, that read as "unchanged, safe."
+
+I was comparing two failures to each other and calling it a pass. That is the same
+output-as-oracle trap T-143 removed from `ship.sh` and CONTRIBUTING warns about, in a costume I
+did not recognise — and I repeated it a third time while fixing it, writing
+`node --check … | head -5 && echo "✓ PARSES CLEAN"`, which printed the tick because `head`
+succeeded on a machine with no node installed.
+
+### What changed
+- The shadowing `const d` is gone; the function's parameter was always `d`.
+- **`ios/tools/check-sphere.sh`** extracts the `type="module"` block *specifically*, refuses if
+  there is not exactly one or if it is implausibly short (so a broken extraction fails loudly
+  instead of passing vacuously), and parses it with `jsc -m`. A `SyntaxError` is ours; the
+  module-resolution `TypeError` on the bare `three` specifier is expected and means clean.
+- **`ship.sh` runs it before `xcodegen`**, so a console that does not parse cannot be built,
+  signed, uploaded, or released.
+
+### Checks
+Verified in **both directions**, which is the point: the fixed page passes (rc=0), and a copy
+with the exact shipped bug reintroduced fails with the exact error (rc=1). FamiliarMac Release
+builds rc=0 with zero errors.
+
+### What I should have done
+Run the page. Every fix this session was verified by reasoning about a diff; not once did I
+load the console and look at it. A parse check is a floor, not a substitute — and this one was
+not even a floor.
+
 ## 2026-08-16 — T-199 · The two truths can now disagree in public
 
 Ian asked for the whole identity path to be reviewed: *"the organic growth of this slowly may
