@@ -472,8 +472,19 @@ final class AppModel: ObservableObject {
         // The door's DeviceRecord name leads when the latest worldview carries this device;
         // PlatformDevice.name remains the honest fallback before the first read or on an older
         // familiar. The editable field writes the record through the signed console-act seam.
-        let deviceName = worldview?.members?.first(where: { $0.node_id == node.nodeId })?.label
-            ?? PlatformDevice.name
+        let selfRow = worldview?.members?.first(where: { $0.node_id == node.nodeId })
+        let deviceName = selfRow?.label ?? PlatformDevice.name
+        // What the MESH says this device serves, as against what this app believes locally
+        // (T-199). The app has never read this, so `Mine — Ian's` in the console and
+        // `established='MacOnStick'` in the record could not disagree in any way the system was
+        // able to notice — there was no comparison to fail. Two truths that cannot conflict in
+        // public will conflict in private forever.
+        let establishedHandle = selfRow?.human ?? ""
+        // ADR-0039's unfinished half shows up as a MACHINE name sitting in the human slot. Name
+        // that specifically rather than reporting a vague mismatch: it is a known, diagnosed
+        // condition with a known migration, not a mystery.
+        let looksLikeMachine = !establishedHandle.isEmpty
+            && establishedHandle.lowercased() == deviceName.lowercased().replacingOccurrences(of: " console", with: "")
         // T-171 is deliberately phone-local: the shared Device screen may render what the
         // iPhone already knows about its paired watch, but no observation/worldview field is
         // created here. T-169 owns any later, retention-governed mesh report.
@@ -515,6 +526,9 @@ final class AppModel: ObservableObject {
                 "causes": joinProgress.causes,
             ] as [String: Any],
             "servedHuman": servedHuman,
+            // T-199: the mesh's own answer, and whether it names a machine instead of a person.
+            "establishedHandle": establishedHandle,
+            "establishedIsMachine": looksLikeMachine,
             // Join in flight (B6): the console shows a progress indicator instead of snapping
             // back to the static path card while the introduction round-trips.
             "introducing": introducing,
