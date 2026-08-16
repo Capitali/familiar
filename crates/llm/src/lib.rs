@@ -167,6 +167,18 @@ fn consult_in(dir: &Path, prompt: &str, timeout: Duration, lane: Lane) -> io::Re
             "FAMILIAR_ALLOW_LLM_CLOUD",
             if b.allow_llm_cloud { "1" } else { "0" },
         )
+        // The lane travels with the consult (T-191). `Lane` already decides who goes NEXT —
+        // "Law II in scheduling form: presence outranks musing" — but queue order is worthless
+        // once the metabolism has spent a free tier's quota: the person then speaks and is
+        // refused by a cooldown their own familiar caused. Telling the adapter which lane it
+        // is serving lets presence outrank musing in QUOTA too, not only in ordering.
+        .env(
+            "FAMILIAR_LANE",
+            match lane {
+                Lane::Human => "human",
+                Lane::Background => "background",
+            },
+        )
         .spawn()?;
     let deadline = Instant::now() + timeout;
     let status = loop {
