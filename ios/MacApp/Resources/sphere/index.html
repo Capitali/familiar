@@ -1773,12 +1773,17 @@ function renderChrome() {
   // The visitor's compass shows whenever this device reads as a guest (or is held) — and
   // never on the device screen itself, where the path it points to already is.
   const mem = ((S.device || {}).membership || {});
+  // The pending name has done its job once the mesh recognises this device.
+  if (mem.state === 'member') S.namePending = '';
   // Why an introduction is held or was refused (T-185) — read once, used by both the guest bar
   // and the nudge below, so a name already given silences the ask and shows the real reason.
   const held = ((S.device || {}).introduceHeld || '');
   const introducing = !!(S.device || {}).introducing;
   const gb = $('guestbar');
   if (gb) {
+    // 'unknown' is deliberately absent here (T-197): a device that holds a grant but has not
+    // yet heard its standing is not a visitor, and must not be told it is one while the first
+    // worldview read is still in flight.
     const guesty = (introducing || mem.state === 'guest' || mem.state === 'held') && S.activeScreen !== 'device' && !street;
     gb.style.display = guesty ? 'flex' : 'none';
     const gt = $('guestbartext');
@@ -1803,7 +1808,9 @@ function renderChrome() {
     // being HELD until the door is reachable, means the human has done their part — nudging them
     // again is the console calling them forgetful for its own plumbing. Ian, 2026-08-15: "I enter
     // the name... and was immediate presented with a 'you need to choose a name' dialog."
-    if (mem.state !== 'guest' || street || introducing || held) {
+    // A name already given silences the ask — in flight, held, or simply submitted and waiting
+    // (T-198). Chasing someone for a name they just typed is how this read as broken.
+    if (mem.state !== 'guest' || street || introducing || held || S.namePending) {
       gn.style.display = 'none';
       S.guestSince = 0;
     } else {
@@ -2132,11 +2139,30 @@ function servingRow(d) {
       </button>
     </div>`;
   }
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-    <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">I AM</span>
-    <input id="servedHumanInput" value="" placeholder="your name" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
-    <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
-    <button onclick="sphereCancelServing()" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
+  // What became of the name the human just gave (T-198). Giving your name is the single act
+  // that turns a visitor into a member, and it used to produce NO visible result on this
+  // screen: the field blanked, the form collapsed to "no one identified", and the only status
+  // surface — the guest bar — is deliberately hidden HERE, on the very screen where the act
+  // happens. Ian, on Betty's iPad: "I entered name, nothing.. sent me to the device screen and
+  // an empty name field again ... it's no wonder others are not completing the membership
+  // process." An act with no acknowledgement reads as a broken app, and the human retries into
+  // the same silence.
+  const d = S.device || {};
+  const pend = S.namePending || '';
+  const memState = ((d.membership || {}).state) || '';
+  let note = '', tone = 'rgba(150,180,255,0.6)';
+  if (d.introduceHeld) { note = d.introduceHeld; tone = '#ffcf9e'; }
+  else if (d.introducing) { note = 'telling the mesh who you are…'; tone = '#9dc0ff'; }
+  else if (pend && memState === 'member') { note = '✓ established — you are a member'; tone = '#9fe8c0'; }
+  else if (pend) { note = 'sent — waiting for the mesh to confirm'; tone = '#9dc0ff'; }
+  return `<div style="margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span class="m" style="font-size:8px;letter-spacing:0.16em;color:rgba(150,180,255,0.55);">I AM</span>
+      <input id="servedHumanInput" value="${esc(pend)}" placeholder="your name" spellcheck="false" autocapitalize="none" autocorrect="off" style="width:130px;background:rgba(16,34,60,0.5);border:1px solid rgba(120,190,255,0.25);border-radius:8px;color:#e8f0fc;font-size:12px;padding:6px 9px;"/>
+      <button onclick="window.setServedHuman()" class="glybtn" style="padding:6px 13px;border-radius:8px;font-size:11px;width:auto;height:auto;">set</button>
+      <button onclick="sphereCancelServing()" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
+    </div>
+    ${note ? `<div class="m" style="margin-top:7px;font-size:10.5px;line-height:1.5;color:${tone};max-width:340px;">${esc(note)}</div>` : ''}
   </div>`;
 }
 window.sphereCorrectServing = (on) => { S.correctServing = !!on; refreshScreen(); };
@@ -2150,8 +2176,11 @@ window.setServedHuman = () => {
   const v = el && el.value.trim();
   if (v) {
     toApp('setHuman', { name: v });
-    el.value = ''; el.blur();
-    S.correctServing = false;
+    // Keep the name and keep the form OPEN until the mesh confirms (T-198). Blanking the field
+    // and collapsing the form on submit is what made this read as "nothing happened" — the
+    // human's act disappeared and took its own evidence with it.
+    S.namePending = v;
+    if (el) el.blur();
     refreshScreen();
   }
 };
@@ -2159,6 +2188,7 @@ window.sphereCancelServing = () => {
   const el = document.getElementById('servedHumanInput');
   if (el) { el.value = ''; el.blur(); }
   S.correctServing = false;
+  S.namePending = '';
   refreshScreen();
 };
 window.onerror = (msg, src, line) => {
