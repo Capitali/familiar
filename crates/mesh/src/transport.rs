@@ -1316,6 +1316,14 @@ async fn handle(
         // Device records (ADR-0039) ride the same dial with their own endpoints, so a
         // door built before them 404s harmlessly instead of failing a signed body.
         (Method::GET, "/mesh/devices") => offer_devices(&dir),
+        (Method::GET, "/mesh/threads") => offer_threads(&dir),
+        (Method::POST, "/mesh/thread-sync") => {
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_thread_sync(&dir, &bytes)
+        }
         (Method::POST, "/mesh/device-sync") => {
             let bytes = match collect(req).await {
                 Ok(b) => b,
@@ -3102,6 +3110,95 @@ fn recv_device_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
     text(StatusCode::OK, format!("absorbed {absorbed}"))
 }
 
+/// `GET /mesh/threads` → this door's theory offer (T-195), record-sync's third twin.
+fn offer_threads(dir: &Path) -> Response<Full<Bytes>> {
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Ok(node) = crate::node::NodeKey::load_or_mint(dir, "familiar") else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no node key");
+    };
+    match crate::thread_sync::build_thread_sync(dir, &cred, &node, now_secs()) {
+        Ok(Some(sync)) => match serde_json::to_vec(&sync) {
+            Ok(body) => text(StatusCode::OK, body),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        },
+        // Nothing to offer is not an error; the caller simply learns nothing this round.
+        Ok(None) => text(StatusCode::NO_CONTENT, ""),
+        Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "assemble"),
+    }
+}
+
+/// `POST /mesh/thread-sync` → absorb a sibling door's theories (T-195).
+///
+/// The merge is the kernel's, not this seam's: a terminal verdict is sticky, so absorbing can
+/// never revive a theory this door has already retired.
+fn recv_thread_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
+    let Ok(sync) = serde_json::from_slice::<crate::thread_sync::ThreadSync>(bytes) else {
+        return text(StatusCode::BAD_REQUEST, "bad thread-sync");
+    };
+    let Some(cred) = group::load(dir).ok().flatten() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group here");
+    };
+    let Ok(gk) = cred.verifying_key() else {
+        return text(StatusCode::SERVICE_UNAVAILABLE, "no group key");
+    };
+    let revoked = group::load_revoked(dir).unwrap_or_default();
+    if let Err(e) =
+        crate::thread_sync::verify_thread_sync(&sync, &gk, &cred.group_id, now_secs(), &revoked)
+    {
+        return text(StatusCode::FORBIDDEN, e.to_string());
+    }
+    match familiar_kernel::thread::absorb(dir, &sync.body.threads, now_secs()) {
+        Ok(n) => text(StatusCode::OK, format!("absorbed {n}")),
+        Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+/// The dial-out half of theory replication — device-sync's twin, same best-effort shape.
+async fn sync_threads_with(dir: &Path, addr: &str) {
+    let now = now_secs();
+    if let (Ok(Some(cred)), Ok(node)) = (
+        group::load(dir),
+        crate::node::NodeKey::load_or_mint(dir, "familiar"),
+    ) {
+        if let Ok(Some(ours)) = crate::thread_sync::build_thread_sync(dir, &cred, &node, now) {
+            if let Ok(raw) = serde_json::to_vec(&ours) {
+                let _ = http_send(
+                    addr,
+                    Method::POST,
+                    "/mesh/thread-sync",
+                    Some(raw),
+                    &[("content-type", "application/json")],
+                )
+                .await;
+            }
+        }
+        if let Ok(resp) = http_send(addr, Method::GET, "/mesh/threads", None, &[]).await {
+            if resp.status == StatusCode::OK {
+                if let Ok(theirs) =
+                    serde_json::from_slice::<crate::thread_sync::ThreadSync>(&resp.body)
+                {
+                    let revoked = group::load_revoked(dir).unwrap_or_default();
+                    if let Ok(gk) = cred.verifying_key() {
+                        if crate::thread_sync::verify_thread_sync(
+                            &theirs,
+                            &gk,
+                            &cred.group_id,
+                            now,
+                            &revoked,
+                        )
+                        .is_ok()
+                        {
+                            let _ = familiar_kernel::thread::absorb(dir, &theirs.body.threads, now);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The dial-out half of device replication — record-sync's twin, same best-effort shape:
 /// offer ours, absorb theirs; an old door 404s both and nothing is lost.
 async fn sync_devices_with(dir: &Path, addr: &str) {
@@ -3844,6 +3941,9 @@ async fn exchange_with(dir: &Path, addr: &str, our_brief: &[u8]) -> Result<()> {
     sync_records_with(dir, addr).await;
     // Device records (ADR-0039) ride the same dial through their own endpoints.
     sync_devices_with(dir, addr).await;
+    // Theories ride it too (T-195) — so a retirement reaches the fleet instead of meaning
+    // "on whichever node the human happened to type it into".
+    sync_threads_with(dir, addr).await;
     // Pre-fetch tool bodies we don't already have, content-addressed for the in-tick merge.
     if let Ok(brief) = serde_json::from_slice::<MeshBrief>(&reply.body) {
         upsert_peer(dir, &brief, addr)?;

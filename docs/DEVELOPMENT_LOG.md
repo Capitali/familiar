@@ -6,6 +6,61 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-195 · Theories federate over record-sync
+
+Ian: *"theories need to use the record-sync that exists within the mesh, but this needs to
+happen quickly and it needs to be accurate."* And: *"theory cleardown should be a rare
+occurrence, but keeping it in sync when it happens is just good hygiene. We always want to
+maintain accuracy in data as that is truth and trusted."*
+
+Theories were per-node with nothing reconciling them, so a fleet-wide purge only ever meant
+"on whichever node the human typed it into". 443 were retired here on 2026-08-15 while a
+sibling kept its own 130 — and restarting that sibling republished a theory Ian had already
+dismissed, which is how he found this.
+
+### Accuracy first — the merge, in the kernel
+`thread::merge_incoming` decides every conflict, and its rules exist because breaking any one
+of them corrupts the record:
+
+1. **A terminal status is sticky.** `retired` beats `pursued` regardless of which side is newer
+   or higher-versioned. A sibling that never heard about a verdict is not evidence against it —
+   without this, every sync resurrects what a human already dismissed.
+2. **`superseded_by` is sticky**, and is adopted even when the rest of our copy wins.
+3. **Otherwise the higher `v` wins**, ties breaking on fresher `status_at` — the ordinary
+   latest-word rule, applied only among genuinely live copies.
+
+`find_counterpart` matches by `id` first, then by typed identity (`family_key` + `variant_key`)
+so the same claim minted independently on two doors is recognised as one theory. An **unkeyed**
+thread matches only itself: with no identity there is nothing safe to merge on, and guessing
+would fold distinct theories together.
+
+### The carriage
+`crates/mesh/src/thread_sync.rs` is device-sync's shape verbatim — signed body, membership
+proof, 48h window, 64 cap — with `GET /mesh/threads` and `POST /mesh/thread-sync`, riding the
+same dial-out so a CGNAT'd door still participates. An old door 404s both and loses nothing.
+
+One subtlety worth keeping: the window keys on `max(created_at, status_at, last_worked_at)`,
+not `created_at`. A retirement changes `status_at` and leaves creation alone, so keying on
+creation would have left **exactly the verdicts this channel exists to carry** sitting at home.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0,
+35 suites. Eight new tests, each named for the corruption it prevents.
+
+### Also — the rule this session earned
+`CONTRIBUTING.md` gains **"Absence is not a negative"** (Ian: *"no more assuming that no data
+equals a negative state"*), with the six instances from this session tabulated. It is the
+engineering form of SOUL.md's keystone: code that reads absence as a negative is the familiar
+lying to itself one layer below where anyone looks.
+
+### Open — priority propagation
+Ian asks whether urgent changes should move at maximum spread velocity rather than the 30s
+dial. Recommendation recorded in the board: not a general priority channel, but **eager
+re-push on novelty** — a door that absorbs a change which alters a terminal state dials its
+own peers immediately instead of waiting for its next round. Novelty-gated, so it terminates
+on its own and cannot storm. Corrections should outrun news; that is the mesh form of "trust
+is the requirement to correct".
+
 ## 2026-08-16 — T-194 · What the thinking costs
 
 Ian: *"I don't have a clear picture of token usage for claude by the familiar. Can you help me

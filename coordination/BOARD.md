@@ -119,6 +119,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-196 · Corrections should outrun news — eager propagation on novelty
+- status: queued — **proposed, Ian raised it 2026-08-16**
+- scope: the dial-out round in transport.rs; a novelty gate on absorb
+- accept: a door that absorbs a change ALTERING A TERMINAL STATE (a retirement, a supersession, a severance, a boundary narrowing) immediately dials its own peers rather than waiting for its next scheduled round; a door that absorbs nothing new does NOT re-dial, so the wave terminates on its own; no storm is possible because propagation is gated on novelty, not on time
+- notes: Ian 2026-08-16: "many of our mesh / mesh sync operations happen too slowly. Should there be some sort of priority channel, flag, or other means by which changes like this take priority and move through the mesh at maximum spread velocity?" Recommendation: NOT a general priority channel — a second class of traffic doubles the failure modes and invites everything to be marked urgent. Instead make CORRECTIONS eager: the epidemic "rumour mongering with feedback" shape, where a node spreads a hot item aggressively until it stops being novel. It self-limits, needs no new endpoint, and matches the doctrine — a correction that takes five minutes to reach the fleet is a correction that is still wrong somewhere. Twice in one session a stale peer served old truth: Wildhorse answering in its pre-T-180 voice, and the same node republishing a retired theory
+
 ### T-187 · The dialogue remembers, and may ask
 - status: DONE — recall of both voices, the dossier's habits + needs, and permission to ask one question back
 - owner: claude
