@@ -6,6 +6,32 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-186 · The failure mark says why
+
+Ian, build 93 on the iPad: a red `!` over the globe and nothing beside it.
+
+The badge shows on `(!S.linkOk || S.jsErr) && !joining`. For a first join, `joining` goes
+false the moment `jp.stage` reaches a TERMINAL value (`unreachable` / `declined`) — and that
+is a path on which `sphereLinkDown` is never called, because `pushLinkDown` only fires from
+`model.$worldviewError` and no worldview read was ever attempted. So `S.linkErr` was still
+its initial `''`, and `linkmsg` renders only `showBadge && msg`. The mark appeared with no
+words.
+
+The reason was in hand the entire time, sitting in `jp.detail` and `jp.host` — the join's own
+narration, which T-120 built and the badge never read. T-120 separated progress from failure
+and left the failure mark mute.
+
+A failure mark with no words is the worst of both: it says something is wrong and refuses to
+say what, which is unactionable and reads as a dead app.
+
+### What changed
+`linkmsg` now falls back to the join's own detail and host, and — when even that is absent —
+says so plainly rather than showing an empty box: *"the link is down and no reason was
+recorded — tap Device for the join log."*
+
+### Checks
+Page JS compared block-by-block against HEAD: parse-identical. Rust untouched.
+
 ## 2026-08-15 — T-185 · An introduction is never dropped on the floor
 
 Ian, adding an iPad locally: *"I enter the name, set to mine, enable all the gates... then
