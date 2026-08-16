@@ -177,7 +177,22 @@ pub fn install(dir: &Path, interval: u64) -> io::Result<PathBuf> {
     // launchd runs with cwd `/`, so a relative data dir would make `--data-dir` and the
     // log path resolve under `/` — the agent then fails to open its log and exits
     // EX_CONFIG (78). Canonicalize to an absolute path so a relative arg can't break it.
-    let dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    //
+    // `canonicalize` alone is not enough: it FAILS when the path does not exist yet, and the
+    // old fallback (`unwrap_or_else(|_| dir.to_path_buf())`) then kept the relative path —
+    // defeating the protection this comment describes and producing precisely the EX_CONFIG
+    // it warns about. Installing from a checkout whose `familiar_data` had not been created
+    // yet wrote `--data-dir familiar_data` and `familiar_data/daemon.log` into the plist, and
+    // the agent could not start at all (2026-08-15). Make it absolute FIRST, from the current
+    // directory, so existence never decides whether the daemon can run.
+    let dir = if dir.is_absolute() {
+        dir.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(dir))
+            .unwrap_or_else(|_| dir.to_path_buf())
+    };
+    let dir = fs::canonicalize(&dir).unwrap_or(dir);
     let dir = dir.as_path();
     let log = dir.join(LOGFILE);
     let xml = format!(
@@ -265,5 +280,30 @@ mod tests {
                 "forbidden launchctl dialect: {word}"
             );
         }
+    }
+
+    /// T-188 — launchd runs with cwd `/`, so a relative path in the plist makes the agent fail
+    /// EX_CONFIG before it ever runs. The old guard canonicalized, which FAILS on a path that
+    /// does not exist yet and fell back to the relative form — the protection evaporated exactly
+    /// when it was needed, on a fresh checkout whose data dir had not been created.
+    #[test]
+    fn a_data_dir_that_does_not_exist_yet_is_still_made_absolute() {
+        let missing = std::path::Path::new("familiar_data_definitely_not_here");
+        assert!(
+            !missing.exists(),
+            "fixture must not exist for this to mean anything"
+        );
+        let resolved = if missing.is_absolute() {
+            missing.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(missing))
+                .unwrap_or_else(|_| missing.to_path_buf())
+        };
+        let resolved = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+        assert!(
+            resolved.is_absolute(),
+            "a plist path must never be relative: {resolved:?}"
+        );
     }
 }
