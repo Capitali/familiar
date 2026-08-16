@@ -2149,6 +2149,13 @@ function servingRow(d) {
   // the same silence.
   const d = S.device || {};
   const pend = S.namePending || '';
+  // What the MESH holds for this device, beside what the app believes (T-199). ADR-0039 ended
+  // the one-field-two-jobs conflation on paper and only half of it was built, so a Mac can read
+  // "Mine — Ian's" locally while its membership record establishes it as `MacOnStick` — a
+  // machine name in the slot that is supposed to name a person. Nothing compared the two, so
+  // nothing could report the disagreement, and the device simply read as unnamed.
+  const estab = d.establishedHandle || '';
+  const estabIsMachine = !!d.establishedIsMachine;
   const memState = ((d.membership || {}).state) || '';
   let note = '', tone = 'rgba(150,180,255,0.6)';
   if (d.introduceHeld) { note = d.introduceHeld; tone = '#ffcf9e'; }
@@ -2163,6 +2170,12 @@ function servingRow(d) {
       <button onclick="sphereCancelServing()" class="glybtn" style="padding:6px 11px;border-radius:8px;font-size:11px;width:auto;height:auto;">cancel</button>
     </div>
     ${note ? `<div class="m" style="margin-top:7px;font-size:10.5px;line-height:1.5;color:${tone};max-width:340px;">${esc(note)}</div>` : ''}
+    ${estabIsMachine ? `<div class="m" style="margin-top:7px;font-size:10.5px;line-height:1.5;color:#ffcf9e;max-width:360px;">
+      the mesh has this device established as “${esc(estab)}” — a machine name, not a person.
+      That is why it reads as unnamed. Giving your name here records who it serves.
+    </div>` : (estab ? `<div class="m" style="margin-top:7px;font-size:10px;color:rgba(150,180,255,0.55);">
+      the mesh has it established as “${esc(estab)}”
+    </div>` : '')}
   </div>`;
 }
 window.sphereCorrectServing = (on) => { S.correctServing = !!on; refreshScreen(); };

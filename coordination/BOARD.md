@@ -119,6 +119,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-200 · Finish ADR-0039 — the identity mapping
+- status: queued — **the review is written; this is the work it recommends**
+- scope: HumanRecord (kernel or mesh), DeviceRecord.humans[] writer, a migration for machine-named establishments, AppModel reading records instead of shadowing them
+- accept: one authority for "whose device is this" (the establishment + association edge) with the app's local fields as a VIEW over it; no machine name survives in a human slot; a device whose local belief and mesh record disagree says so
+- notes: full review at docs/reviews/2026-08-16-identity-mapping-review.md. Ian 2026-08-16 asked whether organic growth masked a better path — it did not; ADR-0039 already chose the right path and only half of it was built. Step 3 (the migration) touches filter-2 facts on devices belonging to Betty and Mol as well as Ian, so it wants him present, not an unattended run
+
 ### T-196 · Corrections should outrun news — eager propagation on novelty
 - status: queued — **proposed, Ian raised it 2026-08-16**
 - scope: the dial-out round in transport.rs; a novelty gate on absorb

@@ -6,6 +6,51 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-199 · The two truths can now disagree in public
+
+Ian asked for the whole identity path to be reviewed: *"the organic growth of this slowly may
+have masked a better architectural decision path."* Full review in
+[docs/reviews/2026-08-16-identity-mapping-review.md](reviews/2026-08-16-identity-mapping-review.md).
+
+**Verdict: the architecture is right and unfinished.** ADR-0039 diagnosed this exact problem on
+2026-08-14 and specified the fix; about half was built, and every symptom today comes from the
+unbuilt half. Read live from this Mac's own records:
+
+```
+3d68a068   established='MacOnStick'   ← a MACHINE name in the human slot
+b604bbd6   established='ian'
+10ba2c17   established='betty'
+```
+
+Which is, word for word, the conflation ADR-0039 was written to end: *"the phones establish as
+their human ("ian"), while the Macs were named as machines ("MacOnStick", "wildhorse")."* It is
+why Ian's Mac reads `Mine — Ian's` **and** unnamed at the same time: the local UI knows an
+owner, the mesh record names a computer, and no human-facing surface can find a person.
+
+Designed and never built: **`HumanRecord`** (its only trace in the tree is a comment — *"until
+that record exists they live here"*) and **`DeviceRecord.humans[]`**, whose structure and merge
+exist with no writer anywhere. That leaves seven notions of "whose device is this" and nothing
+reconciling them — and `AppModel` never reads the mesh's establishment at all, so the console
+and the record **could not disagree in any way the system was able to notice**.
+
+### What changed now (the safe half)
+The app reads its own member row's `human` and carries it to the console, along with whether it
+looks like a machine name rather than a person. The Device screen says so plainly: *"the mesh
+has this device established as 'MacOnStick' — a machine name, not a person. That is why it
+reads as unnamed."* Two truths that cannot conflict in public will conflict in private forever.
+
+Deliberately **not** done here: rewriting establishment handles on live membership records. That
+is a data migration touching filter-2 facts on devices belonging to more than one person, and
+it is not a thing to do unattended.
+
+### Recommended order (in the review)
+1. build `HumanRecord`; 2. write the `humans[]` edge; 3. migrate the machine-named
+establishments; 4. make `servedHuman`/`deviceOwner` a *view* over the records rather than a
+parallel truth; 5. keep contradictions visible. No new ADR — ADR-0039 finished.
+
+### Checks
+FamiliarMac and FamiliarAgent Release both rc=0; page JS parses; Rust fmt/test exit 0.
+
 ## 2026-08-16 — T-197/T-198 · Unknown is not a visitor, and an act must be answered
 
 Two reports, one disease, hours after the rule was written down.
