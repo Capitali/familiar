@@ -119,9 +119,10 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
-### T-185 · "I AM <name>" never reaches the door — the identity filter has no client
-- status: queued — **the registration bug Ian hit; wiring, NOT a design change**
-- owner: —
+### T-185 · An introduction is never dropped on the floor
+- status: DONE (build 93) — held-and-replayed, refusals shown verbatim, nudge silenced
+- owner: claude
+- CORRECTION to the original filing: the identity filter DOES have a client (`AdmissionClient` → `POST /mesh/introduce`, fired by `confirmPresentHuman`). The earlier "no client exists" reading came from a grep that excluded AdmissionClient.swift. The real defect was `guard storedGrant() != nil, !host.isEmpty else { return false }` — a SILENT drop of the human's introduction when the handshake had not finished or no address was in hand
 - scope: ios/Shared/Sources/AppModel.swift (setServedHuman), the console's setHuman bridge on both shells, a client for POST /mesh/introduce
 - depends: —
 - accept: naming yourself on a device running the app mints a signed Introduction, posts it to the door, and the device becomes a MEMBER without any further human act when the door accepts; a refusal is shown with the door's own reason; the guest nudge stops firing at someone who has already given their name

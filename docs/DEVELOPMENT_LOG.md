@@ -6,6 +6,59 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-185 · An introduction is never dropped on the floor
+
+Ian, adding an iPad locally: *"I enter the name, set to mine, enable all the gates... then
+opened the roster.... and was immediate presented with a 'you need to choose a name dialog'
+... it took me to the device screen and the name I had choosen was there still ... No
+approval check ever appears in the welcome screen either -- so this might explain the
+repeated non joins."*
+
+The whole two-filter path was built and wired: `AdmissionClient` posts to `POST
+/mesh/introduce`, `confirmPresentHuman` fires `introduceMesh` on a guest, the door runs the
+rules engine and admits. (An earlier reading of this bug claimed no client existed for that
+endpoint — wrong; the grep that produced it excluded `AdmissionClient.swift`.)
+
+The defect was one line:
+
+```swift
+guard storedGrant() != nil, !host.isEmpty else { return false }
+```
+
+If the covenant handshake had not yet landed a grant, or no door address was in hand, the
+human's introduction was discarded **silently** — no note, no state change, nothing on
+screen. The name stayed visible because it is local state; membership stayed `guest`; and
+the nudge went on asking, every three minutes, for a name that had already been given. The
+missing approval prompt was never the bug either: with a valid local introduction the door
+admits outright, which is ADR-0026's promise that the welcome is a greeting and not a gate.
+
+Naming yourself is the single most important thing a human says to the familiar. Losing it
+without a word is the same failure as a watch that cannot say why it failed to join (T-172)
+and a reply that performs attention it does not have (T-180).
+
+### What changed
+- **The intent is held, not dropped.** `pendingIntroduction` keeps the claim and evidence,
+  and the handshake replays it the moment a grant and address exist — the human's act does
+  not expire because the plumbing was still in flight when they made it.
+- **It says why.** `introduceHeldReason` carries plain words ("the covenant handshake hasn't
+  finished — your name is held and will be sent the moment it does") to the console.
+- **A refusal is shown verbatim.** The door's 403 text IS the path to admission ("that handle
+  already exists here — ask for an invite naming it, or hand off from one of their devices"),
+  so it replaces the generic visitor line instead of being summarised into a shrug.
+- **The nudge stops.** It no longer fires while an introduction is in flight or held — asking
+  again for a name already given is the console calling the human forgetful for its own
+  plumbing.
+
+### Checks
+FamiliarMac Release and FamiliarAgent Release (generic iOS Simulator) both built rc=0. Page
+JS compared block-by-block against HEAD — parse-identical. Rust bar untouched by this brick
+and re-run green: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo
+test` all exit 0, 35 suites.
+
+### Next
+This may be a contributor to T-184's purge storm: a device whose introduction was silently
+dropped stays an unestablished guest until the two-hour sweep takes it, then knocks again.
+
 ## 2026-08-15 — T-180 · A reply that has not thought says so
 
 Ian, on build 91: *"the dialog with the familiar needs work, i seem to get 'Understood, i'll

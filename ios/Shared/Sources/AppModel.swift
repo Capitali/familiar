@@ -27,6 +27,13 @@ final class AppModel: ObservableObject {
     /// A join is in flight — the console shows progress instead of the static path card (B6).
     @Published var introducing = false
     var introduceStartedAt: TimeInterval = 0
+    /// Why an introduction could not be sent yet, in words for the human. Empty when there is
+    /// nothing being held. The console shows this instead of asking again for a name it has
+    /// (T-185).
+    @Published var introduceHeldReason = ""
+    /// The introduction the human made before the door was reachable. Replayed once it is —
+    /// an act of identification is not discarded because the handshake was still in flight.
+    var pendingIntroduction: (IdentityClaim?, Evidence)?
     /// The door's last verdict on a game act, shown on the games screen (B15). "" when clear.
     @Published var gameNote = ""
 
@@ -502,6 +509,9 @@ final class AppModel: ObservableObject {
             // Join in flight (B6): the console shows a progress indicator instead of snapping
             // back to the static path card while the introduction round-trips.
             "introducing": introducing,
+            // Why an introduction is held or was refused — the console shows this instead of
+            // nudging for a name the human already gave (T-185).
+            "introduceHeld": introduceHeldReason,
             "introduceElapsed": introducing ? Int(Date().timeIntervalSince1970 - introduceStartedAt) : 0,
             // The door's last verdict on a game act (B15) — surfaced on the games screen so a
             // refused BEGIN shows its reason instead of silently bouncing to the finished game.
@@ -825,6 +835,13 @@ final class AppModel: ObservableObject {
                 if let tok = pendingInvite {
                     let claim: IdentityClaim? = servedHuman == "observer" ? nil : IdentityClaim(handle: servedHuman)
                     _ = await introduce(claim: claim, evidence: .invite(tok))
+                } else if let (claim, evidence) = pendingIntroduction {
+                    // The human named themselves before the handshake finished (T-185). Their act
+                    // waited; now the door is reachable, so it goes through without their having
+                    // to say it a second time.
+                    pendingIntroduction = nil
+                    note("sending the name you gave earlier…")
+                    _ = await introduce(claim: claim, evidence: evidence)
                 }
                 return
             } catch EnrollmentClient.EnrollError.denied {
@@ -979,7 +996,28 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     private func introduce(claim: IdentityClaim?, evidence: Evidence) async -> Bool {
-        guard storedGrant() != nil, !host.isEmpty else { return false }
+        // A human just told the familiar who they are. That is the single most important thing
+        // anybody says to it, and it must never be dropped on the floor (T-185).
+        //
+        // This guard used to be `guard storedGrant() != nil, !host.isEmpty else { return false }`
+        // — silent. If the covenant handshake had not landed a grant yet, or no door address was
+        // in hand, the name went nowhere and NOTHING was said: the console kept the name (it is
+        // local state), membership stayed `guest`, and the nudge went on asking for a name that
+        // had already been given. Ian hit exactly this adding an iPad, 2026-08-15.
+        //
+        // So: say why, and REMEMBER the intent. The introduction is replayed the moment the
+        // grant and address exist, because the human's act does not expire just because the
+        // handshake had not finished when they made it.
+        guard storedGrant() != nil, !host.isEmpty else {
+            pendingIntroduction = (claim, evidence)
+            let why = storedGrant() == nil
+                ? "the covenant handshake hasn't finished — your name is held and will be sent the moment it does"
+                : "no door address in hand yet — your name is held and will be sent when one answers"
+            introduceHeldReason = why
+            note("holding “\(claim?.handle ?? "")” — \(why)")
+            return false
+        }
+        introduceHeldReason = ""
         // Show the join is IN FLIGHT (B6): a name entered kicks off a round trip (evidence,
         // maybe a vouch, a sync) that could take seconds; without this the console snapped back
         // to the static path card and looked like nothing happened.
@@ -991,6 +1029,8 @@ final class AppModel: ObservableObject {
             switch try await client.introduce(claim: claim, evidence: evidence, host: host, port: enrollPort) {
             case .member(let handle):
                 pendingInvite = nil
+                pendingIntroduction = nil
+                introduceHeldReason = ""
                 membership = .member(handle: handle)
                 wasRecognised = true          // the worldview edge must not chime twice
                 Chime.accepted()
@@ -1004,6 +1044,10 @@ final class AppModel: ObservableObject {
                 membership = .held(retryIn: s)
                 note("… held — try again in \(s)s")
             case .error(let m):
+                // The door's own words are the path forward ("that handle already exists here —
+                // ask for an invite naming it, or hand off from one of their devices"). Shown
+                // verbatim rather than summarised into a shrug.
+                introduceHeldReason = m
                 note("✗ introduce failed: \(m)")
             }
         } catch {
