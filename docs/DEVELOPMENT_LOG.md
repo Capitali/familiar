@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-191 · Presence outranks musing in quota, not only in queue order
+
+Ian: *"the bigger issue at hand is that the familiar has no functioning brain."* True, and the
+cause was not that the providers were dead. Tested directly, cerebras answers in 17 bytes. The
+brain was being **starved by the familiar's own thinking**.
+
+`Lane` in `crates/llm` already carries the right doctrine, and its comment says so — *"Law II
+in scheduling form: presence outranks musing"* — a waiting human goes to the head of the queue
+and an in-flight background consult yields. But that is only ORDERING. It does nothing about
+quota, and quota is what actually ran out: the 60s metabolism kept re-hitting providers that
+had just answered 429, which pins a free tier at its limit instead of letting it recover. The
+person then speaks and is refused by a cooldown their own familiar caused.
+
+### What changed
+- The lane now travels with the consult: `crates/llm` exports `FAMILIAR_LANE=human|background`
+  alongside the existing `FAMILIAR_ALLOW_LLM_CLOUD`.
+- **Background consults stand down from a cooling provider entirely** rather than retrying it
+  last, and say so: *"standing down from cerebras — cooling, and the next words spoken to the
+  familiar have first call on it."*
+- A **human-lane consult is unchanged**: it still tries everything, cooling providers last,
+  because a person waiting is worth the attempt.
+
+Default is `human` when the variable is absent, so a human running the adapter by hand gets the
+permissive path.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0,
+35 suites. `bash -n` clean; ordering verified against a fixture where cerebras is cooling —
+background tries `[claude, gemini]`, human still tries `[claude, cerebras, gemini]`.
+`shellcheck -e SC2034` reports only the pre-existing SC1091 on the `key.env` source line,
+confirmed identical on a stashed baseline.
+
+### Next
+This buys headroom on the free tiers; it does not manufacture capacity. gemini and cerebras
+are still small, and claude still needs API credit — which is bought at console.anthropic.com,
+a different site from claude.ai, and is not covered by any claude.ai subscription.
+
 ## 2026-08-16 — T-190 · Direct install discovers its devices, and says why it failed
 
 Ian: *"we should be able to push to the local ipadOS and ioS devices directly correct?"* —

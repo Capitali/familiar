@@ -502,6 +502,24 @@ def rank(p):
 
 order = configured if mode == "probe" else sorted(configured, key=rank)
 
+# T-191 — presence outranks musing in QUOTA, not only in queue order.
+#
+# `Lane` in crates/llm already sends a waiting human to the head of the queue, but ordering is
+# worthless once the metabolism has spent a free tier: the person then speaks and is refused by
+# a cooldown their own familiar caused. Every 60s tick was retrying providers that had just
+# said 429 — which keeps them pinned at the limit instead of letting it recover.
+#
+# So background thinking now STANDS DOWN from a provider that is cooling, and leaves that
+# headroom for whoever is actually there. A human-lane consult still tries everything, cooling
+# providers last, because a person waiting is worth the attempt.
+lane = os.environ.get("FAMILIAR_LANE", "human")
+if lane == "background" and mode == "consult":
+    resting = [p for p in order if health.get(p, {}).get("available_after", 0) > now]
+    if resting:
+        order = [p for p in order if p not in resting]
+        print(f"standing down from {','.join(resting)} — cooling, and the next words "
+              f"spoken to the familiar have first call on it", file=sys.stderr)
+
 errors = []
 rate_limited = []
 answered = False
