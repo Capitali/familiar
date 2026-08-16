@@ -119,6 +119,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-187 · The dialogue remembers, and may ask
+- status: DONE — recall of both voices, the dossier's habits + needs, and permission to ask one question back
+- owner: claude
+- notes: Ian 2026-08-15. Supersedes the queued T-181, which named only the "acknowledge what they said" half. The turns and the dossier both existed and were never shown to the model
+
 ### T-185 · An introduction is never dropped on the floor
 - status: DONE (build 93) — held-and-replayed, refusals shown verbatim, nudge silenced
 - owner: claude
