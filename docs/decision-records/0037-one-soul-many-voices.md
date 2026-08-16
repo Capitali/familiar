@@ -188,6 +188,51 @@ game's pairing flow is the familiar's device flow wearing a persona.
 Its declared tools act on a simulation; the boundary that would let it touch anything real
 is a separate grant that no game may request.
 
+### What the game's MCP server actually is (verified live, 2026-08-16)
+
+Ian supplied the endpoint: **`https://srv1328560.hstgr.cloud/mcp`**. It answers `initialize`
+without auth and identifies as **`ucf-exchange` v1.0.0**, protocol `2025-06-18`, capability
+`tools`. Its own instructions: *"The United Cat Foods exchange, read-only. Prices are a pure
+function of station stock, so they move as goods move; nothing here is scripted."* A live
+`ucf_status` returns `tick 5494`, `tickDurationSec 300`, `worldName PROD`, and a state hash.
+Tool *calls* require `Authorization: Bearer ucfk_...`.
+
+Ten tools, and **every one is read-only**:
+
+| tool | what it gives |
+|---|---|
+| `ucf_status` | the world clock — tick, tick length, next boundary, state hash |
+| `ucf_reference` | the world model: goods, recipes, stations |
+| `ucf_stations` | every station, its class, the body it orbits |
+| `ucf_prices` | every good's mid price and stock at every station, one call |
+| `ucf_quotes` | one station's board: ask, bid, stock, equilibrium |
+| `ucf_quote` | the executable total for a bulk order, walking the price curve |
+| `ucf_news` | the Dispatch feed — **events announced before they bite** |
+| `ucf_carriers` | every hull, where it is, what it carries |
+| `ucf_loadboard` | the freight board with deadhead, cost, net, rate-per-day |
+| `ucf_route` | flight plan: legs, distance, hours under thrust, fuel |
+
+**This corrects an assumption in section A above.** That section predicted the game would
+expose *ship systems* as tools (`ship.set_thrust`). It does not — at least not here. This
+server is an **economy and logistics observatory**, and it contains **no actuators at all**.
+Which means:
+
+- Against this server, Purr's whole relationship to the game is **observation**. There is
+  nothing to actuate, so `allow_actuate` is not even engaged; this sits under `allow_network`.
+- The ship-spec-as-tool-discovery idea still holds as the *shape* for ship control, but ship
+  control is not on this endpoint. Whether it arrives as a second MCP server or stays in-game
+  is a question for the game team.
+- The partition matters **more**, not less. Ten tools of rich, live, plausible world data is
+  exactly the material that would contaminate the household's reasoning if it landed in one
+  undifferentiated observation log.
+
+And it is worth saying what this makes possible, because it is the thesis of ADR-0013 in
+miniature: `ucf_news` announces events **before they bite**, `ucf_prices` is the whole board in
+one call, and `ucf_route` computes the fuel. A familiar watching all three can notice what a
+captain flying one ship cannot — a price that will move because a dispatch just landed, a
+deadhead leg a load-board entry would fill. That is *noticing*, which is the thing this project
+claims to be for, with the pleasant property that the stakes are entirely fictional.
+
 ### Open, and owed to the game team
 - MCP server topology on iOS, where the game and the familiar are one process — an
   in-process transport rather than a socket, which MCP permits but which needs a named
