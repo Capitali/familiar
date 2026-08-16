@@ -2119,6 +2119,18 @@ fn cmd_observe(args: &[String]) -> ExitCode {
     match observation::record(&dir, obs) {
         Ok(o) => {
             println!("recorded {} : {} {} {}", o.id, o.actor, o.action, o.object);
+            // A person at this terminal is as present as one at a console (T-193). The mesh
+            // door touches the dialogue wake-file on every utterance it receives, so the
+            // daemon's reply thread answers within ~1s — but an utterance recorded HERE woke
+            // nothing, and waited for the next scheduled tick, which backs off to 960s when
+            // the world is quiet. Presence outranks musing wherever the person happens to be
+            // standing; the door is not the only place someone can speak.
+            if o.actor != "familiar"
+                && !o.actor.starts_with("mesh")
+                && (o.action == "told the familiar" || o.action == "answered")
+            {
+                familiar_kernel::dialog::wake(&dir);
+            }
             ExitCode::SUCCESS
         }
         Err(e) => {
