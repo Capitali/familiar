@@ -59,7 +59,11 @@ osascript -e 'quit app "FamiliarMac"' 2>/dev/null || true
 sleep 2
 rm -rf /Applications/FamiliarMac.app
 cp -R "$MACAPP" /Applications/
-open /Applications/FamiliarMac.app
+# Relaunching the console is a courtesy, not a stage of the ship. `open` returns -600
+# (procNotFound) when there is no GUI session to launch into — a closed lid was enough — and
+# under `set -e` that aborted build 93 AFTER the Mac app was already installed but BEFORE the
+# iOS build and the TestFlight upload. A cosmetic step must never be able to kill a ship.
+open /Applications/FamiliarMac.app || echo "⚠ could not relaunch the console (no GUI session?) — install still good"
 ditto -c -k --keepParent "$MACAPP" "$HOME/Downloads/FamiliarMac-universal.zip"
 echo "✓ Mac installed + zip refreshed"
 
