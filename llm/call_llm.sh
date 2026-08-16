@@ -489,7 +489,15 @@ if mode == "consult" and not configured:
 def rank(p):
     h = health.get(p, {})
     cooling = 1 if h.get("available_after", 0) > now else 0
-    not_ok = 0 if h.get("status") == "ok" else 1
+    # A provider with NO health record has never been tried — that is not-knowing, not a
+    # known fault, and it must not be scored as one. Ranking it below every healthy
+    # incumbent meant a newly configured provider could never reach the front of the chain
+    # while any existing one was working, silently overriding the human's configured order:
+    # adding `claude` at the head of `claude,cerebras,gemini` changed nothing, and the
+    # adapter reported no error because it never called it (2026-08-15).
+    # Untried ties with healthy, and `sorted` is stable, so the configured order decides.
+    status = h.get("status")
+    not_ok = 0 if status in ("ok", None) else 1
     return (cooling, not_ok)
 
 order = configured if mode == "probe" else sorted(configured, key=rank)

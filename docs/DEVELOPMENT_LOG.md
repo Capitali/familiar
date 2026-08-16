@@ -6,6 +6,47 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-189 · An untried provider is not an unhealthy one
+
+Ian added an Anthropic key and put `claude` at the head of the chain
+(`claude,cerebras,gemini`). Nothing changed: every consult still went to cerebras, and the
+adapter reported no error about claude at all — no health entry, no failure, silence.
+
+The provider ordering:
+
+```python
+def rank(p):
+    h = health.get(p, {})
+    cooling = 1 if h.get("available_after", 0) > now else 0
+    not_ok  = 0 if h.get("status") == "ok" else 1      # ← a provider never tried scores 1
+    return (cooling, not_ok)
+```
+
+A provider with **no health record has never been tried**. That is not-knowing, and it was
+being scored identically to a known fault — so it sorted below every healthy incumbent, and a
+newly configured provider could never reach the front of the chain while any existing one was
+working. The human's configured order was silently overridden by the adapter's own history.
+
+The same doctrinal error as the rest of this session: not-knowing treated as a known negative,
+failing silently. It is the provider-selection twin of the reply that performed attention it
+did not have (T-180) and the badge that showed a fault without a reason (T-186).
+
+### What changed
+`not_ok = 0 if status in ("ok", None) else 1` — untried ties with healthy, and `sorted` is
+stable, so the configured order decides between them. A genuinely failed or rate-limited
+provider still sinks, and cooldown still dominates.
+
+### Checks
+`bash -n`; the ranking verified directly against a fixture where cerebras is healthy and
+gemini rate-limited — `claude,cerebras,gemini` now orders claude first while the rate-limited
+gemini still sinks. Confirmed live: claude was called for the first time (its health entry
+appeared, which is itself the proof it had never been reached before).
+
+### Next
+Claude now answers with `HTTP 400 — "Your credit balance is too low to access the Anthropic
+API."` That is an account matter for Ian, not a code one. Meanwhile gemini and cerebras remain
+429 under the daemon's 60s metabolism, so the dialogue still returns honest receipts.
+
 ## 2026-08-15 — T-188 · A daemon path must be absolute even before it exists
 
 Found by breaking it. Running `familiar daemon install` from a checkout wrote
