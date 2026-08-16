@@ -17,6 +17,11 @@ final class AppModel: ObservableObject {
     /// a guest is a stable, honest state, and `path` is the door's own words for what admission
     /// still needs — shown verbatim, because the refusal text IS the UI copy.
     enum MembershipState: Equatable {
+        /// We hold a grant but have not yet heard what the mesh says about our standing.
+        /// NOT a visitor — a device that has never been told anything is not thereby a
+        /// stranger. Resolves to `.member` on the first recognised read, or to `.guest`
+        /// after three unrecognised ones (T-197).
+        case unknown
         case none
         case knocking
         case guest(path: String)
@@ -421,9 +426,12 @@ final class AppModel: ObservableObject {
         }
         refreshPresence()
         enrolled = storedGrant() != nil && !host.isEmpty
-        // Fine-grained truth arrives with the first worldview read; until then an enrolled
-        // device is at least a guest, and the copy names the path (ADR-0026).
-        membership = enrolled ? .guest(path: Self.admissionPath) : .none
+        // Fine-grained truth arrives with the first worldview read. Until then this device's
+        // standing is UNKNOWN — it is not a visitor (T-197). Assuming guest here meant every
+        // member's console flashed "VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP" at them for the
+        // seconds before the first read landed, which is the mesh calling its own people
+        // strangers because it had not finished reading yet. Absence is not a negative.
+        membership = enrolled ? .unknown : .none
         #if os(iOS)
         voice = VoiceSensing { [weak self] obs in self?.emit(obs) }
         face = FaceSensing { [weak self] obs in self?.emit(obs) }
@@ -454,6 +462,7 @@ final class AppModel: ObservableObject {
         // and — for a guest — the door's own path-to-admission copy.
         let membershipDict: [String: Any]
         switch membership {
+        case .unknown: membershipDict = ["state": "unknown", "path": ""]
         case .none: membershipDict = ["state": "none", "path": ""]
         case .knocking: membershipDict = ["state": "knocking", "path": ""]
         case .guest(let path): membershipDict = ["state": "guest", "path": path]

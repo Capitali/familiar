@@ -6,6 +6,59 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-197/T-198 · Unknown is not a visitor, and an act must be answered
+
+Two reports, one disease, hours after the rule was written down.
+
+**T-197 — the launch flash.** Ian: *"the client on this mac, when launched immediately flashed
+the visitor badge... that was clearly not an intentional workflow."* The initialiser said so
+in as many words:
+
+```swift
+enrolled = storedGrant() != nil && !host.isEmpty
+// ...until then an enrolled device is at least a guest
+membership = enrolled ? .guest(path: Self.admissionPath) : .none
+```
+
+A member launches, is marked `.guest` until the first worldview read confirms standing, and
+the console dutifully flashes *"VISITOR — TAP FOR YOUR PATH TO MEMBERSHIP"* at them. Standing
+was not yet **known**, and unknown was rendered as the negative — the mesh calling its own
+people strangers because it had not finished reading. Ian, correctly: *"I thought we just set
+this rule — lack of data <> negative."*
+
+`MembershipState.unknown` now carries that third value. It resolves to `.member` on the first
+recognised read and to `.guest` only after three unrecognised ones, so a genuine visitor still
+finds the path — it is the *assumption* that is gone, not the outcome.
+
+**T-198 — the act with no answer.** Ian, on Betty's iPad: *"I was taken to device screen,
+entered name, nothing.. I changed to roster screen and got the visitor popup asking me to name
+myself that sent me to the device screen and an empty name field again... this is pretty
+broken, and it's no wonder others are not completing the membership process."*
+
+He is right, and the loop was airtight. The `I AM` field renders `value=""` unconditionally.
+`setServedHuman` cleared it, set `correctServing = false` (collapsing the form back to "no one
+identified"), and the **only** status surface — the guest bar — is deliberately hidden on the
+Device screen, which is the very screen where the act happens. So: type your name, watch it
+vanish, receive nothing. Navigate away, get nudged for a name you already gave, tap through to
+an empty field, repeat.
+
+Giving your name is the single act that turns a visitor into a member. It now:
+- **keeps what was typed** and keeps the form open until the mesh resolves it;
+- **says what became of it** inline — "telling the mesh who you are…", the door's own refusal
+  text, "sent — waiting for the mesh to confirm", or "✓ established — you are a member";
+- **silences the nudge** while a name is pending, in flight, or held.
+
+### Checks
+FamiliarMac and FamiliarAgent Release both built rc=0; page JS parse-identical to HEAD; Rust
+fmt/clippy/test all exit 0, 35 suites.
+
+### Open — the architecture Ian is questioning
+*"the membership, mesh establishment, and device and user registration process and mapping...
+the organic growth of this slowly may have masked a better architectural decision path."* His
+Mac reads `Mine — Ian's` while carrying no established name, which is the tell: **device
+ownership is local UI state, and establishment is a mesh fact, and nothing reconciles them.**
+Reviewed under T-199.
+
 ## 2026-08-16 — T-195 · Theories federate over record-sync
 
 Ian: *"theories need to use the record-sync that exists within the mesh, but this needs to
