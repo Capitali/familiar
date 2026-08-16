@@ -6,6 +6,37 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-188 · A daemon path must be absolute even before it exists
+
+Found by breaking it. Running `familiar daemon install` from a checkout wrote
+`--data-dir familiar_data` and `familiar_data/daemon.log` into the launchd plist, and the
+agent then failed `EX_CONFIG (78)` on every start — launchd runs with cwd `/`, so both paths
+resolved under the read-only system volume.
+
+The guard was already there, and had a hole:
+
+```rust
+let dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+```
+
+`canonicalize` **fails when the path does not exist yet**, and the fallback kept the relative
+path — so the protection evaporated in exactly the case it was written for: a fresh checkout
+whose data dir had not been created. The comment directly above it predicts the EX_CONFIG that
+then happened.
+
+Now the path is made absolute against the current directory FIRST and canonicalized only as a
+tidy-up, so whether the directory exists never decides whether the daemon can run.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0,
+35 suites, plus a regression test that asserts a non-existent relative dir still resolves
+absolute.
+
+### Next
+Both free LLM tiers (gemini, cerebras) are returning 429 under the daemon's 60s background
+metabolism, so the human dialogue lane gets a rate-limited receipt even though the gate is
+open and the adapter is healthy. The human lane jumps the queue but cannot jump a spent quota.
+
 ## 2026-08-15 — T-187 · The dialogue remembers, and may ask
 
 Ian, once the mind came up: *"the familiar has to be able to ask things back, it must have
