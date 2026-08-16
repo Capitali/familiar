@@ -2603,6 +2603,18 @@ fn recv_introduce(
                     &req.node.pubkey,
                     now,
                 );
+                if existing {
+                    // WARN the human whose name this is, on the devices they already hold
+                    // (T-202). The claim has always been recorded here; until now it waited
+                    // silently in `claims_waiting` to be noticed, and a security-relevant
+                    // event that only reaches you if you go looking is not a warning.
+                    let label = if req.node.label.trim().is_empty() {
+                        req.node.node_id.chars().take(8).collect::<String>()
+                    } else {
+                        req.node.label.trim().to_string()
+                    };
+                    crate::push::spawn_notify_claim(dir, claim.handle.trim(), &label);
+                }
                 return text(
                     StatusCode::FORBIDDEN,
                     if existing {

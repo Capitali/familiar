@@ -6,6 +6,45 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-16 — T-202 · A name already taken is an alarm, not a refusal
+
+Ian: *"The naming needs to be aware of the possibility of new users with duplicate names...
+alert and dialog for the user should it be the same person should utilize notifications as well
+as in app sounds and alerts to WARN the user that another device is being added to the mesh
+with their name — approve or deny."*
+
+Most of the mechanism was already here and, as usual, the missing part was the surface. The
+door already refuses an introduction claiming an established handle, already **records the
+claim anyway** ("a claim addresses even when the evidence fails", ADR-0019), and the console
+already renders it to that human's own devices with a one-tap vouch. What it never did was
+**tell them**. The claim sat in `claims_waiting` waiting to be noticed — and a
+security-relevant event that only reaches you if you go looking is not a warning.
+
+### What changed
+- **The refusal speaks to the person**, in Ian's words. It was
+  *"an introduction never attaches to an existing identity; that takes a handoff, a voucher, or
+  an invite naming it"* — true, and written for whoever wrote it. Now: *"'ian' already exists
+  here. If this is you, open the familiar on one of your other devices and approve this one —
+  it will be waiting there. If this is not you, choose a different name."* The invite path's
+  equivalent got the same treatment.
+- **`push::spawn_notify_claim`** — the only push the familiar sends that is not an invitation.
+  It goes to every device whose membership record establishes that handle:
+  *"⚠︎ someone is claiming your name — A device calling itself <label> says it is yours. If you
+  are setting it up, approve it. If not, deny it."* `time-sensitive`, which is the strongest
+  interruption level available without Apple's critical-alert entitlement, and pierces most
+  Focus modes.
+- The claimant's device label is a string a stranger chose and is interpolated into a JSON
+  payload, so the two characters that could break out of it are stripped.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all exit 0.
+
+### Still open on this
+An explicit **deny** (today the human vouches or ignores, and ignoring leaves the claimant a
+guest — passive, where Ian asked for approve *or* deny), and the in-app **sound** on receipt.
+Filed as T-203; the push is the half that matters most, since it is the one that reaches a
+pocket.
+
 ## 2026-08-16 — T-201 · Build 98 broke every client, and the check could not have caught it
 
 Ian, on two iPhones, Betty's iPad and the Mac: *"it's all just spinning 'waiting on the

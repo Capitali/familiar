@@ -795,8 +795,8 @@ pub fn evaluate_admission(
                 // the inviter naming it — or a handoff/voucher from that human's own device.
                 if ctx.handle_exists(claimed) {
                     return Err(Error::Untrusted(format!(
-                        "invite: “{claimed}” already exists here — ask for an invite naming \
-                         that handle, or hand off from one of their devices"
+                        "“{claimed}” already exists here. If this is you, approve this device \
+                         from one you already use; otherwise choose a different name."
                     )));
                 }
                 claimed.to_string()
@@ -826,9 +826,9 @@ pub fn evaluate_admission(
             }
             if ctx.handle_exists(handle) {
                 return Err(Error::Untrusted(format!(
-                    "introduction: “{handle}” already exists here — an introduction never \
-                     attaches to an existing identity; that takes a handoff, a voucher, or an \
-                     invite naming it"
+                    "“{handle}” already exists here. If this is you, open the familiar on one \
+                     of your other devices and approve this one — it will be waiting there. If \
+                     this is not you, choose a different name."
                 )));
             }
             // If the device provenance names a device, it must actually be established.
