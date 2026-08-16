@@ -227,10 +227,14 @@ const isStale = (p) => {
 // the grace period keeps a napping laptop from flapping on and off the map. Self always shows.
 const GLOBE_STALE_SECS = 3 * 3600;
 const globeVisible = (p) => {
-  // A dot on the globe is a claim of WHERE — so a device with no real fix is off the map
-  // entirely (B12). The lighthouse's North-Pole post IS a real fix (|lat| ≥ 85), so it stays.
+  // The globe answers WHO IS HERE NOW (T-204). A node with no position at all cannot be drawn,
+  // but `peers()` now scatters an ONLINE unplaced node near the anchor and flags it
+  // `estimated`, so "here, place unknown" is representable instead of vanishing.
+  // An estimated dot is only ever drawn for a node that is online this moment — staleness is
+  // what made the old scatter a false claim, and it is what stays excluded.
   if (!p.located) return false;
   if (p.local) return true;
+  if (p.estimated) return p.status === 'online';
   const ls = p.m.last_seen || 0;
   return p.status === 'online' || (ls > 0 && nowS() - ls <= GLOBE_STALE_SECS);
 };
@@ -361,13 +365,29 @@ function peers(all) {
   const anchor = ms.find(anchorable);
   return ms.map((m) => {
     const st = m.status || (m.online ? 'online' : 'offline');
-    const lat = m.lat || 0, lon = m.lon || 0, located = lat !== 0 || lon !== 0;
-    // No scatter-near-the-anchor for unlocated devices anymore (B12): a fabricated position
-    // is exactly the inaccuracy that put stale, place-less phones on the map. Unlocated nodes
-    // keep 0,0 and `located:false`, which the roster shows as "≈" and the globe drops.
+    let lat = m.lat || 0, lon = m.lon || 0;
+    let located = lat !== 0 || lon !== 0;
+    let estimated = false;
+    // B12 removed scatter-near-the-anchor because a fabricated position put STALE, place-less
+    // phones on the map — a dot is a claim of WHERE, and that claim was false. But dropping
+    // every unlocated node also drops the LIVE ones: Betty's iPhone showed her own node and the
+    // lighthouse and nothing else, because her door carries no fix for the rest, and an empty
+    // globe reads as an empty mesh (Ian, 2026-08-16).
+    //
+    // The gate was the wrong one. What made the old scatter a lie was staleness, not estimation
+    // — so gate on being HERE NOW. A node that is online but unplaced is scattered near the
+    // mesh's anchor and marked `estimated`, which the map draws as a hollow ring rather than a
+    // solid pin: present, place unknown. Anything not online keeps 0,0 and stays off the map.
+    if (!located && st === 'online' && anchor && !(m.kind === 'self_node')) {
+      const h = hash32((m.node_id || '') + (m.label || ''));
+      lat = anchor.lat + ((h & 0xffff) / 65535 - 0.5) * 0.045;
+      lon = anchor.lon + (((h >>> 16) & 0xffff) / 65535 - 0.5) * 0.06;
+      located = true;
+      estimated = true;
+    }
     const nm = nodeName(m);
     return {
-      m, name: nm.text, masked: nm.masked, lat, lon, located, hasAnchor: !!anchor, status: st,
+      m, name: nm.text, masked: nm.masked, lat, lon, located, estimated, hasAnchor: !!anchor, status: st,
       color: statusColor(st, m.kind), local: m.kind === 'self_node',
       kindWord: { self_node: 'SELF', gossip_peer: 'PEER', device_peer: 'DEVICE', device_agent: 'AGENT' }[m.kind] || 'NODE',
       // Last-known location + when it was known (C4) — persists in the roster even after the
@@ -1880,8 +1900,10 @@ function renderCallouts() {
   $('callouts').innerHTML = pairs.map(([p, i]) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;">
       <div style="position:absolute;left:0;top:0;width:11px;height:11px;transform:translate(-50%,-50%);">
-        <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
-        <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};animation:ping 2.8s ease-out infinite;"></span>
+        ${p.estimated
+          ? `<span style="position:absolute;inset:0;border-radius:50%;background:transparent;border:1.5px dashed ${p.color};opacity:0.75;"></span>`
+          : `<span style="position:absolute;inset:0;border-radius:50%;background:${p.color};box-shadow:0 0 12px ${p.color};"></span>
+             <span style="position:absolute;inset:0;border-radius:50%;background:${p.color};animation:ping 2.8s ease-out infinite;"></span>`}
       </div>
       <div style="position:absolute;left:0;top:0;width:44px;height:1px;transform-origin:0 0;transform:rotate(-58deg);background:linear-gradient(90deg,${p.color},rgba(140,180,255,0));"></div>
       <div onclick="sphereDive(${i})" style="position:absolute;left:18px;top:-52px;min-width:110px;padding:7px 10px;border-radius:11px;background:rgba(9,15,32,0.6);border:1px solid ${p.local?'rgba(174,231,255,0.35)':'rgba(120,160,255,0.28)'};backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 10px 30px rgba(0,0,0,0.45);pointer-events:auto;cursor:pointer;">
@@ -1890,7 +1912,7 @@ function renderCallouts() {
           ${servedWord(p.m) ? `<span style="font-size:11px;font-weight:600;color:#9fe8c0;">${esc(servedWord(p.m))}</span>` : ''}
           <span class="m" style="font-size:7.5px;letter-spacing:0.1em;padding:2px 5px;border-radius:5px;background:${p.local?'rgba(174,231,255,0.16)':'rgba(120,160,255,0.16)'};color:${p.local?'#cdeeff':'#bcd2ff'};">${p.kindWord}</span>
         </div>
-        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};white-space:nowrap;">${esc(p.seenFull)}</span></div>
+        <div class="m" style="display:flex;align-items:center;gap:8px;font-size:9px;color:rgba(200,216,248,0.6);"><span>${p.estimated ? 'here · place unknown' : p.located ? (p.m.geo_device ? '' : '≈ ') + p.lat.toFixed(2)+'°, '+p.lon.toFixed(2)+'°' : '≈'}</span><span style="color:${p.color};white-space:nowrap;">${esc(p.seenFull)}</span></div>
       </div>
     </div>`).join('') + F.map((fn) => `
     <div data-callout="1" style="position:absolute;left:0;top:0;will-change:transform;opacity:0.55;">
