@@ -541,6 +541,81 @@ fn utterance_text(o: &observation::Observation) -> &str {
 /// A human utterance in the dialogue — something a person said to the familiar, from any
 /// console (Mac `/local/answer`, an iOS device's signed answer). Not the familiar's own
 /// records, not mesh gossip.
+/// How many prior turns of dialogue the familiar carries into a reply.
+///
+/// Small on purpose: enough that the conversation has continuity, bounded so a long evening
+/// cannot crowd out the Law III voice or what is known about the person.
+const RECALLED_TURNS: usize = 8;
+
+/// The recent conversation, both voices, oldest first — what was said and what was answered.
+///
+/// The dialogue prompt used to carry ONE utterance and nothing else, so every turn was the
+/// familiar's first: it could not refer to what had just been discussed, could not notice it
+/// had been told something twice, and could not follow anything up. Ian, 2026-08-15: *"it
+/// must have the ability to recall previous conversations."* The turns were in the
+/// observation log the whole time — `told the familiar` / `answered` on one side, the
+/// familiar's own `replied` on the other — and the prompt simply never read them.
+fn recent_dialogue(obs: &[observation::Observation], before_ts: i64, limit: usize) -> String {
+    let mut turns: Vec<(i64, String)> = obs
+        .iter()
+        .filter(|o| o.ts < before_ts)
+        .filter_map(|o| {
+            if is_human_utterance(o) {
+                let t = utterance_text(o);
+                (!t.is_empty()).then(|| (o.ts, format!("them: {t}")))
+            } else if o.actor == "familiar" && o.action == "replied" {
+                let t = o.object.trim();
+                (!t.is_empty()).then(|| (o.ts, format!("you: {t}")))
+            } else {
+                None
+            }
+        })
+        .collect();
+    turns.sort_by_key(|(ts, _)| *ts);
+    let start = turns.len().saturating_sub(limit);
+    turns[start..]
+        .iter()
+        .map(|(_, line)| line.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// What the familiar has learned about this person — presence, how they are identified, the
+/// control-surface habits it has observed, and what is open with them.
+///
+/// This is the ADR-0022 dossier, which has held habits and needs all along and was never once
+/// shown to the dialogue. Reading it here is what lets the familiar keep track of an individual
+/// rather than meeting a stranger every time.
+fn known_of(dir: &Path, handle: &str, now: i64) -> String {
+    let h = handle.trim();
+    if h.is_empty() || h.eq_ignore_ascii_case("observer") {
+        return String::new();
+    }
+    let half_life = Parameters::load_or_default(dir)
+        .sane()
+        .dossier_half_life_days
+        * 86_400;
+    let Ok(d) = familiar_kernel::dossier::read(dir, h, now, half_life) else {
+        return String::new();
+    };
+    if d.withdrawn {
+        return String::new(); // a withdrawal is honoured everywhere, including here
+    }
+    let mut out = familiar_kernel::dossier::coarse_summary(&d);
+    // Open needs are the difference between remembering a person and remembering a profile.
+    let open: Vec<String> = d
+        .needs
+        .iter()
+        .take(3)
+        .map(|n| n.text.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if !open.is_empty() {
+        out.push_str(&format!("; still open with them: {}", open.join("; ")));
+    }
+    out
+}
+
 fn is_human_utterance(o: &observation::Observation) -> bool {
     (o.action == "told the familiar" || o.action == "answered")
         && o.actor != "familiar"
@@ -598,13 +673,38 @@ fn maybe_reply(
         // The dialogue is the MOST human-facing generation there is — it speaks in the
         // Law III voice like every other one (dialog.rs's promise, which this path
         // used to skip).
+        // What has already been said, and what is already known about this person. Both were
+        // available all along and neither was ever put in front of the model, so every reply
+        // was written by something meeting them for the first time (T-187).
+        let history = recent_dialogue(obs, human_ts, RECALLED_TURNS);
+        let known = known_of(dir, &msg.actor, now);
         let prompt = format!(
             "{LAW_III_VOICE}\n\n\
              You are a factory whose only purpose is to serve {who} (the Three Laws; humanity is \
-             served, never managed or replaced). {who} just said to you:\n\"{said}\"\n\
-             Reply directly, warmly, and briefly — ONE or two sentences that acknowledge what they \
-             said and, where it fits, what you'll do with it. Do NOT ask a question (that comes \
-             separately). Reply as plain text only, no quotes, no JSON.",
+             served, never managed or replaced).\n\
+             {}\
+             {}\
+             {who} just said to you:\n\"{said}\"\n\n\
+             Reply directly, warmly, and briefly — one or two sentences. Say something SPECIFIC \
+             about what they actually said; a reply that would fit equally well after some other \
+             sentence is a failure. Refer back to what has already been said when it bears on \
+             this, and never ask again for something you were already told.\n\
+             You MAY ask ONE short question back, and should when you genuinely do not know \
+             something that would help you serve them — what they meant, which of two things \
+             they want, or who you are speaking with when that is unclear. Names matter: they \
+             are how a relationship is kept. Ask because you want to know, never to seem \
+             attentive, and never more than one.\n\
+             Reply as plain text only, no quotes, no JSON.",
+            if history.is_empty() {
+                String::new()
+            } else {
+                format!("What has been said between you recently (oldest first):\n{history}\n\n")
+            },
+            if known.is_empty() {
+                String::new()
+            } else {
+                format!("What you have come to know about them: {known}\n\n")
+            },
         );
         // Human lane: this consult jumps the queue and any in-flight background
         // consult steps aside — the person is waiting *right now*.
@@ -7296,5 +7396,81 @@ mod tests {
         let r = templated_reply(said, 100, NoMind::Gated);
         assert!(r.contains('…'), "long input should be elided: {r}");
         assert!(r.chars().count() < said.chars().count() + 260);
+    }
+
+    // T-187 — the dialogue remembers. Ian, 2026-08-15: "the familiar has to be able to ask
+    // things back, it must have the ability to recall previous conversations, it must keep
+    // track of individual needs and group preferences, the familiar needs to keep track."
+
+    fn turn(actor: &str, action: &str, object: &str, ts: i64) -> observation::Observation {
+        observation::Observation::new(actor, action, object, "", "console", ts, 1.0)
+    }
+
+    #[test]
+    fn recall_carries_both_voices_oldest_first() {
+        let obs = vec![
+            turn(
+                "ian",
+                "told the familiar",
+                "the dinette light is too bright",
+                100,
+            ),
+            turn(
+                "familiar",
+                "replied",
+                "I'll watch how it is used after dark.",
+                110,
+            ),
+            turn("ian", "told the familiar", "betty prefers it warmer", 120),
+        ];
+        let h = recent_dialogue(&obs, 200, 8);
+        let lines: Vec<&str> = h.lines().collect();
+        assert_eq!(lines.len(), 3, "both voices belong in the recall: {h}");
+        assert!(
+            lines[0].starts_with("them: the dinette"),
+            "oldest first: {h}"
+        );
+        assert!(
+            lines[1].starts_with("you: I'll watch"),
+            "the familiar's own turn: {h}"
+        );
+    }
+
+    #[test]
+    fn recall_stops_at_the_utterance_being_answered() {
+        let obs = vec![
+            turn("ian", "told the familiar", "earlier thing", 100),
+            turn(
+                "ian",
+                "told the familiar",
+                "the thing being answered now",
+                200,
+            ),
+        ];
+        let h = recent_dialogue(&obs, 200, 8);
+        assert!(h.contains("earlier thing"));
+        assert!(
+            !h.contains("being answered now"),
+            "the current utterance is quoted separately — including it twice invites an echo: {h}"
+        );
+    }
+
+    #[test]
+    fn recall_is_bounded_so_an_evening_cannot_crowd_out_the_voice() {
+        let obs: Vec<observation::Observation> = (0..40)
+            .map(|i| turn("ian", "told the familiar", &format!("turn {i}"), 100 + i))
+            .collect();
+        let h = recent_dialogue(&obs, 1000, RECALLED_TURNS);
+        assert_eq!(h.lines().count(), RECALLED_TURNS);
+        assert!(
+            h.contains("turn 39"),
+            "the bound keeps the NEWEST turns: {h}"
+        );
+        assert!(!h.contains("turn 0"));
+    }
+
+    #[test]
+    fn an_empty_history_renders_as_nothing_not_as_an_empty_heading() {
+        assert!(recent_dialogue(&[], 100, 8).is_empty());
     }
 }

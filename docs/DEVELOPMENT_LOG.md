@@ -6,6 +6,52 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-15 — T-187 · The dialogue remembers, and may ask
+
+Ian, once the mind came up: *"the familiar has to be able to ask things back, it must have
+the ability to recall previous conversations, it must keep track of individual needs and
+group preferences, the familiar needs to keep track."*
+
+Four asks, one cause. The `converse` prompt carried the Law III voice, who it serves, and
+**one utterance** — nothing else. Every reply was written by something meeting the person for
+the first time: it could not refer to what had just been discussed, could not notice it had
+been told the same thing twice, could not follow anything up. And it was explicitly forbidden
+to ask: *"Do NOT ask a question (that comes separately)"* — which removes the single
+strongest evidence of attention there is.
+
+Nothing needed building. The turns were in the observation log all along (`told the
+familiar` / `answered` on one side, the familiar's own `replied` on the other), and the
+ADR-0022 dossier has held presence, standing, **habits** (`lights=dim@h20` — preferences
+learned by observation) and **needs** (open threads and unanswered questions) since it was
+written. Neither was ever put in front of the model. Same shape as every other defect this
+session: the capability exists, the surface that needs it does not use it.
+
+### What changed
+- `recent_dialogue()` — the last 8 turns, **both voices**, oldest first, cut off before the
+  utterance being answered so it is not quoted twice and echoed back.
+- `known_of()` — the dossier's coarse summary plus up to three open needs. Honours
+  `withdrawn`: a person who removed themselves is not recalled here either.
+- The prompt now demands **specificity** ("a reply that would fit equally well after some
+  other sentence is a failure"), says never to ask again for something already given, and
+  **permits exactly one question back** — encouraged when it genuinely does not know
+  something, explicitly including who it is speaking with, since names are how a relationship
+  is kept. "Ask because you want to know, never to seem attentive."
+
+Bounded at 8 turns on purpose: enough for continuity, not so much that an evening's chat
+crowds out the Law III voice or what is known about the person.
+
+### Checks
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` all **exit 0**,
+35 suites. Four new tests: both voices oldest-first; the current utterance excluded from
+recall; the bound keeps the newest turns; empty history renders as nothing rather than an
+empty heading.
+
+### Next
+Live verification needs the daemon on the new binary — a manual `tick` alongside the running
+daemon races it, because the adapter uses fixed `prompt.txt`/`response.json` names in one
+shared directory. That is T-118's class (fixed-name files under concurrency) showing up
+outside the tests; harmless while exactly one familiar process runs, which is the normal case.
+
 ## 2026-08-15 — T-186 · The failure mark says why
 
 Ian, build 93 on the iPad: a red `!` over the globe and nothing beside it.
