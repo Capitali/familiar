@@ -1832,7 +1832,16 @@ function renderChrome() {
   const showBadge = (!S.linkOk || !!S.jsErr) && !joining;
   $('linkdown').style.display = showBadge ? 'flex' : 'none';
   const lm = $('linkmsg');
-  const msg = (!S.linkOk && S.linkErr) ? S.linkErr : (S.jsErr || '');
+  // The mark must never be mute (T-186). It shows on TERMINAL failure — which for a first join
+  // means `jp.stage` reached `unreachable`/`declined`, a path on which `sphereLinkDown` is never
+  // called, so `S.linkErr` is still its initial ''. The reason was in hand the whole time, sitting
+  // in the join's own detail, and the badge simply never read it. Ian, build 93 on the iPad: a red
+  // ! with nothing beside it. A failure mark with no words is the worst of both — it says
+  // something is wrong and refuses to say what, which is unactionable and reads as a dead app.
+  const jpWhy = jp ? [jp.detail, jp.host && ('at ' + jp.host)].filter(Boolean).join(' · ') : '';
+  const msg = (!S.linkOk && S.linkErr) ? S.linkErr
+            : (S.jsErr || jpWhy
+               || (showBadge ? 'the link is down and no reason was recorded — tap Device for the join log' : ''));
   lm.textContent = msg; lm.style.display = (showBadge && msg) ? 'block' : 'none';
   const jl = $('joinlive');
   if (jl) {
