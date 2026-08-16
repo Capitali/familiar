@@ -425,6 +425,125 @@ pub const MATURITY_THRESHOLD: u32 = 3;
 
 /// Whether a theory has earned a place in the human-facing view (C5): it has recurred enough,
 /// or it progressed into work / an answer. Abandoned and marginalized theories never surface.
+/// Statuses a thread cannot come back from. Order matters only in that ANY of these beats
+/// every active status when two doors disagree.
+///
+/// This is the whole safety property of federation (T-195). Nodes reach terminal verdicts
+/// independently — one retires a theory in a fleet-wide purge while a sibling, offline or
+/// simply not asked, still holds it `pursued`. If the active copy could win, every sync would
+/// resurrect what a human had already dismissed, and the mesh would argue with its own past.
+/// Ian saw exactly that when a restarted peer republished a theory from the day before.
+pub const TERMINAL_STATUSES: &[&str] = &[
+    "retired",
+    "abandoned",
+    "superseded",
+    "expired",
+    "answered",
+    "marginalized",
+];
+
+pub fn is_terminal(status: &str) -> bool {
+    TERMINAL_STATUSES.contains(&status)
+}
+
+/// Merge one incoming thread into what this door already holds.
+///
+/// The rules, in order — each exists because breaking it corrupts the record:
+///
+/// 1. **A terminal status is sticky.** Retired beats pursued no matter which side is newer or
+///    higher-versioned. A verdict is a decision a human or the engine already reached; a
+///    sibling that never heard about it is not evidence against it.
+/// 2. **`superseded_by` is sticky.** Once a thread points at its successor it keeps pointing.
+/// 3. **Otherwise the higher `v` wins**, and ties break on the fresher `status_at` — the
+///    ordinary "latest word" rule, applied only among genuinely live copies.
+///
+/// Returns the merged thread, or None when the incoming copy tells us nothing new.
+pub fn merge_incoming(mine: &Thread, theirs: &Thread) -> Option<Thread> {
+    let mine_terminal = is_terminal(&mine.status);
+    let theirs_terminal = is_terminal(&theirs.status);
+
+    // 1 + 2: a verdict, or a supersession, always survives contact with a live copy.
+    if mine_terminal && !theirs_terminal {
+        return None; // ours is the verdict; theirs is stale news
+    }
+    if theirs_terminal && !mine_terminal {
+        let mut out = mine.clone();
+        out.status = theirs.status.clone();
+        out.status_at = theirs.status_at.max(mine.status_at);
+        if out.superseded_by.is_empty() {
+            out.superseded_by = theirs.superseded_by.clone();
+        }
+        return Some(out);
+    }
+
+    // Both terminal, or both live: the later word wins, with version as the tiebreak.
+    let theirs_newer =
+        theirs.v > mine.v || (theirs.v == mine.v && theirs.status_at > mine.status_at);
+    if !theirs_newer {
+        // Even when we keep ours, a supersession we had not heard of is worth adopting.
+        if mine.superseded_by.is_empty() && !theirs.superseded_by.is_empty() {
+            let mut out = mine.clone();
+            out.superseded_by = theirs.superseded_by.clone();
+            return Some(out);
+        }
+        return None;
+    }
+    let mut out = theirs.clone();
+    if out.superseded_by.is_empty() {
+        out.superseded_by = mine.superseded_by.clone();
+    }
+    out.last_worked_at = out.last_worked_at.max(mine.last_worked_at);
+    Some(out)
+}
+
+/// Find the thread this incoming one is a copy OF, if any.
+///
+/// By `id` first — ids are stable and a resync of the same thread must land on itself. Failing
+/// that, by typed identity (`family_key` + `variant_key`), which is how two doors that minted
+/// the same claim independently are recognised as holding one theory rather than two. Unkeyed
+/// (prose-only, pre-engine) threads match by id alone: without an identity there is nothing
+/// safe to merge on, and guessing would fold distinct theories together.
+pub fn find_counterpart<'a>(existing: &'a [Thread], incoming: &Thread) -> Option<&'a Thread> {
+    if let Some(t) = existing.iter().find(|t| t.id == incoming.id) {
+        return Some(t);
+    }
+    if incoming.family_key.is_empty() || incoming.variant_key.is_empty() {
+        return None;
+    }
+    existing
+        .iter()
+        .find(|t| t.family_key == incoming.family_key && t.variant_key == incoming.variant_key)
+}
+
+/// Absorb threads offered by a sibling door. Returns how many changed anything here.
+pub fn absorb(dir: &Path, incoming: &[Thread], now: i64) -> io::Result<usize> {
+    let mut changed = 0usize;
+    for t in incoming {
+        let existing = load(dir)?;
+        match find_counterpart(&existing, t) {
+            Some(mine) => {
+                if let Some(merged) = merge_incoming(mine, t) {
+                    let mut m = merged;
+                    m.id = mine.id.clone(); // identity here is OURS; theirs was only a copy
+                    store::upsert_by_id(dir, THREADS_FILE, &m.id, &m)?;
+                    changed += 1;
+                }
+            }
+            None => {
+                // A theory this door has never held. Terminal ones are still worth taking:
+                // learning that a sibling retired something keeps us from re-minting it.
+                let mut fresh = t.clone();
+                if fresh.status_at == 0 {
+                    fresh.status_at = now;
+                }
+                append(dir, &fresh)?;
+                changed += 1;
+            }
+        }
+    }
+    Ok(changed)
+}
+
 pub fn is_mature(t: &Thread) -> bool {
     if matches!(
         t.status.as_str(),
@@ -909,5 +1028,95 @@ mod tests {
             "a re-run manifest re-folds nothing"
         );
         let _ = fs::remove_dir_all(&p);
+    }
+
+    // T-195 — federation must never argue with the past. Each test is a way the mesh could
+    // corrupt its own record if the merge got it wrong.
+
+    fn th(id: &str, status: &str, v: u32, status_at: i64) -> Thread {
+        Thread {
+            id: id.into(),
+            question: String::new(),
+            theory: String::new(),
+            direction: String::new(),
+            created_at: status_at,
+            status: status.into(),
+            status_at,
+            last_worked_at: 0,
+            reinforced: 0,
+            answers: Vec::new(),
+            origin: String::new(),
+            origin_human: String::new(),
+            actor: String::new(),
+            anchors: Vec::new(),
+            facts_rev: 0,
+            facts_digest: String::new(),
+            v,
+            family_key: "fam".into(),
+            variant_key: "var".into(),
+            superseded_by: String::new(),
+            kind: String::new(),
+            expires_at: 0,
+            rule_proposal: None,
+        }
+    }
+
+    #[test]
+    fn a_retired_theory_is_never_revived_by_a_peer_that_still_pursues_it() {
+        let mine = th("t1", "retired", 1, 100);
+        let theirs = th("t1", "pursued", 9, 999); // newer AND higher-versioned
+        assert!(
+            merge_incoming(&mine, &theirs).is_none(),
+            "a sibling that never heard about the verdict is not evidence against it"
+        );
+    }
+
+    #[test]
+    fn a_retirement_learned_from_a_peer_is_adopted() {
+        let mine = th("t1", "pursued", 5, 500);
+        let theirs = th("t1", "retired", 1, 200); // older and lower-versioned
+        let out = merge_incoming(&mine, &theirs).expect("the verdict must travel");
+        assert_eq!(out.status, "retired");
+    }
+
+    #[test]
+    fn two_terminal_verdicts_settle_on_the_later_word() {
+        let mine = th("t1", "abandoned", 1, 100);
+        let theirs = th("t1", "retired", 2, 300);
+        assert_eq!(merge_incoming(&mine, &theirs).unwrap().status, "retired");
+    }
+
+    #[test]
+    fn a_supersession_is_sticky_even_when_we_keep_our_copy() {
+        let mine = th("t1", "pursued", 9, 900);
+        let mut theirs = th("t1", "pursued", 1, 100);
+        theirs.superseded_by = "t2".into();
+        let out =
+            merge_incoming(&mine, &theirs).expect("the pointer is news even if the rest is not");
+        assert_eq!(out.superseded_by, "t2");
+        assert_eq!(out.v, 9, "our content still wins");
+    }
+
+    #[test]
+    fn the_same_claim_minted_on_two_doors_is_one_theory_not_two() {
+        let existing = vec![th("local-1", "pursued", 1, 100)];
+        let mut incoming = th("remote-9", "pursued", 2, 200);
+        incoming.id = "remote-9".into(); // different id, same typed identity
+        let found = find_counterpart(&existing, &incoming).expect("typed identity must match");
+        assert_eq!(found.id, "local-1");
+    }
+
+    #[test]
+    fn an_unkeyed_theory_matches_only_itself() {
+        let mut mine = th("local-1", "pursued", 1, 100);
+        mine.family_key = String::new();
+        mine.variant_key = String::new();
+        let mut incoming = th("remote-9", "pursued", 1, 100);
+        incoming.family_key = String::new();
+        incoming.variant_key = String::new();
+        assert!(
+            find_counterpart(&[mine], &incoming).is_none(),
+            "without identity there is nothing safe to merge on — guessing folds distinct theories"
+        );
     }
 }

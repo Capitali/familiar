@@ -49,6 +49,7 @@ pub mod record;
 pub mod rendezvous;
 pub mod standing;
 pub mod status;
+pub mod thread_sync;
 pub mod transport;
 pub mod worldview;
 
