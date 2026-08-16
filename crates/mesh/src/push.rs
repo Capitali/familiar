@@ -236,6 +236,75 @@ pub fn spawn_notify_turn(dir: &Path, holder: &str, kind: &str) {
     });
 }
 
+/// WARN a human that a device is claiming their name (T-202).
+///
+/// This is the only push the familiar sends that is not an invitation — it is an alarm. A
+/// device somewhere has introduced itself as `handle`, and either the human is setting up a
+/// new device of their own, or somebody is trying to become them. Both readings demand the
+/// same thing: the person whose name it is must find out **now**, on the devices they already
+/// hold, rather than the next time they happen to open a console.
+///
+/// Until this existed the claim sat silently in `claims_waiting` waiting to be noticed. A
+/// security-relevant event that only reaches you if you go looking is not a warning.
+pub fn spawn_notify_claim(dir: &Path, claimed_handle: &str, claimer_label: &str) {
+    let Some(cfg) = load_config(dir) else { return };
+    let Ok(rt) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let handle_lc = claimed_handle.to_lowercase();
+    let device_ids: Vec<String> = crate::record::load_all(dir)
+        .into_iter()
+        .filter(|r| {
+            crate::record::derive_state(r) == crate::record::RecordState::Member
+                && r.identity
+                    .established
+                    .as_ref()
+                    .is_some_and(|e| e.handle.to_lowercase() == handle_lc)
+        })
+        .map(|r| r.device_id)
+        .collect();
+    let tokens: Vec<PushToken> = load_tokens(dir)
+        .into_iter()
+        .filter(|t| device_ids.iter().any(|d| d == &t.node_id))
+        .collect();
+    if tokens.is_empty() {
+        return;
+    }
+    // `critical` would need Apple's critical-alert entitlement; time-sensitive is the strongest
+    // level available and pierces most Focus modes, which is what this needs to do.
+    //
+    // The label is a device name a stranger chose, and it is about to be interpolated into a
+    // JSON payload: strip the two characters that could break out of the string.
+    let who = claimer_label.replace(['"', '\\'], "");
+    let body = format!(
+        "A device calling itself {who} says it is yours. If you are setting it up, approve it. If not, deny it."
+    );
+    let payload = format!(
+        r#"{{"aps":{{"alert":{{"title":"⚠︎ someone is claiming your name","body":"{body}"}},"sound":"default","interruption-level":"time-sensitive"}},"claim":"{handle_lc}"}}"#
+    );
+    let now = crate::transport::now_secs();
+    rt.spawn(async move {
+        let jwt = match provider_jwt(&cfg, now) {
+            Ok(j) => j,
+            Err(e) => {
+                eprintln!("apns: no provider token: {e}");
+                return;
+            }
+        };
+        for t in tokens {
+            let r = send_one(&cfg, &jwt, &t, &payload).await;
+            if !r.ends_with("200") {
+                eprintln!(
+                    "apns: claim warning to {}({}) -> {}",
+                    &t.node_id[..8.min(t.node_id.len())],
+                    t.env,
+                    r
+                );
+            }
+        }
+    });
+}
+
 /// Announce a riddle WIN to every member device — the fanfare reaches the phones in pockets
 /// too (B13), not only the winner's. Best-effort; needs registered tokens and an APNs config.
 pub fn spawn_notify_win(dir: &Path, winner: &str, kind: &str) {

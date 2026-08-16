@@ -119,6 +119,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-203 · Deny is an act, and a claim should be audible
+- status: queued
+- scope: an explicit deny alongside the vouch button; Chime on claim arrival; the claim card's colour
+- accept: a human can DENY a claim on their name in one act, and the denial is recorded (not merely an absence of approval); a claim naming this device's human plays a sound and reads as a warning rather than a green invitation
+- notes: Ian 2026-08-16 asked for "approve or deny" plus "in app sounds and alerts". T-202 shipped the refusal copy and the time-sensitive push; this is the rest. The claim card is currently GREEN (rgba(40,60,24) with a #3ddc97 border) — the palette of a welcome, not of a warning about someone taking your name. Ignoring is also not denying: an unanswered claim leaves the claimant a guest, which is safe but silent, and Ian asked for the act
+
 ### T-200 · Finish ADR-0039 — the identity mapping
 - status: queued — **the review is written; this is the work it recommends**
 - scope: HumanRecord (kernel or mesh), DeviceRecord.humans[] writer, a migration for machine-named establishments, AppModel reading records instead of shadowing them
