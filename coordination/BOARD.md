@@ -119,6 +119,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-208 · The visitor purge announces but does not collect
+- status: queued — **verified live 2026-08-16, six orphan records outliving the window by 3×**
+- scope: crates/mesh/src/record.rs `purge_stale_guests` / `guest_purge_in`; the snapshot it iterates
+- accept: a guest past GUEST_PURGE_SECS is actually removed from mesh/records; the purge observation is emitted ONLY when a file was really deleted; repeated announcements for the same device_id are impossible
+- notes: Ian 2026-08-16: "mac console has two iphones that are not members listed as well". Six records, ages 7m/48m/375m/394m/400m/420m against a 120m window. All six pass every gate condition — `state: {kind: guest}`, derived Guest, `identity.established` absent, filename == `device_id` so the delete path is right. They are NOT experiment debris: four predate the sever/rejoin work by hours.
+- SUSPECT: `purge_stale_guests` iterates `snapshot(dir)` and calls `invalidate_snapshot` only AFTER the loop — if the snapshot is stale or served from a warm cache the sweep can walk a set that no longer matches disk, and every `remove_file` is `let _ =` so a miss is silent. Related smell seen earlier today: the SAME device_ids were announced as purged repeatedly across ticks (f225a9b3, 862f451d, f69b005b at several timestamps), which means the announcement is not evidence of removal — the log said it happened many times and the file never went. That is the day's own rule again: a step that reports success without checking it.
+- ALSO: these six all carry `attestation: yes` (they contracted the covenant) but `admitted: no`. Worth confirming the two-filter door is not leaving half-admitted records behind on every knock
+
 ### T-205 · The world partition — game data is not real data
 - status: queued — **the load-bearing half of the ADR-0037 revision; nothing Purr ships without it**
 - scope: a `world` on observations, threads, questions and dossier contributions; the reasoning engine reading within one world; the law signals computed over `real` only

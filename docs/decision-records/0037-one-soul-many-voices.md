@@ -242,6 +242,14 @@ claims to be for, with the pleasant property that the stakes are entirely fictio
 - The autonomy grant (§8) is unchanged by this revision, but should be re-expressed as an
   MCP capability rather than a REST field.
 
+**Settled 2026-08-16 (Ian):** *"for now ship control stays in-game — may change for fleet
+operations in the future."* So the §A question is answered: there is no second MCP server for
+ship systems, and Purr's relationship to the game is **observation only** — which the exchange's
+ten read-only tools already match exactly. Purr is an **advisor**, not a co-pilot. `allow_actuate`
+stays out of this entirely, and the first client is the smallest useful thing: a read-only
+observer of a live economy. Fleet operations may reopen it; nothing here forecloses that, and the
+declared-actuator shape is already the right one when it does.
+
 ---
 
 ## Decision (original, 2026-08-10)
