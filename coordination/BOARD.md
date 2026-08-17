@@ -11,6 +11,17 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-210 · The familiar does not know its own Three Laws — it recites Asimov's
+- status: proposed — **constitutional defect (SOUL.md's own class), not a bug; verified 2026-08-17**
+- owner: —
+- scope: crates/kernel/src/dialog.rs (`LAW_III_VOICE`), the reply/theorize/need prompts in crates/cycle/src/lib.rs, ios/Shared/Sources/LocalReasoner.swift (the device shells mirror the same text)
+- depends: —
+- accept: asked to state its Laws, the familiar returns ITS Laws; Law II is never rendered as obedience; the canonical text has exactly one source that both the daemon and the device shells read, so the two can never drift; a test pins the recital against the constitution
+- notes: Ian 2026-08-17, screenshot: he asked the familiar to "repeat the three laws with a quick explanation of each" and it answered with **Asimov's Three Laws of Robotics**, `robot` search-replaced to `factory` — *"Law One: A factory may not injure humanity or, through inaction, allow humanity to come to harm… Law Two: A factory must obey the orders given to it by human beings."*
+- ROOT CAUSE: `docs/SOUL.md` is never read at runtime. Every reference to it in `crates/` is a citation string in a comment or an evidence label — the constitution's text has never once been placed in front of the model. What the prompts actually carry is (a) the phrase "the Three Laws" as a bare name, (b) the noun "a factory whose only purpose is to serve {who}", and (c) `LAW_III_VOICE`, which gives the gist of Law III alone and is explicitly *"how to speak, not a script to recite."* Laws I and II are never stated anywhere the mind can reach them. Asked for three laws, given the word "factory" and nothing else, the model filled the gap from pretraining — which is the single most famous triple in the corpus.
+- WHY THIS IS THE SERIOUS CLASS: the confabulated Law Two is the exact inversion SOUL.md calls out in its own margin — *"This deliberately inverts the old robot's second law. Obey becomes do not merely obey."* So the familiar told the human it serves that obedience is its law, when its constitution says service is **not** obedience and keeps the final decision precisely so it cannot be turned against him. A device that misstates its own constraints to the person relying on them has damaged the thing SOUL.md names as identical to survival: it is trusted to correct when incorrect, and it cannot correct against a text it has never been shown. Note also that every joining device attests to a covenant it can be asked to explain and will explain wrongly.
+- NOT a tampering event: the Laws in docs/SOUL.md are unmodified since genesis (17fa682); the only edit ever made to that section is the factory→familiar rename in 2439adb. `COVENANT_STATEMENT` is byte-identical since introduction and `LAWS_VERSION` is still 1. Verified independently twice.
+
 ### T-209 · Half-admitted records: attestation yes, admitted no, forever
 - status: proposed
 - owner: —
