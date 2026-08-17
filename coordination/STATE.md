@@ -18,6 +18,13 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   is why the design needs no prose validation and does not reopen the standing ruling.
   Incidental finding: **`crates/kernel/src/persona.rs` does not exist** — ADR-0037 §1 specifies
   the persona seam and it was never built, so `Persona::role_line` must be created in Brick 1.
+  **UPDATE 2026-08-17 (companion:claude-opus): BRICK 1 IS MERGED — `8743850`.** The
+  constitution is in the registry and in the reply prompt; `docs/SOUL.md` is read by a drift
+  test rather than by nobody. Bar exit-checked on the merged tree (fmt 0, clippy --all-targets
+  0, 660 tests passed / 0 failed). NOT yet deployed to any door and not shipped to any console
+  — the fix is in main only, so the live familiar still recites Asimov until a daemon deploy.
+  Brick 2 (the typed reply act) is next and is what makes the misstatement structurally
+  impossible; the device shells still carry no Laws of their own.
   Two decisions still owed by Ian are recorded in the plan: whether the dialogue path may write
   to the corruption ledger (a keyword classifier on chat would record "did anyone hack into our
   wifi?" against him, and there is no expunge mechanism), and whether to accept a labelled
