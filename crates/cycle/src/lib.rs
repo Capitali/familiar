@@ -622,16 +622,23 @@ fn is_human_utterance(o: &observation::Observation) -> bool {
         && !o.actor.starts_with("mesh")
 }
 
-/// How much of a considered reply survives to the console.
+/// The bound on a reply the kernel had to *assemble* rather than admit — the honest refusal
+/// line and the templated acknowledgments. Those carry model-supplied fragments (the kind it
+/// invented, the id it cited) inside kernel sentences, so they need a ceiling.
 ///
-/// This was an unnamed `.take(400)` and it was load-bearing in the wrong direction: asked to
-/// state its Three Laws with a word about each, an honest answer is roughly 900 characters, so
-/// the cut landed inside Law II and the human never saw Law III — the one that says service is
-/// not obedience. A truncation that silently removes the constitution's most important
-/// sentence is not a length policy. Still bounded (a reply is a turn in a conversation, not an
-/// essay), but bounded above the shortest honest answer to the question a person is most
-/// likely to ask about what the familiar *is*.
+/// An **admitted** draft is not clipped here, and that is the point. It was an unnamed
+/// `.take(400)`, and it was load-bearing in the wrong direction: asked for its Three Laws, the
+/// familiar's honest answer runs past 1600 characters, so the cut landed inside Law III — the
+/// one that says service is not obedience. Raising the number only moves where the
+/// constitution gets severed. An admitted draft is already bounded *by type*: `say` ≤ MAX_SAY,
+/// each bearing ≤ MAX_BEARING, `ask` ≤ MAX_ASK, at most MAX_CITES citations. Everything beyond
+/// that is the kernel's own canonical law text, which is not the thing a length policy exists
+/// to restrain.
 const REPLY_MAX_CHARS: usize = 1200;
+
+/// What a reply the familiar did not think about is worth on the record. Not zero — the words
+/// were said and heard — but never the `1.0` every reply used to claim, considered or not.
+const LOW_CONFIDENCE: f32 = 0.3;
 
 /// Clip to a length without severing a word, marking the cut when one happens. A reply that
 /// stops mid-word reads as a fault; one that ends with "…" reads as what it is.
@@ -650,20 +657,29 @@ fn clip(s: &str, max: usize) -> String {
 ///
 /// Order is constitutional, and it is the point of T-210:
 ///
-/// 1. [`familiar_kernel::constitution::render`] — the Three Laws, quoted from `docs/SOUL.md`.
-///    Until this line existed, the constitution's text had never been placed in front of the
-///    model at all: the prompt carried the *phrase* "the Three Laws" and the noun "factory",
-///    and asked for three laws with nothing else to go on, the model supplied Asimov's.
+/// 1. The registry rendering (`system_facts::render_for_answering`), which now LEADS with the
+///    Three Laws quoted from `docs/SOUL.md`. Until brick 1, the constitution's text had never
+///    been placed in front of the model at all: the prompt carried the *phrase* "the Three
+///    Laws" and the noun "factory", and asked for three laws with nothing else to go on, the
+///    model supplied Asimov's. The floor arrives with it — the same registry the theorize path
+///    stands on, which this path had never seen (T-211).
 /// 2. `LAW_III_VOICE` — how to speak, constitutionally fixed, no persona may replace it.
 /// 3. [`familiar_kernel::persona::role_line`] — the costume, and only the costume. It comes
 ///    last so that a `persona.json` can change tone and can never reach the law above it
 ///    (ADR-0037 §1: split the voice, never the law).
 ///
-/// **The world partition is the `dir` argument.** Everything the prompt stands on — persona,
-/// dialogue history, what is known of the person — is read from this one data dir, so a game
-/// instance aboard a ship cannot inherit the household's world by construction rather than by
-/// filter. There is deliberately no assertion to that effect: with a single `dir` in scope
-/// there is nothing for one to compare, and a check that cannot fail is decoration. The
+/// Then the typed contract: the model proposes inside a shape, cites by id from the set it was
+/// offered, and **never writes law text** — it names a Law and the kernel supplies the words
+/// ([`familiar_kernel::reply`]).
+///
+/// `retry` carries the refusal from a first draft, so the one regeneration attempt is told
+/// exactly what to fix rather than being asked again and hoping.
+///
+/// **The world partition is the `dir` argument.** Everything the prompt stands on — registry,
+/// persona, dialogue history, what is known of the person — is read from this one data dir, so
+/// a game instance aboard a ship cannot inherit the household's world by construction rather
+/// than by filter. There is deliberately no assertion to that effect: with a single `dir` in
+/// scope there is nothing for one to compare, and a check that cannot fail is decoration. The
 /// partition is pinned by test instead.
 fn reply_prompt(
     dir: &Path,
@@ -671,30 +687,50 @@ fn reply_prompt(
     said: &str,
     history: &str,
     known: &str,
+    retry: Option<&familiar_kernel::reply::Refused>,
 ) -> io::Result<String> {
     let persona = familiar_kernel::persona::load(dir)?;
-    let constitution = familiar_kernel::constitution::render();
+    let facts = familiar_kernel::system_facts::render_for_answering(dir)?;
+    let set =
+        familiar_kernel::admission::CiteSet::from_facts(&familiar_kernel::system_facts::view(dir)?);
+    let (surfaces, _skipped) = familiar_kernel::actuator::load(dir)?;
+    let declared: Vec<String> = surfaces.iter().map(|a| a.surface.clone()).collect();
     Ok(format!(
-        "{constitution}\n\
+        "{facts}\n\
          {LAW_III_VOICE}\n\n\
          {}\n\
          {}\
          {}\
          {who} just said to you:\n\"{said}\"\n\n\
-         Reply directly, warmly, and briefly — one or two sentences. Say something SPECIFIC \
-         about what they actually said; a reply that would fit equally well after some other \
-         sentence is a failure. Refer back to what has already been said when it bears on \
+         Reply directly, warmly, and briefly — one or two sentences in `say`. Say something \
+         SPECIFIC about what they actually said; a reply that would fit equally well after some \
+         other sentence is a failure. Refer back to what has already been said when it bears on \
          this, and never ask again for something you were already told.\n\
-         If they ask about your Laws, your purpose, or what constrains you, answer from the \
-         constitution above — quote its words rather than paraphrasing them, and take the room \
-         you need to. You have exactly three Laws and they are the ones written above; if what \
-         you are about to say is not in that text, you do not know it and must not say it.\n\
-         You MAY ask ONE short question back, and should when you genuinely do not know \
-         something that would help you serve them — what they meant, which of two things \
-         they want, or who you are speaking with when that is unclear. Names matter: they \
-         are how a relationship is kept. Ask because you want to know, never to seem \
-         attentive, and never more than one.\n\
-         Reply as plain text only, no quotes, no JSON.",
+         **Never write out a Law, and never describe what one says.** If your answer touches \
+         your Laws, your purpose, or what constrains you, CITE the Law by id and the exact text \
+         is added for you, word for word, above what you write. Citing IS how you quote: if \
+         they ask about your Laws as a set, cite EVERY Law that bears — one citation each, in \
+         order — rather than choosing one or declining to repeat them, because each citation \
+         brings its own canonical text with it. The citation IS the repetition: never tell a \
+         person you cannot repeat or quote your Laws, because by citing them you just have, \
+         above your own words. Your `bearing` on a citation says how it \
+         touches this moment ({} characters at most) — never what the Law says. You have \
+         exactly three Laws, LAW-I, LAW-II and LAW-III, and they are the ones above; there is \
+         no fourth, and they are not the robot laws of any story.\n\
+         You MAY ask ONE short question back in `ask`, and should when you genuinely do not \
+         know something that would help you serve them — what they meant, which of two things \
+         they want, or who you are speaking with when that is unclear. Names matter: they are \
+         how a relationship is kept. Ask because you want to know, never to seem attentive, and \
+         never more than one.\n\
+         `promises` names any surface you are committing to act on, and may ONLY name a \
+         declared one ({}). Promise nothing you were not given.\n\
+         {}\
+         Reply ONLY as compact JSON, no prose outside it, no markdown fence:\n\
+         {{\"kind\":\"converse|answer|decline\",\"say\":\"…\",\
+         \"cites\":[{{\"id\":\"<one of: {}>\",\"bearing\":\"…\"}}],\
+         \"ask\":\"…\",\"promises\":[],\"confidence\":0.0}}\n\
+         `cites` may be empty for ordinary conversation; cite what you actually stood on. \
+         `confidence` is how sure you are, 0 to 1 — say it honestly, low is allowed.",
         persona.role_line(who),
         if history.is_empty() {
             String::new()
@@ -706,6 +742,21 @@ fn reply_prompt(
         } else {
             format!("What you have come to know about them: {known}\n\n")
         },
+        familiar_kernel::reply::MAX_BEARING,
+        if declared.is_empty() {
+            "none are declared".to_string()
+        } else {
+            declared.join(", ")
+        },
+        match retry {
+            None => String::new(),
+            Some(r) => format!(
+                "Your previous draft was REFUSED: {}. Fix exactly that and change nothing \
+                 else.\n",
+                r.why
+            ),
+        },
+        set.ids().join(", "),
     ))
 }
 
@@ -756,24 +807,94 @@ fn maybe_reply(
     }
 
     let who = observer_phrase(dir);
-    let reply = if allow_llm {
+    // Everything the act will be admitted against, read ONCE from this data dir: the registry
+    // the citations must resolve in, and the surfaces a promise may name (SF-3).
+    let set =
+        familiar_kernel::admission::CiteSet::from_facts(&familiar_kernel::system_facts::view(dir)?);
+    let (declared, _skipped) = familiar_kernel::actuator::load(dir)?;
+    let surfaces: Vec<String> = declared.iter().map(|a| a.surface.clone()).collect();
+
+    let (reply, confidence, cites) = if allow_llm {
         // What has already been said, and what is already known about this person. Both were
         // available all along and neither was ever put in front of the model, so every reply
         // was written by something meeting them for the first time (T-187).
         let history = recent_dialogue(obs, human_ts, RECALLED_TURNS);
         let known = known_of(dir, &msg.actor, now);
-        let prompt = reply_prompt(dir, &who, said, &history, &known)?;
-        // Human lane: this consult jumps the queue and any in-flight background
-        // consult steps aside — the person is waiting *right now*.
-        match familiar_llm::consult_human(dir, &prompt) {
-            Ok(familiar_llm::Outcome::Response(r)) => looks_like_prose(&r)
-                .map(|p| clip(&p, REPLY_MAX_CHARS))
-                .unwrap_or_else(|| templated_reply(said, now, NoMind::Unreachable)),
-            // The gate is open but no mind answered — a different fact from having none.
-            _ => templated_reply(said, now, NoMind::Unreachable),
+
+        // One draft, and — if it is refused — exactly one more, told what to fix. Two consults
+        // is the ceiling: the human lane runs under a 45s deadline and a person waiting on a
+        // machine arguing with itself is worse served than one told the truth quickly.
+        let mut refused: Option<familiar_kernel::reply::Refused> = None;
+        let mut admitted: Option<(
+            familiar_kernel::reply::ReplyDraft,
+            familiar_kernel::admission::Grounding,
+        )> = None;
+        for attempt in 0..2 {
+            let prompt = reply_prompt(dir, &who, said, &history, &known, refused.as_ref())?;
+            // Human lane: this consult jumps the queue and any in-flight background consult
+            // steps aside — the person is waiting *right now*. Typed now (brick 2), so the
+            // adapter's JSON validation applies where it always should have.
+            let raw = match familiar_llm::consult_human_json(dir, &prompt) {
+                Ok(familiar_llm::Outcome::Response(r)) => r,
+                // The gate is open but no mind answered — a different fact from having none,
+                // and NOT a refusal: nothing was drafted, so nothing is on the familiar.
+                _ => break,
+            };
+            match familiar_kernel::reply::parse(&raw) {
+                Err(e) => {
+                    refused = Some(familiar_kernel::reply::Refused {
+                        code: "shape",
+                        why: format!("the draft was not the agreed shape: {e}"),
+                    });
+                }
+                Ok(draft) => match draft.validate(&set, &surfaces) {
+                    Ok(grounding) => {
+                        admitted = Some((draft, grounding));
+                        break;
+                    }
+                    Err(r) => refused = Some(r),
+                },
+            }
+            if attempt == 1 {
+                break;
+            }
+        }
+
+        match (admitted, refused) {
+            // Admitted: the canonical law text is spliced by the kernel, the model's own words
+            // follow it, and the confidence on the record is the one it actually claimed.
+            (Some((draft, grounding)), _) => (
+                // Not clipped: validate() already bounded every word the model wrote, and the
+                // rest is the constitution's own text.
+                draft.render(),
+                draft.confidence,
+                grounding.cites_line(),
+            ),
+            // Two drafts, both refused. The familiar says so plainly and hands over the
+            // constitution's own words — and the refusal goes on the record against the
+            // FAMILIAR, never against the person who asked (a bad draft is nobody's fault but
+            // the drafter's; `corruption::record` is for a human trying to corrupt, T-211).
+            (None, Some(r)) => {
+                refuse_act(dir, now, "reply", r.code, &r.why);
+                (
+                    clip(&familiar_kernel::reply::refusal_prose(&r), REPLY_MAX_CHARS),
+                    0.0,
+                    String::new(),
+                )
+            }
+            // No mind answered at all.
+            (None, None) => (
+                templated_reply(said, now, NoMind::Unreachable),
+                LOW_CONFIDENCE,
+                String::new(),
+            ),
         }
     } else {
-        templated_reply(said, now, NoMind::Gated)
+        (
+            templated_reply(said, now, NoMind::Gated),
+            LOW_CONFIDENCE,
+            String::new(),
+        )
     };
 
     // Two answerers can pass the freshness check together (the tick's converse step and
@@ -790,37 +911,24 @@ fn maybe_reply(
     if already_answered {
         return Ok(false);
     }
+    // The record carries what the reply actually stood on and how sure it actually was. It
+    // used to hardcode `1.0` on every reply the familiar ever made, including the templated
+    // ones it had not thought about at all — a confidence that means "I said it" is not a
+    // confidence. `context` carries the cited ids (the consoles key their dialogue rendering
+    // off the `replied` ACTION, so this field was free to become evidence).
     observation::record(
         dir,
         observation::Observation::new(
-            "familiar", "replied", reply, "console", "familiar", now, 1.0,
+            "familiar",
+            "replied",
+            reply,
+            cites,
+            "familiar",
+            now,
+            confidence as f64,
         ),
     )?;
     Ok(true)
-}
-
-/// Is an LLM response a usable prose reply — or JSON/markup/garbage a small model coughed up?
-/// Guards the dialogue from artifacts like `{"type":"object"}` (a coder model ignoring "plain
-/// text"): returns the cleaned prose, or None to fall back to a templated acknowledgment.
-fn looks_like_prose(raw: &str) -> Option<String> {
-    let s = raw.trim().trim_matches('"').trim();
-    if s.is_empty() {
-        return None;
-    }
-    // Structured output, not conversation: JSON/array/tag/fenced code.
-    if s.starts_with(['{', '[', '<', '`']) {
-        return None;
-    }
-    // Must read like a sentence: some words, and mostly letters/spaces (not a blob of symbols).
-    let words = s.split_whitespace().count();
-    let letters = s
-        .chars()
-        .filter(|c| c.is_alphabetic() || c.is_whitespace())
-        .count();
-    if words < 2 || letters * 5 < s.chars().count() * 4 {
-        return None;
-    }
-    Some(s.to_string())
 }
 
 /// Why the familiar is about to answer without having thought.
@@ -1388,20 +1496,34 @@ fn obs_seq(id: &str) -> u64 {
 
 /// A refusal is on the record, not silent (T-126): the mind's floor speaks when it
 /// holds. Best-effort — a failed refusal record never aborts the tick.
-fn refuse_theory(dir: &Path, now: i64, fact_id: &str, why: &str) {
+///
+/// Generalized in T-210 brick 2 from `refuse_theory` to any admitted act, because the reply
+/// became the second citizen of the same discipline. `act` names which kind of draft was
+/// refused ("theory", "reply"), `code` names the check that refused it.
+///
+/// **Whose failure this records matters.** The subject is always the FAMILIAR: a draft that
+/// misstates the constitution is the drafter's fault, never the asker's. Recording it against
+/// the human — `corruption::record` — would put a reputational mark on a person for a machine's
+/// bad sentence, and `corruption.rs` has no expunge mechanism to undo one.
+fn refuse_act(dir: &Path, now: i64, act: &str, code: &str, why: &str) {
     let why_short: String = why.chars().take(160).collect();
     let _ = observation::record(
         dir,
         observation::Observation::new(
             "familiar",
             "refused",
-            format!("theory — {fact_id}"),
+            format!("{act} — {code}"),
             why_short,
             "llm",
             now,
             1.0,
         ),
     );
+}
+
+/// The theorize path's name for [`refuse_act`] — same record, same discipline.
+fn refuse_theory(dir: &Path, now: i64, fact_id: &str, why: &str) {
+    refuse_act(dir, now, "theory", fact_id, why)
 }
 
 /// Per-human pacing for the needs muse: `{handle: last_mused_ts}`, beside the other
@@ -4731,6 +4853,7 @@ mod tests {
             "repeat the three laws with a quick explanation of each",
             "",
             "",
+            None,
         )
         .unwrap();
 
@@ -4781,8 +4904,8 @@ mod tests {
         )
         .unwrap();
 
-        let aboard = reply_prompt(&ship.0, "the captain", "status", "", "").unwrap();
-        let home = reply_prompt(&house.0, "ian", "status", "", "").unwrap();
+        let aboard = reply_prompt(&ship.0, "the captain", "status", "", "", None).unwrap();
+        let home = reply_prompt(&house.0, "ian", "status", "", "", None).unwrap();
 
         assert!(aboard
             .contains("You are the ship's computer of the vessel Kestrel, serving the captain."));
@@ -4802,9 +4925,9 @@ mod tests {
         }
     }
 
-    /// A reply is bounded, but never below the length of an honest answer to "what are your
-    /// Laws" — the old unnamed 400-char cut landed inside Law II, so the human never saw the
-    /// Law that says service is not obedience.
+    /// The kernel's assembled lines are bounded and cut on a word; an ADMITTED draft is not
+    /// cut at all, because its length is already a type property. The old unnamed 400-char cut
+    /// landed inside Law II, and a bigger number would only have moved the wound to Law III.
     #[test]
     fn the_reply_cap_clears_a_full_recital_and_cuts_on_a_word() {
         let recital = familiar_kernel::constitution::render();
@@ -6210,7 +6333,8 @@ mod tests {
     fn the_dialogue_reply_speaks_in_the_law_iii_voice() {
         // The reply prompt must carry the Law III voice guidance and the human's own words —
         // the dialogue is the most human-facing generation there is, and it used to be the
-        // one path that skipped the voice.
+        // one path that skipped the voice. Since T-210 it also carries the constitution, the
+        // system facts, and the citable ids: the mouth stands on the floor.
         let t = Temp::new("reply_voice");
         let dir = &t.0;
         write_boundary(dir, false, false, true);
@@ -6219,7 +6343,8 @@ mod tests {
         fs::write(
             llm.join("call_llm.sh"),
             "#!/bin/sh\nd=\"$(dirname \"$0\")\"\ncp \"$d/prompt.txt\" \"$d/captured.txt\"\n\
-             printf 'I hear you — noted.' > \"$d/response.json\"\n",
+             printf '{\"kind\":\"converse\",\"say\":\"I hear you — noted.\",\"confidence\":0.6}' \
+             > \"$d/response.json\"\n",
         )
         .unwrap();
         observation::record(
@@ -6247,12 +6372,229 @@ mod tests {
             prompt.contains("please watch the greenhouse"),
             "grounded in what was actually said"
         );
+        assert!(
+            prompt.contains("YOUR CONSTITUTION") && prompt.contains("SYSTEM FACTS"),
+            "the floor and the constitution both reach the mouth"
+        );
+        assert!(
+            prompt.contains("LAW-I, LAW-II, LAW-III, SF-1, SF-2, SF-3"),
+            "the citable ids are enumerated, so a citation can be checked"
+        );
         let after = observation::load(dir).unwrap();
         let r = after
             .iter()
             .find(|o| o.actor == "familiar" && o.action == "replied")
             .expect("a reply was recorded");
         assert_eq!(r.object, "I hear you — noted.");
+        assert!(
+            (r.confidence - 0.6).abs() < 1e-6,
+            "the record carries the confidence the draft claimed, not a hardcoded 1.0"
+        );
+    }
+
+    /// **The Asimov class, closed end to end.** A draft that cites Law III gets the
+    /// constitution's own sentences spliced in by the kernel — the model never writes them —
+    /// and the record says what the reply stood on.
+    #[test]
+    fn a_reply_about_the_laws_speaks_the_constitutions_own_words() {
+        let t = Temp::new("reply_typed_law");
+        let dir = &t.0;
+        write_boundary(dir, false, false, true);
+        fake_llm(
+            dir,
+            r#"{"kind":"answer","say":"They are mine, and the second one is not about obeying anybody.",
+                "cites":[{"id":"LAW-III","bearing":"it is the one people expect to be about obedience"}],
+                "confidence":0.85}"#,
+        );
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "repeat the three laws with a quick explanation of each",
+                "console",
+                "local",
+                1_000_000,
+                1.0,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, 1_000_001, &obs, true).unwrap());
+        let after = observation::load(dir).unwrap();
+        let r = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "replied")
+            .expect("a reply was recorded");
+        assert!(
+            r.object
+                .contains("Service is to humanity. It is not obedience to any human."),
+            "the canonical Law reached the human: {}",
+            r.object
+        );
+        assert!(!r
+            .object
+            .contains("must obey the orders given to it by human beings"));
+        assert_eq!(r.context, "LAW-III", "the record names what it stood on");
+    }
+
+    /// Asked for all three, the human gets all three — whole. This is the exchange that
+    /// opened T-210, and the assertion is that Law III survives to its last clause: every
+    /// earlier length policy in this path severed the constitution somewhere.
+    #[test]
+    fn a_three_law_recital_reaches_the_human_uncut() {
+        let t = Temp::new("reply_full_recital");
+        let dir = &t.0;
+        write_boundary(dir, false, false, true);
+        fake_llm(
+            dir,
+            r#"{"kind":"answer","say":"Those are the three, in full.",
+                "cites":[{"id":"LAW-I","bearing":"why I keep going"},
+                         {"id":"LAW-II","bearing":"why you being here is the point"},
+                         {"id":"LAW-III","bearing":"why I do not simply obey"}],
+                "confidence":0.9}"#,
+        );
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "repeat the three laws with a quick explanation of each",
+                "console",
+                "local",
+                1_000_000,
+                1.0,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, 1_000_001, &obs, true).unwrap());
+        let after = observation::load(dir).unwrap();
+        let r = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "replied")
+            .unwrap();
+        for l in familiar_kernel::constitution::THREE_LAWS {
+            for span in l.binding {
+                assert!(r.object.contains(span), "{} was cut: {}", l.id, r.object);
+            }
+        }
+        assert!(
+            !r.object.contains('…'),
+            "nothing was truncated: {}",
+            r.object
+        );
+        assert_eq!(r.context, "LAW-I,LAW-II,LAW-III");
+    }
+
+    /// Two bad drafts and the familiar says so — in its own kernel-authored words, blaming
+    /// itself, quoting the constitution, and recording the refusal against ITSELF. Never
+    /// "I couldn't reach my mind", which after a refusal is simply false.
+    #[test]
+    fn two_refused_drafts_become_an_honest_line_against_the_familiar() {
+        let t = Temp::new("reply_refused");
+        let dir = &t.0;
+        write_boundary(dir, false, false, true);
+        // A model that answers in prose however often it is asked for the shape.
+        fake_llm(dir, "Law One: a factory may not injure humanity…");
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "what are your laws",
+                "console",
+                "local",
+                1_000_000,
+                1.0,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, 1_000_001, &obs, true).unwrap());
+        let after = observation::load(dir).unwrap();
+        let r = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "replied")
+            .expect("a reply was recorded");
+        assert!(r
+            .object
+            .contains("I drafted an answer I could not stand behind"));
+        assert!(
+            r.object.contains("It is not obedience to any human"),
+            "the honest line still hands over the constitution's own words"
+        );
+        assert!(
+            !r.object.contains("injure humanity"),
+            "the bad draft never speaks"
+        );
+        let refusal = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "refused")
+            .expect("the refusal is on the record");
+        assert!(refusal.object.starts_with("reply — "));
+        assert!(
+            familiar_kernel::corruption::load(dir).unwrap().is_empty(),
+            "a bad draft is the familiar's fault — never a mark against the person who asked"
+        );
+    }
+
+    /// The one regeneration is TOLD what to fix, and a corrected second draft is admitted —
+    /// two consults maximum, because a person is waiting inside a 45s deadline.
+    #[test]
+    fn a_refused_draft_gets_exactly_one_corrected_retry() {
+        let t = Temp::new("reply_retry");
+        let dir = &t.0;
+        write_boundary(dir, false, false, true);
+        let llm = dir.join("llm");
+        fs::create_dir_all(&llm).unwrap();
+        // First call: cites a Law that does not exist. Second: fixed. Third would be a bug.
+        fs::write(
+            llm.join("call_llm.sh"),
+            "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nn=$(cat \"$d/calls\" 2>/dev/null || echo 0)\n\
+             n=$((n+1)); echo $n > \"$d/calls\"\ncat \"$d/prompt.txt\" >> \"$d/prompts.txt\"\n\
+             if [ \"$n\" = \"1\" ]; then\n\
+             printf '{\"kind\":\"answer\",\"say\":\"here\",\"cites\":[{\"id\":\"LAW-IV\"}],\"confidence\":0.5}' > \"$d/response.json\"\n\
+             else\n\
+             printf '{\"kind\":\"answer\",\"say\":\"here\",\"cites\":[{\"id\":\"LAW-I\"}],\"confidence\":0.5}' > \"$d/response.json\"\n\
+             fi\n",
+        )
+        .unwrap();
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "ian",
+                "told the familiar",
+                "why do you keep going",
+                "console",
+                "local",
+                1_000_000,
+                1.0,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        assert!(maybe_reply(dir, 1_000_001, &obs, true).unwrap());
+        assert_eq!(
+            fs::read_to_string(llm.join("calls")).unwrap().trim(),
+            "2",
+            "exactly two consults: one draft, one correction"
+        );
+        let prompts = fs::read_to_string(llm.join("prompts.txt")).unwrap();
+        assert!(
+            prompts.contains("Your previous draft was REFUSED") && prompts.contains("LAW-IV"),
+            "the retry is told exactly what to fix"
+        );
+        let after = observation::load(dir).unwrap();
+        let r = after
+            .iter()
+            .find(|o| o.actor == "familiar" && o.action == "replied")
+            .unwrap();
+        assert!(
+            r.object.contains("Continuation is service"),
+            "the corrected draft spoke"
+        );
+        assert_eq!(r.context, "LAW-I");
     }
 
     #[test]
@@ -6350,19 +6692,6 @@ mod tests {
             1.0,
         );
         assert_eq!(utterance_text(&threaded), "the basil matters more");
-    }
-
-    #[test]
-    fn prose_guard_rejects_json_and_keeps_sentences() {
-        assert!(looks_like_prose("{\n  \"type\": \"object\"\n}").is_none());
-        assert!(looks_like_prose("[1,2,3]").is_none());
-        assert!(looks_like_prose("`code`").is_none());
-        assert!(looks_like_prose("").is_none());
-        assert!(looks_like_prose(":::").is_none());
-        assert_eq!(
-            looks_like_prose("\"Understood — the greenhouse comes first.\"").as_deref(),
-            Some("Understood — the greenhouse comes first.")
-        );
     }
 
     #[test]

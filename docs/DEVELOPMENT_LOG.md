@@ -6,6 +6,95 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — T-210 brick 2 · The typed answering act: law text is unauthorable
+
+Brick 1 put the constitution in front of the model, and the live check confirmed it worked —
+asked to repeat its Three Laws, the familiar answered with its own. But it answered in the
+model's words. Correct that time. Not correct by construction.
+
+This brick makes the class impossible rather than unlikely, with one move:
+
+> **The model may cite a Law by id. The kernel supplies the words.**
+
+There is now no channel through which a model-authored paraphrase of a Law reaches a human, so
+there is nothing to check for contradiction. That matters because the alternative — asking a
+validator "is this paraphrase of Law III correct?" — is undecidable without either a second
+model in the truth loop or a keyword match, and the standing 2026-08-15 ruling forbids both.
+This design satisfies that ruling by not needing it.
+
+### What changed
+- **`crates/kernel/src/reply.rs` (new).** `ReplyDraft { kind, say, cites, ask, promises,
+  confidence }`, `deny_unknown_fields`, and a `validate` that is nine type checks and zero
+  judgements: known kind, non-empty `say`, bounded `say`, citations that resolve, a `bearing`
+  short enough to be a remark rather than a restatement, a cited Law that resolves to canonical
+  text, one bounded question, promises bounded by the human's *declaration* (SF-3 — the
+  familiar does not promise what it was never given), and a confidence that is a number in
+  range. `render` splices the canonical law text above the model's words, with the model's
+  bearing between them, so if the two ever disagree the human is reading the constitution
+  first.
+- **`crates/kernel/src/admission.rs` (new).** D3's single admission function: `CiteSet`,
+  `check_cites`, `Grounding`. The reply is its first citizen; T-135 moves `TheoryDraft`'s
+  anchor check onto it. The `CiteSet` is *derived* from the registry rather than listed, so a
+  fact added to the registry is citable the moment it exists. `Grounding` carries the facts
+  revision and declaration digest a citation was checked against.
+- **`llm::consult_human_json`.** The human lane, typed. Same queue priority, same yielding,
+  same 45s deadline — a person is still waiting; only `Expect::Prose` → `Expect::Json` changes.
+- **One regeneration, told what to fix.** A refused draft is re-asked exactly once with the
+  refusal sentence in the prompt. Two consults is the ceiling: a person waiting on a machine
+  arguing with itself is worse served than one told the truth quickly.
+- **An honest refusal, and whose failure it is.** After two refused drafts the familiar says
+  *"I drafted an answer I could not stand behind — {why} — so I am not going to say it"*, and
+  then hands over the constitution's own words. Deliberately **not** `templated_reply`, which
+  says "I couldn't reach my mind" — after a refusal that is false, and a false receipt about
+  the familiar's own failure is the not-knowing-serving-itself that SOUL.md names the deepest
+  breach. Recorded via a generalized `refuse_act` against the **familiar**. Never
+  `corruption::record` against the person who asked: a bad draft is the drafter's fault, and
+  `corruption.rs` has no expunge mechanism to undo a mark once made.
+- **The record stopped lying about confidence.** `replied` carried a hardcoded `1.0` on every
+  reply the familiar ever made, including the templated ones it had not thought about. It now
+  carries the draft's own confidence (`0.3` for the un-thought fallbacks), and `context`
+  carries the cited ids — the consoles key their dialogue rendering off the `replied` action,
+  so that field was free to become evidence.
+- **`looks_like_prose` is gone.** Its only production caller was this path, and its
+  `starts_with(['{','['])` rejection would have fought the typed draft head-on.
+- **The length policy was the wrong shape.** Brick 1 raised an unnamed `.take(400)` to a named
+  1200, and the live three-Law recital promptly hit *that* — severing Law III mid-clause. An
+  admitted draft is no longer clipped at all: its length is already a type property (`say` ≤
+  900, each bearing ≤ 160, `ask` ≤ 200, ≤ 6 citations), and everything beyond that is the
+  kernel's own canonical text, which is not what a length policy exists to restrain.
+  `REPLY_MAX_CHARS` now bounds only the lines the kernel *assembles*, which carry
+  model-supplied fragments inside kernel sentences.
+
+### Checks
+`cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
+--workspace` — each run separately with its exit status checked, all 0. **670 tests passed, 0
+failed** across 35 suites. Nine new tests. The law-splicing renderer was neutered and both the
+kernel and cycle regressions confirmed failing before being kept.
+
+**Live, against the real adapter, in a scratch data dir** (the verification the plan names):
+`"repeat the three laws with a quick explanation of each"` → all three Laws in the
+constitution's own sentences, each with the model's one-line bearing below it, nothing
+truncated, confidence 0.90 on the record. Two prompt corrections were needed to get there and
+both are worth knowing: the first live draft cited only Law III and *declined* to state the
+others, and the second told the human "I can't repeat the Laws themselves" in the same reply
+where the kernel had just repeated all three above its words. Both were prompt shape, not
+mechanism — the citation IS the repetition, and the prompt now says so.
+
+### What the next developer should know
+The residual gap is real, accepted, and labelled in `reply.rs`: a model returning
+`kind: "converse"` with Asimov written out inside `say` passes every check, because nothing in
+that module reads `say` for meaning and nothing should. The canonical text renders above
+whatever `say` holds, the prompt asks for a citation instead, and the regression tests watch
+for it. If it ever happens in the field, the narrow fix is a detector for *quotations of a
+known foreign text* — string identity against a fixed artifact, which is decidable — not a
+judge of prose.
+
+Still owed by T-210: the device shells (`ios/Shared/Sources/LocalReasoner.swift`) carry no Laws
+of their own. Brick 4 (the corrupting-intent screen on the live surface, and `answer_requests`'
+own hand-written Law III paraphrase re-pointed at the registry) is next, and it needs Ian's
+decision on whether the dialogue path may write to the corruption ledger — recorded in the plan
+and unanswered.
+
 ## 2026-08-17 — T-210 brick 1 · The constitution exists at runtime
 
 Ian asked the familiar to *"repeat the three laws with a quick explanation of each"* and it

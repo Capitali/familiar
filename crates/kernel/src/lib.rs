@@ -12,6 +12,7 @@
 
 pub mod activity;
 pub mod actuator;
+pub mod admission;
 pub mod affected;
 pub mod belief;
 pub mod boundary;
@@ -40,6 +41,7 @@ pub mod presence;
 pub mod question;
 pub mod reaction_rule;
 pub mod regression_guard;
+pub mod reply;
 pub mod request;
 pub mod review;
 pub mod routing;
