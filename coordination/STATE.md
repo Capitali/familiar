@@ -23,8 +23,15 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   test rather than by nobody. Bar exit-checked on the merged tree (fmt 0, clippy --all-targets
   0, 660 tests passed / 0 failed). NOT yet deployed to any door and not shipped to any console
   — the fix is in main only, so the live familiar still recites Asimov until a daemon deploy.
-  Brick 2 (the typed reply act) is next and is what makes the misstatement structurally
-  impossible; the device shells still carry no Laws of their own.
+  **BRICK 2 MERGED `ea52b7e` and DEPLOYED to MacOnStick's daemon** (2026-08-17): law text is
+  unauthorable — the model cites a Law by id and the kernel splices the words. Verified live
+  against the real adapter: "repeat the three laws with a quick explanation of each" now
+  returns all three in the constitution's own sentences, uncut. **The doors were NOT deployed
+  — auto mode blocks the model from running vps/deploy-lighthouse.sh, so the lighthouse and
+  Wildhorse still run the pre-T-210 engine and still recite Asimov to anything that reads
+  through them.** That deploy is one command in Ian's own terminal:
+  `bash vps/deploy-lighthouse.sh` (main is clean and green at ea52b7e).
+  Bricks 3/5/6 belong to T-211; brick 4 needs Ian's corruption-ledger decision.
   Two decisions still owed by Ian are recorded in the plan: whether the dialogue path may write
   to the corruption ledger (a keyword classifier on chat would record "did anyone hack into our
   wifi?" against him, and there is no expunge mechanism), and whether to accept a labelled
