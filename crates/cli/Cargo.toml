@@ -15,6 +15,7 @@ familiar-sense.workspace = true
 familiar-cycle.workspace = true
 familiar-llm.workspace = true
 familiar-mesh.workspace = true
+familiar-mcp.workspace = true
 familiar-agent.workspace = true
 familiar-reach.workspace = true
 serde_json.workspace = true
