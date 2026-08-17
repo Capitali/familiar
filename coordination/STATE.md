@@ -134,6 +134,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-17 · companion:claude-opus, on Ian's word, took over codex's unfinished claimed work while codex is unavailable. **T-118 merged 80b65aa** — codex's released 20-file sweep finished, verified, and guarded: two concurrent full suites are green, and the harness is proven honest because removing the pid makes those same two runs fail 25/21. T-104 is the only other codex-owned item and it is genuinely BLOCKED, not abandoned: its repository brick merged as 6e02b0a and what remains is a live FamTalker01 deploy (infra lane, gated on T-117) — which this session cannot run anyway, since auto mode blocks the model from SSH deploys.
+
 *(any non-controller session — companion engineers and the infra/fleet-ops session
 alike: append dated one-liner FACTS here — session started/ended, a pass executed and
 its results, anything the controller should read before its next arbitration. The

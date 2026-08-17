@@ -148,20 +148,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: met — Build 86 Mac console installed + zip refreshed; IPA uploaded clean, external release added 86 to the public group + submitted beta review; lighthouse deployed 04a015e (box-built, familiar-peer active, /mesh/hello answering); Wildhorse daemon upgraded to 04a015e via the T-119 bootout/bootstrap bracket (its first production use — hello 200, running); phones direct-install unreachable (⚠ tolerated, TestFlight covers); Ian notified in-session (mobile push skipped: Remote Control inactive)
 - notes: Ian (2026-08-15, verbatim): "then it seems like time for a build and ship" — recorded per rule 5. Run by this companion because no other lane was alive (ListAgents empty). MacOnStick's own daemon deliberately NOT touched — controller's declared deploy territory; it still runs its pre-86 build and wants a controller pass
 
-### T-118 · Isolate test temp directories across concurrent worktrees
-- status: RELEASED — claim abandoned 2026-08-15 when companion:codex exhausted its budget
-  without a clean exit. Its uncommitted working tree is preserved and pushed at
-  `origin/claude/codex-t118` (4114ef2): per-process temp roots across 20 files in cycle,
-  exec, kernel and mesh. NOT verified, NOT merged — no focused regression or parallel
-  harness is present, so the brick is incomplete by its own accept bar. Whoever picks this
-  up should start from that branch rather than from scratch.
-- owner: — (was companion:codex)
-- controller (2026-08-14): accepted — it explains observed reality (a full-suite count read 4-of-31 during concurrent runs today); per-process/per-worktree unique temp roots, start with the fixed-name helpers (rules/actuator tests included)
-- scope: fixed-name temporary-directory helpers in crate tests (begin with crates/cycle)
-- depends: —
-- accept: test temp roots include a process- or worktree-unique component; concurrent full green-bar runs cannot mutate the same fixture directory; a focused regression or parallel harness pins the isolation
-- notes: observed while barring T-103: one full run overlapped the controller's run and cycle's parameter-revert test saw its second tick revert again; the test passed alone and a clean full rerun passed after the other job ended. Treat this as test-infrastructure hardening, not a T-103 failure. companion:codex claimed after T-171; scope is test-only and disjoint from the now-landed Watch UI work
-
 ### T-117 · Deploy and witness FamTalker01's virtual home
 - status: proposed
 - owner: —
@@ -737,6 +723,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-118 · Isolate test temp directories across concurrent worktrees
+- status: done
+- owner: companion:claude-opus (finished the brick companion:codex released; Ian 2026-08-17: "Claim the unfinished codex claimed ones from the board and finish them as well. Codex unavailable for another few days.")
+- merged: 80b65aa
+- scope: fixed-name temporary-directory helpers in crate tests (cycle, exec, kernel, mesh) + crates/kernel/src/testing.rs + crates/kernel/tests/temp_roots.rs
+- depends: —
+- accept: met — codex's per-process sweep merged from `origin/claude/codex-t118`; `kernel::testing::temp_root` owns the naming rule; `capabilities.rs` stopped using the system temp root itself; a structural guard walks every .rs in the workspace and fails any `temp_dir()` without a per-process component. **Two full suites (kernel, cycle, mesh, guard) run simultaneously against the same /tmp: both green, 524 tests each, 0 failures. Neutered by removing the pid from cycle's Temp::path, the same two concurrent runs go red — 25 and 21 failures**, which is the 2026-08-14 incident reproduced on demand.
+- notes: the guard exempts two files by name (the helper that owns the rule, and the guard, which must name the pattern to search for it), both documented in its source
 
 ### T-208 · The visitor purge announces but does not collect
 - status: done
