@@ -147,6 +147,17 @@ pub fn consult_human(dir: &Path, prompt: &str) -> io::Result<Outcome> {
     consult_in(dir, prompt, HUMAN_TIMEOUT, Lane::Human, Expect::Prose)
 }
 
+/// [`consult_human`] for a **typed** human-lane act (T-210 brick 2): same queue priority, same
+/// yielding, same short deadline — a person is still waiting — but the adapter's JSON
+/// validation applies, because this caller asked for a shape rather than for sentences.
+///
+/// The two differ in exactly one field, and that is deliberate: the reason the dialogue lane
+/// exists is Law II in scheduling form (presence outranks musing), and nothing about answering
+/// in a typed shape changes who is waiting.
+pub fn consult_human_json(dir: &Path, prompt: &str) -> io::Result<Outcome> {
+    consult_in(dir, prompt, HUMAN_TIMEOUT, Lane::Human, Expect::Json)
+}
+
 /// [`consult`] with an explicit adapter deadline. A hung adapter must never hang
 /// the caller: at the deadline the adapter is killed and the consult is
 /// `Refused`. Exit code 2 is the adapter contract for "every provider
