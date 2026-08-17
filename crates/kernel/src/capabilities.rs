@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn a_closed_boundary_advertises_nothing() {
-        let dir = std::env::temp_dir();
+        let dir = crate::testing::temp_root("caps_closed");
         let caps = detect(&dir, &Boundary::closed());
         assert!(
             caps.is_empty(),
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn gates_surface_as_capabilities() {
-        let dir = std::env::temp_dir();
+        let dir = crate::testing::temp_root("caps_gates");
         let mut b = Boundary::closed();
         b.allow_execute = true;
         b.allow_agent = true;

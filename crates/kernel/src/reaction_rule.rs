@@ -354,7 +354,7 @@ mod tests {
     use super::*;
 
     fn dir(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_rules_{tag}"));
+        let p = std::env::temp_dir().join(format!("familiar_rules_{}_{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
