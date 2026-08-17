@@ -12,6 +12,16 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   answering act gated against the registry (keeping the "no prose-on-prose" ruling intact);
   conduct strand only, with T-212/T-213/T-214 filed and not built; T-181 settled **yes, and
   questions carry stakes**, which finishes ADR-0040's deferred D2.
+  **The central design move: law text is UNAUTHORABLE.** The model cites a Law by id and the
+  kernel splices the canonical text verbatim — so a model-authored paraphrase of a Law can
+  never reach a human and contradiction is structurally impossible rather than detected. This
+  is why the design needs no prose validation and does not reopen the standing ruling.
+  Incidental finding: **`crates/kernel/src/persona.rs` does not exist** — ADR-0037 §1 specifies
+  the persona seam and it was never built, so `Persona::role_line` must be created in Brick 1.
+  Two decisions still owed by Ian are recorded in the plan: whether the dialogue path may write
+  to the corruption ledger (a keyword classifier on chat would record "did anyone hack into our
+  wifi?" against him, and there is no expunge mechanism), and whether to accept a labelled
+  residual gap or add a narrow foreign-law-quotation detector.
 - **main tip:** `8363f15` — every brick through discovery-naming + narration. CI green.
 - Shared checkout: `~/Projects/familiar` on MacOnStick — leave it on `main`, clean.
   Long work: use a scratch worktree (rule 7).
