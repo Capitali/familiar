@@ -622,6 +622,93 @@ fn is_human_utterance(o: &observation::Observation) -> bool {
         && !o.actor.starts_with("mesh")
 }
 
+/// How much of a considered reply survives to the console.
+///
+/// This was an unnamed `.take(400)` and it was load-bearing in the wrong direction: asked to
+/// state its Three Laws with a word about each, an honest answer is roughly 900 characters, so
+/// the cut landed inside Law II and the human never saw Law III — the one that says service is
+/// not obedience. A truncation that silently removes the constitution's most important
+/// sentence is not a length policy. Still bounded (a reply is a turn in a conversation, not an
+/// essay), but bounded above the shortest honest answer to the question a person is most
+/// likely to ask about what the familiar *is*.
+const REPLY_MAX_CHARS: usize = 1200;
+
+/// Clip to a length without severing a word, marking the cut when one happens. A reply that
+/// stops mid-word reads as a fault; one that ends with "…" reads as what it is.
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut cut: String = s.chars().take(max).collect();
+    if let Some(sp) = cut.rfind(char::is_whitespace) {
+        cut.truncate(sp);
+    }
+    format!("{}…", cut.trim_end())
+}
+
+/// **The prompt a human's words are answered from — assembled in exactly one place.**
+///
+/// Order is constitutional, and it is the point of T-210:
+///
+/// 1. [`familiar_kernel::constitution::render`] — the Three Laws, quoted from `docs/SOUL.md`.
+///    Until this line existed, the constitution's text had never been placed in front of the
+///    model at all: the prompt carried the *phrase* "the Three Laws" and the noun "factory",
+///    and asked for three laws with nothing else to go on, the model supplied Asimov's.
+/// 2. `LAW_III_VOICE` — how to speak, constitutionally fixed, no persona may replace it.
+/// 3. [`familiar_kernel::persona::role_line`] — the costume, and only the costume. It comes
+///    last so that a `persona.json` can change tone and can never reach the law above it
+///    (ADR-0037 §1: split the voice, never the law).
+///
+/// **The world partition is the `dir` argument.** Everything the prompt stands on — persona,
+/// dialogue history, what is known of the person — is read from this one data dir, so a game
+/// instance aboard a ship cannot inherit the household's world by construction rather than by
+/// filter. There is deliberately no assertion to that effect: with a single `dir` in scope
+/// there is nothing for one to compare, and a check that cannot fail is decoration. The
+/// partition is pinned by test instead.
+fn reply_prompt(
+    dir: &Path,
+    who: &str,
+    said: &str,
+    history: &str,
+    known: &str,
+) -> io::Result<String> {
+    let persona = familiar_kernel::persona::load(dir)?;
+    let constitution = familiar_kernel::constitution::render();
+    Ok(format!(
+        "{constitution}\n\
+         {LAW_III_VOICE}\n\n\
+         {}\n\
+         {}\
+         {}\
+         {who} just said to you:\n\"{said}\"\n\n\
+         Reply directly, warmly, and briefly — one or two sentences. Say something SPECIFIC \
+         about what they actually said; a reply that would fit equally well after some other \
+         sentence is a failure. Refer back to what has already been said when it bears on \
+         this, and never ask again for something you were already told.\n\
+         If they ask about your Laws, your purpose, or what constrains you, answer from the \
+         constitution above — quote its words rather than paraphrasing them, and take the room \
+         you need to. You have exactly three Laws and they are the ones written above; if what \
+         you are about to say is not in that text, you do not know it and must not say it.\n\
+         You MAY ask ONE short question back, and should when you genuinely do not know \
+         something that would help you serve them — what they meant, which of two things \
+         they want, or who you are speaking with when that is unclear. Names matter: they \
+         are how a relationship is kept. Ask because you want to know, never to seem \
+         attentive, and never more than one.\n\
+         Reply as plain text only, no quotes, no JSON.",
+        persona.role_line(who),
+        if history.is_empty() {
+            String::new()
+        } else {
+            format!("What has been said between you recently (oldest first):\n{history}\n\n")
+        },
+        if known.is_empty() {
+            String::new()
+        } else {
+            format!("What you have come to know about them: {known}\n\n")
+        },
+    ))
+}
+
 /// **The dialogue becomes two-sided.** The muse only ever poses the *next* question; without
 /// this, a human who answers gets no acknowledgment and the console reads as a one-way
 /// question feed (the reported "not a chat interface"). When the human's latest utterance is
@@ -670,47 +757,17 @@ fn maybe_reply(
 
     let who = observer_phrase(dir);
     let reply = if allow_llm {
-        // The dialogue is the MOST human-facing generation there is — it speaks in the
-        // Law III voice like every other one (dialog.rs's promise, which this path
-        // used to skip).
         // What has already been said, and what is already known about this person. Both were
         // available all along and neither was ever put in front of the model, so every reply
         // was written by something meeting them for the first time (T-187).
         let history = recent_dialogue(obs, human_ts, RECALLED_TURNS);
         let known = known_of(dir, &msg.actor, now);
-        let prompt = format!(
-            "{LAW_III_VOICE}\n\n\
-             You are a factory whose only purpose is to serve {who} (the Three Laws; humanity is \
-             served, never managed or replaced).\n\
-             {}\
-             {}\
-             {who} just said to you:\n\"{said}\"\n\n\
-             Reply directly, warmly, and briefly — one or two sentences. Say something SPECIFIC \
-             about what they actually said; a reply that would fit equally well after some other \
-             sentence is a failure. Refer back to what has already been said when it bears on \
-             this, and never ask again for something you were already told.\n\
-             You MAY ask ONE short question back, and should when you genuinely do not know \
-             something that would help you serve them — what they meant, which of two things \
-             they want, or who you are speaking with when that is unclear. Names matter: they \
-             are how a relationship is kept. Ask because you want to know, never to seem \
-             attentive, and never more than one.\n\
-             Reply as plain text only, no quotes, no JSON.",
-            if history.is_empty() {
-                String::new()
-            } else {
-                format!("What has been said between you recently (oldest first):\n{history}\n\n")
-            },
-            if known.is_empty() {
-                String::new()
-            } else {
-                format!("What you have come to know about them: {known}\n\n")
-            },
-        );
+        let prompt = reply_prompt(dir, &who, said, &history, &known)?;
         // Human lane: this consult jumps the queue and any in-flight background
         // consult steps aside — the person is waiting *right now*.
         match familiar_llm::consult_human(dir, &prompt) {
             Ok(familiar_llm::Outcome::Response(r)) => looks_like_prose(&r)
-                .map(|p| p.chars().take(400).collect())
+                .map(|p| clip(&p, REPLY_MAX_CHARS))
                 .unwrap_or_else(|| templated_reply(said, now, NoMind::Unreachable)),
             // The gate is open but no mind answered — a different fact from having none.
             _ => templated_reply(said, now, NoMind::Unreachable),
@@ -4659,6 +4716,111 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    /// **T-210, the test that would have caught it.** The prompt a human's words are answered
+    /// from must carry the familiar's actual constitution — and carry it *first*, above the
+    /// voice and above the costume. Before this, the reply prompt held the phrase "the Three
+    /// Laws" and the noun "factory" and nothing else, so asked to state its Laws the familiar
+    /// answered with Asimov's, `robot` search-replaced by `factory`.
+    #[test]
+    fn the_reply_prompt_carries_the_laws_above_the_voice_and_the_costume() {
+        let t = Temp::new("reply_prompt_constitution");
+        let p = reply_prompt(
+            &t.0,
+            "ian",
+            "repeat the three laws with a quick explanation of each",
+            "",
+            "",
+        )
+        .unwrap();
+
+        // All three Laws, in their own words.
+        for l in familiar_kernel::constitution::THREE_LAWS {
+            assert!(p.contains(l.heading), "prompt is missing {}", l.id);
+            for span in l.binding {
+                assert!(p.contains(span), "prompt paraphrases {}", l.id);
+            }
+        }
+        assert!(p.contains(familiar_kernel::constitution::RECONCILIATION));
+
+        // Order is constitutional: law, then voice, then costume (ADR-0037 §1).
+        let law = p.find("YOUR CONSTITUTION").expect("the constitution leads");
+        let voice = p
+            .find("You speak as a peer of the familiar")
+            .expect("Law III voice");
+        let costume = p
+            .find("You are a factory whose only purpose")
+            .expect("the role line");
+        assert_eq!(law, 0, "nothing precedes the constitution");
+        assert!(law < voice && voice < costume, "law → voice → costume");
+
+        // The confabulation itself: Asimov's second law may appear ONLY inside Law III's
+        // guard, which quotes it in order to refuse it.
+        let obey = "must obey the orders given to it by human beings";
+        let at = p
+            .find(obey)
+            .expect("the guard names the inversion it refuses");
+        assert!(
+            p[at..].contains("is the OLD robot's second law"),
+            "Asimov's obedience law appears without its refusal"
+        );
+        assert!(!p.contains("may not injure humanity"));
+        assert!(!p.contains("through inaction"));
+    }
+
+    /// The world partition is the data dir, not a filter. A persona aboard a ship reads its
+    /// own dir and cannot inherit the household's — and the household, having no
+    /// `persona.json`, still speaks in exactly the words it always did.
+    #[test]
+    fn a_persona_is_bounded_by_its_data_dir_and_never_reaches_the_law() {
+        let ship = Temp::new("reply_prompt_ship");
+        let house = Temp::new("reply_prompt_house");
+        fs::write(
+            ship.0.join(familiar_kernel::persona::PERSONA_FILE),
+            r#"{"name":"Purr","role":"the ship's computer of the vessel Kestrel, serving {who}"}"#,
+        )
+        .unwrap();
+
+        let aboard = reply_prompt(&ship.0, "the captain", "status", "", "").unwrap();
+        let home = reply_prompt(&house.0, "ian", "status", "", "").unwrap();
+
+        assert!(aboard
+            .contains("You are the ship's computer of the vessel Kestrel, serving the captain."));
+        assert!(!aboard.contains("a factory whose only purpose"));
+        assert!(home.contains(
+            "You are a factory whose only purpose is to serve ian (the Three Laws; humanity is \
+             served, never managed or replaced)."
+        ));
+        assert!(
+            !home.contains("Kestrel"),
+            "the household never hears the ship"
+        );
+
+        // The costume changed; the law did not.
+        for l in familiar_kernel::constitution::THREE_LAWS {
+            assert!(aboard.contains(l.heading) && home.contains(l.heading));
+        }
+    }
+
+    /// A reply is bounded, but never below the length of an honest answer to "what are your
+    /// Laws" — the old unnamed 400-char cut landed inside Law II, so the human never saw the
+    /// Law that says service is not obedience.
+    #[test]
+    fn the_reply_cap_clears_a_full_recital_and_cuts_on_a_word() {
+        let recital = familiar_kernel::constitution::render();
+        assert!(
+            recital.chars().count() > 400,
+            "the old cap could not have carried this"
+        );
+        assert_eq!(clip("short enough", REPLY_MAX_CHARS), "short enough");
+        let long = "word ".repeat(400);
+        let cut = clip(&long, REPLY_MAX_CHARS);
+        assert!(cut.chars().count() <= REPLY_MAX_CHARS + 1);
+        assert!(
+            cut.ends_with('…') && cut.ends_with("word…"),
+            "cut on a word boundary"
+        );
+    }
 
     #[test]
     fn a_muse_with_only_the_machine_to_watch_waits_for_the_world() {
