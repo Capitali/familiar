@@ -119,6 +119,24 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
+### T-205 · The world partition — game data is not real data
+- status: queued — **the load-bearing half of the ADR-0037 revision; nothing Purr ships without it**
+- scope: a `world` on observations, threads, questions and dossier contributions; the reasoning engine reading within one world; the law signals computed over `real` only
+- accept: a game observation can never mint a theory about the household and vice versa; service/presence/capacities are computed over `world=real` alone; the boundary is NOT partitioned (one gate set, no laxer jurisdiction); absent world means `real`, and absence is not suspicion
+- notes: Ian 2026-08-16, revising ADR-0037. Without this a ship's stores and Betty's presence share one observation log — "the captain is low on water" is a crisis or a game state depending on a distinction the engine cannot make, the dossier accrues a human's GAME behaviour as their habits, and HUMANITY.md's protected class faces fictional cats the code cannot tell from real ones. A fleet of happy captains must never be able to raise the number that says the familiar is serving humanity
+
+### T-206 · An MCP seam, both directions
+- status: queued — **counterparty live and verified**: https://srv1328560.hstgr.cloud/mcp answers `initialize` as `ucf-exchange` v1.0.0 (protocol 2025-06-18), 10 READ-ONLY tools, tool calls need `Authorization: Bearer ucfk_...`. Read-only means the first useful client is an OBSERVATION client, not an actuator one — a smaller and safer first brick than expected
+- scope: an MCP client (the familiar reaching a game/other server's tools + resources) and a small MCP server (the familiar's own surface); boundary-gated identically to every other outward act
+- accept: an MCP tool call passes `guard::evaluate` and `allow_actuate` like any actuator; undeclared stays unactuatable (ADR-0032); a disconnected server degrades to the no-oracle floor rather than erroring; an MCP client is a stranger with delegated capability (ADR-0041) and is identified, not trusted by protocol
+- notes: Ian 2026-08-16 — replaces the 13 bespoke `/local/purr/*` endpoints. Jeff (the game team) also asked independently whether the familiar has an MCP interface; it has none today. The inversion is the point: the GAME runs the server, so ship systems arrive as tool discovery rather than a bespoke spec schema the familiar has to invent
+
+### T-207 · Discovery should see BLE, and know what is already paired
+- status: queued
+- scope: BLE scan in the discovery pass; classification of what is already paired/authorized to this host and human; beacon payload decoding as typed environmental observation
+- accept: discovery lists BLE devices alongside network ones; each is marked paired/authorized-to-this-host or merely visible; beacon data (iBeacon/Eddystone and the richer manufacturer formats) becomes typed observation, not a hex blob; nothing is actuated without a declared surface
+- notes: Ian 2026-08-16: "BLE is a legitimate control and observation interface. It is especially good for observations of the environment due to BLE beacons rich data formats." The household already has the case in hand — motorlights is BLE-only (no IP surface at all), and the SP548E driver in ~/Development/motorlights is the worked precedent. CAUTION on Apple platforms: CoreBluetooth exposes a per-host randomised UUID rather than a stable MAC, so "already paired" is host-relative and must be reported as such rather than as a property of the device — and pairing state is not fully enumerable from a sandboxed app, so what cannot be known must be said, not guessed
+
 ### T-203 · Deny is an act, and a claim should be audible
 - status: queued
 - scope: an explicit deny alongside the vouch button; Chime on claim arrival; the claim card's colour

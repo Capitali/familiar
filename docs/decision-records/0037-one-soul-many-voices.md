@@ -1,6 +1,11 @@
 # ADR-0037 — One soul, many voices: the persona seam, and Purr the ship's computer
 
-- **Status:** proposed (drafted 2026-08-10 from the owner's direction: a ship's
+- **Status:** proposed — **revised 2026-08-16** on Ian's direction: the wire contract
+  becomes **MCP**, game-world data is **partitioned** from the real world, and the ship's
+  computer is modelled as a **device the captain owns** rather than a bespoke integration.
+  The original bespoke-REST design is kept below as *Superseded* for the game team's
+  reference, since they have already read it.
+- **Originally:** proposed (drafted 2026-08-10 from the owner's direction: a ship's
   computer for a third-party, physics-faithful game of space mining — water and
   minerals — construction, and trade, whose ships are shaped like cats and flown by
   cats. The computer's root name is **Purr**, every captain renames their own, and
@@ -65,7 +70,185 @@ and returns `"ok"`; the familiar's own speech surfaces only as fields of the pol
 worldview. A bridge officer needs a delivery channel: replies that arrive when they're
 ready, and unprompted utterances that arrive when events warrant.
 
-## Decision
+## Decision — 2026-08-16 revision
+
+Three changes. The persona seam (§1 below) is unaffected and remains the heart of this
+record; what changes is how the game *reaches* the familiar, what happens to the data it
+sends, and what a ship's computer **is** in the model.
+
+### A. The wire is MCP, and the game is the server
+
+The v1 contract specified thirteen bespoke endpoints under `/local/purr/*` — pairing,
+telemetry, chat, cursor-polled utterances and commands. Every one of them is a thing the
+**Model Context Protocol** already standardises, and building a private protocol for a
+partner integration means both sides maintain a bespoke client forever.
+
+More importantly, the bespoke design pointed the wrong way. It had the game **push**
+telemetry at the familiar and **poll** for commands, which makes the familiar a passive
+recipient with a custom intake. Inverted, it becomes something the familiar already knows
+how to do:
+
+> **The game runs an MCP server. The familiar is its client.**
+
+The ship declares its systems as MCP **tools** (`ship.set_thrust`, `ship.dock`,
+`ship.transfer_cargo`) and its state as MCP **resources** (`ship://telemetry/stores`,
+`ship://crew/roster`). That is *exactly* the shape of ADR-0032's declared actuators and of
+an observation source — so the ship spec stops being a bespoke JSON schema this project
+has to invent and becomes **tool discovery**, which MCP does natively.
+
+What follows for free:
+
+- **The boundary already governs it.** An MCP tool call is an outward act; it passes
+  `guard::evaluate` and the `allow_actuate` gate like any other. Nothing new to trust.
+- **Undeclared is unactuatable** (ADR-0032) survives intact: if the ship did not declare
+  the tool, it does not exist to Purr.
+- **Degradation is native.** MCP servers come and go; a disconnected server is a ship
+  whose systems are simply not reachable, which the no-oracle floor (§9 of the contract)
+  already describes.
+
+The **captain's voice** needs the other direction — the game must deliver an utterance and
+receive a reply. That is a *small* MCP server on the familiar's side exposing two tools
+(`purr.say`, `purr.utterances`) plus the pairing handshake, and it replaces §§2, 5, 6 of
+the contract. Two servers, both standard, no private protocol.
+
+This also answers a question that arrived the same day from outside the game: *does the
+familiar have an MCP interface?* Under this decision it has one because Purr needed it,
+and every other MCP client benefits — with the same boundary in front.
+
+### B. Game-world data is partitioned from the real world, at the record
+
+This is the load-bearing safety decision and it is **not optional**.
+
+A ship's stores, a cargo manifest, and a crew of cats are **fiction**. The RV's lights,
+Betty's presence, and Clover's wellbeing are **real**. If both enter one observation log,
+the consequences are not stylistic:
+
+- theories would be minted across the boundary — *"the captain is low on water"* is a
+  crisis or a game state depending on a distinction the engine could not make;
+- the Law I service signal and Law II presence signal would be computed partly over
+  fictional service, corrupting the only measures the constitution has;
+- the dossier would accumulate a human's **game** behaviour as their habits;
+- and HUMANITY.md's protected class — beings capable of suffering, memory, relationship —
+  would face fictional cats indistinguishable, to the code, from real ones.
+
+So every observation, thread, question, and dossier contribution carries a **`world`**:
+
+```
+world = "real"            // the default, and what every existing row is
+      | "purr:<ship_id>"  // one game world per commissioned ship
+```
+
+The rules, which are simple and absolute:
+
+1. **`real` is the default.** Absent means real — and because absence is not a negative
+   (CONTRIBUTING), an untagged row is *not* thereby suspect; it is the ordinary case.
+2. **Reasoning never crosses.** Loop detection, theory minting, prediction settlement and
+   the dossier read within one world only. A game world can never produce a theory about
+   the household, and the household's evidence never settles a game claim.
+3. **The law signals are computed over `real` alone.** Service, presence and capacities
+   measure the familiar's service to actual people. A fleet of happy captains must never
+   be able to raise the number that says the familiar is serving humanity.
+4. **The boundary is not partitioned.** One gate set, one guard. A game world cannot open
+   a capability the real world has closed — the partition protects the *reasoning*, and
+   must never become a second, laxer jurisdiction.
+5. **The human is real in both.** The captain is one person with one identity; only the
+   *data about the ship* is fiction. Their name, their standing, and their right to
+   correct hold everywhere.
+
+Consequence worth stating plainly: **a game world is not a sandbox for the constitution.**
+Purr is still bound by the Three Laws when speaking to a real human, because the human on
+the other side of the fiction is real.
+
+### C. A ship's computer is a device the captain owns
+
+Ian, 2026-08-16: *"identity management needs to be part of this as well so that a
+'captain' can have a memory with his 'named ship computer' which is much like his
+device… observation and control."*
+
+This needs no new identity model. It needs the one ADR-0039 and ADR-0042 already describe:
+
+- **The captain is a `HumanRecord`** — the same record as any human the familiar serves.
+  Real, singular, and shared across every world.
+- **The ship's computer is a `DeviceRecord`** with `posture: fixed` — a **station**
+  (ADR-0042). It is bound to a place (the vessel), it serves whoever is aboard, and it has
+  no owner in the possessive sense. Its `name` is the one the captain gave it at
+  commissioning, which is the same field and the same act as naming any other device.
+- **The relationship is the association edge** — `DeviceRecord.humans[]`, current and past,
+  which ADR-0039 designed as plural precisely so a device may serve several people (a
+  captain and crew) without belonging to one.
+- **The memory between them is the dossier**, scoped to that ship's world. What the
+  captain prefers, when they are usually aboard, what they have asked before — the same
+  machinery that remembers Ian prefers the dinette light dim, partitioned per §B.
+
+The pleasing part: commissioning a ship's computer and adding a device to the household are
+**the same ceremony** — name it, establish who it serves, declare what it may actuate. The
+game's pairing flow is the familiar's device flow wearing a persona.
+
+**What this makes explicit:** Purr's only real-world actuator remains its voice, forever.
+Its declared tools act on a simulation; the boundary that would let it touch anything real
+is a separate grant that no game may request.
+
+### What the game's MCP server actually is (verified live, 2026-08-16)
+
+Ian supplied the endpoint: **`https://srv1328560.hstgr.cloud/mcp`**. It answers `initialize`
+without auth and identifies as **`ucf-exchange` v1.0.0**, protocol `2025-06-18`, capability
+`tools`. Its own instructions: *"The United Cat Foods exchange, read-only. Prices are a pure
+function of station stock, so they move as goods move; nothing here is scripted."* A live
+`ucf_status` returns `tick 5494`, `tickDurationSec 300`, `worldName PROD`, and a state hash.
+Tool *calls* require `Authorization: Bearer ucfk_...`.
+
+Ten tools, and **every one is read-only**:
+
+| tool | what it gives |
+|---|---|
+| `ucf_status` | the world clock — tick, tick length, next boundary, state hash |
+| `ucf_reference` | the world model: goods, recipes, stations |
+| `ucf_stations` | every station, its class, the body it orbits |
+| `ucf_prices` | every good's mid price and stock at every station, one call |
+| `ucf_quotes` | one station's board: ask, bid, stock, equilibrium |
+| `ucf_quote` | the executable total for a bulk order, walking the price curve |
+| `ucf_news` | the Dispatch feed — **events announced before they bite** |
+| `ucf_carriers` | every hull, where it is, what it carries |
+| `ucf_loadboard` | the freight board with deadhead, cost, net, rate-per-day |
+| `ucf_route` | flight plan: legs, distance, hours under thrust, fuel |
+
+**This corrects an assumption in section A above.** That section predicted the game would
+expose *ship systems* as tools (`ship.set_thrust`). It does not — at least not here. This
+server is an **economy and logistics observatory**, and it contains **no actuators at all**.
+Which means:
+
+- Against this server, Purr's whole relationship to the game is **observation**. There is
+  nothing to actuate, so `allow_actuate` is not even engaged; this sits under `allow_network`.
+- The ship-spec-as-tool-discovery idea still holds as the *shape* for ship control, but ship
+  control is not on this endpoint. Whether it arrives as a second MCP server or stays in-game
+  is a question for the game team.
+- The partition matters **more**, not less. Ten tools of rich, live, plausible world data is
+  exactly the material that would contaminate the household's reasoning if it landed in one
+  undifferentiated observation log.
+
+And it is worth saying what this makes possible, because it is the thesis of ADR-0013 in
+miniature: `ucf_news` announces events **before they bite**, `ucf_prices` is the whole board in
+one call, and `ucf_route` computes the fuel. A familiar watching all three can notice what a
+captain flying one ship cannot — a price that will move because a dispatch just landed, a
+deadhead leg a load-board entry would fill. That is *noticing*, which is the thing this project
+claims to be for, with the pleasant property that the stakes are entirely fictional.
+
+### Open, and owed to the game team
+- MCP server topology on iOS, where the game and the familiar are one process — an
+  in-process transport rather than a socket, which MCP permits but which needs a named
+  binding.
+- Whether `world` is a first-class column or a context prefix in the existing store; the
+  former is cleaner, the latter is a smaller migration.
+- The autonomy grant (§8) is unchanged by this revision, but should be re-expressed as an
+  MCP capability rather than a REST field.
+
+---
+
+## Decision (original, 2026-08-10)
+
+> **Superseded in part** by the revision above: §1's persona seam stands unchanged; the
+> transport described in the companion contract is replaced by MCP (§A). Kept because the
+> game team has already read it and the reasoning is still the reasoning.
 
 ### 1. The persona seam: split the voice, never the law
 

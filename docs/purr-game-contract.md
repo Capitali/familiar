@@ -1,5 +1,31 @@
 # Purr Game Contract, v1
 
+> ## ⚠︎ Revised 2026-08-16 — read this first
+>
+> Ian's direction has changed the transport. **The bespoke `/local/purr/*` endpoints below
+> are superseded by MCP**, and the direction is inverted: rather than the game pushing
+> telemetry and polling for commands, **the game runs an MCP server** and the familiar is
+> its client.
+>
+> - **Ship systems become MCP tools** (`ship.set_thrust`, `ship.dock`) — which is what
+>   ADR-0032's *declared actuators* already are, so the ship-spec schema in §2 is replaced
+>   by ordinary MCP tool discovery.
+> - **Ship state becomes MCP resources** (`ship://telemetry/stores`) — replacing §3.
+> - **The captain's voice** is a small MCP server on the familiar's side (`purr.say`,
+>   `purr.utterances`) — replacing §§5–6.
+> - **§§2 (pairing), 8 (autonomy), 9 (degradation), 10 (versioning)** survive in substance;
+>   only their encoding changes.
+>
+> Two further decisions land alongside it, both in
+> [ADR-0037](decision-records/0037-one-soul-many-voices.md): game-world data is
+> **partitioned** from real-world data at the record, and the ship's computer is modelled as
+> a **station device** the captain commissions — the same ceremony as adding any device to a
+> household.
+>
+> The open questions in §11 still stand and are still owed answers. A v2 of this contract,
+> expressed in MCP, follows once the game team confirms the shape.
+
+
 The integration contract between a game client and **Purr** — a ship's-computer persona
 of the familiar. This is the document handed to the game team; the decision record
 behind it is [ADR-0037](decision-records/0037-one-soul-many-voices.md).
