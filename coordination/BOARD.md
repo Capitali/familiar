@@ -11,6 +11,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-209 · Half-admitted records: attestation yes, admitted no, forever
+- status: proposed
+- owner: —
+- scope: crates/mesh/src/enroll.rs + the knock path in crates/mesh/src/transport.rs (the two-filter door); diagnosis first, no fix without it
+- depends: —
+- accept: either the door is shown to leave nothing behind on a knock that clears the covenant but never clears identity, or the leftover is named and given a home; a test pins whichever answer is true
+- notes: split out of T-208 (companion:claude-fable, 2026-08-17). All seven ghosts found live carried `attestation: yes` with `admitted: no` — they contracted the covenant and were never vouched, which is a legitimate resting state for a visitor, so this may be correct behaviour rather than a leak. What made it worth a task is that nothing ages a half-admitted record out on its own terms; it only left via the guest purge, which T-208 has now made quiet. Diagnose before touching anything
+
 ### T-174 · Restore the documented iOS simulator build under Xcode 27
 - status: proposed
 - owner: —
@@ -118,17 +126,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: companion must not SSH-deploy (rule 8); preserve every existing boundary choice, change no human records, and stop on a malformed boundary. Rollback: disable the timer, remove actuators.json, set allow_actuate false (leave unrelated gates untouched)
 
 ## Queued
-
-### T-208 · The visitor purge announces but does not collect
-- status: claimed — **root cause found live on Wildhorse 2026-08-17 07:00; it is resurrection, not a failed delete**
-- owner: companion:claude-fable
-- scope: crates/mesh/src/record.rs (`purge_stale_guests`, `absorb`, `build_record_sync`), crates/mesh/src/transport.rs (the two `record::absorb` call sites, for the declined-absorb return)
-- depends: —
-- accept: a guest past GUEST_PURGE_SECS is actually removed from mesh/records; the purge observation is emitted ONLY when a file was really deleted; repeated announcements for the same device_id are impossible; a sibling door's record-sync can never re-create a guest this door's own retention has already aged out; tests pin the decline, the offer-side filter, and announcement-as-evidence
-- notes: Ian 2026-08-16: "mac console has two iphones that are not members listed as well". Superseded diagnosis below — the delete path was never broken.
-- ROOT CAUSE (verified live, this door, 2026-08-17): the purge **does** collect. It is refilled every tick by record-sync. Tick step 8b `federate()` runs immediately before the purge sweep in `cycle`: `record::absorb` takes an incoming record whole when `local == None` (record.rs:1473), including its original ancient `first_seen`, so a sibling door re-creates the very record this door just deleted; the sweep deletes it again and announces again, ~64s later, forever. Evidence: 922 `purged` observations in the local DB across 7 device_ids repeating at every tick timestamp; `mesh/records/` held none of the 7 at 06:55 and all 7 at 06:59, mtime stamped that tick. Sample ghost `7a44b91b01765ced` — guest, `admitted: null`, `attestation: yes`, `first_seen` 18h old, `last_seen` only 42s after it, origin `iPhone · iOS 26.6.1 · v98` at 139.178.129.26, lat/lon 37.232/-122.068. That is **Cupertino** — these are Apple App Review devices that knocked at the lighthouse, accepted the Three Laws, and were never vouched. They stay inside `RECORD_SYNC_WINDOW_SECS` (48h), so the lighthouse keeps offering them for 48h while every door keeps purging them.
-- The three fixes: (1) `absorb` declines to CREATE a guest that arrives already past GUEST_PURGE_SECS — merging an existing record is untouched, since that one may carry establishment; (2) `build_record_sync` does not offer a guest our own policy is obliged to delete; (3) `purge_stale_guests` pushes a device_id only when `remove_file` actually returned Ok, so the announcement is evidence rather than intent. Fix 1 is the load-bearing one — it holds even against an old build on the other side.
-- ALSO (open, unchanged): every ghost carries `attestation: yes` and `admitted: no`. The two-filter door leaving half-admitted records behind on each knock is worth its own look; not in this brick's scope.
 
 ### T-205 · The world partition — game data is not real data
 - status: queued — **the load-bearing half of the ADR-0037 revision; nothing Purr ships without it**
@@ -678,6 +675,18 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-208 · The visitor purge announces but does not collect
+- status: done
+- owner: companion:claude-fable
+- merged: 50bb46b
+- scope: crates/mesh/src/record.rs (`purge_stale_guests`, `absorb`, `build_record_sync`), crates/mesh/src/transport.rs (the two `record::absorb` call sites)
+- depends: —
+- accept: a guest past GUEST_PURGE_SECS is actually removed; the purge observation is emitted ONLY when a file was really deleted; repeated announcements for the same device_id are impossible; a sibling's record-sync can never re-create a guest this door's retention has already aged out; tests pin all three
+- notes: the board's diagnosis was wrong and the correction is the interesting part — **the delete path was never broken**. `federate()` runs immediately before the guest sweep in cycle's tick; `record::absorb` took an incoming record whole when `local == None`, ancient `first_seen` and all, so a sibling handed back the visitor this door had just forgotten and the sweep deleted it again four lines later. Every tick, for the 48h `RECORD_SYNC_WINDOW_SECS` keeps offering it against a 2h retention window. Verified live on Wildhorse 2026-08-17: `mesh/records/` held none of the seven ghosts at 06:55 and all seven at 06:59 with that tick's mtime; 922 `purged` observations across those ids over eighteen hours. The ghosts are Apple App Review iPhones (iOS 26.6.1 · v98, 139.178.129.26, lat/lon 37.232/-122.068 — Cupertino) that accepted the Three Laws at the lighthouse and were never vouched.
+- fixes: (1) `absorb` returns `Result<Option<_>>` and declines to CREATE a guest already past GUEST_PURGE_SECS — scoped to `local == None`, so a guest we hold still merges and a late establishment is never lost; (2) `build_record_sync` does not offer a guest this door owes the bin; (3) `purge_stale_guests` announces only what `remove_file` actually removed. Fix 1 is load-bearing — it holds even against an old build on the other side, so no fleet-wide upgrade is needed for a door to stop creating ghosts.
+- bar: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` — all exit 0; 35 suites, 651 passed, 0 failed. Six new tests. Each of the three fixes was neutered individually and the suite re-run to confirm a test fails without it; the first announcement test PASSED against the broken code and was rewritten (read-only records dir, honestly skipped when the process can write anyway) — the same failure mode as the bug it guards
+- spun out: T-209 (attestation yes / admitted no — the half-admitted resting state)
 
 ### T-171 · StatusView is unreachable — the watch diagnostics and Re-link button never ship
 - status: done
