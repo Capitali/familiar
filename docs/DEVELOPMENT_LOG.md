@@ -6,6 +6,77 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — T-206 (client half) · The familiar can reach a partner's MCP server
+
+Ian handed over a key file that had been sitting untracked in the repo — *"that's jeff's MCP
+key and location … implement/test as part of the ongoing build efforts"* — and then named what
+it was: **UCF is United Cat Foods, Jeff's game universe.** So this is ADR-0037's counterparty,
+and T-206's board entry already carried the live probe from 2026-08-16: `ucf-exchange` v1.0.0,
+protocol 2025-06-18, **ten read-only tools**. Read-only makes the first useful client an
+observation client, which is a smaller and safer brick than the ADR anticipated.
+
+First, the key itself. It was untracked in a **public** repo working tree, one `git add -A`
+from being published. It now lives at `data/mcp/ucf.env`, mode 0600, the same convention as
+`data/llm/key.env`, with the original beside it.
+
+### The new crate, and the one decision that mattered
+
+`crates/mcp` — the client half. `Session::open` does the `initialize` handshake and the
+`notifications/initialized` the protocol requires, `tools()` discovers, `call()` invokes.
+JSON-RPC 2.0 over Streamable HTTP, parsing both framings a server may answer with (plain JSON
+and `text/event-stream`), strictly: a server that breaks the protocol gets an error, never a
+guess.
+
+**The decision: this wire verifies certificates, and `mesh`'s does not.** `mesh` dials with a
+deliberately opportunistic config that accepts any server certificate, because in the covenant
+mesh authenticity lives in the ed25519 payload signature and TLS is only there to encrypt.
+That posture is right there and would have been a credential leak here — an MCP request
+carries a **bearer token** and no signature of its own, so the certificate is the only thing
+between a partner's key and whoever answers the address. `crates/mcp/src/tls.rs` builds a
+verifying root store from the platform CA bundle and **refuses** if it cannot find one. No
+fallback, no "just this once": the same shape as `boundary::load` falling back to `closed()`.
+A structural test asserts the module contains no `.dangerous(` call at all, because rustls
+offers no way to ask a config whether it verifies.
+
+### What governs it
+- **The boundary, before the socket.** Every reach passes `guard::evaluate(Network)`, checked
+  again at call time rather than only at open — a gate that shut mid-session has shut for this
+  call too. Verified live: against Ian's real data dir the CLI answers *"refused — Network on
+  'https://srv1328560.hstgr.cloud' is outside the human-owned boundary; availability is not
+  authorization."*
+- **The declaration is the consent** (ADR-0032, worn by MCP). A server exists because a human
+  wrote it into `mcp/servers.json`; a tool is callable only if that declaration names it.
+  Discovery and permission are deliberately different: the familiar may always ask a declared
+  server what it offers — that is how a human decides what to allow — and may invoke only what
+  was written down. An undeclared call is refused **locally**, so the wire never carries it.
+- **The credential is never in the declaration.** `servers.json` names a key file; the token is
+  read at the moment it is needed and never stored on the struct, so neither a debug print nor
+  an error message can spill it.
+- **A disconnected server degrades** to the no-oracle floor (ADR-0035): an `Io` error, not a
+  panic and not a fabricated answer.
+
+`familiar mcp servers | tools <server> | call <server> <tool> [json]` is the human's side of it.
+
+### Checks
+`cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
+--workspace` — each exit-checked, all 0; **684 passed, 0 failed**. Ten new tests, three of them
+against a **stub MCP server on loopback** that speaks the real framing (SSE, chunked, session
+header, 401 on a missing bearer): the handshake works, discovery lists both tools, the declared
+one calls, the undeclared one refuses without the server ever seeing it (asserted by counting
+what the stub received), a shut boundary sends nothing at all, and an absent server degrades.
+
+### What the next developer should know
+The live call has **not** been made. `allow_network` is shut on this household's boundary and
+only Ian can open it — the refusal above is the system working. To try it for real: open the
+gate, then `familiar mcp tools ucf`. The declaration ships with `"tools": []`, so even with the
+gate open the familiar can only *look*.
+
+Not built here, deliberately: the familiar's own MCP server (`purr.say`, `purr.utterances`),
+which is the other half of T-206. The counterparty is read-only, so the client is the half that
+does anything today. Also untouched: turning what a partner reports into **observations** —
+that wants T-205's world partition first, or a ship's stores and Betty's presence end up in one
+log, which is precisely what T-205 exists to prevent.
+
 ## 2026-08-17 — T-118 · Two runs, two fixture roots (finishing codex's abandoned brick)
 
 Picked up on Ian's word (2026-08-17: *"Claim the unfinished codex claimed ones from the board

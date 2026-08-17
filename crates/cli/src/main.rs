@@ -56,6 +56,10 @@ commands:
   daemon         manage the background daemon:
                  status | start | stop | reload | install | uninstall
                  (start/stop = pidfile process; install = launchd at login)
+  mcp            partner servers over the Model Context Protocol (ADR-0037):
+                 `mcp servers` | `mcp tools <server>` (discovery) |
+                 `mcp call <server> <tool> [json]` — callable only if the human's
+                 mcp/servers.json declares that tool; every reach passes the boundary
   boundary       show the Pact — the capability boundary (the human's lever, Law III)
   guard          weigh a proposed action against the Pact (Law III)
   consult        consult the LLM (refused unless a human has opened the Pact)
@@ -123,6 +127,7 @@ fn main() -> ExitCode {
         Some("db") => cmd_db(rest),
         Some("agent") => cmd_agent(rest),
         Some("mesh") => cmd_mesh(rest),
+        Some("mcp") => cmd_mcp(rest),
         Some("outreach") => cmd_outreach(rest),
         Some("goal") => cmd_goal(rest),
         Some(cmd) => {
@@ -3401,6 +3406,135 @@ fn cmd_spend(args: &[String]) -> ExitCode {
         "\nthe ledger keeps a week; budgets live in llm/key.env as <PROVIDER>_DAILY_TOKEN_BUDGET."
     );
     ExitCode::SUCCESS
+}
+
+/// `mcp` — the partner seam (T-206, ADR-0037 §A). Read what a declared server offers, and
+/// call the tools the human declared callable.
+///
+/// Nothing here can widen anything: the servers come from `mcp/servers.json`, the callable
+/// tools come from that same declaration, and every reach passes the boundary first. A shut
+/// `allow_network` refuses, and the refusal says so rather than failing obscurely.
+fn cmd_mcp(args: &[String]) -> ExitCode {
+    let sub = args.first().map(String::as_str).unwrap_or("servers");
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let positional: Vec<&String> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--"))
+        .collect();
+
+    match sub {
+        "servers" => match familiar_mcp::ServerSet::load(&dir) {
+            Err(e) => {
+                eprintln!("mcp: {e}");
+                ExitCode::FAILURE
+            }
+            Ok(set) if set.servers.is_empty() => {
+                println!(
+                    "mcp: no servers declared. Write {} to name one — a partner the human never \
+                     wrote down does not exist to the familiar.",
+                    familiar_mcp::declaration::SERVERS_FILE
+                );
+                ExitCode::SUCCESS
+            }
+            Ok(set) => {
+                for s in &set.servers {
+                    let callable = if s.tools.is_empty() {
+                        "discovery only — no tool is callable".to_string()
+                    } else {
+                        format!("callable: {}", s.tools.join(", "))
+                    };
+                    println!("{} — {}", s.name, s.url);
+                    println!("  {callable}");
+                    if !s.note.is_empty() {
+                        println!("  note: {}", s.note);
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+        },
+        "tools" => {
+            let Some(name) = positional.first() else {
+                eprintln!("usage: familiar mcp tools <server>");
+                return ExitCode::FAILURE;
+            };
+            let mut session = match familiar_mcp::Session::open(&dir, name) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("mcp: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            println!(
+                "{} — {} v{} (protocol {})",
+                name, session.server_name, session.server_version, session.protocol_version
+            );
+            match session.tools() {
+                Err(e) => {
+                    eprintln!("mcp: {e}");
+                    ExitCode::FAILURE
+                }
+                Ok(tools) => {
+                    let set = familiar_mcp::ServerSet::load(&dir).unwrap_or_default();
+                    let declared = set.get(name).map(|s| s.tools.clone()).unwrap_or_default();
+                    for t in &tools {
+                        let mark = if declared.contains(&t.name) {
+                            "callable"
+                        } else {
+                            "not declared"
+                        };
+                        println!("  {} [{}]", t.name, mark);
+                        if !t.description.is_empty() {
+                            println!("      {}", t.description);
+                        }
+                    }
+                    println!(
+                        "{} tool(s); {} callable. Declaring a tool in {} is what makes it callable.",
+                        tools.len(),
+                        declared.len(),
+                        familiar_mcp::declaration::SERVERS_FILE
+                    );
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        "call" => {
+            let (Some(name), Some(tool)) = (positional.first(), positional.get(1)) else {
+                eprintln!("usage: familiar mcp call <server> <tool> [json-arguments]");
+                return ExitCode::FAILURE;
+            };
+            let raw = positional.get(2).map(|s| s.as_str()).unwrap_or("{}");
+            let arguments: serde_json::Value = match serde_json::from_str(raw) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("mcp: arguments must be JSON: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let mut session = match familiar_mcp::Session::open(&dir, name) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("mcp: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match session.call(tool, arguments) {
+                Ok(v) => {
+                    println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("mcp: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        other => {
+            eprintln!("mcp: unknown subcommand '{other}' (servers|tools|call)");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn cmd_boundary(args: &[String]) -> ExitCode {

@@ -451,6 +451,7 @@ dependencies = [
  "familiar-cycle",
  "familiar-kernel",
  "familiar-llm",
+ "familiar-mcp",
  "familiar-mesh",
  "familiar-reach",
  "familiar-sense",
@@ -499,6 +500,17 @@ name = "familiar-llm"
 version = "0.1.0"
 dependencies = [
  "familiar-kernel",
+ "serde_json",
+]
+
+[[package]]
+name = "familiar-mcp"
+version = "0.1.0"
+dependencies = [
+ "familiar-kernel",
+ "pem",
+ "rustls",
+ "serde",
  "serde_json",
 ]
 
