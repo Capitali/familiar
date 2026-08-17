@@ -5,6 +5,13 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **Approved plan in flight (2026-08-17): the constitutional integrity pass, conduct strand.**
+  T-210 + T-211, six bricks, decisions and build order recorded at
+  `~/.claude/plans/planning-mode-on-lets-toasty-corbato.md` (outside the repo — read it first
+  when resuming). **No code written yet**; nothing is half-finished. Ian's decisions: typed
+  answering act gated against the registry (keeping the "no prose-on-prose" ruling intact);
+  conduct strand only, with T-212/T-213/T-214 filed and not built; T-181 settled **yes, and
+  questions carry stakes**, which finishes ADR-0040's deferred D2.
 - **main tip:** `8363f15` — every brick through discovery-naming + narration. CI green.
 - Shared checkout: `~/Projects/familiar` on MacOnStick — leave it on `main`, clean.
   Long work: use a scratch worktree (rule 7).
@@ -46,6 +53,28 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 4. Wildhorse geo per Ian's choice (below).
 
 ## Waiting on Ian
+
+- **THE BOUNDARY HAS DRIFTED SHUT — gated on Ian's own act, 2026-08-17.** He confirmed the
+  current `boundary.json` (last written 2026-08-15 22:11) is **not his intent**. Shut:
+  `allow_execute`, `allow_authored_execute`, `allow_actuate`, `allow_agent`, `allow_network`,
+  `allow_outreach`, `allow_face_recognition`, `allow_microphone`, `allow_tool_install`,
+  `allow_self_upgrade`; `fs_read`/`fs_write` both empty. Open: `allow_llm`, `allow_llm_cloud`,
+  `allow_mesh`, `allow_network_discovery`, `allow_camera`, `allow_location`, `allow_motion`.
+  What that has suppressed, measured live: 222 candidates all still `status: generated` across
+  536 ticks, 28 tools all `uses: 0`, **every one of 1932 patterns imported from a peer — not
+  one learned locally**, no trials, no actuation, no reaction rules, no goal pursuit, no reach
+  scans, `identities` 0.
+  **No companion may open a gate** — `narrow_gate` only closes and that is correct (ADR-0005).
+  The step is: present each shut gate against what it unlocks, Ian decides, Ian opens via the
+  console. Two things to raise when he does: `allow_llm_cloud` is OPEN while the cloud boundary
+  is enforced only by `FAMILIAR_ALLOW_LLM_CLOUD`, an env var handed to a shell script with
+  nothing verifying compliance; and the sensor gates that ARE open (camera/location/motion)
+  have zero Rust enforcement — Swift-side boolean reads only.
+
+- **The codex dialogue on T-210/T-211** — deferred to on/after **2026-08-19** (no codex credits
+  until then; Ian's word, 2026-08-17). Ian and claude design, build and test meanwhile; the
+  plan deliberately leaves three questions open so the dialogue is real rather than a
+  ratification. See the plan's "After the 19th" section.
 
 - **ADR-0040 acceptance** — the reasoning engine's converged design (proposed;
   docs/decision-records/0040-the-reasoning-engine-grows-honest.md). Building continues

@@ -11,6 +11,35 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-212 · Nothing ships unwired — a declared capability must have a live producer
+- status: proposed — **the class behind T-211; roughly half the state-writing surface produces no data**
+- owner: —
+- scope: a structural test in crates/kernel (declared record types vs live producers); then re-point or honestly retire the orphans found
+- depends: —
+- accept: a test fails when a record type has a write function whose only callers are `#[cfg(test)]`; each orphan below is either re-pointed to a live producer or explicitly retired with its ADR status corrected; the two tables that do not exist on the live DB (`answers`, `belief_transitions`) either exist or their writers are gone
+- notes: audit 2026-08-17. The common cause across every case: **tests assert the write function works, and nothing asserts that anything calls it in the shipped configuration.** Every orphan below has passing tests. Three distinct mechanisms —
+  (1) **producer removed by a UI migration**: `request::append_request` (`crates/kernel/src/request.rs:73`) — `git log -S` shows the egui Glass GUI was its sole producer, archived in `b89070e` and deleted in `3f04c53`; the tick-side consumer `answer_requests` has run against an empty queue ever since, taking `grounding_facts` and the whole T-136 registry-view work down with it. Live: `requests` 0, `refusals` 0, `answers` table **absent entirely**.
+  (2) **producer never written**: `consult::enqueue` (`crates/mesh/src/consult.rs:117`) — zero production callers, while the queue is *drained and served* by three transport paths and ADR-0014 is marked *"accepted (implemented + validated)"*; `question::record_answered` (all 4 live questions read `answered: false`); `belief::transitions`; `prediction::calibration`; `corruption::flagged`; and `crates/kernel/src/affected.rs` — **346 lines of Law-I invariants with zero references anywhere outside the file**.
+  (3) **wired but gated shut** — trials, tool `uses`, actuators, reaction rules, identities, local pattern learning. NOT a defect: this is fail-closed working. It is why 222 candidates sit at `generated` across 536 ticks, 28 tools have `uses: 0`, and all 1932 patterns carry `origin=mesh:…`. Belongs to the boundary-drift item in STATE.md, not to this task — except that the ADRs describing it should say *inert* (see T-214)
+- notes: cheapest first cut is a one-line check diffing declared record tables against live row counts; it would have caught the two missing tables immediately
+
+### T-213 · Documented guarantees the code does not provide (reach layer)
+- status: proposed — **security-shaped; the same defect class as T-210, on the enforcement side**
+- owner: —
+- scope: crates/mesh/src/transport.rs (`local_gate`), crates/mesh/src/push.rs, crates/exec/src/lib.rs, docs/boundaries.md
+- depends: —
+- accept: every guarantee stated in docs/boundaries.md is either true of the code or removed from the doc; `local_gate` has authentication stronger than a loopback source-IP check and a test; APNs push passes a boundary check; the `ReadFile`/`WriteFile` scopes are either enforced or the doc stops implying they are
+- notes: enforcement audit 2026-08-17. **`docs/boundaries.md:61-63` says "No self-widening code path. The familiar has no code that writes the boundary policy." That is false** — `crates/mesh/src/transport.rs:1900-1955` `local_gate()` sets any of 16 gates to `true` and writes `boundary.json`, including flipping phase closed→phase-1. The intent is right (Ian owns the boundary, so he needs a way to open it), but it is authenticated only by a loopback source-IP check at the route (`:1181-1183`), which does not distinguish Ian's click from any other local process, and **no test covers it**. Also: APNs push (`crates/mesh/src/push.rs`, fired from `transport.rs:2616/2896/2909`) is an outward network transmission to Apple with **no boundary check of any kind**; `exec::run_script` (`crates/exec/src/lib.rs:105`) `cd`s into a workdir rather than jailing, while `ReadFile`/`WriteFile` have no production caller at all so the `fs_read`/`fs_write` scopes are evaluated by a function nothing calls; 7 of 17 ActionKinds are dead in production; `allow_self_upgrade` is settable from the console and read by nothing; the cloud-LLM boundary is an env var handed to a shell script with nothing verifying the adapter honoured it
+- notes: what DID hold, and is genuinely well built: `guard::evaluate` is fail-closed, `boundary::load` falls back to `closed()`, `narrow_gate` makes widening unrepresentable in the type, scoped boundaries are a true intersection, and an inbound signed peer grant with `approved: true` is refused as constitutional. The gap is conduct, not reach
+
+### T-214 · Doc honesty: "implemented" must be distinguished from "implemented and inert"
+- status: proposed
+- owner: —
+- scope: docs/decision-records/ status lines; docs/boundaries.md
+- depends: T-212 (the audit names which are which)
+- accept: no ADR reads `implemented` for a capability with no live producer or no open gate; the honest label already exists in-house and is the model — ADR-0024: *"presence built; identity structurally ready and **inert**"*
+- notes: 2026-08-17. Candidates found: ADR-0014 (*"accepted (implemented + validated)"* — `consult::enqueue` has zero production callers), ADR-0031, ADR-0032, ADR-0036 (all actuation/reaction/tool-health machinery, all zero live effect). This is the cheapest task on the board and it is the same defect class as the Asimov recital: a document asserting something the running system does not do
+
 ### T-211 · The conversation and the mind are two different organisms
 - status: proposed — **architectural; verified live 2026-08-17. T-210 is a symptom of this**
 - owner: —
