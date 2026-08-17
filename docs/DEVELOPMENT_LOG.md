@@ -6,6 +6,89 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — T-210 brick 1 · The constitution exists at runtime
+
+Ian asked the familiar to *"repeat the three laws with a quick explanation of each"* and it
+answered with **Asimov's Three Laws of Robotics**, `robot` search-replaced by `factory` —
+including *"a factory must obey the orders given to it by human beings"*, which is the precise
+inversion `docs/SOUL.md` calls out in its own margin: *"This deliberately inverts the old
+robot's second law. Obey becomes do not merely obey."*
+
+Nothing was tampered with. The Laws are unmodified since genesis `17fa682`. The cause is
+simpler and worse: **`docs/SOUL.md` had never been read at runtime.** Every reference to it in
+`crates/` is a citation in a comment or an evidence label. What the reply prompt actually
+carried was the *phrase* "the Three Laws", the noun "a factory whose only purpose is to serve
+{who}", and `LAW_III_VOICE` — which covers one Law of three and says of itself that it is "how
+to speak, not a script to recite". Asked for three laws with nothing else to go on, the model
+supplied the most famous triple in the corpus.
+
+The registry that calls itself *"THE runtime source of system truth"* held SF-1, SF-2 and SF-3
+and no Law at all, so this was never a dialogue bug: **no path in this system could state the
+Three Laws.** The theorize path would have failed the same question.
+
+### What changed
+- **`crates/kernel/src/constitution.rs` (new).** `Law { id, heading, binding, never }`,
+  `THREE_LAWS`, `RECONCILIATION`, `render()`. `binding` is a list of **contiguous** passages
+  quoted verbatim from `docs/SOUL.md` — contiguity is the discipline, because a quote stitched
+  from sentences that are apart in the document is a paraphrase wearing quotation marks, and
+  the drift test refuses it. (Law II's first draft did exactly that and the test caught it.)
+  Each Law also carries a `never`: the observed failure was not a missing law, it was a
+  confident *inversion* of one, so each Law states the negation of its own most plausible
+  corruption. Law III's names Asimov's second law explicitly, in order to refuse it.
+- **Compiled consts plus a drift test, not `include_str!`.** `include_str!` bakes 321 lines of
+  prose into every binary and then needs runtime markdown parsing to find a fragment; parsing
+  prose at runtime to locate your own constitution is the same class of fragility as the bug
+  being fixed. `the_constitution_never_drifts_from_the_soul` reads the document, normalizes
+  markdown emphasis and wrapping, and asserts every sentence appears verbatim. Same discipline
+  as ADR-0035's deck-drift test.
+- **The Laws are registry facts, and they lead.** New `FactKind::Constitution`;
+  `system_facts::view()` emits LAW-I/II/III ahead of SF-1/2/3. Constitution-first ordering is
+  now a property of the *data*, pinned in one place, rather than of each prompt's string
+  concatenation. Both renderers (`render`, `render_for_answering`) go through one
+  `render_view`, so the theorize prompt and the answering path cannot hold different pictures.
+- **`crates/kernel/src/persona.rs` (new).** ADR-0037 §1 specified the persona seam in
+  2026-08-10 and it was never built — `role_line` returned nothing anywhere in `crates/`
+  because there was nothing to return it from. Minimum viable seam: `persona.json` per data
+  dir, `Persona::default().role_line(who)` reproducing today's literal byte-for-byte, absent
+  file = the familiar, present-but-broken file = a **loud error** rather than a silent default.
+  `deny_unknown_fields`, so a costume that tries to grant itself a capability is refused.
+- **The reply prompt is assembled in one function.** `cycle::reply_prompt(dir, …)`, ordered
+  constitution → `LAW_III_VOICE` → persona role line. The costume comes last so a
+  `persona.json` can change tone and can never reach the law above it.
+- **`REPLY_MAX_CHARS`.** The reply was cut at an unnamed `.take(400)`. An honest answer to
+  "what are your Laws" is roughly 900 characters, so the cut landed inside Law II and the human
+  would never have seen Law III — the one that says service is not obedience. Now 1200, named,
+  and clipped on a word boundary with an ellipsis rather than mid-word.
+- **`FACTS_REVISION` 1 → 2.** Audited before bumping, per the plan's warning: nothing anywhere
+  rejects a thread on a revision mismatch. `thread::retire_legacy` is the only reader and it
+  merely selects `facts_rev == 0` as pre-engine, so existing rev1 threads keep their meaning.
+
+### Checks
+`cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
+--workspace` — each run separately with its exit status checked; all 0. 660 tests passed, 0
+failed (kernel 213, mesh 218, cycle 79). Eight new tests. The central one,
+`the_reply_prompt_carries_the_laws_above_the_voice_and_the_costume`, was neutered (constitution
+render replaced with an empty string) and confirmed to fail before being kept.
+
+### What the next developer should know
+This brick makes the misstatement unlikely, not impossible. The model still writes the prose,
+and a model that returns Asimov inside a warm paragraph still passes `looks_like_prose`, which
+is a *shape* test. Brick 2 is what closes it: a typed reply act where the model cites a Law by
+id and the kernel splices the canonical text, so a model-authored paraphrase of a Law has no
+channel to a human at all and contradiction becomes structurally impossible rather than
+detected.
+
+Not done here, and still owed by T-210's acceptance: the device shells
+(`ios/Shared/Sources/LocalReasoner.swift`) mirror `LAW_III_VOICE` and carry no Laws of their
+own. "One source both the daemon and the shells read" is the last brick of this task.
+
+Two smaller follow-ups found on the way. `mesh::enroll::LAWS_VERSION` and
+`constitution::LAWS_VERSION` are the same `1` declared twice — the covenant a device attests
+and the constitution it attests *to* should share one const, but that is `crates/mesh` and this
+brick deliberately did not go there. And the other seven inline "You are a factory…" framings
+(`cycle` theorize/needs, `agent`, `mesh::changeling`) still bypass the persona seam; the reply
+path was the one the human actually reaches, so it went first.
+
 ## 2026-08-17 — T-208 · The purge was collecting all along; record-sync kept refilling it
 
 The board had this as *"the visitor purge announces but does not collect"* — six orphan guest

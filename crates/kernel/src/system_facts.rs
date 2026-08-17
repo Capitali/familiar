@@ -24,7 +24,12 @@ pub const FACTS_SCHEMA_VERSION: u32 = 1;
 /// Content revision — bumps when a fact is added, amended, or superseded. Admitted
 /// drafts record the revision they were validated against; a changed fact supersedes
 /// a revision, it never silently reinterprets old threads.
-pub const FACTS_REVISION: u32 = 1;
+///
+/// rev2 (T-210, 2026-08-17): the Three Laws joined the registry. Audited before bumping,
+/// per the plan's warning — nothing anywhere *rejects* a thread on a revision mismatch;
+/// `thread::retire_legacy` is the only reader and it merely selects `facts_rev == 0` rows
+/// as pre-engine. So existing rev1 threads keep their meaning and are never orphaned.
+pub const FACTS_REVISION: u32 = 2;
 
 /// Mechanisms a draft may claim its proposal works through. Everything else refuses:
 /// an unknown mechanism is not waved through because no keyword matched (round 2).
@@ -200,6 +205,11 @@ pub fn lexical_guard(text: &str) -> Result<(), Refusal> {
 /// observation is EVIDENCE that never becomes a SystemFact by being rendered beside one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactKind {
+    /// The constitution itself (LAW-I/II/III) — quoted from `docs/SOUL.md`, never authored,
+    /// and outranking every other kind: where any fact here conflicts with a Law, the Law
+    /// wins (SOUL.md's own first paragraph). Kept a separate kind from `Invariant` because
+    /// a design invariant can be amended by a decision record and a Law cannot.
+    Constitution,
     /// Compiled design invariant (SF-1, SF-2): how the system is built.
     Invariant,
     /// Derived live from the human's declaration (SF-3), carrying its digest.
@@ -247,14 +257,24 @@ fn digest_of(parts: &[String]) -> String {
 /// sibling assembly of "what is true here"; a second assembly is how a floor starts
 /// lying while every part of it stays individually correct.
 pub fn view(dir: &Path) -> io::Result<FactsView> {
-    let mut facts: Vec<Fact> = LIFECYCLE_FACTS
+    // The constitution comes FIRST, always — a property of the data, pinned in one place,
+    // rather than of every prompt's string concatenation (T-210). Until this line existed,
+    // no path in this system could state the Three Laws: the registry that calls itself THE
+    // runtime source of truth held nothing about them, so a mind asked what its laws were
+    // had nowhere to read them and answered from pretraining.
+    let mut facts: Vec<Fact> = crate::constitution::THREE_LAWS
         .iter()
-        .map(|f| Fact {
-            id: f.id.to_string(),
-            kind: FactKind::Invariant,
-            rendering: f.rendering.to_string(),
+        .map(|l| Fact {
+            id: l.id.to_string(),
+            kind: FactKind::Constitution,
+            rendering: crate::constitution::line(l),
         })
         .collect();
+    facts.extend(LIFECYCLE_FACTS.iter().map(|f| Fact {
+        id: f.id.to_string(),
+        kind: FactKind::Invariant,
+        rendering: f.rendering.to_string(),
+    }));
     facts.push(Fact {
         id: "SF-2".into(),
         kind: FactKind::Invariant,
@@ -290,19 +310,42 @@ pub fn view(dir: &Path) -> io::Result<FactsView> {
     })
 }
 
+/// Render a view: the constitution first (its own frame — a Law is not a build detail), then
+/// the system facts under the caller's frame. One assembly for both consumers, so the theorize
+/// prompt and the answering path can never hold different pictures of what is true here.
+fn render_view(v: &FactsView, frame: &str) -> String {
+    let mut out = String::new();
+    let (laws, facts): (Vec<&Fact>, Vec<&Fact>) = v
+        .facts
+        .iter()
+        .partition(|f| f.kind == FactKind::Constitution);
+    if !laws.is_empty() {
+        out.push_str(&crate::constitution::preamble());
+        out.push('\n');
+        for f in &laws {
+            out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
+        }
+        out.push_str(&crate::constitution::reconciliation_line());
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "SYSTEM FACTS (registry v{} rev{} decl:{} — {frame}):\n",
+        v.schema, v.revision, v.declaration_digest
+    ));
+    for f in &facts {
+        out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
+    }
+    out
+}
+
 /// The bounded rendering a THEORIZE prompt receives — a view of [`view`], never its own
 /// assembly. Kept identical in content to what [`validate`] enforces (one source).
 pub fn render(dir: &Path) -> io::Result<String> {
-    let v = view(dir)?;
-    let mut out = format!(
-        "SYSTEM FACTS (registry v{} rev{} decl:{} — these are how this system is BUILT; \
-         never diagnose them as defects, never propose mechanisms outside them):\n",
-        v.schema, v.revision, v.declaration_digest
-    );
-    for f in &v.facts {
-        out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
-    }
-    Ok(out)
+    Ok(render_view(
+        &view(dir)?,
+        "these are how this system is BUILT; never diagnose them as defects, never propose \
+         mechanisms outside them",
+    ))
 }
 
 /// The bounded rendering the REQUEST-ANSWERING path receives (T-136). Same registry,
@@ -311,16 +354,10 @@ pub fn render(dir: &Path) -> io::Result<String> {
 /// behaviour could be answered by a path that had never heard of it. Observations stay
 /// evidence — they are labelled separately and never rendered as system facts.
 pub fn render_for_answering(dir: &Path) -> io::Result<String> {
-    let v = view(dir)?;
-    let mut out = format!(
-        "SYSTEM FACTS (registry v{} rev{} decl:{} — how this system is built and what it \
-         may act on; these are not observations):\n",
-        v.schema, v.revision, v.declaration_digest
-    );
-    for f in &v.facts {
-        out.push_str(&format!("- [{}] {}\n", f.id, f.rendering));
-    }
-    Ok(out)
+    Ok(render_view(
+        &view(dir)?,
+        "how this system is built and what it may act on; these are not observations",
+    ))
 }
 
 #[cfg(test)]
@@ -485,6 +522,47 @@ mod t136_tests {
         // Same declaration, same digest — it is an identity, not a clock.
         declare(&d, "lights", &["dim", "bright", "off"]);
         assert_eq!(view(&d).unwrap().declaration_digest, two.declaration_digest);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// **The constitution is in the registry, and it comes first.** T-210: the module that
+    /// calls itself THE runtime source of system truth returned three facts, none of them a
+    /// Law, so no path in this system could state the Three Laws — the theorize path would
+    /// have failed the same question the dialogue failed. Ordering is a property of the DATA
+    /// here, pinned once, rather than of every prompt's string concatenation.
+    #[test]
+    fn the_laws_are_registry_facts_and_they_lead() {
+        let d = tmp("laws");
+        declare(&d, "lights", &["dim", "bright"]);
+        let v = view(&d).unwrap();
+        let ids: Vec<&str> = v.facts.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["LAW-I", "LAW-II", "LAW-III", "SF-1", "SF-2", "SF-3"],
+            "the constitution leads the registry"
+        );
+        assert!(v
+            .facts
+            .iter()
+            .take(3)
+            .all(|f| f.kind == FactKind::Constitution));
+        // Law III's own words, not a summary of them, and not the inversion.
+        let three = v.facts.iter().find(|f| f.id == "LAW-III").unwrap();
+        assert!(three.rendering.contains("It is not obedience to any human"));
+        assert!(three.rendering.contains("A command is not authority"));
+
+        // Both consumers carry them, and the Laws are framed as law rather than as build
+        // detail — "never diagnose them as defects" is a sentence about SF-1, not about a Law.
+        for r in [render(&d).unwrap(), render_for_answering(&d).unwrap()] {
+            assert!(r.starts_with("YOUR CONSTITUTION"), "the Laws come first");
+            for id in ["LAW-I", "LAW-II", "LAW-III", "SF-1", "SF-2", "SF-3"] {
+                assert!(r.contains(id), "missing {id}");
+            }
+            let laws_at = r.find("LAW-I").unwrap();
+            let facts_at = r.find("SYSTEM FACTS").unwrap();
+            assert!(laws_at < facts_at, "constitution before system facts");
+            assert!(r.contains(&crate::constitution::RECONCILIATION.to_string()));
+        }
         let _ = fs::remove_dir_all(&d);
     }
 
