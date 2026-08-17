@@ -992,14 +992,19 @@ pub fn purge_stale_guests(dir: &Path, now: i64) -> Vec<String> {
             Some(remaining) if remaining <= 0 => {}
             _ => continue,
         }
-        // The record file itself.
+        // The record file itself. Whether THIS call removed it is the only evidence the caller
+        // has that a visitor was forgotten, so it decides the announcement: a sweep that walked
+        // a record already gone has nothing to report, and "purged" said on every tick for the
+        // same device_id is a log that describes intent instead of what happened.
         let f = dir.join(RECORDS_DIR).join(format!("{}.json", r.device_id));
-        let _ = std::fs::remove_file(&f);
+        let collected = std::fs::remove_file(&f).is_ok();
         // Admission scaffolding (grant / pending / denied) and the live peer row, so the next
         // read re-mints a FRESH guest with a fresh clock rather than resurrecting this one.
         crate::enroll::forget_admission_files(dir, &r.device_id);
         let _ = crate::transport::remove_peer(dir, &r.device_id);
-        purged.push(r.device_id.clone());
+        if collected {
+            purged.push(r.device_id.clone());
+        }
     }
     if !purged.is_empty() {
         invalidate_snapshot(dir);
@@ -1407,9 +1412,13 @@ pub fn build_record_sync(
     node: &NodeKey,
     now: i64,
 ) -> Result<Option<RecordSync>> {
+    // Never offer a guest our own retention has already aged out. The sync window (48h) is far
+    // wider than the guest window (2h), so without this a door keeps handing siblings visitors
+    // it is itself obliged to forget — for the 46h in between.
     let mut recent: Vec<MembershipRecord> = load_all(dir)
         .into_iter()
         .filter(|r| now - r.last_seen <= RECORD_SYNC_WINDOW_SECS)
+        .filter(|r| !matches!(guest_purge_in(r, now), Some(remaining) if remaining <= 0))
         .collect();
     let game = crate::game::load(dir).filter(|g| now - g.updated <= RECORD_SYNC_WINDOW_SECS);
     if recent.is_empty() && game.is_none() {
@@ -1461,7 +1470,20 @@ pub fn verify_record_sync(
 
 /// Absorb one record from a sibling door: merge with what this door holds, or take it whole.
 /// The legacy roll is mirrored (member on, severed off) so the doctor's answers stay agreed.
-pub fn absorb(dir: &Path, incoming: &MembershipRecord) -> Result<MembershipRecord> {
+///
+/// Returns `None` when the offer is **declined**: a guest we hold nothing about that already
+/// arrives past [`GUEST_PURGE_SECS`]. Creating it would re-mint, with its original ancient
+/// `first_seen`, exactly the record [`purge_stale_guests`] deletes seconds later on the same
+/// tick — `federate` runs immediately before the sweep — so the door would delete and announce
+/// the same visitor every tick for the whole 48h a sibling keeps offering it. Declining is not
+/// a refusal of the sibling: forgetting an unidentified visitor after two hours is this door's
+/// own retention promise, and a record arriving from elsewhere does not reopen it. A guest we
+/// DO already hold still merges, because that record may be carrying an establishment home.
+pub fn absorb(
+    dir: &Path,
+    incoming: &MembershipRecord,
+    now: i64,
+) -> Result<Option<MembershipRecord>> {
     let device_id = incoming.device_id.trim().to_string();
     if device_id.is_empty() || incoming.keys.is_empty() {
         return Err(Error::Malformed("record-sync: empty record".into()));
@@ -1473,6 +1495,9 @@ pub fn absorb(dir: &Path, incoming: &MembershipRecord) -> Result<MembershipRecor
         None => {
             let mut r = incoming.clone();
             r.state = derive_state(&r);
+            if matches!(guest_purge_in(&r, now), Some(remaining) if remaining <= 0) {
+                return Ok(None);
+            }
             r
         }
     };
@@ -1493,7 +1518,7 @@ pub fn absorb(dir: &Path, incoming: &MembershipRecord) -> Result<MembershipRecor
         }
         RecordState::Guest => {}
     }
-    Ok(merged)
+    Ok(Some(merged))
 }
 
 /// A correction traveling the mesh: the correcting member's cert + the act, signed over the
@@ -2853,5 +2878,183 @@ mod tests {
         assert_eq!(loaded, r);
         assert_eq!(load_all(&dir).len(), 1);
         assert!(load(&dir, "nope").unwrap().is_none());
+    }
+
+    // ---- T-208: the purge collects, and nothing refills it ----
+    //
+    // The live failure (Wildhorse, 2026-08-17): seven un-vouched visitors announced as purged
+    // on every tick for eighteen hours. The sweep was never the problem — `federate` runs
+    // immediately before it, `absorb` re-created each record from a sibling's offer with its
+    // original ancient `first_seen`, and the sweep deleted it again seconds later.
+
+    /// A visitor past the window is really gone, is announced exactly once, and a second sweep
+    /// has nothing left to say. "Purged" is a report of what happened, not of what was intended.
+    #[test]
+    fn t208_the_sweep_collects_and_announces_once() {
+        let dir = fresh("t208_sweep");
+        let mut stale = base_record("stalevisitor00001");
+        stale.first_seen = NOW - GUEST_PURGE_SECS - 1;
+        stale.last_seen = NOW - GUEST_PURGE_SECS - 1;
+        save(&dir, &stale).unwrap();
+
+        let announced = purge_stale_guests(&dir, NOW);
+        assert_eq!(announced, vec!["stalevisitor00001".to_string()]);
+        assert!(
+            load(&dir, "stalevisitor00001").unwrap().is_none(),
+            "the announcement must mean the record file is gone"
+        );
+
+        assert!(
+            purge_stale_guests(&dir, NOW).is_empty(),
+            "a second sweep has nothing to announce — repeated announcements are the bug"
+        );
+    }
+
+    /// The announcement is evidence, not intent: when the record file does not actually go, the
+    /// sweep says nothing. This is the property the live failure violated — 922 observations
+    /// claiming a purge that the next tick disproved. Held against a delete that genuinely fails
+    /// (a read-only records directory), because a delete that succeeds cannot show the difference.
+    #[cfg(unix)]
+    #[test]
+    fn t208_a_sweep_that_did_not_collect_says_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = fresh("t208_evidence");
+        let mut stale = base_record("stalevisitor00003");
+        stale.first_seen = NOW - GUEST_PURGE_SECS - 1;
+        stale.last_seen = NOW - GUEST_PURGE_SECS - 1;
+        save(&dir, &stale).unwrap();
+
+        let records = dir.join(RECORDS_DIR);
+        let original = std::fs::metadata(&records).unwrap().permissions();
+        std::fs::set_permissions(&records, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        // Root ignores the mode bits, so ask the directory rather than assume: if we can still
+        // write here, this run cannot stage a failing delete and must not pretend it did.
+        let probe = records.join(".t208-probe");
+        let unrestricted = std::fs::write(&probe, b"").is_ok();
+        let _ = std::fs::remove_file(&probe);
+
+        if !unrestricted {
+            let announced = purge_stale_guests(&dir, NOW);
+            assert!(
+                announced.is_empty(),
+                "a delete that failed must not be announced as a purge"
+            );
+            assert!(
+                load(&dir, "stalevisitor00003").unwrap().is_some(),
+                "and the record is still there — which is exactly why saying so would be a lie"
+            );
+        }
+
+        std::fs::set_permissions(&records, original).unwrap();
+    }
+
+    /// The bug itself. A sibling door offers back the visitor we just forgot; absorbing it would
+    /// re-create a record already past our retention, which the very next sweep deletes and
+    /// announces again — every tick, for the 48h the sibling keeps offering it.
+    #[test]
+    fn t208_a_sibling_cannot_resurrect_a_visitor_we_have_already_forgotten() {
+        let dir = fresh("t208_resurrect");
+        let mut ghost = base_record("ghostvisitor00001");
+        ghost.first_seen = NOW - GUEST_PURGE_SECS - 1;
+        ghost.last_seen = NOW - GUEST_PURGE_SECS - 1;
+        save(&dir, &ghost).unwrap();
+        assert_eq!(purge_stale_guests(&dir, NOW).len(), 1);
+
+        // The sibling's offer, arriving on the next tick's record-sync.
+        assert!(
+            absorb(&dir, &ghost, NOW).unwrap().is_none(),
+            "an offer past our own retention is declined, not absorbed"
+        );
+        assert!(
+            load(&dir, "ghostvisitor00001").unwrap().is_none(),
+            "declining must not write the file"
+        );
+        assert!(
+            purge_stale_guests(&dir, NOW).is_empty(),
+            "with nothing refilling it, the tick after a purge is silent"
+        );
+    }
+
+    /// The scoping that keeps the rule from eating real news: retention declines a record we
+    /// hold NOTHING about. A visitor we already hold still merges, because that offer may be
+    /// carrying the establishment that makes them a member.
+    #[test]
+    fn t208_an_establishment_still_arrives_for_a_guest_we_already_hold() {
+        let dir = fresh("t208_establish");
+        let mut ours = base_record("latevisitor000001");
+        ours.first_seen = NOW - GUEST_PURGE_SECS - 1;
+        ours.last_seen = NOW - GUEST_PURGE_SECS - 1;
+        save(&dir, &ours).unwrap();
+
+        let mut theirs = ours.clone();
+        theirs.identity.established = Some(Establishment {
+            handle: "betty".into(),
+            class: EvidenceClass::DeviceVoucher,
+            artifact: "proof".into(),
+            at: NOW - 10,
+        });
+        theirs.admitted = Some(AdmissionFact {
+            minted_by: "siblingdoor00001".into(),
+            at: NOW - 10,
+            evidence: EvidenceClass::DeviceVoucher,
+            artifact: "proof".into(),
+        });
+
+        let merged = absorb(&dir, &theirs, NOW).unwrap().expect("not declined");
+        assert_eq!(derive_state(&merged), RecordState::Member);
+        assert!(
+            purge_stale_guests(&dir, NOW).is_empty(),
+            "an established device is never a stale visitor"
+        );
+    }
+
+    /// A visitor still inside the window is ordinary mesh traffic and absorbs normally — the
+    /// rule is about retention, not about distrusting siblings.
+    #[test]
+    fn t208_a_visitor_inside_the_window_still_absorbs() {
+        let dir = fresh("t208_fresh");
+        let mut recent = base_record("freshvisitor00001");
+        recent.first_seen = NOW - 60;
+        recent.last_seen = NOW - 60;
+        assert!(absorb(&dir, &recent, NOW).unwrap().is_some());
+        assert!(load(&dir, "freshvisitor00001").unwrap().is_some());
+    }
+
+    /// The offer side of the same promise: a door does not hand siblings the visitors it is
+    /// itself obliged to forget. The sync window is 48h and the guest window is 2h, so without
+    /// this filter a door spends the 46h in between offering records it deletes every tick.
+    #[test]
+    fn t208_a_door_does_not_offer_a_visitor_it_owes_the_bin() {
+        let dir = fresh("t208_offer");
+        let node = NodeKey::load_or_mint(&dir, "door").unwrap();
+        let cred = group::create_group(&dir, &node, "g", NOW, DEFAULT_CERT_TTL_SECS).unwrap();
+
+        let mut stale = base_record("stalevisitor00002");
+        stale.first_seen = NOW - GUEST_PURGE_SECS - 1;
+        stale.last_seen = NOW - GUEST_PURGE_SECS - 1;
+        save(&dir, &stale).unwrap();
+
+        let mut fresh_guest = base_record("freshvisitor00002");
+        fresh_guest.first_seen = NOW - 60;
+        fresh_guest.last_seen = NOW - 60;
+        save(&dir, &fresh_guest).unwrap();
+
+        let sync = build_record_sync(&dir, &cred, &node, NOW).unwrap().unwrap();
+        let offered: Vec<&str> = sync
+            .body
+            .records
+            .iter()
+            .map(|r| r.device_id.as_str())
+            .collect();
+        assert!(
+            offered.contains(&"freshvisitor00002"),
+            "a visitor inside the window still travels"
+        );
+        assert!(
+            !offered.contains(&"stalevisitor00002"),
+            "a visitor past our retention is not ours to hand on"
+        );
     }
 }

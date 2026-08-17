@@ -6,6 +6,70 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — T-208 · The purge was collecting all along; record-sync kept refilling it
+
+The board had this as *"the visitor purge announces but does not collect"* — six orphan guest
+records outliving a two-hour window, the same device_ids announced as purged over and over, and
+a reasonable suspicion that `remove_file` was failing silently behind its `let _ =`.
+
+The delete path was never broken. It was being **refilled faster than it could stay empty**.
+
+### What was actually happening
+
+Caught live on Wildhorse this morning. `mesh/records/` held none of the seven ghosts at 06:55
+and all seven at 06:59, each one stamped with that tick's mtime. The local observation store had
+**922** `purged` observations across those seven device_ids, repeating at every tick timestamp
+for eighteen hours.
+
+The loop is one tick long. In `cycle`, step 8b `federate()` runs immediately before the guest
+sweep. `federate` exchanges record-syncs; `record::absorb` took an incoming record **whole**
+when it held nothing locally — including its original `first_seen`. So a sibling door handed
+back the visitor this door had just forgotten, aged eighteen hours on arrival; the sweep four
+lines later deleted it again and announced it again. `RECORD_SYNC_WINDOW_SECS` is 48h and
+`GUEST_PURGE_SECS` is 2h, so every door in the mesh was obliged to offer, for 46 hours, exactly
+the records every other door was obliged to delete.
+
+Worth knowing who the ghosts were: guest, `attestation: yes`, `admitted: no`, `origin` an
+iPhone on iOS 26.6.1 · v98 at 139.178.129.26, lat/lon 37.232/-122.068. That is Cupertino —
+**Apple App Review**, knocking at the lighthouse during review, accepting the Three Laws, and
+never being vouched for. The mesh handled them exactly right and then could not let them go.
+
+### What changed
+- **`absorb` declines rather than creates.** Returns `Result<Option<MembershipRecord>>`; `None`
+  means an offer past our own retention that we hold nothing about. Forgetting an unidentified
+  visitor after two hours is this door's own promise, and a record arriving from elsewhere does
+  not reopen it. Scoped deliberately to `local == None` — a guest we already hold still merges,
+  because that offer may be carrying the establishment that makes them a member.
+- **`build_record_sync` does not offer what it owes the bin.** A door should not hand siblings
+  the visitors it is itself about to delete.
+- **The announcement became evidence.** `purge_stale_guests` pushes a device_id only when
+  `remove_file` actually returned `Ok`. The old code announced intent; 922 observations said a
+  thing had happened that the next tick disproved.
+
+`absorb`'s two call sites in `transport.rs` now take `now` and treat `Ok(None)` as declined —
+the `absorbed N` count no longer reports taking in a record we deliberately did not create.
+
+### Checks
+`cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
+--workspace` — all exit 0; 35 suites, 651 tests passed, 0 failed. Six new tests in
+`record.rs`. Each of the three fixes was individually neutered and the suite re-run to confirm a
+test actually fails without it — the first version of the announcement test passed against the
+broken code, which is the same class of mistake as the bug it was written for, so it was rewritten
+to hold against a delete that genuinely fails (a read-only records directory, skipped honestly
+when the process can write anyway).
+
+### What the next developer should know
+The seven ghosts are still inside the 48h sync window right now. They stop being offered once
+their `last_seen` ages out, but a door running this fix stops creating them immediately —
+fix 1 holds even when the door on the other side is an old build.
+
+Still open, and deliberately not in this brick: every ghost carried `attestation: yes` with
+`admitted: no`. Whether the two-filter door leaves half-admitted records behind on every knock
+is its own question, noted on T-208's board entry.
+
+The shape of this one is the same shape as most of 2026-08-16: **a step that reported success
+without measuring it.** The purge said "purged" because it had run, not because anything went.
+
 ## 2026-08-16 — T-202 · A name already taken is an alarm, not a refusal
 
 Ian: *"The naming needs to be aware of the possibility of new users with duplicate names...

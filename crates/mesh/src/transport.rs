@@ -3278,7 +3278,9 @@ fn recv_record_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
     }
     let mut absorbed = 0usize;
     for r in &sync.body.records {
-        if crate::record::absorb(dir, r).is_ok() {
+        // Ok(None) is a declined offer (a guest already past our retention), not an absorb —
+        // counting it would report we took in a record we deliberately did not create.
+        if matches!(crate::record::absorb(dir, r, now_secs()), Ok(Some(_))) {
             absorbed += 1;
         }
     }
@@ -3324,7 +3326,7 @@ async fn sync_records_with(dir: &Path, addr: &str) {
                         .is_ok()
                         {
                             for r in &theirs.body.records {
-                                let _ = crate::record::absorb(dir, r);
+                                let _ = crate::record::absorb(dir, r, now);
                             }
                             if let Some(g) = &theirs.body.game {
                                 absorb_game_notifying(dir, g);
