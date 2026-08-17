@@ -3418,11 +3418,24 @@ fn cmd_mcp(args: &[String]) -> ExitCode {
     let sub = args.first().map(String::as_str).unwrap_or("servers");
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
-    let positional: Vec<&String> = args
-        .iter()
-        .skip(1)
-        .filter(|a| !a.starts_with("--"))
-        .collect();
+    // Positional arguments, with flag VALUES skipped: `mcp call ucf ucf_status --data-dir X`
+    // must not read `X` as the tool's JSON arguments (it did, on the first live run).
+    let positional: Vec<&String> = {
+        let mut out = Vec::new();
+        let mut skip_next = false;
+        for a in args.iter().skip(1) {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if let Some(key) = a.strip_prefix("--") {
+                skip_next = !key.contains('=');
+                continue;
+            }
+            out.push(a);
+        }
+        out
+    };
 
     match sub {
         "servers" => match familiar_mcp::ServerSet::load(&dir) {

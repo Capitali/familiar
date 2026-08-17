@@ -65,11 +65,31 @@ header, 401 on a missing bearer): the handshake works, discovery lists both tool
 one calls, the undeclared one refuses without the server ever seeing it (asserted by counting
 what the stub received), a shut boundary sends nothing at all, and an absent server degrades.
 
+### It works, live
+
+Ian read the refusal and answered *"allow_network -- make this thing functional."* — so the
+gate was opened (that one field, nothing else; every other shut gate stayed shut, and the old
+policy is kept beside it as `boundary.json.bak-2026-08-17-preT206`). Then, against Jeff's
+actual server:
+
+- `familiar mcp tools ucf` → **ucf-exchange v1.0.0, protocol 2025-06-18, ten tools**, each with
+  its description. It is a space-trading economy: `ucf_status` (world clock), `ucf_stations`,
+  `ucf_prices`, `ucf_quotes`, `ucf_quote`, `ucf_news`, `ucf_carriers`, `ucf_loadboard`,
+  `ucf_route`, `ucf_reference`. Every one is read-only; the surface has no order-placing tool.
+- All ten were then declared, and `ucf_status` answered: world `PROD`, **tick 5778**, 300-second
+  ticks, content version 25. `ucf_stations` returned fifteen stations — Cannery Row Fulfilment
+  orbiting Callisto, Enceladus Draw out on the frontier.
+- A tool that is *not* in the declaration still refuses locally, without reaching the wire.
+
+One bug the live run found, which no stub could have: `mcp call ucf ucf_status --data-dir X`
+read `X` as the tool's JSON arguments, because the positional filter dropped tokens beginning
+`--` and kept their values. Fixed, and the reason is in the code.
+
 ### What the next developer should know
-The live call has **not** been made. `allow_network` is shut on this household's boundary and
-only Ian can open it — the refusal above is the system working. To try it for real: open the
-gate, then `familiar mcp tools ucf`. The declaration ships with `"tools": []`, so even with the
-gate open the familiar can only *look*.
+The declaration now names all ten tools, and the note in it says why that was safe: they are
+all read-only *as discovered on 2026-08-17*. If Jeff adds an order-placing tool, it arrives as
+`not declared` and stays uncallable until a human writes it in. That is the property to
+preserve — discovery is not permission.
 
 Not built here, deliberately: the familiar's own MCP server (`purr.say`, `purr.utterances`),
 which is the other half of T-206. The counterparty is read-only, so the client is the half that
