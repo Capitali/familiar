@@ -468,7 +468,7 @@ mod tests {
     use std::fs;
 
     fn dir(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(name);
+        let p = std::env::temp_dir().join(format!("{name}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p

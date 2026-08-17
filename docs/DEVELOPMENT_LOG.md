@@ -6,6 +6,61 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — T-118 · Two runs, two fixture roots (finishing codex's abandoned brick)
+
+Picked up on Ian's word (2026-08-17: *"Claim the unfinished codex claimed ones from the board
+and finish them as well. Codex unavailable for another few days."*). companion:codex claimed
+T-118 on 2026-08-15 and hit its budget mid-flight; the working tree was committed verbatim to
+`origin/claude/codex-t118` (4114ef2) and released back to the board as incomplete — 20 files
+of per-process temp roots with no regression proving any of it.
+
+The original symptom, 2026-08-14: a full green-bar run overlapped another session's run and
+`cycle`'s parameter-revert test watched its fixture revert a second time. It passed alone and a
+clean rerun passed once the other job finished. Two processes were writing
+`/tmp/familiar_cycle_test_<tag>`, because a fixed fixture name is the same path in every
+process on the machine — and this repo runs several worktrees at once by design (coordination
+rule 7).
+
+### What changed
+- **Codex's sweep, merged.** Per-process roots across cycle, exec, kernel and mesh. It merged
+  onto current main cleanly.
+- **`crates/kernel/src/testing.rs` (new).** `temp_root(tag)` — the one place that decides how a
+  fixture root is named, arriving clean. The naming rule is a pure function of `(tag, pid)` so
+  the isolation property can be tested without spawning anything.
+- **The last two fixed roots.** `capabilities.rs`'s two tests passed the *system temp root
+  itself* as a data dir — not a collision between our tests, but a directory shared with every
+  process on the machine, read by a function that looks for files by name.
+- **`crates/kernel/tests/temp_roots.rs` (new) — the structural guard.** It walks every `.rs` in
+  the workspace and fails on any `temp_dir()` without a per-process component within the same
+  expression. The per-process fix is easy to apply and easy to forget: the next test reaches
+  for `temp_dir().join("my_test")` because the file above it used to. This catches that when it
+  is written, rather than the next time two runs overlap.
+
+### Checks
+`cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test
+--workspace` — each exit-checked, all 0; **674 passed, 0 failed**.
+
+Then the accept bar's own words — *concurrent full green-bar runs cannot mutate the same
+fixture directory* — tested rather than asserted. Two full runs of the kernel, cycle, mesh and
+guard suites, started simultaneously against the same `/tmp`: **both green, 524 tests each, 0
+failures.**
+
+And the harness was neutered to prove it measures something. With the pid removed from
+`cycle`'s `Temp::path` and nothing else changed, the same two concurrent runs went **red — 25
+and 21 failures.** That is the 2026-08-14 incident, reproduced on demand and then fixed. The
+structural guard was neutered separately (pid removed from `observation.rs`) and named the file
+and line.
+
+### What the next developer should know
+The guard exempts exactly two files by name — the helper that owns the rule and the guard
+itself, which has to name the pattern in order to search for it. Both are listed in its source
+with the reason. A test that genuinely needs the shared temp root will fail the guard, and that
+is the intended conversation.
+
+Codex's other unfinished item, T-104, is *blocked* rather than abandoned: its repository brick
+merged long ago (6e02b0a) and what remains is a live FamTalker01 deploy, which belongs to the
+infra lane and is gated on T-117.
+
 ## 2026-08-17 — T-210 brick 2 · The typed answering act: law text is unauthorable
 
 Brick 1 put the constitution in front of the model, and the live check confirmed it worked —

@@ -339,7 +339,8 @@ mod tests {
     const NOW: i64 = 1_770_000_000;
 
     fn tmp(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_mesh_brief_{tag}"));
+        let p =
+            std::env::temp_dir().join(format!("familiar_mesh_brief_{}_{tag}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p

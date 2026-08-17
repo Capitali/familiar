@@ -165,7 +165,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(tag: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_exec_test_{tag}"));
+        let p =
+            std::env::temp_dir().join(format!("familiar_exec_test_{}_{tag}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p

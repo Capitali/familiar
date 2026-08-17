@@ -745,7 +745,8 @@ mod tests {
     use super::*;
 
     fn tmp(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("familiar_mesh_group_{tag}"));
+        let p =
+            std::env::temp_dir().join(format!("familiar_mesh_group_{}_{tag}", std::process::id()));
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
