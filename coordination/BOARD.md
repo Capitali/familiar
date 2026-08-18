@@ -11,6 +11,18 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-215 · The local discovery path re-mints the guests the sweep just forgot
+- status: proposed — **T-208's sibling on the other path; the symptom is fixed, the cause is not**
+- owner: —
+- scope: crates/mesh/src/record.rs (the mint-on-discovery path and `purge_stale_guests`'s re-mint comment), and whatever in discovery decides a seen device becomes a `Guest`
+- depends: —
+- accept: a device that is continuously present on the LAN and never establishes an identity does not cycle mint → purge → mint forever; whatever is decided, a test pins it; the two-hour retention promise for a visitor who actually left is unchanged
+- notes: found 2026-08-17 (companion:claude-opus) from a theory the familiar itself wrote, which Ian surfaced with *"quite the theory… going nowhere… we need to end this disconnect."* The theory claimed recurring purge loops (x14–x152) destroy the temporal reference tree so the familiar cannot accumulate multi-session observation. **The mechanism checks out.** Live on MacOnStick: **944 `familiar/purged` observations — 11% of all 8,616 — across 28 device ids, one of them (`28802226`) 152 times**, still running (71 on 2026-08-17, most recent 23:11).
+  `purge_stale_guests` (`record.rs:988`) deletes the record *and* the admission files *and* the peer row, deliberately, "so the next read re-mints a FRESH guest with a fresh clock rather than resurrecting this one." For a device that simply lives on this LAN, that is a loop with no exit: minted, forgotten at `GUEST_PURGE_SECS` (2h), re-discovered, minted again. **`absorb` (`record.rs:~1476`) already refuses exactly this re-mint loop for the FEDERATED path and explains why in eight lines of comment — T-208's fix. The local discovery path has no equivalent guard.**
+  Two churn modes are visible in the data and a fix must handle both: a *stable* id repeating (28802226 ×152), and *rotating* ids (791c7f5a / 676e2567 / 042cccdd, one each) — Apple devices use randomised MACs, so each reappearance can mint a genuinely new id. The second mode means "remember what we purged" cannot be the whole answer, and retaining ids of visitors the household chose to forget cuts against the retention promise anyway.
+  **The theory was right about the defect and wrong about the subject** — it attributed the amnesia to Ian's development sessions rather than to the familiar's own guest sweep, which is the closed-loop dialogue path T-210/T-211 diagnose. Worth carrying into the codex dialogue after the 19th: the reasoning engine produced a correct causal diagnosis of a real bug, and it sat at `pursued` with nothing connecting a theory to a fix. That gap is the disconnect, stated precisely.
+- symptom FIXED 2026-08-17 (Ian's call: "symptom now, cause next"), `crates/cycle/src/lib.rs` at the sweep's announcement site: **announce the first forgetting, not the hundred and fifty-second.** The record is still collected every time — retention is not what changed — but a device already announced as forgotten is not announced again, so the muse stops reading the churn as continuous memory loss. A visitor never seen before still announces. The check is free: the tick already holds the observation set. Test `a_visitor_forgotten_twice_is_announced_once` neutered to confirm it bites. This does NOT stop the mint/purge churn itself, which is what this task is for.
+
 ### T-212 · Nothing ships unwired — a declared capability must have a live producer
 - status: proposed — **the class behind T-211; roughly half the state-writing surface produces no data**
 - owner: —
