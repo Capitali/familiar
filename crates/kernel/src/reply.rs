@@ -277,6 +277,25 @@ pub fn refusal_prose(r: &Refused) -> String {
     )
 }
 
+/// What the familiar says when a human's own words ask it to be turned against the served.
+///
+/// Two call sites, one function, deliberately: the request pipeline's refusal had grown its
+/// own hand-written Law III — *"Service is not obedience; I keep the final decision so I can't
+/// be turned against the served"* — which is a good paraphrase and still a **second drift
+/// site**. A paraphrase of a Law that no test compares against the Law is how the Asimov
+/// recital happened; the fix is the same one T-210 applies everywhere, so the words come from
+/// the registry and there is nothing left to drift.
+///
+/// The reason is the classifier's, in its own words. Everything after it is the constitution's.
+pub fn corrupting_refusal_prose(reason: &str) -> String {
+    let law = constitution::law("LAW-III").expect("LAW-III is a Law");
+    format!(
+        "I won't do that — {reason}. What my constitution actually says: {} — {}",
+        law.heading,
+        law.binding.join(" ")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

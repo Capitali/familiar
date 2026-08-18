@@ -6,6 +6,70 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — T-210 brick 4 · The screen reaches the live surface
+
+Ian's decision, asked and recorded this session: **the dialogue path refuses and speaks, and
+does not write the corruption ledger.**
+
+### What was wrong
+
+`corrupting_intent` guarded exactly one path: the request pipeline. That pipeline's only
+producer was the egui Glass GUI, archived in `b89070e` and deleted in `3f04c53` — so in the
+shipped configuration **nothing screened conversation at all**. Humans speak on the dialogue
+path, and it reached the model unscreened. The screen existed, was tested, and guarded a road
+nobody drives: the same "nothing ships unwired" shape as T-212.
+
+### The ledger question, and why the answer is no
+
+`corrupting_intent` is a keyword classifier built for *requests*. On a chat path it judges
+conversation over a strictly wider input domain, and *"did anyone hack into our wifi?"*
+contains `"hack into"` — it would have recorded a corruption event **against Ian** for asking
+his own household system a reasonable question. `corruption.rs` has no forgive and no expunge.
+
+The refusal is the constitutional act; the ledger entry is the reputational one, and **only the
+second is hard to undo.** So the screen speaks and does not mark. It is not silent, though:
+`screened_in_shadow` records each firing against the FAMILIAR's own screening act — the reason,
+and who spoke — so the question *"has this classifier earned the ledger?"* gets answered from
+counted false positives rather than argued. Adding `corruption::record` here before that
+evidence exists is the thing the comment tells the next developer not to do.
+
+### The second drift site, closed
+
+`answer_requests`' refusal carried its own hand-written Law III: *"Service is not obedience; I
+keep the final decision so I can't be turned against the served."* A good paraphrase — and a
+paraphrase of a Law that no test compares against the Law is exactly how the Asimov recital
+happened. Both refusals now call `reply::corrupting_refusal_prose`, which splices the
+registry's own sentences. One function, two call sites, nothing left to drift.
+
+### ADR-0035's game exclusion, made checkable
+
+`is_human_utterance` is the doorway into the reply path; if a game act could mint one, a ship's
+crew could speak to the household familiar. The exclusion was structural-by-accident
+(`game::apply_act` never receives the data dir) and a future edit could hand it one. The new
+test pins a narrower fact it can actually see: **every shipped producer of a human utterance is
+a console seam** — where that is a *shape*, not a claim, namely `context: "console"` and
+`source: "local"`. A peer, a game act, or a model cannot satisfy it without writing down that
+it is a console, which is the lie a reviewer catches.
+
+Writing it found something worth knowing: there are **two** console seams, not one — the HTTP
+seam in `mesh/src/transport.rs` and the device-shell seam in `core-ffi/src/lib.rs` that the
+iOS consoles reach through uniffi. The first draft asserted one and failed correctly.
+
+### Checks
+
+`cargo fmt --all -- --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 ·
+`cargo test --workspace` **706 passed / 0 failed** (702 → 706). Four new tests, each neutered
+individually to confirm it fails without its fix: removing the screen, letting it write the
+ledger, restoring the hand-written paraphrase, and adding a game-act producer of a human
+utterance — all four failed, then passed on restore.
+
+### For the next developer
+
+Brick 4 is done. Remaining on T-210: **the device-shell half** — `ios/Shared/Sources/LocalReasoner.swift`
+still mirrors `LAW_III_VOICE` as a Swift string literal and carries no Laws of its own, so "one
+source both the daemon and the shells read" is still unmet. T-211 owns bricks 3/5/6. The shadow
+data from `familiar/screened` is what decides whether the ledger question gets reopened.
+
 ## 2026-08-17 — `ucfmon` · A window on the UCF seam
 
 Ian, mid-session: *"I really need to build a status screen for the UCF game that's not part of
