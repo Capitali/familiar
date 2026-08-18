@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 
 use crate::catch::{Haul, Kibble, Yowl};
 use crate::sniff::{Pounce, Prowl};
+use familiar_mcp::Claimed;
 
 const WIDTH: usize = 98;
 
@@ -289,13 +290,44 @@ pub fn draw(p: &Prowl, t: &Twitches, fur: &Fur, prowls: u64, interval: u64) -> S
             );
             // Discovery is not permission: a tool that appeared is a decision for a human.
             if !extra.is_empty() {
+                // The interesting drift is not "a tool appeared" but "a tool that SPENDS
+                // appeared". One line each, loudest first, with the server's own claim about
+                // what it does — shown as a claim, because it is one.
+                let acts = extra.iter().filter(|(_, c)| *c == Claimed::Acts).count();
                 cont(
                     &mut o,
                     &fur.ears_back(&format!(
-                        "⚠ on offer but NOT on the collar — untouchable until a human says so: {}",
-                        extra.join(", ")
+                        "⚠ {} on offer but NOT on the collar — untouchable until a human writes \
+                         each one in{}",
+                        extra.len(),
+                        if acts > 0 {
+                            format!(" · {acts} SAY THEY ACT ON THE WORLD")
+                        } else {
+                            String::new()
+                        }
                     )),
                 );
+                let mut ranked = extra.clone();
+                ranked.sort_by_key(|(_, c)| match c {
+                    Claimed::Acts => 0,
+                    Claimed::Unstated => 1,
+                    Claimed::Reads => 2,
+                });
+                for (name, claimed) in ranked.iter().take(8) {
+                    let (mark, says) = match claimed {
+                        Claimed::Acts => (fur.hiss("✱"), fur.hiss("server says: ACTS")),
+                        Claimed::Reads => (fur.dim("·"), fur.dim("server says: reads only")),
+                        // Silence is not a claim of safety, and must not read as one.
+                        Claimed::Unstated => (fur.dim("·"), fur.dim("server says nothing")),
+                    };
+                    cont(&mut o, &format!("  {mark} {name:<22} {says}"));
+                }
+                if ranked.len() > 8 {
+                    cont(
+                        &mut o,
+                        &fur.dim(&format!("    … and {} more", ranked.len() - 8)),
+                    );
+                }
             }
             if !gone.is_empty() {
                 cont(
@@ -634,6 +666,64 @@ fn paw_prints(o: &mut String, fur: &Fur, p: &Prowl) {
 mod tests {
     use super::*;
     use crate::sniff::pretend::prowl_with_bowls;
+
+    /// **The moment this whole discipline exists for.** Jeff's `ucf-market` schema adds five
+    /// tools to the ten on the collar, and three of them SPEND — `ucf_trade`, `ucf_book`,
+    /// `ucf_travel`. When that endpoint is pointed at, the screen must not report a bland
+    /// "5 new tools": it must say that three of them act on the world, because that is the
+    /// difference between a shrug and a decision.
+    #[test]
+    fn tools_that_act_are_called_out_above_tools_that_read() {
+        let p = crate::sniff::pretend::prowl_with_offer(
+            &["ucf_status", "ucf_prices"],
+            &[
+                ("ucf_status", Claimed::Reads),
+                ("ucf_prices", Claimed::Reads),
+                ("ucf_me", Claimed::Reads),
+                ("ucf_trade", Claimed::Acts),
+                ("ucf_travel", Claimed::Acts),
+                ("ucf_mystery", Claimed::Unstated),
+            ],
+        );
+        let out = draw(
+            &p,
+            &twitches(&Whiskers::new(), &p),
+            &Fur { colour: false },
+            1,
+            15,
+        );
+
+        assert!(out.contains("4 on offer but NOT on the collar"));
+        assert!(
+            out.contains("2 SAY THEY ACT ON THE WORLD"),
+            "the count of acting tools must be on the headline, not buried"
+        );
+        // Acting tools rank above reading ones, so a truncated list never hides a spender.
+        let trade = out.find("ucf_trade").expect("ucf_trade must be listed");
+        let me = out.find("ucf_me").expect("ucf_me must be listed");
+        assert!(
+            trade < me,
+            "a tool that acts must be listed before one that reads"
+        );
+        assert!(out.contains("server says: ACTS"));
+    }
+
+    /// Silence is not a claim of safety. `ucf-exchange` sends no annotations at all, so its
+    /// tools must render as "says nothing" — never as "reads only".
+    #[test]
+    fn an_unannotated_tool_is_never_rendered_as_safe() {
+        let p =
+            crate::sniff::pretend::prowl_with_offer(&[], &[("ucf_whatever", Claimed::Unstated)]);
+        let out = draw(
+            &p,
+            &twitches(&Whiskers::new(), &p),
+            &Fur { colour: false },
+            1,
+            15,
+        );
+        assert!(out.contains("server says nothing"));
+        assert!(!out.contains("reads only"));
+    }
 
     #[test]
     fn a_stretch_reads_the_way_a_human_says_it() {

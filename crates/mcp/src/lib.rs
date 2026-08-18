@@ -36,7 +36,7 @@ pub mod session;
 pub mod tls;
 
 pub use declaration::{Server, ServerSet};
-pub use session::{Session, Tool};
+pub use session::{Annotations, Claimed, Session, Tool};
 
 /// Everything that can go wrong reaching a partner, kept apart so a caller can tell a shut
 /// gate from a broken wire from a server that answered rubbish.

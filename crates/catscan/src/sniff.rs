@@ -51,6 +51,16 @@ pub struct Collar {
     pub problem: Option<String>,
 }
 
+/// A tool the server offers, and what the server CLAIMS it does.
+///
+/// The claim is displayed, never obeyed — `may_call` answers to the human's collar alone.
+/// Carrying it matters because the interesting drift is not "a tool appeared" but "a tool that
+/// SPENDS appeared", and a human should not have to read ten descriptions to notice.
+pub struct Offered {
+    pub name: String,
+    pub claimed: familiar_mcp::Claimed,
+}
+
 /// The cat flap. Whether this reach is permitted, asked at the moment the cat would go
 /// through it — the same gate `familiar_mcp::permitted` consults, asked the same way.
 pub struct CatFlap {
@@ -89,7 +99,7 @@ pub struct Prowl {
     pub collar: Collar,
     pub flap: CatFlap,
     pub boop: Result<NoseBoop, String>,
-    pub on_offer: Pounce<Vec<String>>,
+    pub on_offer: Pounce<Vec<Offered>>,
     pub purr: Pounce<Purr>,
     pub perches: Pounce<Vec<Perch>>,
     pub bowls: Pounce<Vec<Kibble>>,
@@ -104,12 +114,12 @@ impl Prowl {
     /// Tools on offer that the collar does **not** name. Discovery is not permission
     /// (ADR-0032) — these are visible and untouchable, and the cat names them because a new
     /// one appearing is exactly the event a human needs to decide about.
-    pub fn uncollared(&self) -> Vec<String> {
+    pub fn uncollared(&self) -> Vec<(String, familiar_mcp::Claimed)> {
         match self.on_offer.got() {
             Some(o) => o
                 .iter()
-                .filter(|t| !self.collar.tools.iter().any(|d| d == *t))
-                .cloned()
+                .filter(|t| !self.collar.tools.contains(&t.name))
+                .map(|t| (t.name.clone(), t.claimed))
                 .collect(),
             None => Vec::new(),
         }
@@ -123,7 +133,7 @@ impl Prowl {
                 .collar
                 .tools
                 .iter()
-                .filter(|d| !o.iter().any(|t| t == *d))
+                .filter(|d| !o.iter().any(|t| t.name == **d))
                 .cloned()
                 .collect(),
             None => Vec::new(),
@@ -275,7 +285,14 @@ pub fn prowl(tray: &Path, server: &str, session: &mut Option<Session>, now: i64)
         };
         Pounce {
             millis: t.millis,
-            caught: t.caught.map(|v| v.into_iter().map(|x| x.name).collect()),
+            caught: t.caught.map(|v| {
+                v.into_iter()
+                    .map(|x| Offered {
+                        claimed: x.claimed(),
+                        name: x.name,
+                    })
+                    .collect()
+            }),
         }
     };
 
@@ -314,6 +331,31 @@ pub fn prowl(tray: &Path, server: &str, session: &mut Option<Session>, now: i64)
 #[cfg(test)]
 pub mod pretend {
     use super::*;
+
+    /// A prowl whose collar and offer list are set explicitly, for drift rendering.
+    pub fn prowl_with_offer(collared: &[&str], offered: &[(&str, familiar_mcp::Claimed)]) -> Prowl {
+        let mut p = super::tests::bare_prowl(collared, None);
+        // The drift panel only renders once the two of them have said hello, so a prowl used
+        // to exercise it needs a successful boop.
+        p.boop = Ok(NoseBoop {
+            server_name: "ucf-market".into(),
+            server_version: "1.0.0".into(),
+            protocol_version: "2025-06-18".into(),
+            wearing_tag: true,
+            millis: 1,
+        });
+        p.on_offer = Pounce {
+            caught: Ok(offered
+                .iter()
+                .map(|(n, c)| Offered {
+                    name: (*n).to_string(),
+                    claimed: *c,
+                })
+                .collect()),
+            millis: 1,
+        };
+        p
+    }
 
     /// A prowl carrying nothing but a tick and a table of bowls — enough to exercise movement.
     pub fn prowl_with_bowls(bowls: &[(&str, f64)], tick: i64) -> Prowl {
@@ -368,7 +410,13 @@ mod tests {
             boop: Err("unused".into()),
             on_offer: match on_offer {
                 Some(v) => Pounce {
-                    caught: Ok(v),
+                    caught: Ok(v
+                        .into_iter()
+                        .map(|name| Offered {
+                            name,
+                            claimed: familiar_mcp::Claimed::Unstated,
+                        })
+                        .collect()),
                     millis: 1,
                 },
                 None => Pounce::missed("no session"),
@@ -395,7 +443,13 @@ mod tests {
             &["ucf_status"],
             Some(vec!["ucf_status".into(), "ucf_place_order".into()]),
         );
-        assert_eq!(p.uncollared(), vec!["ucf_place_order".to_string()]);
+        assert_eq!(
+            p.uncollared(),
+            vec![(
+                "ucf_place_order".to_string(),
+                familiar_mcp::Claimed::Unstated
+            )]
+        );
         assert!(p.collared_but_gone().is_empty());
     }
 

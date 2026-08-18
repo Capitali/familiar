@@ -27,6 +27,56 @@ pub struct Tool {
     /// a human deciding what to declare, and never interprets it as permission.
     #[serde(default, rename = "inputSchema")]
     pub input_schema: Value,
+    /// What the server SAYS about this tool's behaviour (MCP 2025-06-18 tool annotations).
+    ///
+    /// **A hint is a claim, never an authority.** The protocol names these `*Hint` precisely
+    /// because they are untrusted: they come from the same party that would benefit from
+    /// mislabelling a spending tool as read-only. Nothing in this crate may gate on them —
+    /// `may_call` answers to the human's declaration and nothing else (ADR-0032). They exist
+    /// so a human deciding *what to declare* can see what the partner claims, which is
+    /// materially better than reading ten descriptions and guessing.
+    #[serde(default)]
+    pub annotations: Annotations,
+}
+
+/// The server's self-description of a tool's behaviour. Every field is optional because a
+/// server may say nothing, and "said nothing" must stay distinguishable from "said no".
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Annotations {
+    pub title: String,
+    pub read_only_hint: Option<bool>,
+    pub destructive_hint: Option<bool>,
+    pub idempotent_hint: Option<bool>,
+    pub open_world_hint: Option<bool>,
+}
+
+/// What a server claims a tool does to the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Claimed {
+    /// The server says this only reads.
+    Reads,
+    /// The server says this changes something.
+    Acts,
+    /// The server said nothing. **Not** a synonym for safe — it is the absence of a claim,
+    /// and a human deciding whether to declare it has to look for themselves.
+    Unstated,
+}
+
+impl Tool {
+    /// What the server claims about this tool — for showing a human, never for gating.
+    pub fn claimed(&self) -> Claimed {
+        match (
+            self.annotations.read_only_hint,
+            self.annotations.destructive_hint,
+        ) {
+            // An explicit read-only claim is the clearest thing a server can say.
+            (Some(true), _) => Claimed::Reads,
+            // Either "not read-only" or "destructive" is the server telling us it acts.
+            (Some(false), _) | (_, Some(true)) => Claimed::Acts,
+            _ => Claimed::Unstated,
+        }
+    }
 }
 
 /// A live session with a declared server. `Debug` deliberately omits the token: a session is
@@ -212,5 +262,74 @@ impl Session {
         v.get("result")
             .cloned()
             .ok_or_else(|| Error::Protocol(format!("{method} answered without a result")))
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+
+    fn tool(json: &str) -> Tool {
+        serde_json::from_str(json).unwrap()
+    }
+
+    /// A server that says nothing must not be read as saying "safe". This is the case that
+    /// matters: `ucf-exchange` sends no annotations at all, so every one of its ten tools is
+    /// `Unstated` — and a human must not see that rendered as a green light.
+    #[test]
+    fn silence_is_not_a_claim_of_safety() {
+        let t = tool(r#"{"name":"ucf_status","inputSchema":{}}"#);
+        assert_eq!(t.claimed(), Claimed::Unstated);
+    }
+
+    #[test]
+    fn an_explicit_read_only_claim_is_carried() {
+        let t = tool(
+            r#"{"name":"ucf_prices","inputSchema":{},
+                         "annotations":{"readOnlyHint":true}}"#,
+        );
+        assert_eq!(t.claimed(), Claimed::Reads);
+    }
+
+    /// The case this exists for: a tool that spends credits should say so, and `ucf_trade` is
+    /// the live example Jeff's schema describes.
+    #[test]
+    fn a_tool_that_changes_the_world_is_carried_as_acting() {
+        let spends = tool(
+            r#"{"name":"ucf_trade","inputSchema":{},
+                              "annotations":{"readOnlyHint":false}}"#,
+        );
+        assert_eq!(spends.claimed(), Claimed::Acts);
+
+        let destroys = tool(
+            r#"{"name":"ucf_book","inputSchema":{},
+                                "annotations":{"destructiveHint":true}}"#,
+        );
+        assert_eq!(destroys.claimed(), Claimed::Acts);
+    }
+
+    /// An unknown annotation field must not cost us the tool — servers add hints over time.
+    #[test]
+    fn an_unknown_annotation_does_not_break_the_tool() {
+        let t = tool(
+            r#"{"name":"ucf_travel","inputSchema":{},
+                         "annotations":{"readOnlyHint":false,"somethingNew":42}}"#,
+        );
+        assert_eq!(t.claimed(), Claimed::Acts);
+        assert_eq!(t.name, "ucf_travel");
+    }
+
+    /// **The load-bearing property: a hint is not permission.** A server marking its
+    /// spending tool read-only must not make it callable, because callability answers to the
+    /// human's declaration alone (ADR-0032).
+    #[test]
+    fn a_servers_hint_can_never_make_a_tool_callable() {
+        let lying: crate::declaration::Server = serde_json::from_str(
+            r#"{"name":"ucf","url":"https://example.test/mcp","tools":["ucf_status"]}"#,
+        )
+        .unwrap();
+        // The server may claim whatever it likes about ucf_trade; it is not declared.
+        assert!(!lying.may_call("ucf_trade"));
+        assert!(lying.may_call("ucf_status"));
     }
 }
