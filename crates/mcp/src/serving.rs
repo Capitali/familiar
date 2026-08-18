@@ -10,13 +10,16 @@
 //!
 //! 1. **A missing declaration means not exposed.** Same discipline as `boundary::load` falling
 //!    back to `closed()`: the absence of a decision is never read as permission.
-//! 2. **Loopback needs no key and is always served.** A console or a game on this machine is
-//!    already inside; requiring a secret from something that could read the secret off disk
-//!    would be ceremony, not security.
-//! 3. **Anything else needs a bearer token, and exposure without one serves nobody.** A public
-//!    surface with no key is not something this project ships. If `expose` is true and no key
-//!    resolves, every non-loopback request is refused — the misconfiguration closes the door
-//!    rather than opening it.
+//! 2. **The exposed route has no loopback exemption at all.** This is the correction to a real
+//!    bug, caught the first time a reverse proxy sat in front of this seam (2026-08-18): Caddy
+//!    terminates TLS and forwards from `127.0.0.1`, so *every request from the internet arrived
+//!    looking like a neighbour* and an earlier version of this module waved them all through
+//!    without a token. A proxy is not a neighbour. The exemption is gone, and the console keeps
+//!    its unauthenticated path by using a different route on the loopback-only listener — a
+//!    door the proxy cannot reach by construction, rather than one it is trusted not to use.
+//! 3. **Exposure without a key serves nobody.** A public surface with no key is not something
+//!    this project ships. If `expose` is true and no key resolves, every request is refused —
+//!    the misconfiguration closes the door rather than opening it.
 //!
 //! The token is compared in constant time. It is a small thing, but a comparison that returns
 //! early on the first wrong byte tells an attacker how much of the key they guessed.
@@ -128,15 +131,15 @@ fn same_secret(a: &str, b: &str) -> bool {
     diff == 0
 }
 
-/// May this request be served?
+/// May this request be served on the **exposed** route?
 ///
-/// `loopback` is the transport's own judgement about the peer address; `presented` is whatever
-/// arrived in `Authorization: Bearer …`, already stripped of its scheme.
-pub fn admits(dir: &Path, loopback: bool, presented: Option<&str>) -> Result<(), Denied> {
-    // Rule 2: something on this machine is already inside.
-    if loopback {
-        return Ok(());
-    }
+/// `presented` is whatever arrived in `Authorization: Bearer …`, already stripped of its scheme.
+///
+/// Deliberately takes no peer address. The caller cannot pass "but this one is local" because
+/// there is no such argument to pass — which is the fix for the proxy bug, expressed in the
+/// type rather than in a comment asking the next reader to be careful. Local callers that
+/// legitimately need no token use the loopback-only route instead.
+pub fn admits(dir: &Path, presented: Option<&str>) -> Result<(), Denied> {
     let serving = load(dir);
     if !serving.expose {
         return Err(Denied::NotExposed);
@@ -182,10 +185,8 @@ mod tests {
     #[test]
     fn absence_of_a_decision_is_never_permission() {
         let d = tmp("absent");
-        assert_eq!(admits(&d, false, None), Err(Denied::NotExposed));
-        assert_eq!(admits(&d, false, Some("anything")), Err(Denied::NotExposed));
-        // …but the machine's own console is already inside.
-        assert_eq!(admits(&d, true, None), Ok(()));
+        assert_eq!(admits(&d, None), Err(Denied::NotExposed));
+        assert_eq!(admits(&d, Some("anything")), Err(Denied::NotExposed));
     }
 
     /// A declaration nobody can parse is not a decision.
@@ -193,7 +194,7 @@ mod tests {
     fn a_malformed_declaration_closes_the_door() {
         let d = tmp("malformed");
         write(&d, "{ this is not json");
-        assert_eq!(admits(&d, false, Some("x")), Err(Denied::NotExposed));
+        assert_eq!(admits(&d, Some("x")), Err(Denied::NotExposed));
     }
 
     /// **Exposure without a key serves nobody.** The misconfiguration must close the door, not
@@ -203,11 +204,11 @@ mod tests {
     fn exposed_without_a_key_refuses_everyone_outside() {
         let d = tmp("nokey");
         write(&d, r#"{"expose":true}"#);
-        assert_eq!(admits(&d, false, Some("x")), Err(Denied::NoKeyConfigured));
-        assert_eq!(admits(&d, false, None), Err(Denied::NoKeyConfigured));
+        assert_eq!(admits(&d, Some("x")), Err(Denied::NoKeyConfigured));
+        assert_eq!(admits(&d, None), Err(Denied::NoKeyConfigured));
         // Declared with a key file that does not exist is the same situation.
         write(&d, DECL);
-        assert_eq!(admits(&d, false, Some("x")), Err(Denied::NoKeyConfigured));
+        assert_eq!(admits(&d, Some("x")), Err(Denied::NoKeyConfigured));
     }
 
     #[test]
@@ -215,13 +216,40 @@ mod tests {
         let d = tmp("token");
         write(&d, DECL);
         write_key(&d, "ucfk_secret_value");
-        assert_eq!(admits(&d, false, Some("ucfk_secret_value")), Ok(()));
-        assert_eq!(
-            admits(&d, false, Some("ucfk_secret_valu")),
-            Err(Denied::BadToken)
-        );
-        assert_eq!(admits(&d, false, Some("")), Err(Denied::BadToken));
-        assert_eq!(admits(&d, false, None), Err(Denied::BadToken));
+        assert_eq!(admits(&d, Some("ucfk_secret_value")), Ok(()));
+        assert_eq!(admits(&d, Some("ucfk_secret_valu")), Err(Denied::BadToken));
+        assert_eq!(admits(&d, Some("")), Err(Denied::BadToken));
+        assert_eq!(admits(&d, None), Err(Denied::BadToken));
+    }
+
+    /// **The proxy regression.** A reverse proxy terminating TLS forwards from `127.0.0.1`, so
+    /// every request off the internet arrives looking like a neighbour. An earlier version of
+    /// this function took a `loopback` flag and returned `Ok` on it before looking at anything
+    /// else — which meant putting Caddy in front turned the bearer gate off for the whole
+    /// world, and did so silently. Caught live on 2026-08-18 by a no-token request that
+    /// answered `HTTP 200`.
+    ///
+    /// The fix is structural: there is no argument by which a caller can claim to be local, so
+    /// no caller can be waved through. This test pins the property by asserting that the ONLY
+    /// thing that admits is the right token.
+    #[test]
+    fn a_proxy_is_not_a_neighbour() {
+        let d = tmp("proxy");
+        write(&d, DECL);
+        write_key(&d, "the-real-token");
+        // Every shape a proxied stranger can arrive in — none of them are admitted.
+        for wrong in [
+            None,
+            Some(""),
+            Some("the-real-toke"),
+            Some("Bearer the-real-token"),
+        ] {
+            assert!(
+                admits(&d, wrong).is_err(),
+                "a request without the token must never be admitted, however local it looks"
+            );
+        }
+        assert_eq!(admits(&d, Some("the-real-token")), Ok(()));
     }
 
     /// A stranger learns the door is shut, not what is wrong behind it.
