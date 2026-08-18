@@ -1120,6 +1120,40 @@ async fn handle(
             };
             recv_console_act(&dir, &bytes, &sig, &ctx.seen)
         }
+        // **The familiar's own MCP server** (ADR-0037 §A, the pairing handshake). Loopback
+        // ONLY, and that is a deliberate limit rather than an oversight: exposing this seam
+        // beyond this machine is a new public surface, which is a decision for the human who
+        // owns the boundary, not one a route handler makes on its behalf. A partner reaching
+        // it today does so through something the human already ran.
+        //
+        // No signature is required and none would mean anything: MCP carries no caller
+        // identity, so `partner` is a label a human reads. That is precisely why the only
+        // thing on offer here is the constitution, the act of accepting it, and speech about
+        // ourselves — nothing that acts, spends, or widens anything.
+        (Method::POST, "/local/mcp") => {
+            if peer_ip != "127.0.0.1" && peer_ip != "::1" {
+                text(StatusCode::FORBIDDEN, "local only")
+            } else {
+                match collect(req).await {
+                    Ok(b) => {
+                        let answer = familiar_mcp::server::handle_bytes(&dir, &b, now_secs());
+                        // A notification answers with an empty object and no content, which
+                        // the protocol expects to see as 202 rather than an empty 200 body.
+                        let is_notification =
+                            answer.as_object().map(|o| o.is_empty()).unwrap_or(false);
+                        if is_notification {
+                            text(StatusCode::ACCEPTED, "")
+                        } else {
+                            match serde_json::to_vec(&answer) {
+                                Ok(body) => text(StatusCode::OK, body),
+                                Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+                            }
+                        }
+                    }
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                }
+            }
+        }
         (Method::GET, "/local/worldview") => {
             // A peer's own console (e.g. the macOS SwiftUI app) reads the worldview of the node
             // running on the same machine, without a mesh signature — it's reading itself, not a

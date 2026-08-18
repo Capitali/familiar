@@ -532,6 +532,7 @@ dependencies = [
  "ed25519-dalek",
  "familiar-kernel",
  "familiar-llm",
+ "familiar-mcp",
  "getrandom 0.2.17",
  "http-body-util",
  "hyper",

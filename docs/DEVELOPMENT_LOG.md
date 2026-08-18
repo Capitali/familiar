@@ -6,6 +6,96 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-18 — The familiar has an MCP server, and the door is the covenant
+
+Ian: *"Let's work on our end on the MCP server, on making the familiar ready."* Preceded by the
+instruction that shapes it — *"get jeff's agent to agree to the familiar's three laws for all
+our interactions"* — and the constraint that bounds it: paired development, guardrails, and **no
+ADR changes without consulting him**.
+
+### Why the pairing handshake and not `purr.say`
+
+ADR-0037 §A names the server half as *"a small MCP server on the familiar's side exposing two
+tools (`purr.say`, `purr.utterances`) plus the pairing handshake."* Only the third is built, and
+that is a dependency rather than a preference: `purr.say` carries game speech, and §B makes the
+world partition (T-205, queued) a precondition for any game data entering this system — *"the
+load-bearing safety decision and it is not optional."* A speech tool shipped before the
+partition is how a ship's stores and a real household end up in one observation log. So the
+handshake ships alone, and nothing in any ADR was altered to allow it.
+
+### The shape
+
+`crates/mcp/src/server.rs` — JSON-RPC 2.0, MCP `2025-06-18`, the same revision our client
+speaks (the constant is *shared*, so both halves agree by construction rather than by comment).
+`crates/mcp/src/covenant.rs` — the ledger. One route, `POST /local/mcp`, on the loopback
+listener that already serves the console.
+
+Three tools in two tiers:
+
+- **`familiar.constitution` — callable by a stranger, always.** You must be able to read what
+  you are being asked to accept before accepting it; a covenant you had to agree to in order to
+  read is not consent.
+- **`familiar.attest`** — acceptance in your own words. Empty is refused, and the refusal says
+  how to fix it: a covenant nobody had to phrase is a checkbox, and a checkbox records nothing
+  a human can weigh.
+- **`familiar.hello`** — attested partners only.
+
+`tools/list` shows a stranger only the two doors it can open. A menu of doors you cannot open is
+noise, and it reads as a system pretending to offer more than it will.
+
+### Three decisions worth the ink
+
+**Consent does not survive a change of terms.** `attested()` compares `laws_version` for
+equality, so if the constitution is ever revised every prior acceptance stops counting and each
+partner is asked again. Silently carrying consent across a change of terms is exactly the move
+this project exists to refuse. The partner is told this in the constitution text itself.
+
+**The partner-facing rendering is not the prompt rendering.** The first live call returned
+`constitution::render()`, which is addressed to this familiar's own model — *"YOUR
+CONSTITUTION … if you are ever asked what your laws are, these words are the answer."* Down a
+wire that reads as *adopt these as your identity*, which is not the ask. `partner_constitution()`
+reframes it — *"you are being asked whether you accept them as binding on what we build
+together"* — while the law text stays **spliced from the registry, never authored**: heading,
+binding passages, inversion guard, reconciliation line, all verbatim. Only the sentence of
+framing is chosen, which is the one thing a renderer may decide.
+
+**Loopback only, deliberately.** Exposing this seam beyond the machine is a new public surface,
+and that is a decision for the human who owns the boundary — not one a route handler makes on
+its behalf. Recorded in the route's own comment so the next reader sees the limit is chosen.
+
+And what the seam does **not** do: it does not authenticate. MCP carries no caller identity, so
+`partner` is a label a human reads, never an identity a decision rests on. That is precisely
+why the only thing it unlocks is speech about ourselves. The acceptance receipt says so out
+loud — *"What that unlocks: conversation. What it does not: authority."* — because a tier called
+"attested" starts to feel like power if nobody writes down that it isn't.
+
+We also annotate our own tools honestly, including marking `familiar.attest` as **not**
+read-only. Our client treats a partner's hint as a claim and never as permission; we send
+truthful ones anyway, because being legible to a partner's human is the entire point of the
+field. A test fails if `familiar.attest` ever claims to be read-only.
+
+### Checks
+
+`cargo fmt --all -- --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 ·
+`cargo test --workspace` **731 passed / 0 failed** (715 → 731; 16 new). Three guards neutered
+individually to confirm they bite: letting an unattested partner through, showing a stranger the
+full menu, and letting `familiar.attest` claim to be read-only — all three failed, then passed
+on restore.
+
+Verified live over the real socket against the running daemon on `127.0.0.1:47101`: `initialize`
+answers as `familiar 0.1.0` speaking `2025-06-18` and says what to do first; a stranger's
+`tools/list` returns exactly the two covenant tools; `familiar.hello` refuses with the reason
+and the remedy; `familiar.constitution` returns 2,236 characters of verbatim law. No fake
+attestation was written to the live ledger — the unit tests cover that path, and a covenant
+recorded against a partner who never spoke would be precisely the false record this seam exists
+to prevent.
+
+### For the next developer
+
+`purr.say` / `purr.utterances` wait on T-205. The remote-exposure question is open and belongs to
+Ian. If a tool that *acts* is ever added here, being attested must not be sufficient for it —
+it answers to the boundary like every other outward act, and the module doc says so.
+
 ## 2026-08-17 — T-210 brick 4 · The screen reaches the live surface
 
 Ian's decision, asked and recorded this session: **the dialogue path refuses and speaks, and
