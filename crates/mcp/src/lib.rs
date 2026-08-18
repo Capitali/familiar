@@ -30,8 +30,10 @@ use std::path::Path;
 use familiar_kernel::boundary;
 use familiar_kernel::guard::{self, Action, ActionKind, Decision};
 
+pub mod covenant;
 pub mod declaration;
 pub mod http;
+pub mod server;
 pub mod session;
 pub mod tls;
 
