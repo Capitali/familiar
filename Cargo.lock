@@ -574,6 +574,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "familiar-ucfmon"
+version = "0.1.0"
+dependencies = [
+ "familiar-kernel",
+ "familiar-mcp",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "familiar-vision"
 version = "0.1.0"
 dependencies = [
