@@ -1081,14 +1081,18 @@ async fn handle(
         // Loopback still reaches this path without a token — a console on this machine could
         // read the token off disk anyway, so demanding it would be ceremony.
         (Method::POST, "/mcp") => {
-            let loopback = peer_ip == "127.0.0.1" || peer_ip == "::1";
+            // No loopback exemption on this route, and that is the fix for a real bug rather
+            // than an oversight: a reverse proxy terminating TLS forwards from 127.0.0.1, so
+            // an exemption here reads every stranger on the internet as a neighbour. The
+            // console's unauthenticated path is `/local/mcp` on the loopback-ONLY listener,
+            // which a proxy cannot reach by construction.
             let presented = req
                 .headers()
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.strip_prefix("Bearer "))
                 .map(|s| s.trim().to_string());
-            match familiar_mcp::serving::admits(&dir, loopback, presented.as_deref()) {
+            match familiar_mcp::serving::admits(&dir, presented.as_deref()) {
                 Err(denied) => text(StatusCode::FORBIDDEN, denied.why()),
                 Ok(()) => match collect(req).await {
                     Ok(b) => {
