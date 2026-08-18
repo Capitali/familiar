@@ -6,6 +6,69 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-17 — `ucfmon` · A window on the UCF seam
+
+Ian, mid-session: *"I really need to build a status screen for the UCF game that's not part of
+the testflight distribution. I am fine with a CLI app that shows how the familiar is interacting
+with UCF — but it should be dynamically showing me what is going on with all the interfaces to
+UCF."*
+
+`crates/ucfmon` — a `ucfmon` binary, deliberately **not** a `familiar` subcommand and not
+anything `ios/` embeds. It is an instrument: it watches the seam and never participates in it,
+writes nothing, and cannot widen anything. Its callable set comes from the human's declaration
+and every reach passes the same `guard::evaluate(Network)` the client passes, so a shut gate
+blanks the world panels and prints the guard's own rationale — the boundary working, not an
+outage.
+
+### What it shows, in the order the question actually gets answered
+
+**DECLARATION** (`mcp/servers.json`, re-read every round, so an edit lands without a restart) →
+**BOUNDARY** (the `allow_network` flag *and* the verdict on this origin, kept separate: an open
+flag whose scoped boundary still refuses this reach is the interesting case, and collapsing them
+would hide it) → **WIRE** (handshake, and drift in both directions) → **the world** (clock,
+stations, market, news, carriers, freight) → **FAMILIAR→UCF**.
+
+Two drift signals nothing else surfaces. *On offer but not declared* is the ADR-0032 event a
+human must decide about — a tool that appeared, visible and uncallable. *Declared but no longer
+offered* is an allowlist pointing at something gone. Neither is claimed without evidence: no
+session means no drift report, so a network failure can never masquerade as a drift finding.
+
+### The finding the screen was built to make visible
+
+**The metabolism never calls this seam.** `grep familiar_mcp crates/cycle` is empty and no
+observation in 8,657 names it. Every call the monitor draws was made by the monitor. So the
+last panel counts local evidence — observations naming the seam, loads the exchange itself
+marks `mine` — and says plainly: *no local record of the familiar itself calling this seam.*
+
+That panel is **counted, never asserted.** Hardcoding "the tick loop never calls this" would be
+a hand-written paraphrase of the code — the precise drift class T-210 exists to fix, arriving
+in a new file. Because it counts, the day the metabolism starts calling the exchange the panel
+changes on its own and nobody has to remember to edit it.
+
+### One deliberate divergence from `crates/mcp`
+
+`familiar-mcp` parses strictly: a server that answers something other than what MCP describes
+gets `Error::Protocol`, never a guess, because the client *acts* on what it reads. `ucfmon`
+only *draws*, so `world.rs` defaults every field and ignores unknown ones. When Jeff adds a
+column, the monitor keeps showing the ten things it already understood instead of going dark.
+An instrument that blanks on an unfamiliar field is worse than one showing a labelled subset.
+
+### Checks
+
+`cargo fmt --all -- --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 ·
+`cargo test --workspace` **701 passed / 0 failed** (684 → 701; 17 new). Neutered
+`undeclared_on_offer` to confirm the drift test actually bites — it failed, then passed on
+restore. Verified live against `ucf-exchange` v1.0.0: PROD tick 5838, 15 stations, 89 price
+rows, 23 stockouts, 100 loads, 17 carriers, handshake 633ms, no drift.
+
+### For the next developer
+
+`ucfmon --once --plain` is the pipe/CI form and exits non-zero when it could not reach the
+seam. Default interval is 15s against a world that ticks every 300s; `--interval` floors at 1s
+because hammering a partner's server is a Law III failure, not a preference. The monitor is the
+honest instrument for T-206's **server half** and observation ingestion when those land — the
+FAMILIAR→UCF panel is exactly the thing that should stop reading zero.
+
 ## 2026-08-17 — T-206 (client half) · The familiar can reach a partner's MCP server
 
 Ian handed over a key file that had been sitting untracked in the repo — *"that's jeff's MCP
