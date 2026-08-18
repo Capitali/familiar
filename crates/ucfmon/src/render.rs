@@ -198,6 +198,7 @@ pub fn screen(r: &Round, c: &Changes, ink: &Ink, rounds: u64, interval: u64) -> 
         ))
     );
     rule(&mut o, ink);
+    row(&mut o, ink, "WATCHING", &ink.dim(&clip(&r.dir, 78)));
 
     // ---- the three interfaces that decide whether anything happens at all ----------
     match &r.declared.problem {
