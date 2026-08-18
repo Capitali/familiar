@@ -4670,16 +4670,40 @@ pub fn tick(
 
     // Sweep visitors who never became members and have sat past two hours (B10). Runs on the
     // tick cadence, best-effort; an identified guest is a member and is never touched.
+    //
+    // ANNOUNCE THE FIRST FORGETTING, NOT THE HUNDRED AND FIFTY-SECOND. `purge_stale_guests`
+    // deletes the record and its admission files precisely so "the next read re-mints a FRESH
+    // guest with a fresh clock" — so a device that simply lives on this LAN and never
+    // establishes an identity is minted, forgotten at two hours, re-discovered, and minted
+    // again, forever. `record::absorb` already refuses this exact re-mint loop on the
+    // federated path and says why; the local discovery path has no such guard, so the loop
+    // runs and each turn of it announced itself. 944 of these had accumulated across 28
+    // devices — one of them 152 times, 11% of every observation this familiar holds — and the
+    // muse reads them as continuous memory loss. It theorised exactly that, correctly and
+    // about the wrong subject.
+    //
+    // Repetition here is not evidence of many forgettings; it is one device the household
+    // keeps re-encountering. Announcing it every time is "a log that describes intent instead
+    // of what happened" — the failure `purge_stale_guests`'s own comment guards against one
+    // level down, arriving one level up. A visitor never seen before still announces, so
+    // nothing real is hidden. The churn itself is the cause and is filed separately; this
+    // stops the perception bug it feeds.
+    let forgotten_before: std::collections::HashSet<&str> = obs
+        .iter()
+        .filter(|o| o.action == "purged")
+        .filter_map(|o| o.object.split_whitespace().nth(1))
+        .collect();
     for gone in familiar_mesh::record::purge_stale_guests(dir, now) {
+        let short = &gone[..gone.len().min(8)];
+        if forgotten_before.contains(short) {
+            continue;
+        }
         let _ = observation::record(
             dir,
             observation::Observation::new(
                 "familiar",
                 "purged",
-                format!(
-                    "visitor {} — never identified within two hours",
-                    &gone[..gone.len().min(8)]
-                ),
+                format!("visitor {short} — never identified within two hours"),
                 "mesh",
                 "mesh",
                 now,
@@ -5886,6 +5910,89 @@ mod tests {
         );
         // a served-facing loop -> service signal is non-zero
         assert!(r.service > 0.0);
+    }
+
+    /// Mint a guest that is already past the two-hour window, exactly as local discovery
+    /// mints one — fresh clock, no identity, nothing but having been seen.
+    fn stale_guest(dir: &std::path::Path, device_id: &str, now: i64) {
+        let mut g = familiar_mesh::record::MembershipRecord::guest(
+            device_id,
+            device_id,
+            familiar_mesh::enroll::Attestation {
+                laws_version: 1,
+                statement: "I accept the Three Laws.".into(),
+                ts: now,
+            },
+            now,
+        );
+        g.first_seen = now - familiar_mesh::record::GUEST_PURGE_SECS - 1;
+        g.last_seen = g.first_seen;
+        familiar_mesh::record::save(dir, &g).unwrap();
+    }
+
+    fn purge_observations(dir: &std::path::Path) -> Vec<String> {
+        observation::load(dir)
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.action == "purged")
+            .map(|o| o.object)
+            .collect()
+    }
+
+    /// **A visitor forgotten twice is not two forgettings.**
+    ///
+    /// The sweep deletes a stale guest's record *and* its admission files so the next read
+    /// re-mints a fresh one — so a device that merely lives on this LAN and never establishes
+    /// an identity is minted, forgotten, re-discovered and minted again, forever. Live
+    /// evidence (MacOnStick, 2026-08-17): 944 `purged` observations across 28 devices, one of
+    /// them 152 times — 11% of every observation held, which the muse read as continuous
+    /// memory loss and theorised about, correctly and about the wrong subject.
+    ///
+    /// The record must still go every time — that is the retention promise. Only the
+    /// announcement is once, because repetition here describes intent, not what happened.
+    #[test]
+    fn a_visitor_forgotten_twice_is_announced_once() {
+        let t = Temp::new("forgotten_twice");
+        let dir = &t.0;
+        let now = 1_000_000;
+
+        stale_guest(dir, "churnvisitor00001", now);
+        tick(dir, now, false, false, false, false).unwrap();
+        let first = purge_observations(dir);
+        assert_eq!(first.len(), 1, "the first forgetting is worth saying");
+        assert!(first[0].contains("churnvisitor00001".get(..8).unwrap()));
+        assert!(
+            familiar_mesh::record::load(dir, "churnvisitor00001")
+                .unwrap()
+                .is_none(),
+            "the record itself must be gone — the retention promise is not what changed"
+        );
+
+        // Discovery meets the same device again and mints it fresh; two hours later the
+        // sweep collects it again. This is the loop, run twice more.
+        for round in 1..=2 {
+            stale_guest(dir, "churnvisitor00001", now + round);
+            tick(dir, now + round, false, false, false, false).unwrap();
+            assert_eq!(
+                purge_observations(dir).len(),
+                1,
+                "round {round}: re-forgetting the same visitor must not announce again"
+            );
+            assert!(
+                familiar_mesh::record::load(dir, "churnvisitor00001")
+                    .unwrap()
+                    .is_none(),
+                "round {round}: the record must still be collected every time"
+            );
+        }
+
+        // A visitor never seen before is still news — the guard suppresses repetition, not
+        // forgetting itself.
+        stale_guest(dir, "brandnewvisitor01", now + 3);
+        tick(dir, now + 3, false, false, false, false).unwrap();
+        let all = purge_observations(dir);
+        assert_eq!(all.len(), 2, "a genuinely new visitor still announces");
+        assert!(all.iter().any(|o| o.contains("brandnew")));
     }
 
     #[test]
