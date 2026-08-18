@@ -444,6 +444,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "familiar-catscan"
+version = "0.1.0"
+dependencies = [
+ "familiar-kernel",
+ "familiar-mcp",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "familiar-cli"
 version = "0.1.0"
 dependencies = [
@@ -569,16 +579,6 @@ name = "familiar-sense"
 version = "0.1.0"
 dependencies = [
  "familiar-kernel",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "familiar-ucfmon"
-version = "0.1.0"
-dependencies = [
- "familiar-kernel",
- "familiar-mcp",
  "serde",
  "serde_json",
 ]

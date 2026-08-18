@@ -70,14 +70,60 @@ still mirrors `LAW_III_VOICE` as a Swift string literal and carries no Laws of i
 source both the daemon and the shells read" is still unmet. T-211 owns bricks 3/5/6. The shadow
 data from `familiar/screened` is what decides whether the ledger question gets reopened.
 
-## 2026-08-17 — `ucfmon` · A window on the UCF seam
+## 2026-08-17 — `catscan` · Full feline
+
+Ian, on seeing the UCF monitor: *"for all the UCF code and variable names, please go full
+feline, full cat culture. Humor is awesome."*
+
+So `ucfmon` is `catscan` — a CAT scan of United Cat Foods — and every name that is **ours** to
+choose is now a cat. The striking part is how little of this is decoration. The domain was
+already feline (the counterparty sells cat food; the familiar's own MCP server half is
+`purr.say`), and the metaphors turn out to be *more* precise than what they replaced:
+
+| was | is | why it is better, not just funnier |
+|---|---|---|
+| `Gate` | `CatFlap` | the boundary IS a flap: a hole with a latch a household controls |
+| `Handshake` | `NoseBoop` | MCP `initialize` is two creatures touching noses before business |
+| `Declared` | `Collar` | a collar says who you belong to and what you may touch |
+| `Round` | `Prowl` | a circuit of the territory, looking at everything |
+| `Timed<T>` | `Pounce<T>` | an attempt with a flight time, that catches or misses |
+| `Footprint` | `PawPrints` | evidence of having been somewhere, counted from the ground |
+| `Memory` | `Whiskers` | the organ that senses *movement*, which is what it holds |
+| `Status` | `Purr` | the world's steady background rhythm — its tick |
+| `Station`/`Price`/`News`/`Carrier` | `Perch`/`Kibble`/`Yowl`/`Tomcat` | each one reads as what it is |
+
+`payload()` became `open_the_bag()`, `decode()` became `taste()`, `clip()` became a claw
+`trim()`. A stockout is an `EMPTY` bowl, which is correctly rendered in alarm colour, being the
+most upsetting thing in the known universe. Carriers are `on the prowl` or `curled up`. An
+expired news item is `hoarse`. The footer offers `^C to stop (or knock it off the table)`.
+
+**What deliberately did NOT become a cat.** Wire-facing field names (`stationClass`,
+`worldName`) stay as the payload writes them, so the mapping to Jeff's JSON is legible at a
+glance; the MCP tool names are his and are not ours to rename; and `crates/mcp` is the generic
+protocol client, not UCF code, so it was left entirely alone. The rule applied: *rename what we
+named, keep what someone else named.*
+
+The doc comments keep every load-bearing sentence — why the parser is lenient here and strict
+in `crates/mcp`, why the flag and the verdict are shown separately, why the paw-print panel
+counts instead of asserting. Jokes were added around the engineering, not in place of it.
+
+### Checks
+
+`cargo fmt --all -- --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 ·
+`cargo test --workspace` **706 passed / 0 failed** (19 in `catscan`, up from 17 — `Yowl::live`
+and `Kibble::empty` became named predicates worth pinning). Verified live: PROD tick 5859, 15
+perches, 89 bowls with 24 empty, 2 still yowling, 17 tomcats, 106 hauls, no drift.
+
+`~/.local/bin/ucfmon` was removed and `catscan` installed in its place.
+
+## 2026-08-17 — `catscan` · A window on the UCF cat flap
 
 Ian, mid-session: *"I really need to build a status screen for the UCF game that's not part of
 the testflight distribution. I am fine with a CLI app that shows how the familiar is interacting
 with UCF — but it should be dynamically showing me what is going on with all the interfaces to
 UCF."*
 
-`crates/ucfmon` — a `ucfmon` binary, deliberately **not** a `familiar` subcommand and not
+`crates/catscan` — a `catscan` binary (named `ucfmon` for about an hour, until Ian said *"for all the UCF code and variable names, please go full feline, full cat culture. Humor is awesome"* — see the entry below), deliberately **not** a `familiar` subcommand and not
 anything `ios/` embeds. It is an instrument: it watches the seam and never participates in it,
 writes nothing, and cannot widen anything. Its callable set comes from the human's declaration
 and every reach passes the same `guard::evaluate(Network)` the client passes, so a shut gate
@@ -142,7 +188,7 @@ not recreate it.
 
 ### For the next developer
 
-`ucfmon --once --plain` is the pipe/CI form and exits non-zero when it could not reach the
+`catscan --once --plain` is the pipe/CI form and exits non-zero when it could not reach the
 seam. Default interval is 15s against a world that ticks every 300s; `--interval` floors at 1s
 because hammering a partner's server is a Law III failure, not a preference. The monitor is the
 honest instrument for T-206's **server half** and observation ingestion when those land — the
