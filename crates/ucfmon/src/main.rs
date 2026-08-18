@@ -49,6 +49,25 @@ It reads. It never writes, and it cannot widen anything: the callable tools come
 the human's declaration and every reach passes the boundary. ^C to stop.
 ";
 
+/// Where to look when the human did not say.
+///
+/// `store::data_dir(None)` is the relative `familiar_data`, which is right for a process
+/// launched from a checkout and wrong for an instrument run from anywhere. "Does the relative
+/// dir exist" is too weak a test: a stray empty `familiar_data` in a home directory shadows
+/// the real one and the monitor looks healthy while watching nothing.
+///
+/// So pick by the thing this tool actually needs — a declaration to read. First candidate
+/// holding `mcp/servers.json` wins; otherwise the installed per-user dir, whose emptiness the
+/// screen will then report honestly against a named path.
+fn default_dir() -> PathBuf {
+    let installed = familiar_kernel::store::user_data_dir();
+    let candidates = [familiar_kernel::store::data_dir(None), installed.clone()];
+    candidates
+        .into_iter()
+        .find(|d| d.join(familiar_mcp::declaration::SERVERS_FILE).is_file())
+        .unwrap_or(installed)
+}
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -68,7 +87,7 @@ struct Args {
 fn parse(argv: &[String]) -> Result<Args, String> {
     let mut a = Args {
         server: "ucf".into(),
-        dir: familiar_kernel::store::data_dir(None),
+        dir: default_dir(),
         interval: 15,
         once: false,
         plain: std::env::var_os("NO_COLOR").is_some(),

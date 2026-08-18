@@ -61,6 +61,21 @@ An instrument that blanks on an unfamiliar field is worse than one showing a lab
 restore. Verified live against `ucf-exchange` v1.0.0: PROD tick 5838, 15 stations, 89 price
 rows, 23 stockouts, 100 loads, 17 carriers, handshake 633ms, no drift.
 
+### Two things the first live run outside the checkout caught
+
+**A stray `~/familiar_data` shadowed the real dir.** "Prefer the relative dir if it exists" is
+too weak a test — a 4 KB leftover in a home directory wins over the installed 10 MB one and the
+monitor looks healthy while watching nothing. It now picks by the thing it actually needs: the
+first candidate holding `mcp/servers.json`, else the installed per-user dir. The resolved path
+is printed as **WATCHING** on every screen, because an instrument that will not say where it is
+looking can be pointed at the wrong familiar and still look fine.
+
+**Reading the footprint was creating a database.** `observation::load` opens-or-creates, so the
+first run left a stray `familiar.db` + WAL in whatever directory it was aimed at — which
+silently broke the one promise the crate makes. It now returns an empty footprint unless
+`familiar.db` is already a file. Verified: the stray directory was deleted and a full run did
+not recreate it.
+
 ### For the next developer
 
 `ucfmon --once --plain` is the pipe/CI form and exits non-zero when it could not reach the

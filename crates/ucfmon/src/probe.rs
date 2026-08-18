@@ -82,6 +82,9 @@ pub struct Footprint {
 
 /// Everything one round looked at.
 pub struct Round {
+    /// The directory this round actually read. Shown on the screen: an instrument that does
+    /// not say where it is looking can be watching the wrong familiar and look healthy.
+    pub dir: String,
     pub declared: Declared,
     pub gate: Gate,
     pub handshake: Result<Handshake, String>,
@@ -161,6 +164,16 @@ fn call<T: for<'de> serde::Deserialize<'de>>(
 /// Read the local footprint. Best-effort: a monitor must not fall over because the daemon
 /// holds a write lock on the database.
 fn footprint(dir: &Path, server: &str) -> Footprint {
+    // Never open a database that is not already there. `observation::load` would CREATE one,
+    // and an instrument that leaves a stray `familiar.db` behind in whatever directory it was
+    // pointed at has stopped being read-only — the one promise this whole crate makes.
+    if !dir.join(familiar_kernel::store::DB_FILE).is_file() {
+        return Footprint {
+            observations_total: 0,
+            observations_naming_seam: 0,
+            last_seam_observation: None,
+        };
+    }
     let all = observation::load(dir).unwrap_or_default();
     let needle = server.to_ascii_lowercase();
     let naming: Vec<&observation::Observation> = all
@@ -280,6 +293,7 @@ pub fn round(dir: &Path, server: &str, session: &mut Option<Session>, now: i64) 
     }
 
     Round {
+        dir: dir.display().to_string(),
         footprint: footprint(dir, &declared.name),
         declared,
         gate,
@@ -337,6 +351,7 @@ mod tests {
 
     pub(super) fn round_with(declared: &[&str], offered: Option<Vec<String>>) -> Round {
         Round {
+            dir: "/tmp/test".into(),
             declared: Declared {
                 name: "ucf".into(),
                 url: "https://example.test/mcp".into(),
