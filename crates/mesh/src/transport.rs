@@ -1070,6 +1070,44 @@ async fn handle(
 
     let resp = match (method, path.as_str()) {
         (Method::GET, "/mesh/hello") => hello(&dir),
+        // **The familiar's MCP server, reachable from outside — if its human said so.**
+        //
+        // This is the PUBLIC listener, so unlike `/local/mcp` nothing about the peer vouches
+        // for it. `serving::admits` is the whole gate and it fails closed three ways: no
+        // declaration means not exposed, an unparseable declaration means not exposed, and
+        // "exposed" with no key resolving means nobody outside is served at all. A public
+        // surface with no key is not something this project ships.
+        //
+        // Loopback still reaches this path without a token — a console on this machine could
+        // read the token off disk anyway, so demanding it would be ceremony.
+        (Method::POST, "/mcp") => {
+            let loopback = peer_ip == "127.0.0.1" || peer_ip == "::1";
+            let presented = req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .map(|s| s.trim().to_string());
+            match familiar_mcp::serving::admits(&dir, loopback, presented.as_deref()) {
+                Err(denied) => text(StatusCode::FORBIDDEN, denied.why()),
+                Ok(()) => match collect(req).await {
+                    Ok(b) => {
+                        let answer = familiar_mcp::server::handle_bytes(&dir, &b, now_secs());
+                        let is_notification =
+                            answer.as_object().map(|o| o.is_empty()).unwrap_or(false);
+                        if is_notification {
+                            text(StatusCode::ACCEPTED, "")
+                        } else {
+                            match serde_json::to_vec(&answer) {
+                                Ok(body) => text(StatusCode::OK, body),
+                                Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+                            }
+                        }
+                    }
+                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
+                },
+            }
+        }
         (Method::POST, "/mesh/brief") => {
             let bytes = match collect(req).await {
                 Ok(b) => b,

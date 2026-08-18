@@ -34,6 +34,7 @@ pub mod covenant;
 pub mod declaration;
 pub mod http;
 pub mod server;
+pub mod serving;
 pub mod session;
 pub mod tls;
 

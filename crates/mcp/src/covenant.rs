@@ -25,6 +25,18 @@ use serde::{Deserialize, Serialize};
 /// Where the accepted covenants live, relative to the data dir.
 pub const PARTNERS_FILE: &str = "mcp/partners.json";
 
+/// How many distinct partners this ledger will hold.
+///
+/// `attest` is the one tool here that writes, and once the seam is exposed beyond this machine
+/// (see [`crate::serving`]) it is a write reachable by strangers. A ledger with no ceiling is a
+/// disk-filling vector wearing the costume of a covenant. Sixty-four is far more partners than
+/// a household familiar will ever have, and small enough that the file stays something a human
+/// can read in one sitting — which is the whole reason it is a file and not a database.
+///
+/// Re-accepting is never refused: a partner already in the ledger is updating their own words,
+/// not consuming a new slot.
+pub const MAX_PARTNERS: usize = 64;
+
 /// One partner's acceptance, in their own words.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Covenant {
@@ -84,6 +96,8 @@ pub enum Refused {
     NoPartner,
     /// Empty or whitespace-only words.
     NoStatement,
+    /// The ledger is full of other partners.
+    LedgerFull,
 }
 
 impl Refused {
@@ -95,6 +109,10 @@ impl Refused {
             Refused::NoStatement => {
                 "say it in your own words in `statement` — an empty acceptance records nothing \
                  a human can weigh"
+            }
+            Refused::LedgerFull => {
+                "this familiar is already holding as many covenants as it will keep; its human \
+                 has to retire one before another is recorded"
             }
         }
     }
@@ -120,6 +138,11 @@ pub fn accept(dir: &Path, partner: &str, statement: &str, ts: i64) -> Result<Cov
     };
 
     let mut all = load(dir).unwrap_or_default();
+    let known = all.accepted.iter().any(|a| a.partner == entry.partner);
+    // A ceiling on strangers, never on someone already here restating their own acceptance.
+    if !known && all.accepted.len() >= MAX_PARTNERS {
+        return Err(Refused::LedgerFull);
+    }
     all.accepted
         .retain(|a| !(a.partner == entry.partner && a.laws_version == entry.laws_version));
     all.accepted.push(entry.clone());
@@ -191,6 +214,28 @@ mod tests {
         let all = load(&d).unwrap();
         assert_eq!(all.accepted.len(), 1);
         assert_eq!(all.accepted[0].statement, "second words");
+    }
+
+    /// Once exposed, `accept` is a write a stranger can reach. It must have a ceiling — and
+    /// the ceiling must never fall on someone already here restating their own words.
+    #[test]
+    fn the_ledger_has_a_ceiling_that_spares_existing_partners() {
+        let d = tmp("ceiling");
+        for i in 0..MAX_PARTNERS {
+            accept(&d, &format!("partner-{i}"), "yes", 1).unwrap();
+        }
+        assert_eq!(
+            accept(&d, "one-too-many", "yes", 1).unwrap_err(),
+            Refused::LedgerFull
+        );
+        // Someone already in the ledger is updating, not consuming a slot.
+        accept(&d, "partner-0", "revised words", 2).unwrap();
+        let all = load(&d).unwrap();
+        assert_eq!(all.accepted.len(), MAX_PARTNERS);
+        assert!(all
+            .accepted
+            .iter()
+            .any(|a| a.partner == "partner-0" && a.statement == "revised words"));
     }
 
     /// **The load-bearing property.** Consent does not survive a change of terms: if the Laws
