@@ -12,7 +12,7 @@ resolver = "2"
 # embedded core. Retired UIs (egui Glass, menu-bar Marble, wgpu hologram engine, SwiftUI
 # consoles) were removed 2026-07-24 — git history keeps them; see ADR-0007 (superseded)
 # and ADR-0008.
-members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/ucfmon"]
+members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/catscan"]
 
 [workspace.package]
 version = "0.1.0"
