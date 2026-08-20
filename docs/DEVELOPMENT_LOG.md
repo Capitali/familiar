@@ -6,6 +6,28 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — Q2: the dead pipeline retires; its nouns move to the one road
+
+The conduct dialogue's Q2 close. `answer_requests` — the grounded answering pipeline whose
+only producer was archived with the egui GUI (`b89070e`), 0 requests / 0 refusals live —
+is retired as an execution path, together with everything only it drove:
+`fetch_and_answer` (the 16k-char unscreened web-page bypass — removed rather than
+patched), `analyze_offline`, `analyze_with_llm`, `grounding_facts` (its registry-view
+property lives on at the live prompt seam, where brick 1 already put it), `run_tool`, and
+`answer_from_run`. `ToolRun` loses the two fields only the dead formatter read.
+
+The durable nouns survive and gain a LIVE producer: `persist_exchange` in the dialogue
+path writes the `Request`/`Answer` pair — an admitted reply persists with **exactly the
+admitted confidence and cites** (grounded-in-cites → `Known`, admitted-but-citeless →
+`Probable`), a screened utterance persists as `refused` with the registry's prose, and
+templated/no-mind replies persist nothing because they answered nothing. The corruption
+ledger stays untouched from the dialogue path (Ian's ruling, now pinned in the noun layer
+too). Tick's `answered`/`refused` counts now diff the persisted nouns, so the activity
+feed reports what was durably answered rather than what a dead queue held.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 744 passed / 0 failed, exit-checked.
+Next: brick 6 (the epistemic ADR + adversarial law-quotation regressions).
+
 ## 2026-08-20 — Brick 5′: own speech dereferences; it is never evidence
 
 The conduct dialogue's Q1 close (codex's design, adopted in Round 3): the planned
