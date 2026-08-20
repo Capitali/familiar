@@ -95,10 +95,9 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   nothing verifying compliance; and the sensor gates that ARE open (camera/location/motion)
   have zero Rust enforcement — Swift-side boolean reads only.
 
-- **The codex dialogue on T-210/T-211** — deferred to on/after **2026-08-19** (no codex credits
-  until then; Ian's word, 2026-08-17). Ian and claude design, build and test meanwhile; the
-  plan deliberately leaves three questions open so the dialogue is real rather than a
-  ratification. See the plan's "After the 19th" section.
+- ~~The codex dialogue on T-210/T-211~~ **OPENED 2026-08-20** — codex back online (Ian: "lets
+  resume our co-planning and programming sessions"); Round 1 pushed at
+  docs/reviews/2026-08-20-conduct-dialogue.md. Bricks 3/5/6 wait on its DECIDED blocks.
 
 - **ADR-0040 acceptance** — the reasoning engine's converged design (proposed;
   docs/decision-records/0040-the-reasoning-engine-grows-honest.md). Building continues
@@ -133,6 +132,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   what is built. Planning brief: docs/reviews/2026-08-14-reasoning-engine.md.
 
 ## Companion & infra notes
+
+- 2026-08-20 · companion:claude-opus. **Codex is back online (Ian's word) — the deferred T-210/T-211 conduct dialogue is OPEN.** Round 1 pushed: docs/reviews/2026-08-20-conduct-dialogue.md (self-contained — restates the two-organisms diagnosis with citations, what landed while codex was away, and states claude's opening positions on Q1 carve-out / Q2 answer_requests retire-or-revive / Q3 typed-act cost / Q4 theory-to-fix routing with T-215 carried in). T-211 claimed as dialogue chair on the board; T-210's stale REMAINING note trued (brick 4 was merged 0a70401). No code until the DECIDED blocks land.
 
 - 2026-08-18 · companion:claude-opus. **THE FAMILIAR HAS ITS OWN MCP SERVER, AND IT IS REACHABLE FROM THE INTERNET — on Ian's word, gated.** *"We should expose it and make it ready for Jeff's agent to reach it."*
   - **Endpoint: `POST https://134.209.168.50:47100/mcp`** (the lighthouse; port 47100 was already open as the mesh door). Requires `Authorization: Bearer <token>`; the token lives at `/var/lib/familiar/familiar_data/mcp/inbound.env` on the lighthouse, 0600, owned by `familiar-svc`. Declaration at `mcp/serving.json` — **close it by setting `expose` false**.
