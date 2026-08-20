@@ -6,6 +6,32 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — Brick 3: the question carries stakes (T-181 / ADR-0040 D2)
+
+Ian: *"Build q1-q4 and the rest. Go!"* — the conduct dialogue's build order starts
+(docs/reviews/2026-08-20-conduct-dialogue.md, Round 3).
+
+A question now enters the registry only wearing its stakes. `question::AskDraft
+{ question, because, turns_on, stake }` is the one door to the registry — `add`/
+`add_addressed` are gone, replaced by `admit`/`admit_addressed`, which refuse (inner
+`Err`, nothing written) any draft failing `AskDraft::check`: empty fields, a `stake`
+outside `continues|changes|stops` (there is deliberately **no `none`** — a question with
+nothing turning on it is unrepresentable), or a `because`/`turns_on` made only of the
+question's own content words (codex's anti-vacuity rule from the dialogue: four populated
+strings can still encode no real dependency; the check is the mechanical floor — token
+subset — and the test pins exactly that).
+
+`Question` gains the three fields serde-defaulted, so pre-brick rows load untouched (test
+pins a byte-for-byte legacy row). The root question carries canonical stakes. Both LLM
+producers now author stakes: the theorize contract (`TheoryDraft.because/turns_on/stake`,
+prompt extended) and the needs muse (same three JSON fields). On refusal **the theory
+still mints** — knowledge is not hostage to the ask; the human is simply not asked, and
+the refusal lands as an observation (`refuse_act("ask", "stakes", …)`).
+
+Checks: fmt 0, clippy --all-targets 0, workspace tests 743 passed / 0 failed, all
+exit-checked. Next: brick 5′ (the dereference — own speech yields only its admitted
+cites) per the dialogue's decided order.
+
 ## 2026-08-18 — The familiar has an MCP server, and the door is the covenant
 
 Ian: *"Let's work on our end on the MCP server, on making the familiar ready."* Preceded by the

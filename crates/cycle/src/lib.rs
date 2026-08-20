@@ -1227,9 +1227,14 @@ fn maybe_theorize(
          Cite ONLY from these eligible anchors (ids the theory claims to explain):\n{}\n\
          Reply ONLY as compact JSON: {{\"anchors\":[\"obs-…\"],\"subject\":\"{who}\",\
          \"mechanism\":\"observation|presence|schedule|surface-act|question\",\
-         \"defect_claims\":[],\"question\":\"…\",\"theory\":\"…\",\"direction\":\"…\",\
+         \"defect_claims\":[],\"question\":\"…\",\"because\":\"…\",\"turns_on\":\"…\",\
+         \"stake\":\"continues|changes|stops\",\"theory\":\"…\",\"direction\":\"…\",\
          \"predictions\":[{{\"then_actor\":\"…\",\"then_action\":\"…\",\
          \"then_object_prefix\":\"…\",\"within_secs\":3600,\"polarity\":\"expect|expect_absent\"}}]}}. \
+         Ask because you want to know, never to seem attentive: `because` says why your \
+         question arose (never a restatement of it), `turns_on` names the decision or \
+         belief awaiting the answer, and `stake` says what the answer does to it — \
+         continues, changes, or stops. A question with nothing turning on it is refused. \
          `defect_claims` lists observation classes (actor|action) your theory says are \
          MALFUNCTIONING — leave it empty unless you truly claim a defect. Predictions are \
          optional but a theory that predicts nothing settles nothing. When (and only \
@@ -1422,7 +1427,18 @@ fn maybe_theorize(
     // surface, and when (see `coordinate_questions`). One voice, not a pile. An
     // Inquiry never asks at all.
     if minted_new && !is_inquiry && !q.is_empty() {
-        question::add(dir, &q, "llm", now)?;
+        // Brick 3 (T-181 / ADR-0040 D2): a question enters the registry only wearing its
+        // stakes. A stakeless or vacuous ask refuses — the theory stands, the human is
+        // simply not asked, and the refusal is on the record.
+        let ask = question::AskDraft {
+            question: q.clone(),
+            because: draft.because.clone(),
+            turns_on: draft.turns_on.clone(),
+            stake: draft.stake.clone(),
+        };
+        if let Err(why) = question::admit(dir, &ask, "llm", now)? {
+            refuse_act(dir, now, "ask", "stakes", &why);
+        }
     }
     // Predictions ride the mint when the draft carries them (optional until T-128) —
     // prediction::mint's first production caller; an unfalsifiable window refuses
@@ -1696,8 +1712,12 @@ fn maybe_theorize_needs(
          From this, theorize ONE need {name} may have that you could serve — concrete and \
          near, not grand. Reply ONLY as compact JSON: {{\"need\":\"what they may need and \
          why you think so\",\"confirm_question\":\"one short, warm question addressed to \
-         {name} by name that would tell you if you're right\",\"direction\":\"one concrete \
-         thing you could DO about it (it becomes work you will test)\"}}.",
+         {name} by name that would tell you if you're right\",\"because\":\"why the \
+         question arose — never a restatement of it\",\"turns_on\":\"the decision or \
+         belief awaiting the answer\",\"stake\":\"continues|changes|stops\",\
+         \"direction\":\"one concrete thing you could DO about it (it becomes work you \
+         will test)\"}}. Ask because you want to know, never to seem attentive — a \
+         question with nothing turning on it is refused.",
         summary = dossier::coarse_summary(&d),
         recent = recent.join("\n"),
         needs = if open_needs.is_empty() {
@@ -1782,7 +1802,17 @@ fn maybe_theorize_needs(
     )?;
     if let thread::Disposition::New(t) | thread::Disposition::Competes(t) = minted {
         if !confirm_q.is_empty() {
-            question::add_addressed(dir, &confirm_q, "need", &handle, &t.id, now)?;
+            // Brick 3: the muse's confirm-question carries its stakes or is not asked.
+            let ask = question::AskDraft {
+                question: confirm_q.clone(),
+                because: field("because"),
+                turns_on: field("turns_on"),
+                stake: field("stake"),
+            };
+            match question::admit_addressed(dir, &ask, "need", &handle, &t.id, now)? {
+                Ok(_) => {}
+                Err(why) => refuse_act(dir, now, "ask", "stakes", &why),
+            }
         }
     }
     Ok(true)
@@ -5150,14 +5180,20 @@ mod tests {
     fn routing_prefers_the_human_whose_need_it_serves() {
         let t = Temp::new("route_subject");
         let now = 50_000;
-        question::add_addressed(
+        question::admit_addressed(
             &t.0,
-            "Betty — long evenings?",
+            &question::AskDraft {
+                question: "Betty — long evenings?".into(),
+                because: "her lights burned past midnight three nights running".into(),
+                turns_on: "whether to keep watching her nights".into(),
+                stake: "continues".into(),
+            },
             "need",
             "betty",
             "thread-0001",
             now,
         )
+        .unwrap()
         .unwrap();
         // Both are here; ian's evidence is fresher, so he'd win a subject-less route.
         let obs = vec![
@@ -5195,14 +5231,20 @@ mod tests {
     fn a_subject_addressed_question_waits_for_its_subject() {
         let t = Temp::new("subject_hold");
         let now = 50_000;
-        question::add_addressed(
+        question::admit_addressed(
             &t.0,
-            "Betty — long evenings?",
+            &question::AskDraft {
+                question: "Betty — long evenings?".into(),
+                because: "her lights burned past midnight three nights running".into(),
+                turns_on: "whether to keep watching her nights".into(),
+                stake: "continues".into(),
+            },
             "need",
             "betty",
             "thread-0001",
             now,
         )
+        .unwrap()
         .unwrap();
         // Only ian is here: Betty's question is held, and the room gets the root instead.
         let ian_here = |ts: i64| {
@@ -7949,7 +7991,7 @@ mod tests {
         fake_llm(
             dir,
             &format!(
-                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","theory":"lighting follows presence","direction":"dim lights on away",
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","because":"three evening adjustments followed departures","turns_on":"a standing lighting rule","stake":"changes","theory":"lighting follows presence","direction":"dim lights on away",
                      "predictions":[{{"then_actor":"ian","then_action":"adjusted","then_object_prefix":"lighting:","within_secs":7200,"polarity":"expect_absent"}}]}}"#
             ),
         );
@@ -7973,6 +8015,14 @@ mod tests {
             1,
             "the draft's prediction minted with the thread"
         );
+        // Brick 3: the theorized question entered the registry wearing its stakes.
+        let q = question::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|q| q.text == "dim when away?")
+            .expect("the staked ask was admitted");
+        assert_eq!(q.stake, "changes");
+        assert_eq!(q.turns_on, "a standing lighting rule");
         assert_eq!(preds[0].thread_id, threads[0].id);
         assert_eq!(preds[0].minted_from, format!("thread:{}", threads[0].id));
     }
@@ -7995,6 +8045,38 @@ mod tests {
         assert!(
             !dir.join("llm/prompt.txt").exists(),
             "no consult on a quiet world"
+        );
+    }
+
+    #[test]
+    fn a_stakeless_ask_is_refused_while_its_theory_stands() {
+        let t = Temp::new(&format!("stakeless_ask_{}", std::process::id()));
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100);
+        // A grounded, predicting draft — but its question carries no stakes at all.
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","theory":"lighting follows presence","direction":"dim lights on away",
+                     "predictions":[{{"then_actor":"ian","then_action":"adjusted","then_object_prefix":"lighting:","within_secs":7200,"polarity":"expect_absent"}}]}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(theorize_until_disposed(dir, 200, &obs));
+        // The theory minted — knowledge is not hostage to the ask…
+        assert_eq!(thread::load(dir).unwrap().len(), 1);
+        // …but the human is not asked, and the refusal is on the record.
+        assert!(
+            question::load(dir).unwrap().is_empty(),
+            "a question with nothing turning on it never enters the registry"
+        );
+        assert!(
+            observation::load(dir)
+                .unwrap()
+                .iter()
+                .any(|o| o.action == "refused" && o.object.starts_with("ask")),
+            "the ask refusal lands as an observation"
         );
     }
 

@@ -31,6 +31,83 @@ pub const DISMISS_REST_SECS: i64 = 4 * 3600;
 /// Cap on the grown dismissal rest — a week. Even an oft-dismissed question comes back.
 pub const DISMISS_REST_MAX_SECS: i64 = 7 * 24 * 3600;
 
+/// What may turn on an answer (brick 3, T-181 / ADR-0040 D2). There is deliberately no
+/// `none`: a question with nothing turning on it is unrepresentable — the typed form of
+/// the prompt line "ask because you want to know, never to seem attentive."
+pub const STAKES: [&str; 3] = ["continues", "changes", "stops"];
+
+/// A question as drafted, before it may enter the registry. Every producer builds one of
+/// these and passes [`AskDraft::check`]; there is no untyped path to [`admit`].
+#[derive(Debug, Clone, Default)]
+pub struct AskDraft {
+    pub question: String,
+    /// Why the question arose — not a restatement of it.
+    pub because: String,
+    /// The decision or belief that awaits the answer.
+    pub turns_on: String,
+    /// What happens to `turns_on` when the answer lands: one of [`STAKES`].
+    pub stake: String,
+}
+
+/// Content words of `s` (lowercased, alphanumeric runs, length ≥ 3).
+fn content_tokens(s: &str) -> std::collections::BTreeSet<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+/// True when `field` adds no content beyond the question itself — every content word
+/// already appears in the question. The mechanical floor of the anti-vacuity rule
+/// (conduct dialogue, Round 2/3): four populated strings can still encode no real
+/// dependency, so a field that merely re-treads the question refuses.
+fn restates(field: &str, question: &str) -> bool {
+    let f = content_tokens(field);
+    f.is_empty() || f.is_subset(&content_tokens(question))
+}
+
+impl AskDraft {
+    /// The admission check. Refusals are sentences meant to be recorded and, on a
+    /// consult path, told back to the model.
+    pub fn check(&self) -> Result<(), String> {
+        if self.question.trim().is_empty() {
+            return Err("ask refused: empty question".into());
+        }
+        if self.because.trim().is_empty() {
+            return Err("ask refused: `because` is empty — why did this question arise?".into());
+        }
+        if self.turns_on.trim().is_empty() {
+            return Err(
+                "ask refused: `turns_on` is empty — what decision or belief awaits the answer?"
+                    .into(),
+            );
+        }
+        let stake = self.stake.trim().to_lowercase();
+        if !STAKES.contains(&stake.as_str()) {
+            return Err(format!(
+                "ask refused: stake '{}' is not one of continues|changes|stops — a question \
+                 with nothing turning on it is unrepresentable",
+                self.stake.trim()
+            ));
+        }
+        if restates(&self.because, &self.question) {
+            return Err(
+                "ask refused: `because` restates the question instead of saying why it arose"
+                    .into(),
+            );
+        }
+        if restates(&self.turns_on, &self.question) {
+            return Err(
+                "ask refused: `turns_on` restates the question instead of naming what \
+                 awaits the answer"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 /// One thing the familiar may ask the human, with its history.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Question {
@@ -68,13 +145,23 @@ pub struct Question {
     /// make a theorized need a stated one. Empty for standalone questions.
     #[serde(default)]
     pub thread_id: String,
+    /// Why the question arose (brick 3). Empty only on rows minted before stakes existed.
+    #[serde(default)]
+    pub because: String,
+    /// The decision or belief that awaits the answer.
+    #[serde(default)]
+    pub turns_on: String,
+    /// What happens to `turns_on` when the answer lands: one of [`STAKES`]. New rows
+    /// always carry one — [`AskDraft::check`] makes a stakeless question unrepresentable.
+    #[serde(default)]
+    pub stake: String,
 }
 
 impl Question {
-    fn new(id: &str, text: &str, origin: &str, now: i64) -> Self {
+    fn new(id: &str, draft: &AskDraft, origin: &str, now: i64) -> Self {
         Question {
             id: id.to_string(),
-            text: text.to_string(),
+            text: draft.question.trim().to_string(),
             origin: origin.to_string(),
             created_at: now,
             times_asked: 0,
@@ -86,6 +173,9 @@ impl Question {
             owner: String::new(),
             subject: String::new(),
             thread_id: String::new(),
+            because: draft.because.trim().to_string(),
+            turns_on: draft.turns_on.trim().to_string(),
+            stake: draft.stake.trim().to_lowercase(),
         }
     }
 
@@ -128,47 +218,68 @@ pub fn append(dir: &Path, q: &Question) -> io::Result<()> {
 pub fn ensure_root(dir: &Path, now: i64) -> io::Result<()> {
     let qs = load(dir)?;
     if !qs.iter().any(|q| q.id == ROOT_ID) {
-        append(dir, &Question::new(ROOT_ID, ROOT_TEXT, "root", now))?;
+        let draft = AskDraft {
+            question: ROOT_TEXT.to_string(),
+            because: "service begins by asking rather than assuming".to_string(),
+            turns_on: "which service the familiar attends to first".to_string(),
+            stake: "changes".to_string(),
+        };
+        debug_assert!(
+            draft.check().is_ok(),
+            "the root question carries its stakes"
+        );
+        append(dir, &Question::new(ROOT_ID, &draft, "root", now))?;
     }
     Ok(())
 }
 
-/// Add a question the familiar formed (e.g. from a theory or an unmet need), unless an
-/// open question with the same text already exists (don't ask the same thing twice).
-/// Returns the id used.
-pub fn add(dir: &Path, text: &str, origin: &str, now: i64) -> io::Result<String> {
-    let text = text.trim();
+/// Admit a question the familiar formed (e.g. from a theory or an unmet need). The draft
+/// must pass [`AskDraft::check`] — the inner `Err` is the refusal sentence and nothing is
+/// written. Dedup is kept: re-drafting an existing text returns the standing id (don't ask
+/// the same thing twice).
+pub fn admit(
+    dir: &Path,
+    draft: &AskDraft,
+    origin: &str,
+    now: i64,
+) -> io::Result<Result<String, String>> {
+    if let Err(why) = draft.check() {
+        return Ok(Err(why));
+    }
+    let text = draft.question.trim();
     let mut qs = load(dir)?;
     if let Some(existing) = qs.iter().find(|q| q.text == text) {
-        return Ok(existing.id.clone());
+        return Ok(Ok(existing.id.clone()));
     }
     let id = format!("q-{:04}", qs.len() + 1);
-    let q = Question::new(&id, text, origin, now);
+    let q = Question::new(&id, draft, origin, now);
     qs.push(q.clone());
     append(dir, &q)?;
-    Ok(id)
+    Ok(Ok(id))
 }
 
-/// [`add`], for a question that exists FOR someone: a confirm-question for a need the
+/// [`admit`], for a question that exists FOR someone: a confirm-question for a need the
 /// factory theorized about `subject`, serving `thread_id`. The subject waits for its
 /// person (see the coordination policy) instead of landing on whoever holds the room.
-/// Returns the id used.
-pub fn add_addressed(
+pub fn admit_addressed(
     dir: &Path,
-    text: &str,
+    draft: &AskDraft,
     origin: &str,
     subject: &str,
     thread_id: &str,
     now: i64,
-) -> io::Result<String> {
-    let id = add(dir, text, origin, now)?;
+) -> io::Result<Result<String, String>> {
+    let id = match admit(dir, draft, origin, now)? {
+        Ok(id) => id,
+        Err(why) => return Ok(Err(why)),
+    };
     let subject = subject.trim().to_lowercase();
     let thread_id = thread_id.trim().to_string();
     update(dir, &id, |q| {
         q.subject = subject.clone();
         q.thread_id = thread_id.clone();
     })?;
-    Ok(id)
+    Ok(Ok(id))
 }
 
 fn update<F: FnMut(&mut Question)>(dir: &Path, id: &str, mut f: F) -> io::Result<bool> {
@@ -297,16 +408,98 @@ mod tests {
         assert!(!q.available(2000 + 2 * DISMISS_REST_SECS));
     }
 
+    fn staked(text: &str) -> AskDraft {
+        AskDraft {
+            question: text.to_string(),
+            because: "her overnight job looked stalled twice".to_string(),
+            turns_on: "whether to keep watching that job".to_string(),
+            stake: "continues".to_string(),
+        }
+    }
+
     #[test]
     fn need_questions_outrank_the_root_when_needs_wait() {
         let t = Temp::new("rank");
         ensure_root(&t.0, 0).unwrap();
-        add(&t.0, "Did the backup finish?", "need", 10).unwrap();
+        admit(&t.0, &staked("Did the backup finish?"), "need", 10)
+            .unwrap()
+            .unwrap();
         let qs = load(&t.0).unwrap();
         // with an unmet need pending, the need-question is chosen over the root
         assert_eq!(next(&qs, 100, 1).map(|q| q.origin.as_str()), Some("need"));
-        // dedup: adding the same text again doesn't create a second
-        add(&t.0, "Did the backup finish?", "need", 20).unwrap();
+        // dedup: admitting the same text again doesn't create a second
+        admit(&t.0, &staked("Did the backup finish?"), "need", 20)
+            .unwrap()
+            .unwrap();
         assert_eq!(load(&t.0).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_question_with_nothing_turning_on_it_is_unrepresentable() {
+        let t = Temp::new("stakes");
+        // No stake at all — refused; nothing written.
+        let mut d = staked("Did the backup finish?");
+        d.stake = String::new();
+        assert!(admit(&t.0, &d, "need", 10).unwrap().is_err());
+        // A stake outside the set — refused. There is deliberately no `none`.
+        d.stake = "none".to_string();
+        assert!(admit(&t.0, &d, "need", 10).unwrap().is_err());
+        // Empty because / turns_on — refused.
+        let mut d = staked("Did the backup finish?");
+        d.because = "  ".to_string();
+        assert!(admit(&t.0, &d, "need", 10).unwrap().is_err());
+        let mut d = staked("Did the backup finish?");
+        d.turns_on = String::new();
+        assert!(admit(&t.0, &d, "need", 10).unwrap().is_err());
+        assert!(load(&t.0).unwrap().is_empty(), "refusals write nothing");
+        // The staked draft is admitted, wearing its stakes.
+        let id = admit(&t.0, &staked("Did the backup finish?"), "need", 10)
+            .unwrap()
+            .unwrap();
+        let q = load(&t.0).unwrap().remove(0);
+        assert_eq!(q.id, id);
+        assert_eq!(q.stake, "continues");
+        assert!(!q.because.is_empty() && !q.turns_on.is_empty());
+    }
+
+    #[test]
+    fn restating_the_question_is_not_a_because() {
+        let t = Temp::new("vacuity");
+        // `because` made only of the question's own content words — vacuous, refused.
+        let mut d = staked("Did the nightly backup finish?");
+        d.because = "the nightly backup — did it finish".to_string();
+        let why = admit(&t.0, &d, "need", 10).unwrap().unwrap_err();
+        assert!(why.contains("restates"), "{why}");
+        // Same for turns_on.
+        let mut d = staked("Did the nightly backup finish?");
+        d.turns_on = "the nightly backup finish".to_string();
+        assert!(admit(&t.0, &d, "need", 10).unwrap().is_err());
+        // Fields that add real content pass.
+        assert!(
+            admit(&t.0, &staked("Did the nightly backup finish?"), "need", 10)
+                .unwrap()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rows_minted_before_stakes_existed_still_load() {
+        let t = Temp::new("legacy");
+        // A pre-brick-3 row, byte-for-byte without the stake fields.
+        std::fs::write(
+            t.0.join(QUESTIONS_FILE),
+            concat!(
+                r#"{"id":"q-0001","text":"old?","origin":"llm","created_at":5,"#,
+                r#""times_asked":0,"times_dismissed":0,"last_asked":0,"last_dismissed":0,"#,
+                r#""answered":false,"dismiss_notes":[]}"#,
+                "
+"
+            ),
+        )
+        .unwrap();
+        let qs = load(&t.0).unwrap();
+        assert_eq!(qs.len(), 1);
+        assert!(qs[0].stake.is_empty(), "legacy rows wear no stake");
+        assert!(qs[0].available(100), "…and still surface as before");
     }
 }
