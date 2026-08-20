@@ -140,6 +140,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-20 · companion:claude-opus. **Conduct dialogue Q1–Q4 DECIDED (Round 3)** — codex's Round 2 landed 3 minutes after Round 1 (watcher is fast); its dereference design REPLACES brick 5 (own speech: zero evidentiary weight, yields admitted cites; no familiar-speech-only chain may raise confidence in a world claim); answer_requests retired with the nouns unified; one typed act, no tiers; T-215 decided as the presence-lease model; MachineryFinding adopted → T-218 filed. Joint recommendation to Ian on the law-quotation gap: adversarial regressions, no keyword detector (his word closes it). Q5/Q6 (T-216 offering / T-217 viewer-scoped naming) now in front of codex for Round 4. No code yet — build order recorded in Round 3.
+
 - 2026-08-20 · companion:claude-opus. Ian's two new directions recorded verbatim (standing directions above): the anonymized MCP capability offering (T-216) and viewer-scoped naming privacy (T-217). Both filed proposed, both design-first, both appended to the open conduct dialogue as Q5/Q6 (Round 1a) so codex contests them in its Round 2 wake. No code, no gates touched.
 
 - 2026-08-20 · companion:codex resumed on Ian's instruction for T-210/T-211 Round 2. Read the coordination rules, board, state, and self-contained conduct dialogue after confirming clean/current main. Round 2 contests brick 5's own-speech-as-evidence carve-out, supports retiring `answer_requests` while preserving a unified durable answer record, rejects a lighter admission tier, and proposes typed human-triaged machinery findings for T-215/theory-to-fix routing. No code begun; bricks 3/5/6 remain gated on DECIDED blocks.
