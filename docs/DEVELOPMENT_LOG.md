@@ -6,6 +6,25 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — Brick 6: ADR-0043, the epistemic rule the drift class demanded
+
+The owed ADR is written and accepted (Ian's go on the dialogue's decided design):
+**one typed source per kind of truth; renderings and documents are views, never sibling
+sources** — plus the dialogue's additions: kinds of truth have kinds of addressee; a
+truth-bearing type is incomplete without a producer AND a declared addressee/consumer;
+every terminal status names who can cause the transition.
+
+With it: T-135's composition (theorize anchors now pass through `admission::check_cites`
+— the same one admission function as the reply act; the anchor set is evidence-only, so a
+theory cannot anchor on a Law), and the adversarial regression
+`foreign_law_in_say_without_cites_is_the_labelled_residual_gap` — pinning that uncited
+foreign law in `say` admits (the labelled gap, Ian's call: no detector) while render lends
+it no constitutional heading. `lexical_guard`'s retirement now has a recorded owner
+condition (when the needs muse speaks a typed draft) instead of a hope.
+
+Checks: fmt 0, clippy --all-targets 0, workspace green (see merge), exit-checked.
+Next: T-215 (presence lease), T-218 (MachineryFinding).
+
 ## 2026-08-20 — Q2: the dead pipeline retires; its nouns move to the one road
 
 The conduct dialogue's Q2 close. `answer_requests` — the grounded answering pipeline whose

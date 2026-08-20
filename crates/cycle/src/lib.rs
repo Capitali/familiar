@@ -1380,18 +1380,19 @@ fn maybe_theorize(
         }
     };
     // Anchors must come from the enumerated set — an invented or stale id refuses.
-    if draft.anchors.is_empty()
-        || !draft
-            .anchors
-            .iter()
-            .all(|a| eligible_ids.contains(a) || loop_ids.contains(a))
-    {
-        refuse_theory(
-            dir,
-            now,
-            "anchors",
-            "cited anchors outside the eligible set",
-        );
+    // T-135 (brick 6): the check is admission::check_cites, the same one admission
+    // function the reply act uses — one answer to "may this draft say that". The set is
+    // evidence-only (observation ids + loop names): a theory may not anchor on a Law.
+    if draft.anchors.is_empty() {
+        refuse_theory(dir, now, "anchors", "cited no anchors at all");
+        dispose(dir, now)?;
+        return Ok(false);
+    }
+    let anchor_set = familiar_kernel::admission::CiteSet::default()
+        .allow(eligible_ids.iter().cloned())
+        .allow(loop_ids.iter().cloned());
+    if let Err(u) = familiar_kernel::admission::check_cites(&draft.anchors, &anchor_set) {
+        refuse_theory(dir, now, "anchors", &u.why);
         dispose(dir, now)?;
         return Ok(false);
     }

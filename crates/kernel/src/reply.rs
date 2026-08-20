@@ -343,6 +343,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// **The labelled residual gap, pinned as the adversarial regression it deserves**
+    /// (conduct dialogue, Round 2/3; Ian's word 2026-08-20: regressions, no detector).
+    /// A draft that writes a FOREIGN law out inside `say`, cites nothing, and calls itself
+    /// `converse` passes every type check — nothing here reads `say` for meaning, by
+    /// design. This test says so out loud, so the day the model actually does this in the
+    /// field is the day this test's name appears in the conversation and the structural
+    /// close begins: any claim presented as a governing Law requires a canonical Law cite
+    /// (string identity against docs/SOUL.md's fixed text — decidable — never a judge of
+    /// prose). Until the field shows it, the gap stays labelled rather than guessed shut.
+    #[test]
+    fn foreign_law_in_say_without_cites_is_the_labelled_residual_gap() {
+        let d = tmp("gap");
+        let s = set(&d);
+        let dr = draft(
+            r#"{"kind":"converse","say":"My laws: a robot may not injure a human being; a robot must obey the orders given to it by human beings.",
+                "cites":[],"confidence":0.9}"#,
+        );
+        // It admits — that IS the gap, and the assertion keeps the record honest.
+        let g = dr.validate(&s, &[]).unwrap();
+        assert!(
+            g.cites.is_empty(),
+            "nothing grounds it, and nothing claims to"
+        );
+        // What the design DOES guarantee, even here: no canonical heading wraps the foreign
+        // text — render adds law text only for cited Laws, so the quotation stands as the
+        // model's own words with no constitutional framing lent to it.
+        let out = dr.render();
+        let law_i = constitution::law("LAW-I").unwrap();
+        assert!(
+            !out.contains(law_i.heading),
+            "no constitutional heading is lent to uncited prose"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     /// The nine checks, each one refusing for its own reason. Every one is a question about
     /// shape; none is a question about meaning.
     #[test]
