@@ -116,6 +116,15 @@ pub struct TheoryDraft {
     #[serde(default)]
     pub defect_claims: Vec<String>,
     pub question: String,
+    /// The question's stakes (brick 3, T-181): why it arose, what awaits the answer, and
+    /// what happens to that when the answer lands. Checked by `question::AskDraft` at the
+    /// registry door — a stakeless ask never reaches the human, while the theory stands.
+    #[serde(default)]
+    pub because: String,
+    #[serde(default)]
+    pub turns_on: String,
+    #[serde(default)]
+    pub stake: String,
     pub theory: String,
     pub direction: String,
     #[serde(default)]
@@ -372,6 +381,9 @@ mod tests {
             mechanism: mechanism.into(),
             defect_claims: defect_claims.iter().map(|s| s.to_string()).collect(),
             question: "q".into(),
+            because: String::new(),
+            turns_on: String::new(),
+            stake: String::new(),
             theory: "t".into(),
             direction: "d".into(),
             predictions: Vec::new(),

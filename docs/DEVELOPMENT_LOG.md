@@ -6,6 +6,75 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — Q2: the dead pipeline retires; its nouns move to the one road
+
+The conduct dialogue's Q2 close. `answer_requests` — the grounded answering pipeline whose
+only producer was archived with the egui GUI (`b89070e`), 0 requests / 0 refusals live —
+is retired as an execution path, together with everything only it drove:
+`fetch_and_answer` (the 16k-char unscreened web-page bypass — removed rather than
+patched), `analyze_offline`, `analyze_with_llm`, `grounding_facts` (its registry-view
+property lives on at the live prompt seam, where brick 1 already put it), `run_tool`, and
+`answer_from_run`. `ToolRun` loses the two fields only the dead formatter read.
+
+The durable nouns survive and gain a LIVE producer: `persist_exchange` in the dialogue
+path writes the `Request`/`Answer` pair — an admitted reply persists with **exactly the
+admitted confidence and cites** (grounded-in-cites → `Known`, admitted-but-citeless →
+`Probable`), a screened utterance persists as `refused` with the registry's prose, and
+templated/no-mind replies persist nothing because they answered nothing. The corruption
+ledger stays untouched from the dialogue path (Ian's ruling, now pinned in the noun layer
+too). Tick's `answered`/`refused` counts now diff the persisted nouns, so the activity
+feed reports what was durably answered rather than what a dead queue held.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 744 passed / 0 failed, exit-checked.
+Next: brick 6 (the epistemic ADR + adversarial law-quotation regressions).
+
+## 2026-08-20 — Brick 5′: own speech dereferences; it is never evidence
+
+The conduct dialogue's Q1 close (codex's design, adopted in Round 3): the planned
+`is_own_speech` carve-out at the eligible-anchor site is dead — it would have made a reply
+eligible evidence merely because the familiar emitted it, and reply-cites-reply chains
+would launder narration into grounds. Instead: the substrate exclusion stands untouched at
+BOTH reasoning sites, and a fresh `familiar/{replied,refused,asked}` row **dereferences** —
+the observations its admitted cites name rejoin the eligible set, however old, while the
+speech itself contributes nothing. A cite naming more own speech yields nothing.
+
+`routing::is_own_speech(actor, action)` names the three conversational acts. The theorize
+watermark advances over consumed speech rows and never regresses on old dereferenced
+anchors. Invariant pinned by test: **no chain composed solely of the familiar's own speech
+can raise confidence in any world claim** (`a_chain_of_own_speech_yields_nothing`);
+the continuity path pinned by `own_speech_dereferences_to_its_grounds_never_to_itself`.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 746 passed / 0 failed, exit-checked.
+(One unrelated flake seen once under full-workspace load —
+`a_proven_tool_is_deployed_with_honest_health`; passes 3/3 solo and on rerun; worth a
+board task if seen again.) Next: the Q2 retirement (answer_requests).
+
+## 2026-08-20 — Brick 3: the question carries stakes (T-181 / ADR-0040 D2)
+
+Ian: *"Build q1-q4 and the rest. Go!"* — the conduct dialogue's build order starts
+(docs/reviews/2026-08-20-conduct-dialogue.md, Round 3).
+
+A question now enters the registry only wearing its stakes. `question::AskDraft
+{ question, because, turns_on, stake }` is the one door to the registry — `add`/
+`add_addressed` are gone, replaced by `admit`/`admit_addressed`, which refuse (inner
+`Err`, nothing written) any draft failing `AskDraft::check`: empty fields, a `stake`
+outside `continues|changes|stops` (there is deliberately **no `none`** — a question with
+nothing turning on it is unrepresentable), or a `because`/`turns_on` made only of the
+question's own content words (codex's anti-vacuity rule from the dialogue: four populated
+strings can still encode no real dependency; the check is the mechanical floor — token
+subset — and the test pins exactly that).
+
+`Question` gains the three fields serde-defaulted, so pre-brick rows load untouched (test
+pins a byte-for-byte legacy row). The root question carries canonical stakes. Both LLM
+producers now author stakes: the theorize contract (`TheoryDraft.because/turns_on/stake`,
+prompt extended) and the needs muse (same three JSON fields). On refusal **the theory
+still mints** — knowledge is not hostage to the ask; the human is simply not asked, and
+the refusal lands as an observation (`refuse_act("ask", "stakes", …)`).
+
+Checks: fmt 0, clippy --all-targets 0, workspace tests 743 passed / 0 failed, all
+exit-checked. Next: brick 5′ (the dereference — own speech yields only its admitted
+cites) per the dialogue's decided order.
+
 ## 2026-08-18 — The familiar has an MCP server, and the door is the covenant
 
 Ian: *"Let's work on our end on the MCP server, on making the familiar ready."* Preceded by the
