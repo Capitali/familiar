@@ -1182,20 +1182,50 @@ fn maybe_theorize(
     // the muse sees, restricted to observations NEWER than the commit-order cursor, so
     // "nothing new" is exact and a restart cannot rephrase old evidence.
     let cursor = theorize_cursor(dir);
-    let eligible: Vec<&observation::Observation> = obs
+    let mut eligible: Vec<&observation::Observation> = obs
         .iter()
         .filter(|o| !infra_observation(o))
         .filter(|o| !familiar_kernel::routing::is_substrate(&o.actor))
         .filter(|o| obs_seq(&o.id) > cursor)
         .collect();
+    // Brick 5′ (conduct dialogue Q1, DECIDED): own speech dereferences. A fresh
+    // familiar/{replied,refused,asked} row is never itself eligible (the substrate
+    // exclusion above stands, both here and at the muse window) — instead the
+    // observations its ADMITTED cites name rejoin the eligible set, however old. The
+    // conversation steers attention without ever becoming what a theory is about, and a
+    // cite that names more own speech yields nothing: no chain made solely of the
+    // familiar's speech can raise confidence in a world claim (the invariant, tested).
+    let fresh_speech: Vec<&observation::Observation> = obs
+        .iter()
+        .filter(|o| familiar_kernel::routing::is_own_speech(&o.actor, &o.action))
+        .filter(|o| obs_seq(&o.id) > cursor)
+        .collect();
+    let cited: std::collections::HashSet<&str> = fresh_speech
+        .iter()
+        .flat_map(|o| o.context.split(','))
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .collect();
+    eligible.extend(
+        obs.iter()
+            .filter(|o| cited.contains(o.id.as_str()))
+            .filter(|o| !infra_observation(o))
+            .filter(|o| !familiar_kernel::routing::is_substrate(&o.actor))
+            .filter(|o| obs_seq(&o.id) <= cursor), // fresh cited rows are already in
+    );
     if eligible.is_empty() && detected.iter().all(infra_loop) {
         return Ok(false); // a stable world being quiet is correct — no consult at all
     }
+    // The cursor never regresses: dereferenced anchors are old by design, so the
+    // watermark advances on the fresh window (speech rows included — they are consumed
+    // by this batch even though they are not evidence).
     let max_seen = eligible
         .iter()
+        .chain(fresh_speech.iter())
         .map(|o| obs_seq(&o.id))
         .max()
-        .unwrap_or(cursor);
+        .unwrap_or(cursor)
+        .max(cursor);
     let eligible_ids: std::collections::HashSet<String> =
         eligible.iter().map(|o| o.id.clone()).collect();
     let loop_ids: std::collections::HashSet<String> = detected
@@ -8045,6 +8075,89 @@ mod tests {
         assert!(
             !dir.join("llm/prompt.txt").exists(),
             "no consult on a quiet world"
+        );
+    }
+
+    #[test]
+    fn own_speech_dereferences_to_its_grounds_never_to_itself() {
+        let t = Temp::new(&format!("deref_{}", std::process::id()));
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        // An old observation, already consumed: the cursor sits past it.
+        let oid = seed_eligible_obs(dir, 100);
+        write_theorize_cursor(dir, obs_seq(&oid)).unwrap();
+        // The familiar spoke about it — a fresh reply whose ADMITTED cites name it.
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "replied",
+                "the lights follow you",
+                &oid,
+                "familiar",
+                150,
+                0.8,
+            ),
+        )
+        .unwrap();
+        // The draft cites the OLD observation: eligible again, through the reply.
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","because":"three evening adjustments followed departures","turns_on":"a standing lighting rule","stake":"changes","theory":"lighting follows presence","direction":"dim lights on away",
+                     "predictions":[{{"then_actor":"ian","then_action":"adjusted","then_object_prefix":"lighting:","within_secs":7200,"polarity":"expect_absent"}}]}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(theorize_until_disposed(dir, 200, &obs));
+        let threads = thread::load(dir).unwrap();
+        assert_eq!(
+            threads.len(),
+            1,
+            "the dereferenced ground anchors the theory"
+        );
+        assert_eq!(threads[0].anchors, vec![oid]);
+    }
+
+    #[test]
+    fn a_chain_of_own_speech_yields_nothing() {
+        let t = Temp::new(&format!("speech_chain_{}", std::process::id()));
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        // Two fresh replies, the second citing the first — own speech all the way down.
+        let first = observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "replied",
+                "all is well",
+                "",
+                "familiar",
+                100,
+                0.8,
+            ),
+        )
+        .unwrap();
+        observation::record(
+            dir,
+            observation::Observation::new(
+                "familiar",
+                "replied",
+                "as I said, all is well",
+                &first.id,
+                "familiar",
+                150,
+                0.9,
+            ),
+        )
+        .unwrap();
+        let obs = observation::load(dir).unwrap();
+        // No eligible evidence exists: the speech is not evidence, and its only cite is
+        // more speech. No consult happens and nothing mints.
+        assert!(!maybe_theorize(dir, 200, &obs, &[], true).unwrap());
+        assert!(
+            thread::load(dir).unwrap().is_empty(),
+            "no chain of the familiar's own speech raises confidence in a world claim"
         );
     }
 

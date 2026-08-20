@@ -6,6 +6,27 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — Brick 5′: own speech dereferences; it is never evidence
+
+The conduct dialogue's Q1 close (codex's design, adopted in Round 3): the planned
+`is_own_speech` carve-out at the eligible-anchor site is dead — it would have made a reply
+eligible evidence merely because the familiar emitted it, and reply-cites-reply chains
+would launder narration into grounds. Instead: the substrate exclusion stands untouched at
+BOTH reasoning sites, and a fresh `familiar/{replied,refused,asked}` row **dereferences** —
+the observations its admitted cites name rejoin the eligible set, however old, while the
+speech itself contributes nothing. A cite naming more own speech yields nothing.
+
+`routing::is_own_speech(actor, action)` names the three conversational acts. The theorize
+watermark advances over consumed speech rows and never regresses on old dereferenced
+anchors. Invariant pinned by test: **no chain composed solely of the familiar's own speech
+can raise confidence in any world claim** (`a_chain_of_own_speech_yields_nothing`);
+the continuity path pinned by `own_speech_dereferences_to_its_grounds_never_to_itself`.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 746 passed / 0 failed, exit-checked.
+(One unrelated flake seen once under full-workspace load —
+`a_proven_tool_is_deployed_with_honest_health`; passes 3/3 solo and on rerun; worth a
+board task if seen again.) Next: the Q2 retirement (answer_requests).
+
 ## 2026-08-20 — Brick 3: the question carries stakes (T-181 / ADR-0040 D2)
 
 Ian: *"Build q1-q4 and the rest. Go!"* — the conduct dialogue's build order starts

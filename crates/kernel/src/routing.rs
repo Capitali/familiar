@@ -108,6 +108,16 @@ pub fn is_substrate(actor: &str) -> bool {
     )
 }
 
+/// The familiar's own conversational acts — `replied`, `refused`, `asked` under the actor
+/// `"familiar"` (brick 5′; conduct dialogue Q1, DECIDED). Own speech is never evidence: it
+/// may be selected for continuity, but it carries zero evidentiary weight of its own and
+/// yields only the cites the kernel admitted with it. The invariant the theorize path
+/// tests: a chain made solely of own speech can never raise confidence in a world claim.
+pub fn is_own_speech(actor: &str, action: &str) -> bool {
+    actor.trim().eq_ignore_ascii_case("familiar")
+        && matches!(action.trim(), "replied" | "refused" | "asked")
+}
+
 /// Everyone the familiar has fresh evidence for, strongest first. `observer` is excluded: it is the
 /// *absence* of a name, and addressing a question to "observer" is broadcasting with extra steps.
 pub fn present_humans(obs: &[Observation], now: i64) -> Vec<PresentHuman> {
@@ -372,5 +382,16 @@ mod tests {
         assert!(is_substrate("host") && is_substrate("HOST") && is_substrate("local_hardware"));
         assert!(is_substrate("network") && is_substrate("familiar") && is_substrate("cli"));
         assert!(!is_substrate("ian") && !is_substrate("betty"));
+    }
+
+    #[test]
+    fn own_speech_is_exactly_the_three_conversational_acts() {
+        assert!(is_own_speech("familiar", "replied"));
+        assert!(is_own_speech("familiar", "refused"));
+        assert!(is_own_speech("familiar", "asked"));
+        // Metabolism is not speech; a human replying is not the familiar's speech.
+        assert!(!is_own_speech("familiar", "purged"));
+        assert!(!is_own_speech("familiar", "screened_in_shadow"));
+        assert!(!is_own_speech("ian", "replied"));
     }
 }
