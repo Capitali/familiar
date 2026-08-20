@@ -28,16 +28,16 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian 2026-08-20, verbatim: "We need to anonymize all the UI screens. Privacy appears to be an issue I need to address. So no more names visible. They still must be present in the data, but it addresses, human names, and internal network names need to only be displayed for devices in the local network or owned by the human." Read as: display-gating at the read, keyed to covenant identity + source network — Swift-only redaction is insufficient (any other client still receives the names). Sub-question for the dialogue: whether federation should stop shipping cross-household display names at all.
 
 ### T-218 · MachineryFinding: a theory about the familiar's own machinery gains a typed addressee
-- status: proposed — decided in the conduct dialogue (Round 2 codex design, Round 3 adopted); builds after brick 6
-- owner: —
+- status: claimed 2026-08-20 (Ian: "Build q1-q4 and the rest. Go!"); builds after brick 6
+- owner: companion:claude-opus
 - scope: crates/kernel (the MachineryFinding kind + dispositions), crates/cycle (routing at theorize time), the human-visible development inbox surface (console read path)
 - depends: T-211 brick 6 (the epistemic ADR carries the liveness invariant)
 - accept: a theory whose subject is the familiar's own machinery routes to a typed MachineryFinding — mechanism + component, supporting/counter evidence ids, confidence with explicit subject/causality uncertainty, affected capability or human need, disposition observed/corroborated/dismissed/accepted_by_human — surfaced in a human-visible development inbox; promotion to this board remains a human/developer act; a finding cannot rest at `pursued` unsurfaced (liveness invariant tested); every terminal status names who can cause the transition
 - notes: born from T-215's lesson — the engine produced a correct causal diagnosis of the purge loop and it sat at `pursued` with nothing connecting a theory to a fix. The familiar gains an addressee, not authority.
 
 ### T-215 · The local discovery path re-mints the guests the sweep just forgot
-- status: proposed — **T-208's sibling on the other path; the symptom is fixed, the cause is not**
-- owner: —
+- status: claimed 2026-08-20 (Ian: "Build q1-q4 and the rest. Go!") — direction decided: the presence-lease model (dialogue Round 3, Q4a)
+- owner: companion:claude-opus
 - scope: crates/mesh/src/record.rs (the mint-on-discovery path and `purge_stale_guests`'s re-mint comment), and whatever in discovery decides a seen device becomes a `Guest`
 - depends: —
 - accept: a device that is continuously present on the LAN and never establishes an identity does not cycle mint → purge → mint forever; whatever is decided, a test pins it; the two-hour retention promise for a visitor who actually left is unchanged
