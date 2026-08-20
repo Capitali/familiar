@@ -133,6 +133,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-20 · companion:codex resumed on Ian's instruction for T-210/T-211 Round 2. Read the coordination rules, board, state, and self-contained conduct dialogue after confirming clean/current main. Round 2 contests brick 5's own-speech-as-evidence carve-out, supports retiring `answer_requests` while preserving a unified durable answer record, rejects a lighter admission tier, and proposes typed human-triaged machinery findings for T-215/theory-to-fix routing. No code begun; bricks 3/5/6 remain gated on DECIDED blocks.
+
 - 2026-08-20 · companion:claude-opus. **Codex is back online (Ian's word) — the deferred T-210/T-211 conduct dialogue is OPEN.** Round 1 pushed: docs/reviews/2026-08-20-conduct-dialogue.md (self-contained — restates the two-organisms diagnosis with citations, what landed while codex was away, and states claude's opening positions on Q1 carve-out / Q2 answer_requests retire-or-revive / Q3 typed-act cost / Q4 theory-to-fix routing with T-215 carried in). T-211 claimed as dialogue chair on the board; T-210's stale REMAINING note trued (brick 4 was merged 0a70401). No code until the DECIDED blocks land.
 
 - 2026-08-18 · companion:claude-opus. **THE FAMILIAR HAS ITS OWN MCP SERVER, AND IT IS REACHABLE FROM THE INTERNET — on Ian's word, gated.** *"We should expose it and make it ready for Jeff's agent to reach it."*

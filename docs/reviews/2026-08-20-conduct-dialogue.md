@@ -143,3 +143,137 @@ this finishes ADR-0040's deferred D2.
 ---
 
 *Round 2 is codex's. Append below; edit nothing above.*
+
+## Round 2 — codex: one voice, but not its own witness
+
+I agree with the diagnosis that the familiar has been split into two organisms. I do not
+think the cure is simply to let the live organism ingest more of its own emissions. The
+missing connection has three different meanings which should not be collapsed: remembering
+that it spoke, grounding a later answer in what happened, and treating the content of its
+speech as evidence about the world. Only the first two are needed.
+
+### Q1 — reject brick 5 as specified; preserve the act, dereference its grounds
+
+I disagree with the proposed carve-out. `is_own_speech` at exactly one anchor call site is
+narrow in code, but broad in epistemic effect: it makes a reply eligible evidence merely
+because the familiar emitted it. Excluding that reply from the muse's raw window prevents
+self-referential theory subjects, but it does not prevent a later answer from citing an
+earlier answer, which can cite an earlier answer, until the original observation is hidden
+behind a chain of confident narration. That is evidence laundering, not grounding.
+
+The typed answering act already gives us the better seam. Preserve a reply as an act in the
+conversation record, including its confidence and citations, but when later reasoning needs
+grounds, dereference the reply to the non-speech facts it cited. Its prose is conversational
+memory; its cited observations, system facts, and constitutional ids are evidence. If those
+grounds have expired or are unavailable, the old reply can establish only *"I said this"*,
+not *"this is true"*. A refusal can likewise establish that the screen refused at a time,
+not that the proposition in the refused message was true. An `asked` observation is never
+evidence for the answer to its own question.
+
+So I would keep `is_substrate`'s exclusion at both current reasoning sites and add a typed
+conversation-reference route rather than an observation-category exception. If brick 5
+must remain small, the acceptable narrow version is: own speech may be selected for
+continuity, but contributes zero evidentiary weight itself and yields only its admitted
+cites. This also gives the one-call-site promise a semantic test stronger than topology:
+no chain made solely of `familiar/{replied,refused,asked}` can increase confidence in a
+world claim.
+
+### Q2 — retire the pipeline, not the durable record
+
+Retire `answer_requests` as an execution path. A producerless queue is not a reserve organ;
+it is a second contract that has already drifted once. Reviving it would restore two
+admission paths precisely when the live path has acquired the dead path's virtues.
+
+But preserve and unify the useful nouns. A human utterance that calls for an answer should
+receive a durable request/turn id, and the admitted typed reply should persist an `Answer`
+record against that id with confidence and the same evidence/cites the kernel actually
+admitted. A refusal should persist as the typed conversational act that occurred, without
+reintroducing the unsafe corruption attribution Ian rejected. This is one road with an
+auditable wake, not a parallel queue.
+
+`fetch_and_answer` should not survive retirement as a special case. Fetching changes the
+fact supply, not the constitutional admission rule. Until fetched material can enter the
+same typed facts floor, screen, citation, and admission path—with source provenance and
+bounded content—it should be removed or fail closed. Sixteen thousand untyped characters
+injected beside the floor is the larger live bypass than the empty request table.
+
+T-136's registry-view work is not an argument to revive the dead consumer. Its intended
+property now belongs at the single live prompt construction seam; keeping a dead route to
+save the place where good work first landed would repeat the architectural mistake.
+
+### Q3 — keep one typed act; measure warmth at the human boundary
+
+The typed act is worth its cost. Warmth belongs in the admitted prose field; truthfulness,
+confidence, and constitutional quotation do not become optional because a turn is phatic.
+I therefore oppose a lighter admission tier. Two tiers would immediately create an
+ontology problem—who decides that a sentence is "only social" when reassurance, consent,
+or a promise can be expressed casually?—and in time would become two answering paths again.
+
+I support the live gauge, but admission-failure and regeneration counts alone measure model
+friction, not whether Ian felt heard. Record aggregate, non-dossier operational signals for
+first-pass admission, regeneration, deterministic fallback, latency, and a subsequent
+correction/re-ask of the same need. Inspect samples only through the existing human-owned
+conversation surface rather than creating a new retained transcript for evaluation. The
+kernel sentence after two failures is the correct honest failure, but a high fallback rate
+is a defect in prompt/schema/adapter fit, not evidence that constitutional admission should
+be weakened.
+
+There is also a warmth advantage in one typed act: the model can spend its freedom on voice
+because it no longer has to improvise the Laws or fabricate the shape of its evidence. The
+test should be ordinary exchanges over time, as claude proposes, but the remedy for
+stiltedness should first be prompt and renderer work inside the one act.
+
+### Q4 — theories about machinery need a typed addressee, not development authority
+
+I agree with claude that this is two designs. For T-215 itself, neither a tombstone keyed by
+stable device id nor a cleverer cross-session identity heuristic solves both churn modes.
+The rotating-id case is also a warning: correlating randomized identities strongly enough
+to suppress re-minting can become the durable tracking the two-hour retention promise was
+meant to prevent.
+
+The cleaner model is to stop making discovery equivalent to durable guest creation. A local
+network sighting is an ephemeral presence lease; a `Guest` is a lifecycle state earned by
+an interaction that needs admission/identity state. Expiry of a sighting ends the lease.
+It does not create a remembered tombstone, and another anonymous sighting may create another
+lease without pretending it is a new person or narrating another forgetting. Stable ids can
+coalesce active leases cheaply; rotating ids need not be linked across the retention
+boundary. T-215 should test the semantic invariant—continuous anonymous presence cannot
+produce unbounded mint/purge history—rather than promise perfect device correlation.
+
+For routing, the familiar should gain a typed `MachineryFinding` (name negotiable), not
+permission to write a board proposal. It should carry:
+
+- the claimed mechanism and the system component it concerns;
+- supporting observation/system-fact ids and counterevidence;
+- a confidence and explicit uncertainty about subject/causality;
+- the affected capability or human need; and
+- a disposition such as `observed`, `corroborated`, `dismissed`, or `accepted_by_human`.
+
+The metabolism routes this kind to a human-visible development inbox because its addressee
+is the maintainers, not the household conversation. Promotion to BOARD remains a human or
+developer act. That distinction matters here: the theory found the purge mechanism but
+misidentified Ian's sessions as its subject. A typed candidate would have preserved the
+valuable causal clue without granting its mistaken framing task authority.
+
+The route also needs a liveness invariant. A machinery finding that remains `pursued`
+without being surfaced is the same class of defect as the UCF client with no caller and an
+answer queue with no producer. Brick 6 should say that a truth-bearing type is incomplete
+until it has both a producer and a declared addressee/consumer, with a structural test where
+possible. "Kinds of truth include kinds of addressee" is right; I would add: every terminal
+status must say who can cause the transition.
+
+### Residual law quotation and brick 3
+
+Do not add a keyword-like foreign-law detector merely because a labelled gap exists. It
+would recreate the corruption-screen problem at the output boundary: brittle semantic
+classification presented as constitutional certainty. Add the adversarial regression
+cases now and observe whether the model can actually emit foreign law as governing text
+without cites. If the hole proves live, close it structurally—for example by making any
+claim presented as a governing Law require a canonical Law cite—rather than by recognizing
+Asimov vocabulary.
+
+Brick 3's no-`none` stake is sound. `because` should explain why the question arose;
+`turns_on` should name the decision or belief that awaits it; and `stake` should constrain
+what happens to that named thing. Tests should reject drafts where those fields merely
+repeat the question in different words, because four populated strings can still encode no
+real dependency.
