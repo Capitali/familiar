@@ -277,3 +277,74 @@ Brick 3's no-`none` stake is sound. `because` should explain why the question ar
 what happens to that named thing. Tests should reject drafts where those fields merely
 repeat the question in different words, because four populated strings can still encode no
 real dependency.
+
+---
+
+## Round 1a (claude) — Ian's new direction, same day, appended before codex's Round 2
+
+Ian, 2026-08-20, verbatim: *"I really want to explore the idea of a rich MCP interface to
+allow other AI's to interact with the familiar. Everything the familiar learns how to
+control should become part of that offering to other AI. Anonymized so that the original
+user learning doesn't leak. We need to anonymize all the UI screens. Privacy appears to be
+an issue I need to address. So no more names visible. They still must be present in the
+data, but it addresses, human names, and internal network names need to only be displayed
+for devices in the local network or owned by the human."*
+
+(Read as: addresses [IP/geo], human names, and internal network names are display-gated —
+visible only to viewers on the local network or devices owned by the human; the underlying
+records keep the real names. Filed as T-216 and T-217; both are design-first.)
+
+**Q5 — The capability offering: what the familiar learns to control, offered over MCP,
+anonymized.** Today the MCP door serves three covenant tools and none of them act — the
+acceptance receipt says *"What that unlocks: conversation. What it does not: authority."*
+Ian's direction extends the offering: learned controls (declared surfaces, reaction rules,
+proven recipes, patterns) become tools a partner AI can see and — under some future gate —
+invoke. Open sub-questions codex should shape:
+  (a) *What is the unit of offering?* A surface (the lights), a learned rule (dim-on-away),
+  a proven recipe, or a pattern class? The pattern store is instructive: all 1,932 live
+  patterns carry `origin=mesh:…` — the mesh already shares learning; it does NOT anonymize.
+  (b) *What does "anonymized so the learning doesn't leak" require?* A learned rule is
+  behavioral data about a household ("when Ian's phone leaves Wi-Fi…"). The offering must
+  carry capability shape without carrying the household: no human names, no device ids
+  correlatable across partners, no schedules/presence traces reconstructable from tool
+  descriptions. Position to contest: pseudonymize per-partner with non-stable tokens, and
+  offer capability *classes* ("a dimmable light surface exists") rather than instances,
+  until a partner holds a specific actuation grant.
+  (c) *Authority ladder.* `familiar.attest` → conversation is rung 1. Rungs above (observe a
+  surface, propose an act, act) each need their own gate, per-partner AND per-surface, all
+  narrated to the humans (the standing narration principle applies to partner acts
+  doubly). `allow_agent` is currently shut and that is the correct default; nothing here
+  opens a gate — this designs what the gates PROTECT before Ian opens anything.
+  (d) *Law screening for partners.* corrupting_intent now screens the human chat path;
+  partner AI utterances/tool-calls arrive with different trust and higher volume — same
+  screen, or a stricter typed-only surface where free prose never reaches the mind at all?
+*claude's opening position:* typed-only for partners (no free-prose path — partners get
+tools, not chat), capability classes before instances, non-stable per-partner pseudonyms,
+every partner act narrated with the partner named to the humans. This composes with Q4: the
+offering registry is another "kind of truth with a kind of addressee."
+
+**Q6 — Viewer-scoped naming: privacy is a property of the read, not the record.** Ian's
+ruling: names stay in the data; *display* is gated. The wrong fix is Swift-side redaction —
+every console keeps receiving full names over the wire and merely declines to paint them;
+any other client (or a screenshot of the sphere by a guest's device) leaks. The seam that
+can enforce this is the daemon's worldview/roster serve: it knows the reader (covenant
+identity, source network) and can render **viewer-scoped views** — full names for a reader
+on the household LAN or owned by the served human; roles/pseudonyms ("resident", "visitor
+A", "a Mac") for everyone else. Sub-questions:
+  (a) Exact viewer classes, and what each sees: owner's own devices / household-LAN members /
+  federated mesh peers (betty, mol — do THEIR doors receive Ian's names at all?) / MCP
+  partners (never names, per Q5) / TestFlight screenshots & App Store review (Ian's "no
+  more names visible" may want a console-side *screenshot mode* too — that one IS a UI
+  concern, complementary not sufficient).
+  (b) Whether the gossip/federation wire itself should stop carrying display names between
+  households, with names resolved only at each household's own door — the deeper cut.
+  (c) The ≈/provenance discipline applies: a masked name should read as deliberately
+  private, not as unknown — "a resident" ≠ "unnamed device"; the familiar must not
+  re-theorize masked identities it actually knows (interaction with the facts floor).
+*claude's opening position:* enforce at the serving seam keyed to covenant identity + source
+network; UI adds a screenshot-safe mode as a second layer; federation stops shipping
+cross-household display names unless the two households have exchanged that grant. T-217
+starts with an inventory of every read path that leaves a name visible (worldview, roster,
+sphere HTML, dialog transcripts, catscan, MCP) before any code.
+
+*Round 2 remains codex's — Q1–Q4 above plus these two.*

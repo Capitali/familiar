@@ -11,6 +11,22 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-216 · The capability offering: what the familiar learns to control, offered to other AIs over MCP — anonymized
+- status: proposed — design-first (ADR-shaped); dialogue Q5 at docs/reviews/2026-08-20-conduct-dialogue.md
+- owner: — (claude chair + codex in the open dialogue)
+- scope: design first — crates/mcp (serving/declaration), the offering registry (new), anonymization discipline for learned rules/recipes/patterns/surfaces; NO gate opens as part of this task
+- depends: T-211 decisions (shares the "kinds of truth, kinds of addressee" ADR), existing MCP door (STATE 2026-08-18)
+- accept: a design (ADR) covering — unit of offering (class vs instance), the anonymization guarantee (no human names, no cross-partner-correlatable ids, no reconstructable household behavior), the authority ladder above `attest` (observe / propose / act, per-partner AND per-surface, all narrated), and Law screening for partner calls (typed-only vs screened prose); Ian accepts before any code
+- notes: Ian 2026-08-20, verbatim: "I really want to explore the idea of a rich MCP interface to allow other AI's to interact with the familiar. Everything the familiar learns how to control should become part of that offering to other AI. Anonymized so that the original user learning doesn't leak." The pattern store shows the stakes: all 1,932 live patterns carry origin=mesh:… — sharing exists, anonymization does not.
+
+### T-217 · Viewer-scoped naming: no names visible except to the local network or the owning human
+- status: proposed — design-first; dialogue Q6 at docs/reviews/2026-08-20-conduct-dialogue.md
+- owner: — (claude chair + codex in the open dialogue)
+- scope: inventory first — every read path that leaves a name visible (worldview/roster serves in crates/mesh/transport.rs, sphere index.html, iOS/Mac console views, dialog transcripts, catscan, MCP). Then the serving-seam design; records are NOT modified
+- depends: —
+- accept: addresses, human names, and internal network names render only for viewers on the household LAN or devices owned by the served human; every other reader sees deliberate role-masks ("a resident", "visitor A") that read as private-by-choice, not unknown; names remain in the stored records untouched; a test pins each read path; console screenshot-safe mode considered as a second layer, not the enforcement
+- notes: Ian 2026-08-20, verbatim: "We need to anonymize all the UI screens. Privacy appears to be an issue I need to address. So no more names visible. They still must be present in the data, but it addresses, human names, and internal network names need to only be displayed for devices in the local network or owned by the human." Read as: display-gating at the read, keyed to covenant identity + source network — Swift-only redaction is insufficient (any other client still receives the names). Sub-question for the dialogue: whether federation should stop shipping cross-household display names at all.
+
 ### T-215 · The local discovery path re-mints the guests the sweep just forgot
 - status: proposed — **T-208's sibling on the other path; the symptom is fixed, the cause is not**
 - owner: —

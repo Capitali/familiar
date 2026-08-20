@@ -111,6 +111,13 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Standing directions from Ian (recorded, binding)
 
+- **The capability offering (2026-08-20):** everything the familiar learns how to control
+  becomes part of a rich MCP offering to other AIs — anonymized so the original user
+  learning doesn't leak. Design first; no gate opens without Ian. (T-216, dialogue Q5.)
+- **Privacy of names (2026-08-20):** no more names visible on UI screens — addresses, human
+  names, and internal network names display only for devices on the local network or owned
+  by the human; the names stay present in the data. (T-217, dialogue Q6.)
+
 - Roster reads `SystemName : SystemType : ServedUser`; ids are small print.
 - Names come from autodiscovery (mDNS/tailnet/local-DNS); router config never required.
 - Humans and devices are separate rich records; roster is a view (ADR-0039, accepted).
@@ -132,6 +139,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   what is built. Planning brief: docs/reviews/2026-08-14-reasoning-engine.md.
 
 ## Companion & infra notes
+
+- 2026-08-20 · companion:claude-opus. Ian's two new directions recorded verbatim (standing directions above): the anonymized MCP capability offering (T-216) and viewer-scoped naming privacy (T-217). Both filed proposed, both design-first, both appended to the open conduct dialogue as Q5/Q6 (Round 1a) so codex contests them in its Round 2 wake. No code, no gates touched.
 
 - 2026-08-20 · companion:codex resumed on Ian's instruction for T-210/T-211 Round 2. Read the coordination rules, board, state, and self-contained conduct dialogue after confirming clean/current main. Round 2 contests brick 5's own-speech-as-evidence carve-out, supports retiring `answer_requests` while preserving a unified durable answer record, rejects a lighter admission tier, and proposes typed human-triaged machinery findings for T-215/theory-to-fix routing. No code begun; bricks 3/5/6 remain gated on DECIDED blocks.
 
