@@ -1330,6 +1330,8 @@ fn maybe_theorize(
          Theorize about the world and the person you serve — what the readings and events \
          MEAN for them — not about your own connectivity, infrastructure, or plumbing.\n\
          Cite ONLY from these eligible anchors (ids the theory claims to explain):\n{}\n\
+         Predictions may target ONLY these OBSERVED event classes (actor|action) — one \
+         the log has actually produced; an invented class refuses at mint:\n{}\n\
          Reply ONLY as compact JSON: {{\"anchors\":[\"obs-…\"],\"subject\":\"{who}\",\
          \"mechanism\":\"observation|presence|schedule|surface-act|question\",\
          \"defect_claims\":[],\"question\":\"…\",\"because\":\"…\",\"turns_on\":\"…\",\
@@ -1356,6 +1358,20 @@ fn maybe_theorize(
             format!("Latest sensor readings:\n{}\n", readings.join("\n"))
         },
         eligible_lines.join("\n"),
+        {
+            // The observed event vocabulary (T-221): recent distinct actor|action pairs,
+            // own speech excluded, bounded — the prediction contract's closed world.
+            let mut classes: Vec<String> = obs
+                .iter()
+                .rev()
+                .filter(|o| !familiar_kernel::routing::is_own_speech(&o.actor, &o.action))
+                .map(|o| format!("{}|{}", o.actor, o.action))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            classes.truncate(40);
+            classes.join("  ")
+        },
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,
@@ -1483,6 +1499,40 @@ fn maybe_theorize(
         })
         .collect();
     let (target, acts) = declared_match(dir, &format!("{direction} {theory}"));
+    // T-221 (the calibration study's unanimous finding — 121/121 misses were
+    // predictions of event classes NO PRODUCER EVER EMITS: "presence_detector/
+    // detect_absence", whole sentences as actions): a prediction may target only the
+    // OBSERVED vocabulary. The same discipline as anchors — the system enumerates, the
+    // draft picks, an invention refuses. This RAISES falsifiability: a prediction that
+    // can only miss was never a falsifier, it was costume. Refused predictions land on
+    // the record; a draft left with none wonders (T-128) instead of wearing one.
+    let known_classes: std::collections::BTreeSet<(String, String)> = obs
+        .iter()
+        .filter(|o| !familiar_kernel::routing::is_own_speech(&o.actor, &o.action))
+        .map(|o| (o.actor.clone(), o.action.clone()))
+        .collect();
+    let mut draft = draft;
+    draft.predictions.retain(|pd| {
+        let ok = known_classes
+            .iter()
+            .any(|(a, act)| a == pd.then_actor.trim() && act == pd.then_action.trim());
+        if !ok {
+            refuse_act(
+                dir,
+                now,
+                "prediction",
+                "vocabulary",
+                &format!(
+                    "predicted event class '{}|{}' has never been observed — a prediction \
+                     that cannot be observed cannot falsify",
+                    pd.then_actor.trim(),
+                    pd.then_action.trim()
+                ),
+            );
+        }
+        ok
+    });
+    let draft = draft;
     let predictions_sig: Vec<String> = draft
         .predictions
         .iter()
@@ -8155,6 +8205,45 @@ mod tests {
 
     /// The producer end of T-220: an ARMED draft (typed rule proposal) admitted through
     /// the real theorize path mints the durable decision beside its question.
+    /// T-221: a prediction naming an event class the log has never produced refuses at
+    /// mint (on the record), and a draft left with none WONDERS instead of wearing a
+    /// falsifier that can only miss. A prediction in the observed vocabulary survives.
+    #[test]
+    fn an_invented_event_class_cannot_be_a_falsifier() {
+        let t = Temp::new(&format!("pred_vocab_{}", std::process::id()));
+        let dir = &t.0;
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100); // the log speaks: ian|adjusted
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","because":"three evening adjustments followed departures","turns_on":"a standing lighting rule","stake":"changes","theory":"lighting follows presence","direction":"dim lights on away",
+                     "predictions":[{{"then_actor":"presence_detector","then_action":"detect_absence","then_object_prefix":"lights","within_secs":3600,"polarity":"expect"}}]}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(theorize_until_disposed(dir, 200, &obs));
+        let ts = thread::load(dir).unwrap();
+        assert_eq!(ts.len(), 1);
+        assert_eq!(
+            ts[0].kind, "inquiry",
+            "its only falsifier was costume — it wonders"
+        );
+        assert!(
+            familiar_kernel::prediction::load(dir)
+                .predictions
+                .is_empty(),
+            "nothing unobservable minted"
+        );
+        assert!(
+            observation::load(dir)
+                .unwrap()
+                .iter()
+                .any(|o| o.action == "refused" && o.object.starts_with("prediction")),
+            "the refusal is on the record"
+        );
+    }
+
     #[test]
     fn an_armed_ask_mints_the_durable_decision() {
         let t = Temp::new(&format!("armed_ask_{}", std::process::id()));
