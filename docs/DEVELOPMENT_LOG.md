@@ -6,6 +6,33 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — T-221: the misses had ONE cause — predictions spoke a language the world doesn't
+
+The five-class study codex required (progress-areas Round 2/3) ran over every settled
+result on both stores, joined to its minted prediction and re-checked against the full
+observation log. The verdict was unanimous to a degree no one predicted: **121 of 121
+misses were class 3 — the predicted event class has NEVER been produced by anything.**
+Not one wrong window, not one wrong-actor near-miss, not one settlement artifact. The
+model invents matcher vocabulary — `presence_detector|detect_absence`,
+`system|maintain`, whole sentences as action values — so every prediction was
+unfalsifiable-in-practice while counting as a falsifier, and erosion executed good
+theories (the lights pilot included) on evidence that could never have arrived.
+
+The fix is the anchors discipline applied to predictions (T-126's shape): the SYSTEM
+enumerates the observed event vocabulary (recent distinct `actor|action` pairs, own
+speech excluded, bounded at 40) into the theorize prompt; at mint, a prediction whose
+class the log has never produced REFUSES on the record
+(`refuse_act("prediction","vocabulary",…)`), and a draft left with no surviving
+prediction WONDERS (T-128) instead of wearing costume. The identity/variant key is
+computed after the filter, so refused predictions never shape thread identity.
+
+This RAISES falsifiability, per the study's constraint — abstention (wondering) will
+rise and that is the honest trade; the following week's report must show miss rate WITH
+coverage and settlement latency beside it (codex's guard against buying improvement by
+predicting less). Bar: fmt 0, clippy --all-targets 0, workspace 789 passed / 0 failed,
+exit-checked. Study artifacts: the partition script and both stores' outputs are in the
+task record.
+
 ## 2026-08-21 — T-220: the pending decision is durable — a person's choice survives erosion
 
 Codex's Round-2 design (adopted Round 3), built. The defect it ends: the one thread ever
