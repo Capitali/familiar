@@ -174,8 +174,24 @@ fn tools_for(dir: &Path, params: &Value) -> Vec<Value> {
     let mut out = vec![constitution_tool(), attest_tool()];
     if covenant::attested(dir, &partner_of(params)) {
         out.push(hello_tool());
+        out.push(discover_classes_tool());
     }
     out
+}
+
+/// Rung 2 of the ADR-0044 ladder: the class catalog. Attested partners only; classes are
+/// affordances, never authority — nothing listed is invocable without a human's grant.
+fn discover_classes_tool() -> Value {
+    tool(
+        "familiar.discover_classes",
+        "The capability classes available here, as generic affordances: what KINDS of          thing this familiar could be granted to observe or do — never instances, names,          counts, or authority. Attested partners only. A grant (observe/invoke) is a          deliberate human act per capability, per partner, per bounds; discovery is not a          request for one.",
+        json!({
+            "type": "object",
+            "properties": { "partner": { "type": "string" } },
+            "required": ["partner"]
+        }),
+        true,
+    )
 }
 
 /// The content-block shape an MCP tool answers in.
@@ -213,6 +229,17 @@ fn call(dir: &Path, params: &Value, now: i64) -> Result<Value, (i64, String)> {
                 ))),
                 Err(r) => Ok(tool_error(format!("not recorded — {}", r.why()))),
             }
+        }
+
+        "familiar.discover_classes" => {
+            if !covenant::attested(dir, &partner) {
+                return Ok(tool_error(unattested(&partner)));
+            }
+            let avail = crate::offering::available(dir);
+            Ok(content(
+                serde_json::to_string_pretty(&crate::offering::catalog_json(&avail))
+                    .unwrap_or_else(|_| "{}".into()),
+            ))
         }
 
         "familiar.hello" => {
@@ -483,6 +510,56 @@ mod tests {
         assert!(names(&listed).contains(&"familiar.hello".to_string()));
         let stranger = handle(&d, &req("tools/list", json!({ "partner": "someone" })), 1).unwrap();
         assert!(!names(&stranger).contains(&"familiar.hello".to_string()));
+    }
+
+    /// **Rung 2 (ADR-0044): discovery is attested-only, offers classes, and leaks nothing.**
+    /// A stranger cannot list or call it; an attested partner gets the catalog — which, on
+    /// a household with no shaped surfaces, is honestly empty rather than padded.
+    #[test]
+    fn discovery_is_attested_only_and_offers_affordances_never_authority() {
+        let d = tmp("discover");
+        // A stranger: not listed, and a call refuses on the covenant.
+        let stranger_menu = handle(&d, &req("tools/list", json!({ "partner": "s" })), 1).unwrap();
+        assert!(!names(&stranger_menu).contains(&"familiar.discover_classes".to_string()));
+        let refused = handle(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.discover_classes", "arguments": { "partner": "s" } }),
+            ),
+            1,
+        )
+        .unwrap();
+        assert!(is_error(&refused));
+
+        covenant::accept(&d, "jeffs-agent", "we accept the three laws", 1).unwrap();
+        let menu = handle(
+            &d,
+            &req("tools/list", json!({ "partner": "jeffs-agent" })),
+            2,
+        )
+        .unwrap();
+        assert!(names(&menu).contains(&"familiar.discover_classes".to_string()));
+        let cat = handle(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.discover_classes",
+                        "arguments": { "partner": "jeffs-agent" } }),
+            ),
+            3,
+        )
+        .unwrap();
+        assert!(!is_error(&cat));
+        let body = text_of(&cat);
+        assert!(
+            body.contains(r#""classes": []"#),
+            "no shaped surface, an empty catalog: {body}"
+        );
+        assert!(
+            body.contains("not authority"),
+            "the catalog says what discovery is not"
+        );
     }
 
     /// An empty acceptance is refused, and the refusal says how to fix it.

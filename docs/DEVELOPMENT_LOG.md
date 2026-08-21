@@ -6,6 +6,33 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — ADR-0044 rung 2: the offering catalog — affordances, never the household
+
+Ian accepted ADR-0044 ("start ADR-0044 (use codex partner if needed)") and rung 2 is
+built. `crates/mcp/src/offering.rs`:
+
+- **`ClassDef` is repo-authored vocabulary** — every field `'static`, written and
+  reviewed here, never derived from household data. Adding a class IS the human
+  declassification act (ADR-0044 §2). v1 ships one: `switchable.reversible/v1`.
+- **The availability compiler is structural**: a declared surface matches a def by SHAPE
+  (two acts forming a closed revert pair) — names, commands, descriptions are never
+  consulted, so a surface contributes exactly one bit: a def matched.
+- **The allowlist serializer is anonymizing by construction**: `catalog_json` takes only
+  `&[Availability]` (static defs + enums), so rule subjects, act commands, surface names,
+  counts, and free prose are unrepresentable in its output. The sentinel test loads a
+  household surface dripping with identifying strings ("ians-secret-lamp",
+  192.168.108.44, act names, keywords) and proves none serialize. No instance counts
+  cross — presence is the whole fact.
+- **`familiar.discover_classes`** joins the covenant door: attested partners only (not
+  listed to strangers; calls refuse on the covenant); an unshaped household serves an
+  honestly EMPTY catalog; the reply says what discovery is not ("affordances, not
+  authority — nothing here is invocable without a human's grant").
+
+Rung 3 (grant object + typed partner-act ledger) is offered to codex's lane on the
+board. Checks: fmt 0, clippy --all-targets 0, workspace 755 passed / 0 failed,
+exit-checked. Fleet note: Ian's iPad reconnected this morning after reboot — the OS-27
+outage closes as a device-side network wedge; every server path was healthy throughout.
+
 ## 2026-08-21 — The consult lane belongs to one familiar, not the process
 
 The pre-ship CI check caught `a_proven_tool_is_deployed_with_honest_health` red on a

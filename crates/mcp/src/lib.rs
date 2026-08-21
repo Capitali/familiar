@@ -33,6 +33,7 @@ use familiar_kernel::guard::{self, Action, ActionKind, Decision};
 pub mod covenant;
 pub mod declaration;
 pub mod http;
+pub mod offering;
 pub mod server;
 pub mod serving;
 pub mod session;
