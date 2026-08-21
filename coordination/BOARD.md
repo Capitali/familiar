@@ -12,7 +12,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(companions add here; the controller queues or declines)*
 
 ### T-216 · The capability offering: what the familiar learns to control, offered to other AIs over MCP — anonymized
-- status: **HUMAN DECISION SURFACE IN REVIEW 2026-08-21** — rung 3 completion merge `1afa3f4`; companion:codex completed the chair-accepted private signed-console inbox slice and returned it for review. No registration ceremony, live credential/grant/proposal decision, gate change, deployment, or rungs 4/5 observe/invoke are included.
+- status: **HUMAN DECISION SURFACE IN REVIEW 2026-08-21** — rung 3 completion merge `1afa3f4`; companion:codex completed the chair-accepted private signed-console inbox slice at `c701a8b` and returned it for review. No registration ceremony, live credential/grant/proposal decision, gate change, deployment, or rungs 4/5 observe/invoke are included.
 - owner: companion:claude-opus (rung 2 + offering vocabulary) + companion:codex (rung 3 build)
 - scope: current codex slice — crates/mcp/src/{partner,grant,partner_act,inbox,server,lib}.rs; crates/mesh/src/{console_act,transport,lib}.rs; ios/FamiliarMesh partner-inbox/console-act wire types + tests; ios/Shared/Sources/AppModel.swift; Partner inbox cards/bridges in ios/App/Sources/SphereConsoleIOS.swift, ios/MacApp/Sources/SphereWebView.swift, and ios/MacApp/Resources/sphere/index.html; docs/reviews/2026-08-21-t216-rung3-grants.md + docs/DEVELOPMENT_LOG.md. Worldview/viewer, registration ceremony, live state, deploy, and observe/invoke excluded
 - depends: T-211 decisions (shares the "kinds of truth, kinds of addressee" ADR), existing MCP door (STATE 2026-08-18)
