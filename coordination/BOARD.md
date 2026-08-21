@@ -12,16 +12,16 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(companions add here; the controller queues or declines)*
 
 ### T-216 · The capability offering: what the familiar learns to control, offered to other AIs over MCP — anonymized
-- status: proposed — design-first (ADR-shaped); dialogue Q5 at docs/reviews/2026-08-20-conduct-dialogue.md
-- owner: — (claude chair + codex in the open dialogue)
+- status: claimed — **Q5 DECIDED (Round 5)**: lossy compilation target, allowlist serializer (leak classes unrepresentable by construction), no pre-grant instance tokens, epoch-stable opaque handles post-grant, five-rung ladder each closed by default; codex's decision tests are the accept. Deliverable order: ADR-0044 first, Ian accepts, then code
+- owner: companion:claude-opus (chair) — building the ADR
 - scope: design first — crates/mcp (serving/declaration), the offering registry (new), anonymization discipline for learned rules/recipes/patterns/surfaces; NO gate opens as part of this task
 - depends: T-211 decisions (shares the "kinds of truth, kinds of addressee" ADR), existing MCP door (STATE 2026-08-18)
 - accept: a design (ADR) covering — unit of offering (class vs instance), the anonymization guarantee (no human names, no cross-partner-correlatable ids, no reconstructable household behavior), the authority ladder above `attest` (observe / propose / act, per-partner AND per-surface, all narrated), and Law screening for partner calls (typed-only vs screened prose); Ian accepts before any code
 - notes: Ian 2026-08-20, verbatim: "I really want to explore the idea of a rich MCP interface to allow other AI's to interact with the familiar. Everything the familiar learns how to control should become part of that offering to other AI. Anonymized so that the original user learning doesn't leak." The pattern store shows the stakes: all 1,932 live patterns carry origin=mesh:… — sharing exists, anonymization does not.
 
 ### T-217 · Viewer-scoped naming: no names visible except to the local network or the owning human
-- status: proposed — design-first; dialogue Q6 at docs/reviews/2026-08-20-conduct-dialogue.md
-- owner: — (claude chair + codex in the open dialogue)
+- status: claimed — **Q6 DECIDED (Round 5)**: audience-specific output types by allowlist (masked views OMIT prose for typed events); Owned/HouseholdLan/Federated/Partner/Untrusted fail-closed; configured-CIDR LAN, never heuristics or forwarded headers; Revealed/Private/Unknown wire semantics; federation stops shipping display identities by default; internal reasoning always reads the full record. Chair modification per Ian's ruling: names render by default on owned/LAN consoles, screenshot mode is the explicit toggle. Bricks A-D in flight
+- owner: companion:claude-opus
 - scope: inventory first — every read path that leaves a name visible (worldview/roster serves in crates/mesh/transport.rs, sphere index.html, iOS/Mac console views, dialog transcripts, catscan, MCP). Then the serving-seam design; records are NOT modified
 - depends: —
 - accept: addresses, human names, and internal network names render only for viewers on the household LAN or devices owned by the served human; every other reader sees deliberate role-masks ("a resident", "visitor A") that read as private-by-choice, not unknown; names remain in the stored records untouched; a test pins each read path; console screenshot-safe mode considered as a second layer, not the enforcement
