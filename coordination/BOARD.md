@@ -78,7 +78,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: what DID hold, and is genuinely well built: `guard::evaluate` is fail-closed, `boundary::load` falls back to `closed()`, `narrow_gate` makes widening unrepresentable in the type, scoped boundaries are a true intersection, and an inbound signed peer grant with `approved: true` is refused as constitutional. The gap is conduct, not reach
 
 ### T-214 · Doc honesty: "implemented" must be distinguished from "implemented and inert"
-- status: claimed 2026-08-21 (overnight, within Ian's "continue advancing" grant — the cheapest task on the board, no decisions needed)
+- status: **done 2026-08-21** — ADR-0014/0031/0032/0036 status lines trued against the 2026-08-17 audit, claims scoped to the audited node; ADR-0024's label was the model
 - owner: companion:claude-opus
 - scope: docs/decision-records/ status lines; docs/boundaries.md
 - depends: T-212 (the audit names which are which)
