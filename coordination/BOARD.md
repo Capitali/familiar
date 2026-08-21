@@ -48,6 +48,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - DIRECTION DECIDED 2026-08-20 (conduct dialogue Round 3, Q4a): the **presence lease model** — discovery stops equating to durable guest creation; a LAN sighting is an ephemeral lease whose expiry is silent (no tombstone, no narrated forgetting); `Guest` is earned by an interaction needing admission/identity state; stable ids coalesce active leases, rotating ids deliberately NOT linked across the retention boundary (strong correlation would itself become forbidden tracking). Accept criterion superseded by the invariant: continuous anonymous presence cannot produce unbounded mint/purge history.
 - symptom FIXED 2026-08-17 (Ian's call: "symptom now, cause next"), `crates/cycle/src/lib.rs` at the sweep's announcement site: **announce the first forgetting, not the hundred and fifty-second.** The record is still collected every time — retention is not what changed — but a device already announced as forgotten is not announced again, so the muse stops reading the churn as continuous memory loss. A visitor never seen before still announces. The check is free: the tick already holds the observation set. Test `a_visitor_forgotten_twice_is_announced_once` neutered to confirm it bites. This does NOT stop the mint/purge churn itself, which is what this task is for.
 
+### T-219 · A question about a device that no longer exists never retires
+- status: proposed
+- owner: —
+- scope: crates/kernel/src/question.rs (a retire path), the question-coordination sweep in crates/cycle; diagnosis of the enroll-era leftover class
+- depends: —
+- accept: an open question whose subject device has no living record retires on the sweep (retained, never deleted — same discipline as inquiry expiry); the lighthouse's live leftover ("A new device joined the mesh: iPhone (147cfa12). Who does it belong to?" — a device with NO record, occupying the active-question slot and starving the root) is gone after one deploy; a test pins the sweep
+- notes: found 2026-08-21 during the phone-outage investigation. The current enroll path files NO question (ADR-0026: a guest is the stable resting state) and the enroll test even asserts the who-does-it-belong-to class is retired — but a pre-ADR-0026 ROW still sits `answered:false` on the lighthouse and, being non-root and never answered, is available forever. ADR-0043 §6 shape: a question is incomplete without a retirement transition, and this class's transition should be "its subject stopped existing"
+
 ### T-212 · Nothing ships unwired — a declared capability must have a live producer
 - status: proposed — **the class behind T-211; roughly half the state-writing surface produces no data**
 - owner: —
@@ -70,8 +78,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: what DID hold, and is genuinely well built: `guard::evaluate` is fail-closed, `boundary::load` falls back to `closed()`, `narrow_gate` makes widening unrepresentable in the type, scoped boundaries are a true intersection, and an inbound signed peer grant with `approved: true` is refused as constitutional. The gap is conduct, not reach
 
 ### T-214 · Doc honesty: "implemented" must be distinguished from "implemented and inert"
-- status: proposed
-- owner: —
+- status: claimed 2026-08-21 (overnight, within Ian's "continue advancing" grant — the cheapest task on the board, no decisions needed)
+- owner: companion:claude-opus
 - scope: docs/decision-records/ status lines; docs/boundaries.md
 - depends: T-212 (the audit names which are which)
 - accept: no ADR reads `implemented` for a capability with no live producer or no open gate; the honest label already exists in-house and is the model — ADR-0024: *"presence built; identity structurally ready and **inert**"*
@@ -86,8 +94,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: split out of T-208 (companion:claude-fable, 2026-08-17). All seven ghosts found live carried `attestation: yes` with `admitted: no` — they contracted the covenant and were never vouched, which is a legitimate resting state for a visitor, so this may be correct behaviour rather than a leak. What made it worth a task is that nothing ages a half-admitted record out on its own terms; it only left via the guest purge, which T-208 has now made quiet. Diagnose before touching anything
 
 ### T-174 · Restore the documented iOS simulator build under Xcode 27
-- status: proposed
-- owner: —
+- status: **done 2026-08-21 — fixed by time**: the documented simulator build passes under Xcode 27.0 (27A5237l) with no repo change (verified during the phone-outage investigation; FamiliarAgent Debug-iphonesimulator builds and installs). Note discovered alongside: the SIMULATOR on MacOnStick has no working networking at all (host privacy gate) — see STATE 2026-08-21
+- owner: companion:claude-opus (verification only)
 - scope: ios/Watch/Assets.xcassets, ios/project.yml, ios/README.md
 - depends: —
 - accept: after `xcodegen`, the documented unsigned FamiliarAgent simulator command passes under Xcode 27 without weakening the real-device Watch icon or the generic-iOS release build; both console schemes remain green
