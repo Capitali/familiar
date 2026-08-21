@@ -6,6 +6,22 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — The consult lane belongs to one familiar, not the process
+
+The pre-ship CI check caught `a_proven_tool_is_deployed_with_honest_health` red on a
+docs-only commit — the same test that flaked once locally under full-workspace load.
+Mechanism, confirmed in the code: `LANES` was **one process-wide static queue**, so under
+`cargo test` a human-lane consult in one test familiar made a BACKGROUND consult of a
+completely different test familiar yield mid-flight (`Outcome::Yielded` → `author_tool`
+None → cultivate 0). The theorize tests never flaked only because their helper retries on
+yield; cultivate's doesn't. Tonight's bricks added human-lane traffic (the reply
+persistence tests), which is why the class surfaced today.
+
+Fix: lanes are keyed by data dir (`OnceLock<Mutex<HashMap<PathBuf, Arc<LaneCell>>>>`) —
+presence outranks musing WITHIN a household; it does not outrank other households'
+musing. Production is unchanged (one process, one dir, one lane). Three consecutive full
+workspace runs green (752/0 ×3), fmt 0, clippy --all-targets 0, exit-checked.
+
 ## 2026-08-20 — T-217: a name is shown only to its own household
 
 Ian's ruling (verbatim in STATE): addresses, human names, and internal network names
