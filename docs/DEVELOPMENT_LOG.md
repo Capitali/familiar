@@ -6,6 +6,26 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — T-210 closes: the shells read the same constitution as the daemon
+
+The device-shell half, the last piece of T-210's accept. The iOS/iPadOS shells cannot
+link the kernel, so `ios/Shared/Sources/ConstitutionText.swift` is a **generated view**:
+its entire content is derived from `constitution::render()` by the kernel test
+`the_shell_view_matches_the_constitution`, which is also the generator
+(`REGEN_SHELL_CONSTITUTION=1 cargo test -p familiar-kernel the_shell_view`). Editing the
+Swift file, or the kernel, alone turns CI red — one source, byte-exact, per ADR-0043 §1.
+
+`LocalReasoner.swift` no longer carries its own gloss of the Laws (it had a one-line
+paraphrase of each — the exact class brick 1 was built to end): the Laws come from
+`ConstitutionText.renderedLaws`; only the Law III VOICE guidance (how to speak, never law
+text) remains local. Verified: FamiliarMac Debug and FamiliarAgent generic-iOS Release
+both build after xcodegen.
+
+**T-210's accept is now met in full**: recital = its own Laws (bricks 1-2, verified live);
+Law II never rendered as obedience (unauthorable text); one source daemon + shells (this);
+recital pinned by test (brick 2 + the drift pair). Checks: fmt 0, clippy --all-targets 0,
+workspace 750 passed / 0 failed, both app schemes build, exit-checked.
+
 ## 2026-08-20 — T-218: a theory about the machinery gains its addressee
 
 ADR-0043 §5, built. `kernel/machinery.rs`: the `MachineryFinding` — mechanism +
