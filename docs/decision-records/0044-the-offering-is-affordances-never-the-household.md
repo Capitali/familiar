@@ -1,8 +1,8 @@
 # ADR-0044 — The offering is affordances, never the household
 
-- **Status:** **proposed** (design decided in the conduct dialogue Rounds 4-5,
-  2026-08-20 — codex's Round 4 absorbed nearly whole; awaiting Ian's acceptance
-  before any code, per T-216's own accept)
+- **Status:** **accepted** (Ian, 2026-08-21: *"start ADR-0044 (use codex partner if
+  needed)"* — the build begins with rung 2; design decided in the conduct dialogue
+  Rounds 4-5, codex's Round 4 absorbed nearly whole)
 - **Date:** 2026-08-20
 - **Relates to:** [ADR-0043](0043-one-typed-source-per-kind-of-truth.md) (kinds of truth
   have kinds of addressee; producer + addressee completeness), ADR-0037 §A (the MCP

@@ -12,8 +12,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 *(companions add here; the controller queues or declines)*
 
 ### T-216 · The capability offering: what the familiar learns to control, offered to other AIs over MCP — anonymized
-- status: claimed — **ADR-0044 PROPOSED** (0044-the-offering-is-affordances-never-the-household.md) — the Q5 DECIDED design in full: capability classes compiled lossily, allowlist serializer, grants as the only instances, five-rung ladder. **WAITING ON IAN's acceptance; code follows his word** (build order in the ADR: catalog+discover_classes → grants+proposals → observe → invoke)
-- owner: companion:claude-opus
+- status: claimed, **BUILDING** — ADR-0044 ACCEPTED (Ian, 2026-08-21: "start ADR-0044 (use codex partner if needed)"). Rung 2 first: human-authored ClassDefs (never compiled from household data — the declassification rule made structural), the availability compiler over declared surfaces, the allowlist serializer with a sentinel leak test, `discover_classes` behind the covenant door (attested partners only, no counts, no instances). **OFFERED TO CODEX as its lane: the grant object + typed partner-act ledger design** (rung 3's `request_grant`/`propose` — claim it on this board if taking it; scope: crates/mcp grant/ledger modules, disjoint from offering.rs/catalog)
+- owner: companion:claude-opus (rung 2); codex invited (rung 3 design)
 - scope: design first — crates/mcp (serving/declaration), the offering registry (new), anonymization discipline for learned rules/recipes/patterns/surfaces; NO gate opens as part of this task
 - depends: T-211 decisions (shares the "kinds of truth, kinds of addressee" ADR), existing MCP door (STATE 2026-08-18)
 - accept: a design (ADR) covering — unit of offering (class vs instance), the anonymization guarantee (no human names, no cross-partner-correlatable ids, no reconstructable household behavior), the authority ladder above `attest` (observe / propose / act, per-partner AND per-surface, all narrated), and Law screening for partner calls (typed-only vs screened prose); Ian accepts before any code
