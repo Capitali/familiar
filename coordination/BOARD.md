@@ -49,6 +49,30 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - DIRECTION DECIDED 2026-08-20 (conduct dialogue Round 3, Q4a): the **presence lease model** — discovery stops equating to durable guest creation; a LAN sighting is an ephemeral lease whose expiry is silent (no tombstone, no narrated forgetting); `Guest` is earned by an interaction needing admission/identity state; stable ids coalesce active leases, rotating ids deliberately NOT linked across the retention boundary (strong correlation would itself become forbidden tracking). Accept criterion superseded by the invariant: continuous anonymous presence cannot produce unbounded mint/purge history.
 - symptom FIXED 2026-08-17 (Ian's call: "symptom now, cause next"), `crates/cycle/src/lib.rs` at the sweep's announcement site: **announce the first forgetting, not the hundred and fifty-second.** The record is still collected every time — retention is not what changed — but a device already announced as forgotten is not announced again, so the muse stops reading the churn as continuous memory loss. A visitor never seen before still announces. The check is free: the tick already holds the observation set. Test `a_visitor_forgotten_twice_is_announced_once` neutered to confirm it bites. This does NOT stop the mint/purge churn itself, which is what this task is for.
 
+### T-220 · The first service loop closes — and an armed proposal waits for its human
+- status: proposed — **the north-star brick; Ian's "no meaningful service" measured: 660 threads, 0 acts, fleet-wide**
+- owner: —
+- scope: crates/cycle (erosion exemption for threads with rule_proposal awaiting assent), the T-102 mint path (built), wildhorse's declared lights surface (exists); end-to-end verification on the live fleet
+- depends: —
+- accept: an armed rule_proposal thread awaiting its subject's answer does not retire on prediction erosion (pinned); the lights pilot re-arms; on Ian's assent the paired rule mints, fires on a real presence transition, and the act narrates ("dimmed the motorlights because you left — undo with a word"); the whole loop verified live once
+- notes: the one prior armed thread (lighthouse thread-0297) eroded to retired on missed predictions WHILE waiting for assent — the constitutional design routes action through assent, then lets the assent target die of a clock. Evidence: docs/reviews/2026-08-21-progress-areas.md
+
+### T-221 · Prediction calibration: 120 of 125 settled predictions missed
+- status: proposed
+- owner: —
+- scope: a study over prediction_results on both stores (window sizes, matcher classes, actor targets of the misses), then recalibrated mint defaults in the theorize prompt + prediction::mint; T-123's field-calibration gate consumes this
+- depends: —
+- accept: the dominant miss cause is named with counts; mint defaults change accordingly; the fleet miss rate over the following week drops materially and is REPORTED (not asserted); no loosening that makes predictions unfalsifiable
+- notes: erosion is working as designed — it is the predictions that are mis-aimed, and they take good theories (including the lights pilot) down with them
+
+### T-222 · Answers must reach the question registry
+- status: proposed
+- owner: —
+- scope: the thread-answer path (thread::add_answer / add_answer_from callers) calls question::record_answered for the question a thread carries; sweep for stale open questions whose thread already holds an answer
+- depends: — (composes with T-219)
+- accept: a human answer on a thread marks its registry question answered (310 live questions, 0 ever marked — T-212's finding, now measured); answered non-root questions retire; the console stops re-surfacing what was already said; a test pins the join
+- notes: humans DO talk — 362 threads carry answers fleet-wide while the registry believes silence
+
 ### T-219 · A question about a device that no longer exists never retires
 - status: proposed
 - owner: —

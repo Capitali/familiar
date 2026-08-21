@@ -12,6 +12,10 @@ serde_json.workspace = true
 familiar-kernel.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+getrandom = "0.2"
+hmac = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
 # Blocking TLS, the same rustls the mesh transport already carries — but configured to
 # VERIFY, because this wire carries a bearer token instead of a signed payload (see
 # tls.rs). `pem` parses the platform trust store; both are already in the lock file.

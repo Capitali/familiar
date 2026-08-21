@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use familiar_kernel::constitution;
 use serde::{Deserialize, Serialize};
 
+use crate::partner::PartnerContext;
+
 /// Where the accepted covenants live, relative to the data dir.
 pub const PARTNERS_FILE: &str = "mcp/partners.json";
 
@@ -52,11 +54,26 @@ pub struct Covenant {
     pub ts: i64,
 }
 
+/// Acceptance bound to a transport-authenticated principal. Kept as a separate record kind so
+/// old caller-label covenants can never be mistaken for authority-bearing consent on upgrade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrincipalCovenant {
+    pub principal: String,
+    pub credential_fingerprint: String,
+    pub alias_snapshot: String,
+    pub laws_version: u32,
+    pub statement: String,
+    pub ts: i64,
+}
+
 /// Everything recorded so far.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Covenants {
     #[serde(default)]
     pub accepted: Vec<Covenant>,
+    #[serde(default)]
+    pub principals: Vec<PrincipalCovenant>,
 }
 
 fn path(dir: &Path) -> PathBuf {
@@ -89,6 +106,20 @@ pub fn attested(dir: &Path, partner: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Has this authenticated principal accepted the Laws as they currently stand? Credential
+/// fingerprints are retained as audit snapshots, while consent binds to the stable principal:
+/// an explicit human credential re-binding does not silently create a new identity.
+pub fn principal_attested(dir: &Path, context: &PartnerContext) -> bool {
+    load(dir)
+        .map(|c| {
+            c.principals.iter().any(|a| {
+                a.principal == context.principal
+                    && a.laws_version == constitution::LAWS_VERSION
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Why an acceptance was not recorded. Both are the partner's to fix, and both say how.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
@@ -98,6 +129,8 @@ pub enum Refused {
     NoStatement,
     /// The ledger is full of other partners.
     LedgerFull,
+    /// The authenticated context did not carry a stable principal.
+    NoPrincipal,
 }
 
 impl Refused {
@@ -113,6 +146,9 @@ impl Refused {
             Refused::LedgerFull => {
                 "this familiar is already holding as many covenants as it will keep; its human \
                  has to retire one before another is recorded"
+            }
+            Refused::NoPrincipal => {
+                "the transport did not establish a partner principal; a caller label is not identity"
             }
         }
     }
@@ -140,27 +176,65 @@ pub fn accept(dir: &Path, partner: &str, statement: &str, ts: i64) -> Result<Cov
     let mut all = load(dir).unwrap_or_default();
     let known = all.accepted.iter().any(|a| a.partner == entry.partner);
     // A ceiling on strangers, never on someone already here restating their own acceptance.
-    if !known && all.accepted.len() >= MAX_PARTNERS {
+    if !known && all.accepted.len() + all.principals.len() >= MAX_PARTNERS {
         return Err(Refused::LedgerFull);
     }
     all.accepted
         .retain(|a| !(a.partner == entry.partner && a.laws_version == entry.laws_version));
     all.accepted.push(entry.clone());
 
-    // Best-effort persistence, and the caller is told the truth if it fails: an acceptance
-    // that was not written down did not happen.
-    if let Some(parent) = path(dir).parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match serde_json::to_vec_pretty(&all) {
-        Ok(bytes) => {
-            if std::fs::write(path(dir), bytes).is_err() {
-                return Err(Refused::NoStatement);
-            }
-        }
-        Err(_) => return Err(Refused::NoStatement),
-    }
+    persist(dir, &all)?;
     Ok(entry)
+}
+
+/// Record the current authenticated principal's own acceptance. There is deliberately no
+/// `partner` argument: identity has already been established by the credential.
+pub fn accept_principal(
+    dir: &Path,
+    context: &PartnerContext,
+    statement: &str,
+    ts: i64,
+) -> Result<PrincipalCovenant, Refused> {
+    if context.principal.trim().is_empty() {
+        return Err(Refused::NoPrincipal);
+    }
+    let statement = statement.trim();
+    if statement.is_empty() {
+        return Err(Refused::NoStatement);
+    }
+    let entry = PrincipalCovenant {
+        principal: context.principal.clone(),
+        credential_fingerprint: context.credential_fingerprint.clone(),
+        alias_snapshot: context.alias.clone(),
+        laws_version: constitution::LAWS_VERSION,
+        statement: statement.to_string(),
+        ts,
+    };
+    let mut all = load(dir).unwrap_or_default();
+    let known = all
+        .principals
+        .iter()
+        .any(|a| a.principal == context.principal);
+    if !known && all.accepted.len() + all.principals.len() >= MAX_PARTNERS {
+        return Err(Refused::LedgerFull);
+    }
+    all.principals.retain(|a| {
+        !(a.principal == entry.principal && a.laws_version == entry.laws_version)
+    });
+    all.principals.push(entry.clone());
+    persist(dir, &all)?;
+    Ok(entry)
+}
+
+fn persist(dir: &Path, all: &Covenants) -> Result<(), Refused> {
+    let Some(parent) = path(dir).parent() else {
+        return Err(Refused::NoStatement);
+    };
+    std::fs::create_dir_all(parent).map_err(|_| Refused::NoStatement)?;
+    let bytes = serde_json::to_vec_pretty(all).map_err(|_| Refused::NoStatement)?;
+    let tmp = parent.join(format!(".partners-{}.tmp", std::process::id()));
+    std::fs::write(&tmp, bytes).map_err(|_| Refused::NoStatement)?;
+    std::fs::rename(tmp, path(dir)).map_err(|_| Refused::NoStatement)
 }
 
 #[cfg(test)]
@@ -190,6 +264,44 @@ mod tests {
         assert_eq!(c.statement, "We accept the Three Laws.");
         assert!(attested(&d, "ucf-market"));
         assert!(!attested(&d, "someone-else"));
+    }
+
+    #[test]
+    fn a_principal_covenant_is_bound_and_old_labels_are_not_promoted() {
+        let d = tmp("principal");
+        accept(&d, "same-label", "old speech covenant", 1).unwrap();
+        let context = PartnerContext {
+            principal: "principal-a".into(),
+            credential_fingerprint: "abc123".into(),
+            alias: "same-label".into(),
+        };
+        assert!(attested(&d, "same-label"));
+        assert!(
+            !principal_attested(&d, &context),
+            "a self-asserted covenant must not become principal consent"
+        );
+        let accepted = accept_principal(&d, &context, "bound words", 2).unwrap();
+        assert_eq!(accepted.principal, "principal-a");
+        assert_eq!(accepted.credential_fingerprint, "abc123");
+        assert!(principal_attested(&d, &context));
+    }
+
+    #[test]
+    fn two_principals_with_one_alias_do_not_share_consent() {
+        let d = tmp("principal_distinct");
+        let a = PartnerContext {
+            principal: "principal-a".into(),
+            credential_fingerprint: "a".into(),
+            alias: "agent".into(),
+        };
+        let b = PartnerContext {
+            principal: "principal-b".into(),
+            credential_fingerprint: "b".into(),
+            alias: "agent".into(),
+        };
+        accept_principal(&d, &a, "yes", 1).unwrap();
+        assert!(principal_attested(&d, &a));
+        assert!(!principal_attested(&d, &b));
     }
 
     /// A checkbox records nothing a human can weigh, so an empty statement is refused — and
