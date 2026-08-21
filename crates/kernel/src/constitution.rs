@@ -166,6 +166,46 @@ pub fn render() -> String {
 mod tests {
     use super::*;
 
+    /// **The device-shell half of T-210** (ADR-0043 §1: renderings are views, never sibling
+    /// sources). The iOS/iPadOS shells cannot link this crate, so their constitution is a
+    /// GENERATED VIEW — a Swift file whose entire content this test derives from
+    /// [`render`] and compares byte-for-byte. Drift in either direction turns CI red.
+    /// Regenerate after a constitutional change with:
+    /// `REGEN_SHELL_CONSTITUTION=1 cargo test -p familiar-kernel the_shell_view`
+    #[test]
+    fn the_shell_view_matches_the_constitution() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../ios/Shared/Sources/ConstitutionText.swift");
+        let mut body = String::new();
+        for line in render().lines() {
+            body.push_str("    ");
+            body.push_str(line);
+            body.push('\n');
+        }
+        let header = "// GENERATED VIEW — DO NOT EDIT. One source: crates/kernel/src/constitution.rs\n\
+                      // (itself drift-tested against docs/SOUL.md). This file is written and verified\n\
+                      // by the kernel test `the_shell_view_matches_the_constitution`; editing it here\n\
+                      // turns CI red. Regenerate with:\n\
+                      //   REGEN_SHELL_CONSTITUTION=1 cargo test -p familiar-kernel the_shell_view\n\
+                      //\n\
+                      // T-210's device-shell half: the daemon reads the constitution from the kernel;\n\
+                      // a shell reads these same words through this view — the two cannot drift.\n";
+        let triple = "\"\"\"";
+        let expected = format!(
+            "{header}enum ConstitutionText {{\n    static let renderedLaws = {triple}\n{body}    {triple}\n}}\n"
+        );
+        if std::env::var("REGEN_SHELL_CONSTITUTION").is_ok() {
+            std::fs::write(&path, &expected).expect("write ConstitutionText.swift");
+        }
+        let actual = std::fs::read_to_string(&path).expect(
+            "ios/Shared/Sources/ConstitutionText.swift must exist — generate it with REGEN_SHELL_CONSTITUTION=1 cargo test -p familiar-kernel the_shell_view",
+        );
+        assert_eq!(
+            actual, expected,
+            "the shell's constitution view drifted from the kernel — regenerate with              REGEN_SHELL_CONSTITUTION=1 cargo test -p familiar-kernel the_shell_view"
+        );
+    }
+
     /// Markdown emphasis and line wrapping are presentation; the words are the constitution.
     /// Strip the first, collapse the second, compare the rest.
     fn normalize(s: &str) -> String {
