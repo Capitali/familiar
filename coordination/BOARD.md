@@ -58,8 +58,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the one prior armed thread (lighthouse thread-0297) eroded to retired on missed predictions WHILE waiting for assent — the constitutional design routes action through assent, then lets the assent target die of a clock. Evidence: docs/reviews/2026-08-21-progress-areas.md
 
 ### T-221 · Prediction calibration: 120 of 125 settled predictions missed
-- status: proposed
-- owner: —
+- status: claimed 2026-08-21 (diagnostic-first per codex Round 2 — the five-class miss partition before any default changes)
+- owner: companion:claude-opus
 - scope: a study over prediction_results on both stores (window sizes, matcher classes, actor targets of the misses), then recalibrated mint defaults in the theorize prompt + prediction::mint; T-123's field-calibration gate consumes this
 - depends: —
 - accept: the dominant miss cause is named with counts; mint defaults change accordingly; the fleet miss rate over the following week drops materially and is REPORTED (not asserted); no loosening that makes predictions unfalsifiable
