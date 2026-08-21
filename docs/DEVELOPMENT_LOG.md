@@ -6,6 +6,20 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — T-216 accepted; a fixture race CI caught and the local bar could not
+
+The chair review of `c701a8b` accepted the human decision surface as built (full findings
+in docs/reviews/2026-08-21-t216-rung3-grants.md; bar independently reproduced at 798/0).
+CI then surfaced what three local full-workspace runs never did: the two new `mcp::inbox`
+tests shared one `temp_root` fixture tag, and `temp_root` begins by deleting the tagged
+directory — so under the harness's in-process concurrency, one test could sweep the fixture
+out from under the other's open partner-act sqlite ledger ("disk I/O error",
+run 32528810825). Running only the racing pair reproduced it 20/20 locally; the full suite
+passed by scheduling luck. Fix: one tag per test, the convention every other `temp_root`
+caller already follows, now stated at the setup site. The pair is 30/30 green after; full
+workspace re-run green. Lesson for the next flake: a green full-suite bar does not clear a
+shared-fixture race — run the suspicious tests alone, together, in a loop.
+
 ## 2026-08-21 — T-216: a partner's request reaches only its registered human
 
 Rung 3's authority records already knew how to request, grant, decline, revoke, propose,

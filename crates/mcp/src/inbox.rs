@@ -270,8 +270,11 @@ mod tests {
         HumanDecisionContext::from_verified_mesh(format!("{human}-device"), human.into()).unwrap()
     }
 
-    fn setup() -> (std::path::PathBuf, PartnerContext, PartnerContext) {
-        let dir = familiar_kernel::testing::temp_root("partner_inbox");
+    // One tag per TEST: temp_root deletes and recreates the tagged directory, and the
+    // harness runs tests concurrently in one process — a shared tag lets one test sweep
+    // the fixture out from under another's open ledger (seen as a sqlite disk I/O error).
+    fn setup(tag: &str) -> (std::path::PathBuf, PartnerContext, PartnerContext) {
+        let dir = familiar_kernel::testing::temp_root(tag);
         std::fs::create_dir_all(dir.join("mcp")).unwrap();
         let records = [
             ("p-ian", "Ian partner", "ian"),
@@ -337,7 +340,7 @@ mod tests {
 
     #[test]
     fn projection_is_private_to_the_registered_human_and_joins_only_valid_surfaces() {
-        let (dir, ian, betty) = setup();
+        let (dir, ian, betty) = setup("partner_inbox_private");
         for (context, key) in [(&ian, "ian-request"), (&betty, "betty-request")] {
             grant::request_grant(
                 &dir,
@@ -368,7 +371,7 @@ mod tests {
 
     #[test]
     fn legacy_principals_are_not_assigned_and_corruption_fails_the_whole_view() {
-        let (dir, _, _) = setup();
+        let (dir, _, _) = setup("partner_inbox_legacy");
         let mut registry = partner::load(&dir).unwrap();
         registry.principals[0].registered_by.clear();
         std::fs::write(
