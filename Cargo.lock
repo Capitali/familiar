@@ -548,6 +548,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "familiar-probe"
+version = "0.1.0"
+dependencies = [
+ "familiar-mesh",
+ "serde_json",
+]
+
+[[package]]
 name = "familiar-reach"
 version = "0.1.0"
 dependencies = [
