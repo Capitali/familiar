@@ -61,58 +61,81 @@ struct Lanes {
     humans_waiting: usize,
 }
 
-/// The single per-process consult queue. Poison-tolerant throughout — a panicked
-/// consult must not silence the LLM forever.
-static LANES: (std::sync::Mutex<Lanes>, std::sync::Condvar) = (
-    std::sync::Mutex::new(Lanes {
-        busy: false,
-        humans_waiting: 0,
-    }),
-    std::sync::Condvar::new(),
-);
+type LaneCell = (std::sync::Mutex<Lanes>, std::sync::Condvar);
+
+/// One consult queue **per familiar** (keyed by data dir), not per process. In production
+/// one process serves one familiar, so nothing changes. Under `cargo test` — or any future
+/// host embedding several familiars — the lanes must not couple strangers: with one
+/// process-wide queue, a human-lane consult in one test familiar made a BACKGROUND consult
+/// of a completely different familiar step aside mid-flight (`Outcome::Yielded`), which is
+/// how `a_proven_tool_is_deployed_with_honest_health` flaked under full-workspace load
+/// (seen locally and in CI the same day, 2026-08-20). Presence outranks musing within a
+/// household; it does not outrank other households' musing. Poison-tolerant throughout —
+/// a panicked consult must not silence the LLM forever.
+static LANES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, std::sync::Arc<LaneCell>>>,
+> = std::sync::OnceLock::new();
+
+/// The lane cell for one familiar. Keyed by the dir as given — the daemon passes one
+/// absolute path for its whole life, and tests use distinct temp roots.
+fn lane_cell(dir: &Path) -> std::sync::Arc<LaneCell> {
+    let map = LANES.get_or_init(Default::default);
+    let mut m = map.lock().unwrap_or_else(|e| e.into_inner());
+    m.entry(dir.to_path_buf())
+        .or_insert_with(|| {
+            std::sync::Arc::new((
+                std::sync::Mutex::new(Lanes {
+                    busy: false,
+                    humans_waiting: 0,
+                }),
+                std::sync::Condvar::new(),
+            ))
+        })
+        .clone()
+}
 
 /// Holds the consult slot; released (with a wake to all waiters) on drop.
-struct LaneGuard;
+struct LaneGuard(std::sync::Arc<LaneCell>);
 
 impl Drop for LaneGuard {
     fn drop(&mut self) {
-        let mut l = LANES.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut l = self.0 .0.lock().unwrap_or_else(|e| e.into_inner());
         l.busy = false;
-        LANES.1.notify_all();
+        self.0 .1.notify_all();
     }
 }
 
-/// Wait for the consult slot. Human-lane callers announce themselves first (so the
-/// background lane — waiting or running — steps aside), then take the next free slot.
-fn acquire(lane: Lane) -> LaneGuard {
-    let mut l = LANES.0.lock().unwrap_or_else(|e| e.into_inner());
-    match lane {
-        Lane::Human => {
-            l.humans_waiting += 1;
-            while l.busy {
-                l = LANES.1.wait(l).unwrap_or_else(|e| e.into_inner());
+/// Wait for this familiar's consult slot. Human-lane callers announce themselves first
+/// (so the background lane — waiting or running — steps aside), then take the next slot.
+fn acquire(dir: &Path, lane: Lane) -> LaneGuard {
+    let cell = lane_cell(dir);
+    {
+        let mut l = cell.0.lock().unwrap_or_else(|e| e.into_inner());
+        match lane {
+            Lane::Human => {
+                l.humans_waiting += 1;
+                while l.busy {
+                    l = cell.1.wait(l).unwrap_or_else(|e| e.into_inner());
+                }
+                l.humans_waiting -= 1;
             }
-            l.humans_waiting -= 1;
-        }
-        Lane::Background => {
-            while l.busy || l.humans_waiting > 0 {
-                l = LANES.1.wait(l).unwrap_or_else(|e| e.into_inner());
+            Lane::Background => {
+                while l.busy || l.humans_waiting > 0 {
+                    l = cell.1.wait(l).unwrap_or_else(|e| e.into_inner());
+                }
             }
         }
+        l.busy = true;
     }
-    l.busy = true;
-    LaneGuard
+    LaneGuard(cell)
 }
 
-/// Is a human-lane consult waiting right now? A running background consult polls this
-/// and yields between adapter checks.
-fn human_is_waiting() -> bool {
-    LANES
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .humans_waiting
-        > 0
+/// Is a human-lane consult waiting on THIS familiar right now? A running background
+/// consult polls this and yields between adapter checks.
+fn human_is_waiting(dir: &Path) -> bool {
+    let cell = lane_cell(dir);
+    let l = cell.0.lock().unwrap_or_else(|e| e.into_inner());
+    l.humans_waiting > 0
 }
 
 /// The result of a consult attempt.
@@ -173,7 +196,7 @@ fn consult_in(
     lane: Lane,
     expect: Expect,
 ) -> io::Result<Outcome> {
-    let _slot = acquire(lane);
+    let _slot = acquire(dir, lane);
     let b = boundary::load(dir)?;
     let verdict = guard::evaluate(&Action::new(ActionKind::Llm, "llm-provider"), &b);
     if verdict.decision != Decision::Allow {
@@ -235,7 +258,7 @@ fn consult_in(
         }
         // A person is waiting: background thinking steps aside mid-flight. The muse
         // retries on its own cadence; the human's reply starts within ~100ms.
-        if lane == Lane::Background && human_is_waiting() {
+        if lane == Lane::Background && human_is_waiting(dir) {
             let _ = child.kill();
             let _ = child.wait();
             return Ok(Outcome::Yielded(
