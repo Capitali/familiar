@@ -1918,7 +1918,7 @@ fn recv_sibling_worldview(
     let _ = crate::federation::save_sibling(dir, &sib);
     match crate::worldview::assemble_worldview(dir, &cred, now) {
         Ok(mut view) => {
-            crate::standing::to_sibling_view(&mut view, &req.group_id, &cred.label);
+            crate::standing::to_sibling_view(dir, &mut view, &req.group_id, &cred.label);
             match serde_json::to_string(&view) {
                 Ok(j) => text(StatusCode::OK, j),
                 Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

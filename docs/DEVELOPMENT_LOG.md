@@ -6,6 +6,41 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — T-217: a name is shown only to its own household
+
+Ian's ruling (verbatim in STATE): addresses, human names, and internal network names
+display only for devices on the local network or owned by the human; the records keep the
+names. The conduct dialogue's Q6 close (codex Round 4), built on what already existed —
+the guest projection and sibling projection were most of the masking; what they lacked
+was structural.
+
+- **`mesh/viewer.rs` — the audience of a read** (`Owned` / `HouseholdLan` / `Federated`,
+  fail closed): Owned = the reading device's record is established (full names from ANY
+  network); HouseholdLan = loopback or a `household_lan_cidrs` match — a DECLARED
+  household fact, empty by default; an unparseable CIDR narrows, never widens; never a
+  forwarded header. Replaces the binary standing gate at `/mesh/worldview`.
+- **`to_guest_view` is now an exhaustive allowlist BUILDER**, not a mutate-in-place pass:
+  a field added to `Worldview` refuses to compile until someone decides its masked form
+  (the old shape leaked every new field to guests by default — and had already leaked
+  `TheoryView.work`/`acts`, now cleared). Masked observation entries keep only the typed
+  event: kind-of-actor, action, ts, confidence — "a resident spoke," never what they said.
+- **Scope tokens replace global pseudonyms**: hashed through a per-door random salt AND
+  the viewer, so masked labels are stable for one reader but never correlatable across
+  readers; deleting `mesh/scope_salt` rotates the epoch. `Worldview.masked` (serde-default)
+  says the masking is deliberate — private-by-choice is never unknown-to-identify.
+- **Verified brick D was already built**: the gossip brief ships `capability.human` only
+  under `share_identities` + per-group `identity_optin`, default OFF — the federation
+  naming-grant the dialogue asked for, existing as SPEC R10.
+- Leak test seeds a masked view with a named member, an address, coordinates, a dialogue
+  body, and a rule sentence, serializes, and proves none of it appears. Viewer tests pin:
+  owned-off-LAN keeps names; RFC1918 alone never widens; declared CIDR widens; loopback
+  is the household.
+
+Deliberately NOT here (recorded): console screenshot mode + `catscan --masked` (next
+console build); gate-states visibility for guests (carried to the dialogue as Round 6
+material); the cross-household record-sync scope question. Checks: fmt 0, clippy
+--all-targets 0, workspace 752 passed / 0 failed, exit-checked. Next: ADR-0044 (T-216).
+
 ## 2026-08-20 — T-210 closes: the shells read the same constitution as the daemon
 
 The device-shell half, the last piece of T-210's accept. The iOS/iPadOS shells cannot

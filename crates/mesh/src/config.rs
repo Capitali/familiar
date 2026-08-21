@@ -107,6 +107,12 @@ pub struct MeshConfig {
     /// it back is the rollback — the legacy stores keep being dual-written either way.
     #[serde(default)]
     pub read_records: bool,
+    /// The household's declared LAN (T-217): explicit IPv4 CIDRs (`"192.168.108.0/24"`) or
+    /// exact addresses. Name display widens to un-established member readers ONLY on these
+    /// networks. Deliberately empty by default — fail closed; "LAN" is a household's
+    /// declared fact, never an address-range guess.
+    #[serde(default)]
+    pub household_lan_cidrs: Vec<String>,
     /// Areas of knowledge this mesh DECLARES to its siblings (ADR-0033 §4) — free-text
     /// topics ("weather", "energy", "birds"). Declaration, never inventory: an empty list is
     /// a full citizen of the federation that shares nothing, and that is fine.
@@ -134,6 +140,7 @@ impl Default for MeshConfig {
             advertise_hosts: Vec::new(),
             rendezvous_hosts: Vec::new(),
             advertise_pins: Vec::new(),
+            household_lan_cidrs: Vec::new(),
             read_records: false,
             declared_areas: Vec::new(),
         }
