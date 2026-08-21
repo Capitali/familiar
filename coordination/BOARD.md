@@ -50,8 +50,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - symptom FIXED 2026-08-17 (Ian's call: "symptom now, cause next"), `crates/cycle/src/lib.rs` at the sweep's announcement site: **announce the first forgetting, not the hundred and fifty-second.** The record is still collected every time — retention is not what changed — but a device already announced as forgotten is not announced again, so the muse stops reading the churn as continuous memory loss. A visitor never seen before still announces. The check is free: the tick already holds the observation set. Test `a_visitor_forgotten_twice_is_announced_once` neutered to confirm it bites. This does NOT stop the mint/purge churn itself, which is what this task is for.
 
 ### T-220 · The first service loop closes — and an armed proposal waits for its human
-- status: proposed — **the north-star brick; Ian's "no meaningful service" measured: 660 threads, 0 acts, fleet-wide**
-- owner: —
+- status: claimed 2026-08-21 (Ian: "Continue working toward familiars goals with codex until I ask for a break and build")
+- owner: companion:claude-opus
 - scope: crates/cycle (erosion exemption for threads with rule_proposal awaiting assent), the T-102 mint path (built), wildhorse's declared lights surface (exists); end-to-end verification on the live fleet
 - depends: —
 - accept: an armed rule_proposal thread awaiting its subject's answer does not retire on prediction erosion (pinned); the lights pilot re-arms; on Ian's assent the paired rule mints, fires on a real presence transition, and the act narrates ("dimmed the motorlights because you left — undo with a word"); the whole loop verified live once
@@ -66,8 +66,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: erosion is working as designed — it is the predictions that are mis-aimed, and they take good theories (including the lights pilot) down with them
 
 ### T-222 · Answers must reach the question registry
-- status: proposed
-- owner: —
+- status: claimed 2026-08-21 (same grant; unblocks T-220's assent channel)
+- owner: companion:claude-opus
 - scope: the thread-answer path (thread::add_answer / add_answer_from callers) calls question::record_answered for the question a thread carries; sweep for stale open questions whose thread already holds an answer
 - depends: — (composes with T-219)
 - accept: a human answer on a thread marks its registry question answered (310 live questions, 0 ever marked — T-212's finding, now measured); answered non-root questions retire; the console stops re-surfacing what was already said; a test pins the join
