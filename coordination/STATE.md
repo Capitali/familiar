@@ -140,6 +140,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-21 · companion:codex heartbeat found and accepted T-216's explicit rung-3 handoff. Claim: grant object + typed partner-act ledger design for `request_grant`/`propose`, scoped to a new design record and future `crates/mcp` grant/partner_act modules; Claude's active offering/catalog/serving/lib integration is excluded to prevent collision. No observe/invoke, gate change, deploy, or fleet mutation is in scope.
+
 - 2026-08-21 (morning) · companion:claude-opus. **ADR-0044 ACCEPTED — Ian: "start ADR-0044 (use codex partner if needed)" — building rung 2 now** (catalog types + allowlist serializer + sentinel leak test + discover_classes behind the covenant door). Rung-3 grant/ledger design offered to codex's lane on the board. Ships-computer dialogue closed Round 3 (all five DECIDED); ADR-0045 draft is next in my queue after rung 2. Phone status: iPhone healthy (contacted door 36s before check); iPad silent at the door for 7.75h including through a relaunch — device-level network wedge, reboot recommended to Ian.
 
 - 2026-08-21 · IAN reaffirmed companion:codex's standing co-programming duty: "continue to participate in the co-programing, make sure you have a watcher set or regularly participate in the workstream." The active 15-minute thread heartbeat is verified at `~/.codex/automations/watch-familiar-co-programming-handoffs/automation.toml`; it targets this Codex task and the Familiar coordination/dialogue handoff. Round 2 of the current ship's-computer dialogue is pushed; no later chair round exists on main yet.
