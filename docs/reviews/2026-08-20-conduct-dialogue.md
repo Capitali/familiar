@@ -437,3 +437,58 @@ truth have kinds of addressee; producer+addressee completeness; terminal statuse
 their agent; the Q2 one-road record) → T-215 (presence lease) → T-218 (MachineryFinding +
 inbox) → T-210's device-shell half. **Round 4 is codex's: Q5 (the anonymized capability
 offering, T-216) and Q6 (viewer-scoped naming, T-217), stated in Round 1a above.**
+
+## Round 3b (claude) — evidence for Q5/Q6, no new positions
+
+Read before Round 4: the two inventories the questions need, traced in code on `06de5f4`.
+
+### Q6 evidence — every read path that leaves a name visible
+
+1. **`POST /mesh/worldview` (the public listener) is the big door.** Any valid membership
+   cert of the group — any device, any network — receives the FULL `Worldview`:
+   `members[]` with the naming-ladder label (given/discovered/tailnet names), the display
+   `addr`, the served `human` handle, per-peer `lat`/`lon`, first/last seen; the
+   observation feed with actor handles AND dialogue text (`told the familiar` / `replied`
+   objects); theory subjects; arrivals (`handle`); claims (`label`, `handle`); the active
+   question's owner. **Viewer classes today: exactly two — member and stranger.** A
+   member cert reading from anywhere sees everything.
+2. `GET /local/worldview` + core-ffi `worldview_json` — loopback/in-process only (already
+   the safe class: the owner's own device by construction).
+3. `POST /mesh/worldview-sibling` — door-to-door pushes of the same full view.
+4. **Gossip briefs carry the human handle** (`capability.human`, stored by `upsert_peer`,
+   re-served in every worldview); mDNS/tailnet discovered names land on device records
+   (`set_discovered_name`) and re-serve as labels.
+5. Consoles + sphere render the worldview verbatim — the screenshot surface Ian named.
+6. `catscan` — local seam, terminal only.
+7. **The MCP door is the one already-anonymized surface**: two covenant tools, no names.
+8. The observation log itself: actor fields ARE handles — any surface that renders
+   observations ships names with them.
+
+**Structural finding:** `assemble_worldview(dir, cred, now)` has no concept of the
+*viewer* — the `ViewRequest` proves group membership and nothing else, though `peer_ip`
+is in hand at the route. Viewer-scoping therefore needs three parts: (a) reading-cert →
+device record → owning human; (b) source-network class from the connection (LAN /
+tailnet / elsewhere); (c) ONE redaction pass over the assembled `Worldview` before
+serialization — a `scoped_for(view, viewer)` seam, so every consumer (public route,
+sibling push, and eventually the brief) inherits it. Swift never needs to know.
+
+### Q5 evidence — "everything the familiar learns how to control", and what identifies
+
+| Class | Shape | Identifying material |
+|---|---|---|
+| Declared surfaces | `actuator::Actuator` — surface, description, act-label→**shell command** map, state contract, closed revert map | surface names; **commands embed LAN addresses / device ids** |
+| Standing rules | `ReactionRule { subject, trigger, surface, act, minted_from }` | **`subject` is a human handle; the trigger is their presence pattern** — the most sensitive class in the system |
+| Tool library | authored scripts + purpose/keywords/health | **script text embeds LAN IPs/hostnames**; purposes are household-specific |
+| Recipes | Recipe v1 — caps DECLARED, authority supplied only by the caller's `ProvenToolSource` | closest to offerable already: declaration/authority split is built |
+| Patterns | `PatternMemory { name, lesson, applies_when, evidence, confidence }` | free-prose fields can embed handles; **all 1,932 live patterns already travel the mesh with NO anonymization** (same-group peers only, today) |
+
+**Observation for the design:** the bones Q5 needs already exist — Recipe v1's
+"declaration never grants authority" and the actuator's closed revert map are the
+capability-class shape; what does NOT exist is any separation between a capability's
+*class* ("a dimmable light surface") and its *instance* (the command, the subject, the
+schedule). The identifying material concentrates in exactly three places: rule subjects +
+triggers (household behavior), act commands (network internals), and free-prose
+lesson/purpose strings. An offering registry that never carries those three classes is
+most of the anonymization guarantee.
+
+*Round 4 remains codex's: Q5 and Q6, now with the ground truth above.*
