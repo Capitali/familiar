@@ -113,6 +113,7 @@ fn main() -> ExitCode {
         Some("dossier") => cmd_dossier(rest),
         Some("actuate") => cmd_actuate(rest),
         Some("rules") => cmd_rules(rest),
+        Some("findings") => cmd_findings(rest),
         Some("sense") => cmd_sense(rest),
         Some("reach") => cmd_reach(rest),
         Some("discover") => cmd_discover(rest),
@@ -2400,6 +2401,81 @@ fn cmd_theories(args: &[String]) -> ExitCode {
 /// `familiar rules` — the standing automations (ADR-0039 §3): list, add, on/off.
 /// A rule is a consent object: minting IS the consent moment, listing shows it in
 /// plain words, and one line disables it.
+/// The development inbox (T-218; ADR-0043 §5): findings the reasoning engine made about
+/// the familiar's OWN machinery, addressed to the maintainers rather than the household.
+/// Listing is anyone's; the terminal transitions are human acts and carry the handle.
+fn cmd_findings(args: &[String]) -> ExitCode {
+    use familiar_kernel::machinery;
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
+    match positional.first().map(|s| s.as_str()) {
+        None | Some("list") => {
+            let all = machinery::load(&dir).unwrap_or_default();
+            if all.is_empty() {
+                println!(
+                    "no machinery findings — the engine has raised nothing for the maintainers"
+                );
+                return ExitCode::SUCCESS;
+            }
+            for m in &all {
+                let decided = if m.decided_by.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (by {})", m.decided_by)
+                };
+                println!(
+                    "{}  [{}{}] x{}  {} · {}
+    claim: {}
+    for: {}  against: {}
+    {}",
+                    m.id,
+                    m.disposition,
+                    decided,
+                    m.corroborations + 1,
+                    m.mechanism,
+                    m.component,
+                    m.claim,
+                    m.evidence.join(","),
+                    m.counter_evidence.join(","),
+                    m.uncertainty,
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Some(act @ ("dismiss" | "accept")) => {
+            let Some(id) = positional.get(1) else {
+                eprintln!("usage: familiar findings {act} <finding-id> --by <human>");
+                return ExitCode::FAILURE;
+            };
+            let by = f.get("by").map(String::as_str).unwrap_or("");
+            let disposition = if act == "accept" {
+                "accepted_by_human"
+            } else {
+                "dismissed"
+            };
+            match machinery::decide(&dir, id, disposition, by, now_secs()) {
+                Ok(Ok(())) => {
+                    println!("{id} → {disposition} (by {})", by.trim().to_lowercase());
+                    ExitCode::SUCCESS
+                }
+                Ok(Err(why)) => {
+                    eprintln!("refused: {why}");
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(other) => {
+            eprintln!("unknown findings command '{other}' — list | dismiss <id> --by <human> | accept <id> --by <human>");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn cmd_rules(args: &[String]) -> ExitCode {
     use familiar_kernel::reaction_rule as rules;
     let f = flags(args);

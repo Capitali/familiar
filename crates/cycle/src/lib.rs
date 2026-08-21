@@ -1400,6 +1400,24 @@ fn maybe_theorize(
     // with the fact cited on the record.
     if let Err(r) = familiar_kernel::system_facts::validate(&draft) {
         refuse_theory(dir, now, r.fact_id, &r.why);
+        // T-218 (ADR-0043 §5): a refused claim about the familiar's OWN machinery is not
+        // discarded with its framing — it routes to the maintainers as a MachineryFinding,
+        // carrying its evidence, the fact that refused it, and explicit uncertainty. The
+        // purge-loop diagnosis died exactly here once: correct about the defect, wrong
+        // about the subject, refused, and lost. The addressee is the development inbox
+        // (`familiar findings`), never a household question, and it grants no authority.
+        if !draft.defect_claims.is_empty() {
+            let _ = familiar_kernel::machinery::observe(
+                dir,
+                &draft.mechanism,
+                &draft.defect_claims.join(","),
+                &draft.theory,
+                &draft.anchors,
+                &[r.fact_id.to_string()],
+                &draft.direction,
+                now,
+            );
+        }
         dispose(dir, now)?;
         return Ok(false);
     }
@@ -7616,6 +7634,22 @@ mod tests {
             theorize_cursor(dir) > 0,
             "the batch is disposed, not re-asked"
         );
+        // T-218: the refused machinery claim is NOT lost with its framing — it routes to
+        // the maintainers as a finding, carrying its evidence, the refusing fact, and
+        // explicit uncertainty. The purge-loop diagnosis died at exactly this site once.
+        let findings = familiar_kernel::machinery::load(dir).unwrap();
+        assert_eq!(findings.len(), 1, "the claim reached the development inbox");
+        let m = &findings[0];
+        assert_eq!(m.component, "familiar|purged");
+        assert_eq!(m.evidence, vec![oid.clone()]);
+        assert_eq!(m.counter_evidence, vec!["SF-1".to_string()]);
+        assert_eq!(m.disposition, "observed");
+        assert!(
+            !m.uncertainty.is_empty(),
+            "no finding pretends to certainty"
+        );
+        // …and it never becomes a household question.
+        assert!(question::load(dir).unwrap().is_empty());
     }
 
     #[test]

@@ -6,6 +6,27 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — T-218: a theory about the machinery gains its addressee
+
+ADR-0043 §5, built. `kernel/machinery.rs`: the `MachineryFinding` — mechanism +
+component, the claim in the engine's words (preserved, not endorsed), supporting
+evidence, counter-evidence (the facts that refused it), explicit uncertainty (never
+empty — the engine has misattributed subjects before), dispositions
+`observed → corroborated → {dismissed | accepted_by_human}`. **Terminal transitions are
+human acts only**, carry the handle, and are final; a claim re-derived after dismissal
+mints fresh, because re-derivation is signal.
+
+Producer: the theorize floor's refusal site — a refused draft with `defect_claims`
+routes to the inbox instead of dying with its framing (the purge-loop diagnosis died
+exactly there). Same open (mechanism, component) claim corroborates rather than
+duplicating. Consumer: `familiar findings` (list | dismiss | accept, `--by <human>`) —
+the development inbox, so the type has both a producer and a declared addressee from
+birth (ADR-0043 §6). Promotion to the board stays a human act outside the system —
+an addressee, not authority.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 749 passed / 0 failed, exit-checked.
+Next: T-210's device-shell half (one Laws source for daemon and shells).
+
 ## 2026-08-20 — T-215: the presence lease — the purge loop's cause, ended
 
 The conduct dialogue's Q4a close (codex's design, adopted). The two-hour retention

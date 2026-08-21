@@ -30,6 +30,7 @@ pub mod identity;
 pub mod intent;
 pub mod lineage;
 pub mod loops;
+pub mod machinery;
 pub mod mutation;
 pub mod obs_class;
 pub mod observation;
