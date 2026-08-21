@@ -28,7 +28,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: Ian 2026-08-20, verbatim: "We need to anonymize all the UI screens. Privacy appears to be an issue I need to address. So no more names visible. They still must be present in the data, but it addresses, human names, and internal network names need to only be displayed for devices in the local network or owned by the human." Read as: display-gating at the read, keyed to covenant identity + source network — Swift-only redaction is insufficient (any other client still receives the names). Sub-question for the dialogue: whether federation should stop shipping cross-household display names at all.
 
 ### T-218 · MachineryFinding: a theory about the familiar's own machinery gains a typed addressee
-- status: claimed 2026-08-20 (Ian: "Build q1-q4 and the rest. Go!"); builds after brick 6
+- status: **done 2026-08-20 (v1)** — kernel/machinery.rs (dispositions observed/corroborated/dismissed/accepted_by_human; terminal = named human acts, final; re-derivation after dismissal mints fresh); producer at the theorize floor's refusal site (a refused defect-claim routes to the inbox instead of dying with its framing); consumer `familiar findings` CLI. Follow-ons noted: console inbox surface; routing for machinery claims the floor does NOT refuse
 - owner: companion:claude-opus
 - scope: crates/kernel (the MachineryFinding kind + dispositions), crates/cycle (routing at theorize time), the human-visible development inbox surface (console read path)
 - depends: T-211 brick 6 (the epistemic ADR carries the liveness invariant)
@@ -36,7 +36,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: born from T-215's lesson — the engine produced a correct causal diagnosis of the purge loop and it sat at `pursued` with nothing connecting a theory to a fix. The familiar gains an addressee, not authority.
 
 ### T-215 · The local discovery path re-mints the guests the sweep just forgot
-- status: claimed 2026-08-20 (Ian: "Build q1-q4 and the rest. Go!") — direction decided: the presence-lease model (dialogue Round 3, Q4a)
+- status: **done 2026-08-20** — the presence lease: guest_purge_in counts from the LAST sighting; record_sighting renews from the verified-brief seam (coarse); sightings never mint; rotating ids stay unlinked by design. Invariant pinned: continuous anonymous presence cannot produce unbounded mint/purge history
 - owner: companion:claude-opus
 - scope: crates/mesh/src/record.rs (the mint-on-discovery path and `purge_stale_guests`'s re-mint comment), and whatever in discovery decides a seen device becomes a `Guest`
 - depends: —
@@ -659,7 +659,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Claimed
 
 ### T-211 · The conversation and the mind are two different organisms
-- status: claimed (design dialogue phase — no code before the decisions) — **architectural; verified live 2026-08-17. T-210 is a symptom of this**
+- status: **done 2026-08-20** — closed against ADR-0043 (accepted). Built on Ian's "Build q1-q4 and the rest. Go!": brick 3 (stakes — AskDraft, no `none`, anti-vacuity; ADR-0040 D2 closed), brick 5′ (the dereference replaced the carve-out — own speech zero-weight, laundering invariant pinned), Q2 retirement (answer_requests + fetch_and_answer gone; persist_exchange makes the dialogue path the producer of the durable Request/Answer nouns), brick 6 (ADR-0043 + law-quotation gap pinned as labelled regression, no detector — Ian's word). Q5/Q6 of the dialogue continue as T-216/T-217
 - owner: companion:claude-opus (claude chair) + companion:codex (dialogue partner)
 - scope: diagnosis and design first. Touches crates/cycle/src/lib.rs (`maybe_reply` vs `answer_requests`), crates/kernel/src/request.rs, crates/kernel/src/system_facts.rs, crates/kernel/src/intent.rs, the console/iOS utterance seam in crates/mesh/src/transport.rs. No code before a decision — this is an ADR-shaped question
 - depends: —
@@ -677,7 +677,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - Q1–Q4 DECIDED 2026-08-20 (Round 3): brick 5 carve-out REPLACED by codex's dereference design (own speech = zero evidentiary weight, yields admitted cites; laundering invariant tested); answer_requests RETIRED with nouns unified (durable request/turn id + persisted Answer; fetch_and_answer fails closed); one typed act, NO tiers, aggregate gauge only; T-215 = presence lease; MachineryFinding filed as T-218. Build order in Round 3. OPEN: Q5/Q6 (T-216/T-217) await codex's Round 4; residual law-quotation gap awaits Ian (joint recommendation: regressions, no detector).
 
 ### T-210 · The familiar does not know its own Three Laws — it recites Asimov's
-- status: claimed — **constitutional defect (SOUL.md's own class), not a bug; verified 2026-08-17**
+- status: **done 2026-08-20** — accept met in full; closed against ADR-0043. Bricks 1 (`8743850`), 2 (`ea52b7e`), 4 (`0a70401`), device-shell half (merge `ba57992`: ConstitutionText.swift is a generated view of constitution::render(), the kernel drift test is its generator — daemon and shells read one source)
 - owner: companion:claude-opus (continuing the claude-fable lane's approved plan)
 - scope: NEW crates/kernel/src/constitution.rs + crates/kernel/src/persona.rs, crates/kernel/src/system_facts.rs (the registry emits the Laws), crates/kernel/src/dialog.rs (`LAW_III_VOICE`), the reply/theorize/need prompts in crates/cycle/src/lib.rs, ios/Shared/Sources/LocalReasoner.swift (the device shells mirror the same text). Does NOT touch crates/mesh, the boundary, or any wire contract
 - depends: —
