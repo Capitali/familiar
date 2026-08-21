@@ -6,6 +6,47 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — T-218: a theory about the machinery gains its addressee
+
+ADR-0043 §5, built. `kernel/machinery.rs`: the `MachineryFinding` — mechanism +
+component, the claim in the engine's words (preserved, not endorsed), supporting
+evidence, counter-evidence (the facts that refused it), explicit uncertainty (never
+empty — the engine has misattributed subjects before), dispositions
+`observed → corroborated → {dismissed | accepted_by_human}`. **Terminal transitions are
+human acts only**, carry the handle, and are final; a claim re-derived after dismissal
+mints fresh, because re-derivation is signal.
+
+Producer: the theorize floor's refusal site — a refused draft with `defect_claims`
+routes to the inbox instead of dying with its framing (the purge-loop diagnosis died
+exactly there). Same open (mechanism, component) claim corroborates rather than
+duplicating. Consumer: `familiar findings` (list | dismiss | accept, `--by <human>`) —
+the development inbox, so the type has both a producer and a declared addressee from
+birth (ADR-0043 §6). Promotion to the board stays a human act outside the system —
+an addressee, not authority.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 749 passed / 0 failed, exit-checked.
+Next: T-210's device-shell half (one Laws source for daemon and shells).
+
+## 2026-08-20 — T-215: the presence lease — the purge loop's cause, ended
+
+The conduct dialogue's Q4a close (codex's design, adopted). The two-hour retention
+promise was always "forget a visitor who LEFT" — but `guest_purge_in` counted from
+`first_seen`, so a device continuously present on the LAN was purged MID-VISIT,
+re-knocked, was re-minted, and cycled mint → purge → mint forever (one live id purged
+152 times; 944 purge observations, 11% of the log).
+
+Now the guest record is a **lease**: `guest_purge_in` counts from the last sighting
+(`last_seen.max(first_seen)`), and `record::record_sighting` — called from `upsert_peer`,
+the verified-brief seam — renews it, coarsely (one write per 10 min, not per gossip
+round). Deliberately narrow: a sighting never mints (a Guest is earned by the knock's
+attestation), established identities are untouched, and rotating ids are NOT linked
+across the retention boundary — correlation strong enough to suppress a re-mint would
+itself become the tracking the promise forbids. The invariant is the test:
+`t215_continuous_presence_cannot_produce_unbounded_mint_purge_history`.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 747 passed / 0 failed, exit-checked.
+Next: T-218 (MachineryFinding).
+
 ## 2026-08-20 — Brick 6: ADR-0043, the epistemic rule the drift class demanded
 
 The owed ADR is written and accepted (Ian's go on the dialogue's decided design):

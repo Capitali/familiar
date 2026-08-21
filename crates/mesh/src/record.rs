@@ -29,11 +29,23 @@ use std::path::Path;
 /// Where device records live, one JSON file per `device_id`.
 pub const RECORDS_DIR: &str = "mesh/records";
 
-/// How long a visitor who never establishes an identity is kept before being fully purged
-/// (ADR-0026: the guest state is stable, but "stable" was becoming "forever"). Two hours —
-/// long enough to look around, redeem an invite, and be welcomed; short enough that a place
-/// the household never chose to know doesn't accumulate. They can always try again later.
+/// How long a visitor who never establishes an identity is kept AFTER THEIR LAST SIGHTING
+/// before being fully purged (ADR-0026; T-215 — the presence lease). Two hours — long
+/// enough to look around, redeem an invite, and be welcomed; short enough that a place the
+/// household never chose to know doesn't accumulate. They can always try again later.
+///
+/// T-215 (conduct dialogue Q4a, DECIDED): the clock runs from the last sighting, not the
+/// first. A guest record is a LEASE that live presence renews ([`record_sighting`]) — the
+/// retention promise was always "forget a visitor who LEFT", and counting from `first_seen`
+/// broke it in the other direction: a device continuously present on the LAN was purged
+/// mid-visit, re-knocked, was re-minted, and cycled mint → purge → mint forever (one live
+/// id 152 times). Rotating ids are deliberately NOT linked across the retention boundary —
+/// correlation strong enough to suppress a re-mint would itself become the tracking the
+/// promise forbids.
 pub const GUEST_PURGE_SECS: i64 = 2 * 3600;
+/// How often a sighting bothers to rewrite the record — coarse, so a chatty gossip round
+/// doesn't churn the record store (same shape as the origin freshness window).
+const SIGHTING_FRESH_SECS: i64 = 600;
 /// Spent invite tokens — a token id that has a file here has been used.
 const SPENT_INVITES_DIR: &str = "mesh/spent_invites";
 
@@ -978,7 +990,27 @@ pub fn guest_purge_in(r: &MembershipRecord, now: i64) -> Option<i64> {
     if !matches!(r.state, RecordState::Guest) {
         return None;
     }
-    Some(r.first_seen + GUEST_PURGE_SECS - now)
+    // The lease clock: two hours from the LAST evidence of presence (T-215). A visitor
+    // still here keeps their lease; a visitor who left is forgotten on the old schedule.
+    Some(r.last_seen.max(r.first_seen) + GUEST_PURGE_SECS - now)
+}
+
+/// A live sighting renews an existing GUEST record's lease (T-215). Deliberately narrow:
+/// a sighting alone never mints a record (a Guest is earned by the knock's attestation),
+/// members and established identities are untouched (they are never purge-eligible), and
+/// a record freshly renewed is not rewritten — so continuous presence costs one small
+/// write per [`SIGHTING_FRESH_SECS`], not one per gossip round.
+pub fn record_sighting(dir: &Path, node_id: &str, now: i64) -> Result<()> {
+    let Some(r) = find_by_key(dir, node_id) else {
+        return Ok(());
+    };
+    if !matches!(r.state, RecordState::Guest) || r.identity.established.is_some() {
+        return Ok(());
+    }
+    if now - r.last_seen < SIGHTING_FRESH_SECS {
+        return Ok(());
+    }
+    upsert(dir, &r.device_id, now, |_| {})
 }
 
 /// Fully purge visitors who never established an identity and have sat past [`GUEST_PURGE_SECS`]
@@ -2886,6 +2918,93 @@ mod tests {
     // on every tick for eighteen hours. The sweep was never the problem — `federate` runs
     // immediately before it, `absorb` re-created each record from a sibling's offer with its
     // original ancient `first_seen`, and the sweep deleted it again seconds later.
+
+    // ---- T-215: the presence lease — the cause behind T-208's symptom ----
+
+    /// **The invariant (conduct dialogue Q4a, DECIDED): continuous anonymous presence
+    /// cannot produce unbounded mint/purge history.** A guest who keeps being sighted
+    /// keeps their lease — the sweep collects nothing while they are here, however long
+    /// they stay — and once they actually leave, they are forgotten exactly once, two
+    /// hours after the LAST sighting. This is the loop that purged one live visitor id
+    /// 152 times: minted, purged mid-visit on the first-seen clock, re-knocked, forever.
+    #[test]
+    fn t215_continuous_presence_cannot_produce_unbounded_mint_purge_history() {
+        let dir = fresh("t215_lease");
+        let mut g = base_record("leasevisitor00001");
+        g.first_seen = NOW;
+        g.last_seen = NOW;
+        save(&dir, &g).unwrap();
+
+        // Present for a whole day, sighted every half hour: the lease renews and the
+        // sweep never collects — zero purge history for a visitor who never left.
+        let mut purges = 0;
+        let mut t = NOW;
+        while t < NOW + 24 * 3600 {
+            t += 1800;
+            record_sighting(&dir, "leasevisitor00001", t).unwrap();
+            purges += purge_stale_guests(&dir, t).len();
+        }
+        assert_eq!(
+            purges, 0,
+            "a visitor still on the LAN is never purged mid-visit"
+        );
+        assert!(
+            load(&dir, "leasevisitor00001").unwrap().is_some(),
+            "one record the whole visit — no re-mint churn"
+        );
+
+        // They leave. Inside the window the lease still holds…
+        let gone_at = t;
+        assert!(purge_stale_guests(&dir, gone_at + GUEST_PURGE_SECS - 1).is_empty());
+        // …two hours after the LAST sighting, forgotten — exactly once.
+        assert_eq!(
+            purge_stale_guests(&dir, gone_at + GUEST_PURGE_SECS + 1),
+            vec!["leasevisitor00001".to_string()]
+        );
+        assert!(purge_stale_guests(&dir, gone_at + GUEST_PURGE_SECS + 2).is_empty());
+    }
+
+    /// The lease is narrow: a sighting never mints a record (a Guest is earned by the
+    /// knock's attestation), an established identity is never touched by it, and a fresh
+    /// sighting inside the coarse window does not rewrite the record.
+    #[test]
+    fn t215_a_sighting_renews_but_never_mints_or_touches_the_established() {
+        let dir = fresh("t215_narrow");
+        // A stranger the door has no record of: sighted, still no record.
+        record_sighting(&dir, "total-stranger-0001", NOW).unwrap();
+        assert!(load(&dir, "total-stranger-0001").unwrap().is_none());
+
+        // An established record: the sighting leaves it byte-identical.
+        let mut m = base_record("establishedone001");
+        m.identity.established = Some(Establishment {
+            handle: "ian".into(),
+            class: EvidenceClass::LocalIntroduction,
+            artifact: "test".into(),
+            at: NOW,
+        });
+        save(&dir, &m).unwrap();
+        let before = load(&dir, "establishedone001").unwrap().unwrap();
+        record_sighting(&dir, "establishedone001", NOW + 7200).unwrap();
+        assert_eq!(load(&dir, "establishedone001").unwrap().unwrap(), before);
+
+        // A guest sighted twice in quick succession writes once (coarse lease clock).
+        let mut g = base_record("quickvisitor00001");
+        g.first_seen = NOW;
+        g.last_seen = NOW;
+        save(&dir, &g).unwrap();
+        record_sighting(&dir, "quickvisitor00001", NOW + 30).unwrap();
+        assert_eq!(
+            load(&dir, "quickvisitor00001").unwrap().unwrap().last_seen,
+            NOW,
+            "a sighting inside the coarse window is not rewritten"
+        );
+        record_sighting(&dir, "quickvisitor00001", NOW + 7200).unwrap();
+        assert_eq!(
+            load(&dir, "quickvisitor00001").unwrap().unwrap().last_seen,
+            NOW + 7200,
+            "a later sighting renews the lease"
+        );
+    }
 
     /// A visitor past the window is really gone, is announced exactly once, and a second sweep
     /// has nothing left to say. "Purged" is a report of what happened, not of what was intended.

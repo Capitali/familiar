@@ -4630,6 +4630,10 @@ fn short(s: &str) -> String {
 // ---- peer roster + status -----------------------------------------------------------
 
 fn upsert_peer(dir: &Path, brief: &MeshBrief, addr: &str) -> Result<()> {
+    // T-215: a verified brief is a live sighting — it renews a guest record's lease so the
+    // sweep counts absence from the last sighting, not the first. Best-effort: presence
+    // bookkeeping must never fail the exchange.
+    let _ = crate::record::record_sighting(dir, &brief.body.node.node_id, now_secs());
     let path = dir.join(PEERS_FILE);
     let mut peers: Vec<PeerRecord> = std::fs::read_to_string(&path)
         .ok()
