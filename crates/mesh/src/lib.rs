@@ -51,6 +51,7 @@ pub mod standing;
 pub mod status;
 pub mod thread_sync;
 pub mod transport;
+pub mod viewer;
 pub mod worldview;
 
 pub use enroll::{Attestation, EnrollRequest, Grant, Pending};

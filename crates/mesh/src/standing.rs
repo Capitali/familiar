@@ -235,9 +235,32 @@ pub fn standing_of(dir: &Path, node_id: &str) -> Standing {
 
 /// A stable, meaningless name for a node — same input, same output, so a guest sees a coherent
 /// mesh across polls instead of names that shuffle every five seconds.
-fn pseudonym(node_id: &str) -> String {
-    let h = fnv(node_id);
-    format!("peer-{:04x}", (h & 0xffff) as u16)
+/// The per-door scope salt (T-217): random, minted once, never on the wire. Scope tokens
+/// hash through it so masked labels are stable for one viewer but never correlatable
+/// ACROSS viewers — two readers of the same mesh cannot join their masked views on a
+/// token. Deleting `mesh/scope_salt` rotates every token (the coarse revocation epoch).
+fn scope_salt(dir: &std::path::Path) -> String {
+    let path = dir.join("mesh/scope_salt");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        let s = s.trim().to_string();
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    let salt = crate::os_random::<16>()
+        .map(|b| crate::hex_encode(&b))
+        .unwrap_or_else(|_| "unsalted".into());
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, &salt);
+    salt
+}
+
+/// A masked label: deliberate, viewer-scoped, epoch-scoped — never an identity.
+fn scope_token(salt: &str, reader: &str, subject: &str) -> String {
+    let h = fnv(&format!("{salt}|{reader}|{subject}"));
+    format!("peer-{:08x}", (h & 0xffff_ffff) as u32)
 }
 
 fn fnv(s: &str) -> u64 {
@@ -303,116 +326,211 @@ const REDACTED: &str = "—";
 /// Removed: labels, actors, the humans served and present, addresses, and all free text — the
 /// observation objects, theory questions, goal descriptions, reflections, service and frontier
 /// names. That is where the people are.
-pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
+pub fn to_guest_view(dir: &std::path::Path, view: &mut Worldview, reader_node_id: &str) {
     let h = fnv(reader_node_id);
     // Deterministic per reader, spread over the globe.
     let dlat = ((h >> 8) & 0xff) as f64 / 255.0 * 120.0 - 60.0;
     let dlon = (h & 0xff) as f64 / 255.0 * 360.0 - 180.0;
+    let salt = scope_salt(dir);
+    let tok = |subject: &str| scope_token(&salt, reader_node_id, subject);
 
-    view.group_label = "Mesh".into();
+    // Every collection is MAPPED by allowlist, and the view is REBUILT as an exhaustive
+    // struct literal (T-217, conduct dialogue Q6 DECIDED): a field added to `Worldview`
+    // refuses to compile here until someone decides its masked form. The old shape — a
+    // mutate-in-place pass — was fail-open: a new field leaked to every guest by default.
 
-    // The dialog screen stays exactly as it is — same panel, same affordance — but the question
-    // itself is the familiar talking about its household, so a guest gets a real-shaped prompt
-    // rather than this one.
-    if !view.question.is_empty() {
-        view.question = "What should I be paying attention to?".into();
-    }
-    // Who the question is addressed to names a person, so it goes with the rest of the names.
-    view.question_owner = String::new();
-    // How many others are awaiting a decision is the household's business, not a guest's.
-    view.guests_waiting = 0;
-    view.standing_full.clear();
-    // Whose device is claiming whom is entirely the household's business — a guest never
-    // learns that another guest is knocking as "ian", let alone gets a key to vouch for.
-    view.claims_waiting.clear();
-    // The fire is inside the house: a guest sees no game, no players, no story.
-    view.game = None;
-    // A standing rule names its subject and their comings and goings — the most private
-    // sentence in the house. A guest sees none of them (ADR-0039 §4).
-    view.rules.clear();
-    // A guest sees the arrivals too — the mesh greets, that is shape — but not who: labels
-    // pseudonymize and handles fall to "someone", same rule as the roster.
-    for a in view.arrivals.iter_mut() {
-        a.label = pseudonym(&a.node_id);
-        if !a.handle.is_empty() {
-            a.handle = "someone".into();
-        }
-        // Origin is the household's verification evidence, never a fellow visitor's to see.
-        a.lat = 0.0;
-        a.lon = 0.0;
-        a.addr.clear();
-        a.build.clear();
-        // Same for activity: when another arrival was last heard from is household evidence.
-        a.last_seen = 0;
-    }
-
-    for m in view.members.iter_mut() {
-        let is_reader = m.node_id == reader_node_id;
-        anon_member(m, is_reader, dlat, dlon);
-    }
-
-    for p in view.peers.iter_mut() {
-        p.label = pseudonym(&p.node_id);
-    }
-
-    for o in view.recent.iter_mut() {
-        o.actor = anon_actor(&o.actor);
-        o.object = REDACTED.into();
-        o.context = String::new();
-        o.source = String::new();
-        // action, ts and confidence stay — the cadence and character of the feed is the point.
-    }
-
-    for t in view.theories.iter_mut() {
-        t.question = REDACTED.into();
-        t.theory = REDACTED.into();
-        t.direction = REDACTED.into();
-        t.answers.clear();
-    }
-
-    for r in view.humanity.iter_mut() {
-        r.reflection = REDACTED.into();
-        r.grounded_in = String::new();
-    }
-
-    for g in view.goals.iter_mut() {
-        g.description = REDACTED.into();
-        g.owner_human = String::new(); // names a person
-        g.needs.clear();
-        g.origin = String::new();
-        g.produced = String::new();
-        g.notes = String::new();
-        // status, owner (a short node id) and every date stay.
-    }
-
-    for s in view.services.iter_mut() {
-        s.name = REDACTED.into();
-        s.seen_by = anon_actor(&s.seen_by);
-        // `kind` stays: that the mesh sees an airplay and an mqtt is shape, not identity.
-    }
-
-    for f in view.frontier.iter_mut() {
-        f.label = REDACTED.into();
-        f.ip = String::new();
-        // reach + open service kinds + last_seen stay.
-    }
-
+    // The mesh greets arrivals — that is shape — but not who: labels tokenize, handles fall
+    // to "someone", and the household's verification evidence (origin, address, activity)
+    // is never a fellow visitor's to see.
+    let arrivals = view
+        .arrivals
+        .iter()
+        .map(|a| {
+            let mut a = a.clone();
+            a.label = tok(&a.node_id);
+            if !a.handle.is_empty() {
+                a.handle = "someone".into();
+            }
+            a.lat = 0.0;
+            a.lon = 0.0;
+            a.addr.clear();
+            a.build.clear();
+            a.last_seen = 0;
+            a
+        })
+        .collect();
+    let members = view
+        .members
+        .iter()
+        .map(|m| {
+            let mut m = m.clone();
+            let is_reader = m.node_id == reader_node_id;
+            anon_member(&mut m, is_reader, dlat, dlon, &tok);
+            m
+        })
+        .collect();
+    let peers = view
+        .peers
+        .iter()
+        .map(|p| {
+            let mut p = p.clone();
+            p.label = tok(&p.node_id);
+            p
+        })
+        .collect();
+    // Dialogue and observation BODIES are omitted, not shortened (Q6: no finite field
+    // redactor proves free prose clean) — what remains is the typed event: kind of actor,
+    // action, time, confidence. "A resident spoke", never what they said.
+    let recent = view
+        .recent
+        .iter()
+        .map(|o| crate::worldview::ObsView {
+            actor: anon_actor(&o.actor),
+            action: o.action.clone(),
+            object: REDACTED.into(),
+            context: String::new(),
+            source: String::new(),
+            ts: o.ts,
+            confidence: o.confidence,
+        })
+        .collect();
+    // Theory prose is free text — same rule. Work notes and act narrations go with it
+    // (the in-place pass never cleared them; the builder catches exactly this class).
+    let theories = view
+        .theories
+        .iter()
+        .map(|t| {
+            let mut t = t.clone();
+            t.question = REDACTED.into();
+            t.theory = REDACTED.into();
+            t.direction = REDACTED.into();
+            t.answers.clear();
+            t.work.clear();
+            t.acts.clear();
+            t
+        })
+        .collect();
+    let humanity = view
+        .humanity
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            r.reflection = REDACTED.into();
+            r.grounded_in = String::new();
+            r
+        })
+        .collect();
+    let goals = view
+        .goals
+        .iter()
+        .map(|g| {
+            let mut g = g.clone();
+            g.description = REDACTED.into();
+            g.owner_human = String::new(); // names a person
+            g.needs.clear();
+            g.origin = String::new();
+            g.produced = String::new();
+            g.notes = String::new();
+            // status, owner (a short node id) and every date stay.
+            g
+        })
+        .collect();
+    let services = view
+        .services
+        .iter()
+        .map(|sv| {
+            let mut sv = sv.clone();
+            sv.name = REDACTED.into();
+            sv.seen_by = anon_actor(&sv.seen_by);
+            // `kind` stays: that the mesh sees an airplay and an mqtt is shape, not identity.
+            sv
+        })
+        .collect();
+    let frontier = view
+        .frontier
+        .iter()
+        .map(|f| {
+            let mut f = f.clone();
+            f.label = REDACTED.into();
+            f.ip = String::new();
+            // reach + open service kinds + last_seen stay.
+            f
+        })
+        .collect();
     // That this mesh federates is shape; WITH WHOM is the household's business. Handles
-    // pseudonymize (stable per reader-visible id), declarations and welcomers are withheld.
-    for s in view.siblings.iter_mut() {
-        s.handle = pseudonym(&s.group_id);
-        s.group_id = pseudonym(&s.group_id);
-        s.declared_areas.clear();
-        s.offered_tools.clear();
-        s.welcomed_by = String::new();
-        s.lat = 0.0;
-        s.lon = 0.0;
-    }
-    // What we declare is a promise to siblings, not a guest's to read.
-    view.declared_areas.clear();
+    // tokenize (viewer-scoped), declarations and welcomers are withheld.
+    let siblings = view
+        .siblings
+        .iter()
+        .map(|sb| {
+            let mut sb = sb.clone();
+            sb.handle = tok(&sb.group_id);
+            sb.group_id = tok(&sb.group_id);
+            sb.declared_areas.clear();
+            sb.offered_tools.clear();
+            sb.welcomed_by = String::new();
+            sb.lat = 0.0;
+            sb.lon = 0.0;
+            sb
+        })
+        .collect();
 
-    // Addresses and pins are how a device reaches the mesh — a guest is a member and still needs
-    // them, so they are NOT scrubbed here. They are not personal data; they are the door.
+    *view = Worldview {
+        group_label: "Mesh".into(),
+        // The serving door's id: an id, not a name — displayed as small print everywhere.
+        node_id: view.node_id.clone(),
+        // The dialog screen stays — same panel, same affordance — but the household's own
+        // question is the familiar talking about its people, so a guest gets a real-shaped
+        // prompt rather than this one; who it is addressed to goes with the names.
+        question: if view.question.is_empty() {
+            String::new()
+        } else {
+            "What should I be paying attention to?".into()
+        },
+        question_owner: String::new(),
+        // How many others await a decision is the household's business, not a guest's.
+        guests_waiting: 0,
+        guest_purge_in_secs: view.guest_purge_in_secs,
+        standing_full: Vec::new(),
+        arrivals,
+        // Whose device is claiming whom is entirely the household's business.
+        claims_waiting: Vec::new(),
+        // The fire is inside the house: a guest sees no game, no players, no story.
+        game: None,
+        presence: view.presence,
+        withdrawn: view.withdrawn,
+        service: view.service,
+        capacity: view.capacity,
+        observation_count: view.observation_count,
+        peers,
+        recent,
+        theories,
+        theory_quality: view.theory_quality,
+        // Open question carried to the dialogue (Round 6 material): whether the boundary's
+        // gate states are shape or household security posture. Status quo kept: they ride.
+        gates: view.gates.clone(),
+        // A standing rule names its subject and their comings and goings — the most private
+        // sentence in the house. A guest sees none of them (ADR-0039 §4).
+        rules: Vec::new(),
+        tick: view.tick,
+        uptime_secs: view.uptime_secs,
+        humanity,
+        members,
+        services,
+        frontier,
+        // Edges are node-id pairs — ids, not names; the map's shape survives.
+        edges: view.edges.clone(),
+        goals,
+        // Addresses and pins are how a device reaches the mesh — a guest is a member and
+        // still needs them. They are not personal data; they are the door.
+        hosts: view.hosts.clone(),
+        pins: view.pins.clone(),
+        siblings,
+        // What we declare is a promise to siblings, not a guest's to read.
+        declared_areas: Vec::new(),
+        // Deliberate, and said so: private-by-choice is never unknown-to-identify.
+        masked: true,
+    };
 }
 
 /// Rewrite a worldview into its **sibling projection** (ADR-0033 §3): the guest projection
@@ -420,7 +538,12 @@ pub fn to_guest_view(view: &mut Worldview, reader_node_id: &str) {
 /// names, humans, faces, addresses, per-node positions, free text. `reader_group_id` is the
 /// sibling mesh's id — it sees its own entry as itself; other siblings stay pseudonymized
 /// (who else we federate with is the household's business).
-pub fn to_sibling_view(view: &mut Worldview, reader_group_id: &str, our_handle: &str) {
+pub fn to_sibling_view(
+    dir: &std::path::Path,
+    view: &mut Worldview,
+    reader_group_id: &str,
+    our_handle: &str,
+) {
     // Keep the reader's own sibling entry aside — it knows itself, and hiding it would make
     // the console look broken (same rule as a guest seeing its own node).
     let own = view
@@ -429,7 +552,8 @@ pub fn to_sibling_view(view: &mut Worldview, reader_group_id: &str, our_handle: 
         .find(|s| s.group_id == reader_group_id)
         .cloned();
     let declared = view.declared_areas.clone();
-    to_guest_view(view, reader_group_id);
+    let salt = scope_salt(dir);
+    to_guest_view(dir, view, reader_group_id);
     // The sibling rung adds back, deliberately and only: our handle, our declaration, and
     // the reader's own standing here.
     if !our_handle.trim().is_empty() {
@@ -440,18 +564,24 @@ pub fn to_sibling_view(view: &mut Worldview, reader_group_id: &str, our_handle: 
         if let Some(slot) = view
             .siblings
             .iter_mut()
-            .find(|s| s.group_id == pseudonym(&own.group_id))
+            .find(|s| s.group_id == scope_token(&salt, reader_group_id, &own.group_id))
         {
             *slot = own;
         }
     }
 }
 
-fn anon_member(m: &mut Member, is_reader: bool, dlat: f64, dlon: f64) {
+fn anon_member(
+    m: &mut Member,
+    is_reader: bool,
+    dlat: f64,
+    dlon: f64,
+    tok: &dyn Fn(&str) -> String,
+) {
     // The reader still sees itself as itself — it already knows its own name, and hiding it would
     // just make the console look broken.
     if !is_reader {
-        m.label = pseudonym(&m.node_id);
+        m.label = tok(&m.node_id);
         m.actor = anon_actor(&m.actor);
         m.human = if m.human.is_empty() {
             String::new()
@@ -526,9 +656,26 @@ mod tests {
     }
 
     #[test]
-    fn pseudonyms_are_stable_and_distinct() {
-        assert_eq!(pseudonym("node-a"), pseudonym("node-a"));
-        assert_ne!(pseudonym("node-a"), pseudonym("node-b"));
+    fn scope_tokens_are_stable_per_viewer_and_never_correlatable_across_viewers() {
+        // Stable for one viewer: references inside a masked view cohere.
+        assert_eq!(
+            scope_token("salt", "viewer-1", "node-a"),
+            scope_token("salt", "viewer-1", "node-a")
+        );
+        assert_ne!(
+            scope_token("salt", "viewer-1", "node-a"),
+            scope_token("salt", "viewer-1", "node-b")
+        );
+        // Two viewers cannot join their masked views on a token (Q6, DECIDED).
+        assert_ne!(
+            scope_token("salt", "viewer-1", "node-a"),
+            scope_token("salt", "viewer-2", "node-a")
+        );
+        // Rotating the salt rotates every token — the coarse revocation epoch.
+        assert_ne!(
+            scope_token("salt-1", "viewer-1", "node-a"),
+            scope_token("salt-2", "viewer-1", "node-a")
+        );
     }
 
     #[test]

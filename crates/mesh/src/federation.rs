@@ -925,9 +925,55 @@ mod tests {
         assert!(full.siblings.iter().any(|s| s.handle == "cedar"));
         assert_eq!(full.declared_areas, vec!["energy", "birds"]);
 
-        // Guest rung: federation is shape, not names.
+        // Guest rung: federation is shape, not names. Seed the view with exactly the
+        // content Ian's ruling protects — a named member with an address and a position,
+        // a dialogue body, a standing rule — and prove none of it serializes (T-217).
         let mut guest = full.clone();
-        crate::standing::to_guest_view(&mut guest, "some-guest-node");
+        if let Some(m) = guest.members.first_mut() {
+            m.human = "ian".into();
+            m.label = "Wildhorse".into();
+            m.addr = "192.168.108.7:47100".into();
+            m.lat = 43.1234;
+            m.lon = -89.5678;
+        }
+        guest.recent.push(crate::worldview::ObsView {
+            actor: "ian".into(),
+            action: "told the familiar".into(),
+            object: "the dinette light is too bright after dark".into(),
+            context: "console".into(),
+            source: "local".into(),
+            ts: NOW,
+            confidence: 1.0,
+        });
+        guest.rules.push(crate::worldview::RuleView {
+            id: "rule-0001".into(),
+            sentence: "when ian leaves wifi, dim the motorlights".into(),
+            enabled: true,
+            disabled_reason: String::new(),
+        });
+        crate::standing::to_guest_view(a_dir.path(), &mut guest, "some-guest-node");
+        assert!(
+            guest.masked,
+            "deliberate, and said so — private is never unknown"
+        );
+        let json = serde_json::to_string(&guest).unwrap();
+        for leak in [
+            "ian",
+            "Wildhorse",
+            "192.168.108.7",
+            "43.1234",
+            "dinette",
+            "motorlights",
+        ] {
+            assert!(
+                !json.contains(leak),
+                "the masked view serialized household content: {leak}"
+            );
+        }
+        assert!(
+            guest.recent.iter().any(|o| o.action == "told the familiar"),
+            "the typed event survives — a resident spoke, never what they said"
+        );
         assert_eq!(
             guest.siblings.len(),
             2,
@@ -948,7 +994,7 @@ mod tests {
 
         // Sibling rung: our handle, our declaration, and the reader's own standing — no more.
         let mut sib = full.clone();
-        crate::standing::to_sibling_view(&mut sib, "gid-cedar", &a_cred.label);
+        crate::standing::to_sibling_view(a_dir.path(), &mut sib, "gid-cedar", &a_cred.label);
         assert_eq!(
             sib.group_label, "river",
             "a sibling knows whose door it reads"

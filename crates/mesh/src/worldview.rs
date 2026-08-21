@@ -326,6 +326,12 @@ pub struct Worldview {
     /// never inventory.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declared_areas: Vec<String>,
+    /// True when this view was deliberately masked for its audience (T-217): labels are
+    /// roles and scope tokens, not unknowns. Private-by-choice must never be re-read as
+    /// unknown-to-identify — a console renders masked entries as private, and nothing may
+    /// treat a scope token as an identity to resolve.
+    #[serde(default)]
+    pub masked: bool,
 }
 
 /// A standing rule as the console lists it (ADR-0039 §3): the sentence, the switch.
@@ -562,12 +568,18 @@ pub(crate) fn read_worldview(
             m.relationship = "self".into();
         }
     }
-    // Membership decided that this node may READ. Standing decides what it sees. Admission is
-    // automatic (ADR-0015), so "admitted" and "trusted with the household's names" are not the
-    // same fact — an unlisted reader gets the same mesh with none of the identities. Default
-    // deny: full standing is granted by hand in `standing.json`.
-    if crate::standing::standing_of(dir, &req.node.node_id) == crate::standing::Standing::Guest {
-        crate::standing::to_guest_view(&mut view, &req.node.node_id);
+    // Membership decided that this node may READ. The AUDIENCE decides what it sees
+    // (T-217; conduct dialogue Q6, DECIDED — Ian's ruling: names display only for devices
+    // on the household LAN or owned by the human). Owned = the reading device carries an
+    // established identity, full names from any network. HouseholdLan = an un-established
+    // member on the door's own machine or a DECLARED household CIDR — never an RFC1918
+    // guess, never a forwarded header. Everything else gets the masked view: deliberate
+    // roles, viewer-scoped tokens, free prose omitted. Fail closed.
+    match crate::viewer::classify(dir, &req.node.node_id, peer_ip) {
+        crate::viewer::Audience::Owned | crate::viewer::Audience::HouseholdLan => {}
+        crate::viewer::Audience::Federated => {
+            crate::standing::to_guest_view(dir, &mut view, &req.node.node_id);
+        }
     }
     // Tell a still-unidentified visitor how long until they're forgotten (B10), so the console
     // can warn them before the purge. Their own business — it rides through the guest projection.
@@ -1004,6 +1016,7 @@ pub fn assemble_worldview(
     let goals = goal_views(dir);
 
     Ok(Worldview {
+        masked: false,
         group_label: cred.label.clone(),
         node_id: cred.membership.node_id.clone(),
         // Address advertisement is the *served* read path's concern (read_worldview fills it);
