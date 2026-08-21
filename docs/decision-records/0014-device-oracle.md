@@ -1,6 +1,10 @@
 # ADR-0014 — The device oracle: Apple Intelligence as the mesh's paid-for mind
 
-- **Status:** accepted (implemented + validated — a device answered a queued consult via Apple Intelligence, 2026-07-27)
+- **Status:** accepted — implemented and **inert** (T-214, 2026-08-21: the queue is drained
+  and served by three transport paths, but `consult::enqueue` has had zero production
+  callers since the validation run of 2026-07-27 — a device answered a queued consult via
+  Apple Intelligence that day, and nothing has enqueued one since. Built truth with no
+  live producer; revives only when a producer is deliberately built — ADR-0043 §6)
 - **Date:** 2026-07-25
 - **Relates to:** [ADR-0009](0009-sovereign-mesh-transport.md) (the signed device
   seams this extends), [ADR-0011](0011-scenario-engine.md) (the laboratory that

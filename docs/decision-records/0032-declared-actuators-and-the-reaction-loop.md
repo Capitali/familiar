@@ -2,7 +2,11 @@
 
 - **Status:** accepted — implemented 2026-08-08 (the gate, the declaration format, the
   poll → heed → tend loop, reaction evidence, habit folding); reading contract amended
-  2026-08-15 by T-157 so the kernel no longer contains the first device's grammar
+  2026-08-15 by T-157 so the kernel no longer contains the first device's grammar.
+  **Implemented and inert in the field** (T-214, 2026-08-21, per the 2026-08-17 audit of
+  the primary live node): `allow_actuate` shut and no declared surface with a runner, so
+  the loop has not fired there — the machinery is tested, gated shut, and waiting on the
+  human's gate, which is the designed order (ADR-0005), not a defect
 - **Relates to:** [ADR-0031](0031-consent-by-observation.md) (the philosophy this makes
   concrete), [ADR-0022](0022-the-human-dossier.md) (habit patterns are a dossier kind),
   [ADR-0005](0005-human-owned-capability-boundary.md) (the gate),

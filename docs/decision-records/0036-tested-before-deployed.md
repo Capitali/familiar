@@ -1,6 +1,9 @@
 # ADR-0036 — Tested before deployed; self-correcting after
 
-- **Status:** accepted — implemented 2026-08-10
+- **Status:** accepted — implemented 2026-08-10; **inert in the field** (T-214,
+  2026-08-21, per the 2026-08-17 audit of the primary live node: `allow_execute` shut —
+  28 tools all `uses: 0`, 222 candidates all `generated` across 536 ticks. Fail-closed as
+  designed; the label keeps the document honest about live effect — ADR-0043 §6)
 - **Relates to:** `docs/SOUL.md` ("capability is unrestricted; restraint is
   constitutional"), [ADR-0010](0010-scenario-laboratory.md) /
   [ADR-0011](0011-scenario-engine.md) (the lab's effectiveness gates, referenced not

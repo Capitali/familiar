@@ -1,7 +1,11 @@
 # ADR-0031 — Consent by observation: the query is the final gate, not the first
 
 - **Status:** accepted (Ian, 2026-08-08) — first slice implemented the same day (the
-  dossier, needs theorizing, Law I question routing)
+  dossier, needs theorizing, Law I question routing); the ACTUATION half is implemented
+  and **inert** in the field (T-214, 2026-08-21, per the 2026-08-17 enforcement audit of
+  the primary live node: `allow_actuate` shut, zero reaction rules, zero acts —
+  fail-closed working as designed, and the words here say so rather than implying live
+  effect)
 - **Relates to:** [ADR-0022](0022-the-human-dossier.md) (the dossier — the substrate this
   reads from), [ADR-0016](0016-multi-human-served-identity.md) (per-human attribution),
   [ADR-0019](0019-friendly-identification.md) (routing), `docs/SOUL.md` (Law III),
