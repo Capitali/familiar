@@ -6,6 +6,40 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — T-220: the pending decision is durable — a person's choice survives erosion
+
+Codex's Round-2 design (adopted Round 3), built. The defect it ends: the one thread ever
+armed to mint a standing rule eroded to `retired` on missed predictions WHILE waiting
+for Ian's assent — assent routed through a target that could die of a clock.
+
+`kernel/pending.rs`: the `PendingDecision` — proposal, subject, surface, question
+(id + text snapshot), basis snapshot (theory/anchors/facts_rev), minted beside the
+question when an armed draft is admitted (one open decision per thread). States:
+`pending → (awaiting_gate) → assented | declined` — no state expires by timer; waiting
+is not a state that expires.
+
+`cycle::heed_pending_decisions` runs each tick, deliberately UNGATED (staging must work
+while `allow_actuate` is shut): an explicit no declines; an explicit yes with the gate
+shut STAGES — kept, narrated once ("opening allow_actuate completes it"), silent
+thereafter — and one human gate-open completes the loop on a later tick with no re-ask.
+A completing yes re-validates against the THEN-CURRENT world (`mint_policy` refuses a
+surface no longer declared — the decision closes honestly rather than acting on a stale
+declaration). The honesty note is STAMPED when erosion happens, because a human answer
+revives a retired thread (T-128) and would otherwise erase the very fact the note
+carries: "minted on your assent … (the supporting theory had retired while you
+decided)".
+
+The theory itself keeps eroding freely — waiting is not immunity from counter-evidence.
+Tests pin: producer (real theorize path, armed draft → decision bound to question and
+thread by id), assent-after-retirement with the note, gate-shut staging + completion on
+open with exactly one narration, decline, and silence-keeps-waiting. Bar: fmt 0, clippy
+--all-targets 0, workspace 788 passed / 0 failed, exit-checked.
+
+REMAINING for the live witness (the loop's accept): wildhorse deploy + its declared
+lights surface + Ian's allow_actuate — one real presence transition, one reversible
+effect, one honest narration, reachability recorded. Everything up to the gate is now
+staged by construction.
+
 ## 2026-08-21 — T-222: a person's words persist — answers reach the question registry
 
 The measured defect: 362 threads carried human answers while all 310 registry questions

@@ -1560,8 +1560,30 @@ fn maybe_theorize(
             turns_on: draft.turns_on.clone(),
             stake: draft.stake.clone(),
         };
-        if let Err(why) = question::admit(dir, &ask, "llm", now)? {
-            refuse_act(dir, now, "ask", "stakes", &why);
+        match question::admit(dir, &ask, "llm", now)? {
+            Err(why) => refuse_act(dir, now, "ask", "stakes", &why),
+            Ok(qid) => {
+                // T-220: an ARMED ask (the draft carries a typed rule proposal) mints
+                // the durable PENDING DECISION alongside the question — proposal,
+                // subject, surface, and basis snapshot. The theory may now erode
+                // freely; the person's choice survives it (progress-areas dialogue,
+                // codex's design, Round 3 adopted).
+                if let Some(rp) = &draft.rule_proposal {
+                    let _ = familiar_kernel::pending::mint(
+                        dir,
+                        &thread_id,
+                        &rp.subject,
+                        rp,
+                        &qid,
+                        &q,
+                        &draft.theory,
+                        &draft.anchors,
+                        familiar_kernel::system_facts::FACTS_REVISION,
+                        0,
+                        now,
+                    );
+                }
+            }
         }
     }
     // Predictions ride the mint when the draft carries them (optional until T-128) —
@@ -2900,6 +2922,175 @@ fn poll_actuators(
     }
     familiar_kernel::actuator::save_state(dir, &state)?;
     Ok((transitions, reactions))
+}
+
+/// T-220: heed the DURABLE pending decisions — the road that needs no prior act. A new
+/// answer from the subject after the ask decides: an explicit negative declines; an
+/// explicit yes re-validates against the THEN-CURRENT world (mint_policy checks the
+/// surface's declaration; the boundary gates) and mints the paired standing policy. A
+/// shut gate STAGES the assent (`awaiting_gate`, narrated once) — the yes is kept, and
+/// one human gate-open completes the loop on a later tick. A dismissal is "not now",
+/// never "no". If the supporting theory weakened or retired while the person decided,
+/// the adopted narration says so — the honesty note, never silent inheritance.
+fn heed_pending_decisions(dir: &Path, now: i64) -> io::Result<usize> {
+    let decisions = familiar_kernel::pending::load(dir)?;
+    if decisions.is_empty() {
+        return Ok(0);
+    }
+    let threads = thread::load(dir)?;
+    let gated = familiar_kernel::boundary::load(dir)
+        .map(|b| b.allow_actuate)
+        .unwrap_or(false);
+    let mut handled = 0;
+    for d in decisions {
+        if !matches!(d.status.as_str(), "pending" | "awaiting_gate") {
+            continue;
+        }
+        let t = threads.iter().find(|t| t.id == d.thread_id);
+        // Stamp the weakening WHEN IT HAPPENS: an answer later revives a retired thread
+        // (T-128 — human attention outranks triage), which would erase the very fact the
+        // honesty note exists to carry. The decision remembers what revival forgets.
+        if d.note.is_empty() {
+            if let Some(st) = t.map(|t| t.status.as_str()) {
+                if !matches!(st, "open" | "pursued") {
+                    familiar_kernel::pending::transition(
+                        dir,
+                        &d.id,
+                        &d.status,
+                        &format!("the supporting theory had {st} while you decided"),
+                        now,
+                    )?;
+                }
+            }
+        }
+        let new_answers: Vec<&String> = t
+            .map(|t| t.answers.iter().skip(d.answers_seen).collect())
+            .unwrap_or_default();
+        let affirmative = d.status == "awaiting_gate"
+            || new_answers
+                .iter()
+                .any(|a| familiar_kernel::actuator::is_affirmative(a));
+        let negative = new_answers
+            .iter()
+            .any(|a| familiar_kernel::actuator::is_negative(a));
+        if negative {
+            familiar_kernel::pending::transition(
+                dir,
+                &d.id,
+                "declined",
+                "the subject said no",
+                now,
+            )?;
+            handled += 1;
+            continue;
+        }
+        if !affirmative {
+            continue; // still waiting — waiting is not a state that expires
+        }
+        if !gated {
+            if d.status != "awaiting_gate" {
+                familiar_kernel::pending::transition(
+                    dir,
+                    &d.id,
+                    "awaiting_gate",
+                    "assent heard; allow_actuate is closed",
+                    now,
+                )?;
+                observation::record(
+                    dir,
+                    observation::Observation::new(
+                        "familiar",
+                        "narrated",
+                        format!(
+                            "heard your yes on \"{}\" — the actuate gate is closed, so \
+                             nothing moves; opening allow_actuate completes it",
+                            d.question
+                        ),
+                        "console",
+                        "familiar",
+                        now,
+                        1.0,
+                    ),
+                )?;
+                handled += 1;
+            }
+            continue;
+        }
+        // Re-validate against the world AS IT IS NOW: mint_policy refuses a surface no
+        // longer declared or edges no longer its labels — a stale theory lends nothing.
+        // The honesty note prefers what was STAMPED during the wait (revival-proof),
+        // falling back to the current status for a weakening seen only now.
+        let stamped = familiar_kernel::pending::load(dir)?
+            .into_iter()
+            .find(|x| x.id == d.id)
+            .map(|x| x.note)
+            .unwrap_or_default();
+        let theory_note = if !stamped.is_empty() {
+            format!(" ({stamped})")
+        } else {
+            match t.map(|t| t.status.as_str()) {
+                Some("open") | Some("pursued") | None => String::new(),
+                Some(other) => format!(" (the supporting theory had {other} while you decided)"),
+            }
+        };
+        match familiar_kernel::reaction_rule::mint_policy(
+            dir,
+            &d.proposal,
+            &format!("thread:{}", d.thread_id),
+            now,
+        ) {
+            Ok((away, back)) => {
+                familiar_kernel::pending::transition(
+                    dir,
+                    &d.id,
+                    "assented",
+                    theory_note.trim(),
+                    now,
+                )?;
+                observation::record(
+                    dir,
+                    observation::Observation::new(
+                        "familiar",
+                        "adopted",
+                        format!("policy:{}", away.policy_id),
+                        format!(
+                            "{} · {} — minted on your assent, decision:{}{}",
+                            away.sentence(),
+                            back.sentence(),
+                            d.id,
+                            theory_note
+                        ),
+                        "familiar",
+                        now,
+                        1.0,
+                    ),
+                )?;
+            }
+            Err(e) => {
+                familiar_kernel::pending::transition(
+                    dir,
+                    &d.id,
+                    "declined",
+                    &format!("assent stood, but the world changed: {e}"),
+                    now,
+                )?;
+                observation::record(
+                    dir,
+                    observation::Observation::new(
+                        "familiar",
+                        "reports",
+                        format!("policy-refused:{}", d.surface),
+                        format!("{e} — decision:{} closed honestly rather than acting on a stale declaration", d.id),
+                        "familiar",
+                        now,
+                        1.0,
+                    ),
+                )?;
+            }
+        }
+        handled += 1;
+    }
+    Ok(handled)
 }
 
 /// The verbal channel: a new answer on the acted thread, or a dismissal of its
@@ -4403,14 +4594,19 @@ pub fn tick(
     //      reactions to any open act, then act on matched needs — consent by observation,
     //      double-gated (allow_actuate for the surface, allow_execute for the running).
     //      Every failure inside is tool-unhealthy and visible, never fatal to the tick.
+    // T-220: pending decisions are heeded UNGATED, deliberately — hearing a person's
+    // yes and STAGING it must work while allow_actuate is shut (staging is the loop's
+    // whole promise: the assent is kept, narrated once, and one human gate-open
+    // completes it). The minting inside is gate-checked itself.
+    let decisions_heeded = heed_pending_decisions(dir, now)?;
     let (actuated, reactions) = if allow_execute && actuate_allowed(dir) {
         let (_transitions, poll_reactions) = poll_actuators(dir, now, &obs)?;
         let heeded = heed_reactions(dir, now)?;
         let acted = tend_actuators(dir, now)?;
         let _rules_acted = tend_rules(dir, now, &obs)?;
-        (acted, poll_reactions + heeded)
+        (acted, poll_reactions + heeded + decisions_heeded)
     } else {
-        (0, 0)
+        (0, decisions_heeded)
     };
 
     // 8·2 Own the roadmap — the mesh side of the same telos. A shared goal whose needs this node's
@@ -5299,6 +5495,141 @@ mod tests {
             0,
             "one act per rest window"
         );
+    }
+
+    fn seed_decision(dir: &Path, thread_status: &str) -> (String, String) {
+        // A thread that carried an armed proposal, and its durable pending decision.
+        let (tid, _cid) = seed_pursued_need(dir, 1000);
+        let mut th = thread::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == tid)
+            .unwrap();
+        th.status = thread_status.into();
+        familiar_kernel::store::update_by_id(dir, thread::THREADS_FILE, &tid, &th).unwrap();
+        let rp = familiar_kernel::reaction_rule::RuleProposal {
+            subject: "ian".into(),
+            surface: "lights".into(),
+            on_away: "dim".into(),
+            on_back: "bright".into(),
+        };
+        let did = familiar_kernel::pending::mint(
+            dir,
+            &tid,
+            "ian",
+            &rp,
+            "q-0001",
+            "Dim when away?",
+            "lighting follows presence",
+            &[],
+            3,
+            th.answers.len(),
+            1000,
+        )
+        .unwrap()
+        .unwrap();
+        (tid, did)
+    }
+
+    /// **T-220's whole point:** the theory eroded to `retired` while the person decided —
+    /// and the decision survives it. The yes mints, and the narration says what happened.
+    #[test]
+    fn an_assent_mints_even_after_the_theory_retired() {
+        let t = Temp::new("decision_survives");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, did) = seed_decision(dir, "retired");
+        // A tick passes while the theory lies retired: the weakening is STAMPED on the
+        // decision, so the answer's revival (T-128) cannot erase what happened.
+        assert_eq!(heed_pending_decisions(dir, 1050).unwrap(), 0);
+        thread::add_answer_from(dir, &tid, "yes please — keep doing that", "phone:ian", 1100)
+            .unwrap();
+        assert_eq!(heed_pending_decisions(dir, 1200).unwrap(), 1);
+        let rules = familiar_kernel::reaction_rule::load(dir).rules;
+        assert_eq!(
+            rules.len(),
+            2,
+            "both edges minted from the surviving decision"
+        );
+        let d = familiar_kernel::pending::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|d| d.id == did)
+            .unwrap();
+        assert_eq!(d.status, "assented");
+        let obs = observation::load(dir).unwrap();
+        let adopted = obs
+            .iter()
+            .find(|o| o.action == "adopted")
+            .expect("the mint narrates");
+        assert!(
+            adopted.context.contains("retired while you decided"),
+            "the honesty note rides the narration: {}",
+            adopted.context
+        );
+    }
+
+    /// Assent with the gate shut STAGES: the yes is kept and narrated once; one human
+    /// gate-open completes the loop on a later tick with no re-ask.
+    #[test]
+    fn assent_with_the_gate_shut_stages_then_completes_on_open() {
+        let t = Temp::new("decision_stages");
+        let dir = &t.0;
+        write_fake_actuator(dir); // declared surface, but the gate stays SHUT
+        let (tid, did) = seed_decision(dir, "pursued");
+        thread::add_answer_from(dir, &tid, "yes please", "phone:ian", 1100).unwrap();
+        assert_eq!(heed_pending_decisions(dir, 1200).unwrap(), 1);
+        let d = |dir: &Path| {
+            familiar_kernel::pending::load(dir)
+                .unwrap()
+                .into_iter()
+                .find(|x| x.id == did)
+                .unwrap()
+        };
+        assert_eq!(d(dir).status, "awaiting_gate");
+        assert!(
+            familiar_kernel::reaction_rule::load(dir).rules.is_empty(),
+            "a shut gate mints nothing"
+        );
+        let narrations = || {
+            observation::load(dir)
+                .unwrap()
+                .iter()
+                .filter(|o| o.action == "narrated" && o.object.contains("allow_actuate"))
+                .count()
+        };
+        assert_eq!(narrations(), 1);
+        // A later tick with the gate still shut: silent — narrated once, not nagged.
+        assert_eq!(heed_pending_decisions(dir, 1300).unwrap(), 0);
+        assert_eq!(narrations(), 1);
+        // The human opens the gate; the kept yes completes without a re-ask.
+        open_actuate_boundary(dir);
+        assert_eq!(heed_pending_decisions(dir, 1400).unwrap(), 1);
+        assert_eq!(d(dir).status, "assented");
+        assert_eq!(familiar_kernel::reaction_rule::load(dir).rules.len(), 2);
+    }
+
+    /// A no declines; silence just keeps waiting — waiting is not a state that expires.
+    #[test]
+    fn a_no_declines_and_silence_keeps_waiting() {
+        let t = Temp::new("decision_no");
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        open_actuate_boundary(dir);
+        let (tid, did) = seed_decision(dir, "pursued");
+        // Silence: nothing moves, nothing expires.
+        assert_eq!(heed_pending_decisions(dir, 1100).unwrap(), 0);
+        // An explicit no: declined, and no rule exists.
+        thread::add_answer_from(dir, &tid, "no, too dark", "phone:ian", 1200).unwrap();
+        assert_eq!(heed_pending_decisions(dir, 1300).unwrap(), 1);
+        let d = familiar_kernel::pending::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == did)
+            .unwrap();
+        assert_eq!(d.status, "declined");
+        assert!(familiar_kernel::reaction_rule::load(dir).rules.is_empty());
     }
 
     #[test]
@@ -7819,6 +8150,44 @@ mod tests {
         assert!(
             thread::load(dir).unwrap().is_empty(),
             "no chain of the familiar's own speech raises confidence in a world claim"
+        );
+    }
+
+    /// The producer end of T-220: an ARMED draft (typed rule proposal) admitted through
+    /// the real theorize path mints the durable decision beside its question.
+    #[test]
+    fn an_armed_ask_mints_the_durable_decision() {
+        let t = Temp::new(&format!("armed_ask_{}", std::process::id()));
+        let dir = &t.0;
+        write_fake_actuator(dir);
+        write_boundary(dir, false, true, true);
+        let oid = seed_eligible_obs(dir, 100);
+        fake_llm(
+            dir,
+            &format!(
+                r#"{{"anchors":["{oid}"],"mechanism":"presence","question":"dim when away?","because":"three evening adjustments followed departures","turns_on":"a standing lighting rule","stake":"changes","theory":"lighting follows presence","direction":"dim lights on away",
+                     "rule_proposal":{{"subject":"ian","surface":"lights","on_away":"dim","on_back":"bright"}},
+                     "predictions":[{{"then_actor":"ian","then_action":"adjusted","then_object_prefix":"lighting:","within_secs":7200,"polarity":"expect_absent"}}]}}"#
+            ),
+        );
+        let obs = observation::load(dir).unwrap();
+        assert!(theorize_until_disposed(dir, 200, &obs));
+        let ds = familiar_kernel::pending::load(dir).unwrap();
+        assert_eq!(ds.len(), 1, "the armed ask minted its durable decision");
+        let d = &ds[0];
+        assert_eq!(d.surface, "lights");
+        assert_eq!(d.subject, "ian");
+        assert_eq!(d.status, "pending");
+        let q = question::load(dir)
+            .unwrap()
+            .into_iter()
+            .find(|q| q.text == "dim when away?")
+            .expect("the question was admitted");
+        assert_eq!(d.question_id, q.id, "decision and question are bound by id");
+        assert_eq!(
+            d.thread_id,
+            thread::load(dir).unwrap()[0].id,
+            "and to the thread that proposed"
         );
     }
 

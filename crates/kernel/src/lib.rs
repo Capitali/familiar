@@ -36,6 +36,7 @@ pub mod obs_class;
 pub mod observation;
 pub mod parameters;
 pub mod pattern_memory;
+pub mod pending;
 pub mod persona;
 pub mod prediction;
 pub mod presence;
