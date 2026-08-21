@@ -317,6 +317,48 @@ pub fn record_dismissed(dir: &Path, id: &str, now: i64, note: &str) -> io::Resul
     })
 }
 
+/// T-222: mark answered every registry question bound to `thread_id` — the durable-id
+/// join from a thread answer to the question the console actually asked. Returns how
+/// many questions closed. Root is exempt by its own lifecycle (it recurs regardless).
+pub fn record_answered_for_thread(dir: &Path, thread_id: &str, now: i64) -> io::Result<usize> {
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return Ok(0);
+    }
+    let mut closed = 0;
+    for q in load(dir)? {
+        if q.thread_id == thread_id && !q.answered && record_answered(dir, &q.id, now)? {
+            closed += 1;
+        }
+    }
+    Ok(closed)
+}
+
+/// T-222's conservative backfill: close every unanswered thread-bound question whose
+/// thread ALREADY carries a human answer — the same durable-id join applied to history,
+/// run idempotently (a no-op when the registry is current). Ambiguity is impossible by
+/// construction: the join is `Question.thread_id`, nothing else. Questions without a
+/// thread binding are untouched — their retirement is explicit policy (T-219), never an
+/// invented answer.
+pub fn backfill_answered(dir: &Path, now: i64) -> io::Result<usize> {
+    let answered_threads: std::collections::BTreeSet<String> = crate::thread::load(dir)?
+        .into_iter()
+        .filter(|t| !t.answers.is_empty())
+        .map(|t| t.id)
+        .collect();
+    let mut closed = 0;
+    for q in load(dir)? {
+        if !q.answered
+            && !q.thread_id.is_empty()
+            && answered_threads.contains(&q.thread_id)
+            && record_answered(dir, &q.id, now)?
+        {
+            closed += 1;
+        }
+    }
+    Ok(closed)
+}
+
 pub fn record_answered(dir: &Path, id: &str, now: i64) -> io::Result<bool> {
     update(dir, id, |q| {
         q.answered = true;
@@ -480,6 +522,54 @@ mod tests {
                 .unwrap()
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn a_thread_answer_closes_its_registry_question_by_durable_id_only() {
+        let t = Temp::new("t222_join");
+        // Two addressed questions on two threads, one standalone, and the root.
+        ensure_root(&t.0, 0).unwrap();
+        let d1 = AskDraft {
+            question: "Betty — long evenings?".into(),
+            because: "her lights burned past midnight three nights running".into(),
+            turns_on: "whether to keep watching her nights".into(),
+            stake: "continues".into(),
+        };
+        admit_addressed(&t.0, &d1, "need", "betty", "thread-0001", 10)
+            .unwrap()
+            .unwrap();
+        let d2 = AskDraft {
+            question: "Dim when away?".into(),
+            because: "three evening adjustments followed departures".into(),
+            turns_on: "a standing lighting rule".into(),
+            stake: "changes".into(),
+        };
+        admit_addressed(&t.0, &d2, "need", "ian", "thread-0002", 20)
+            .unwrap()
+            .unwrap();
+        // An answer lands on thread-0002: exactly ITS question closes — by id, never by
+        // prose or recency (thread-0001's stays open; the root is untouched).
+        assert_eq!(
+            record_answered_for_thread(&t.0, "thread-0002", 100).unwrap(),
+            1
+        );
+        let qs = load(&t.0).unwrap();
+        let by_text = |txt: &str| qs.iter().find(|q| q.text == txt).unwrap();
+        assert!(by_text("Dim when away?").answered);
+        assert!(!by_text("Betty — long evenings?").answered);
+        assert!(!qs.iter().find(|q| q.id == ROOT_ID).unwrap().answered);
+        // Idempotent: answering the same thread again closes nothing further.
+        assert_eq!(
+            record_answered_for_thread(&t.0, "thread-0002", 200).unwrap(),
+            0
+        );
+        // An unbound thread id closes nothing.
+        assert_eq!(
+            record_answered_for_thread(&t.0, "thread-9999", 300).unwrap(),
+            0
+        );
+        // And an answered non-root question no longer surfaces (retired by lifecycle).
+        assert!(!by_text("Dim when away?").available(10_000_000));
     }
 
     #[test]

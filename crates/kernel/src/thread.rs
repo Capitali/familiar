@@ -584,7 +584,17 @@ pub fn add_answer(dir: &Path, id: &str, text: &str, now: i64) -> io::Result<bool
         t.status = "open".into();
         t.status_at = now;
     }
-    store::update_by_id(dir, THREADS_FILE, id, &t)
+    let wrote = store::update_by_id(dir, THREADS_FILE, id, &t)?;
+    // T-222: the answer reaches the QUESTION REGISTRY too, by durable id — the registry
+    // question that carries this thread's id is what the console asked; a human's answer
+    // on the thread IS its answer. Without this join, 310 live questions sat unanswered
+    // against 362 answered threads and the console re-asked what was already said —
+    // which tells a person their words did not persist. Join is by `Question.thread_id`
+    // ONLY (never prose or recency); best-effort, and it must never fail the answer.
+    if wrote {
+        let _ = crate::question::record_answered_for_thread(dir, id, now);
+    }
+    Ok(wrote)
 }
 
 /// [`add_answer`] with the answerer's identity. When the answerer is the human the thread is

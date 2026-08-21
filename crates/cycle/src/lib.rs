@@ -4373,6 +4373,11 @@ pub fn tick(
     // The factory coordinates its questions (root + theories + needs) through the
     // registry, surfacing one at a time under the Three Laws. Identification is no longer
     // the dialog's job — the presence ladder, the join door, and the guest nudge carry it.
+    // T-222: before coordinating what to ask, close what was already answered — the
+    // durable-id backfill keeps the registry honest against thread answers arriving by
+    // any path (console, device, sync), so the familiar never re-asks what a person
+    // already said. Idempotent; a current registry costs one read.
+    let _ = question::backfill_answered(dir, now);
     coordinate_questions(dir, now, &obs)?;
 
     // 8. Act — turn open threads into candidate work (executed on a later tick),
