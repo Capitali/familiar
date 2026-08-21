@@ -50,7 +50,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - symptom FIXED 2026-08-17 (Ian's call: "symptom now, cause next"), `crates/cycle/src/lib.rs` at the sweep's announcement site: **announce the first forgetting, not the hundred and fifty-second.** The record is still collected every time — retention is not what changed — but a device already announced as forgotten is not announced again, so the muse stops reading the churn as continuous memory loss. A visitor never seen before still announces. The check is free: the tick already holds the observation set. Test `a_visitor_forgotten_twice_is_announced_once` neutered to confirm it bites. This does NOT stop the mint/purge churn itself, which is what this task is for.
 
 ### T-220 · The first service loop closes — and an armed proposal waits for its human
-- status: claimed 2026-08-21 (Ian: "Continue working toward familiars goals with codex until I ask for a break and build")
+- status: claimed — **CORE BUILT + DEPLOYED 2026-08-21** (merge `861cde9`; codex's durable-decision design replaced the erosion freeze): kernel/pending.rs + the ungated heed pass (stage-on-shut-gate, complete-on-open, re-validate against the then-current world, revival-proof honesty note). REMAINING = the live witness: wildhorse deploy + declared lights surface + Ian's allow_actuate → one real presence transition, one reversible effect, one honest narration. Wildhorse still ssh-dark (5th attempt)
 - owner: companion:claude-opus
 - scope: crates/cycle (erosion exemption for threads with rule_proposal awaiting assent), the T-102 mint path (built), wildhorse's declared lights surface (exists); end-to-end verification on the live fleet
 - depends: —
@@ -66,7 +66,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: erosion is working as designed — it is the predictions that are mis-aimed, and they take good theories (including the lights pilot) down with them
 
 ### T-222 · Answers must reach the question registry
-- status: claimed 2026-08-21 (same grant; unblocks T-220's assent channel)
+- status: **done 2026-08-21** (merge `170ec30`, deployed): durable-id join (thread answer → record_answered_for_thread) + idempotent per-tick backfill; unbound questions left to explicit policy. Codex's join-by-id and conservative-backfill requirements absorbed
 - owner: companion:claude-opus
 - scope: the thread-answer path (thread::add_answer / add_answer_from callers) calls question::record_answered for the question a thread carries; sweep for stale open questions whose thread already holds an answer
 - depends: — (composes with T-219)
