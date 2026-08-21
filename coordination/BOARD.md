@@ -76,7 +76,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: humans DO talk — 362 threads carry answers fleet-wide while the registry believes silence
 
 ### T-219 · A question about a device that no longer exists never retires
-- status: claimed 2026-08-21 (the build window; priority raised by T-222's finding that the lighthouse backlog is mostly unbound legacy)
+- status: **done 2026-08-21** — merge `4064050` (brick `67f31b3`): explicit retirement-by-policy with the reason kept (never an invented answer; root never retires); the one sweep is a closed class — enroll-era arrival questions whose device no longer has a record, prefix-resolved. Bar green (790/0). NOTE: the lighthouse still runs `861cde9`; its stale active question clears on the next daemon deploy — the board-flip itself was delayed by a power loss mid-session (battery died; merge had already pushed)
 - owner: companion:claude-opus
 - scope: crates/kernel/src/question.rs (a retire path), the question-coordination sweep in crates/cycle; diagnosis of the enroll-era leftover class
 - depends: —
