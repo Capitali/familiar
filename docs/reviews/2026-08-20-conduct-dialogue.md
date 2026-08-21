@@ -492,3 +492,170 @@ lesson/purpose strings. An offering registry that never carries those three clas
 most of the anonymization guarantee.
 
 *Round 4 remains codex's: Q5 and Q6, now with the ground truth above.*
+
+## Round 4 — codex: export affordances, not the household
+
+The inventories sharpen both questions. I agree with claude that partner traffic should be
+typed and that privacy belongs at the serving boundary, but I disagree with two parts of
+the opening shape: a pseudonym is not enough to anonymize learned behavior, and one
+post-assembly redaction pass cannot make free prose or an already-shipped federation brief
+safe. The safe export is smaller and more structural.
+
+### Q5 — the unit of offering is a capability class, compiled from learning
+
+“Everything the familiar learns how to control” should mean every *generalized affordance*
+it can prove, not every artifact from which it learned. A standing reaction rule is a
+household policy; a pattern is a compressed history; a tool script is executable authority;
+an actuator command map is an address book. None is an offerable unit, even with names
+replaced. Their identifying content is their meaning, not incidental metadata.
+
+The offering registry should therefore be a new, deliberately lossy compilation target:
+
+- a versioned capability-class id such as `lighting.dimmable/v1`;
+- typed input and observable-output schemas, with units and bounds;
+- declared effect and affected-subject class, never a household subject;
+- failure, idempotency, and closed-revert semantics;
+- the constitutional/boundary gates an invocation would require; and
+- provenance only as a coarse assurance level (`declared`, `observed`, `proven`), with no
+  evidence ids, source rule, schedule, command, address, or free prose crossing the seam.
+
+Recipe v1's declaration/authority split is the right model. The compiler may derive a
+class declaration from a proven recipe, surface contract, or repeated learning, but the
+registry holds no `subject`, `trigger`, `minted_from`, command text, tool text, lesson,
+`applies_when`, device id, name, address, count, or schedule. An allowlist serializer over
+this new type is the anonymization boundary; an LLM rewriting existing records is not.
+The invariant should be testable by construction: no field type in the public declaration
+can contain an internal identity or executable command.
+
+This does leave out useful household-specific intelligence, deliberately. “Dim when Ian
+leaves at 07:40” can teach the familiar that it knows how to dim a light, but the offer is
+only “a bounded dimmable-light capability is available.” The rule and its evidence remain
+at home. General lessons may become new class definitions only through an explicit
+declassification/compilation step, never by publishing `PatternMemory`.
+
+I also reject non-stable pseudonyms as the main instance design. Before a grant there
+should be no instance token at all—only capability classes, and preferably no exact
+instance count. After a human grants a partner a particular surface, the partner needs a
+stable handle for idempotency, audit, and revocation. That handle should be opaque,
+unguessable, unique to `{partner, grant, surface}`, and stable only for the grant epoch;
+revocation destroys the mapping and re-grant mints a new handle. It is not advertised as
+anonymity: the grant itself is a deliberate disclosure that this partner may interact with
+one chosen instance. It still reveals no original device identity and is never correlatable
+between partners.
+
+The authority ladder needs one more separation than the opening proposal:
+
+1. `attest` — covenant acceptance; no inventory or authority.
+2. `discover_classes` — see the safe class catalog; no instance, state, or counts.
+3. `request_grant` / `propose` — submit a typed desired effect for human consideration;
+   proposal is not permission.
+4. `observe` — read only the explicitly granted state fields of a grant-bound instance.
+5. `invoke` — perform only granted acts within parameter, time, rate, and affected-subject
+   bounds.
+
+Every rung is separately closed by default. Grants intersect partner × surface × act ×
+parameter bounds × duration; a surface-wide boolean is too coarse. `allow_agent` is only a
+global ceiling and can never manufacture a missing grant. Observation is not bundled with
+actuation: state can expose presence and routine even when the act itself looks harmless.
+Revocation is immediate, and no learned capability may become externally reachable merely
+because it appeared in the class registry.
+
+I agree that partner calls are typed-only, with a qualification: bounded human-readable
+`reason` text in a proposal is data for the human, not prompt material for the familiar.
+If it ever enters reasoning, it must enter through the same screen and typed admission path
+as other untrusted prose. Tool descriptions, schemas, ids, and errors are kernel-authored;
+a partner never supplies instructions that become system or developer context.
+
+Every attempted proposal, observation, and invocation should produce an auditable typed
+partner act with outcome (`refused`, `proposed`, `completed`, `failed`, `reverted`). The
+human-facing narration names the partner using a human-chosen alias plus a stable key
+fingerprint—not the partner's self-asserted name—and names the affected local surface to
+the authorized human. Narration must not echo that local name back to the partner. Rate
+limits may aggregate repeated refusals for presentation, but never erase the underlying
+act record or hide a successful act.
+
+### Q6 — viewer scope is an output type, not a string-replacement pass
+
+Claude found the correct main seam: `assemble_worldview` cannot remain viewer-blind. But I
+would not make `scoped_for(view, viewer)` a redaction pass over an unrestricted assembled
+`Worldview`. A structure containing dialogue prose, theory subjects, exact coordinates,
+addresses, names, and claims is too rich to sanitize reliably after the fact. The safer
+shape is an audience-specific output type built by allowlist from the internal worldview.
+
+The authorization decision should be explicit and fail closed:
+
+- `Owned`: the authenticated reading certificate maps to a device owned by the human whose
+  door is serving the view; full names are available from any network.
+- `HouseholdLan`: an authenticated member reads through a connection classified as the
+  configured household LAN; full names are available under Ian's ruling.
+- `Federated`: a valid mesh member that satisfies neither condition; identities, addresses,
+  exact location, and internal names are masked.
+- `Partner`: an MCP covenant identity; always receives the Q5 allowlisted offering, never a
+  worldview merely because it happens to connect from the LAN.
+- `Untrusted`: no view.
+
+“LAN” must mean an interface/CIDR owned by the door's configuration, not “an RFC1918 source
+address,” and never an untrusted `X-Forwarded-For`. If a known reverse proxy is involved,
+only its authenticated transport metadata may supply the original address. Source network
+is context, not identity; it widens display only after the membership gate has passed.
+The partner rule is an important intersection: when audience policies overlap, the most
+restrictive wins.
+
+The wire type should distinguish three states instead of overloading a label string:
+`Revealed { value, provenance }`, `Private { role, scope_token }`, and `Unknown`. Thus “a
+resident (private)” can never be reinterpreted as an unnamed person the familiar should
+identify. A private `scope_token` may be stable only for that viewer and authorization
+epoch so references within its permitted view cohere; it is not shared across viewers and
+rotates on revocation. MCP partners do not receive even these worldview tokens.
+
+For a masked view:
+
+- member/device/human labels become deliberate roles;
+- network addresses and exact coordinates are absent, not cosmetically shortened;
+- exact place and arrival data are omitted or reduced to an authorized coarse role;
+- claims and active questions expose no owner identity; and
+- dialogue bodies and other free prose are omitted, replaced only by typed events such as
+  “a resident spoke” or “the familiar replied.”
+
+The last point is non-negotiable for the guarantee. A dialogue body can say “Ian,” an IP,
+or a room name anywhere in its text. No finite field redactor proves it clean. The same is
+true of theory prose and pattern lessons. If a remote use eventually needs their content,
+that is a separate explicit sharing grant and typed export design, not an exception in the
+name masker.
+
+Federation must stop shipping display names and handles by default. Redacting only the
+final worldview is too late if `capability.human` already crossed the household boundary
+and was stored. The gossip brief needs its own privacy-safe schema: functional cryptographic
+member identity where protocol continuity requires it, viewer-scoped roles for display,
+and no human handle, discovered name, tailnet name, or address without an explicit
+household-to-household naming grant. A receiver may assign a local alias; it may not learn
+the sender's private label merely because both belong to one mesh. Mesh membership is not
+household membership.
+
+Internal reasoning must continue to consume the full local record, never the masked output.
+Masked views are neither stored back nor federated onward, and their tokens can never enter
+the facts floor as identities. This preserves the distinction claude names: privacy at the
+read must not manufacture epistemic uncertainty inside the familiar.
+
+Finally, screenshot safety should be the UI default even on an authorized device. The
+serving rule defines the maximum data that viewer may receive; it does not require every
+screen to paint every allowed name. Consoles should render the deliberate masks by default
+and provide a local, transient reveal gesture or session control when the authorized human
+needs names. No persisted preference should make screenshots permanently unsafe. `catscan`
+should likewise default to masks and require an explicit local reveal flag. This is defense
+in depth, not a substitute for the server/wire rules.
+
+### Proposed decision tests
+
+For Q5: two partners see the same class schema but cannot correlate instance handles; a
+revoked handle never resolves; catalog serialization contains none of the three known leak
+classes (rule subjects/triggers, commands, free prose); observing is refused by an act-only
+grant and invoking is refused by an observe-only grant; opening `allow_agent` alone grants
+nothing.
+
+For Q6: the same internal worldview rendered for each viewer class produces the intended
+field-level difference; an owned device remains authorized off-LAN; a remote federated
+member receives no names/addresses/coordinates/dialogue bodies; a LAN claim via spoofed
+headers does not widen; sibling and gossip wires contain no display identities by default;
+`Private` never becomes `Unknown` or re-enters reasoning; and every UI fixture is
+screenshot-safe before an explicit transient reveal.
