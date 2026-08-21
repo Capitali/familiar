@@ -187,11 +187,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Queued
 
-### T-205 · The world partition — game data is not real data
-- status: queued — **the load-bearing half of the ADR-0037 revision; nothing Purr ships without it**
-- scope: a `world` on observations, threads, questions and dossier contributions; the reasoning engine reading within one world; the law signals computed over `real` only
-- accept: a game observation can never mint a theory about the household and vice versa; service/presence/capacities are computed over `world=real` alone; the boundary is NOT partitioned (one gate set, no laxer jurisdiction); absent world means `real`, and absence is not suspicion
-- notes: Ian 2026-08-16, revising ADR-0037. Without this a ship's stores and Betty's presence share one observation log — "the captain is low on water" is a crisis or a game state depending on a distinction the engine cannot make, the dossier accrues a human's GAME behaviour as their habits, and HUMANITY.md's protected class faces fictional cats the code cannot tell from real ones. A fleet of happy captains must never be able to raise the number that says the familiar is serving humanity
+### T-205 · The world partition — worlds are stores (rewritten against ADR-0045)
+- status: queued — **the load-bearing half of the ADR-0037 revision; nothing Purr ships without it.** REWRITTEN 2026-08-21 per the ships-computer dialogue (Rounds 1-3, all DECIDED) so the task has exactly one buildable meaning; ADR-0045 (proposed, awaiting Ian) is the record
+- scope: a ship world is a SEPARATE DATA DIR (own store/persona/surfaces/keys/cadence); NO `world` field on any ordinary record, anywhere; typed bridge envelopes with provenance (WorldInstanceId + source key + grant epoch + schema version + event id); the WorldInstance provisioning record; the signed expiring boundary projection (leases only narrow)
+- depends: ADR-0045 acceptance
+- accept: the hostile sentinel test both directions (household sentinels in every record class never reach ship output or store; ship sentinels never reach a household muse, dossier, service signal, question, or capacity); household law signals scan a store that simply contains no ship data (no WHERE clause to forget); inbound bridge accepts ONLY the control plane (CommissioningBundle/GrantUpdate/BoundaryNarrowed/Rename/Decommission); an AttentionNotice receipt is citable only for authorship/time/delivery, never its payload; decommission revokes keys/grants immediately and leaves the store's fate to an explicit human retention act
+- notes: supersedes the earlier scope text ("a `world` on observations, threads, questions and dossier contributions") — that design is DEAD per ADR-0045 §1: a filter on a shared store eventually acquires one forgotten reader. "One gate set, no laxer jurisdiction" survives strengthened as the three-layer boundary lease (ADR-0045 §5)
 
 ### T-206 · An MCP seam, both directions
 - status: claimed (client half) — **counterparty live and verified**: https://srv1328560.hstgr.cloud/mcp answers `initialize` as `ucf-exchange` v1.0.0 (protocol 2025-06-18), 10 READ-ONLY tools, tool calls need `Authorization: Bearer ucfk_...`. Read-only means the first useful client is an OBSERVATION client, not an actuator one — a smaller and safer first brick than expected
