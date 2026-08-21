@@ -29,6 +29,8 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::partner::{self, PartnerContext};
+
 /// Where the human writes this decision, relative to the data dir.
 pub const SERVING_FILE: &str = "mcp/serving.json";
 
@@ -96,6 +98,14 @@ pub enum Denied {
     BadToken,
 }
 
+/// What the bearer established. The historical door-wide key carries no principal and can
+/// reach only rungs 1-2; a registered partner credential carries the context rung 3 requires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admission {
+    Door,
+    Partner(PartnerContext),
+}
+
 impl Denied {
     pub fn why(&self) -> &'static str {
         match self {
@@ -117,20 +127,6 @@ impl Denied {
 }
 
 /// Compare two secrets without leaking how far the match got.
-fn same_secret(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    // Length is not itself secret — but fold it in rather than returning early, so the loop
-    // below runs the same way for every input.
-    let mut diff = (a.len() ^ b.len()) as u8;
-    let n = a.len().max(b.len());
-    for i in 0..n {
-        let x = a.get(i).copied().unwrap_or(0);
-        let y = b.get(i).copied().unwrap_or(0);
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
 /// May this request be served on the **exposed** route?
 ///
 /// `presented` is whatever arrived in `Authorization: Bearer …`, already stripped of its scheme.
@@ -140,16 +136,26 @@ fn same_secret(a: &str, b: &str) -> bool {
 /// type rather than in a comment asking the next reader to be careful. Local callers that
 /// legitimately need no token use the loopback-only route instead.
 pub fn admits(dir: &Path, presented: Option<&str>) -> Result<(), Denied> {
+    admit(dir, presented).map(|_| ())
+}
+
+/// Admit and retain authenticated identity for the MCP server. Exposure remains the global
+/// human-owned ceiling; a registered credential is an alternative bearer for that open door,
+/// never a way to open it.
+pub fn admit(dir: &Path, presented: Option<&str>) -> Result<Admission, Denied> {
     let serving = load(dir);
     if !serving.expose {
         return Err(Denied::NotExposed);
+    }
+    if let Some(context) = presented.and_then(|token| partner::authenticate(dir, token)) {
+        return Ok(Admission::Partner(context));
     }
     let Ok(Some(expected)) = serving.token(dir) else {
         // Rule 3: exposure without a key serves nobody.
         return Err(Denied::NoKeyConfigured);
     };
     match presented {
-        Some(t) if same_secret(t, &expected) => Ok(()),
+        Some(t) if partner::same_secret(t, &expected) => Ok(Admission::Door),
         _ => Err(Denied::BadToken),
     }
 }
@@ -262,10 +268,30 @@ mod tests {
     /// Constant-time comparison, exercised at the boundaries where a naive one differs.
     #[test]
     fn secrets_compare_without_early_exit() {
-        assert!(same_secret("abc", "abc"));
-        assert!(!same_secret("abc", "abd"));
-        assert!(!same_secret("abc", "abcd"));
-        assert!(!same_secret("", "a"));
-        assert!(same_secret("", ""));
+        assert!(partner::same_secret("abc", "abc"));
+        assert!(!partner::same_secret("abc", "abd"));
+        assert!(!partner::same_secret("abc", "abcd"));
+        assert!(!partner::same_secret("", "a"));
+        assert!(partner::same_secret("", ""));
+    }
+
+    #[test]
+    fn a_registered_partner_credential_carries_identity_but_does_not_open_the_door() {
+        let d = tmp("partner");
+        std::fs::write(d.join("mcp/partner.env"), "PARTNER_TOKEN=partner-secret\n").unwrap();
+        let principal =
+            crate::partner::register(&d, "Workshop agent", "mcp/partner.env", "PARTNER_TOKEN")
+                .unwrap();
+        assert_eq!(
+            admit(&d, Some("partner-secret")),
+            Err(Denied::NotExposed),
+            "a credential is identity, never exposure authority"
+        );
+        write(&d, r#"{"expose":true}"#);
+        match admit(&d, Some("partner-secret")).unwrap() {
+            Admission::Partner(context) => assert_eq!(context.principal, principal.id),
+            Admission::Door => panic!("a partner credential must not lose its identity"),
+        }
+        assert_eq!(admit(&d, Some("wrong")), Err(Denied::NoKeyConfigured));
     }
 }

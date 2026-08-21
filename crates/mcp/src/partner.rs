@@ -65,11 +65,18 @@ pub enum RegistrationError {
 impl std::fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BadAlias => write!(f, "the human-chosen alias is empty, too long, or contains controls"),
-            Self::BadCredentialReference => write!(f, "credential paths must be relative and keys nonempty"),
+            Self::BadAlias => write!(
+                f,
+                "the human-chosen alias is empty, too long, or contains controls"
+            ),
+            Self::BadCredentialReference => {
+                write!(f, "credential paths must be relative and keys nonempty")
+            }
             Self::CredentialMissing => write!(f, "the referenced credential is missing or empty"),
             Self::RegistryFull => write!(f, "the partner principal registry is full"),
-            Self::DuplicateCredential => write!(f, "that credential is already bound to a principal"),
+            Self::DuplicateCredential => {
+                write!(f, "that credential is already bound to a principal")
+            }
             Self::Io(e) => write!(f, "principal registry: {e}"),
         }
     }
@@ -242,13 +249,15 @@ pub(crate) fn credential_fingerprint(secret: &str) -> String {
 
 pub(crate) fn random_id(prefix: &str) -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).map_err(io::Error::other)?;
+    getrandom::getrandom(&mut bytes)
+        .map_err(|error| io::Error::other(format!("getrandom: {error}")))?;
     Ok(format!("{prefix}-{}", hex(&bytes)))
 }
 
 pub(crate) fn random_bytes<const N: usize>() -> io::Result<[u8; N]> {
     let mut bytes = [0u8; N];
-    getrandom::getrandom(&mut bytes).map_err(io::Error::other)?;
+    getrandom::getrandom(&mut bytes)
+        .map_err(|error| io::Error::other(format!("getrandom: {error}")))?;
     Ok(bytes)
 }
 
@@ -278,9 +287,7 @@ fn validate_reference(file: &str, key: &str) -> Result<(), RegistrationError> {
     let path = Path::new(file);
     let relative = !path.is_absolute()
         && !file.is_empty()
-        && path
-            .components()
-            .all(|c| matches!(c, Component::Normal(_)));
+        && path.components().all(|c| matches!(c, Component::Normal(_)));
     if !relative || key.trim().is_empty() || key.chars().any(char::is_control) {
         return Err(RegistrationError::BadCredentialReference);
     }
@@ -289,28 +296,35 @@ fn validate_reference(file: &str, key: &str) -> Result<(), RegistrationError> {
 
 fn read_secret(dir: &Path, file: &str, key: &str) -> Option<String> {
     let raw = std::fs::read_to_string(dir.join(file)).ok()?;
-    raw.lines().find_map(|line| {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            return None;
-        }
-        let (name, value) = line.split_once('=')?;
-        (name.trim() == key).then(|| {
-            value
-                .trim()
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_string()
+    raw.lines()
+        .find_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (name, value) = line.split_once('=')?;
+            (name.trim() == key).then(|| {
+                value
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string()
+            })
         })
-    }).filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty())
 }
 
 fn write_registry(dir: &Path, registry: &PrincipalRegistry) -> io::Result<()> {
     let path = registry_path(dir);
-    let parent = path.parent().ok_or_else(|| io::Error::other("no registry parent"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("no registry parent"))?;
     std::fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(".principals-{}.tmp", std::process::id()));
-    std::fs::write(&tmp, serde_json::to_vec_pretty(registry).map_err(io::Error::other)?)?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_vec_pretty(registry).map_err(io::Error::other)?,
+    )?;
     std::fs::rename(tmp, path)
 }
 

@@ -12,8 +12,9 @@
 //!
 //! ## The shape
 //!
-//! JSON-RPC 2.0, MCP `2025-06-18`, the same revision our client speaks. Three tools, in two
-//! tiers:
+//! JSON-RPC 2.0, MCP `2025-06-18`, the same revision our client speaks. The first two tiers
+//! remain label-covenanted speech; rung 3 additionally requires transport-authenticated
+//! [`PartnerContext`](crate::partner::PartnerContext):
 //!
 //! - `familiar.constitution` — **always callable, even by a stranger.** You must be able to
 //!   read what you are being asked to accept before accepting it; a covenant you had to agree
@@ -27,18 +28,16 @@
 //!
 //! ## What this module deliberately does not do
 //!
-//! It does not authenticate. An MCP client presents no key at this layer, so `partner` is a
-//! label a human reads and never an identity a decision rests on — which is exactly why the
-//! only thing it unlocks is *speech about ourselves*. Nothing here can act, spend, or change
-//! the boundary, and the gate that governs those is untouched. When a tool that acts is ever
-//! added, it answers to the boundary the same as every other outward act, and being attested
-//! will not be sufficient for it.
+//! It does not authenticate bytes itself: the transport supplies a principal context or none.
+//! A caller-supplied `partner` remains only a label for the legacy speech tier and is never
+//! consulted by `request_grant` or `propose`. Neither rung-3 tool observes or invokes anything.
 
 use familiar_kernel::constitution;
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
-use crate::covenant;
+use crate::partner::PartnerContext;
+use crate::{covenant, grant};
 
 /// The protocol revision this server speaks — the same one [`crate::session`] speaks as a
 /// client, so both halves of the seam agree by construction rather than by comment.
@@ -52,12 +51,27 @@ pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
+/// Enforced before JSON parsing. The public transport checks before/while collecting too, so a
+/// chunked sender cannot make this allocation unbounded.
+pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
+
 /// Handle one JSON-RPC request and return the response, or `None` for a notification (which by
 /// the spec gets no reply at all).
 ///
 /// Pure but for the covenant ledger it reads and writes: no socket, no clock. `now` is passed
 /// in so a test can pin the timestamp, the same way the rest of this workspace does it.
 pub fn handle(dir: &Path, request: &Value, now: i64) -> Option<Value> {
+    handle_for(dir, request, now, None)
+}
+
+/// Handle with identity established by the transport. The context is server-owned and never
+/// reconstructed from MCP params.
+pub fn handle_for(
+    dir: &Path,
+    request: &Value,
+    now: i64,
+    context: Option<&PartnerContext>,
+) -> Option<Value> {
     let id = request.get("id").cloned();
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
     let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -77,8 +91,8 @@ pub fn handle(dir: &Path, request: &Value, now: i64) -> Option<Value> {
                              accept them in your own words. Until you do, nothing else here \
                              is callable."
         })),
-        "tools/list" => Ok(json!({ "tools": tools_for(dir, &params) })),
-        "tools/call" => call(dir, &params, now),
+        "tools/list" => Ok(json!({ "tools": tools_for(dir, &params, context) })),
+        "tools/call" => call(dir, &params, now, context),
         // `ping` is in the protocol and costs nothing to honour.
         "ping" => Ok(json!({})),
         other => Err((
@@ -133,64 +147,131 @@ fn constitution_tool() -> Value {
     )
 }
 
-fn attest_tool() -> Value {
+fn attest_tool(bound: bool) -> Value {
     tool(
         "familiar.attest",
         "Accept the three laws, in your own words. Records who accepted, what they said, and \
          which version of the laws they were shown. Re-accepting supersedes your previous \
          statement. This unlocks conversation, not authority — every act is still weighed \
          against the human's capability boundary.",
-        json!({
-            "type": "object",
-            "properties": {
-                "partner": { "type": "string", "description": "what you call yourself" },
-                "statement": {
-                    "type": "string",
-                    "description": "your acceptance, phrased by you — an empty one is refused"
-                }
-            },
-            "required": ["partner", "statement"]
-        }),
+        if bound {
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "statement": {
+                        "type": "string",
+                        "description": "your acceptance, phrased by you — identity comes from your credential"
+                    }
+                },
+                "required": ["statement"]
+            })
+        } else {
+            json!({
+                "type": "object",
+                "properties": {
+                    "partner": { "type": "string", "description": "what you call yourself" },
+                    "statement": {
+                        "type": "string",
+                        "description": "your acceptance, phrased by you — an empty one is refused"
+                    }
+                },
+                "required": ["partner", "statement"]
+            })
+        },
         false,
     )
 }
 
-fn hello_tool() -> Value {
+fn hello_tool(bound: bool) -> Value {
     tool(
         "familiar.hello",
         "Who this familiar is and what it is currently able to do. Attested partners only.",
-        json!({
-            "type": "object",
-            "properties": { "partner": { "type": "string" } },
-            "required": ["partner"]
-        }),
+        identity_schema(bound),
         true,
     )
 }
 
 /// What this caller can see. A stranger is shown the two doors it can actually open — a menu
 /// of refusals teaches nothing and reads as a system pretending to offer more than it will.
-fn tools_for(dir: &Path, params: &Value) -> Vec<Value> {
-    let mut out = vec![constitution_tool(), attest_tool()];
-    if covenant::attested(dir, &partner_of(params)) {
-        out.push(hello_tool());
-        out.push(discover_classes_tool());
+fn tools_for(dir: &Path, params: &Value, context: Option<&PartnerContext>) -> Vec<Value> {
+    let bound = context.is_some();
+    let mut out = vec![constitution_tool(), attest_tool(bound)];
+    let attested = match context {
+        Some(context) => covenant::principal_attested(dir, context),
+        None => covenant::attested(dir, &partner_of(params)),
+    };
+    if attested {
+        out.push(hello_tool(bound));
+        out.push(discover_classes_tool(bound));
+        if bound {
+            out.push(request_grant_tool());
+            out.push(propose_tool());
+        }
     }
     out
 }
 
 /// Rung 2 of the ADR-0044 ladder: the class catalog. Attested partners only; classes are
 /// affordances, never authority — nothing listed is invocable without a human's grant.
-fn discover_classes_tool() -> Value {
+fn discover_classes_tool(bound: bool) -> Value {
     tool(
         "familiar.discover_classes",
         "The capability classes available here, as generic affordances: what KINDS of          thing this familiar could be granted to observe or do — never instances, names,          counts, or authority. Attested partners only. A grant (observe/invoke) is a          deliberate human act per capability, per partner, per bounds; discovery is not a          request for one.",
+        identity_schema(bound),
+        true,
+    )
+}
+
+fn identity_schema(bound: bool) -> Value {
+    if bound {
+        json!({ "type": "object", "additionalProperties": false, "properties": {} })
+    } else {
         json!({
             "type": "object",
             "properties": { "partner": { "type": "string" } },
             "required": ["partner"]
+        })
+    }
+}
+
+fn request_grant_tool() -> Value {
+    tool(
+        "familiar.request_grant",
+        "Ask this familiar's human for a bounded relationship to one capability class. The request names no instance and grants nothing. Repeat the same request_key and payload to read its current status.",
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "request_key": { "type": "string", "maxLength": 64 },
+                "class_id": { "type": "string" },
+                "requested_operations": { "type": "object" },
+                "requested_duration_seconds": { "type": "integer", "minimum": grant::MIN_GRANT_SECONDS, "maximum": grant::MAX_GRANT_SECONDS },
+                "reason": { "type": "string", "maxLength": grant::MAX_REASON_BYTES }
+            },
+            "required": ["request_key", "class_id", "requested_operations"]
         }),
-        true,
+        false,
+    )
+}
+
+fn propose_tool() -> Value {
+    tool(
+        "familiar.propose",
+        "Place one typed desired effect, within an active human grant, in the human's inbox. This never observes, invokes, or promises the effect occurred.",
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "proposal_key": { "type": "string", "maxLength": 64 },
+                "instance": { "type": "string", "maxLength": 128 },
+                "operation": { "type": "string" },
+                "parameters": { "type": "object" },
+                "reason": { "type": "string", "maxLength": grant::MAX_REASON_BYTES }
+            },
+            "required": ["proposal_key", "instance", "operation", "parameters"]
+        }),
+        false,
     )
 }
 
@@ -203,7 +284,12 @@ fn tool_error(text: String) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": true })
 }
 
-fn call(dir: &Path, params: &Value, now: i64) -> Result<Value, (i64, String)> {
+fn call(
+    dir: &Path,
+    params: &Value,
+    now: i64,
+    context: Option<&PartnerContext>,
+) -> Result<Value, (i64, String)> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params
         .get("arguments")
@@ -219,21 +305,40 @@ fn call(dir: &Path, params: &Value, now: i64) -> Result<Value, (i64, String)> {
                 .get("statement")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            match covenant::accept(dir, &partner, statement, now) {
-                Ok(c) => Ok(content(format!(
-                    "Recorded. {} accepted the three laws (version {}) at {}, saying: \"{}\"\n\n\
-                     What that unlocks: conversation. What it does not: authority. Every act \
-                     this familiar takes is still weighed against a capability boundary its \
-                     human owns, and being attested is never sufficient for one.",
-                    c.partner, c.laws_version, c.ts, c.statement
-                ))),
-                Err(r) => Ok(tool_error(format!("not recorded — {}", r.why()))),
+            if let Some(context) = context {
+                if args
+                    .as_object()
+                    .is_none_or(|object| object.keys().any(|key| key != "statement"))
+                {
+                    return Ok(tool_error(
+                        "not recorded — authenticated attest accepts only `statement`; `partner` cannot override credential identity".into(),
+                    ));
+                }
+                match covenant::accept_principal(dir, context, statement, now) {
+                    Ok(c) => Ok(content(format!(
+                        "Recorded. This authenticated principal accepted the three laws (version {}) at {} in its own words.\n\nWhat that unlocks: class discovery and the ability to ask the human for a grant. What it does not: authority; proposal is not permission.",
+                        c.laws_version,
+                        c.ts,
+                    ))),
+                    Err(r) => Ok(tool_error(format!("not recorded — {}", r.why()))),
+                }
+            } else {
+                match covenant::accept(dir, &partner, statement, now) {
+                    Ok(c) => Ok(content(format!(
+                        "Recorded. {} accepted the three laws (version {}) at {}, saying: \"{}\"\n\n\
+                         What that unlocks: conversation. What it does not: authority. Every act \
+                         this familiar takes is still weighed against a capability boundary its \
+                         human owns, and being attested is never sufficient for one.",
+                        c.partner, c.laws_version, c.ts, c.statement
+                    ))),
+                    Err(r) => Ok(tool_error(format!("not recorded — {}", r.why()))),
+                }
             }
         }
 
         "familiar.discover_classes" => {
-            if !covenant::attested(dir, &partner) {
-                return Ok(tool_error(unattested(&partner)));
+            if !is_attested(dir, context, &partner) {
+                return Ok(tool_error(unattested_for(context, &partner)));
             }
             let avail = crate::offering::available(dir);
             Ok(content(
@@ -243,8 +348,8 @@ fn call(dir: &Path, params: &Value, now: i64) -> Result<Value, (i64, String)> {
         }
 
         "familiar.hello" => {
-            if !covenant::attested(dir, &partner) {
-                return Ok(tool_error(unattested(&partner)));
+            if !is_attested(dir, context, &partner) {
+                return Ok(tool_error(unattested_for(context, &partner)));
             }
             Ok(content(format!(
                 "{SERVER_NAME} {SERVER_VERSION}, speaking MCP {PROTOCOL_VERSION}.\n\
@@ -260,13 +365,87 @@ fn call(dir: &Path, params: &Value, now: i64) -> Result<Value, (i64, String)> {
             )))
         }
 
+        "familiar.request_grant" => {
+            let Some(context) = context else {
+                return Ok(tool_error(principal_required()));
+            };
+            if !covenant::principal_attested(dir, context) {
+                grant::audit_access_refusal(
+                    dir,
+                    context,
+                    crate::partner_act::PartnerOperation::GrantRequest,
+                    crate::partner_act::ReasonCode::CovenantMissing,
+                    now,
+                );
+                return Ok(tool_error(unattested_for(Some(context), "")));
+            }
+            let input: grant::GrantRequestInput = match serde_json::from_value(args) {
+                Ok(input) => input,
+                Err(error) => {
+                    grant::audit_schema_refusal(
+                        dir,
+                        context,
+                        crate::partner_act::PartnerOperation::GrantRequest,
+                        now,
+                    );
+                    return Ok(tool_error(format!(
+                        "request refused — invalid typed input: {error}"
+                    )));
+                }
+            };
+            match grant::request_grant(dir, context, input, now) {
+                Ok(receipt) => Ok(content(
+                    serde_json::to_string_pretty(&receipt).unwrap_or_else(|_| "{}".into()),
+                )),
+                Err(refusal) => Ok(tool_error(format!("request refused — {refusal}"))),
+            }
+        }
+
+        "familiar.propose" => {
+            let Some(context) = context else {
+                return Ok(tool_error(principal_required()));
+            };
+            if !covenant::principal_attested(dir, context) {
+                grant::audit_access_refusal(
+                    dir,
+                    context,
+                    crate::partner_act::PartnerOperation::Proposal,
+                    crate::partner_act::ReasonCode::CovenantMissing,
+                    now,
+                );
+                return Ok(tool_error(unattested_for(Some(context), "")));
+            }
+            let input: grant::ProposalInput = match serde_json::from_value(args) {
+                Ok(input) => input,
+                Err(error) => {
+                    grant::audit_schema_refusal(
+                        dir,
+                        context,
+                        crate::partner_act::PartnerOperation::Proposal,
+                        now,
+                    );
+                    return Ok(tool_error(format!(
+                        "proposal refused — invalid typed input: {error}"
+                    )));
+                }
+            };
+            match grant::propose(dir, context, input, now) {
+                Ok(receipt) => Ok(content(
+                    serde_json::to_string_pretty(&receipt).unwrap_or_else(|_| "{}".into()),
+                )),
+                Err(refusal) => Ok(tool_error(format!("proposal refused — {refusal}"))),
+            }
+        }
+
         "" => Err((INVALID_PARAMS, "tools/call needs a `name`".into())),
 
         other => {
             // Two different refusals, and the difference matters to whoever is reading it:
             // a tool that exists behind the covenant, versus one that does not exist at all.
-            if other == "familiar.hello" || !covenant::attested(dir, &partner) {
-                Ok(tool_error(unattested(other)))
+            if matches!(other, "familiar.request_grant" | "familiar.propose") && context.is_none() {
+                Ok(tool_error(principal_required()))
+            } else if other == "familiar.hello" || !is_attested(dir, context, &partner) {
+                Ok(tool_error(unattested_for(context, other)))
             } else {
                 Ok(tool_error(format!(
                     "`{other}` is not a tool this familiar offers. Call `tools/list` for what is."
@@ -274,6 +453,26 @@ fn call(dir: &Path, params: &Value, now: i64) -> Result<Value, (i64, String)> {
             }
         }
     }
+}
+
+fn is_attested(dir: &Path, context: Option<&PartnerContext>, partner: &str) -> bool {
+    context.map_or_else(
+        || covenant::attested(dir, partner),
+        |context| covenant::principal_attested(dir, context),
+    )
+}
+
+fn unattested_for(context: Option<&PartnerContext>, what: &str) -> String {
+    match context {
+        Some(_) => format!(
+            "`{what}` is not available until this authenticated principal accepts the current three laws. Call `familiar.constitution`, then `familiar.attest` with only `statement`; identity comes from the credential."
+        ),
+        None => unattested(what),
+    }
+}
+
+fn principal_required() -> String {
+    "rung 3 requires a human-registered per-partner credential; the door-wide bearer and a caller-supplied `partner` label carry no grant identity".into()
 }
 
 /// The constitution as an **outside reader** needs it.
@@ -325,6 +524,21 @@ fn unattested(what: &str) -> String {
 /// Batches are not supported and say so; the protocol permits a server to decline them and a
 /// half-implemented batch is worse than an honest refusal.
 pub fn handle_bytes(dir: &Path, body: &[u8], now: i64) -> Value {
+    handle_bytes_for(dir, body, now, None)
+}
+
+pub fn handle_bytes_for(
+    dir: &Path,
+    body: &[u8],
+    now: i64,
+    context: Option<&PartnerContext>,
+) -> Value {
+    if body.len() > MAX_REQUEST_BYTES {
+        return json!({
+            "jsonrpc": "2.0", "id": Value::Null,
+            "error": { "code": -32600, "message": "request body exceeds the 64 KiB MCP ceiling" }
+        });
+    }
     let request: Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => {
@@ -340,7 +554,7 @@ pub fn handle_bytes(dir: &Path, body: &[u8], now: i64) -> Value {
             "error": { "code": -32600, "message": "batched requests are not supported; send one at a time" }
         });
     }
-    handle(dir, &request, now).unwrap_or_else(|| {
+    handle_for(dir, &request, now, context).unwrap_or_else(|| {
         // A notification: answered with an empty object, which the transport turns into a 202.
         Value::Object(Map::new())
     })
@@ -349,6 +563,7 @@ pub fn handle_bytes(dir: &Path, body: &[u8], now: i64) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
@@ -380,6 +595,45 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    fn context(id: &str) -> PartnerContext {
+        PartnerContext {
+            principal: id.into(),
+            credential_fingerprint: format!("fingerprint-{id}"),
+            alias: "Workshop agent".into(),
+        }
+    }
+
+    fn declare_surface(dir: &Path) {
+        let file = json!({ "actuators": [{
+            "surface": "ians-secret-lamp",
+            "state_cmd": "private state command",
+            "state": { "fields": { "power": { "kind": "enum", "values": ["on", "off"],
+                "source": { "kind": "json", "key": "power" } } } },
+            "actions": { "private-on": "secret on", "private-off": "secret off" },
+            "buckets": [
+                { "name": "private-on", "when": [{ "op": "eq", "field": "power", "value": "off" }] },
+                { "name": "private-off", "when": [] }
+            ]
+        }] });
+        std::fs::write(
+            dir.join(familiar_kernel::actuator::ACTUATORS_FILE),
+            serde_json::to_vec(&file).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn grant_args(key: &str) -> Value {
+        json!({
+            "request_key": key,
+            "class_id": "switchable.reversible/v1",
+            "requested_operations": {
+                "set_state": { "state": { "kind": "enum", "values": ["primary", "reverted"] } }
+            },
+            "requested_duration_seconds": 600,
+            "reason": "quoted partner data"
+        })
     }
 
     #[test]
@@ -653,5 +907,232 @@ mod tests {
             json!(false),
             "a tool that writes must not claim to be read-only, even our own"
         );
+    }
+
+    #[test]
+    fn a_label_covenant_and_door_bearer_can_never_reach_rung_three() {
+        let d = tmp("unbound_rung3");
+        covenant::accept(&d, "same-label", "yes", 1).unwrap();
+        let list = handle(
+            &d,
+            &req("tools/list", json!({ "partner": "same-label" })),
+            2,
+        )
+        .unwrap();
+        assert!(!names(&list).contains(&"familiar.request_grant".to_string()));
+        assert!(!names(&list).contains(&"familiar.propose".to_string()));
+        let called = handle(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.request_grant", "arguments": grant_args("one") }),
+            ),
+            3,
+        )
+        .unwrap();
+        assert!(is_error(&called));
+        assert!(text_of(&called).contains("per-partner credential"));
+        assert!(crate::partner_act::load(&d).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_authenticated_principal_attests_without_a_label_then_gets_rung_three() {
+        let d = tmp("bound_rung3");
+        declare_surface(&d);
+        let context = context("principal-a");
+
+        let before = handle_for(&d, &req("tools/list", json!({})), 1, Some(&context)).unwrap();
+        assert_eq!(
+            names(&before),
+            vec!["familiar.constitution", "familiar.attest"]
+        );
+        let refused = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.request_grant", "arguments": grant_args("early") }),
+            ),
+            2,
+            Some(&context),
+        )
+        .unwrap();
+        assert!(is_error(&refused));
+        assert!(crate::partner_act::load(&d)
+            .unwrap()
+            .iter()
+            .any(|event| event.reason_code == crate::partner_act::ReasonCode::CovenantMissing));
+
+        let spoof = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.attest", "arguments": {
+                    "partner": "someone-else", "statement": "yes"
+                } }),
+            ),
+            3,
+            Some(&context),
+        )
+        .unwrap();
+        assert!(is_error(&spoof));
+        assert!(!covenant::principal_attested(&d, &context));
+
+        let accepted = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.attest", "arguments": { "statement": "yes" } }),
+            ),
+            4,
+            Some(&context),
+        )
+        .unwrap();
+        assert!(!is_error(&accepted));
+        let acceptance = text_of(&accepted);
+        assert!(!acceptance.contains("Workshop agent"));
+        assert!(!acceptance.contains("fingerprint-principal-a"));
+
+        let after = handle_for(&d, &req("tools/list", json!({})), 5, Some(&context)).unwrap();
+        let names = names(&after);
+        assert!(names.contains(&"familiar.request_grant".to_string()));
+        assert!(names.contains(&"familiar.propose".to_string()));
+        let request_schema = after["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "familiar.request_grant")
+            .unwrap();
+        assert!(request_schema["inputSchema"]["properties"]
+            .get("partner")
+            .is_none());
+        assert_eq!(request_schema["annotations"]["readOnlyHint"], false);
+    }
+
+    #[test]
+    fn request_and_propose_wire_only_public_receipts_and_never_actuate() {
+        let d = tmp("rung3_wire");
+        declare_surface(&d);
+        let context = context("principal-a");
+        covenant::accept_principal(&d, &context, "yes", 1).unwrap();
+        let requested = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.request_grant", "arguments": grant_args("wire") }),
+            ),
+            2,
+            Some(&context),
+        )
+        .unwrap();
+        assert!(!is_error(&requested));
+        let pending: Value = serde_json::from_str(&text_of(&requested)).unwrap();
+        let request_id = pending["request_id"].as_str().unwrap();
+
+        let mut boundary = familiar_kernel::boundary::Boundary::closed();
+        boundary.allow_agent = true;
+        std::fs::write(
+            d.join(familiar_kernel::boundary::BOUNDARY_FILE),
+            serde_json::to_vec(&boundary).unwrap(),
+        )
+        .unwrap();
+        crate::grant::grant_request(
+            &d,
+            "ian",
+            request_id,
+            "ians-secret-lamp",
+            BTreeMap::from([(
+                "set_state".into(),
+                BTreeMap::from([(
+                    "state".into(),
+                    crate::grant::ParameterBound::Enum {
+                        values: vec!["primary".into()],
+                    },
+                )]),
+            )]),
+            302,
+            3,
+        )
+        .unwrap();
+        let status = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.request_grant", "arguments": grant_args("wire") }),
+            ),
+            4,
+            Some(&context),
+        )
+        .unwrap();
+        let status_text = text_of(&status);
+        let grant: Value = serde_json::from_str(&status_text).unwrap();
+        let instance = grant["instance"].as_str().unwrap();
+        for private in [
+            "ians-secret-lamp",
+            "Workshop agent",
+            "fingerprint-principal-a",
+            "private state command",
+            "secret on",
+        ] {
+            assert!(!status_text.contains(private));
+        }
+
+        let proposed = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.propose", "arguments": {
+                    "proposal_key": "proposal-wire",
+                    "instance": instance,
+                    "operation": "set_state",
+                    "parameters": { "state": "primary" },
+                    "reason": "quoted partner data"
+                } }),
+            ),
+            5,
+            Some(&context),
+        )
+        .unwrap();
+        assert!(!is_error(&proposed));
+        let proposal_text = text_of(&proposed);
+        assert!(proposal_text.contains("proposed"));
+        assert!(!proposal_text.contains("ians-secret-lamp"));
+        assert!(!proposal_text.contains("completed"));
+        assert!(!d
+            .join(familiar_kernel::actuator::ACTUATOR_STATE_FILE)
+            .exists());
+        let private = serde_json::to_string(&crate::partner_act::load(&d).unwrap()).unwrap();
+        assert!(private.contains("ians-secret-lamp"));
+    }
+
+    #[test]
+    fn oversized_and_malformed_authenticated_calls_have_the_designed_audit_boundary() {
+        let d = tmp("rung3_bounds");
+        let context = context("principal-a");
+        covenant::accept_principal(&d, &context, "yes", 1).unwrap();
+        let oversized = vec![b'x'; MAX_REQUEST_BYTES + 1];
+        let response = handle_bytes_for(&d, &oversized, 2, Some(&context));
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("64 KiB"));
+        assert!(crate::partner_act::load(&d).unwrap().is_empty());
+
+        let malformed = handle_for(
+            &d,
+            &req(
+                "tools/call",
+                json!({ "name": "familiar.request_grant", "arguments": {
+                    "request_key": "bad", "partner": "spoof"
+                } }),
+            ),
+            3,
+            Some(&context),
+        )
+        .unwrap();
+        assert!(is_error(&malformed));
+        assert!(crate::partner_act::load(&d)
+            .unwrap()
+            .iter()
+            .any(|event| event.reason_code == crate::partner_act::ReasonCode::SchemaInvalid));
     }
 }

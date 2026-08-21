@@ -113,8 +113,7 @@ pub fn principal_attested(dir: &Path, context: &PartnerContext) -> bool {
     load(dir)
         .map(|c| {
             c.principals.iter().any(|a| {
-                a.principal == context.principal
-                    && a.laws_version == constitution::LAWS_VERSION
+                a.principal == context.principal && a.laws_version == constitution::LAWS_VERSION
             })
         })
         .unwrap_or(false)
@@ -218,23 +217,23 @@ pub fn accept_principal(
     if !known && all.accepted.len() + all.principals.len() >= MAX_PARTNERS {
         return Err(Refused::LedgerFull);
     }
-    all.principals.retain(|a| {
-        !(a.principal == entry.principal && a.laws_version == entry.laws_version)
-    });
+    all.principals
+        .retain(|a| !(a.principal == entry.principal && a.laws_version == entry.laws_version));
     all.principals.push(entry.clone());
     persist(dir, &all)?;
     Ok(entry)
 }
 
 fn persist(dir: &Path, all: &Covenants) -> Result<(), Refused> {
-    let Some(parent) = path(dir).parent() else {
+    let target = path(dir);
+    let Some(parent) = target.parent() else {
         return Err(Refused::NoStatement);
     };
     std::fs::create_dir_all(parent).map_err(|_| Refused::NoStatement)?;
     let bytes = serde_json::to_vec_pretty(all).map_err(|_| Refused::NoStatement)?;
     let tmp = parent.join(format!(".partners-{}.tmp", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|_| Refused::NoStatement)?;
-    std::fs::rename(tmp, path(dir)).map_err(|_| Refused::NoStatement)
+    std::fs::rename(tmp, target).map_err(|_| Refused::NoStatement)
 }
 
 #[cfg(test)]

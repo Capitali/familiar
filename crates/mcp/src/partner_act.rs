@@ -8,12 +8,11 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::Path;
 
 use crate::partner::{self, PartnerContext};
-
-const TABLE: &str = "partner_acts";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
@@ -78,6 +77,7 @@ pub enum ReasonCode {
     HumanGranted,
     HumanDeclined,
     HumanRevoked,
+    HumanRefusedProposal,
     Expired,
     ProposalStored,
     Internal,
@@ -127,6 +127,8 @@ pub enum PartnerActBody {
         reason: Option<String>,
     },
     ProposalRefused {
+        #[serde(default)]
+        proposal_id: Option<String>,
         proposal_key: Option<String>,
         handle_fingerprint: Option<String>,
     },
@@ -181,27 +183,9 @@ impl PartnerAct {
         })
     }
 
-    pub fn human(
-        context: &PartnerContext,
-        human: &str,
-        at: i64,
-        operation: PartnerOperation,
-        outcome: PartnerOutcome,
-        reason_code: ReasonCode,
-        correlation: String,
-        body: PartnerActBody,
-    ) -> io::Result<Self> {
-        let mut event = Self::partner(
-            context,
-            at,
-            operation,
-            outcome,
-            reason_code,
-            correlation,
-            body,
-        )?;
-        event.actor = PartnerActor::Human(human.to_string());
-        Ok(event)
+    pub fn by_human(mut self, human: &str) -> Self {
+        self.actor = PartnerActor::Human(human.to_string());
+        self
     }
 
     pub fn clock(
@@ -273,6 +257,29 @@ pub fn append_idempotent(
     Ok(result)
 }
 
+/// Indexed read used to make capacity/expiry checks idempotency-aware: an exact replay returns
+/// its original receipt even if the principal has since reached a ceiling or the grant expired.
+pub fn idempotent_original(
+    dir: &Path,
+    principal: &str,
+    operation: PartnerOperation,
+    key: &str,
+) -> io::Result<Option<(PartnerAct, String)>> {
+    let conn = connection(dir)?;
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT data,payload_hash FROM partner_acts \
+             WHERE principal=?1 AND operation=?2 AND idempotency_key=?3 AND original=1 \
+             LIMIT 1",
+            rusqlite::params![principal, operation.label(), key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sqlite)?;
+    row.map(|(data, hash)| Ok((decode(&data)?, hash)))
+        .transpose()
+}
+
 /// Append one terminal transition exactly once. `transition_key` is server-authored (for
 /// example `grant-decision:<request-id>`), so a partner cannot collide unrelated records.
 pub fn append_transition(
@@ -317,7 +324,107 @@ pub fn load(dir: &Path) -> io::Result<Vec<PartnerAct>> {
     for row in rows {
         out.push(decode(&row.map_err(sqlite)?)?);
     }
+    validate_sequence(&out)?;
     Ok(out)
+}
+
+/// Fail closed on a syntactically valid stream whose transitions cannot have occurred through
+/// this module. Folds must never turn corrupt authority history into an empty/default view.
+fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
+    let invalid = |what: &str| io::Error::new(io::ErrorKind::InvalidData, what.to_string());
+    let mut requests = BTreeMap::<String, String>::new();
+    let mut request_decisions = BTreeSet::<String>::new();
+    let mut grants = BTreeMap::<String, (String, String)>::new();
+    let mut grant_terminals = BTreeSet::<String>::new();
+    let mut proposals = BTreeMap::<String, String>::new();
+    let mut proposal_terminals = BTreeSet::<String>::new();
+
+    for event in events {
+        match &event.body {
+            PartnerActBody::GrantRequested { request_id, .. } => {
+                if requests
+                    .insert(request_id.clone(), event.principal.clone())
+                    .is_some()
+                {
+                    return Err(invalid("duplicate grant request transition"));
+                }
+            }
+            PartnerActBody::GrantGranted {
+                request_id,
+                grant_id,
+                surface,
+                ..
+            } => {
+                if requests.get(request_id) != Some(&event.principal) {
+                    return Err(invalid("grant references a missing or foreign request"));
+                }
+                if !request_decisions.insert(request_id.clone()) {
+                    return Err(invalid("grant request has multiple terminal decisions"));
+                }
+                if grants
+                    .insert(grant_id.clone(), (event.principal.clone(), surface.clone()))
+                    .is_some()
+                {
+                    return Err(invalid("duplicate grant transition"));
+                }
+            }
+            PartnerActBody::GrantDeclined { request_id, .. } => {
+                if requests.get(request_id) != Some(&event.principal) {
+                    return Err(invalid("decline references a missing or foreign request"));
+                }
+                if !request_decisions.insert(request_id.clone()) {
+                    return Err(invalid("grant request has multiple terminal decisions"));
+                }
+            }
+            PartnerActBody::GrantRevoked {
+                grant_id, surface, ..
+            }
+            | PartnerActBody::GrantExpired { grant_id, surface } => {
+                if grants.get(grant_id) != Some(&(event.principal.clone(), surface.clone())) {
+                    return Err(invalid(
+                        "grant terminal references missing or changed authority",
+                    ));
+                }
+                if !grant_terminals.insert(grant_id.clone()) {
+                    return Err(invalid("grant has multiple terminal transitions"));
+                }
+            }
+            PartnerActBody::ProposalSubmitted {
+                proposal_id,
+                grant_id,
+                ..
+            } => {
+                if grants.get(grant_id).map(|(principal, _)| principal) != Some(&event.principal)
+                    || grant_terminals.contains(grant_id)
+                {
+                    return Err(invalid("proposal references missing or inactive authority"));
+                }
+                if proposals
+                    .insert(proposal_id.clone(), event.principal.clone())
+                    .is_some()
+                {
+                    return Err(invalid("duplicate proposal transition"));
+                }
+            }
+            PartnerActBody::ProposalRefused {
+                proposal_id: Some(proposal_id),
+                ..
+            }
+            | PartnerActBody::ProposalWithdrawn { proposal_id, .. } => {
+                if proposals.get(proposal_id) != Some(&event.principal) {
+                    return Err(invalid("proposal terminal references a missing proposal"));
+                }
+                if !proposal_terminals.insert(proposal_id.clone()) {
+                    return Err(invalid("proposal has multiple terminal transitions"));
+                }
+            }
+            PartnerActBody::ProposalRefused {
+                proposal_id: None, ..
+            }
+            | PartnerActBody::Refusal { .. } => {}
+        }
+    }
+    Ok(())
 }
 
 pub fn payload_hash<T: Serialize>(value: &T) -> io::Result<String> {
@@ -466,9 +573,9 @@ mod tests {
     #[test]
     fn a_terminal_transition_is_compare_and_insert_not_load_then_append() {
         let dir = temp("transition");
-        let event = PartnerAct::human(
+        append(&dir, &request("request-a", "key-a")).unwrap();
+        let event = PartnerAct::partner(
             &context(),
-            "ian",
             2,
             PartnerOperation::GrantDecision,
             PartnerOutcome::Refused,
@@ -479,7 +586,8 @@ mod tests {
                 declined_by: "ian".into(),
             },
         )
-        .unwrap();
+        .unwrap()
+        .by_human("ian");
         assert!(matches!(
             append_transition(&dir, &event, "grant-decision:request-a").unwrap(),
             TransitionAppend::Inserted(_)
@@ -488,15 +596,15 @@ mod tests {
             append_transition(&dir, &event, "grant-decision:request-a").unwrap(),
             TransitionAppend::Existing(_)
         ));
-        assert_eq!(load(&dir).unwrap().len(), 1);
+        assert_eq!(load(&dir).unwrap().len(), 2);
     }
 
     #[test]
     fn private_surface_truth_is_local_and_append_only() {
         let dir = temp("private");
-        let event = PartnerAct::human(
+        append(&dir, &request("request-a", "key-a")).unwrap();
+        let event = PartnerAct::partner(
             &context(),
-            "ian",
             2,
             PartnerOperation::GrantDecision,
             PartnerOutcome::Completed,
@@ -513,13 +621,43 @@ mod tests {
                 expires_at: 3,
             },
         )
-        .unwrap();
+        .unwrap()
+        .by_human("ian");
         append(&dir, &event).unwrap();
-        assert!(serde_json::to_string(&load(&dir).unwrap()).unwrap().contains("ians-secret-lamp"));
+        assert!(serde_json::to_string(&load(&dir).unwrap())
+            .unwrap()
+            .contains("ians-secret-lamp"));
         let conn = connection(&dir).unwrap();
         let updates: i64 = conn
             .query_row("SELECT COUNT(*) FROM partner_acts", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(updates, 1);
+        assert_eq!(updates, 2);
+    }
+
+    #[test]
+    fn impossible_transition_history_surfaces_instead_of_folding_away() {
+        let dir = temp("impossible");
+        let event = PartnerAct::partner(
+            &context(),
+            2,
+            PartnerOperation::GrantDecision,
+            PartnerOutcome::Completed,
+            ReasonCode::HumanGranted,
+            "missing-request".into(),
+            PartnerActBody::GrantGranted {
+                request_id: "missing-request".into(),
+                grant_id: "grant-a".into(),
+                surface: "ians-secret-lamp".into(),
+                allowed_operations: serde_json::json!({}),
+                epoch_nonce: "nonce".into(),
+                granted_by: "ian".into(),
+                granted_at: 2,
+                expires_at: 3,
+            },
+        )
+        .unwrap()
+        .by_human("ian");
+        append(&dir, &event).unwrap();
+        assert_eq!(load(&dir).unwrap_err().kind(), io::ErrorKind::InvalidData);
     }
 }

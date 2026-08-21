@@ -1092,24 +1092,40 @@ async fn handle(
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.strip_prefix("Bearer "))
                 .map(|s| s.trim().to_string());
-            match familiar_mcp::serving::admits(&dir, presented.as_deref()) {
+            match familiar_mcp::serving::admit(&dir, presented.as_deref()) {
                 Err(denied) => text(StatusCode::FORBIDDEN, denied.why()),
-                Ok(()) => match collect(req).await {
-                    Ok(b) => {
-                        let answer = familiar_mcp::server::handle_bytes(&dir, &b, now_secs());
-                        let is_notification =
-                            answer.as_object().map(|o| o.is_empty()).unwrap_or(false);
-                        if is_notification {
-                            text(StatusCode::ACCEPTED, "")
-                        } else {
-                            match serde_json::to_vec(&answer) {
-                                Ok(body) => text(StatusCode::OK, body),
-                                Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+                Ok(admission) => {
+                    let context = match admission {
+                        familiar_mcp::serving::Admission::Door => None,
+                        familiar_mcp::serving::Admission::Partner(context) => Some(context),
+                    };
+                    if context.as_ref().is_some_and(|context| {
+                        !familiar_mcp::partner::rate_admit(&dir, context, now_secs())
+                    }) {
+                        return Ok(text(StatusCode::TOO_MANY_REQUESTS, "partner rate limit"));
+                    }
+                    match collect_bounded(req, familiar_mcp::server::MAX_REQUEST_BYTES).await {
+                        Ok(b) => {
+                            let answer = familiar_mcp::server::handle_bytes_for(
+                                &dir,
+                                &b,
+                                now_secs(),
+                                context.as_ref(),
+                            );
+                            let is_notification =
+                                answer.as_object().map(|o| o.is_empty()).unwrap_or(false);
+                            if is_notification {
+                                text(StatusCode::ACCEPTED, "")
+                            } else {
+                                match serde_json::to_vec(&answer) {
+                                    Ok(body) => text(StatusCode::OK, body),
+                                    Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+                                }
                             }
                         }
+                        Err(_) => text(StatusCode::PAYLOAD_TOO_LARGE, "MCP body exceeds 64 KiB"),
                     }
-                    Err(_) => text(StatusCode::BAD_REQUEST, "bad body"),
-                },
+                }
             }
         }
         (Method::POST, "/mesh/brief") => {
@@ -1550,6 +1566,33 @@ async fn collect(req: Request<hyper::body::Incoming>) -> Result<Bytes> {
         .await
         .map_err(|e| crate::Error::Malformed(format!("body: {e}")))?
         .to_bytes())
+}
+
+/// Collect without letting a chunked request allocate beyond its declared protocol ceiling.
+/// Used by the public MCP write surface; the older signed mesh endpoints retain their own
+/// message contracts.
+async fn collect_bounded(req: Request<hyper::body::Incoming>, limit: usize) -> Result<Bytes> {
+    if req
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some_and(|length| length > limit)
+    {
+        return Err(crate::Error::Malformed("body exceeds ceiling".into()));
+    }
+    let mut body = req.into_body();
+    let mut bytes = Vec::new();
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|error| crate::Error::Malformed(format!("body: {error}")))?;
+        if let Ok(data) = frame.into_data() {
+            if bytes.len().saturating_add(data.len()) > limit {
+                return Err(crate::Error::Malformed("body exceeds ceiling".into()));
+            }
+            bytes.extend_from_slice(&data);
+        }
+    }
+    Ok(Bytes::from(bytes))
 }
 
 /// `GET /mesh/hello` → who we are + which group (cheap same-group precheck). An ungrouped
