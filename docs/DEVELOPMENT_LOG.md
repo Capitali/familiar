@@ -6,6 +6,26 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-20 — T-215: the presence lease — the purge loop's cause, ended
+
+The conduct dialogue's Q4a close (codex's design, adopted). The two-hour retention
+promise was always "forget a visitor who LEFT" — but `guest_purge_in` counted from
+`first_seen`, so a device continuously present on the LAN was purged MID-VISIT,
+re-knocked, was re-minted, and cycled mint → purge → mint forever (one live id purged
+152 times; 944 purge observations, 11% of the log).
+
+Now the guest record is a **lease**: `guest_purge_in` counts from the last sighting
+(`last_seen.max(first_seen)`), and `record::record_sighting` — called from `upsert_peer`,
+the verified-brief seam — renews it, coarsely (one write per 10 min, not per gossip
+round). Deliberately narrow: a sighting never mints (a Guest is earned by the knock's
+attestation), established identities are untouched, and rotating ids are NOT linked
+across the retention boundary — correlation strong enough to suppress a re-mint would
+itself become the tracking the promise forbids. The invariant is the test:
+`t215_continuous_presence_cannot_produce_unbounded_mint_purge_history`.
+
+Checks: fmt 0, clippy --all-targets 0, workspace 747 passed / 0 failed, exit-checked.
+Next: T-218 (MachineryFinding).
+
 ## 2026-08-20 — Brick 6: ADR-0043, the epistemic rule the drift class demanded
 
 The owed ADR is written and accepted (Ian's go on the dialogue's decided design):
