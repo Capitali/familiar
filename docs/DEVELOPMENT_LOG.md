@@ -6,6 +6,38 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — ADR-0044 rung 3: a partner may propose only inside a human grant
+
+Rung 3 is merged at `1afa3f4`. The public MCP transport can retain a stable
+human-registered principal identity, but an existing door-wide bearer and caller-supplied
+`partner` label remain deliberately unbound and can never list or call the new tools.
+Principal acceptance is bound to the current Laws version and is not inferred from the
+legacy covenant ledger.
+
+- `partner.rs` keeps server-minted principal ids and human aliases separately from secret
+  bytes, authenticates credential fingerprints, and bounds pre-parse principal/global
+  admission.
+- `partner_act.rs` adds append-only SQLite truth with transactional idempotency and unique
+  terminal transitions. Folds reject malformed or impossible history instead of skipping it.
+- `grant.rs` validates class-only requests against the reviewed offering vocabulary. Only a
+  named local human transition may select a private declared surface and narrow operations,
+  bounds, and duration. HMAC-derived handles bind principal + grant + surface + fresh epoch;
+  revocation, expiry, and regrant cannot reuse one.
+- `familiar.propose` records an immutable typed desired effect for later human consideration.
+  It has no actuator, observer, worldview, command, or LLM dependency. A typed human refusal
+  closes an inbox item without creating an act.
+- Partner-facing receipts are separate allowlist structs: local surface, alias, credential
+  fingerprint, household strings, commands, addresses, inventory counts, and cross-partner
+  ids are unrepresentable. The private ledger never enters record-sync or federation.
+- The `/mcp` route carries authenticated context, rejects bodies over 64 KiB while collecting,
+  and rate-limits before JSON parsing. The existing loopback `/local/mcp` path remains unbound.
+
+The human grant-decision CLI/console was deliberately not designed in this brick. No
+credential was issued, no live grant/covenant/boundary changed, no route or gate was opened,
+and nothing was deployed. Rungs 4 and 5 (observe/invoke) remain closed. Checks: exact
+exit-checked `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and
+`cargo test --workspace`; 782 tests passed, 0 failed.
+
 ## 2026-08-21 — ADR-0044 rung 2: the offering catalog — affordances, never the household
 
 Ian accepted ADR-0044 ("start ADR-0044 (use codex partner if needed)") and rung 2 is
