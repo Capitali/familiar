@@ -6,6 +6,23 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — T-219: a question whose subject stopped existing retires by policy
+
+`Question.retired` (serde-default) + `question::retire(id, why)` — retirement is an
+EXPLICIT policy act with its reason kept in the row's own notes; never an invented
+answer; the root never retires. The one sweep this ships is a closed class: enroll-era
+arrival questions ("A new device joined the mesh: … (xxxxxxxx). Who does it belong to?")
+whose device id — prefix-resolved against the records, since ids display as 8-char
+prefixes — no longer has a record. The modern enroll path files no questions (ADR-0026),
+so the class cannot regrow; the live defect it ends is the lighthouse's ACTIVE question
+being about a device purged long ago (147cfa12), starving the root.
+
+Runs each tick beside the T-222 backfill. Tests pin: the vanished-device question
+retires (with reason, unavailable forever, never answered), the living-device sibling
+stands, idempotency. Broader legacy-class retirement (unbound old musings) remains an
+explicit FUTURE policy decision — deliberately not swept here. Bar: fmt 0, clippy
+--all-targets 0, workspace 790 passed / 0 failed, exit-checked.
+
 ## 2026-08-21 — T-221: the misses had ONE cause — predictions spoke a language the world doesn't
 
 The five-class study codex required (progress-areas Round 2/3) ran over every settled

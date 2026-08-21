@@ -155,6 +155,11 @@ pub struct Question {
     /// always carry one — [`AskDraft::check`] makes a stakeless question unrepresentable.
     #[serde(default)]
     pub stake: String,
+    /// T-219: retired by explicit policy (its subject stopped existing, or its class was
+    /// deliberately ended) — never an invented answer. A retired question never
+    /// surfaces; the row and its history stay (append-retained, like everything).
+    #[serde(default)]
+    pub retired: bool,
 }
 
 impl Question {
@@ -176,6 +181,7 @@ impl Question {
             because: draft.because.trim().to_string(),
             turns_on: draft.turns_on.trim().to_string(),
             stake: draft.stake.trim().to_lowercase(),
+            retired: false,
         }
     }
 
@@ -197,6 +203,9 @@ impl Question {
     /// May this question surface now? Retired (answered, non-root) questions never do;
     /// everything else is available once it has rested long enough since last shown/dismissed.
     pub fn available(&self, now: i64) -> bool {
+        if self.retired {
+            return false; // ended by policy — its subject or class stopped existing
+        }
         if self.answered && !self.is_root() {
             return false;
         }
@@ -357,6 +366,20 @@ pub fn backfill_answered(dir: &Path, now: i64) -> io::Result<usize> {
         }
     }
     Ok(closed)
+}
+
+/// T-219: retire a question by explicit policy, with the reason kept beside its history.
+/// The root never retires (its lifecycle is recurrence).
+pub fn retire(dir: &Path, id: &str, why: &str, _now: i64) -> io::Result<bool> {
+    if id == ROOT_ID {
+        return Ok(false);
+    }
+    update(dir, id, |q| {
+        q.retired = true;
+        if !why.trim().is_empty() {
+            q.dismiss_notes.push(format!("retired: {}", why.trim()));
+        }
+    })
 }
 
 pub fn record_answered(dir: &Path, id: &str, now: i64) -> io::Result<bool> {

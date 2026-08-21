@@ -450,6 +450,43 @@ fn unmet_needs(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
+/// T-219's sweep (see the call site above for the policy). Returns questions retired.
+fn retire_orphaned_arrival_questions(dir: &Path, now: i64) -> io::Result<usize> {
+    let qs = question::load(dir)?;
+    let mut retired = 0;
+    for q in qs {
+        if q.retired || q.answered || !q.text.starts_with("A new device joined the mesh:") {
+            continue;
+        }
+        // The template carries the device id as "(xxxxxxxx)" — extract the 8-hex token.
+        let Some(id) = q
+            .text
+            .split('(')
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(str::trim)
+            .filter(|t| t.len() == 8 && t.chars().all(|c| c.is_ascii_hexdigit()))
+        else {
+            continue;
+        };
+        // Ids display as 8-char prefixes; records key on full ids — resolve by prefix.
+        let exists = familiar_mesh::record::load_all(dir)
+            .iter()
+            .any(|r| r.device_id.starts_with(id) || r.keys.iter().any(|k| k.starts_with(id)));
+        if !exists
+            && question::retire(
+                dir,
+                &q.id,
+                &format!("its subject (device {id}) no longer has a record"),
+                now,
+            )?
+        {
+            retired += 1;
+        }
+    }
+    Ok(retired)
+}
+
 /// Coordinate the familiar's questions under the Three Laws and surface at most one.
 ///
 /// - **Law I (service):** questions that complete an observed human need outrank the
@@ -4619,6 +4656,14 @@ pub fn tick(
     // any path (console, device, sync), so the familiar never re-asks what a person
     // already said. Idempotent; a current registry costs one read.
     let _ = question::backfill_answered(dir, now);
+    // T-219: retire questions whose SUBJECT stopped existing. The one class this sweep
+    // touches is closed and deliberate: the retired enroll-era arrival template ("A new
+    // device joined the mesh: … (xxxxxxxx). Who does it belong to?") whose device no
+    // longer has a record — the modern enroll path files no questions (ADR-0026), so the
+    // class cannot regrow. Live cost of the defect: a 147cfa12 arrival question sat as
+    // the lighthouse's ACTIVE question, starving the root, about a device purged long
+    // ago. Never an invented answer: the row retires with its reason kept.
+    let _ = retire_orphaned_arrival_questions(dir, now);
     coordinate_questions(dir, now, &obs)?;
 
     // 8. Act — turn open threads into candidate work (executed on a later tick),
@@ -5097,6 +5142,74 @@ mod tests {
         // And nobody attributed at all → nothing to think about.
         fs::write(t.0.join(NEED_MUSE_FILE), "{}").unwrap();
         assert!(!maybe_theorize_needs(&t.0, now, &[], true).unwrap());
+    }
+
+    /// T-219: the enroll-era arrival question about a purged device retires with its
+    /// reason; the same question about a device that still exists is untouched; nothing
+    /// is given an invented answer.
+    #[test]
+    fn an_arrival_question_about_a_vanished_device_retires() {
+        let t = Temp::new("t219_retire");
+        let dir = &t.0;
+        // Legacy rows, written the way the old enroll path wrote them (no stakes, no
+        // thread binding) — one about a vanished device, one about a living one.
+        let legacy = |id: &str, text: &str| {
+            format!(
+                concat!(
+                    r#"{{"id":"{}","text":"{}","origin":"observer","created_at":5,"#,
+                    r#""times_asked":3,"times_dismissed":0,"last_asked":10,"last_dismissed":0,"#,
+                    r#""answered":false,"dismiss_notes":[]}}"#,
+                    "
+"
+                ),
+                id, text
+            )
+        };
+        fs::write(
+            dir.join("questions.jsonl"),
+            legacy(
+                "q-0001",
+                "A new device joined the mesh: “iPhone” (147cfa12). Who does it belong to?",
+            ) + &legacy(
+                "q-0002",
+                "A new device joined the mesh: “iPad” (aa11bb22). Who does it belong to?",
+            ),
+        )
+        .unwrap();
+        // aa11bb22 still has a record; 147cfa12 has none.
+        let rec = familiar_mesh::record::MembershipRecord::guest(
+            "aa11bb22cc33dd44",
+            "aa11bb22cc33dd44",
+            familiar_mesh::enroll::Attestation {
+                laws_version: familiar_mesh::enroll::LAWS_VERSION,
+                statement: "t".into(),
+                ts: 1,
+            },
+            100,
+        );
+        familiar_mesh::record::save(dir, &rec).unwrap();
+        assert_eq!(retire_orphaned_arrival_questions(dir, 1000).unwrap(), 1);
+        let qs = question::load(dir).unwrap();
+        let by = |id: &str| qs.iter().find(|q| q.id == id).unwrap();
+        assert!(
+            by("q-0001").retired,
+            "the vanished device's question retires"
+        );
+        assert!(
+            !by("q-0001").answered,
+            "…and is never given an invented answer"
+        );
+        assert!(by("q-0001")
+            .dismiss_notes
+            .iter()
+            .any(|n| n.contains("147cfa12")));
+        assert!(
+            !by("q-0001").available(1_000_000),
+            "it never surfaces again"
+        );
+        assert!(!by("q-0002").retired, "a living device's question stands");
+        // Idempotent.
+        assert_eq!(retire_orphaned_arrival_questions(dir, 2000).unwrap(), 0);
     }
 
     #[test]
