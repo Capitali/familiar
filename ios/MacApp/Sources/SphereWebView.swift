@@ -247,6 +247,17 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             let arg = (try? JSONEncoder().encode(why)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"link down\""
             web?.evaluateJavaScript("window.sphereLinkDown && window.sphereLinkDown(\(arg))", completionHandler: nil)
         }
+        if let json = model.partnerInboxJSON {
+            web?.evaluateJavaScript(
+                "window.spherePartnerInbox && window.spherePartnerInbox(\(json))",
+                completionHandler: nil)
+        } else if let why = model.partnerInboxError {
+            let arg = (try? JSONEncoder().encode(why))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "\"partner inbox unavailable\""
+            web?.evaluateJavaScript(
+                "window.spherePartnerInboxError && window.spherePartnerInboxError(\(arg))",
+                completionHandler: nil)
+        }
     }
 
     // ---- nodes on the real map ----
@@ -533,6 +544,43 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                                 "window.sphereUpdate(\(json))", completionHandler: nil)
                         }
                     }
+                }
+            case "partnerAct":
+                guard let act = body["act"] as? String else { break }
+                Task {
+                    switch act {
+                    case "decide":
+                        guard let requestId = body["request_id"] as? String,
+                              let surface = body["surface"] as? String,
+                              let rawBounds = body["allowed_operations"],
+                              JSONSerialization.isValidJSONObject(rawBounds),
+                              let data = try? JSONSerialization.data(withJSONObject: rawBounds),
+                              let bounds = try? JSONDecoder().decode(
+                                PartnerOperationBounds.self, from: data
+                              )
+                        else { return }
+                        let expiresAt = (body["expires_at"] as? NSNumber)?.int64Value ?? 0
+                        await self.model.decidePartnerGrant(
+                            requestId: requestId,
+                            surface: surface,
+                            allowedOperations: bounds,
+                            expiresAt: expiresAt
+                        )
+                    case "decline":
+                        if let id = body["request_id"] as? String {
+                            await self.model.declinePartnerGrant(id)
+                        }
+                    case "revoke":
+                        if let id = body["grant_id"] as? String {
+                            await self.model.revokePartnerGrant(id)
+                        }
+                    case "refuse":
+                        if let id = body["proposal_id"] as? String {
+                            await self.model.refusePartnerProposal(id)
+                        }
+                    default: break
+                    }
+                    await self.poll()
                 }
             default: break
             }

@@ -136,6 +136,43 @@ struct SphereConsoleIOS: View {
                     if let model { bridge?.pushDevice(model.deviceStateJSON()) }
                 }
             }
+            bridge.onPartnerAct = { [weak model] body in
+                guard let model, let act = body["act"] as? String else { return }
+                Task {
+                    switch act {
+                    case "decide":
+                        guard let requestId = body["request_id"] as? String,
+                              let surface = body["surface"] as? String,
+                              let rawBounds = body["allowed_operations"],
+                              JSONSerialization.isValidJSONObject(rawBounds),
+                              let data = try? JSONSerialization.data(withJSONObject: rawBounds),
+                              let bounds = try? JSONDecoder().decode(
+                                PartnerOperationBounds.self, from: data
+                              )
+                        else { return }
+                        let expiresAt = (body["expires_at"] as? NSNumber)?.int64Value ?? 0
+                        await model.decidePartnerGrant(
+                            requestId: requestId,
+                            surface: surface,
+                            allowedOperations: bounds,
+                            expiresAt: expiresAt
+                        )
+                    case "decline":
+                        if let id = body["request_id"] as? String {
+                            await model.declinePartnerGrant(id)
+                        }
+                    case "revoke":
+                        if let id = body["grant_id"] as? String {
+                            await model.revokePartnerGrant(id)
+                        }
+                    case "refuse":
+                        if let id = body["proposal_id"] as? String {
+                            await model.refusePartnerProposal(id)
+                        }
+                    default: break
+                    }
+                }
+            }
             bridge.onWatchRelink = { [weak model, weak bridge] in
                 model?.syncWatch()
                 // PhoneWatchLink publishes its WCSession snapshot asynchronously. Push once
@@ -158,6 +195,12 @@ struct SphereConsoleIOS: View {
         }
         .onReceive(model.$worldviewError) { err in
             if let err { bridge.pushLinkDown(err) }
+        }
+        .onReceive(model.$partnerInboxJSON) { json in
+            if let json { bridge.pushPartnerInbox(json) }
+        }
+        .onReceive(model.$partnerInboxError) { error in
+            if let error { bridge.pushPartnerInboxError(error) }
         }
         .onReceive(voice.$partial) { text in
             if voice.listening { bridge.pushVoicePartial(text) }
@@ -239,6 +282,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onRuleDisable: ((String) -> Void)?
     var onDeviceName: ((String) -> Void)?
     var onWatchRelink: (() -> Void)?
+    var onPartnerAct: (([String: Any]) -> Void)?
     /// This member's join payload (an address, never a secret) — any enrolled
     /// member is a scan-to-join point, so the console renders it as the QR.
     var onInvite: (() -> String?)?
@@ -253,6 +297,7 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
 
     private var lastJSON: String?
     private var lastDeviceJSON: String?
+    private var lastPartnerInboxJSON: String?
 
     func push(worldviewJSON: String) {
         lastJSON = worldviewJSON
@@ -270,6 +315,11 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                     "window.sphereDevice && window.sphereDevice(\(json))",
                     completionHandler: nil)
             }
+            if let json = self.lastPartnerInboxJSON {
+                webView.evaluateJavaScript(
+                    "window.spherePartnerInbox && window.spherePartnerInbox(\(json))",
+                    completionHandler: nil)
+            }
         }
     }
     func pushLinkDown(_ message: String = "") {
@@ -281,6 +331,21 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     func pushDevice(_ json: String) {
         lastDeviceJSON = json
         web?.evaluateJavaScript("window.sphereDevice && window.sphereDevice(\(json))", completionHandler: nil)
+    }
+
+    func pushPartnerInbox(_ json: String) {
+        lastPartnerInboxJSON = json
+        web?.evaluateJavaScript(
+            "window.spherePartnerInbox && window.spherePartnerInbox(\(json))",
+            completionHandler: nil)
+    }
+
+    func pushPartnerInboxError(_ message: String) {
+        let quoted = (try? JSONEncoder().encode(message))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "\"partner inbox unavailable\""
+        web?.evaluateJavaScript(
+            "window.spherePartnerInboxError && window.spherePartnerInboxError(\(quoted))",
+            completionHandler: nil)
     }
 
     /// Live transcript into the dialogue input while the human speaks; "" clears it.
@@ -480,6 +545,8 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
                 }
             case "watchRelink":
                 self.onWatchRelink?()
+            case "partnerAct":
+                self.onPartnerAct?(body)
             case "gate":
                 break   // boundary writes are a local human act at the familiar, never from a device
             default: break

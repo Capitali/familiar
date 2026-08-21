@@ -380,6 +380,10 @@ final class AppModel: ObservableObject {
     /// Last poll cycle, per candidate: "host ✓" / "host ✗ reason" — the Device screen's data.
     @Published var attemptLog: [String] = []
     @Published var worldviewError: String?
+    /// Human-addressed partner state from a separate signed read. This is never persisted and
+    /// never folded into worldview or diagnostics.
+    @Published var partnerInboxJSON: String?
+    @Published var partnerInboxError: String?
     private var worldviewTask: Task<Void, Never>?
 
     // The iPad as a thinking-peer: on-device Apple Intelligence reasoning under the Three Laws.
@@ -640,17 +644,72 @@ final class AppModel: ObservableObject {
         await sendConsoleAct(.nameDevice(name), label: "name device")
     }
 
+    func decidePartnerGrant(
+        requestId: String,
+        surface: String,
+        allowedOperations: PartnerOperationBounds,
+        expiresAt: Int64
+    ) async {
+        await sendConsoleAct(
+            .decideGrant(
+                requestId: requestId,
+                surface: surface,
+                allowedOperations: allowedOperations,
+                expiresAt: expiresAt
+            ),
+            label: "grant partner request"
+        )
+    }
+
+    func declinePartnerGrant(_ requestId: String) async {
+        await sendConsoleAct(.declineGrant(requestId), label: "decline partner request")
+    }
+
+    func revokePartnerGrant(_ grantId: String) async {
+        await sendConsoleAct(.revokeGrant(grantId), label: "revoke partner grant")
+    }
+
+    func refusePartnerProposal(_ proposalId: String) async {
+        await sendConsoleAct(.refuseProposal(proposalId), label: "refuse partner proposal")
+    }
+
     private func sendConsoleAct(_ act: ConsoleAct, label: String) async {
         guard let session = consoleActSession() else {
             note("\(label) not sent — no enrolled door")
             return
         }
+        let isPartnerDecision: Bool
+        switch act {
+        case .decideGrant, .declineGrant, .revokeGrant, .refuseProposal:
+            isPartnerDecision = true
+        case .disableRule, .nameDevice:
+            isPartnerDecision = false
+        }
         do {
             let reply = try await ConsoleActClient(session: session).send(act)
-            note("✓ \(reply)")
+            if isPartnerDecision {
+                guard let data = reply.data(using: .utf8),
+                      (try? JSONDecoder().decode(PartnerInbox.self, from: data)) != nil
+                else {
+                    partnerInboxJSON = nil
+                    partnerInboxError = "decision response was not a valid projection"
+                    note("\(label) not confirmed — refresh before another decision")
+                    return
+                }
+                // The successful response is the post-append private projection. Publish it only
+                // in memory and keep its private fields out of notes and diagnostics.
+                partnerInboxJSON = reply
+                partnerInboxError = nil
+                note("✓ \(label) recorded")
+            } else {
+                note("✓ \(reply)")
+            }
             await refreshWorldview()
         } catch ConsoleActClient.ActError.http(let status, let body) {
             note("\(label) refused (\(status)): \(body.prefix(80))")
+            // A competing device may have decided first. Read the ledger's actual state back;
+            // never leave a stale actionable card after an honest transition conflict.
+            await refreshPartnerInbox()
         } catch ConsoleActClient.ActError.transport(let message) {
             note("\(label) could not reach \(host): \(message.prefix(80))")
         } catch {
@@ -1487,6 +1546,36 @@ final class AppModel: ObservableObject {
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
+    /// A signing session pointed at the same current door's private partner projection.
+    func partnerInboxSession() -> ObservationClient.Session? {
+        guard let g = storedGrant(), !host.isEmpty,
+              let url = PartnerInboxClient.inboxURL(host: host, port: enrollPort)
+        else { return nil }
+        return ObservationClient.Session(node: node, membership: g.membership, url: url)
+    }
+
+    func refreshPartnerInbox() async {
+        guard let session = partnerInboxSession() else {
+            partnerInboxJSON = nil
+            partnerInboxError = "not available — no enrolled door"
+            return
+        }
+        do {
+            let (_, raw) = try await PartnerInboxClient(session: session).fetchWithRaw()
+            partnerInboxJSON = String(data: raw, encoding: .utf8)
+            partnerInboxError = nil
+        } catch PartnerInboxClient.ReadError.http(let status, let body) {
+            partnerInboxJSON = nil
+            partnerInboxError = "not available (\(status)): \(body.prefix(80))"
+        } catch PartnerInboxClient.ReadError.transport(let message) {
+            partnerInboxJSON = nil
+            partnerInboxError = "not available — \(message.prefix(80))"
+        } catch {
+            partnerInboxJSON = nil
+            partnerInboxError = "partner inbox unavailable"
+        }
+    }
+
     /// Poll the familiar's worldview so the iPad Glass shows a live console. Idempotent; cancelled by
     /// `stopWorldviewPolling`. A peer *reads* the familiar's snapshot — it never sees the data dir.
     func startWorldviewPolling() {
@@ -1694,6 +1783,9 @@ final class AppModel: ObservableObject {
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
                 attemptLog = []
+                // This is a separate fresh signed request to the exact door that answered.
+                // It never becomes part of the worldview snapshot or its diagnostics.
+                await refreshPartnerInbox()
                 // The first successful read closes the join story (T-120) — but only on a
                 // transition, so the every-few-seconds poll doesn't churn the stage clock.
                 if joinProgress.stage != .joined {

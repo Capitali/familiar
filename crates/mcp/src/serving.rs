@@ -279,9 +279,19 @@ mod tests {
     fn a_registered_partner_credential_carries_identity_but_does_not_open_the_door() {
         let d = tmp("partner");
         std::fs::write(d.join("mcp/partner.env"), "PARTNER_TOKEN=partner-secret\n").unwrap();
-        let principal =
-            crate::partner::register(&d, "Workshop agent", "mcp/partner.env", "PARTNER_TOKEN")
-                .unwrap();
+        let human = crate::partner::HumanDecisionContext::from_verified_mesh(
+            "test-device".into(),
+            "ian".into(),
+        )
+        .unwrap();
+        let principal = crate::partner::register(
+            &d,
+            &human,
+            "Workshop agent",
+            "mcp/partner.env",
+            "PARTNER_TOKEN",
+        )
+        .unwrap();
         assert_eq!(
             admit(&d, Some("partner-secret")),
             Err(Denied::NotExposed),

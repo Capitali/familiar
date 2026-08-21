@@ -1162,9 +1162,9 @@ async fn handle(
             };
             recv_worldview(&dir, &bytes, &sig, &ctx.seen, &peer_ip)
         }
-        // A full-standing member's two narrow console writes: disable one existing standing
-        // rule, or name the certified device making this request. Same raw-body signature and
-        // replay discipline as the worldview seam; guests can read but cannot write.
+        // A full-standing member's narrow typed console writes: rule reduction, self-naming, or
+        // a partner decision addressed to the established human behind this certified device.
+        // Same raw-body signature and replay discipline as the worldview seam.
         (Method::POST, "/mesh/console-act") => {
             let sig = req
                 .headers()
@@ -1177,6 +1177,21 @@ async fn handle(
                 Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
             };
             recv_console_act(&dir, &bytes, &sig, &ctx.seen)
+        }
+        // A separate private projection. It is intentionally neither worldview nor a local
+        // unsigned read: the same full-standing, fresh signed identity proof gates every row.
+        (Method::POST, "/mesh/partner-inbox") => {
+            let sig = req
+                .headers()
+                .get("x-familiar-sig")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let bytes = match collect(req).await {
+                Ok(b) => b,
+                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
+            };
+            recv_partner_inbox(&dir, &bytes, &sig, &ctx.seen)
         }
         // **The familiar's own MCP server** (ADR-0037 §A, the pairing handshake). Loopback
         // ONLY, and that is a deliberate limit rather than an oversight: exposing this seam
@@ -1719,6 +1734,29 @@ fn recv_console_act(
         Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
         Err(crate::Error::Malformed(m)) => text(StatusCode::BAD_REQUEST, m),
         Err(crate::Error::Io(_)) => text(StatusCode::INTERNAL_SERVER_ERROR, "console act write"),
+    }
+}
+
+/// `POST /mesh/partner-inbox` → verify the person-addressed read and return only its private
+/// projection. Corruption is a whole-view failure, never a skipped card.
+fn recv_partner_inbox(
+    dir: &Path,
+    bytes: &[u8],
+    sig: &str,
+    ring: &std::sync::Mutex<crate::observe::IngestGuard>,
+) -> Response<Full<Bytes>> {
+    match crate::console_act::read_partner_inbox(dir, bytes, sig, now_secs(), ring) {
+        Ok(view) => match serde_json::to_vec(&view) {
+            Ok(body) => text(StatusCode::OK, body),
+            Err(_) => text(StatusCode::INTERNAL_SERVER_ERROR, "encode"),
+        },
+        Err(crate::Error::Untrusted(m)) if m.contains("replay") => text(StatusCode::CONFLICT, m),
+        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
+        Err(crate::Error::Malformed(m)) => text(StatusCode::BAD_REQUEST, m),
+        Err(crate::Error::Io(_)) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "partner inbox unavailable",
+        ),
     }
 }
 

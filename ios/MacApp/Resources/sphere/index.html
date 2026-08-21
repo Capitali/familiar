@@ -198,7 +198,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // ---------- state & real data ----------
 // holoHidden starts TRUE: the app opens onto the bare globe, home centered, menus tucked
 // away — as if the hide glyph had already been clicked. One tap on it brings the screens back.
-const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: true, loading: true, view: null, linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
+const S = { mode: 'globe', focusIdx: 0, activeScreen: 'roster', holoHidden: true, loading: true, view: null, partnerInbox: null, partnerInboxError: '', linkOk: false, builtScreen: '', hideOffline: false, rosterHistory: false, correctServing: false };
 try { S.hideOffline = localStorage.getItem('sphere.hideOffline') === '1'; } catch (e) {}
 
 const $ = (id) => document.getElementById(id);
@@ -459,6 +459,7 @@ const GLYPHS = {
   vision: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:blink 5s ease-in-out infinite;"><path d="M4 24s7-11 20-11 20 11 20 11-7 11-20 11S4 24 4 24z" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="24" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 4"/></g><circle cx="24" cy="24" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 3s ease-in-out infinite;"/></g></svg>`,
   device: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><rect x="14" y="5" width="20" height="38" rx="4.5" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/><line x1="21" y1="9.5" x2="27" y2="9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/><g style="transform-box:fill-box;transform-origin:center;animation:spin 7s linear infinite;"><circle cx="24" cy="25" r="7.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 4" opacity="0.6"/></g><circle cx="24" cy="25" r="4" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2.6s ease-in-out infinite;"/></svg>`,
   games: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><g style="transform-box:fill-box;transform-origin:center;animation:spin 14s linear infinite;"><rect x="15" y="15" width="18" height="18" rx="4.5" transform="rotate(45 24 24)" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-width="1.6"/></g><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 5s linear infinite;"><circle cx="24" cy="8" r="2.1" fill="currentColor"/></g><g style="transform-box:fill-box;transform-origin:center;animation:orbitspin 8s linear infinite reverse;"><circle cx="24" cy="41" r="1.6" fill="currentColor" opacity="0.7"/></g><circle cx="24" cy="24" r="3.6" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:gatepulse 1.7s ease-in-out infinite;"/></svg>`,
+  partners: `<svg viewBox="0 0 48 48" style="width:100%;height:100%;overflow:visible;"><path d="M8 15h20a5 5 0 0 1 5 5v9a5 5 0 0 1-5 5H18l-7 5v-5H8a5 5 0 0 1-5-5v-9a5 5 0 0 1 5-5z" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-width="1.5"/><path d="M31 10h7a6 6 0 0 1 6 6v8a6 6 0 0 1-6 6h-3" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.55"/><circle cx="13" cy="24" r="2.2" fill="currentColor"/><circle cx="20" cy="24" r="2.2" fill="currentColor"/><circle cx="27" cy="24" r="2.2" fill="currentColor" style="transform-box:fill-box;transform-origin:center;animation:iconpulse 2s ease-in-out infinite;"/></svg>`,
 };
 // The games' own control glyphs — back (chevron orbit) and begin (kindled play) — animated
 // like everything else on the ring: wordless, alive.
@@ -476,7 +477,7 @@ const gateGlyph = (on) => `<svg viewBox="0 0 24 24" fill="none" style="width:22p
 // ---------- hologram screens (real data; skeleton built once per screen, data refreshed in place) ----------
 // No Gates screen: boundary gates are mesh functions, handled from the CLI / the familiar itself,
 // not a console menu. The Device menu (the device's own allows) takes the slot Gates used to hold.
-const ALL_SCREENS = ['conversation','roster','theories','work','signals','network','vision','games','device'];
+const ALL_SCREENS = ['conversation','roster','theories','work','signals','network','vision','games','partners','device'];
 // Which screens earn their slot on THIS shell (T-183, Ian 2026-08-15). One HTML file renders on
 // the Mac app and inside the iOS WKWebView, so the ring is filtered rather than forked.
 //   · Mac-only — the network map and the signals read-out are workbench instruments. On a phone
@@ -492,7 +493,7 @@ function screens() {
 // Kept as a name for anything still reading the old constant; the ring itself uses screens().
 const SCREENS = ALL_SCREENS;
 // 'welcome' is reached from its own corner button, not the ring — a greeting with its own bell.
-const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', games:'Games', node:'', device:'Device', welcome:'Welcome' };
+const SCTITLE = { conversation:'Dialogue', roster:'Roster', theories:'Theories', work:'Activity', signals:'Signals', network:'Network', vision:'Vision', games:'Games', partners:'Partners', node:'', device:'Device', welcome:'Welcome' };
 
 // Display capitalization: handles are lowercase slugs by design ("ian", "betty-jo") — but
 // names read as names: Ian, Betty-jo. Display-only; the slug stays the identity.
@@ -1541,6 +1542,63 @@ function refreshScreen() {
         ${gateGlyph(camOn)}
       </div></div>`;
 
+  } else if (k === 'partners') {
+    const inbox = S.partnerInbox;
+    const shell = (body) => `<div style="max-width:780px;">${body}</div>`;
+    const card = (body, tint='120,190,255') => `<div style="padding:16px 18px;border-radius:15px;background:rgba(16,34,60,0.27);border:1px solid rgba(${tint},0.18);margin-bottom:12px;">${body}</div>`;
+    const identity = (x) => `<div style="display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;margin-bottom:9px;"><span style="font-size:16px;font-weight:600;">${esc(x.partner_alias)}</span><span class="m" style="font-size:8px;color:rgba(160,195,255,0.55);overflow-wrap:anywhere;">credential ${esc(x.credential_fingerprint)}</span></div>`;
+    if (S.partnerInboxError) {
+      el.innerHTML = shell(card(`<div style="font-size:16px;font-weight:600;color:#ffb0b0;margin-bottom:8px;">Partner inbox unavailable</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(220,205,215,0.72);">${esc(S.partnerInboxError)}</div><div class="m" style="font-size:9px;line-height:1.55;color:rgba(180,195,220,0.58);margin-top:10px;">No decision controls are available while the private record cannot be read completely.</div>`, '255,110,110'));
+      return;
+    }
+    if (!inbox) {
+      el.innerHTML = shell(card(`<div class="m" style="font-size:10px;color:rgba(170,205,245,0.65);">Reading your private partner inbox…</div>`));
+      return;
+    }
+    const requests = inbox.pending_requests || [];
+    const grants = inbox.active_grants || [];
+    const proposals = inbox.pending_proposals || [];
+    const warnings = inbox.warnings || [];
+    const heading = (name, count, words) => `<div style="display:flex;align-items:baseline;gap:10px;margin:20px 0 10px;"><span style="font-size:18px;font-weight:600;">${name}</span><span class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">${count} · ${words}</span></div>`;
+    const requestCards = requests.map((r, i) => {
+      const choices = (r.eligible_surfaces || []);
+      const duration = Math.max(60, Math.min(Number(r.requested_duration_seconds || 3600), 3600));
+      const armed = S.partnerGrantArmed && S.partnerGrantArmed.i === i;
+      const armedSurface = armed ? S.partnerGrantArmed.surface : '';
+      const operationNames = Object.keys(r.requested_operations || {});
+      const chosenOperation = armed ? S.partnerGrantArmed.operation : (((S.partnerOperationChoice || {})[i]) || operationNames[0] || '');
+      const requestedParams = (r.requested_operations || {})[chosenOperation] || {};
+      const armedParams = armed ? ((S.partnerGrantArmed.allowed || {})[chosenOperation] || {}) : {};
+      const boundControls = Object.entries(requestedParams).map(([name, bound], bi) => {
+        if (bound.kind === 'enum') {
+          const selected = ((armedParams[name] || {}).values || [])[0] || (bound.values || [])[0] || '';
+          return `<label class="m" style="display:block;font-size:8px;letter-spacing:0.11em;color:rgba(160,195,255,0.55);margin-top:8px;">${esc(name)}</label><select id="partnerBound-${i}-${bi}" style="width:100%;max-width:420px;padding:8px 10px;border-radius:9px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.2);">${(bound.values || []).map(value => `<option value="${esc(value)}" ${selected === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>`;
+        }
+        const narrowed = armedParams[name] || {};
+        const midpoint = (Number(bound.min) + Number(bound.max)) / 2;
+        const min = Number.isFinite(Number(narrowed.min)) ? narrowed.min : midpoint;
+        const max = Number.isFinite(Number(narrowed.max)) ? narrowed.max : midpoint;
+        return `<label class="m" style="display:block;font-size:8px;letter-spacing:0.11em;color:rgba(160,195,255,0.55);margin-top:8px;">${esc(name)} · NARROW RANGE</label><div style="display:flex;gap:8px;max-width:420px;"><input id="partnerBoundMin-${i}-${bi}" type="number" min="${Number(bound.min)}" max="${Number(bound.max)}" value="${Number(min)}" style="width:50%;padding:8px 10px;border-radius:9px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.2);"><input id="partnerBoundMax-${i}-${bi}" type="number" min="${Number(bound.min)}" max="${Number(bound.max)}" value="${Number(max)}" style="width:50%;padding:8px 10px;border-radius:9px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.2);"></div>`;
+      }).join('');
+      return card(`${identity(r)}
+        <div style="font-size:14px;line-height:1.5;color:rgba(232,240,252,0.9);margin-bottom:8px;">asks for a bounded suggestion relationship with <span class="m" style="font-size:11px;color:#aee7ff;">${esc(r.class_id)}</span></div>
+        <div class="m" style="font-size:10px;line-height:1.6;color:rgba(188,210,245,0.67);margin-bottom:10px;">A grant gives this partner one opaque handle and lets it leave typed suggestions only. It does not let the partner read or change the surface.</div>
+        ${r.reason_quote ? `<div style="padding:10px 12px;border-left:2px solid rgba(174,231,255,0.35);margin:10px 0;"><span class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(160,195,255,0.55);">PARTNER SAYS:</span><div style="font-size:13px;line-height:1.45;color:rgba(225,235,250,0.82);margin-top:5px;">${esc(r.reason_quote)}</div></div>` : ''}
+        ${choices.length ? `<label class="m" style="display:block;font-size:8px;letter-spacing:0.13em;color:rgba(160,195,255,0.55);margin:12px 0 6px;">LOCAL SURFACE — NEVER SHOWN TO THE PARTNER</label><select id="partnerSurface-${i}" style="width:100%;max-width:420px;padding:9px 11px;border-radius:10px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.24);">${choices.map(c => `<option value="${esc(c.surface)}" ${armedSurface === c.surface ? 'selected' : ''}>${esc(c.surface)}${c.description ? ' — '+esc(c.description) : ''}</option>`).join('')}</select>` : `<div class="m" style="font-size:10px;color:#ffb0b0;margin-top:10px;">No current valid local surface matches this request.</div>`}
+        ${operationNames.length ? `<label class="m" style="display:block;font-size:8px;letter-spacing:0.13em;color:rgba(160,195,255,0.55);margin:12px 0 6px;">ONE ALLOWED SUGGESTION</label><select id="partnerOperation-${i}" onchange="spherePartnerOperation(${i})" style="width:100%;max-width:420px;padding:9px 11px;border-radius:10px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.24);">${operationNames.map(name => `<option value="${esc(name)}" ${chosenOperation === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>${boundControls}` : ''}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+          ${choices.length && operationNames.length ? `<button onclick="spherePartnerGrant(${i},${duration})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;border-color:${armed?'rgba(61,220,151,0.62)':'rgba(120,190,255,0.28)'};"><span class="m" style="font-size:9px;color:${armed?'#9fe8c0':'#cdeeff'};">${armed ? `CONFIRM ${esc(armedSurface || 'SURFACE')} · ${esc(chosenOperation)} ONLY` : `GRANT NARROWLY · ${dur(duration)}`}</span></button>` : ''}
+          <button onclick="spherePartnerDecline(${i})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;"><span class="m" style="font-size:9px;color:#ffb0b0;">DECLINE</span></button>
+        </div>`, '120,190,255');
+    }).join('');
+    const grantCards = grants.map((g, i) => {
+      const armed = S.partnerRevokeArmed === i;
+      return card(`${identity(g)}<div style="font-size:14px;margin-bottom:6px;">may leave bounded suggestions about <span style="color:#aee7ff;">${esc(g.surface)}</span></div><div class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">expires ${utc(g.expires_at)} · no reading and no actuation</div><button onclick="spherePartnerRevoke(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:12px;"><span class="m" style="font-size:9px;color:#ffb0b0;">${armed ? `CONFIRM REVOKE ${esc(g.surface)}` : 'REVOKE'}</span></button>`, '255,177,90');
+    }).join('');
+    const proposalCards = proposals.map((p, i) => card(`${identity(p)}<div style="font-size:14px;line-height:1.5;margin-bottom:7px;">suggests <span style="color:#c9a3ff;">${esc(p.operation)}</span> for <span style="color:#aee7ff;">${esc(p.surface)}</span></div><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:rgba(205,220,245,0.75);background:rgba(5,12,25,0.45);padding:9px 11px;border-radius:9px;">${esc(JSON.stringify(p.parameters || {}, null, 2))}</pre>${p.reason_quote ? `<div style="padding:10px 12px;border-left:2px solid rgba(201,163,255,0.35);margin:10px 0;"><span class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(190,170,230,0.65);">PARTNER SAYS:</span><div style="font-size:13px;line-height:1.45;margin-top:5px;">${esc(p.reason_quote)}</div></div>` : ''}<div class="m" style="font-size:9px;line-height:1.5;color:rgba(170,190,220,0.62);">Leave pending by doing nothing. There is no accept or run action at this rung.</div><button onclick="spherePartnerRefuse(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:11px;"><span class="m" style="font-size:9px;color:#ffb0b0;">REFUSE</span></button>`, '201,163,255')).join('');
+    const empty = !requests.length && !grants.length && !proposals.length;
+    el.innerHTML = shell(`${warnings.map(w => card(`<div class="m" style="font-size:10px;color:#ffd29a;">${esc(w)}</div>`, '255,177,90')).join('')}${empty ? card(`<div style="font-size:16px;font-weight:600;margin-bottom:7px;">No partner decisions waiting</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(180,205,240,0.62);">Requests and suggestions addressed to you will appear here after a fresh signed read.</div>`) : ''}${requests.length ? heading('Requests', requests.length, 'you decide whether a relationship begins') + requestCards : ''}${grants.length ? heading('Active grants', grants.length, 'suggestions only') + grantCards : ''}${proposals.length ? heading('Suggestions', proposals.length, 'refuse or leave pending') + proposalCards : ''}`);
+
   } else if (k === 'device') {
     // A human typing their name outranks the 3s device push — FOCUS-gated only. Gating on a
     // leftover value froze the screen permanently once anything lingered in the box; commit
@@ -1744,6 +1802,10 @@ function renderButtons() {
   const gg = (S.view || {}).game;
   const myH = (((S.device || {}).presence || {}).handle || (S.device || {}).servedHuman || '').toLowerCase();
   const myTurn = gg && gg.status === 'open' && myH && myH !== 'observer' && gg.holder.toLowerCase() === myH;
+  // Safe badge: derived only after this device's authorized private read. No count is carried
+  // in worldview or any broadcast projection.
+  const pi = S.partnerInbox || {};
+  const partnerWaiting = (pi.pending_requests || []).length + (pi.pending_proposals || []).length;
   // Ring rotation: with an odd count, a half-step start plants one button at exactly 90° —
   // dead centre bottom, on top of the surface toggle (it ate the zoom button under signals).
   // Odd counts start AT top centre instead: evenly spaced, mirror-symmetric about the
@@ -1752,8 +1814,11 @@ function renderButtons() {
   $('screenbtns').innerHTML = RING.map((key, i) => {
     const ang = (-90 + (i + off) * (360 / N)) * Math.PI / 180;
     const on = key === S.activeScreen;
-    const warm = key === 'games' && myTurn;
-    return `<button class="scrbtn" title="${SCTITLE[key]}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${warm ? 'radial-gradient(circle, rgba(255,178,102,0.4), transparent 66%)' : on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
+    const warm = (key === 'games' && myTurn) || (key === 'partners' && partnerWaiting > 0);
+    const title = key === 'partners' && partnerWaiting > 0
+      ? `${partnerWaiting} partner item${partnerWaiting === 1 ? '' : 's'} waiting`
+      : SCTITLE[key];
+    return `<button class="scrbtn" title="${title}" onclick="sphereScreen('${key}')" style="left:${(50 + Math.cos(ang) * Rx).toFixed(2)}%;top:${(50 + Math.sin(ang) * Ry).toFixed(2)}%;background:${warm ? 'radial-gradient(circle, rgba(255,178,102,0.4), transparent 66%)' : on ? 'radial-gradient(circle, rgba(120,190,255,0.42), transparent 66%)' : 'radial-gradient(circle, rgba(90,160,255,0.07), transparent 70%)'};">
       <span class="ic" style="color:${warm ? '#ffcf9e' : on ? '#f0f7ff' : 'rgba(176,210,255,0.68)'};${warm ? 'animation:iconpulse 1.2s ease-in-out infinite;' : on ? '' : `animation:glyphhue 5.5s ease-in-out infinite;animation-delay:${(i * 0.42).toFixed(2)}s;`}">${GLYPHS[key]}</span></button>`;
   }).join('');
 }
@@ -1964,6 +2029,71 @@ window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
 // Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
 window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
 window.sphereDisableRule = (id) => { if (id) toApp('ruleDisable', { id }); };
+window.spherePartnerOperation = (i) => {
+  const select = document.getElementById('partnerOperation-' + i);
+  if (!select) return;
+  (S.partnerOperationChoice = S.partnerOperationChoice || {})[i] = select.value;
+  S.partnerGrantArmed = null;
+  refreshScreen();
+};
+function partnerGrantChoice(i) {
+  const r = ((S.partnerInbox || {}).pending_requests || [])[i];
+  const surface = (document.getElementById('partnerSurface-' + i) || {}).value || '';
+  const operation = (document.getElementById('partnerOperation-' + i) || {}).value || '';
+  const requested = ((r || {}).requested_operations || {})[operation] || {};
+  const params = {};
+  let bi = 0;
+  for (const [name, bound] of Object.entries(requested)) {
+    if (bound.kind === 'enum') {
+      const value = (document.getElementById(`partnerBound-${i}-${bi}`) || {}).value || '';
+      if (!value) return null;
+      params[name] = { kind:'enum', values:[value] };
+    } else {
+      const min = Number((document.getElementById(`partnerBoundMin-${i}-${bi}`) || {}).value);
+      const max = Number((document.getElementById(`partnerBoundMax-${i}-${bi}`) || {}).value);
+      if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) return null;
+      params[name] = { kind:'number', min, max };
+    }
+    bi += 1;
+  }
+  if (!r || !surface || !operation || !Object.keys(params).length) return null;
+  return { r, surface, operation, allowed:{ [operation]:params } };
+}
+window.spherePartnerGrant = (i, duration) => {
+  const choice = partnerGrantChoice(i);
+  if (!choice) return;
+  const same = S.partnerGrantArmed && S.partnerGrantArmed.i === i
+    && S.partnerGrantArmed.surface === choice.surface
+    && JSON.stringify(S.partnerGrantArmed.allowed) === JSON.stringify(choice.allowed);
+  if (!same) {
+    S.partnerGrantArmed = { i, surface:choice.surface, operation:choice.operation, allowed:choice.allowed };
+    setTimeout(() => { if (S.partnerGrantArmed && S.partnerGrantArmed.i === i) { S.partnerGrantArmed = null; try { refreshScreen(); } catch (_) {} } }, 5000);
+    refreshScreen();
+    return;
+  }
+  S.partnerGrantArmed = null;
+  toApp('partnerAct', { act:'decide', request_id:choice.r.request_id, surface:choice.surface,
+    allowed_operations:choice.allowed, expires_at:nowS() + Math.max(60, duration|0) });
+};
+window.spherePartnerDecline = (i) => {
+  const r = ((S.partnerInbox || {}).pending_requests || [])[i];
+  if (r) toApp('partnerAct', { act:'decline', request_id:r.request_id });
+};
+window.spherePartnerRevoke = (i) => {
+  const g = ((S.partnerInbox || {}).active_grants || [])[i];
+  if (!g) return;
+  if (S.partnerRevokeArmed !== i) {
+    S.partnerRevokeArmed = i; refreshScreen();
+    setTimeout(() => { if (S.partnerRevokeArmed === i) { S.partnerRevokeArmed = null; try { refreshScreen(); } catch (_) {} } }, 5000);
+    return;
+  }
+  S.partnerRevokeArmed = null;
+  toApp('partnerAct', { act:'revoke', grant_id:g.grant_id });
+};
+window.spherePartnerRefuse = (i) => {
+  const p = ((S.partnerInbox || {}).pending_proposals || [])[i];
+  if (p) toApp('partnerAct', { act:'refuse', proposal_id:p.proposal_id });
+};
 window.sphereSetDeviceName = () => {
   const input = document.getElementById('deviceNameInput');
   const name = (input && input.value || '').trim();
@@ -2288,6 +2418,20 @@ function centerOnSelf() {
   G.group.quaternion.copy(diveAimQ());
   G.diveDir = saved;
 }
+window.spherePartnerInbox = (view) => {
+  S.partnerInbox = view;
+  S.partnerInboxError = '';
+  S.partnerGrantArmed = null;
+  S.partnerRevokeArmed = null;
+  if (S.activeScreen === 'partners') try { refreshScreen(); } catch (e) { S.jsErr = 'partners: ' + e.message; }
+  renderButtons();
+};
+window.spherePartnerInboxError = (message) => {
+  S.partnerInbox = null;
+  S.partnerInboxError = message || 'partner inbox unavailable';
+  if (S.activeScreen === 'partners') try { refreshScreen(); } catch (e) { S.jsErr = 'partners: ' + e.message; }
+  renderButtons();
+};
 window.sphereLinkDown = (msg) => { S.linkOk = false; S.linkErr = msg || ''; renderChrome(); };
 // The native map finished its own flight and the human surfaced back to orbit.
 // Reverse of the dive: called at the crossfade point of the ascent (25% street zoom-out

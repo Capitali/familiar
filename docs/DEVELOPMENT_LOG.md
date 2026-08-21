@@ -6,6 +6,40 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — T-216: a partner's request reaches only its registered human
+
+Rung 3's authority records already knew how to request, grant, decline, revoke, propose,
+and refuse, but the terminal functions still accepted a caller-supplied human string. The
+human-decision slice closes that gap. `PrincipalRecord.registered_by` is now bound from a
+non-serializable `HumanDecisionContext` at explicit registration; legacy principals have no
+addressee and fail closed. The signed console door derives that context only after certificate,
+node-key, freshness, full-standing, and effective-establishment checks. Decision payloads cannot
+name a human, and another established household human cannot read or decide someone else's row.
+
+`mcp::inbox` is a dedicated private projection over the full validated partner ledger. It joins
+the addressed principal's alias and credential fingerprint to current eligible local surface ids,
+and fails the whole view on corrupt or impossible authority history. It never enters worldview,
+record sync, federation, observations, MCP output, persistence, or diagnostics. A separate
+`POST /mesh/partner-inbox` fresh signed read and four typed console acts carry grant, decline,
+revoke, and proposal-refusal decisions. A successful write returns the post-append projection;
+the client validates that projection before reporting success, while transition conflicts trigger
+a fresh read and transport failure leaves the card pending. `propose` now rechecks the current
+`allow_agent` ceiling even under an otherwise-active grant.
+
+The shared served-person screen gains a Partner ring with ordinary-language cards: alias plus
+fingerprint, one eligible surface, one deliberately narrowed operation, bounded duration, and a
+second confirmation naming the surface and operation. Decline is immediate; active grants require
+two taps to revoke; proposals offer Refuse or remain pending only. Partner reasons stay visibly
+quoted, and no proposal card can accept, execute, or represent an actuator edge.
+
+Verification: fmt/diff check 0; changed-crate clippy `--all-targets -D warnings` 0; Rust workspace
+798 passed / 0 failed; Swift package 17 passed / 0 failed; shared sphere JavaScript parse check 0;
+unsigned Mac and iOS shell builds succeeded. The iOS project
+needed its generated Watch dependency removed only for the local simulator compile because the
+existing generated Watch target selects the iPhone simulator SDK; the project was regenerated
+after verification. No registration ceremony, live principal/grant/proposal decision, gate
+change, observe/invoke work, deployment, ship, or fleet mutation was performed.
+
 ## 2026-08-21 — T-219: a question whose subject stopped existing retires by policy
 
 `Question.retired` (serde-default) + `question::retire(id, why)` — retirement is an

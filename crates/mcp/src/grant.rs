@@ -14,7 +14,7 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 
-use crate::partner::{self, PartnerContext};
+use crate::partner::{self, HumanDecisionContext, PartnerContext};
 use crate::partner_act::{
     self, IdempotentAppend, PartnerAct, PartnerActBody, PartnerOperation, PartnerOutcome,
     ReasonCode, TransitionAppend,
@@ -149,6 +149,22 @@ pub fn request_grant(
     input: GrantRequestInput,
     now: i64,
 ) -> Result<PublicGrantReceipt, Refusal> {
+    if partner::registered_by(dir, &context.principal).is_none() {
+        let refusal = Refusal::new(
+            ReasonCode::WrongPrincipal,
+            "this principal has no human-bound rung-3 registration",
+        );
+        audit_refusal(
+            dir,
+            context,
+            PartnerOperation::GrantRequest,
+            input.request_key.as_str(),
+            refusal.code,
+            now,
+            None,
+        );
+        return Err(refusal);
+    }
     if let Err(refusal) = validate_request(dir, &input) {
         audit_refusal(
             dir,
@@ -262,18 +278,17 @@ pub fn request_grant(
     }
 }
 
-/// Named-human transition. It is intentionally not exposed as an MCP tool; the human decision
-/// surface is a later contract. Tests and that future surface call this typed primitive.
+/// Named-human transition. It is intentionally not exposed as an MCP tool; the signed private
+/// console inbox calls this typed primitive after deriving the human from the verified device.
 pub fn grant_request(
     dir: &Path,
-    human: &str,
+    actor: &HumanDecisionContext,
     request_id: &str,
     surface: &str,
     allowed_operations: OperationBounds,
     expires_at: i64,
     now: i64,
 ) -> Result<PublicGrantReceipt, Refusal> {
-    validate_human(human)?;
     let events = partner_act::load(dir).map_err(internal)?;
     let request = request_view(&events, request_id)?.ok_or_else(|| {
         Refusal::new(
@@ -281,6 +296,7 @@ pub fn grant_request(
             "that grant request does not exist",
         )
     })?;
+    require_addressee(dir, &request.context.principal, actor)?;
     if request_terminal(&events, request_id) {
         return Err(Refusal::new(
             ReasonCode::TransitionConflict,
@@ -333,13 +349,13 @@ pub fn grant_request(
             surface: surface.to_string(),
             allowed_operations: serde_json::to_value(allowed_operations).map_err(internal)?,
             epoch_nonce,
-            granted_by: human.to_string(),
+            granted_by: actor.human().to_string(),
             granted_at: now,
             expires_at,
         },
     )
     .map_err(internal)?
-    .by_human(human);
+    .by_human(actor.human());
     match partner_act::append_transition(dir, &event, &format!("grant-decision:{request_id}"))
         .map_err(internal)?
     {
@@ -353,11 +369,10 @@ pub fn grant_request(
 
 pub fn decline_request(
     dir: &Path,
-    human: &str,
+    actor: &HumanDecisionContext,
     request_id: &str,
     now: i64,
 ) -> Result<PublicGrantReceipt, Refusal> {
-    validate_human(human)?;
     let events = partner_act::load(dir).map_err(internal)?;
     let request = request_view(&events, request_id)?.ok_or_else(|| {
         Refusal::new(
@@ -365,6 +380,7 @@ pub fn decline_request(
             "that grant request does not exist",
         )
     })?;
+    require_addressee(dir, &request.context.principal, actor)?;
     let event = PartnerAct::partner(
         &request.context,
         now,
@@ -374,11 +390,11 @@ pub fn decline_request(
         request_id.to_string(),
         PartnerActBody::GrantDeclined {
             request_id: request_id.to_string(),
-            declined_by: human.to_string(),
+            declined_by: actor.human().to_string(),
         },
     )
     .map_err(internal)?
-    .by_human(human);
+    .by_human(actor.human());
     match partner_act::append_transition(dir, &event, &format!("grant-decision:{request_id}"))
         .map_err(internal)?
     {
@@ -390,13 +406,18 @@ pub fn decline_request(
     }
 }
 
-pub fn revoke_grant(dir: &Path, human: &str, grant_id: &str, now: i64) -> Result<(), Refusal> {
-    validate_human(human)?;
+pub fn revoke_grant(
+    dir: &Path,
+    actor: &HumanDecisionContext,
+    grant_id: &str,
+    now: i64,
+) -> Result<(), Refusal> {
     let events = partner_act::load(dir).map_err(internal)?;
     let grant = grant_views(&events)?
         .into_iter()
         .find(|g| g.grant_id == grant_id)
         .ok_or_else(|| Refusal::new(ReasonCode::GrantMissing, "that grant does not exist"))?;
+    require_addressee(dir, &grant.context.principal, actor)?;
     if grant.terminal.is_some() || now >= grant.expires_at {
         return Err(Refusal::new(
             ReasonCode::GrantInactive,
@@ -413,11 +434,11 @@ pub fn revoke_grant(dir: &Path, human: &str, grant_id: &str, now: i64) -> Result
         PartnerActBody::GrantRevoked {
             grant_id: grant_id.to_string(),
             surface: grant.surface,
-            revoked_by: human.to_string(),
+            revoked_by: actor.human().to_string(),
         },
     )
     .map_err(internal)?
-    .by_human(human);
+    .by_human(actor.human());
     match partner_act::append_transition(dir, &event, &format!("grant-terminal:{grant_id}"))
         .map_err(internal)?
     {
@@ -436,6 +457,23 @@ pub fn propose(
     now: i64,
 ) -> Result<PublicProposalReceipt, Refusal> {
     if let Err(refusal) = validate_proposal_shape(&input) {
+        audit_proposal_refusal(dir, context, &input, refusal.code, now);
+        return Err(refusal);
+    }
+    if partner::registered_by(dir, &context.principal).is_none() {
+        let refusal = Refusal::new(
+            ReasonCode::WrongPrincipal,
+            "this principal has no human-bound rung-3 registration",
+        );
+        audit_proposal_refusal(dir, context, &input, refusal.code, now);
+        return Err(refusal);
+    }
+    let boundary = familiar_kernel::boundary::load(dir).map_err(internal)?;
+    if !boundary.allow_agent {
+        let refusal = Refusal::new(
+            ReasonCode::BoundaryClosed,
+            "allow_agent is closed; no new partner proposal may enter",
+        );
         audit_proposal_refusal(dir, context, &input, refusal.code, now);
         return Err(refusal);
     }
@@ -546,16 +584,15 @@ pub fn propose(
     }
 }
 
-/// Named-human terminal transition for a proposal. The human inbox is a later contract, but
-/// rung 3 still needs a typed way to close an item so the open-proposal ceiling cannot become a
-/// permanent self-denial after sixty-four otherwise-valid proposals.
+/// Named-human terminal transition for a proposal. The private inbox exposes refusal only, so the
+/// open-proposal ceiling cannot become a permanent self-denial after sixty-four otherwise-valid
+/// proposals and no acceptance or execution edge is introduced.
 pub fn refuse_proposal(
     dir: &Path,
-    human: &str,
+    actor: &HumanDecisionContext,
     proposal_id: &str,
     now: i64,
 ) -> Result<(), Refusal> {
-    validate_human(human)?;
     let events = partner_act::load(dir).map_err(internal)?;
     let submitted = events
         .iter()
@@ -569,6 +606,7 @@ pub fn refuse_proposal(
             )
         })
         .ok_or_else(|| Refusal::new(ReasonCode::GrantMissing, "that proposal does not exist"))?;
+    require_addressee(dir, &submitted.principal, actor)?;
     let event = PartnerAct::partner(
         &context_of(submitted),
         now,
@@ -583,7 +621,7 @@ pub fn refuse_proposal(
         },
     )
     .map_err(internal)?
-    .by_human(human);
+    .by_human(actor.human());
     match partner_act::append_transition(dir, &event, &format!("proposal-decision:{proposal_id}"))
         .map_err(internal)?
     {
@@ -866,11 +904,15 @@ fn validate_reason(reason: Option<&str>) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn validate_human(human: &str) -> Result<(), Refusal> {
-    if human.trim().is_empty() || human.len() > 80 || human.chars().any(char::is_control) {
+fn require_addressee(
+    dir: &Path,
+    principal: &str,
+    actor: &HumanDecisionContext,
+) -> Result<(), Refusal> {
+    if !partner::is_registered_for(dir, principal, actor) {
         return Err(Refusal::new(
-            ReasonCode::SchemaInvalid,
-            "a named local human must cause this transition",
+            ReasonCode::WrongPrincipal,
+            "this human is not the registered addressee for that partner",
         ));
     }
     Ok(())
@@ -1159,6 +1201,13 @@ fn surface_matches(dir: &Path, surface: &str, class_id: &str) -> bool {
     };
     // The offering seam remains chair-owned. Keep this exhaustive and pinned against every
     // ClassDef until that seam grows a private matcher token suitable for grant binding.
+    actuator_matches_class(surface, class_id)
+}
+
+pub(crate) fn actuator_matches_class(
+    surface: &familiar_kernel::actuator::Actuator,
+    class_id: &str,
+) -> bool {
     match class_id {
         "switchable.reversible/v1" => {
             surface.actions.len() == 2
@@ -1249,6 +1298,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         declared_surface(&dir, "ians-secret-lamp");
+        std::fs::create_dir_all(dir.join("mcp")).unwrap();
+        let registry = partner::PrincipalRegistry {
+            principals: ["principal-a", "principal-b"]
+                .into_iter()
+                .map(|id| partner::PrincipalRecord {
+                    id: id.into(),
+                    alias: "Workshop agent".into(),
+                    credential_file: "mcp/test.env".into(),
+                    credential_key: "TOKEN".into(),
+                    credential_fingerprint: format!("{id}-fingerprint"),
+                    registered_by: "ian".into(),
+                    enabled: true,
+                })
+                .collect(),
+        };
+        std::fs::write(
+            dir.join(partner::PRINCIPALS_FILE),
+            serde_json::to_vec(&registry).unwrap(),
+        )
+        .unwrap();
         dir
     }
 
@@ -1278,6 +1347,10 @@ mod tests {
             credential_fingerprint: key.into(),
             alias: "Workshop agent".into(),
         }
+    }
+
+    fn human(name: &str) -> HumanDecisionContext {
+        HumanDecisionContext::from_verified_mesh(format!("{name}-device"), name.into()).unwrap()
     }
 
     fn operations(values: &[&str]) -> OperationBounds {
@@ -1317,7 +1390,7 @@ mod tests {
         open_agent(dir);
         grant_request(
             dir,
-            "ian",
+            &human("ian"),
             &pending.request_id,
             "ians-secret-lamp",
             operations(&["primary"]),
@@ -1399,7 +1472,7 @@ mod tests {
         assert_eq!(
             grant_request(
                 &dir,
-                "ian",
+                &human("ian"),
                 &pending.request_id,
                 "ians-secret-lamp",
                 operations(&["primary"]),
@@ -1414,7 +1487,7 @@ mod tests {
         assert_eq!(
             grant_request(
                 &dir,
-                "",
+                &human("betty"),
                 &pending.request_id,
                 "ians-secret-lamp",
                 operations(&["primary"]),
@@ -1423,11 +1496,11 @@ mod tests {
             )
             .unwrap_err()
             .code,
-            ReasonCode::SchemaInvalid
+            ReasonCode::WrongPrincipal
         );
         let receipt = grant_request(
             &dir,
-            "ian",
+            &human("ian"),
             &pending.request_id,
             "ians-secret-lamp",
             operations(&["primary"]),
@@ -1468,7 +1541,7 @@ mod tests {
             PublicGrantState::Granted { grant_id, .. } => grant_id.clone(),
             _ => unreachable!(),
         };
-        revoke_grant(&dir, "ian", &grant_id, NOW + 3).unwrap();
+        revoke_grant(&dir, &human("ian"), &grant_id, NOW + 3).unwrap();
         assert_eq!(
             propose(&dir, &a, proposal(&a, "revoked"), NOW + 4)
                 .unwrap_err()
@@ -1488,15 +1561,17 @@ mod tests {
         open_agent(&dir);
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
         let mut joins = Vec::new();
-        for human in ["ian", "betty"] {
+        for device in ["ian-device-one", "ian-device-two"] {
             let dir = dir.clone();
             let request_id = pending.request_id.clone();
             let barrier = barrier.clone();
             joins.push(std::thread::spawn(move || {
                 barrier.wait();
+                let actor =
+                    HumanDecisionContext::from_verified_mesh(device.into(), "ian".into()).unwrap();
                 grant_request(
                     &dir,
-                    human,
+                    &actor,
                     &request_id,
                     "ians-secret-lamp",
                     operations(&["primary"]),
@@ -1542,6 +1617,33 @@ mod tests {
     }
 
     #[test]
+    fn closing_allow_agent_immediately_stops_new_proposals_under_an_active_grant() {
+        let dir = temp("proposal_boundary");
+        let context = context("principal-a", "key-a");
+        let receipt = granted(&dir, &context, "grant");
+        std::fs::write(
+            dir.join(familiar_kernel::boundary::BOUNDARY_FILE),
+            serde_json::to_vec(&familiar_kernel::boundary::Boundary::closed()).unwrap(),
+        )
+        .unwrap();
+        let input = ProposalInput {
+            proposal_key: "closed-now".into(),
+            instance: handle(&receipt),
+            operation: "set_state".into(),
+            parameters: BTreeMap::from([("state".into(), Value::String("primary".into()))]),
+            reason: None,
+        };
+        assert_eq!(
+            propose(&dir, &context, input, NOW + 2).unwrap_err().code,
+            ReasonCode::BoundaryClosed
+        );
+        assert!(!partner_act::load(&dir)
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event.body, PartnerActBody::ProposalSubmitted { .. })));
+    }
+
+    #[test]
     fn a_named_human_can_close_a_proposal_without_creating_an_act() {
         let dir = temp("proposal_refusal");
         let context = context("principal-a", "key-a");
@@ -1561,15 +1663,15 @@ mod tests {
         .unwrap();
         assert_eq!(open_proposal_count(&dir, &context.principal).unwrap(), 1);
         assert_eq!(
-            refuse_proposal(&dir, "", &proposal.proposal_id, NOW + 3)
+            refuse_proposal(&dir, &human("betty"), &proposal.proposal_id, NOW + 3)
                 .unwrap_err()
                 .code,
-            ReasonCode::SchemaInvalid
+            ReasonCode::WrongPrincipal
         );
-        refuse_proposal(&dir, "ian", &proposal.proposal_id, NOW + 3).unwrap();
+        refuse_proposal(&dir, &human("ian"), &proposal.proposal_id, NOW + 3).unwrap();
         assert_eq!(open_proposal_count(&dir, &context.principal).unwrap(), 0);
         assert_eq!(
-            refuse_proposal(&dir, "betty", &proposal.proposal_id, NOW + 4)
+            refuse_proposal(&dir, &human("ian"), &proposal.proposal_id, NOW + 4)
                 .unwrap_err()
                 .code,
             ReasonCode::TransitionConflict

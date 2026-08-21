@@ -34,6 +34,7 @@ pub mod covenant;
 pub mod declaration;
 pub mod grant;
 pub mod http;
+pub mod inbox;
 pub mod offering;
 pub mod partner;
 pub mod partner_act;

@@ -204,7 +204,9 @@ fn tools_for(dir: &Path, params: &Value, context: Option<&PartnerContext>) -> Ve
     if attested {
         out.push(hello_tool(bound));
         out.push(discover_classes_tool(bound));
-        if bound {
+        if context
+            .is_some_and(|context| crate::partner::registered_by(dir, &context.principal).is_some())
+        {
             out.push(request_grant_tool());
             out.push(propose_tool());
         }
@@ -570,6 +572,23 @@ mod tests {
         let p = std::env::temp_dir().join(format!("mcpsrv_{name}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
+        std::fs::create_dir_all(p.join("mcp")).unwrap();
+        let registry = crate::partner::PrincipalRegistry {
+            principals: vec![crate::partner::PrincipalRecord {
+                id: "principal-a".into(),
+                alias: "Workshop agent".into(),
+                credential_file: "mcp/unused.env".into(),
+                credential_key: "TOKEN".into(),
+                credential_fingerprint: "fingerprint-principal-a".into(),
+                registered_by: "ian".into(),
+                enabled: true,
+            }],
+        };
+        std::fs::write(
+            p.join(crate::partner::PRINCIPALS_FILE),
+            serde_json::to_vec(&registry).unwrap(),
+        )
+        .unwrap();
         p
     }
 
@@ -1037,7 +1056,11 @@ mod tests {
         .unwrap();
         crate::grant::grant_request(
             &d,
-            "ian",
+            &crate::partner::HumanDecisionContext::from_verified_mesh(
+                "test-device".into(),
+                "ian".into(),
+            )
+            .unwrap(),
             request_id,
             "ians-secret-lamp",
             BTreeMap::from([(

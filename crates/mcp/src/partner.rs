@@ -29,6 +29,11 @@ pub struct PrincipalRecord {
     pub credential_file: String,
     pub credential_key: String,
     pub credential_fingerprint: String,
+    /// The established human who performed the registration ceremony. Missing on legacy
+    /// records, which deliberately leaves rung 3 disabled until a new human-authenticated
+    /// ceremony binds an addressee.
+    #[serde(default)]
+    pub registered_by: String,
     #[serde(default = "yes")]
     pub enabled: bool,
 }
@@ -50,6 +55,40 @@ pub struct PartnerContext {
     pub principal: String,
     pub credential_fingerprint: String,
     pub alias: String,
+}
+
+/// A human identity derived by the signed mesh door, never decoded from a decision payload.
+///
+/// The fields are private and this type is not deserializable. The mesh constructs it only
+/// after certificate, node-key, freshness, standing, and effective-establishment checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanDecisionContext {
+    device_node_id: String,
+    human: String,
+}
+
+impl HumanDecisionContext {
+    /// Cross-crate constructor for the verified mesh seam. Callers must have completed the
+    /// checks documented on this type; ordinary request schemas cannot construct it.
+    pub fn from_verified_mesh(device_node_id: String, human: String) -> Option<Self> {
+        let device_node_id = device_node_id.trim();
+        let human = human.trim();
+        if device_node_id.is_empty() || human.is_empty() || human.chars().any(char::is_control) {
+            return None;
+        }
+        Some(Self {
+            device_node_id: device_node_id.to_string(),
+            human: human.to_string(),
+        })
+    }
+
+    pub fn device_node_id(&self) -> &str {
+        &self.device_node_id
+    }
+
+    pub fn human(&self) -> &str {
+        &self.human
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +140,7 @@ pub fn load(dir: &Path) -> io::Result<PrincipalRegistry> {
 /// already placed on disk; it never creates or transmits credential bytes and has no MCP tool.
 pub fn register(
     dir: &Path,
+    actor: &HumanDecisionContext,
     alias: &str,
     credential_file: &str,
     credential_key: &str,
@@ -127,11 +167,30 @@ pub fn register(
         credential_file: credential_file.to_string(),
         credential_key: credential_key.to_string(),
         credential_fingerprint: fingerprint,
+        registered_by: actor.human().to_string(),
         enabled: true,
     };
     registry.principals.push(record.clone());
     write_registry(dir, &registry).map_err(|e| RegistrationError::Io(e.to_string()))?;
     Ok(record)
+}
+
+/// Return the rung-3 addressee for an enabled principal. Legacy records have no addressee and
+/// therefore fail closed. Registry corruption is also an absence, never guessed authority.
+pub fn registered_by(dir: &Path, principal: &str) -> Option<String> {
+    load(dir)
+        .ok()?
+        .principals
+        .into_iter()
+        .find(|record| record.enabled && record.id == principal)
+        .and_then(|record| {
+            let human = record.registered_by.trim();
+            (!human.is_empty() && !human.chars().any(char::is_control)).then(|| human.to_string())
+        })
+}
+
+pub fn is_registered_for(dir: &Path, principal: &str, actor: &HumanDecisionContext) -> bool {
+    registered_by(dir, principal).as_deref() == Some(actor.human())
 }
 
 /// Explicit human credential rotation. Keeping the principal id is the deliberate binding act
@@ -343,17 +402,22 @@ mod tests {
         std::fs::write(dir.join(file), format!("{key}={secret}\n")).unwrap();
     }
 
+    fn human(name: &str) -> HumanDecisionContext {
+        HumanDecisionContext::from_verified_mesh("device-test".into(), name.into()).unwrap()
+    }
+
     #[test]
     fn a_human_registration_binds_alias_and_secret_without_storing_the_secret() {
         let dir = temp("register");
         credential(&dir, "mcp/a.env", "TOKEN", "very-secret-a");
-        let record = register(&dir, "Workshop agent", "mcp/a.env", "TOKEN").unwrap();
+        let record = register(&dir, &human("ian"), "Workshop agent", "mcp/a.env", "TOKEN").unwrap();
         assert!(record.id.starts_with("principal-"));
         let raw = std::fs::read_to_string(dir.join(PRINCIPALS_FILE)).unwrap();
         assert!(!raw.contains("very-secret-a"));
         let context = authenticate(&dir, "very-secret-a").unwrap();
         assert_eq!(context.principal, record.id);
         assert_eq!(context.alias, "Workshop agent");
+        assert_eq!(registered_by(&dir, &record.id).as_deref(), Some("ian"));
         assert!(authenticate(&dir, "wrong").is_none());
     }
 
@@ -362,8 +426,8 @@ mod tests {
         let dir = temp("distinct");
         credential(&dir, "mcp/a.env", "TOKEN", "secret-a");
         credential(&dir, "mcp/b.env", "TOKEN", "secret-b");
-        let a = register(&dir, "same label", "mcp/a.env", "TOKEN").unwrap();
-        let b = register(&dir, "same label", "mcp/b.env", "TOKEN").unwrap();
+        let a = register(&dir, &human("ian"), "same label", "mcp/a.env", "TOKEN").unwrap();
+        let b = register(&dir, &human("ian"), "same label", "mcp/b.env", "TOKEN").unwrap();
         assert_ne!(a.id, b.id);
         assert_ne!(
             authenticate(&dir, "secret-a").unwrap().principal,
@@ -375,7 +439,7 @@ mod tests {
     fn changing_secret_bytes_is_not_implicit_rotation_but_binding_is() {
         let dir = temp("rotate");
         credential(&dir, "mcp/a.env", "TOKEN", "old");
-        let a = register(&dir, "A", "mcp/a.env", "TOKEN").unwrap();
+        let a = register(&dir, &human("ian"), "A", "mcp/a.env", "TOKEN").unwrap();
         credential(&dir, "mcp/a.env", "TOKEN", "new");
         assert!(authenticate(&dir, "old").is_none());
         assert!(authenticate(&dir, "new").is_none());
@@ -404,5 +468,17 @@ mod tests {
         let dir = temp("closed");
         std::fs::write(dir.join(PRINCIPALS_FILE), "{ nope").unwrap();
         assert!(authenticate(&dir, "anything").is_none());
+    }
+
+    #[test]
+    fn legacy_principal_has_no_rung_three_addressee() {
+        let dir = temp("legacy");
+        std::fs::write(
+            dir.join(PRINCIPALS_FILE),
+            r#"{"principals":[{"id":"old","alias":"Old","credential_file":"mcp/a.env","credential_key":"TOKEN","credential_fingerprint":"fp","enabled":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(registered_by(&dir, "old"), None);
+        assert!(!is_registered_for(&dir, "old", &human("ian")));
     }
 }
