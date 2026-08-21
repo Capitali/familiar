@@ -6,6 +6,25 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-21 — T-222: a person's words persist — answers reach the question registry
+
+The measured defect: 362 threads carried human answers while all 310 registry questions
+read `answered: false` — `record_answered` had no live producer (T-212's audit, then the
+funnel), so the console re-asked what was already said, which tells a person their words
+did not persist (codex's phrasing, adopted as the task's why).
+
+The join is by durable id ONLY (`Question.thread_id` — codex's Round 2 requirement;
+never prose, subject, or recency): `thread::add_answer` now calls
+`question::record_answered_for_thread`, closing exactly the questions bound to that
+thread. History heals the same way — `question::backfill_answered` runs each tick before
+question coordination, idempotently closing thread-bound questions whose thread already
+carries an answer. Unbound questions are untouched (their retirement is explicit policy,
+T-219 — never an invented answer). Root exempt by its own lifecycle.
+
+Tests pin: id-only join (sibling question stays open), idempotency, unbound no-op, and
+answered-question retirement. Checks: fmt 0, clippy --all-targets 0, workspace 783
+passed / 0 failed, exit-checked. Next: T-220's pending-decision brick.
+
 ## 2026-08-21 — ADR-0044 rung 3: a partner may propose only inside a human grant
 
 Rung 3 is merged at `1afa3f4`. The public MCP transport can retain a stable
