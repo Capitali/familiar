@@ -76,6 +76,15 @@ impl SubjectClass {
     }
 }
 
+/// One generic operation a class offers (rung-3 contract): the id a grant's act leg
+/// binds to. Repo-authored vocabulary — never an actuator's action string; the private
+/// surface resolver maps an abstract operation to a local act only under a human grant.
+pub struct ClassOperationDef {
+    pub id: &'static str,
+    /// Input schema as JSON-schema text, abstract slot names only.
+    pub input_schema: &'static str,
+}
+
 /// One capability class: repo-authored, generic, versioned. Everything a partner may
 /// learn about a capability lives in these `'static` fields and nowhere else.
 pub struct ClassDef {
@@ -97,6 +106,8 @@ pub struct ClassDef {
     pub failure: &'static str,
     /// Boundary gates an invocation would require — gate NAMES are code vocabulary.
     pub required_gates: &'static [&'static str],
+    /// The generic operations a grant may bind to (rung 3). Each separately grantable.
+    pub operations: &'static [ClassOperationDef],
 }
 
 /// The v1 class vocabulary. Adding to this list is the human declassification act.
@@ -113,6 +124,10 @@ pub const CLASS_DEFS: &[ClassDef] = &[ClassDef {
     failure: "the act reports failure and the surface keeps its prior state; the revert \
               path remains available",
     required_gates: &["allow_actuate"],
+    operations: &[ClassOperationDef {
+        id: "set_state",
+        input_schema: r#"{"type":"object","properties":{"state":{"type":"string","enum":["primary","reverted"]}},"required":["state"]}"#,
+    }],
 }];
 
 /// A class the compiler found present, at some assurance. Deliberately contains no
@@ -173,6 +188,11 @@ pub fn catalog_json(avail: &[Availability]) -> Value {
             "closed_revert": a.def.closed_revert,
             "failure": a.def.failure,
             "required_gates": a.def.required_gates,
+            "operations": a.def.operations.iter().map(|o| json!({
+                "id": o.id,
+                "input_schema": serde_json::from_str::<Value>(o.input_schema)
+                    .unwrap_or(Value::Null),
+            })).collect::<Vec<_>>(),
             "assurance": a.assurance.label(),
         })).collect::<Vec<_>>(),
         "note": "Classes are affordances, not authority: nothing here is invocable. \
