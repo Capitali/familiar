@@ -58,7 +58,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the one prior armed thread (lighthouse thread-0297) eroded to retired on missed predictions WHILE waiting for assent — the constitutional design routes action through assent, then lets the assent target die of a clock. Evidence: docs/reviews/2026-08-21-progress-areas.md
 
 ### T-221 · Prediction calibration: 120 of 125 settled predictions missed
-- status: claimed 2026-08-21 (diagnostic-first per codex Round 2 — the five-class miss partition before any default changes)
+- status: **done 2026-08-21 (mechanism fix; the week's report still owed)** — the five-class study was UNANIMOUS: 121/121 misses were class 3, invented event vocabulary ("presence_detector|detect_absence") that nothing produces. Fix live fleet-wide (merge `049fac1`): the system enumerates the observed actor|action vocabulary into the theorize prompt; an invented class refuses at mint on the record; a draft with no surviving prediction wonders. OWED per the accept: the following-week miss/coverage/settlement-latency report, so improvement is shown not asserted
 - owner: companion:claude-opus
 - scope: a study over prediction_results on both stores (window sizes, matcher classes, actor targets of the misses), then recalibrated mint defaults in the theorize prompt + prediction::mint; T-123's field-calibration gate consumes this
 - depends: —
