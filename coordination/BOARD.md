@@ -75,8 +75,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: humans DO talk — 362 threads carry answers fleet-wide while the registry believes silence
 
 ### T-219 · A question about a device that no longer exists never retires
-- status: proposed
-- owner: —
+- status: claimed 2026-08-21 (the build window; priority raised by T-222's finding that the lighthouse backlog is mostly unbound legacy)
+- owner: companion:claude-opus
 - scope: crates/kernel/src/question.rs (a retire path), the question-coordination sweep in crates/cycle; diagnosis of the enroll-era leftover class
 - depends: —
 - accept: an open question whose subject device has no living record retires on the sweep (retained, never deleted — same discipline as inquiry expiry); the lighthouse's live leftover ("A new device joined the mesh: iPhone (147cfa12). Who does it belong to?" — a device with NO record, occupying the active-question slot and starving the root) is gone after one deploy; a test pins the sweep
