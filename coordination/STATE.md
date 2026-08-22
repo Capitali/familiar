@@ -87,13 +87,19 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   Refilling cerebras credits is optional. Side-note for T-224/the fleet: the adapter
   already carries `apple`/`apple_local`/`apple_pcc` providers — Mac daemons have an
   on-device path waiting.
-- ~~T-216 registration ceremony~~ **IAN'S GO RECORDED 2026-08-22** ("T-216 registration
-  ceremony seems ready. Make it so") — but codex's T-224 Round 2 found, and the code
-  confirms, the ceremony seam is unbuilt (`partner::register` has no wire path; the
-  credential must pre-exist on the serving node). The go stands as standing authorization:
-  the moment brick 2 lands, the register card is staged — Ian's tap by default, companion
-  execution on his recorded word if he prefers speed. Claude budget raised to 50000/day
-  on his order (done, verified). IBM Bob backburnered.
+- **THE ENVOY REGISTRATION IS STAGED — ONE TAP FROM IAN COMPLETES THE FIRST CEREMONY
+  (2026-08-22 ~14:51 CT).** Brick 2 chair-accepted (`9bf538c` in the dialogue doc);
+  lighthouse deployed `9bf538c`; provisioning ran on the lighthouse:
+  staging id `registration-009cfb96ad56eebc3ff4932ffcefec57`, addressed to ian, credential
+  inert until the signed act. The Envoy's secret import bundle is 0600 at
+  `~/.envoy-import.json` on MacOnStick (box transfer copy deleted); door SPKI pin
+  independently recomputed = the recorded `46b43ebf…`. FamiliarMac rebuilt from main and
+  installed to /Applications (dev build, still stamps 101). **THE TAP: open FamiliarMac,
+  point its door at the lighthouse (134.209.168.50) if it isn't already, open the Partner
+  ring — the "Envoy (on-device)" registration card is waiting; two taps with the 5s
+  confirm window mint the first principal.** Ian's recorded word covers companion
+  execution instead if he asks. Claude budget raised to 50000/day (done, verified
+  earlier). IBM Bob backburnered.
 - **T-220's lights witness — a geography decision (2026-08-22).** Wildhorse is deployed
   and back on the mesh, but it is NOT in Motorhorse (192.168.1.x behind a different
   Starlink), and the SP548E strip is BLE-only in Motorhorse — out of range. Choose:
