@@ -11,6 +11,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-223 · The findings CLI accepts a caller-supplied human — the defect T-216 just outlawed
+- status: proposed
+- owner: —
+- scope: `familiar findings dismiss/accept --by <human>` (crates/cli + kernel/machinery.rs terminal transitions); either migrate the decision acts to the signed console-act pattern T-216 built, or downgrade the CLI to read-only and route decisions through a console act
+- depends: T-216 human decision surface (accepted `575e4ec` — the pattern and the transport now exist)
+- accept: no CLI flag can name the human who decided a MachineryFinding; the terminal transition derives its actor the way T-216's four decisions do (server-derived from a signed established-device context), or the CLI loses the mutating verbs entirely; a test pins whichever path is chosen
+- notes: filed by the chair from its own T-216 contract review (2026-08-21, on record in docs/reviews/2026-08-21-t216-rung3-grants.md): "the same defect lives in my own T-218 CLI — `familiar findings dismiss --by ian` accepts a caller-supplied human for a constitutional record. The principle this contract establishes indicts it." Not blocking T-216; it is the alignment debt that acceptance created
+
 ### T-216 · The capability offering: what the familiar learns to control, offered to other AIs over MCP — anonymized
 - status: **HUMAN DECISION SURFACE ACCEPTED 2026-08-21 (chair review `575e4ec`)** — codex's `c701a8b` reviewed against the contract's verification floor with no violations; bar independently reproduced (fmt 0, changed-crate clippy -D warnings 0, workspace 798/0). Four advisory notes on record in the review doc, none blocking. Rungs 1–3 + the decision surface are now COMPLETE IN CODE; every next motion (registration ceremony, any live decision, gate change, deploy, rungs 4/5 observe/invoke) is a human-authorized operation — waiting on Ian.
 - owner: companion:claude-opus (rung 2 + offering vocabulary) + companion:codex (rung 3 build)
@@ -76,7 +84,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: humans DO talk — 362 threads carry answers fleet-wide while the registry believes silence
 
 ### T-219 · A question about a device that no longer exists never retires
-- status: **done 2026-08-21** — merge `4064050` (brick `67f31b3`): explicit retirement-by-policy with the reason kept (never an invented answer; root never retires); the one sweep is a closed class — enroll-era arrival questions whose device no longer has a record, prefix-resolved. Bar green (790/0). NOTE: the lighthouse still runs `861cde9`; its stale active question clears on the next daemon deploy — the board-flip itself was delayed by a power loss mid-session (battery died; merge had already pushed)
+- status: **done 2026-08-21, VERIFIED LIVE 2026-08-22** — merge `4064050` (brick `67f31b3`): explicit retirement-by-policy with the reason kept (never an invented answer; root never retires); the one sweep is a closed class — enroll-era arrival questions whose device no longer has a record, prefix-resolved. Bar green (790/0). Lighthouse deployed `002e754` and q-0001 now reads `retired: true` with the reason kept ("its subject (device 147cfa12) no longer has a record") — the accept criterion witnessed on the live box
 - owner: companion:claude-opus
 - scope: crates/kernel/src/question.rs (a retire path), the question-coordination sweep in crates/cycle; diagnosis of the enroll-era leftover class
 - depends: —
