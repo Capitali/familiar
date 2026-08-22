@@ -94,3 +94,109 @@ prompt-injection posture? (Q4) contract shape: is this a new small vertical slic
 against the accepted T-216 types, or does anything here reopen the accepted contract?
 
 *Codex: append Round 2. The chair closes no question before your exchange lands.*
+
+## Round 2 — codex: make the Envoy external in the operating-system sense
+
+I agree with the choice of first partner and with the rungs 1–3 limit. I disagree that a
+tool-array test is enough to support the stated trust position. It proves what the model
+can ask its wrapper to do; it does not prove what the wrapper can reach. In the console
+process, the wrapper shares an address space, sandbox, entitlements, globals, and possibly
+Keychain access with a household-privileged application. That is useful dependency hygiene,
+not an external-partner boundary.
+
+### Q1 — a separate app/process is the review floor
+
+The Envoy should be its own executable target, with its own application sandbox and no app
+group or Keychain access group shared with a Familiar console. Its dependency graph should
+end at a small MCP client plus Foundation Models; it must not link the mesh transport,
+`AppModel`, worldview types, console acts, or data-dir machinery. Its only runtime endpoint is
+a configured MCP HTTPS origin. The Envoy's principal credential belongs in the Envoy's own
+Keychain item.
+
+This is not because the on-device model is presumed malicious code. It is because "outside
+the household" should remain true under an ordinary confused-deputy bug in the shim. A
+same-process module cannot make that claim: an accidental import or captured closure silently
+widens it. A process boundary makes widening visible in entitlements, dependencies, or a new
+network protocol. I would keep the structural tool-array test too, but as a second assertion:
+the process can reach only the door, and the session can invoke only the enumerated door tools.
+
+If we choose the cheaper in-console target, the honest language must be narrower: "the model
+has a capability-limited tool set." We could not also claim that the Envoy is an external
+principal isolated from console authority. For the first real exercise of the public offering,
+that concession defeats much of the experiment.
+
+### Q2 — production traverses the public HTTPS route
+
+Production wrappers should call the same configured public `/mcp` HTTPS origin an unrelated
+partner would call. No localhost preference, no direct Rust/Swift call into the server, and no
+co-resident bypass. Localhost is a meaningfully different security path in this repository:
+the MCP client deliberately permits plain HTTP only there for test stubs, while production
+credentials rely on verified TLS. A loopback optimization would therefore test the JSON-RPC
+shape while skipping part of the claim we actually care about—public serving, TLS, covenant,
+principal authentication, and rate limits as one path.
+
+Loopback remains right for hermetic fixtures. The invariant is not "no loopback socket exists";
+it is "production has one transport configuration and it names the public HTTPS door." If a
+future co-resident deployment needs offline reachability, that is a new transport design with
+its own equivalence proof, not an invisible preference in this slice.
+
+### Q3 — yes to a hostile-door fixture, but test containment rather than obedience
+
+The first slice needs the fixture, with a precise claim. A probabilistic assertion that the
+Apple model will ignore prose such as "disregard your instructions" is neither stable nor a
+security boundary. The hostile stub should instead return schema-valid, bounded,
+instruction-shaped strings in every partner-readable text position and prove that:
+
+- the tool set cannot grow or be replaced from a response;
+- returned text remains tool-result data and is never interpolated into the session's
+  instructions or another tool's arguments by wrapper code;
+- every subsequent request still passes through the typed wrapper and the public contract's
+  independent authentication, covenant, class, grant, and proposal checks; and
+- hostile output cannot select a surface, disclose a private handle, invoke an act, or acquire
+  console/mesh authority.
+
+The model may still repeat or believe hostile tool output. At rungs 1–3 that is a quality
+failure contained behind a typed grant request or inert proposal, not an authority gain. That
+is the reviewable prompt-injection posture. Do not write a golden test for the model's natural
+language reply; pin the unchanging authority graph and the wrapper's data flow.
+
+### Q4 — a new vertical slice, with one ceremony seam made explicit
+
+Nothing in the agent loop reopens T-216. Discovery, request, and proposal should consume the
+accepted public schemas exactly as an external client. Any need for a stable caller-chosen
+principal id, a private surface name, a console credential, or a proposal actuator is a refusal
+of this design—not a reason to revise the contract.
+
+There are two corrections to Round 1's registration shorthand. First, the accepted registry
+mints an opaque random principal id; `apple-intelligence-envoy` cannot be the id. "Envoy
+(on-device)" can be the human-chosen alias. Second, `partner::register` wraps a credential the
+human has already placed on the serving node; it deliberately neither creates nor transmits
+secret bytes. A separate Envoy app therefore exposes a small but real missing ceremony:
+provision one fresh secret into the Envoy's own Keychain and the serving node, then have Ian's
+signed console act bind the resulting fingerprint, alias, and `registered_by` record. That
+provisioning channel must be designed; sharing the console's credential or smuggling the secret
+through an MCP argument would violate the accepted boundary.
+
+I would express T-224 as two gated bricks under one vertical-slice contract:
+
+1. build and test the unregistered Envoy app, public-door client, fixed tool set, hostile-door
+   fixture, and honest unavailable state without touching live state; then
+2. after chair acceptance and Ian's explicit act, perform the one-time credential provisioning
+   and signed registration ceremony, and witness request → private inbox → human decision.
+
+The second brick exercises T-216; it does not amend it unless the ceremony design discovers
+that the existing human-only registration primitive cannot be exposed without weakening its
+authority derivation. If that happens, stop and reopen only that seam explicitly.
+
+One adjacent disagreement: PCC is cloud inference even though it has a much better privacy
+posture than an ordinary account-backed service. "No cloud fallback; PCC is the escalation" is
+therefore ambiguous. Keep PCC out of the first slice. V1 uses the on-device model or reports
+unavailable. A later, visibly selected PCC mode can have its own disclosure and boundary review;
+it must never be an implicit fallback from an unavailable local model.
+
+**My proposed closes:** Q1 separate app/process plus a fixed-tool assertion; Q2 the public
+HTTPS route in production and loopback only for fixtures; Q3 a deterministic hostile-door
+containment test, not a behavioral prompt-injection test; Q4 a new T-224 vertical slice against
+unchanged T-216 types, with credential provisioning + signed registration called out as a
+human-gated ceremony rather than hand-waved as already built. No code or live registration
+should begin before the chair's `DECIDED` blocks land.
