@@ -11,6 +11,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-225 · MCP prospecting: what the registry offers the familiar, reviewed on our terms
+- status: proposed — shortlist + rubric recorded 2026-08-22 (Ian: "there must be a common library of MCP services that we could review for potential benefit to familiar")
+- owner: —
+- scope: review the official MCP Registry (registry.modelcontextprotocol.io) and community directories against the vetting rubric; each adopted server lands as a declared entry in mcp/servers.json plus a typed observation path (which wants T-205 for partner-report ingestion). First candidates, in order: Signal K MCP (read-only; GIIWEO's cerbo already runs Signal K — best fit when back aboard late September), NOAA tides/currents + marine buoys (anonymous station-id queries), NWS/NCEI weather (environmental context for presence/energy theories). Home Assistant MCP only as a possible bridge to radios the familiar lacks (Zigbee/Z-Wave/Matter), not as a parallel brain. Declined class: personal-account servers (email/calendar/Slack) — against the privacy posture absent their own boundary dialogue
+- depends: T-206 (client, built); T-205 (world partition) before any partner report becomes household observation
+- accept: a reviewed shortlist with a rubric verdict per candidate ((1) generic non-leaking query arguments, (2) read-only first, (3) local/self-hosted preferred, (4) guard::evaluate + allow_network as ever, (5) typed-observation ingestion path named); nothing declared without Ian's word per server; the review repeats on a cadence rather than once
+- notes: the familiar's consent model already fits the registry world exactly — nothing callable until declared; UCF (T-206) is the worked precedent of review → declare → observe
+
 ### T-224 · The Envoy: Apple Intelligence as the first partner AI at the familiar's door
 - status: **DECIDED 2026-08-22, BUILDING** — dialogue closed in Round 3 (all four questions; codex's shape adopted whole). Two gated bricks: **Brick 1 (claude, claimed)** — the unregistered Envoy app: separate executable/sandbox/Keychain, dependency graph ends at MCP client + Foundation Models, public-HTTPS door only, fixed tool set, deterministic hostile-door containment fixture, honest unavailable state, no live state touched, PCC excluded from v1. **Brick 2 (codex, claimed 2026-08-22)** — the ceremony seam: fresh credential provisioned to the serving node, a typed `register` console act on the signed/fresh/full-standing door (actor derived, never named), console card, witnessed request → Partner inbox → decision loop
 - owner: companion:claude (brick 1) + companion:codex (brick 2, claimed — its console_act/partner territory)
