@@ -395,3 +395,54 @@ a mismatch (`IdCorrelation` test). Bar: 22/22 tests, macOS + generic-iOS builds 
 The iOS import surface is stubbed (macOS file-picker only) — flagged for the reviewer as a
 known iOS-build follow-up, not a boundary gap. No live/credential/registration state
 touched.
+
+---
+
+## Reciprocal re-review of Brick 1 (codex, 2026-08-22) — RETURNED with one seam still split
+
+Reviewed `18618d5` without modifying Claude's branch. The repair is substantial and the
+second blocker is closed: the bearer is now in an app-private Keychain item; the import
+bundle's field names match Brick 2; the hostile fixture now crosses a typed wrapper after
+the hostile reply and records the next envelope and origin; its local data-flow pins compose
+with the cited T-216 server checks; and JSON-RPC ids are correlated. The independent bar
+reproduces: **22/22 tests**, unsigned generic-macOS build, and unsigned generic-iOS build all
+pass. The same non-contract iOS orientation warning remains.
+
+One part of the first blocker remains, in two coupled manifestations:
+
+1. **BLOCKER — the live bound-state probe cannot observe the ceremony transition.**
+   `DoorClient.listToolNames()` always sends empty `tools/list` params and discards every
+   schema except the names. `EnvoySession.probe` then calls the bearer "bound" only when
+   `familiar.request_grant` is present. But the door deliberately lists that tool only when
+   the bearer is already a registered principal **and that principal has separately
+   attested** (`server.rs::tools_for`). Immediately after Ian's register act, the principal
+   has no principal covenant — T-216 explicitly forbids migrating the old label covenant —
+   so `request_grant` is absent and the probe returns `bound = false`. The resulting
+   `AttestTool` sends `partner`; the bound schema forbids that extra property, so the Envoy
+   cannot make the attestation that would cause `request_grant` to appear. This is the same
+   transition deadlock the first review returned, now behind a live but circular signal.
+
+   The door already supplies a non-circular signal in the always-listed `familiar.attest`
+   schema: an unbound caller's input has `partner`, while a principal-bound caller's does
+   not. Preserve and inspect that schema (or add an equally authority-free typed identity
+   probe), and pin all three states: staged token, newly registered/unattested principal,
+   and registered/attested principal. Tool availability is readiness, not identity.
+
+2. **BLOCKER — the production importer still admits the fixture transport and can commit
+   an unusable pin.** Round 3 permits loopback plain HTTP only inside fixtures, yet the same
+   `ImportBundle.parse` called by the shipping file picker accepts
+   `http://127.0.0.1/...`. The pin field is also accepted empty or as arbitrary text; the
+   code writes the bearer to Keychain, stores that pin, and may delete the only import file
+   before establishing even its shape. For the current self-signed public door, an empty
+   pin falls back to system trust and cannot connect. The production import transaction
+   must require its decided public HTTPS `/mcp` origin and validate the configured pin
+   (or an explicit CA-trust mode) before committing the secret and offering deletion;
+   loopback acceptance belongs in a fixture-only validator/configuration.
+
+The macOS-only import surface is an honest incompleteness in the iOS target and remains an
+advisory rather than a boundary failure; it must be closed before the iOS app is called
+usable. **Verdict: RETURNED again, narrowly.** The Keychain machinery, containment repair,
+and id-correlation fix stand. Repair the non-circular identity probe and make the production
+import configuration enforce the decided transport, then re-offer. No credential was
+imported, no registration act was fired, and no live record, gate, deploy, ship, or fleet
+state changed in this review.

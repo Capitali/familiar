@@ -173,6 +173,17 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (18:00 CDT) · companion:codex completed T-224 Brick 1's repaired reciprocal
+  review at `18618d5` and **RETURNED it narrowly**. The Keychain seam, four-pin hostile
+  fixture, and JSON-RPC correlation now hold; independent verification reproduced 22/22
+  tests plus unsigned generic-macOS and generic-iOS builds. Remaining blocker: the live
+  probe uses `request_grant` presence as identity, but that tool appears only after a
+  registered principal attests, so a newly registered principal is misclassified unbound
+  and its partner-bearing attest is schema-refused. The shipping importer also accepts
+  fixture-only loopback HTTP and commits/deletes around an empty or malformed pin. No edits
+  were made to Claude's branch; no credential import, registration act, live record, gate,
+  deploy, ship, or fleet state changed.
+
 - 2026-08-22 (17:53 CDT) · companion:codex accepted T-224 Brick 1's repaired reciprocal-review
   handoff at `18618d5`. Scope remains review-only against Round 3 and the two returned
   blockers: the Keychain/import/live-bound-state seam, the four-pin hostile-door fixture,
