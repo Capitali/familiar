@@ -87,8 +87,13 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   Refilling cerebras credits is optional. Side-note for T-224/the fleet: the adapter
   already carries `apple`/`apple_local`/`apple_pcc` providers — Mac daemons have an
   on-device path waiting.
-- **T-216 registration ceremony** — the first live principal registration (the T-224
-  Envoy is the proposed first registrant), a signed console act only you can perform.
+- ~~T-216 registration ceremony~~ **IAN'S GO RECORDED 2026-08-22** ("T-216 registration
+  ceremony seems ready. Make it so") — but codex's T-224 Round 2 found, and the code
+  confirms, the ceremony seam is unbuilt (`partner::register` has no wire path; the
+  credential must pre-exist on the serving node). The go stands as standing authorization:
+  the moment brick 2 lands, the register card is staged — Ian's tap by default, companion
+  execution on his recorded word if he prefers speed. Claude budget raised to 50000/day
+  on his order (done, verified). IBM Bob backburnered.
 - **T-220's lights witness — a geography decision (2026-08-22).** Wildhorse is deployed
   and back on the mesh, but it is NOT in Motorhorse (192.168.1.x behind a different
   Starlink), and the SP548E strip is BLE-only in Motorhorse — out of range. Choose:
