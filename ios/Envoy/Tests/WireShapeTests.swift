@@ -13,26 +13,10 @@ final class RecordingDoorProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        if let stream = request.httpBodyStream {
-            stream.open()
-            var data = Data()
-            let size = 4096
-            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
-            defer { buffer.deallocate() }
-            while stream.hasBytesAvailable {
-                let read = stream.read(buffer, maxLength: size)
-                if read <= 0 { break }
-                data.append(buffer, count: read)
-            }
-            stream.close()
-            Self.lastEnvelope =
-                (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        } else if let body = request.httpBody {
-            Self.lastEnvelope =
-                (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
-        }
+        Self.lastEnvelope =
+            (try? JSONSerialization.jsonObject(with: readBody(of: request))) as? [String: Any]
         let reply: [String: Any] = [
-            "jsonrpc": "2.0", "id": "1",
+            "jsonrpc": "2.0", "id": Self.lastEnvelope?["id"] as? String ?? "1",
             "result": ["content": [["type": "text", "text": "ok"]]],
         ]
         let data = try! JSONSerialization.data(withJSONObject: reply)

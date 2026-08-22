@@ -83,8 +83,9 @@ struct DoorClient: Sendable {
         if let credential {
             request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         }
+        let requestId = UUID().uuidString
         let envelope: [String: Any] = [
-            "jsonrpc": "2.0", "id": UUID().uuidString, "method": method, "params": params,
+            "jsonrpc": "2.0", "id": requestId, "method": method, "params": params,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: envelope)
 
@@ -101,6 +102,11 @@ struct DoorClient: Sendable {
         }
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw DoorError.malformed("body is not a JSON object")
+        }
+        // Wire fidelity includes id correlation: an answer to a different question is
+        // malformed, not merely surprising.
+        guard body["id"] as? String == requestId else {
+            throw DoorError.malformed("response id does not match the request id")
         }
         if let error = body["error"] as? [String: Any] {
             throw DoorError.rpc(

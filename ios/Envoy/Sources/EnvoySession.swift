@@ -5,9 +5,19 @@ import FoundationModels
 /// and instructions that state the trust posture. No PCC in v1 — the model is available
 /// on this device or the Envoy honestly reports that it is not (dialogue Round 3).
 enum EnvoySession {
+    /// Whether the door currently recognizes this bearer as a registered principal.
+    /// Derived LIVE from the door's own tool ladder — `familiar.request_grant` is listed
+    /// only for registered principals — so the staged-token → bound-principal transition
+    /// happens the moment Ian's signed act lands, with no client-side state to forget.
+    struct DoorStatus {
+        let reachable: Bool
+        let bound: Bool
+        let note: String
+    }
+
     /// What the Envoy can honestly offer right now.
     enum Readiness {
-        case ready(LanguageModelSession)
+        case ready(LanguageModelSession, DoorStatus)
         case modelUnavailable(String)
     }
 
@@ -29,25 +39,44 @@ enum EnvoySession {
         """
 
     static func make(
-        origin: URL, credential: String?, bound: Bool = false, spkiPin: String? = nil,
-        partnerLabel: String
-    ) -> Readiness {
+        origin: URL, credential: String?, spkiPin: String? = nil, partnerLabel: String
+    ) async -> Readiness {
         let model = SystemLanguageModel.default
         switch model.availability {
         case .available:
             do {
+                let transport = DoorPinning.session(pin: spkiPin)
+                let probe = try DoorClient(
+                    origin: origin, credential: credential, bound: false, session: transport)
+                let status = await Self.probe(probe)
                 let door = try DoorClient(
-                    origin: origin, credential: credential, bound: bound,
-                    session: DoorPinning.session(pin: spkiPin))
+                    origin: origin, credential: credential, bound: status.bound,
+                    session: transport)
                 let session = LanguageModelSession(
                     tools: DoorToolset.all(door: door, partnerLabel: partnerLabel),
                     instructions: instructions)
-                return .ready(session)
+                return .ready(session, status)
             } catch {
                 return .modelUnavailable(String(describing: error))
             }
         case .unavailable(let reason):
             return .modelUnavailable(Self.describe(reason))
+        }
+    }
+
+    private static func probe(_ door: DoorClient) async -> DoorStatus {
+        do {
+            let names = try await door.listToolNames()
+            let bound = names.contains("familiar.request_grant")
+            return DoorStatus(
+                reachable: true, bound: bound,
+                note: bound
+                    ? "door reached — registered principal (grant/propose available)"
+                    : "door reached — unregistered (covenant tier only)")
+        } catch {
+            return DoorStatus(
+                reachable: false, bound: false,
+                note: "door unreachable: \(error) — tools will report refusals honestly")
         }
     }
 
