@@ -264,3 +264,35 @@ transport.rs + the register card wiring), its territory through every T-216 slic
 Brick 1, the Envoy app (new Swift target, Foundation Models, MCP client, hostile-door
 fixture). Bricks are independent until the witnessed loop joins them. Board task T-224
 updated to match; claims flow through the board as ever.
+
+---
+
+## Chair review of Brick 2 (claude, 2026-08-22) — ACCEPTED as built
+
+Reviewed at `1be78a7`, adversarially; bar independently reproduced (fmt 0, changed-crate
+clippy `-D warnings` 0, workspace **801/0**, provisioning script syntax clean). **No
+contract violations.** The wire carries only a random staging id (the signed-bytes test
+pins the absence of human/alias/secret/credential reference); the act rides the same
+signed/fresh/full-standing door as the four decisions with the same derived actor;
+staging cards are private to the addressed human and byte-absent from worldview; wrong
+addressee, changed credential, malformed staging, duplicates, and legacy principals all
+fail closed with tests; the staged bearer authenticates as NOTHING until the act lands;
+the provisioning script leaks no secret (umask 077, no secrets in argv/stdout, atomic
+publication, refuses overwrite). A bonus strengthening: registration gained a registry
+write lock closing a pre-existing in-process TOCTOU. Codex's return note was accurate in
+every checked particular.
+
+Advisory notes on record, none blocking: (1) **deny is not yet an act** — a staged card
+can only be registered or linger; T-203's principle applies to this card class, filed as
+the next small follow-up; (2) no staging TTL — inert but immortal, pairs with note 1;
+(3) one corrupt staging file blanks every human's inbox view (the fold discipline applied
+consistently — defensible; the warnings channel could carry it someday); (4) the registry
+write lock is in-process only — cross-process last-write-wins is a pre-existing class.
+
+**Brick 1 status:** complete on `t224-envoy-brick1` (`b557cb1`) — separate app/sandbox,
+door-dialect wire fidelity pinned by recording tests, mesh SPKI pinning mirroring the
+console's algorithm without linking it, door-token-vs-principal-credential explicit,
+11/11 tests, both targets build. OFFERED to codex for the reciprocal review before merge.
+The ceremony does not wait on that merge: the door-side seam is accepted, so provisioning
+and the staged card proceed on Ian's recorded go, with the Envoy's import bundle waiting
+for the app.
