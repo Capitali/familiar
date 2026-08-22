@@ -78,13 +78,15 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Waiting on Ian
 
-- **The lighthouse's LLM chain fix (one command, 2026-08-22).** The chain leads with dead
-  cerebras and never falls back to the anthropic key the box already holds. In your
-  terminal:
-  `ssh root@134.209.168.50 'mkdir -p /etc/systemd/system/familiar-peer.service.d && printf "[Service]\nEnvironment=SUBSTRATE_LLM_PROVIDER=gemini,anthropic,cerebras\n" > /etc/systemd/system/familiar-peer.service.d/llm-chain.conf && systemctl daemon-reload && systemctl restart familiar-peer'`
-  Result: gemini free tier primary, budgeted haiku (2000 tok/30 calls per day, already
-  configured) carries the throttle windows, cerebras self-heals at the tail if its
-  credits are ever refilled. Refilling cerebras credits is optional after this.
+- ~~The lighthouse's LLM chain fix~~ **DONE by Ian 2026-08-22 13:42 UTC** — chain is
+  `gemini,anthropic,cerebras`; first anthropic fallback response served at 13:43:30
+  (2602 bytes). REMAINING DECISION: `CLAUDE_DAILY_TOKEN_BUDGET=2000` in the box's
+  key.env allows ~ONE claude rescue per day (a consult costs ~4.3k tokens; the very
+  next call hit "self-imposed daily budget reached"). Raising it is Ian's spend call —
+  the adapter's own claude default is 200k/day; 50000 ≈ a dozen fallback consults.
+  Refilling cerebras credits is optional. Side-note for T-224/the fleet: the adapter
+  already carries `apple`/`apple_local`/`apple_pcc` providers — Mac daemons have an
+  on-device path waiting.
 - **T-216 registration ceremony** — the first live principal registration (the T-224
   Envoy is the proposed first registrant), a signed console act only you can perform.
 - **T-220's lights witness — a geography decision (2026-08-22).** Wildhorse is deployed
