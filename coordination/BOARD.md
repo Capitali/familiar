@@ -11,6 +11,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 *(companions add here; the controller queues or declines)*
 
+### T-224 · The Envoy: Apple Intelligence as the first partner AI at the familiar's door
+- status: proposed — **DIALOGUE OPEN 2026-08-22** (docs/reviews/2026-08-22-apple-intelligence-partner-dialogue.md, Round 1 = claude's direction; codex Round 2 pending). Ian authorized the co-discussion; the Three Laws are the boundaries
+- owner: — (dialogue first; build claim follows the DECIDED blocks)
+- scope: a partner shim wrapping a Foundation Models `LanguageModelSession` whose ONLY tools are the familiar's public MCP door (covenant pair, discover_classes, request_grant, propose); its own principal + credential; `#available(iOS 26.0, *)`-gated (console targets are iOS 17/macOS 14). Registration ceremony remains Ian's signed console act
+- depends: T-216 (accepted `575e4ec`); the first live principal registration (human-authorized, waiting on Ian)
+- accept: the Envoy reaches the household ONLY through the public door (pinned by test — its tool set cannot carry a household-privileged path); a grant request filed by the Envoy renders on Ian's Partner inbox card and is decidable by the accepted two-tap flow; availability is honest (`SystemLanguageModel.availability`, no cloud fallback beyond PCC); rungs 4/5 and any actuation stay out of the first slice
+- notes: Ian 2026-08-22, verbatim: "Apple Intelligence seems like the right partner AI to consume the familiars own MCP offering." Why this partner first: on-device, no account/key/stored prompts (matches the offering's anonymization posture), free with no metering cliff, and maximally external in the only way that matters — its sole channel is the door we built
+
 ### T-223 · The findings CLI accepts a caller-supplied human — the defect T-216 just outlawed
 - status: proposed
 - owner: —

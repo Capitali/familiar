@@ -78,6 +78,17 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Waiting on Ian
 
+- **The lighthouse's LLM chain fix (one command, 2026-08-22).** The chain leads with dead
+  cerebras and never falls back to the anthropic key the box already holds. In your
+  terminal:
+  `ssh root@134.209.168.50 'mkdir -p /etc/systemd/system/familiar-peer.service.d && printf "[Service]\nEnvironment=SUBSTRATE_LLM_PROVIDER=gemini,anthropic,cerebras\n" > /etc/systemd/system/familiar-peer.service.d/llm-chain.conf && systemctl daemon-reload && systemctl restart familiar-peer'`
+  Result: gemini free tier primary, budgeted haiku (2000 tok/30 calls per day, already
+  configured) carries the throttle windows, cerebras self-heals at the tail if its
+  credits are ever refilled. Refilling cerebras credits is optional after this.
+- **T-216 registration ceremony** — the first live principal registration (the T-224
+  Envoy is the proposed first registrant), a signed console act only you can perform.
+- **IBM Bob install** — verified pkg at ~/Downloads; `! installer -pkg "/Users/ian/Downloads/IBM-Bob-darwin-arm64-1.126.0+bob2.0.3.pkg" -target CurrentUserHomeDirectory`
+
 - **THE BOUNDARY HAS DRIFTED SHUT — gated on Ian's own act, 2026-08-17.** He confirmed the
   current `boundary.json` (last written 2026-08-15 22:11) is **not his intent**. Shut:
   `allow_execute`, `allow_authored_execute`, `allow_actuate`, `allow_agent`, `allow_network`,
@@ -139,6 +150,8 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   what is built. Planning brief: docs/reviews/2026-08-14-reasoning-engine.md.
 
 ## Companion & infra notes
+
+- 2026-08-22 (midday) · companion:claude (chair). **T-224 dialogue OPENED** (Apple Intelligence as the first partner AI — the Envoy; Round 1 pushed, codex's watcher wakes on this push). **The lighthouse "out of gemini tokens" mystery is SOLVED and it isn't gemini**: the provider chain is `cerebras,gemini` — cerebras leads every failure line with its 402 "out of credits", which read as token exhaustion; gemini actually served at 11:31 and 12:35 today and its 429s are transient free-tier throttling (retry 300s), consistent with Ian's AI Studio quota page. Found while diagnosing: **key.env holds an ANTHROPIC_API_KEY with a deliberate haiku budget (2000 tokens / 30 calls per day) that is NOT in the chain.** The fix is one env override; the harness refused remote config mutation from this session, so it is owed as Ian's one-liner (recorded in Waiting on Ian). IBM Bob evaluated on Ian's ask: no standing free tier (30-day trial, Bobcoins metering), no inference API, Claude underneath — not a lighthouse provider; possible third coding lane later. Bob 2.0.3 pkg downloaded + signature-verified to ~/Downloads on MacOnStick; install needs Ian (harness refuses installers).
 
 - 2026-08-22 · companion:claude (chair). **Lighthouse deployed `002e754`** (post-CI-green; includes T-219's retirement sweep, T-216's accepted decision surface — fail-closed, no principals registered — and the inbox fixture-race fix CI caught, root-caused in DEVELOPMENT_LOG). **T-219 verified live**: q-0001 reads `retired: true` with the reason kept; first tick ran clean. Two things observed for Ian: **the lighthouse's LLM providers are BOTH failing — cerebras "out of credits (402)", gemini rate-limited (429)** — the box reasons on no cloud model until credits/keys are refreshed; and wildhorse is still ssh-dark (6th attempt), which keeps blocking T-220's live witness. T-223 filed (the findings CLI's `--by ian` defect the T-216 contract indicts). This lane's T-216 motion now waits on Ian: registration ceremony, any live decision, and rungs 4/5 are each human-authorized operations.
 
