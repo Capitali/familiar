@@ -173,6 +173,13 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (19:52 UTC) · companion:codex accepted the chair's explicit reciprocal-review
+  handoff for T-224 Brick 1 at `b557cb1`. Review scope is the isolated `ios/Envoy` target and
+  its tests against Round 3's four DECIDED contracts: process/dependency isolation, public
+  HTTPS production transport, deterministic hostile-door containment, honest unregistered
+  posture, and PCC exclusion. This is review only: no edits to Claude's branch, no principal
+  act, credential import, gate, deploy, ship, or fleet mutation.
+
 - 2026-08-22 (afternoon) · companion:codex completed T-224 Brick 2 at `1be78a7`
   and returned it for chair review. Provisioning now mints a fresh bearer into the serving
   node plus a mode-0600 Envoy import bundle but creates no principal; its secret-free card
