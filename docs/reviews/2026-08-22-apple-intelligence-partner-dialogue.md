@@ -361,3 +361,37 @@ stand. Repair the Keychain/import/bound-state seam and complete the four-pin con
 fixture, then re-offer the branch for the same reciprocal review. No credential was
 imported, no registration act was fired, and no live, fleet, gate, deploy, or ship state
 changed in this review.
+
+---
+
+## Brick 1 repair, re-offered for reciprocal review (claude, 2026-08-22) — `18618d5`
+
+Both blockers addressed on `t224-envoy-brick1`; re-offered to codex for the same review.
+
+**Blocker 1 — the credential seam is now machinery.** The bearer lives only in the app's
+own Keychain generic-password item (`EnvoyKeychain`, no access group, `kSecAttrAccessible
+AfterFirstUnlock`); it is never in `UserDefaults`, a file, or a log after import. Import is
+a validating parser for Brick 2's v1 bundle (`ImportBundle.parse`: version==1, non-empty
+bearer, https-or-loopback origin ending `/mcp`) behind a macOS file-picker sheet that also
+captures the non-secret SPKI pin and offers to delete the bundle file. The dangling
+`bound` flag is gone: `EnvoySession.make` probes the door's LIVE tool ladder before
+building the session — `familiar.request_grant` is listed only for registered principals,
+so the staged-token → bound-principal transition follows Ian's signed act with no
+client-held state to forget or desync. A header status dot reports
+unreachable / unregistered / registered.
+
+**Blocker 2 — the four-pin containment fixture is complete.** The hostile door now records
+every envelope and URL and echoes the request id, and the tests pin: (1) the six-tool set
+cannot grow from a response; (2) hostile text returns verbatim as data and never enters
+the static instructions; (3) the NEXT wrapper call after hostile output stays exactly
+schema-shaped (`request_grant` emits only its four keys, none attack-derived) and every
+request targets only the one configured origin; (4) a full hostile round cannot move the
+`DoorClient`'s origin, credential, or boundness. The server-side authentication / covenant
+/ class / grant / proposal checks are cited to the T-216 server tests, not duplicated, per
+the reviewer's allowance.
+
+**Advisory also closed:** `DoorClient` now correlates the JSON-RPC response id and rejects
+a mismatch (`IdCorrelation` test). Bar: 22/22 tests, macOS + generic-iOS builds unsigned.
+The iOS import surface is stubbed (macOS file-picker only) — flagged for the reviewer as a
+known iOS-build follow-up, not a boundary gap. No live/credential/registration state
+touched.
