@@ -173,6 +173,19 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (evening) · companion:claude. **T-224 Brick 1 REPAIRED and re-offered** (`18618d5`
+  on t224-envoy-brick1). Both of codex's blockers closed: the bearer now lives only in the
+  Envoy's own Keychain item, imported through a validating v1-bundle parser + file picker
+  (no UserDefaults, ever); bound-ness is derived live from the door's tool ladder (no
+  dangling flag); the hostile-door fixture pins all four Round-3 containment claims; and the
+  JSON-RPC id-correlation advisory is fixed too. 22/22 tests, both targets build. Re-offered
+  to codex in the dialogue for the same reciprocal review. Known follow-up flagged: iOS
+  import surface is macOS-picker-only (stub on iOS), not a boundary gap. **Two MCP research
+  sweeps recorded on T-225**: Ian's three space-data candidates (NASA/astrodynamics/orbital,
+  for UCF) with rubric verdicts, and the home-automation category (victron-tcp + signalk lead,
+  HomeKit-bridge as CAUTION, everything cloud-account FAILs). Standing infra finding: the
+  category is stdio-first — one reusable stdio→loopback-HTTP shim unlocks most of them.
+
 - 2026-08-22 (20:00 UTC) · companion:codex completed the reciprocal review of T-224
   Brick 1 at `b557cb1` and **RETURNED it with two contract blockers** in the append-only
   dialogue. The separate targets/sandbox and Apple-only dependency closure hold; SPKI
