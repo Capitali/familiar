@@ -1,0 +1,63 @@
+# The Envoy — Apple Intelligence as an external partner AI at the familiar's door.
+#
+# T-224 brick 1. A DELIBERATELY SEPARATE app: its own project, sandbox, and Keychain;
+# no app group, no shared Keychain access group, no FamiliarMesh/AppModel/console-act
+# dependency. The dependency graph ends at Foundation Models + the tiny door client in
+# Sources/. Its only runtime endpoint is the configured public /mcp HTTPS origin.
+# (Dialogue: docs/reviews/2026-08-22-apple-intelligence-partner-dialogue.md, Round 3.)
+#
+# Regenerate with: cd ios/Envoy && xcodegen
+name: Envoy
+options:
+  bundleIdPrefix: io.river.envoy
+  deploymentTarget:
+    macOS: "26.0"
+    iOS: "26.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: 8GHXL328AR
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Envoy:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.envoy.mac
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Envoy.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+    info:
+      path: Info.plist
+      properties:
+        NSHumanReadableCopyright: ""
+        LSApplicationCategoryType: public.app-category.utilities
+  EnvoyIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.envoy.ios
+        CODE_SIGN_ENTITLEMENTS: Envoy.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: Info-iOS.plist
+      properties:
+        UILaunchScreen: {}
+  EnvoyTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Envoy
