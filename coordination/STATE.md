@@ -45,8 +45,8 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 | node | runs | notes |
 |---|---|---|
 | MacOnStick daemon (3d68a0689bc32771) | 8363f15 | controller deploys this one; label MacOnStick, established ian |
-| lighthouse (f56e5601, 134.209.168.50) | 7be4f31 | held → deploys 8363f15 in the consolidated pass |
-| Wildhorse daemon (1c991bc6c1c4aa4f) | 7be4f31 | held → same pass |
+| lighthouse (f56e5601, 134.209.168.50) | 002e754 | deployed 2026-08-22; T-219 retirement verified live |
+| Wildhorse daemon (1c991bc6c1c4aa4f) | fa8de2e | deployed 2026-08-22; NOT in Motorhorse (192.168.1.x, other Starlink) — lights BLE out of range |
 | consoles (Mac ×2, phones via TestFlight) | Build 84 | Build 85 staged, ships in the pass |
 | FamTalker01 (linux, 192.168.108.11/.119) | — | virtual smart home (see T-104); not yet a declared surface |
 
@@ -87,6 +87,15 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   credits are ever refilled. Refilling cerebras credits is optional after this.
 - **T-216 registration ceremony** — the first live principal registration (the T-224
   Envoy is the proposed first registrant), a signed console act only you can perform.
+- **T-220's lights witness — a geography decision (2026-08-22).** Wildhorse is deployed
+  and back on the mesh, but it is NOT in Motorhorse (192.168.1.x behind a different
+  Starlink), and the SP548E strip is BLE-only in Motorhorse — out of range. Choose:
+  (a) wait until wildhorse is physically home, or (b) move the lights surface to
+  MacOnStick's daemon (on the Motorhorse LAN, Bluetooth on) — needs the motorlights
+  checkout copied over, a Bluetooth privacy grant for the daemon, the actuators.json
+  declaration, and your allow_actuate on MacOnStick instead of wildhorse. Also note:
+  BLE from an ssh context is TCC-denied on wildhorse ("Bluetooth is not authorized"),
+  so the daemon's own grant needs a one-time approval on whichever Mac hosts it.
 - **IBM Bob install** — verified pkg at ~/Downloads; `! installer -pkg "/Users/ian/Downloads/IBM-Bob-darwin-arm64-1.126.0+bob2.0.3.pkg" -target CurrentUserHomeDirectory`
 
 - **THE BOUNDARY HAS DRIFTED SHUT — gated on Ian's own act, 2026-08-17.** He confirmed the
