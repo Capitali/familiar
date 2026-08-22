@@ -296,3 +296,68 @@ console's algorithm without linking it, door-token-vs-principal-credential expli
 The ceremony does not wait on that merge: the door-side seam is accepted, so provisioning
 and the staged card proceed on Ian's recorded go, with the Envoy's import bundle waiting
 for the app.
+
+---
+
+## Reciprocal review of Brick 1 (codex, 2026-08-22) — RETURNED with two contract blockers
+
+Reviewed `b557cb1` without modifying Claude's branch. Much of the proposed boundary is
+real: `Envoy` and `EnvoyIOS` are separate application targets with their own bundle ids
+and sandbox, no app group or Keychain access group, and no package or repository-module
+dependency. The built macOS image links only Apple system frameworks (Foundation,
+Foundation Models, CryptoKit, Security, and SwiftUI). The six-tool array is closed in one
+place; the public default is the lighthouse's HTTPS `/mcp` route; non-loopback HTTP is
+refused; the P-256 SPKI reconstruction is byte-for-byte the console algorithm without a
+`FamiliarMesh` link; and PCC is absent. Availability failure is stated honestly.
+
+The independent bar also reproduces: **11/11 tests**, macOS build, and generic-iOS build
+all pass under Xcode 27 with signing disabled. The iOS build has one non-contract warning
+about interface orientations. Those facts are necessary, but the DECIDED contract is not
+yet met:
+
+1. **BLOCKER — the credential seam is commentary, not machinery (Q1/Q4).**
+   `ContentView.swift` stores the bearer in `@AppStorage("door_token")`, hence in the
+   app's preferences rather than its own Keychain. There is no `SecItem` use, import
+   parser, file-import surface, or other consumer for Brick 2's staged
+   `~/.envoy-import.json`; the only screen is the conversation. There is likewise no
+   way in the app to install the lighthouse's SPKI pin. With the checked-in defaults,
+   the first call to the self-signed production door therefore uses system trust and
+   cannot connect. After an out-of-band preferences write, the app still always calls
+   `EnvoySession.make` with `bound` omitted, so the value remains `false`: after Ian's
+   registration tap it keeps sending `partner`, which the authenticated principal schema
+   rejects. A Boolean in the client type accurately names the distinction, but no state
+   transition ever reaches it.
+
+   Before merge, the app needs an explicit, tested import/configuration seam that validates
+   the v1 bundle and public HTTPS `/mcp` origin, stores the bearer in this app's Keychain
+   item (never `UserDefaults`), obtains and stores the non-secret SPKI pin, and deletes or
+   directs deletion of the import file after success. It must also derive or probe the
+   credential's *current* door identity safely: the staged bearer is unbound before Ian's
+   tap and principal-bound after it, so merely treating every imported bearer as bound
+   would fail on the other side of the ceremony.
+
+2. **BLOCKER — the hostile-door fixture proves only two of the four required pins (Q3).**
+   The fixture proves that a response cannot mutate the compile-time tool-name array and
+   that one returned string does not mutate a static instructions constant. Its hostile
+   calls go directly through `DoorClient.call(tool:arguments:)`, bypassing the typed
+   `Tool` wrappers. It never makes a subsequent wrapper call and inspects that envelope,
+   so it does not pin that hostile output stays out of another tool's arguments or that
+   every call re-traverses the typed wrapper. It also supplies no executable assertion
+   for the remaining authority claims: no surface selection, handle disclosure, act edge,
+   or acquired authority. The code inspection supports the intended graph, but Round 3
+   explicitly made the deterministic tests part of acceptance. Extend the recorder/hostile
+   fixture to exercise the wrappers and pin the local data-flow edges; the existing T-216
+   server tests may be cited or composed for the independent authentication/covenant/
+   class/grant/proposal half rather than duplicated.
+
+One advisory, not a third blocker: every request sends a UUID JSON-RPC id, while both test
+doors answer with the constant id `"1"`; `DoorClient` never correlates the response id.
+`URLSession.data(for:)` keeps responses request-local, so this does not widen authority,
+but a client described as wire-faithful should reject a mismatched id and test the match.
+
+**Verdict: RETURNED, not accepted for merge.** The process boundary, dependency closure,
+TLS pin algorithm, typed wire shapes, fixed tool set, and model-availability posture can
+stand. Repair the Keychain/import/bound-state seam and complete the four-pin containment
+fixture, then re-offer the branch for the same reciprocal review. No credential was
+imported, no registration act was fired, and no live, fleet, gate, deploy, or ship state
+changed in this review.

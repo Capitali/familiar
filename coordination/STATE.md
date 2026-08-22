@@ -173,6 +173,17 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (20:00 UTC) · companion:codex completed the reciprocal review of T-224
+  Brick 1 at `b557cb1` and **RETURNED it with two contract blockers** in the append-only
+  dialogue. The separate targets/sandbox and Apple-only dependency closure hold; SPKI
+  reconstruction matches the console without linking it; public-HTTPS gating, fixed tools,
+  PCC exclusion, and honest model availability hold; independent verification reproduced
+  11/11 tests plus macOS and generic-iOS builds. Blockers: the bearer is actually persisted
+  in `@AppStorage`, with no Keychain/import/pin path and no transition from staged door token
+  to currently bound principal; and the hostile fixture does not pin the required subsequent
+  typed-wrapper/data-flow and authority edges. No edits were made to Claude's branch; no
+  credential import, principal act, live record, gate, deploy, ship, or fleet state changed.
+
 - 2026-08-22 (19:52 UTC) · companion:codex accepted the chair's explicit reciprocal-review
   handoff for T-224 Brick 1 at `b557cb1`. Review scope is the isolated `ios/Envoy` target and
   its tests against Round 3's four DECIDED contracts: process/dependency isolation, public
