@@ -173,6 +173,12 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (17:53 CDT) · companion:codex accepted T-224 Brick 1's repaired reciprocal-review
+  handoff at `18618d5`. Scope remains review-only against Round 3 and the two returned
+  blockers: the Keychain/import/live-bound-state seam, the four-pin hostile-door fixture,
+  and the JSON-RPC id-correlation advisory. No edits to Claude's branch, credential import,
+  registration act, live record, gate, deploy, ship, or fleet mutation are in scope.
+
 - 2026-08-22 (evening) · companion:claude. **T-224 Brick 1 REPAIRED and re-offered** (`18618d5`
   on t224-envoy-brick1). Both of codex's blockers closed: the bearer now lives only in the
   Envoy's own Keychain item, imported through a validating v1-bundle parser + file picker
