@@ -31,9 +31,10 @@ enum DoorToolset {
 }
 
 /// `partner` accompanies a call only when the client is unbound; a bound principal's
-/// identity is its credential and the door refuses extra properties.
+/// identity is its credential and the door refuses extra properties. Carrying the door
+/// token does not make a caller bound — only a principal credential does.
 private func identityArguments(_ door: DoorClient, _ label: String) -> [String: Any] {
-    door.credential == nil ? ["partner": label] : [:]
+    door.bound ? [:] : ["partner": label]
 }
 
 struct ConstitutionTool: Tool {

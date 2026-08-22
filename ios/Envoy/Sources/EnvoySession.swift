@@ -28,12 +28,17 @@ enum EnvoySession {
         - If you are unattested, read the constitution and attest before discovery.
         """
 
-    static func make(origin: URL, credential: String?, partnerLabel: String) -> Readiness {
+    static func make(
+        origin: URL, credential: String?, bound: Bool = false, spkiPin: String? = nil,
+        partnerLabel: String
+    ) -> Readiness {
         let model = SystemLanguageModel.default
         switch model.availability {
         case .available:
             do {
-                let door = try DoorClient(origin: origin, credential: credential)
+                let door = try DoorClient(
+                    origin: origin, credential: credential, bound: bound,
+                    session: DoorPinning.session(pin: spkiPin))
                 let session = LanguageModelSession(
                     tools: DoorToolset.all(door: door, partnerLabel: partnerLabel),
                     instructions: instructions)

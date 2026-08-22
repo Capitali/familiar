@@ -13,6 +13,12 @@ struct ContentView: View {
     /// provisioned credential); the default is the household's public door.
     @AppStorage("door_origin") private var doorOrigin = "https://134.209.168.50:47100/mcp"
     @AppStorage("partner_label") private var partnerLabel = "envoy-on-device"
+    /// The door's TLS key pin (SPKI SHA-256 hex) — the mesh cert is self-signed, so a
+    /// pin is how the Envoy knows it reached the right familiar. Empty = system trust.
+    @AppStorage("door_spki_pin") private var doorPin = ""
+    /// The bearer the door demands even from unregistered callers (the door token the
+    /// human issued). Brick 2's ceremony replaces this with the Envoy's own credential.
+    @AppStorage("door_token") private var doorToken = ""
 
     struct Line: Identifiable {
         let id = UUID()
@@ -69,7 +75,9 @@ struct ContentView: View {
         guard let origin = URL(string: doorOrigin) else {
             return .modelUnavailable("The configured door origin is not a URL: \(doorOrigin)")
         }
-        return EnvoySession.make(origin: origin, credential: nil, partnerLabel: partnerLabel)
+        return EnvoySession.make(
+            origin: origin, credential: doorToken.isEmpty ? nil : doorToken,
+            spkiPin: doorPin.isEmpty ? nil : doorPin, partnerLabel: partnerLabel)
     }
 
     private func send(session: LanguageModelSession) {

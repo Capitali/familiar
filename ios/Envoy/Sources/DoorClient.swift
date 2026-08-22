@@ -24,13 +24,21 @@ struct DoorClient: Sendable {
     }
 
     let origin: URL
-    /// Bearer credential for a registered principal. Brick 1 runs unregistered (nil);
-    /// brick 2's ceremony provisions this into the Envoy's own Keychain item.
+    /// Bearer for the door. Even an unregistered caller needs the door token its human
+    /// issued; after brick 2's ceremony this becomes the Envoy's own principal credential
+    /// in its own Keychain item.
     let credential: String?
+    /// True once the bearer is a PRINCIPAL credential (post-ceremony). Bound callers must
+    /// not send a `partner` label — identity comes from the credential, and the door's
+    /// schemas refuse extra properties. A door token alone leaves the caller unbound.
+    let bound: Bool
     /// Injectable so the hostile-door fixture can answer hermetically; production uses .shared.
     let session: URLSession
 
-    init(origin: URL, credential: String? = nil, session: URLSession = .shared) throws {
+    init(
+        origin: URL, credential: String? = nil, bound: Bool = false,
+        session: URLSession = .shared
+    ) throws {
         let scheme = origin.scheme?.lowercased() ?? ""
         let host = origin.host ?? ""
         let loopback = host == "127.0.0.1" || host == "localhost"
@@ -39,6 +47,7 @@ struct DoorClient: Sendable {
         }
         self.origin = origin
         self.credential = credential
+        self.bound = bound
         self.session = session
     }
 

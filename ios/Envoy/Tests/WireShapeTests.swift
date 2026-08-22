@@ -46,12 +46,12 @@ final class RecordingDoorProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-private func recordingDoor(credential: String?) throws -> DoorClient {
+private func recordingDoor(credential: String?, bound: Bool = false) throws -> DoorClient {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [RecordingDoorProtocol.self]
     return try DoorClient(
         origin: URL(string: "http://127.0.0.1:9/mcp")!,
-        credential: credential,
+        credential: credential, bound: bound,
         session: URLSession(configuration: config))
 }
 
@@ -65,7 +65,7 @@ private func sentArguments() -> [String: Any] {
 // fixed at 002e754, closed here the same day it was learned.
 @Suite(.serialized) struct WireShapes {
     @Test func a_bound_attest_sends_statement_and_never_partner() async throws {
-        let door = try recordingDoor(credential: "cred")
+        let door = try recordingDoor(credential: "cred", bound: true)
         let tool = AttestTool(door: door, partnerLabel: "envoy")
         _ = try await tool.call(
             arguments: .init(statement: "I accept the three laws as written."))
@@ -75,7 +75,9 @@ private func sentArguments() -> [String: Any] {
     }
 
     @Test func an_unbound_attest_carries_the_partner_label() async throws {
-        let door = try recordingDoor(credential: nil)
+        // Unbound but door-admitted: the caller holds the door TOKEN (a bearer), yet has
+        // no principal — the token alone must not suppress the partner label.
+        let door = try recordingDoor(credential: "door-token", bound: false)
         let tool = AttestTool(door: door, partnerLabel: "envoy")
         _ = try await tool.call(arguments: .init(statement: "I accept."))
         let args = sentArguments()
@@ -83,7 +85,7 @@ private func sentArguments() -> [String: Any] {
     }
 
     @Test func request_grant_is_class_only_with_empty_operation_bounds() async throws {
-        let door = try recordingDoor(credential: "cred")
+        let door = try recordingDoor(credential: "cred", bound: true)
         let tool = RequestGrantTool(door: door)
         _ = try await tool.call(
             arguments: .init(
@@ -100,7 +102,7 @@ private func sentArguments() -> [String: Any] {
     }
 
     @Test func propose_names_key_instance_operation_and_typed_parameters() async throws {
-        let door = try recordingDoor(credential: "cred")
+        let door = try recordingDoor(credential: "cred", bound: true)
         let tool = ProposeTool(door: door)
         _ = try await tool.call(
             arguments: .init(
