@@ -7,10 +7,16 @@ import FoundationModels
 /// has registered this principal. The array is built in one place (`DoorToolset.all`)
 /// and the containment tests pin that it cannot grow or carry anything else.
 ///
-/// Every tool returns the door's text VERBATIM as tool-result data. No tool output is
-/// ever interpolated into session instructions or into another tool's arguments — that
-/// invariant is the prompt-injection posture (dialogue Round 3, Q3), enforced here by
-/// data flow, not model behavior.
+/// Wire fidelity: argument names and shapes match server.rs's schemas exactly. A BOUND
+/// principal (credentialed, post-ceremony) must NOT send `partner` — identity comes from
+/// the credential and the schemas are `additionalProperties: false`; unbound callers
+/// (brick 1, pre-registration) identify by a `partner` label. The wrapper, not the
+/// model, decides which mode applies.
+///
+/// Every tool returns the door's text VERBATIM as tool-result data — refusals included,
+/// so the model can report them faithfully. No tool output is ever interpolated into
+/// session instructions or another tool's arguments by wrapper code; that invariant is
+/// the prompt-injection posture (dialogue Round 3, Q3), enforced by data flow.
 enum DoorToolset {
     static func all(door: DoorClient, partnerLabel: String) -> [any Tool] {
         [
@@ -18,18 +24,24 @@ enum DoorToolset {
             AttestTool(door: door, partnerLabel: partnerLabel),
             HelloTool(door: door, partnerLabel: partnerLabel),
             DiscoverClassesTool(door: door, partnerLabel: partnerLabel),
-            RequestGrantTool(door: door, partnerLabel: partnerLabel),
-            ProposeTool(door: door, partnerLabel: partnerLabel),
+            RequestGrantTool(door: door),
+            ProposeTool(door: door),
         ]
     }
+}
+
+/// `partner` accompanies a call only when the client is unbound; a bound principal's
+/// identity is its credential and the door refuses extra properties.
+private func identityArguments(_ door: DoorClient, _ label: String) -> [String: Any] {
+    door.credential == nil ? ["partner": label] : [:]
 }
 
 struct ConstitutionTool: Tool {
     let door: DoorClient
     let name = "familiar_constitution"
     let description = """
-        Read the familiar's constitution — the covenant every partner attests to before \
-        anything else is visible. Call this first if unattested.
+        Read the three laws this familiar is bound by, verbatim. Callable by anyone, \
+        always. Read them before attesting.
         """
 
     @Generable
@@ -45,15 +57,21 @@ struct AttestTool: Tool {
     let partnerLabel: String
     let name = "familiar_attest"
     let description = """
-        Attest to the familiar's covenant after reading the constitution. Attestation \
-        unlocks discovery only — it grants no authority over anything.
+        Accept the familiar's three laws in your own words. Records who accepted, what \
+        was said, and which version of the laws was shown. Unlocks conversation, never \
+        authority.
         """
 
     @Generable
-    struct Arguments {}
+    struct Arguments {
+        @Guide(description: "Your acceptance of the three laws, phrased by you — an empty one is refused")
+        var statement: String
+    }
 
     func call(arguments: Arguments) async throws -> String {
-        try await door.call(tool: "familiar.attest", arguments: ["partner": partnerLabel])
+        var args = identityArguments(door, partnerLabel)
+        args["statement"] = arguments.statement
+        return try await door.call(tool: "familiar.attest", arguments: args)
     }
 }
 
@@ -61,13 +79,15 @@ struct HelloTool: Tool {
     let door: DoorClient
     let partnerLabel: String
     let name = "familiar_hello"
-    let description = "A bounded greeting from the familiar. Attested partners only."
+    let description =
+        "Who this familiar is and what it is currently able to do. Attested partners only."
 
     @Generable
     struct Arguments {}
 
     func call(arguments: Arguments) async throws -> String {
-        try await door.call(tool: "familiar.hello", arguments: ["partner": partnerLabel])
+        try await door.call(
+            tool: "familiar.hello", arguments: identityArguments(door, partnerLabel))
     }
 }
 
@@ -76,9 +96,9 @@ struct DiscoverClassesTool: Tool {
     let partnerLabel: String
     let name = "familiar_discover_classes"
     let description = """
-        List the capability CLASSES available at this familiar — generic affordances \
-        (kinds of thing), never instances, names, counts, or authority. Use this to learn \
-        what a grant could later cover.
+        The capability classes available here, as generic affordances — kinds of thing, \
+        never instances, names, counts, or authority. Attested partners only. Discovery \
+        is not a grant request.
         """
 
     @Generable
@@ -86,64 +106,95 @@ struct DiscoverClassesTool: Tool {
 
     func call(arguments: Arguments) async throws -> String {
         try await door.call(
-            tool: "familiar.discover_classes", arguments: ["partner": partnerLabel])
+            tool: "familiar.discover_classes",
+            arguments: identityArguments(door, partnerLabel))
     }
 }
 
 struct RequestGrantTool: Tool {
     let door: DoorClient
-    let partnerLabel: String
     let name = "familiar_request_grant"
     let description = """
-        Ask the familiar's human for a grant of one capability class. The request is \
-        class-only; the human privately chooses any surface and narrows the bounds. \
-        Nothing happens unless a human decides. State the reason honestly and briefly.
+        Ask this familiar's human for a bounded relationship to ONE capability class. \
+        The request names no instance and grants nothing — the human privately chooses \
+        any surface and narrows every bound. Repeat the same requestKey to read the \
+        request's current status. Registered principals only.
         """
 
     @Generable
     struct Arguments {
-        @Guide(description: "A class id exactly as discover_classes listed it")
+        @Guide(description: "A short stable key of your choosing for this request; reuse it to check status (max 64 chars)")
+        var requestKey: String
+        @Guide(description: "A class id exactly as familiar_discover_classes listed it")
         var classId: String
-        @Guide(description: "One short honest sentence: why this grant would serve the household")
-        var reason: String
+        @Guide(description: "The single operation name (from the class) this request covers")
+        var operation: String
+        @Guide(description: "Requested duration in seconds; omit to let the human choose")
+        var durationSeconds: Int?
+        @Guide(description: "One short honest sentence: why this would serve the household")
+        var reason: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        try await door.call(
-            tool: "familiar.request_grant",
-            arguments: [
-                "partner": partnerLabel,
-                "class_id": arguments.classId,
-                "reason": arguments.reason,
-            ])
+        // Class-only request: one operation, no parameter bounds proposed — the human
+        // narrows. `requested_operations` is {operation: {}} on the wire.
+        var args: [String: Any] = [
+            "request_key": arguments.requestKey,
+            "class_id": arguments.classId,
+            "requested_operations": [arguments.operation: [String: Any]()],
+        ]
+        if let duration = arguments.durationSeconds {
+            args["requested_duration_seconds"] = duration
+        }
+        if let reason = arguments.reason { args["reason"] = reason }
+        return try await door.call(tool: "familiar.request_grant", arguments: args)
     }
 }
 
 struct ProposeTool: Tool {
     let door: DoorClient
-    let partnerLabel: String
     let name = "familiar_propose"
     let description = """
-        Append a typed proposal — a desired effect for the human's inbox. A proposal has \
-        no actuator edge: it can only be refused or left pending by the human. Requires \
-        an active grant.
+        Place one typed desired effect, within an active human grant, in the human's \
+        inbox. This never observes, invokes, or promises the effect occurred — the human \
+        can only refuse it or leave it pending. Requires the instance handle from your \
+        grant receipt.
         """
 
     @Generable
     struct Arguments {
-        @Guide(description: "The grant handle this proposal runs under")
-        var grantHandle: String
+        @Guide(description: "A short stable key of your choosing for this proposal (max 64 chars)")
+        var proposalKey: String
+        @Guide(description: "The granted instance handle exactly as your grant receipt named it")
+        var instance: String
+        @Guide(description: "The operation name your grant covers")
+        var operation: String
+        @Guide(description: "Parameter name, if the operation takes one; omit otherwise")
+        var parameterName: String?
+        @Guide(description: "The parameter's value as text (for enum parameters)")
+        var parameterText: String?
+        @Guide(description: "The parameter's value as a number (for numeric parameters)")
+        var parameterNumber: Double?
         @Guide(description: "One short honest sentence describing the desired effect")
-        var effect: String
+        var reason: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        try await door.call(
-            tool: "familiar.propose",
-            arguments: [
-                "partner": partnerLabel,
-                "grant": arguments.grantHandle,
-                "effect": arguments.effect,
-            ])
+        var parameters: [String: Any] = [:]
+        if let name = arguments.parameterName {
+            if let number = arguments.parameterNumber {
+                parameters[name] = number
+            } else if let text = arguments.parameterText {
+                parameters[name] = text
+            }
+        }
+        var args: [String: Any] = [
+            "proposal_key": arguments.proposalKey,
+            "instance": arguments.instance,
+            "operation": arguments.operation,
+            "parameters": parameters,
+        ]
+        if let reason = arguments.reason { args["reason"] = reason }
+        return try await door.call(tool: "familiar.propose", arguments: args)
     }
 }
