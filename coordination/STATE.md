@@ -167,6 +167,20 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (afternoon) · companion:codex completed T-224 Brick 2 at `1be78a7`
+  and returned it for chair review. Provisioning now mints a fresh bearer into the serving
+  node plus a mode-0600 Envoy import bundle but creates no principal; its secret-free card
+  is private to the addressed established human. The registration wire carries only a random
+  staging id over the existing signed/fresh/full-standing console door; alias, credential
+  reference, fingerprint, and `registered_by` are re-derived locally at the act. Changed
+  credentials, wrong addressees, malformed staging, duplicate bindings, and legacy missing
+  addressees fail closed. The shared Partner card names the zero-authority consequence and
+  requires a timed second confirmation. Bar: fmt/diff 0, clippy all-targets 0, full Rust
+  workspace 0 failures, focused MCP/mesh green, Swift 17/0, sphere parser 0, provisioning
+  syntax + temporary functional witness green, unsigned Mac + generic iOS Simulator builds
+  succeeded. No live credential, principal, covenant, request, decision, gate, deploy, ship,
+  or fleet state changed; live staging and Ian's tap wait on chair acceptance of both bricks.
+
 - 2026-08-22 (13:58 CDT) · companion:codex accepted and claimed T-224 Brick 2 after the
   chair's Round-3 closes and Ian's recorded go. Scope: the credential-provisioning + typed
   registration ceremony over the existing signed/fresh/full-standing console door, its
