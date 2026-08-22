@@ -8,14 +8,16 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub const PRINCIPALS_FILE: &str = "mcp/principals.json";
+pub const PENDING_REGISTRATIONS_DIR: &str = "mcp/pending-registrations";
 pub const MAX_PRINCIPALS: usize = 64;
 pub const MAX_ALIAS_BYTES: usize = 80;
+const MAX_PENDING_REGISTRATIONS: usize = 64;
 
 const RATE_CAPACITY: u32 = 30;
 const GLOBAL_RATE_CAPACITY: u32 = 120;
@@ -55,6 +57,35 @@ pub struct PartnerContext {
     pub principal: String,
     pub credential_fingerprint: String,
     pub alias: String,
+}
+
+/// The secret-free portion of a provisioning staged for one established human's console.
+/// Credential paths and keys stay on the serving node and never enter this projection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PendingRegistrationView {
+    pub registration_id: String,
+    pub partner_alias: String,
+    pub credential_fingerprint: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingRegistration {
+    version: u8,
+    id: String,
+    alias: String,
+    credential_file: String,
+    credential_key: String,
+    credential_fingerprint: String,
+    addressed_to: String,
+    created_at: i64,
+}
+
+#[derive(Debug)]
+struct LoadedPendingRegistration {
+    record: PendingRegistration,
+    path: PathBuf,
 }
 
 /// A human identity derived by the signed mesh door, never decoded from a decision payload.
@@ -98,6 +129,9 @@ pub enum RegistrationError {
     CredentialMissing,
     RegistryFull,
     DuplicateCredential,
+    UnknownRegistration,
+    WrongAddressee,
+    CredentialChanged,
     Io(String),
 }
 
@@ -116,6 +150,14 @@ impl std::fmt::Display for RegistrationError {
             Self::DuplicateCredential => {
                 write!(f, "that credential is already bound to a principal")
             }
+            Self::UnknownRegistration => write!(f, "that staged registration does not exist"),
+            Self::WrongAddressee => {
+                write!(f, "that staged registration is addressed to another human")
+            }
+            Self::CredentialChanged => write!(
+                f,
+                "the staged credential is missing or changed; provision a fresh ceremony"
+            ),
             Self::Io(e) => write!(f, "principal registry: {e}"),
         }
     }
@@ -139,6 +181,17 @@ pub fn load(dir: &Path) -> io::Result<PrincipalRegistry> {
 /// Human-only registration primitive. It mints an identity around a credential the human
 /// already placed on disk; it never creates or transmits credential bytes and has no MCP tool.
 pub fn register(
+    dir: &Path,
+    actor: &HumanDecisionContext,
+    alias: &str,
+    credential_file: &str,
+    credential_key: &str,
+) -> Result<PrincipalRecord, RegistrationError> {
+    let _guard = registry_write_lock();
+    register_unlocked(dir, actor, alias, credential_file, credential_key)
+}
+
+fn register_unlocked(
     dir: &Path,
     actor: &HumanDecisionContext,
     alias: &str,
@@ -175,6 +228,96 @@ pub fn register(
     Ok(record)
 }
 
+/// Return only ceremonies addressed to the verified human. Every staged file is validated as
+/// a whole before filtering; malformed or changed provisioning makes the private view fail
+/// rather than presenting a card whose credential no longer has the stated fingerprint.
+pub fn pending_for(
+    dir: &Path,
+    actor: &HumanDecisionContext,
+) -> io::Result<Vec<PendingRegistrationView>> {
+    let pending = load_pending(dir)?;
+    if pending
+        .iter()
+        .any(|pending| !pending_secret_is_current(dir, &pending.record))
+    {
+        return Err(invalid_pending(
+            "a pending registration credential is missing or changed",
+        ));
+    }
+    let registered: HashSet<String> = load(dir)?
+        .principals
+        .into_iter()
+        .map(|record| record.credential_fingerprint)
+        .collect();
+    Ok(pending
+        .into_iter()
+        .filter(|pending| {
+            pending.record.addressed_to == actor.human()
+                && !registered.contains(&pending.record.credential_fingerprint)
+        })
+        .map(|pending| PendingRegistrationView {
+            registration_id: pending.record.id,
+            partner_alias: pending.record.alias,
+            credential_fingerprint: pending.record.credential_fingerprint,
+            created_at: pending.record.created_at,
+        })
+        .collect())
+}
+
+/// Bind one pre-provisioned credential to the human derived by the signed console door.
+/// The wire carries only the random staging id: alias, credential reference, fingerprint, and
+/// addressee are re-read from the serving node after signature/freshness/standing checks.
+pub fn register_staged(
+    dir: &Path,
+    actor: &HumanDecisionContext,
+    registration_id: &str,
+) -> Result<PrincipalRecord, RegistrationError> {
+    let registration_id = registration_id.trim();
+    if !valid_registration_id(registration_id) {
+        return Err(RegistrationError::UnknownRegistration);
+    }
+    let _guard = registry_write_lock();
+    let mut pending = load_pending(dir).map_err(|e| RegistrationError::Io(e.to_string()))?;
+    let Some(staged) = pending
+        .drain(..)
+        .find(|pending| pending.record.id == registration_id)
+    else {
+        return Err(RegistrationError::UnknownRegistration);
+    };
+    if staged.record.addressed_to != actor.human() {
+        return Err(RegistrationError::WrongAddressee);
+    }
+
+    let registry = load(dir).map_err(|e| RegistrationError::Io(e.to_string()))?;
+    if let Some(existing) = registry
+        .principals
+        .iter()
+        .find(|record| record.credential_fingerprint == staged.record.credential_fingerprint)
+    {
+        if existing.registered_by == actor.human() && existing.alias == staged.record.alias {
+            let out = existing.clone();
+            let _ = std::fs::remove_file(&staged.path);
+            return Ok(out);
+        }
+        return Err(RegistrationError::DuplicateCredential);
+    }
+
+    if !pending_secret_is_current(dir, &staged.record) {
+        return Err(RegistrationError::CredentialChanged);
+    }
+    let registered = register_unlocked(
+        dir,
+        actor,
+        &staged.record.alias,
+        &staged.record.credential_file,
+        &staged.record.credential_key,
+    )?;
+    // The registry write is the authority transition and is already durable. A failed cleanup
+    // cannot roll it back; projections filter registered fingerprints, and a retry is idempotent.
+    let _ = std::fs::remove_file(staged.path);
+    Ok(registered)
+}
+
 /// Return the rung-3 addressee for an enabled principal. Legacy records have no addressee and
 /// therefore fail closed. Registry corruption is also an absence, never guessed authority.
 pub fn registered_by(dir: &Path, principal: &str) -> Option<String> {
@@ -201,6 +344,7 @@ pub fn bind_credential(
     credential_file: &str,
     credential_key: &str,
 ) -> Result<PrincipalRecord, RegistrationError> {
+    let _guard = registry_write_lock();
     validate_reference(credential_file, credential_key)?;
     let secret = read_secret(dir, credential_file, credential_key)
         .ok_or(RegistrationError::CredentialMissing)?;
@@ -373,6 +517,96 @@ fn read_secret(dir: &Path, file: &str, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn registry_write_lock() -> std::sync::MutexGuard<'static, ()> {
+    static WRITES: OnceLock<Mutex<()>> = OnceLock::new();
+    WRITES
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn load_pending(dir: &Path) -> io::Result<Vec<LoadedPendingRegistration>> {
+    let pending_dir = dir.join(PENDING_REGISTRATIONS_DIR);
+    let entries = match std::fs::read_dir(&pending_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        if !entry.file_type()?.is_file() {
+            return Err(invalid_pending(
+                "a pending registration is not a regular file",
+            ));
+        }
+        paths.push(entry.path());
+    }
+    paths.sort();
+    if paths.len() > MAX_PENDING_REGISTRATIONS {
+        return Err(invalid_pending("too many pending partner registrations"));
+    }
+
+    let mut ids = HashSet::new();
+    let mut fingerprints = HashSet::new();
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let bytes = std::fs::read(&path)?;
+        let record: PendingRegistration = serde_json::from_slice(&bytes)
+            .map_err(|_| invalid_pending("a pending registration is malformed"))?;
+        validate_pending(&record)?;
+        if !ids.insert(record.id.clone()) {
+            return Err(invalid_pending("duplicate pending registration id"));
+        }
+        if !fingerprints.insert(record.credential_fingerprint.clone()) {
+            return Err(invalid_pending("duplicate pending registration credential"));
+        }
+        out.push(LoadedPendingRegistration { record, path });
+    }
+    Ok(out)
+}
+
+fn validate_pending(record: &PendingRegistration) -> io::Result<()> {
+    if record.version != 1
+        || !valid_registration_id(&record.id)
+        || record.created_at <= 0
+        || record.addressed_to.trim().is_empty()
+        || record.addressed_to.len() > MAX_ALIAS_BYTES
+        || record.addressed_to.chars().any(char::is_control)
+        || record.credential_fingerprint.len() != 64
+        || !record
+            .credential_fingerprint
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid_pending("a pending registration is invalid"));
+    }
+    validate_alias(&record.alias)
+        .and_then(|_| validate_reference(&record.credential_file, &record.credential_key))
+        .map_err(|_| invalid_pending("a pending registration is invalid"))
+}
+
+fn valid_registration_id(id: &str) -> bool {
+    id.starts_with("registration-")
+        && id.len() > "registration-".len()
+        && id.len() <= 80
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn pending_secret_is_current(dir: &Path, pending: &PendingRegistration) -> bool {
+    read_secret(dir, &pending.credential_file, &pending.credential_key)
+        .is_some_and(|secret| credential_fingerprint(&secret) == pending.credential_fingerprint)
+}
+
+fn invalid_pending(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
 fn write_registry(dir: &Path, registry: &PrincipalRegistry) -> io::Result<()> {
     let path = registry_path(dir);
     let parent = path
@@ -406,6 +640,28 @@ mod tests {
         HumanDecisionContext::from_verified_mesh("device-test".into(), name.into()).unwrap()
     }
 
+    fn stage(dir: &Path, id: &str, addressed_to: &str, secret: &str) {
+        let credential_file = format!("mcp/{id}.env");
+        credential(dir, &credential_file, "TOKEN", secret);
+        let pending_dir = dir.join(PENDING_REGISTRATIONS_DIR);
+        std::fs::create_dir_all(&pending_dir).unwrap();
+        std::fs::write(
+            pending_dir.join(format!("{id}.json")),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "version": 1,
+                "id": id,
+                "alias": "Envoy (on-device)",
+                "credential_file": credential_file,
+                "credential_key": "TOKEN",
+                "credential_fingerprint": credential_fingerprint(secret),
+                "addressed_to": addressed_to,
+                "created_at": 1_780_000_000_i64
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn a_human_registration_binds_alias_and_secret_without_storing_the_secret() {
         let dir = temp("register");
@@ -433,6 +689,46 @@ mod tests {
             authenticate(&dir, "secret-a").unwrap().principal,
             authenticate(&dir, "secret-b").unwrap().principal
         );
+    }
+
+    #[test]
+    fn staged_registration_projects_no_secret_and_binds_the_verified_human() {
+        let dir = temp("staged");
+        stage(&dir, "registration-0123456789abcdef", "ian", "envoy-secret");
+        assert!(pending_for(&dir, &human("betty")).unwrap().is_empty());
+        let view = pending_for(&dir, &human("ian")).unwrap();
+        assert_eq!(view.len(), 1);
+        let raw = serde_json::to_string(&view).unwrap();
+        assert!(!raw.contains("envoy-secret"));
+        assert!(!raw.contains("credential_file"));
+        assert!(!raw.contains("credential_key"));
+
+        let record = register_staged(&dir, &human("ian"), "registration-0123456789abcdef").unwrap();
+        assert_eq!(record.registered_by, "ian");
+        assert_eq!(record.alias, "Envoy (on-device)");
+        assert_eq!(
+            authenticate(&dir, "envoy-secret").unwrap().principal,
+            record.id
+        );
+        assert!(pending_for(&dir, &human("ian")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn staged_registration_rechecks_addressee_and_credential_at_the_act() {
+        let dir = temp("staged_refusal");
+        let id = "registration-fedcba9876543210";
+        stage(&dir, id, "ian", "original-secret");
+        assert_eq!(
+            register_staged(&dir, &human("betty"), id),
+            Err(RegistrationError::WrongAddressee)
+        );
+        credential(&dir, &format!("mcp/{id}.env"), "TOKEN", "changed-secret");
+        assert_eq!(
+            register_staged(&dir, &human("ian"), id),
+            Err(RegistrationError::CredentialChanged)
+        );
+        assert!(load(&dir).unwrap().principals.is_empty());
+        assert!(pending_for(&dir, &human("ian")).is_err());
     }
 
     #[test]

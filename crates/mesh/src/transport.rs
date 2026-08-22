@@ -1162,8 +1162,9 @@ async fn handle(
             };
             recv_worldview(&dir, &bytes, &sig, &ctx.seen, &peer_ip)
         }
-        // A full-standing member's narrow typed console writes: rule reduction, self-naming, or
-        // a partner decision addressed to the established human behind this certified device.
+        // A full-standing member's narrow typed console writes: rule reduction, self-naming,
+        // pre-provisioned partner registration, or a partner decision. Partner actors are always
+        // derived from the established human behind this certified device.
         // Same raw-body signature and replay discipline as the worldview seam.
         (Method::POST, "/mesh/console-act") => {
             let sig = req
@@ -1721,7 +1722,8 @@ fn recv_observe(
     }
 }
 
-/// `POST /mesh/console-act` → verify and apply one deliberately narrow console write.
+/// `POST /mesh/console-act` → verify and apply one deliberately narrow console write,
+/// including the secret-free registration id for a pre-provisioned partner ceremony.
 fn recv_console_act(
     dir: &Path,
     bytes: &[u8],

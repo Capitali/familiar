@@ -6,7 +6,8 @@
 //!
 //! - disable an existing standing reaction rule (a reduction of authority),
 //! - name the certified device that signed the request (never another device), or
-//! - decide a private partner grant item addressed to the established human behind that device.
+//! - register a pre-provisioned partner or decide its private grant item, always as the
+//!   established human derived from the signing device.
 //!
 //! Guests can read the projected worldview but cannot use this seam. The raw request bytes are
 //! signed, so Swift and Rust do not need a shared JSON canonicalizer.
@@ -30,6 +31,9 @@ pub enum ConsoleAct {
     },
     NameDevice {
         name: String,
+    },
+    RegisterPartner {
+        registration_id: String,
     },
     DecideGrant {
         request_id: String,
@@ -127,6 +131,12 @@ pub(crate) fn apply(
             // that signed this request. Naming another household device is a separate human act.
             crate::device::set_name(dir, &env.node.node_id, name, now)?;
             Ok(format!("named this device {name}"))
+        }
+        ConsoleAct::RegisterPartner { registration_id } => {
+            let actor = decision_context(dir, &env.node.node_id)?;
+            familiar_mcp::partner::register_staged(dir, &actor, &registration_id)
+                .map_err(registration_error)?;
+            partner_inbox_reply(dir, &actor, now)
         }
         ConsoleAct::DecideGrant {
             request_id,
@@ -257,6 +267,15 @@ fn grant_refusal(refusal: familiar_mcp::grant::Refusal) -> Error {
     Error::Malformed(format!("partner decision: {}", refusal.message))
 }
 
+fn registration_error(error: familiar_mcp::partner::RegistrationError) -> Error {
+    match error {
+        familiar_mcp::partner::RegistrationError::Io(message) => {
+            Error::Io(std::io::Error::other(message))
+        }
+        other => Error::Malformed(format!("partner registration: {other}")),
+    }
+}
+
 fn partner_inbox_reply(
     dir: &Path,
     actor: &familiar_mcp::partner::HumanDecisionContext,
@@ -270,6 +289,7 @@ fn partner_inbox_reply(
 mod tests {
     use super::*;
     use crate::node::NodeKey;
+    use sha2::{Digest, Sha256};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     const NOW: i64 = 1_780_000_000;
@@ -358,6 +378,37 @@ mod tests {
             at: NOW,
         });
         crate::record::save(dir, &record).unwrap();
+    }
+
+    fn stage_registration(dir: &Path, id: &str, addressed_to: &str, secret: &str) {
+        let credential_file = format!("mcp/{id}.env");
+        std::fs::create_dir_all(dir.join("mcp")).unwrap();
+        std::fs::write(dir.join(&credential_file), format!("TOKEN={secret}\n")).unwrap();
+        let mut digest = Sha256::new();
+        digest.update(b"familiar-partner-credential-v1\0");
+        digest.update(secret.as_bytes());
+        let fingerprint = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let pending = dir.join(familiar_mcp::partner::PENDING_REGISTRATIONS_DIR);
+        std::fs::create_dir_all(&pending).unwrap();
+        std::fs::write(
+            pending.join(format!("{id}.json")),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "version": 1,
+                "id": id,
+                "alias": "Envoy (on-device)",
+                "credential_file": credential_file,
+                "credential_key": "TOKEN",
+                "credential_fingerprint": fingerprint,
+                "addressed_to": addressed_to,
+                "created_at": NOW
+            }))
+            .unwrap(),
+        )
+        .unwrap();
     }
 
     fn partner_request(dir: &Path, human: &str) -> (String, familiar_mcp::partner::PartnerContext) {
@@ -477,6 +528,44 @@ mod tests {
         let record = crate::device::load(&dir, &node.node_id()).unwrap().unwrap();
         assert_eq!(record.device_id, node.node_id());
         assert_eq!(record.name, "Aphelion");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn registration_act_names_only_a_staging_id_and_derives_the_human() {
+        let (dir, node, cred) = member("partner-register");
+        establish(&dir, &node, "ian");
+        let id = "registration-0123456789abcdef";
+        stage_registration(&dir, id, "ian", "envoy-secret");
+        let (raw, sig) = signed(
+            &node,
+            cred.membership,
+            "partner-register-1",
+            ConsoleAct::RegisterPartner {
+                registration_id: id.into(),
+            },
+        );
+        let wire = String::from_utf8(raw.clone()).unwrap();
+        assert!(wire.contains(id));
+        for forbidden in [
+            "ian",
+            "Envoy (on-device)",
+            "envoy-secret",
+            "credential_file",
+            "credential_key",
+            "registered_by",
+        ] {
+            assert!(!wire.contains(forbidden), "wire leaked {forbidden}");
+        }
+
+        let reply = apply(&dir, &raw, &sig, NOW, &Mutex::new(IngestGuard::default())).unwrap();
+        let view: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(view["pending_registrations"], serde_json::json!([]));
+        let registry = familiar_mcp::partner::load(&dir).unwrap();
+        assert_eq!(registry.principals.len(), 1);
+        assert_eq!(registry.principals[0].registered_by, "ian");
+        assert_eq!(registry.principals[0].alias, "Envoy (on-device)");
+        assert!(familiar_mcp::partner::authenticate(&dir, "envoy-secret").is_some());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -657,6 +746,12 @@ mod tests {
         let (dir, node, cred) = member("partner-read-replay");
         establish(&dir, &node, "ian");
         let _ = partner_request(&dir, "ian");
+        stage_registration(
+            &dir,
+            "registration-private-inbox",
+            "ian",
+            "private-envoy-secret",
+        );
         let worldview =
             serde_json::to_string(&crate::worldview::assemble_worldview(&dir, &cred, NOW).unwrap())
                 .unwrap();
@@ -665,6 +760,9 @@ mod tests {
             "ian partner",
             "fingerprint-ian",
             "please consider this",
+            "Envoy (on-device)",
+            "registration-private-inbox",
+            "private-envoy-secret",
         ] {
             assert!(!worldview.contains(private_value));
         }
@@ -685,13 +783,9 @@ mod tests {
         let forger = NodeKey::load_or_mint(&forger_dir, "forger").unwrap();
         let forged_sig = forger.sign(&raw);
         assert!(read_partner_inbox(&dir, &raw, &forged_sig, NOW, &guard).is_err());
-        assert_eq!(
-            read_partner_inbox(&dir, &raw, &sig, NOW, &guard)
-                .unwrap()
-                .pending_requests
-                .len(),
-            1
-        );
+        let inbox = read_partner_inbox(&dir, &raw, &sig, NOW, &guard).unwrap();
+        assert_eq!(inbox.pending_requests.len(), 1);
+        assert_eq!(inbox.pending_registrations.len(), 1);
         assert!(matches!(
             read_partner_inbox(&dir, &raw, &sig, NOW, &guard),
             Err(Error::Untrusted(message)) if message.contains("replayed")

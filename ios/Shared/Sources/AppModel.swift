@@ -661,6 +661,13 @@ final class AppModel: ObservableObject {
         )
     }
 
+    func registerPartner(_ registrationId: String) async {
+        await sendConsoleAct(
+            .registerPartner(registrationId),
+            label: "register partner"
+        )
+    }
+
     func declinePartnerGrant(_ requestId: String) async {
         await sendConsoleAct(.declineGrant(requestId), label: "decline partner request")
     }
@@ -680,7 +687,7 @@ final class AppModel: ObservableObject {
         }
         let isPartnerDecision: Bool
         switch act {
-        case .decideGrant, .declineGrant, .revokeGrant, .refuseProposal:
+        case .registerPartner, .decideGrant, .declineGrant, .revokeGrant, .refuseProposal:
             isPartnerDecision = true
         case .disableRule, .nameDevice:
             isPartnerDecision = false

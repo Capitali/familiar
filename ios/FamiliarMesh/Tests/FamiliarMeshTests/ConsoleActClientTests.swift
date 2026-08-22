@@ -117,6 +117,21 @@ final class ConsoleActClientTests: XCTestCase {
     }
 
     func testPartnerDecisionIsTypedAndCannotNameAHuman() throws {
+        let registration = ConsoleActBody(.registerPartner("registration-0123456789abcdef"))
+        let registrationJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(registration))
+                as? [String: Any]
+        )
+        XCTAssertEqual(registrationJSON["kind"] as? String, "register_partner")
+        XCTAssertEqual(
+            registrationJSON["registration_id"] as? String,
+            "registration-0123456789abcdef"
+        )
+        XCTAssertNil(registrationJSON["human"])
+        XCTAssertNil(registrationJSON["alias"])
+        XCTAssertNil(registrationJSON["credential_file"])
+        XCTAssertNil(registrationJSON["credential_key"])
+
         let bounds: PartnerOperationBounds = [
             "set_state": ["state": .enumeration(["on"])]
         ]

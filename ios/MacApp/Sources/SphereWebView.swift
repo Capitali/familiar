@@ -549,6 +549,10 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 guard let act = body["act"] as? String else { break }
                 Task {
                     switch act {
+                    case "register":
+                        if let id = body["registration_id"] as? String {
+                            await self.model.registerPartner(id)
+                        }
                     case "decide":
                         guard let requestId = body["request_id"] as? String,
                               let surface = body["surface"] as? String,

@@ -68,10 +68,19 @@ public enum PartnerJSONValue: Codable, Equatable {
 }
 
 public struct PartnerInbox: Codable, Equatable {
+    /// Optional for compatibility with a door that predates the registration ceremony.
+    public var pending_registrations: [PartnerRegistration]?
     public var pending_requests: [PartnerGrantRequest]
     public var active_grants: [PartnerGrant]
     public var pending_proposals: [PartnerProposal]
     public var warnings: [String]
+}
+
+public struct PartnerRegistration: Codable, Equatable {
+    public var registration_id: String
+    public var partner_alias: String
+    public var credential_fingerprint: String
+    public var created_at: Int64
 }
 
 public struct PartnerSurfaceChoice: Codable, Equatable {

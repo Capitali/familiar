@@ -6,6 +6,31 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-22 — T-224 Brick 2: registration is the human's signed act, not provisioning's side effect
+
+The first-partner ceremony now has two deliberately separate transitions. A local provisioning
+tool mints a fresh bearer, writes it only to the serving node and a mode-0600 Envoy import
+bundle, and publishes a secret-free registration card addressed to one established human. It
+does not register a principal. The private Partner inbox validates every staged credential
+against its domain-separated fingerprint and projects only the card addressed to the human
+derived from the signed device.
+
+Registration itself is a new typed console act carrying only an opaque staging id. The existing
+console door verifies certificate, node key, freshness, replay, full standing, and effective
+human establishment before it re-reads the local alias, credential reference, fingerprint, and
+addressee. It then binds a fresh random principal with `registered_by` taken from that derived
+human context. A changed credential, wrong human, malformed staging set, duplicate binding, or
+legacy missing addressee fails closed. The shared Partner screen renders the card with a timed
+second confirmation and says plainly that identity grants no surface, observation, suggestion,
+or actuation authority; covenant acceptance and a later typed grant request remain separate.
+
+Verification: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, full Rust
+workspace tests, focused MCP/mesh tests, `swift test --package-path ios/FamiliarMesh` (17/0),
+shared sphere JavaScript parse, provisioning shell syntax plus a temporary functional ceremony,
+and unsigned Mac and generic iOS Simulator builds all passed. No live credential, principal,
+covenant, request, decision, gate, deployment, ship, or fleet state changed. Next: chair review
+alongside the Envoy-app brick, then separately stage and witness Ian's authorized live ceremony.
+
 ## 2026-08-21 — T-216 accepted; a fixture race CI caught and the local bar could not
 
 The chair review of `c701a8b` accepted the human decision surface as built (full findings

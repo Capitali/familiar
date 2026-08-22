@@ -5,6 +5,7 @@ import Foundation
 public enum ConsoleAct: Equatable {
     case disableRule(String)
     case nameDevice(String)
+    case registerPartner(String)
     case decideGrant(
         requestId: String,
         surface: String,
@@ -20,6 +21,7 @@ struct ConsoleActBody: Codable {
     var kind: String
     var rule_id: String?
     var name: String?
+    var registration_id: String?
     var request_id: String?
     var surface: String?
     var allowed_operations: PartnerOperationBounds?
@@ -33,29 +35,40 @@ struct ConsoleActBody: Codable {
             kind = "disable_rule"
             rule_id = id
             name = nil
+            registration_id = nil
             request_id = nil; surface = nil; allowed_operations = nil; expires_at = nil
             grant_id = nil; proposal_id = nil
         case .nameDevice(let value):
             kind = "name_device"
             rule_id = nil
             name = value
+            registration_id = nil
+            request_id = nil; surface = nil; allowed_operations = nil; expires_at = nil
+            grant_id = nil; proposal_id = nil
+        case .registerPartner(let id):
+            kind = "register_partner"; rule_id = nil; name = nil
+            registration_id = id
             request_id = nil; surface = nil; allowed_operations = nil; expires_at = nil
             grant_id = nil; proposal_id = nil
         case .decideGrant(let requestId, let chosenSurface, let operations, let expiry):
             kind = "decide_grant"; rule_id = nil; name = nil
+            registration_id = nil
             request_id = requestId; surface = chosenSurface
             allowed_operations = operations; expires_at = expiry
             grant_id = nil; proposal_id = nil
         case .declineGrant(let id):
             kind = "decline_grant"; rule_id = nil; name = nil
+            registration_id = nil
             request_id = id; surface = nil; allowed_operations = nil; expires_at = nil
             grant_id = nil; proposal_id = nil
         case .revokeGrant(let id):
             kind = "revoke_grant"; rule_id = nil; name = nil
+            registration_id = nil
             request_id = nil; surface = nil; allowed_operations = nil; expires_at = nil
             grant_id = id; proposal_id = nil
         case .refuseProposal(let id):
             kind = "refuse_proposal"; rule_id = nil; name = nil
+            registration_id = nil
             request_id = nil; surface = nil; allowed_operations = nil; expires_at = nil
             grant_id = nil; proposal_id = id
         }

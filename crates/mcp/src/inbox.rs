@@ -16,6 +16,7 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PartnerInboxView {
+    pub pending_registrations: Vec<partner::PendingRegistrationView>,
     pub pending_requests: Vec<HumanGrantRequestView>,
     pub active_grants: Vec<HumanGrantView>,
     pub pending_proposals: Vec<HumanProposalView>,
@@ -78,6 +79,7 @@ pub fn assemble(
     actor: &HumanDecisionContext,
     now: i64,
 ) -> io::Result<PartnerInboxView> {
+    let pending_registrations = partner::pending_for(dir, actor)?;
     let registry = partner::load(dir)?;
     let addressed: BTreeSet<String> = registry
         .principals
@@ -243,6 +245,7 @@ pub fn assemble(
     }
 
     Ok(PartnerInboxView {
+        pending_registrations,
         pending_requests,
         active_grants,
         pending_proposals,

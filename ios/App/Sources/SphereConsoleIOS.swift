@@ -140,6 +140,10 @@ struct SphereConsoleIOS: View {
                 guard let model, let act = body["act"] as? String else { return }
                 Task {
                     switch act {
+                    case "register":
+                        if let id = body["registration_id"] as? String {
+                            await model.registerPartner(id)
+                        }
                     case "decide":
                         guard let requestId = body["request_id"] as? String,
                               let surface = body["surface"] as? String,

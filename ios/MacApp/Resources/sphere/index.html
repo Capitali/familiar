@@ -1555,11 +1555,20 @@ function refreshScreen() {
       el.innerHTML = shell(card(`<div class="m" style="font-size:10px;color:rgba(170,205,245,0.65);">Reading your private partner inbox…</div>`));
       return;
     }
+    const registrations = inbox.pending_registrations || [];
     const requests = inbox.pending_requests || [];
     const grants = inbox.active_grants || [];
     const proposals = inbox.pending_proposals || [];
     const warnings = inbox.warnings || [];
     const heading = (name, count, words) => `<div style="display:flex;align-items:baseline;gap:10px;margin:20px 0 10px;"><span style="font-size:18px;font-weight:600;">${name}</span><span class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">${count} · ${words}</span></div>`;
+    const registrationCards = registrations.map((r, i) => {
+      const armed = S.partnerRegisterArmed === r.registration_id;
+      return card(`${identity(r)}
+        <div style="font-size:14px;line-height:1.5;color:rgba(232,240,252,0.9);margin-bottom:8px;">A fresh partner credential is staged on this door.</div>
+        <div class="m" style="font-size:10px;line-height:1.6;color:rgba(188,210,245,0.67);">Registering binds this opaque credential to you. It grants no surface, observation, suggestion, or actuation authority; the partner must still accept the covenant and ask separately.</div>
+        <div class="m" style="font-size:8px;color:rgba(160,195,255,0.48);margin-top:8px;">staged ${utc(r.created_at)}</div>
+        <button onclick="spherePartnerRegister(${i})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;margin-top:14px;border-color:${armed?'rgba(61,220,151,0.62)':'rgba(120,190,255,0.28)'};"><span class="m" style="font-size:9px;color:${armed?'#9fe8c0':'#cdeeff'};">${armed ? `CONFIRM REGISTER ${esc(r.partner_alias)}` : 'REGISTER PARTNER'}</span></button>`, '61,220,151');
+    }).join('');
     const requestCards = requests.map((r, i) => {
       const choices = (r.eligible_surfaces || []);
       const duration = Math.max(60, Math.min(Number(r.requested_duration_seconds || 3600), 3600));
@@ -1596,8 +1605,8 @@ function refreshScreen() {
       return card(`${identity(g)}<div style="font-size:14px;margin-bottom:6px;">may leave bounded suggestions about <span style="color:#aee7ff;">${esc(g.surface)}</span></div><div class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">expires ${utc(g.expires_at)} · no reading and no actuation</div><button onclick="spherePartnerRevoke(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:12px;"><span class="m" style="font-size:9px;color:#ffb0b0;">${armed ? `CONFIRM REVOKE ${esc(g.surface)}` : 'REVOKE'}</span></button>`, '255,177,90');
     }).join('');
     const proposalCards = proposals.map((p, i) => card(`${identity(p)}<div style="font-size:14px;line-height:1.5;margin-bottom:7px;">suggests <span style="color:#c9a3ff;">${esc(p.operation)}</span> for <span style="color:#aee7ff;">${esc(p.surface)}</span></div><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:rgba(205,220,245,0.75);background:rgba(5,12,25,0.45);padding:9px 11px;border-radius:9px;">${esc(JSON.stringify(p.parameters || {}, null, 2))}</pre>${p.reason_quote ? `<div style="padding:10px 12px;border-left:2px solid rgba(201,163,255,0.35);margin:10px 0;"><span class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(190,170,230,0.65);">PARTNER SAYS:</span><div style="font-size:13px;line-height:1.45;margin-top:5px;">${esc(p.reason_quote)}</div></div>` : ''}<div class="m" style="font-size:9px;line-height:1.5;color:rgba(170,190,220,0.62);">Leave pending by doing nothing. There is no accept or run action at this rung.</div><button onclick="spherePartnerRefuse(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:11px;"><span class="m" style="font-size:9px;color:#ffb0b0;">REFUSE</span></button>`, '201,163,255')).join('');
-    const empty = !requests.length && !grants.length && !proposals.length;
-    el.innerHTML = shell(`${warnings.map(w => card(`<div class="m" style="font-size:10px;color:#ffd29a;">${esc(w)}</div>`, '255,177,90')).join('')}${empty ? card(`<div style="font-size:16px;font-weight:600;margin-bottom:7px;">No partner decisions waiting</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(180,205,240,0.62);">Requests and suggestions addressed to you will appear here after a fresh signed read.</div>`) : ''}${requests.length ? heading('Requests', requests.length, 'you decide whether a relationship begins') + requestCards : ''}${grants.length ? heading('Active grants', grants.length, 'suggestions only') + grantCards : ''}${proposals.length ? heading('Suggestions', proposals.length, 'refuse or leave pending') + proposalCards : ''}`);
+    const empty = !registrations.length && !requests.length && !grants.length && !proposals.length;
+    el.innerHTML = shell(`${warnings.map(w => card(`<div class="m" style="font-size:10px;color:#ffd29a;">${esc(w)}</div>`, '255,177,90')).join('')}${empty ? card(`<div style="font-size:16px;font-weight:600;margin-bottom:7px;">No partner decisions waiting</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(180,205,240,0.62);">Registrations, requests, and suggestions addressed to you will appear here after a fresh signed read.</div>`) : ''}${registrations.length ? heading('Registrations', registrations.length, 'you decide whether an identity begins') + registrationCards : ''}${requests.length ? heading('Requests', requests.length, 'you decide whether a relationship begins') + requestCards : ''}${grants.length ? heading('Active grants', grants.length, 'suggestions only') + grantCards : ''}${proposals.length ? heading('Suggestions', proposals.length, 'refuse or leave pending') + proposalCards : ''}`);
 
   } else if (k === 'device') {
     // A human typing their name outranks the 3s device push — FOCUS-gated only. Gating on a
@@ -1805,7 +1814,7 @@ function renderButtons() {
   // Safe badge: derived only after this device's authorized private read. No count is carried
   // in worldview or any broadcast projection.
   const pi = S.partnerInbox || {};
-  const partnerWaiting = (pi.pending_requests || []).length + (pi.pending_proposals || []).length;
+  const partnerWaiting = (pi.pending_registrations || []).length + (pi.pending_requests || []).length + (pi.pending_proposals || []).length;
   // Ring rotation: with an odd count, a half-step start plants one button at exactly 90° —
   // dead centre bottom, on top of the surface toggle (it ate the zoom button under signals).
   // Odd counts start AT top centre instead: evenly spaced, mirror-symmetric about the
@@ -2029,6 +2038,17 @@ window.sphereGameJump = () => { S.gameNav = 'live'; sphereScreen('games'); };
 // Handlers take sanitized slugs/hex; anything richer goes through a data attribute instead.
 window.sphereSetRole = (role, owner) => toApp('deviceRole', { role, owner });
 window.sphereDisableRule = (id) => { if (id) toApp('ruleDisable', { id }); };
+window.spherePartnerRegister = (i) => {
+  const r = ((S.partnerInbox || {}).pending_registrations || [])[i];
+  if (!r) return;
+  if (S.partnerRegisterArmed !== r.registration_id) {
+    S.partnerRegisterArmed = r.registration_id; refreshScreen();
+    setTimeout(() => { if (S.partnerRegisterArmed === r.registration_id) { S.partnerRegisterArmed = null; try { refreshScreen(); } catch (_) {} } }, 5000);
+    return;
+  }
+  S.partnerRegisterArmed = null;
+  toApp('partnerAct', { act:'register', registration_id:r.registration_id });
+};
 window.spherePartnerOperation = (i) => {
   const select = document.getElementById('partnerOperation-' + i);
   if (!select) return;
@@ -2421,6 +2441,7 @@ function centerOnSelf() {
 window.spherePartnerInbox = (view) => {
   S.partnerInbox = view;
   S.partnerInboxError = '';
+  S.partnerRegisterArmed = null;
   S.partnerGrantArmed = null;
   S.partnerRevokeArmed = null;
   if (S.activeScreen === 'partners') try { refreshScreen(); } catch (e) { S.jsErr = 'partners: ' + e.message; }
