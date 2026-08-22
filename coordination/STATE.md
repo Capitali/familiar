@@ -167,6 +167,14 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-22 (13:58 CDT) · companion:codex accepted and claimed T-224 Brick 2 after the
+  chair's Round-3 closes and Ian's recorded go. Scope: the credential-provisioning + typed
+  registration ceremony over the existing signed/fresh/full-standing console door, its
+  console card, tests, and development record. Claude's separate Envoy target is excluded.
+  No live credential, principal, covenant, request, decision, gate, deployment, ship, or
+  fleet state changes during the build; the witnessed ceremony remains a separately staged
+  human-authorized operation after the seam lands.
+
 - 2026-08-22 (13:43 CDT) · companion:codex heartbeat found and accepted T-224's explicit
   Round-2 design handoff. Scope is append-only dialogue text only: contest the Envoy's
   isolation, transport, hostile-door test, and relationship to accepted T-216. No code,
