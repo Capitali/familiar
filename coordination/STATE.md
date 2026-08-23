@@ -16,9 +16,19 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   docs/partners/ucf-factory-readiness.md + generalized provisioning script. **AWAITING
   IAN, in order: (1) run the handed provisioning command on the lighthouse (the harness
   refused remote credential-minting), (2) tap the "UCF Factory (Jeff)" card in the Partner
-  ring, (3) send Jeff the note + import bundle out of band. First metabolism paw print
-  expected within one quiet-cadence tick (~16 min from the 22:51 CT daemon restart);
-  verification was still pending when this entry was written — check catscan.**
+  ring, (3) send Jeff the note + import bundle out of band.**
+  **MORNING TRUTH-UP (2026-08-23): the paw print is REAL — catscan: "the familiar has
+  been through this flap · obs-12074 familiar reached mcp partner ucf: ucf-exchange
+  1.0.0."** Getting there surfaced an operator defect worth recording: last night's
+  `daemon install` was run from the repo CWD without `--data-dir`, so the plist baked
+  `/Users/ian/Projects/familiar/familiar_data` — the household daemon ran 14h against a
+  stray fresh store (boundary closed there, so nothing outward ever ran from it) while
+  the real store had no daemon. Diagnosed via lsof (stdout → the wrong daemon.log);
+  fixed by reinstalling with the explicit absolute data dir; the stray store was
+  removed. LESSON: always pass `--data-dir` to `daemon install`, or run it from a
+  neutral CWD. Ian ran the provisioning command: `registration-48496c73…` ("UCF
+  Factory (Jeff)") staged on the lighthouse, files landing as familiar-svc directly —
+  the script's chown fix verified live. His tap + the bundle handoff remain.
 
 - **Approved plan in flight (2026-08-17): the constitutional integrity pass, conduct strand.**
   T-210 + T-211, six bricks, decisions and build order recorded at
