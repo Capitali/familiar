@@ -87,7 +87,42 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   Refilling cerebras credits is optional. Side-note for T-224/the fleet: the adapter
   already carries `apple`/`apple_local`/`apple_pcc` providers — Mac daemons have an
   on-device path waiting.
-- **CEREMONY LIVE-TEST 2026-08-22, ONE DIAGNOSIS OPEN: the console must read the LIGHTHOUSE
+- **THE FIRST CEREMONY IS COMPLETE (2026-08-23 01:19:40 UTC): the Envoy is principal
+  `principal-f90b15e1adb1768f3ad8fccf46301892`** — alias "Envoy (on-device)",
+  registered_by ian, enabled; staging consumed (pending-registrations empty), registry at
+  `mcp/principals.json` on the lighthouse. Getting the tap to land surfaced FOUR findings,
+  each a follow-up brick candidate:
+  1. **No door picker; LAN outranks lighthouse.** The console auto-selects `host`
+     (home → lighthouse → tail, AppModel readOrderedCandidates) and the partner inbox reads
+     only that one door — so a card staged at the public door is invisible to a console
+     sitting next to its LAN hub. Live-test workaround: paused MacOnStick's hub daemon
+     (`launchctl bootout gui/…/io.river.familiar`) to force failover, restored it after the
+     mint. FIX: the partner inbox read should walk/merge ALL candidate doors.
+  2. **Provisioning staged files as root; daemon runs as familiar-svc.** `mcp/credentials/`
+     and `mcp/pending-registrations/` were root:root 700 → the door's fail-closed inbox
+     assembly returned 500 "partner inbox unavailable". Fixed live by chown -R to
+     familiar-svc (modes kept 700/600). FIX: the provisioning tool must chown to the
+     service user (or run as it).
+  3. **The two-tap confirm is sabotaged by the poll push.** SphereWebView pushes
+     `spherePartnerInbox(json)` every ~5s poll even when unchanged, and the handler
+     unconditionally does `S.partnerRegisterArmed = null` (index.html:2444) — the armed
+     CONFIRM state is silently wiped after 0–5s, so single taps just re-arm forever and no
+     act is ever sent; no feedback anywhere says so (success/refusal land only in the
+     in-memory notes feed). Ian hit exactly this — kept clicking, nothing happened, nothing
+     said why. Workaround that minted: two taps in quick succession. FIX: (a) only clear
+     armed state when the pushed view actually DIFFERS from the displayed one; (b) explicit
+     outcome on the card surface — in-flight state, "Registered ✓", refusal reason inline.
+  4. **The ceremony explains itself too little (Ian's word, 2026-08-22 evening).** The card
+     needs user instruction: what is being registered, and WHY it is a human act instead of
+     automatic. Ian's recorded position: he still thinks automatic would be better. The
+     standing design answer is that an identity begins only by the human's signed word
+     (assent-gated action; the covenant boundary) — so the brick here is to make the card
+     CARRY that narrative (what asked for this, what the tap creates, what happens next),
+     not to remove the act. If Ian wants the design itself reopened, that is a chair
+     question, not a console patch.
+
+- ~~CEREMONY LIVE-TEST 2026-08-22, ONE DIAGNOSIS OPEN~~ **RESOLVED above.** (Kept for the
+  reconstruction trail.) The console must read the LIGHTHOUSE
   door.** Ian opened FamiliarMac's Partner ring and saw the empty state ("Registrations…
   will appear here after a fresh signed read"), not the card. The sphere UI renders
   registration cards correctly (index.html:1558-1608), so this is an empty signed read, not
