@@ -8,8 +8,8 @@
 set -eu
 umask 077
 
-if [ "$#" -ne 4 ]; then
-  echo "usage: $0 DATA_DIR ADDRESSED_HUMAN PUBLIC_HTTPS_MCP_ORIGIN ENVOY_IMPORT_JSON" >&2
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
+  echo "usage: $0 DATA_DIR ADDRESSED_HUMAN PUBLIC_HTTPS_MCP_ORIGIN ENVOY_IMPORT_JSON [ALIAS]" >&2
   exit 64
 fi
 
@@ -17,6 +17,15 @@ data_dir=$1
 addressed_to=$2
 mcp_origin=$3
 export_path=$4
+# The partner's display alias on the registration card. Constrained to characters that are
+# inert in the JSON both files carry — an alias is a label, never a place to smuggle syntax.
+alias=${5:-"Envoy (on-device)"}
+case "$alias" in
+  ''|*[!A-Za-z0-9\ \(\)._-]*)
+    echo "alias must be 1+ characters from: letters, digits, space, () . _ -" >&2
+    exit 64
+    ;;
+esac
 
 if [ ! -d "$data_dir" ]; then
   echo "data dir does not exist: $data_dir" >&2
@@ -96,14 +105,14 @@ fingerprint=$(
 )
 created_at=$(date +%s)
 
-printf '{\n  "version": 1,\n  "id": "%s",\n  "alias": "Envoy (on-device)",\n  "credential_file": "%s",\n  "credential_key": "%s",\n  "credential_fingerprint": "%s",\n  "addressed_to": "%s",\n  "created_at": %s\n}\n' \
-  "$registration_id" "$credential_rel" "$credential_key" "$fingerprint" \
+printf '{\n  "version": 1,\n  "id": "%s",\n  "alias": "%s",\n  "credential_file": "%s",\n  "credential_key": "%s",\n  "credential_fingerprint": "%s",\n  "addressed_to": "%s",\n  "created_at": %s\n}\n' \
+  "$registration_id" "$alias" "$credential_rel" "$credential_key" "$fingerprint" \
   "$addressed_to" "$created_at" > "$pending_tmp"
 
 # This bundle is the only exported secret. The Envoy imports it into its own Keychain; callers
 # delete the file after that import. Nothing secret is printed to stdout or placed in the card.
-printf '{\n  "version": 1,\n  "registration_id": "%s",\n  "alias": "Envoy (on-device)",\n  "mcp_origin": "%s",\n  "bearer_token": "%s"\n}\n' \
-  "$registration_id" "$mcp_origin" "$token" > "$export_tmp"
+printf '{\n  "version": 1,\n  "registration_id": "%s",\n  "alias": "%s",\n  "mcp_origin": "%s",\n  "bearer_token": "%s"\n}\n' \
+  "$registration_id" "$alias" "$mcp_origin" "$token" > "$export_tmp"
 
 # Hard-link publication is atomic and refuses an existing destination. Each temporary lives on
 # the same filesystem as its target, so a crash exposes either the whole file or no file.

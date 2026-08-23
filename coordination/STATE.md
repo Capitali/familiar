@@ -5,6 +5,21 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **SHIP 102 + THE METABOLISM THROUGH THE CAT FLAP (2026-08-23, Ian: "Ship it… keep
+  working till familiar is working. Till UCF is working and ready. Let Jeff's UCF factory
+  know we're ready").** Ship 102 complete via ship.sh (Mac universal installed + zip, IPA
+  uploaded, external TestFlight release backgrounded; device direct-installs skipped — no
+  paired hardware). UCF seam verified live end-to-end (catscan: exchange v1.0.0 answering,
+  world PROD, boundary THROUGH). `66c0e68` closes the 2026-08-17 "no caller" finding — the
+  tick now boops declared MCP partners itself (presence-evidence only, never payload);
+  bar 802/0; deployed to the local daemon AND the lighthouse (`cf9f602`). Jeff package:
+  docs/partners/ucf-factory-readiness.md + generalized provisioning script. **AWAITING
+  IAN, in order: (1) run the handed provisioning command on the lighthouse (the harness
+  refused remote credential-minting), (2) tap the "UCF Factory (Jeff)" card in the Partner
+  ring, (3) send Jeff the note + import bundle out of band. First metabolism paw print
+  expected within one quiet-cadence tick (~16 min from the 22:51 CT daemon restart);
+  verification was still pending when this entry was written — check catscan.**
+
 - **Approved plan in flight (2026-08-17): the constitutional integrity pass, conduct strand.**
   T-210 + T-211, six bricks, decisions and build order recorded at
   `~/.claude/plans/planning-mode-on-lets-toasty-corbato.md` (outside the repo — read it first
