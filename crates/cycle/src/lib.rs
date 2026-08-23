@@ -4502,6 +4502,38 @@ fn regulate_llm_budget(
 /// `allow_llm` is false the cycle never reaches the LLM — candidate hypotheses are
 /// deterministic, and tests stay offline.
 #[allow(clippy::too_many_arguments)]
+/// Boop each declared MCP partner's nose: open the session (the boundary is checked before
+/// anything is dialled, then `initialize`) and record THAT the partner answered — its name,
+/// version and protocol — never WHAT it says. Partner payload is ship-world content and
+/// stays out of household truth (ADR-0045); that a declared partner answers this
+/// household's reach is a household fact, like connectivity. An unreachable, refused or
+/// undeclared partner is the no-oracle floor, not an error — its absence from this
+/// perception is what the structural fingerprint notices.
+fn mcp_presence(dir: &Path, now: i64) -> Vec<observation::Observation> {
+    let Ok(set) = familiar_mcp::ServerSet::load(dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for server in &set.servers {
+        let Ok(session) = familiar_mcp::session::Session::open(dir, &server.name) else {
+            continue;
+        };
+        out.push(observation::Observation::new(
+            "familiar",
+            "reached mcp partner",
+            format!(
+                "{}: {} {}",
+                server.name, session.server_name, session.server_version
+            ),
+            format!("protocol {}", session.protocol_version),
+            "mcp",
+            now,
+            0.95,
+        ));
+    }
+    out
+}
+
 pub fn tick(
     dir: &Path,
     now: i64,
@@ -4530,6 +4562,11 @@ pub fn tick(
     // trivial "still see the same devices" recurrence. See SPEC / periphery-discovery notes.
     if allow_connectivity {
         perceived.push(sense::connectivity(now));
+        // The declared MCP partners, booped by the metabolism itself — T-206's missing
+        // caller. Until this, every call through the cat flap was a human's or a
+        // monitor's; catscan's PAW PRINTS panel counted zero and was built to notice
+        // the day this line started running.
+        perceived.extend(mcp_presence(dir, now));
     }
     // Structural fingerprint of *this* perception vs. the last tick's. Computed over
     // the perceived set (not the cumulative log), so it also falls when a fact
@@ -7931,6 +7968,38 @@ mod tests {
         let status = |id: &str| threads.iter().find(|t| t.id == id).unwrap().status.clone();
         assert_eq!(status("thread-0001"), "marginalized");
         assert_eq!(status("thread-0002"), "pursued");
+    }
+
+    #[test]
+    fn mcp_presence_fails_closed_and_degrades_to_silence() {
+        // T-206's missing caller, pinned: the metabolism boops declared MCP partners
+        // itself — and every failure short of an answer (no declaration, a shut boundary,
+        // a dead partner) is the no-oracle floor: no observation, no error, no stall.
+
+        // No declaration at all: an absent servers.json is an empty set.
+        let t = Temp::new("mcp_presence_silence");
+        assert!(mcp_presence(&t.0, 1000).is_empty());
+
+        // Declared partner, shut boundary: refused before anything is dialled.
+        fs::create_dir_all(t.0.join("mcp")).unwrap();
+        fs::write(
+            t.0.join("mcp/servers.json"),
+            r#"{"servers":[{"name":"ucf","url":"http://127.0.0.1:1/mcp",
+               "key_file":"mcp/ucf.env","key_name":"UCF_TOKEN","tools":[]}]}"#,
+        )
+        .unwrap();
+        fs::write(t.0.join("mcp/ucf.env"), "UCF_TOKEN=ucfk_test\n").unwrap();
+        assert!(mcp_presence(&t.0, 1000).is_empty());
+
+        // Boundary open but the partner is dead (port 1 answers nothing): still silence.
+        let mut b = boundary::Boundary::closed();
+        b.allow_network = true;
+        fs::write(
+            t.0.join(boundary::BOUNDARY_FILE),
+            serde_json::to_string(&b).unwrap(),
+        )
+        .unwrap();
+        assert!(mcp_presence(&t.0, 1000).is_empty());
     }
 
     #[test]
