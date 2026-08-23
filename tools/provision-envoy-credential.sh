@@ -113,6 +113,13 @@ ln "$pending_tmp" "$pending_path"
 pending_created=1
 ln "$export_tmp" "$export_path"
 export_created=1
+
+# The door daemon, not the provisioner, must read what was staged — match the data dir's
+# owner. Provisioning often runs as root while the daemon runs as a service user, and
+# root-owned staging makes the fail-closed inbox read answer 500 to every console (the
+# first live ceremony hit exactly this). The Envoy import bundle stays with the caller.
+data_dir_owner=$(stat -c '%u:%g' "$data_dir" 2>/dev/null || stat -f '%u:%g' "$data_dir")
+chown "$data_dir_owner" "$credential_dir" "$pending_dir" "$credential_path" "$pending_path"
 finished=1
 
 echo "staged $registration_id for $addressed_to"

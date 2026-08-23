@@ -90,8 +90,14 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 - **THE FIRST CEREMONY IS COMPLETE (2026-08-23 01:19:40 UTC): the Envoy is principal
   `principal-f90b15e1adb1768f3ad8fccf46301892`** — alias "Envoy (on-device)",
   registered_by ian, enabled; staging consumed (pending-registrations empty), registry at
-  `mcp/principals.json` on the lighthouse. Getting the tap to land surfaced FOUR findings,
-  each a follow-up brick candidate:
+  `mcp/principals.json` on the lighthouse. Getting the tap to land surfaced FOUR findings.
+  **ALL FOUR FIXED AND SHIPPED 2026-08-23 (Ian: "do all four, then lets build and ship")** —
+  multi-door inbox read with per-item act routing (AppModel), provisioning chown
+  (tools/provision-envoy-credential.sh), the poll-push disarm race + on-card act outcomes
+  and ceremony narrative (sphere index.html + both bridges). Checks: check-sphere ✓,
+  FamiliarMesh 17/0, FamiliarMac + FamiliarAgent builds 0 errors; no Rust changed
+  (lighthouse stays 9bf538c); FamiliarMac reinstalled to /Applications and running.
+  README/CHANGELOG/DEVELOPMENT_LOG updated the same push. Original findings for the trail:
   1. **No door picker; LAN outranks lighthouse.** The console auto-selects `host`
      (home → lighthouse → tail, AppModel readOrderedCandidates) and the partner inbox reads
      only that one door — so a card staged at the public door is invisible to a console

@@ -1561,13 +1561,15 @@ function refreshScreen() {
     const proposals = inbox.pending_proposals || [];
     const warnings = inbox.warnings || [];
     const heading = (name, count, words) => `<div style="display:flex;align-items:baseline;gap:10px;margin:20px 0 10px;"><span style="font-size:18px;font-weight:600;">${name}</span><span class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">${count} · ${words}</span></div>`;
+    const busy = !!S.partnerActBusy;
     const registrationCards = registrations.map((r, i) => {
       const armed = S.partnerRegisterArmed === r.registration_id;
       return card(`${identity(r)}
-        <div style="font-size:14px;line-height:1.5;color:rgba(232,240,252,0.9);margin-bottom:8px;">A fresh partner credential is staged on this door.</div>
-        <div class="m" style="font-size:10px;line-height:1.6;color:rgba(188,210,245,0.67);">Registering binds this opaque credential to you. It grants no surface, observation, suggestion, or actuation authority; the partner must still accept the covenant and ask separately.</div>
-        <div class="m" style="font-size:8px;color:rgba(160,195,255,0.48);margin-top:8px;">staged ${utc(r.created_at)}</div>
-        <button onclick="spherePartnerRegister(${i})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;margin-top:14px;border-color:${armed?'rgba(61,220,151,0.62)':'rgba(120,190,255,0.28)'};"><span class="m" style="font-size:9px;color:${armed?'#9fe8c0':'#cdeeff'};">${armed ? `CONFIRM REGISTER ${esc(r.partner_alias)}` : 'REGISTER PARTNER'}</span></button>`, '61,220,151');
+        <div style="font-size:14px;line-height:1.5;color:rgba(232,240,252,0.9);margin-bottom:8px;">A fresh credential for “${esc(r.partner_alias)}” is staged on ${esc(r.door || 'this door')} — the partner does not exist yet.</div>
+        <div class="m" style="font-size:10px;line-height:1.6;color:rgba(188,210,245,0.67);">This staging was provisioned on your word; nothing was created automatically, and nothing acts until you decide. Your confirmation is the signed act that mints the partner's identity, so everything it ever does traces back to this decision of yours. Registering binds the opaque credential to you and grants no surface, observation, suggestion, or actuation authority — the partner must still accept the covenant and ask separately.</div>
+        <div class="m" style="font-size:8px;color:rgba(160,195,255,0.48);margin-top:8px;">staged ${utc(r.created_at)} on ${esc(r.door || 'this door')}</div>
+        <div class="m" style="font-size:9px;line-height:1.55;color:rgba(174,231,255,0.6);margin-top:8px;">Tap once to arm, then tap CONFIRM within 5 seconds. The result will appear on this screen.</div>
+        <button ${busy ? 'disabled' : ''} onclick="spherePartnerRegister(${i})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;margin-top:14px;border-color:${armed?'rgba(61,220,151,0.62)':'rgba(120,190,255,0.28)'};opacity:${busy?'0.45':'1'};"><span class="m" style="font-size:9px;color:${armed?'#9fe8c0':'#cdeeff'};">${busy ? 'WORKING…' : armed ? `CONFIRM REGISTER ${esc(r.partner_alias)}` : 'REGISTER PARTNER'}</span></button>`, '61,220,151');
     }).join('');
     const requestCards = requests.map((r, i) => {
       const choices = (r.eligible_surfaces || []);
@@ -1596,17 +1598,24 @@ function refreshScreen() {
         ${choices.length ? `<label class="m" style="display:block;font-size:8px;letter-spacing:0.13em;color:rgba(160,195,255,0.55);margin:12px 0 6px;">LOCAL SURFACE — NEVER SHOWN TO THE PARTNER</label><select id="partnerSurface-${i}" style="width:100%;max-width:420px;padding:9px 11px;border-radius:10px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.24);">${choices.map(c => `<option value="${esc(c.surface)}" ${armedSurface === c.surface ? 'selected' : ''}>${esc(c.surface)}${c.description ? ' — '+esc(c.description) : ''}</option>`).join('')}</select>` : `<div class="m" style="font-size:10px;color:#ffb0b0;margin-top:10px;">No current valid local surface matches this request.</div>`}
         ${operationNames.length ? `<label class="m" style="display:block;font-size:8px;letter-spacing:0.13em;color:rgba(160,195,255,0.55);margin:12px 0 6px;">ONE ALLOWED SUGGESTION</label><select id="partnerOperation-${i}" onchange="spherePartnerOperation(${i})" style="width:100%;max-width:420px;padding:9px 11px;border-radius:10px;background:rgba(8,20,40,0.88);color:#dcecff;border:1px solid rgba(120,190,255,0.24);">${operationNames.map(name => `<option value="${esc(name)}" ${chosenOperation === name ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>${boundControls}` : ''}
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
-          ${choices.length && operationNames.length ? `<button onclick="spherePartnerGrant(${i},${duration})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;border-color:${armed?'rgba(61,220,151,0.62)':'rgba(120,190,255,0.28)'};"><span class="m" style="font-size:9px;color:${armed?'#9fe8c0':'#cdeeff'};">${armed ? `CONFIRM ${esc(armedSurface || 'SURFACE')} · ${esc(chosenOperation)} ONLY` : `GRANT NARROWLY · ${dur(duration)}`}</span></button>` : ''}
-          <button onclick="spherePartnerDecline(${i})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;"><span class="m" style="font-size:9px;color:#ffb0b0;">DECLINE</span></button>
+          ${choices.length && operationNames.length ? `<button ${busy ? 'disabled' : ''} onclick="spherePartnerGrant(${i},${duration})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;border-color:${armed?'rgba(61,220,151,0.62)':'rgba(120,190,255,0.28)'};opacity:${busy?'0.45':'1'};"><span class="m" style="font-size:9px;color:${armed?'#9fe8c0':'#cdeeff'};">${busy ? 'WORKING…' : armed ? `CONFIRM ${esc(armedSurface || 'SURFACE')} · ${esc(chosenOperation)} ONLY` : `GRANT NARROWLY · ${dur(duration)}`}</span></button>` : ''}
+          <button ${busy ? 'disabled' : ''} onclick="spherePartnerDecline(${i})" class="glybtn" style="height:36px;padding:0 14px;border-radius:10px;opacity:${busy?'0.45':'1'};"><span class="m" style="font-size:9px;color:#ffb0b0;">DECLINE</span></button>
         </div>`, '120,190,255');
     }).join('');
     const grantCards = grants.map((g, i) => {
       const armed = S.partnerRevokeArmed === i;
-      return card(`${identity(g)}<div style="font-size:14px;margin-bottom:6px;">may leave bounded suggestions about <span style="color:#aee7ff;">${esc(g.surface)}</span></div><div class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">expires ${utc(g.expires_at)} · no reading and no actuation</div><button onclick="spherePartnerRevoke(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:12px;"><span class="m" style="font-size:9px;color:#ffb0b0;">${armed ? `CONFIRM REVOKE ${esc(g.surface)}` : 'REVOKE'}</span></button>`, '255,177,90');
+      return card(`${identity(g)}<div style="font-size:14px;margin-bottom:6px;">may leave bounded suggestions about <span style="color:#aee7ff;">${esc(g.surface)}</span></div><div class="m" style="font-size:9px;color:rgba(160,195,255,0.58);">expires ${utc(g.expires_at)} · no reading and no actuation</div><button ${busy ? 'disabled' : ''} onclick="spherePartnerRevoke(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:12px;opacity:${busy?'0.45':'1'};"><span class="m" style="font-size:9px;color:#ffb0b0;">${busy ? 'WORKING…' : armed ? `CONFIRM REVOKE ${esc(g.surface)}` : 'REVOKE'}</span></button>`, '255,177,90');
     }).join('');
-    const proposalCards = proposals.map((p, i) => card(`${identity(p)}<div style="font-size:14px;line-height:1.5;margin-bottom:7px;">suggests <span style="color:#c9a3ff;">${esc(p.operation)}</span> for <span style="color:#aee7ff;">${esc(p.surface)}</span></div><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:rgba(205,220,245,0.75);background:rgba(5,12,25,0.45);padding:9px 11px;border-radius:9px;">${esc(JSON.stringify(p.parameters || {}, null, 2))}</pre>${p.reason_quote ? `<div style="padding:10px 12px;border-left:2px solid rgba(201,163,255,0.35);margin:10px 0;"><span class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(190,170,230,0.65);">PARTNER SAYS:</span><div style="font-size:13px;line-height:1.45;margin-top:5px;">${esc(p.reason_quote)}</div></div>` : ''}<div class="m" style="font-size:9px;line-height:1.5;color:rgba(170,190,220,0.62);">Leave pending by doing nothing. There is no accept or run action at this rung.</div><button onclick="spherePartnerRefuse(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:11px;"><span class="m" style="font-size:9px;color:#ffb0b0;">REFUSE</span></button>`, '201,163,255')).join('');
+    const proposalCards = proposals.map((p, i) => card(`${identity(p)}<div style="font-size:14px;line-height:1.5;margin-bottom:7px;">suggests <span style="color:#c9a3ff;">${esc(p.operation)}</span> for <span style="color:#aee7ff;">${esc(p.surface)}</span></div><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.5;color:rgba(205,220,245,0.75);background:rgba(5,12,25,0.45);padding:9px 11px;border-radius:9px;">${esc(JSON.stringify(p.parameters || {}, null, 2))}</pre>${p.reason_quote ? `<div style="padding:10px 12px;border-left:2px solid rgba(201,163,255,0.35);margin:10px 0;"><span class="m" style="font-size:8px;letter-spacing:0.14em;color:rgba(190,170,230,0.65);">PARTNER SAYS:</span><div style="font-size:13px;line-height:1.45;margin-top:5px;">${esc(p.reason_quote)}</div></div>` : ''}<div class="m" style="font-size:9px;line-height:1.5;color:rgba(170,190,220,0.62);">Leave pending by doing nothing. There is no accept or run action at this rung.</div><button ${busy ? 'disabled' : ''} onclick="spherePartnerRefuse(${i})" class="glybtn" style="height:34px;padding:0 13px;border-radius:10px;margin-top:11px;opacity:${busy?'0.45':'1'};"><span class="m" style="font-size:9px;color:#ffb0b0;">${busy ? 'WORKING…' : 'REFUSE'}</span></button>`, '201,163,255')).join('');
     const empty = !registrations.length && !requests.length && !grants.length && !proposals.length;
-    el.innerHTML = shell(`${warnings.map(w => card(`<div class="m" style="font-size:10px;color:#ffd29a;">${esc(w)}</div>`, '255,177,90')).join('')}${empty ? card(`<div style="font-size:16px;font-weight:600;margin-bottom:7px;">No partner decisions waiting</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(180,205,240,0.62);">Registrations, requests, and suggestions addressed to you will appear here after a fresh signed read.</div>`) : ''}${registrations.length ? heading('Registrations', registrations.length, 'you decide whether an identity begins') + registrationCards : ''}${requests.length ? heading('Requests', requests.length, 'you decide whether a relationship begins') + requestCards : ''}${grants.length ? heading('Active grants', grants.length, 'suggestions only') + grantCards : ''}${proposals.length ? heading('Suggestions', proposals.length, 'refuse or leave pending') + proposalCards : ''}`);
+    // The most recent act answers HERE, on the deciding surface — in flight, done, or refused
+    // with the door's reason — so a tap never dissolves into silence.
+    const actNotice = S.partnerActBusy
+      ? card(`<div class="m" style="font-size:10px;line-height:1.6;color:#aee7ff;">${esc(S.partnerActBusy)} — waiting for the door's answer. The decision buttons are paused so your word lands exactly once.</div>`, '174,231,255')
+      : (S.partnerActOutcome
+        ? card(`<div style="font-size:15px;font-weight:600;color:${S.partnerActOutcome.ok ? '#9fe8c0' : '#ffb0b0'};margin-bottom:6px;">${S.partnerActOutcome.ok ? 'Done' : 'Not done'}</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(220,230,245,0.75);">${esc(String(S.partnerActOutcome.message || ''))}</div>`, S.partnerActOutcome.ok ? '61,220,151' : '255,110,110')
+        : '');
+    el.innerHTML = shell(`${actNotice}${warnings.map(w => card(`<div class="m" style="font-size:10px;color:#ffd29a;">${esc(w)}</div>`, '255,177,90')).join('')}${empty ? card(`<div style="font-size:16px;font-weight:600;margin-bottom:7px;">No partner decisions waiting</div><div class="m" style="font-size:10px;line-height:1.6;color:rgba(180,205,240,0.62);">Registrations, requests, and suggestions addressed to you will appear here after a fresh signed read.</div>`) : ''}${registrations.length ? heading('Registrations', registrations.length, 'you decide whether an identity begins') + registrationCards : ''}${requests.length ? heading('Requests', requests.length, 'you decide whether a relationship begins') + requestCards : ''}${grants.length ? heading('Active grants', grants.length, 'suggestions only') + grantCards : ''}${proposals.length ? heading('Suggestions', proposals.length, 'refuse or leave pending') + proposalCards : ''}`);
 
   } else if (k === 'device') {
     // A human typing their name outranks the 3s device push — FOCUS-gated only. Gating on a
@@ -2047,6 +2056,9 @@ window.spherePartnerRegister = (i) => {
     return;
   }
   S.partnerRegisterArmed = null;
+  S.partnerActBusy = 'registering ' + (r.partner_alias || 'partner') + '…';
+  S.partnerActOutcome = null;
+  refreshScreen();
   toApp('partnerAct', { act:'register', registration_id:r.registration_id });
 };
 window.spherePartnerOperation = (i) => {
@@ -2092,12 +2104,19 @@ window.spherePartnerGrant = (i, duration) => {
     return;
   }
   S.partnerGrantArmed = null;
+  S.partnerActBusy = 'granting ' + (choice.r.partner_alias || 'partner') + ' narrowly…';
+  S.partnerActOutcome = null;
+  refreshScreen();
   toApp('partnerAct', { act:'decide', request_id:choice.r.request_id, surface:choice.surface,
     allowed_operations:choice.allowed, expires_at:nowS() + Math.max(60, duration|0) });
 };
 window.spherePartnerDecline = (i) => {
   const r = ((S.partnerInbox || {}).pending_requests || [])[i];
-  if (r) toApp('partnerAct', { act:'decline', request_id:r.request_id });
+  if (!r) return;
+  S.partnerActBusy = 'declining ' + (r.partner_alias || 'partner') + '…';
+  S.partnerActOutcome = null;
+  refreshScreen();
+  toApp('partnerAct', { act:'decline', request_id:r.request_id });
 };
 window.spherePartnerRevoke = (i) => {
   const g = ((S.partnerInbox || {}).active_grants || [])[i];
@@ -2108,11 +2127,18 @@ window.spherePartnerRevoke = (i) => {
     return;
   }
   S.partnerRevokeArmed = null;
+  S.partnerActBusy = 'revoking ' + (g.surface || 'grant') + '…';
+  S.partnerActOutcome = null;
+  refreshScreen();
   toApp('partnerAct', { act:'revoke', grant_id:g.grant_id });
 };
 window.spherePartnerRefuse = (i) => {
   const p = ((S.partnerInbox || {}).pending_proposals || [])[i];
-  if (p) toApp('partnerAct', { act:'refuse', proposal_id:p.proposal_id });
+  if (!p) return;
+  S.partnerActBusy = 'refusing ' + (p.operation || 'suggestion') + '…';
+  S.partnerActOutcome = null;
+  refreshScreen();
+  toApp('partnerAct', { act:'refuse', proposal_id:p.proposal_id });
 };
 window.sphereSetDeviceName = () => {
   const input = document.getElementById('deviceNameInput');
@@ -2439,19 +2465,39 @@ function centerOnSelf() {
   G.diveDir = saved;
 }
 window.spherePartnerInbox = (view) => {
+  const raw = JSON.stringify(view || null);
+  // An UNCHANGED push must leave the screen alone: the 5s poll used to disarm the two-tap
+  // CONFIRM on every tick (the window was really 0–5s — the first ceremony's taps died
+  // here) and wipe in-progress bound edits. Only a genuinely new view clears armed state:
+  // a competing device may have decided, so stale armed buttons do still fall.
+  if (raw === S.partnerInboxRaw && !S.partnerInboxError) return;
+  const changed = raw !== S.partnerInboxRaw;
+  S.partnerInboxRaw = raw;
   S.partnerInbox = view;
   S.partnerInboxError = '';
-  S.partnerRegisterArmed = null;
-  S.partnerGrantArmed = null;
-  S.partnerRevokeArmed = null;
+  if (changed) {
+    S.partnerRegisterArmed = null;
+    S.partnerGrantArmed = null;
+    S.partnerRevokeArmed = null;
+    S.partnerActBusy = null;
+  }
   if (S.activeScreen === 'partners') try { refreshScreen(); } catch (e) { S.jsErr = 'partners: ' + e.message; }
   renderButtons();
 };
 window.spherePartnerInboxError = (message) => {
   S.partnerInbox = null;
+  S.partnerInboxRaw = null;
   S.partnerInboxError = message || 'partner inbox unavailable';
   if (S.activeScreen === 'partners') try { refreshScreen(); } catch (e) { S.jsErr = 'partners: ' + e.message; }
   renderButtons();
+};
+// One console act's result, pushed by the app the moment the door answers. The card that
+// asked shows the answer — success or the refusal reason — instead of feedback living only
+// in the notes feed while the button sits there inviting more clicks.
+window.spherePartnerActOutcome = (outcome) => {
+  S.partnerActOutcome = outcome || null;
+  S.partnerActBusy = null;
+  if (S.activeScreen === 'partners') try { refreshScreen(); } catch (e) { S.jsErr = 'partners: ' + e.message; }
 };
 window.sphereLinkDown = (msg) => { S.linkOk = false; S.linkErr = msg || ''; renderChrome(); };
 // The native map finished its own flight and the human surfaced back to orbit.

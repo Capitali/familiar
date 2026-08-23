@@ -136,13 +136,16 @@ struct SphereConsoleIOS: View {
                     if let model { bridge?.pushDevice(model.deviceStateJSON()) }
                 }
             }
-            bridge.onPartnerAct = { [weak model] body in
+            bridge.onPartnerAct = { [weak model, weak bridge] body in
                 guard let model, let act = body["act"] as? String else { return }
                 Task {
+                    // The deciding surface itself gets the act's outcome — success or the
+                    // refusal reason — so a tap never dissolves into silence (T-224 ceremony).
+                    var outcome: AppModel.PartnerActOutcome?
                     switch act {
                     case "register":
                         if let id = body["registration_id"] as? String {
-                            await model.registerPartner(id)
+                            outcome = await model.registerPartner(id)
                         }
                     case "decide":
                         guard let requestId = body["request_id"] as? String,
@@ -155,7 +158,7 @@ struct SphereConsoleIOS: View {
                               )
                         else { return }
                         let expiresAt = (body["expires_at"] as? NSNumber)?.int64Value ?? 0
-                        await model.decidePartnerGrant(
+                        outcome = await model.decidePartnerGrant(
                             requestId: requestId,
                             surface: surface,
                             allowedOperations: bounds,
@@ -163,18 +166,19 @@ struct SphereConsoleIOS: View {
                         )
                     case "decline":
                         if let id = body["request_id"] as? String {
-                            await model.declinePartnerGrant(id)
+                            outcome = await model.declinePartnerGrant(id)
                         }
                     case "revoke":
                         if let id = body["grant_id"] as? String {
-                            await model.revokePartnerGrant(id)
+                            outcome = await model.revokePartnerGrant(id)
                         }
                     case "refuse":
                         if let id = body["proposal_id"] as? String {
-                            await model.refusePartnerProposal(id)
+                            outcome = await model.refusePartnerProposal(id)
                         }
                     default: break
                     }
+                    if let outcome { bridge?.pushPartnerActOutcome(outcome) }
                 }
             }
             bridge.onWatchRelink = { [weak model, weak bridge] in
@@ -335,6 +339,17 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     func pushDevice(_ json: String) {
         lastDeviceJSON = json
         web?.evaluateJavaScript("window.sphereDevice && window.sphereDevice(\(json))", completionHandler: nil)
+    }
+
+    /// Hand one console act's outcome to the page so the card that asked shows the answer.
+    func pushPartnerActOutcome(_ outcome: AppModel.PartnerActOutcome) {
+        let payload: [String: Any] = ["ok": outcome.ok, "message": outcome.message]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        web?.evaluateJavaScript(
+            "window.spherePartnerActOutcome && window.spherePartnerActOutcome(\(json))",
+            completionHandler: nil)
     }
 
     func pushPartnerInbox(_ json: String) {

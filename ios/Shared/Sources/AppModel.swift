@@ -384,6 +384,10 @@ final class AppModel: ObservableObject {
     /// never folded into worldview or diagnostics.
     @Published var partnerInboxJSON: String?
     @Published var partnerInboxError: String?
+    /// Which door holds each pending partner item (registration/request/grant/proposal id →
+    /// host). Partner state is door-local, so the deciding act must return to the door the
+    /// item was read from — not to whichever door the console currently prefers.
+    private var partnerItemDoors: [String: String] = [:]
     private var worldviewTask: Task<Void, Never>?
 
     // The iPad as a thinking-peer: on-device Apple Intelligence reasoning under the Three Laws.
@@ -644,12 +648,13 @@ final class AppModel: ObservableObject {
         await sendConsoleAct(.nameDevice(name), label: "name device")
     }
 
+    @discardableResult
     func decidePartnerGrant(
         requestId: String,
         surface: String,
         allowedOperations: PartnerOperationBounds,
         expiresAt: Int64
-    ) async {
+    ) async -> PartnerActOutcome {
         await sendConsoleAct(
             .decideGrant(
                 requestId: requestId,
@@ -657,33 +662,56 @@ final class AppModel: ObservableObject {
                 allowedOperations: allowedOperations,
                 expiresAt: expiresAt
             ),
-            label: "grant partner request"
+            label: "grant partner request",
+            item: requestId
         )
     }
 
-    func registerPartner(_ registrationId: String) async {
+    /// The explicit result of one console act, for the deciding surface itself. Feedback that
+    /// lives only in the notes feed leaves the button sitting there inviting more clicks —
+    /// the first ceremony proved a human will keep tapping until SOMETHING answers.
+    struct PartnerActOutcome {
+        let ok: Bool
+        let message: String
+    }
+
+    @discardableResult
+    func registerPartner(_ registrationId: String) async -> PartnerActOutcome {
         await sendConsoleAct(
             .registerPartner(registrationId),
-            label: "register partner"
+            label: "register partner",
+            item: registrationId
         )
     }
 
-    func declinePartnerGrant(_ requestId: String) async {
-        await sendConsoleAct(.declineGrant(requestId), label: "decline partner request")
+    @discardableResult
+    func declinePartnerGrant(_ requestId: String) async -> PartnerActOutcome {
+        await sendConsoleAct(
+            .declineGrant(requestId), label: "decline partner request", item: requestId)
     }
 
-    func revokePartnerGrant(_ grantId: String) async {
-        await sendConsoleAct(.revokeGrant(grantId), label: "revoke partner grant")
+    @discardableResult
+    func revokePartnerGrant(_ grantId: String) async -> PartnerActOutcome {
+        await sendConsoleAct(.revokeGrant(grantId), label: "revoke partner grant", item: grantId)
     }
 
-    func refusePartnerProposal(_ proposalId: String) async {
-        await sendConsoleAct(.refuseProposal(proposalId), label: "refuse partner proposal")
+    @discardableResult
+    func refusePartnerProposal(_ proposalId: String) async -> PartnerActOutcome {
+        await sendConsoleAct(
+            .refuseProposal(proposalId), label: "refuse partner proposal", item: proposalId)
     }
 
-    private func sendConsoleAct(_ act: ConsoleAct, label: String) async {
-        guard let session = consoleActSession() else {
+    @discardableResult
+    private func sendConsoleAct(
+        _ act: ConsoleAct, label: String, item: String? = nil
+    ) async -> PartnerActOutcome {
+        // The act must land on the door that holds the item — partner state is door-local,
+        // so a card read from the lighthouse is decided AT the lighthouse even while the
+        // console's preferred door is its LAN hub.
+        let door = item.flatMap { partnerItemDoors[$0] } ?? host
+        guard let session = consoleActSession(door: door) else {
             note("\(label) not sent — no enrolled door")
-            return
+            return PartnerActOutcome(ok: false, message: "\(label) not sent — no enrolled door")
         }
         let isPartnerDecision: Bool
         switch act {
@@ -701,26 +729,36 @@ final class AppModel: ObservableObject {
                     partnerInboxJSON = nil
                     partnerInboxError = "decision response was not a valid projection"
                     note("\(label) not confirmed — refresh before another decision")
-                    return
+                    return PartnerActOutcome(
+                        ok: false,
+                        message: "\(label) not confirmed — the door's reply was not a valid "
+                            + "projection; refresh before deciding again")
                 }
-                // The successful response is the post-append private projection. Publish it only
-                // in memory and keep its private fields out of notes and diagnostics.
-                partnerInboxJSON = reply
-                partnerInboxError = nil
+                // The reply proves the act landed, but it is ONE door's post-append projection —
+                // rebuild the merged view across every door before showing decision state again.
                 note("✓ \(label) recorded")
-            } else {
-                note("✓ \(reply)")
+                await refreshPartnerInbox()
+                await refreshWorldview()
+                return PartnerActOutcome(ok: true, message: "✓ \(label) recorded at \(door)")
             }
+            note("✓ \(reply)")
             await refreshWorldview()
+            return PartnerActOutcome(ok: true, message: "✓ \(reply)")
         } catch ConsoleActClient.ActError.http(let status, let body) {
             note("\(label) refused (\(status)): \(body.prefix(80))")
             // A competing device may have decided first. Read the ledger's actual state back;
             // never leave a stale actionable card after an honest transition conflict.
             await refreshPartnerInbox()
+            return PartnerActOutcome(
+                ok: false, message: "\(label) refused (\(status)): \(body.prefix(120))")
         } catch ConsoleActClient.ActError.transport(let message) {
-            note("\(label) could not reach \(host): \(message.prefix(80))")
+            note("\(label) could not reach \(door): \(message.prefix(80))")
+            return PartnerActOutcome(
+                ok: false, message: "\(label) could not reach \(door): \(message.prefix(120))")
         } catch {
             note("\(label) failed: \(error.localizedDescription)")
+            return PartnerActOutcome(
+                ok: false, message: "\(label) failed: \(error.localizedDescription)")
         }
     }
 
@@ -1545,42 +1583,108 @@ final class AppModel: ObservableObject {
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
-    /// A signing session pointed at the current door's narrow console write seam.
-    func consoleActSession() -> ObservationClient.Session? {
-        guard let g = storedGrant(), !host.isEmpty,
-              let url = ConsoleActClient.consoleActURL(host: host, port: enrollPort)
+    /// A signing session pointed at one door's narrow console write seam.
+    func consoleActSession(door: String) -> ObservationClient.Session? {
+        guard let g = storedGrant(), !door.isEmpty,
+              let url = ConsoleActClient.consoleActURL(host: door, port: enrollPort)
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
-    /// A signing session pointed at the same current door's private partner projection.
-    func partnerInboxSession() -> ObservationClient.Session? {
-        guard let g = storedGrant(), !host.isEmpty,
-              let url = PartnerInboxClient.inboxURL(host: host, port: enrollPort)
+    /// A signing session pointed at one door's private partner projection.
+    func partnerInboxSession(door: String) -> ObservationClient.Session? {
+        guard let g = storedGrant(), !door.isEmpty,
+              let url = PartnerInboxClient.inboxURL(host: door, port: enrollPort)
         else { return nil }
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
+    /// One human-addressed view across EVERY candidate door, not just the promoted one.
+    /// Partner state is door-local: a registration staged at the public lighthouse used to be
+    /// invisible to a console sitting next to its LAN hub (the first ceremony stalled on
+    /// exactly this). Each door's read stays fail-closed on its own state; a door that cannot
+    /// answer becomes a warning line instead of blanking the doors that can.
     func refreshPartnerInbox() async {
-        guard let session = partnerInboxSession() else {
+        let doors = hosts.filter { !$0.isEmpty }
+        guard storedGrant() != nil, !doors.isEmpty else {
             partnerInboxJSON = nil
             partnerInboxError = "not available — no enrolled door"
             return
         }
-        do {
-            let (_, raw) = try await PartnerInboxClient(session: session).fetchWithRaw()
-            partnerInboxJSON = String(data: raw, encoding: .utf8)
-            partnerInboxError = nil
-        } catch PartnerInboxClient.ReadError.http(let status, let body) {
-            partnerInboxJSON = nil
-            partnerInboxError = "not available (\(status)): \(body.prefix(80))"
-        } catch PartnerInboxClient.ReadError.transport(let message) {
-            partnerInboxJSON = nil
-            partnerInboxError = "not available — \(message.prefix(80))"
-        } catch {
-            partnerInboxJSON = nil
-            partnerInboxError = "partner inbox unavailable"
+        var raws: [(door: String, raw: Data)] = []
+        var troubles: [String] = []
+        await withTaskGroup(of: (String, Result<Data, PartnerInboxClient.ReadError>).self) { group in
+            for door in doors {
+                guard let session = partnerInboxSession(door: door) else { continue }
+                group.addTask {
+                    do {
+                        let (_, raw) = try await PartnerInboxClient(session: session).fetchWithRaw()
+                        return (door, .success(raw))
+                    } catch let error as PartnerInboxClient.ReadError {
+                        return (door, .failure(error))
+                    } catch {
+                        return (door, .failure(.transport(error.localizedDescription)))
+                    }
+                }
+            }
+            for await (door, result) in group {
+                switch result {
+                case .success(let raw): raws.append((door, raw))
+                case .failure(.http(let status, let body)):
+                    troubles.append("door \(door) refused (\(status)): \(body.prefix(60))")
+                case .failure(.transport(let message)):
+                    troubles.append("door \(door) unreachable: \(message.prefix(60))")
+                case .failure:
+                    troubles.append("door \(door) sent an unreadable reply")
+                }
+            }
         }
+        guard !raws.isEmpty else {
+            partnerInboxJSON = nil
+            partnerInboxError = troubles.sorted().joined(separator: " · ")
+            return
+        }
+        // Merge in door-preference order so an item federated to two doors keeps its
+        // most-preferred provenance; the act for an item must return to the door that holds it.
+        raws.sort { (doors.firstIndex(of: $0.door) ?? .max) < (doors.firstIndex(of: $1.door) ?? .max) }
+        let sections = [
+            ("pending_registrations", "registration_id"),
+            ("pending_requests", "request_id"),
+            ("active_grants", "grant_id"),
+            ("pending_proposals", "proposal_id"),
+        ]
+        var doorByItem: [String: String] = [:]
+        var merged: [String: [Any]] = ["warnings": []]
+        for (section, _) in sections { merged[section] = [] }
+        for (door, raw) in raws {
+            guard let view = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] else {
+                troubles.append("door \(door) sent an unreadable reply")
+                continue
+            }
+            for (section, idKey) in sections {
+                for item in view[section] as? [[String: Any]] ?? [] {
+                    guard let id = item[idKey] as? String, doorByItem[id] == nil else { continue }
+                    doorByItem[id] = door
+                    var tagged = item
+                    tagged["door"] = door
+                    merged[section]?.append(tagged)
+                }
+            }
+            for warning in view["warnings"] as? [String] ?? [] {
+                merged["warnings"]?.append("\(door): \(warning)")
+            }
+        }
+        for trouble in troubles.sorted() { merged["warnings"]?.append(trouble) }
+        guard let body = try? JSONSerialization.data(withJSONObject: merged),
+              let json = String(data: body, encoding: .utf8)
+        else {
+            partnerInboxJSON = nil
+            partnerInboxError = "could not merge the door views"
+            return
+        }
+        partnerItemDoors = doorByItem
+        partnerInboxJSON = json
+        partnerInboxError = nil
     }
 
     /// Poll the familiar's worldview so the iPad Glass shows a live console. Idempotent; cancelled by

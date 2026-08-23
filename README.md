@@ -206,6 +206,15 @@ surfaced, and the hardening they taught, are
 [ADR-0029](docs/decision-records/0029-the-door-under-load.md) — testers playing IS the
 test.
 
+And it has **partners**: other AIs meet the familiar at its door over MCP, on the
+household's terms — what the familiar learns to control becomes an anonymized offering,
+and a partner holds an opaque handle, never a name or an address. Identity itself is a
+**human ceremony**: provisioning stages an inert credential and a card addressed to one
+established human, and only that human's signed two-tap act at the door mints the
+principal. The first is real — the **Envoy**, the Apple Intelligence model on the
+household's own Mac, registered 2026-08-23. An identity grants nothing; reading,
+suggesting, or acting each remain separate typed grants a human makes and can revoke.
+
 Outward reach (network, LLM, executing generated code, **watching through the camera**) is
 each a separate gate only a human opens. See [CHANGELOG.md](CHANGELOG.md) and
 [docs/07-roadmap.md](docs/07-roadmap.md).

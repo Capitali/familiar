@@ -260,6 +260,17 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
         }
     }
 
+    /// Hand one console act's outcome to the page so the card that asked shows the answer.
+    func pushPartnerActOutcome(_ outcome: AppModel.PartnerActOutcome) {
+        let payload: [String: Any] = ["ok": outcome.ok, "message": outcome.message]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        web?.evaluateJavaScript(
+            "window.spherePartnerActOutcome && window.spherePartnerActOutcome(\(json))",
+            completionHandler: nil)
+    }
+
     // ---- nodes on the real map ----
 
     private func setNodes(_ list: [[String: Any]]) {
@@ -548,10 +559,13 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
             case "partnerAct":
                 guard let act = body["act"] as? String else { break }
                 Task {
+                    // The deciding surface itself gets the act's outcome — success or the
+                    // refusal reason — so a tap never dissolves into silence (T-224 ceremony).
+                    var outcome: AppModel.PartnerActOutcome?
                     switch act {
                     case "register":
                         if let id = body["registration_id"] as? String {
-                            await self.model.registerPartner(id)
+                            outcome = await self.model.registerPartner(id)
                         }
                     case "decide":
                         guard let requestId = body["request_id"] as? String,
@@ -564,7 +578,7 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                               )
                         else { return }
                         let expiresAt = (body["expires_at"] as? NSNumber)?.int64Value ?? 0
-                        await self.model.decidePartnerGrant(
+                        outcome = await self.model.decidePartnerGrant(
                             requestId: requestId,
                             surface: surface,
                             allowedOperations: bounds,
@@ -572,18 +586,19 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                         )
                     case "decline":
                         if let id = body["request_id"] as? String {
-                            await self.model.declinePartnerGrant(id)
+                            outcome = await self.model.declinePartnerGrant(id)
                         }
                     case "revoke":
                         if let id = body["grant_id"] as? String {
-                            await self.model.revokePartnerGrant(id)
+                            outcome = await self.model.revokePartnerGrant(id)
                         }
                     case "refuse":
                         if let id = body["proposal_id"] as? String {
-                            await self.model.refusePartnerProposal(id)
+                            outcome = await self.model.refusePartnerProposal(id)
                         }
                     default: break
                     }
+                    if let outcome { self.pushPartnerActOutcome(outcome) }
                     await self.poll()
                 }
             default: break

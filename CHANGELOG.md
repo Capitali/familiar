@@ -13,6 +13,22 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The familiar has its first partner AI.** Other AIs meet the familiar at its door over
+  MCP, and the first one is registered: the **Envoy**, the Apple Intelligence model on the
+  household's own Mac, minted as a principal on 2026-08-23 by Ian's own two-tap ceremony at
+  the lighthouse door. Provisioning stages an inert credential and a secret-free card
+  addressed to one established human; only that human's signed console act brings the
+  identity into being, and identity grants nothing — no surface, observation, suggestion,
+  or actuation authority — every capability remains a separate typed human grant. The
+  first live ceremony surfaced and retired four defects the same night: the Partner ring
+  now reads **every candidate door** (a card staged at the public lighthouse was invisible
+  beside a LAN hub) and routes each decision back to the door that holds it; provisioning
+  chowns its staging to the daemon's user (root-owned files made the fail-closed inbox
+  answer 500); an unchanged poll push no longer silently disarms the two-tap CONFIRM (the
+  5-second window was really 0–5s); and every decision now answers on the deciding surface
+  itself — in-flight, done, or refused with the door's reason — instead of only in the
+  notes feed. *Validated live 2026-08-23 (principal minted, staging consumed); mesh wire
+  tests 17/0; the ceremony trail is DEVELOPMENT_LOG 2026-08-22/23.*
 - **A confirmed intent becomes a standing rule.** "When I'm away, dim the lights; when
   I'm back, bring them up" is now an object the familiar keeps — minted once with
   `familiar rules add ian away lights dim`, fired on real presence transitions through

@@ -6,6 +6,61 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-23 — The first ceremony ran live, and the four defects it surfaced are fixed
+
+The Envoy is the mesh's first principal: `principal-f90b15e1adb1768f3ad8fccf46301892`,
+alias "Envoy (on-device)", `registered_by: ian`, minted at the lighthouse door
+2026-08-23 01:19:40 UTC by Ian's own two-tap act. Getting his word to land took a live
+debugging session that surfaced four defects, each now fixed:
+
+1. **The partner inbox read only the promoted door.** The console auto-selects `host`
+   (home → lighthouse → tailnet) and read its private partner projection from that one
+   door — so a card staged at the public lighthouse was invisible to a console sitting
+   beside its LAN hub, indistinguishable from "nothing waiting". `refreshPartnerInbox`
+   now walks EVERY candidate door concurrently, merges the views with per-item `door`
+   provenance, renders an unreachable door as a warning line instead of a blank, and
+   routes each deciding act back to the door that holds the item (`partnerItemDoors`)
+   rather than to whichever door the console currently prefers.
+2. **Provisioning staged files as root; the daemon runs as familiar-svc.** The door's
+   fail-closed inbox assembly answered 500 ("partner inbox unavailable") because it
+   could not even list `mcp/pending-registrations/`. `tools/provision-envoy-credential.sh`
+   now chowns the staged credential + card to the data dir's owner; the live box was
+   fixed by hand the same way (modes stay 700/600).
+3. **The poll push silently disarmed the two-tap CONFIRM.** The console re-pushed the
+   inbox every ~5s even when unchanged, and `spherePartnerInbox` unconditionally cleared
+   armed state — the 5-second confirm window was really 0–5s, so single taps re-armed
+   forever, no act was ever sent, and nothing said so. An unchanged push now leaves the
+   screen alone entirely (armed state, in-progress bound edits, focus); only a genuinely
+   new view clears armed buttons, because a competing device may honestly have decided.
+4. **A decision answered only into the notes feed.** Every partner act now returns a
+   typed `PartnerActOutcome` from `AppModel`, both bridges push it to the page, and the
+   Partners screen shows it where the tap happened: an in-flight banner ("waiting for
+   the door's answer") with all decision buttons paused so one word lands exactly once,
+   then "Done" or "Not done" with the door's own refusal reason. The registration card
+   also carries its narrative now — what was staged, on which door, that nothing was
+   created automatically and nothing acts without the human's signed word, and how the
+   two-tap works. Ian's position that registration should be automatic is recorded on
+   STATE; the standing design answer (an identity begins only by the human's word) holds
+   unless he reopens it at chair level.
+
+### Checks run
+
+- `tools/check-sphere.sh` — the console module parses.
+- `ios/FamiliarMesh` `swift test` — 17/0.
+- `xcodebuild` FamiliarMac Release and FamiliarAgent (iOS Simulator) Release — both
+  BUILD SUCCEEDED, 0 errors.
+- `sh -n tools/provision-envoy-credential.sh` — clean. No Rust source changed, so the
+  cargo bar is untouched by this entry; the lighthouse stays on its deployed `9bf538c`.
+- Shipped: FamiliarMac rebuilt from this tree and installed to /Applications on
+  MacOnStick, relaunched, running.
+
+### Next
+
+The Partners ring on any console should now show one merged view across all doors —
+worth a glance on the iPhone too. The grant/proposal legs of the partner loop are next
+(the Envoy holds an identity and no authority), and T-223 still owes the findings CLI
+the same server-derived-human discipline the ceremony proved out.
+
 ## 2026-08-22 — T-224 Brick 2: registration is the human's signed act, not provisioning's side effect
 
 The first-partner ceremony now has two deliberately separate transitions. A local provisioning
