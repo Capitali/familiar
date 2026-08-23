@@ -6,6 +6,52 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-23 — ADR-0045 accepted; the world partition exists (`crates/world`)
+
+Ian accepted ADR-0045 ("Move forward adr-0045"), and build-order step 2 landed the same
+day: `familiar-world`, the partition made literal. Three modules, no engine:
+
+- **instance** — the household's minimal WorldInstance provisioning record.
+  `commission` creates the ship's store WHEREVER the commissioner chooses (never inside
+  the household dir), mints the ship's own ed25519 principal INTO that store (the
+  household never holds the private half), writes a fully closed kernel boundary as the
+  ship's floor, and appends the registry record (pubkey, label, commissioner, endpoint,
+  lifecycle, grant epoch). `decommission` flips lifecycle, clears grants, bumps the
+  epoch — and deliberately never touches the ship store: its fate is an explicit human
+  retention act (§9).
+- **bridge** — crossings are typed envelopes with provenance (instance id + source key
+  + grant epoch + schema version + event id). Outward `AttentionNotice`; what the
+  household keeps is a `BridgeReceipt` whose TYPE has no payload field — §4 enforced by
+  shape, not discipline. `receive_notice` refuses, in order: unknown instance,
+  decommissioned, stale epoch, wrong key, bad signature (over the exact bytes that
+  crossed), expired, replayed. Inward is `ControlEnvelope`: exactly the five human acts
+  (CommissioningBundle carrying the constitution hash, GrantUpdate, BoundaryNarrowed,
+  Rename, Decommission), tagged + deny_unknown_fields, so an observation dressed as an
+  envelope — or a real act padded with one extra field — fails to decode at the door.
+- **lease** — the signed expiring projection of the one root boundary (§5). The
+  signature covers the exact serialized bytes, carried verbatim (no canonicalization to
+  disagree about). `permits` is the fail-closed floor: missing, stale, tampered,
+  stranger-signed, wrong-instance, or a root-shut gate all answer false.
+
+The decisive hostile-sentinel test runs at the partition rung: household sentinels never
+reach a ship store (checked by reading every byte of every file, not by a polite
+loader); ship sentinels never reach the household read path or store; a receipt cannot
+smuggle a headline; the inbound door rejects everything but the five acts. The
+full-cadence version of the test arrives with step 5, when a ship cadence exists to run.
+
+### Checks run
+
+`cargo fmt --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 · workspace
+**805 passed / 0 failed** (802 → 805). No daemon behavior changed (nothing depends on
+`familiar-world` yet), so no deploy rode this entry.
+
+### Next
+
+Step 3: the MCP contract v2 with Jeff's game team (`purr.hear` semantics; pinned
+read-only UCF declarations). Step 4: one WorldInstance provisioned through the real
+commissioning ceremony. Step 5: the ship-side UCF cadence + captain console view, and
+with it the full-cadence sentinel test.
+
 ## 2026-08-23 — The first ceremony ran live, and the four defects it surfaced are fixed
 
 The Envoy is the mesh's first principal: `principal-f90b15e1adb1768f3ad8fccf46301892`,

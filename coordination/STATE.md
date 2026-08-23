@@ -5,6 +5,18 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **ADR-0045 ACCEPTED (Ian, 2026-08-23, verbatim: "Move forward adr-0045") — T-205 STEP 2
+  BUILT AND GREEN.** `crates/world` (familiar-world) is the partition made literal:
+  WorldInstance registry (commission/rename/decommission — the ship's key mints into the
+  ship's own store, decommission ends authority and never touches history), the typed
+  bridge (payload-proof receipts; five-act inbound control plane; full refusal ladder on
+  receive), and the signed expiring BoundaryLease with a fail-closed `permits`. Hostile
+  sentinel tests pass both directions at the partition rung. Bar 805/0; pushed. The gate
+  this lifts: Purr, the `purr.*` speech seam, and UCF gameplay ingestion now queue only
+  behind build-order steps 3–5 (contract v2 with Jeff → commission one instance → ship
+  cadence + captain console + full-cadence sentinel test). Steps 3–7 unbuilt; no gate
+  opened; no game datum anywhere near a household store.
+
 - **SHIP 102 + THE METABOLISM THROUGH THE CAT FLAP (2026-08-23, Ian: "Ship it… keep
   working till familiar is working. Till UCF is working and ready. Let Jeff's UCF factory
   know we're ready").** Ship 102 complete via ship.sh (Mac universal installed + zip, IPA

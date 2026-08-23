@@ -1,0 +1,18 @@
+[package]
+name = "familiar-world"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# ADR-0045: worlds are stores. The partition primitives — the WorldInstance
+# provisioning record, the typed bridge envelopes, and the signed expiring
+# boundary lease. Deliberately NO dependency on cycle/llm/exec: a ship world is
+# a separate store the household engine holds no handle to, and this crate is
+# the proof of that shape, not a second engine.
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+familiar-kernel.workspace = true
+familiar-mesh.workspace = true
+getrandom = "0.2"

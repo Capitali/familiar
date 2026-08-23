@@ -606,6 +606,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "familiar-world"
+version = "0.1.0"
+dependencies = [
+ "familiar-kernel",
+ "familiar-mesh",
+ "getrandom 0.2.17",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

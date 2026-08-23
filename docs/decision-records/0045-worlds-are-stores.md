@@ -1,10 +1,11 @@
 # ADR-0045 — Worlds are stores
 
-- **Status:** **proposed** (design decided in the ships-computer dialogue,
+- **Status:** **accepted** — Ian, 2026-08-23, verbatim: "Move forward adr-0045."
+  (Design decided in the ships-computer dialogue,
   docs/reviews/2026-08-21-ships-computer-dialogue.md Rounds 1-3 — codex's Round 2
-  absorbed nearly whole; awaiting Ian's acceptance. Amends ADR-0037 §B's "partition at
+  absorbed nearly whole. Amends ADR-0037 §B's "partition at
   the record" by reference: the record-level `world` field is dead before it was built)
-- **Date:** 2026-08-21
+- **Date:** 2026-08-21 (proposed) · 2026-08-23 (accepted)
 - **Relates to:** [ADR-0037](0037-one-soul-many-voices.md) (Purr, the persona seam, the
   MCP transport revision — §B amended here), [ADR-0043](0043-one-typed-source-per-kind-of-truth.md)
   (kinds of truth have kinds of addressee; producer + addressee completeness),

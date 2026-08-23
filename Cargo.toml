@@ -13,7 +13,7 @@ resolver = "2"
 # consoles) were removed 2026-07-24 — git history keeps them; see ADR-0007 (superseded)
 # and ADR-0008.
 members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/probe",
-    "crates/probe", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/catscan"]
+    "crates/probe", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/catscan", "crates/world"]
 
 [workspace.package]
 version = "0.1.0"
@@ -40,3 +40,4 @@ familiar-reach = { path = "crates/reach" }
 familiar-scenario = { path = "crates/scenario" }
 familiar-recipe = { path = "crates/recipe" }
 familiar-mcp = { path = "crates/mcp" }
+familiar-world = { path = "crates/world" }
