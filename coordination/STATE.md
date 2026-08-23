@@ -87,6 +87,20 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   Refilling cerebras credits is optional. Side-note for T-224/the fleet: the adapter
   already carries `apple`/`apple_local`/`apple_pcc` providers — Mac daemons have an
   on-device path waiting.
+- **CEREMONY LIVE-TEST 2026-08-22, ONE DIAGNOSIS OPEN: the console must read the LIGHTHOUSE
+  door.** Ian opened FamiliarMac's Partner ring and saw the empty state ("Registrations…
+  will appear here after a fresh signed read"), not the card. The sphere UI renders
+  registration cards correctly (index.html:1558-1608), so this is an empty signed read, not
+  missing UI. Root cause: the staging exists ONLY on the lighthouse (134.209.168.50 — the
+  public door the Envoy's import bundle names), but the console reads its partner inbox from
+  its currently-selected `host` (AppModel: partnerInboxSession → host/enrollPort), which was
+  pointed elsewhere (likely MacOnStick's daemon or rendezvous). **FIX when Ian is back from
+  the Golden Gate beta reboot: in FamiliarMac, switch the active door/host to the lighthouse
+  134.209.168.50, THEN open the Partner ring — the "Envoy (on-device)" card is there.** The
+  console is an established member, so the lighthouse serves it the full signed view. Staging
+  confirmed still present on the box (registration-009cfb96…; principals.json still absent).
+  (Golden Gate = macOS 27 beta; Ian rebooting MacOnStick to take it.)
+
 - **THE ENVOY REGISTRATION IS STAGED — ONE TAP FROM IAN COMPLETES THE FIRST CEREMONY
   (2026-08-22 ~14:51 CT).** Brick 2 chair-accepted (`9bf538c` in the dialogue doc);
   lighthouse deployed `9bf538c`; provisioning ran on the lighthouse:
