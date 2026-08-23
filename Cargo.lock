@@ -487,6 +487,7 @@ dependencies = [
  "familiar-exec",
  "familiar-kernel",
  "familiar-llm",
+ "familiar-mcp",
  "familiar-mesh",
  "familiar-sense",
  "familiar-vision",
