@@ -209,9 +209,45 @@ fn tools_for(dir: &Path, params: &Value, context: Option<&PartnerContext>) -> Ve
         {
             out.push(request_grant_tool());
             out.push(propose_tool());
+            // Rungs 4-5 appear for a registered principal; each still fails closed without an
+            // active grant that carries the operation, and invoke needs `allow_actuate` open.
+            out.push(observe_tool());
+            out.push(invoke_tool());
         }
     }
     out
+}
+
+fn observe_tool() -> Value {
+    tool(
+        "familiar.observe",
+        "Read one bound surface's declared observable, within an active human observe-grant. Names an opaque instance handle, never a surface. Returns the reading; changes nothing.",
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "instance": { "type": "string", "maxLength": 128 } },
+            "required": ["instance"]
+        }),
+        false,
+    )
+}
+
+fn invoke_tool() -> Value {
+    tool(
+        "familiar.invoke",
+        "Run one bounded act on a bound surface, within an active human grant — the effect happens. Names the opaque instance handle and an abstract operation within the grant's bounds, never a local act. Fails closed unless the human has opened the effect channel.",
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "instance": { "type": "string", "maxLength": 128 },
+                "operation": { "type": "string" },
+                "parameters": { "type": "object" }
+            },
+            "required": ["instance", "operation", "parameters"]
+        }),
+        false,
+    )
 }
 
 /// Rung 2 of the ADR-0044 ladder: the class catalog. Attested partners only; classes are
@@ -436,6 +472,104 @@ fn call(
                     serde_json::to_string_pretty(&receipt).unwrap_or_else(|_| "{}".into()),
                 )),
                 Err(refusal) => Ok(tool_error(format!("proposal refused — {refusal}"))),
+            }
+        }
+
+        "familiar.observe" => {
+            let Some(context) = context else {
+                return Ok(tool_error(principal_required()));
+            };
+            if !covenant::principal_attested(dir, context) {
+                grant::audit_access_refusal(
+                    dir,
+                    context,
+                    crate::partner_act::PartnerOperation::Observe,
+                    crate::partner_act::ReasonCode::CovenantMissing,
+                    now,
+                );
+                return Ok(tool_error(unattested_for(Some(context), "")));
+            }
+            let input: grant::ObserveInput = match serde_json::from_value(args) {
+                Ok(input) => input,
+                Err(error) => {
+                    grant::audit_schema_refusal(
+                        dir,
+                        context,
+                        crate::partner_act::PartnerOperation::Observe,
+                        now,
+                    );
+                    return Ok(tool_error(format!(
+                        "observe refused — invalid typed input: {error}"
+                    )));
+                }
+            };
+            // Fail closed when the door is unwired to any executor — the network door cannot
+            // reach a surface by construction until a human-run daemon registers one.
+            let Some(executor) = crate::executor::current() else {
+                grant::audit_access_refusal(
+                    dir,
+                    context,
+                    crate::partner_act::PartnerOperation::Observe,
+                    crate::partner_act::ReasonCode::ExecutorUnavailable,
+                    now,
+                );
+                return Ok(tool_error(
+                    "observe refused — execution is not available at this door".into(),
+                ));
+            };
+            match grant::observe(dir, context, input, now, executor) {
+                Ok(receipt) => Ok(content(
+                    serde_json::to_string_pretty(&receipt).unwrap_or_else(|_| "{}".into()),
+                )),
+                Err(refusal) => Ok(tool_error(format!("observe refused — {refusal}"))),
+            }
+        }
+
+        "familiar.invoke" => {
+            let Some(context) = context else {
+                return Ok(tool_error(principal_required()));
+            };
+            if !covenant::principal_attested(dir, context) {
+                grant::audit_access_refusal(
+                    dir,
+                    context,
+                    crate::partner_act::PartnerOperation::Invoke,
+                    crate::partner_act::ReasonCode::CovenantMissing,
+                    now,
+                );
+                return Ok(tool_error(unattested_for(Some(context), "")));
+            }
+            let input: grant::InvokeInput = match serde_json::from_value(args) {
+                Ok(input) => input,
+                Err(error) => {
+                    grant::audit_schema_refusal(
+                        dir,
+                        context,
+                        crate::partner_act::PartnerOperation::Invoke,
+                        now,
+                    );
+                    return Ok(tool_error(format!(
+                        "invoke refused — invalid typed input: {error}"
+                    )));
+                }
+            };
+            let Some(executor) = crate::executor::current() else {
+                grant::audit_access_refusal(
+                    dir,
+                    context,
+                    crate::partner_act::PartnerOperation::Invoke,
+                    crate::partner_act::ReasonCode::ExecutorUnavailable,
+                    now,
+                );
+                return Ok(tool_error(
+                    "invoke refused — execution is not available at this door".into(),
+                ));
+            };
+            match grant::invoke(dir, context, input, now, executor) {
+                Ok(receipt) => Ok(content(
+                    serde_json::to_string_pretty(&receipt).unwrap_or_else(|_| "{}".into()),
+                )),
+                Err(refusal) => Ok(tool_error(format!("invoke refused — {refusal}"))),
             }
         }
 

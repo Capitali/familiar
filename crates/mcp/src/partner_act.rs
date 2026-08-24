@@ -31,6 +31,10 @@ pub enum PartnerOperation {
     GrantExpiry,
     Proposal,
     ProposalDecision,
+    /// A partner read a bound surface within an active grant (rung 4).
+    Observe,
+    /// A partner ran a bound act within an active grant (rung 5) — the execution edge.
+    Invoke,
 }
 
 impl PartnerOperation {
@@ -42,6 +46,8 @@ impl PartnerOperation {
             Self::GrantExpiry => "grant_expiry",
             Self::Proposal => "proposal",
             Self::ProposalDecision => "proposal_decision",
+            Self::Observe => "observe",
+            Self::Invoke => "invoke",
         }
     }
 }
@@ -80,6 +86,15 @@ pub enum ReasonCode {
     HumanRefusedProposal,
     Expired,
     ProposalStored,
+    /// A rung-4 read completed against a bound surface.
+    Observed,
+    /// A rung-5 act ran against a bound surface (the execution edge).
+    Invoked,
+    /// The executor refused or failed the surface I/O (shut `allow_actuate`, missing
+    /// surface, tool failure) — the door did its authority checks, the primitive said no.
+    ExecutionRefused,
+    /// No executor is wired at this door — observe/invoke fail closed by construction.
+    ExecutorUnavailable,
     Internal,
 }
 
@@ -135,6 +150,22 @@ pub enum PartnerActBody {
     ProposalWithdrawn {
         proposal_id: String,
         withdrawn_by: String,
+    },
+    /// A rung-4 read that completed. `surface` is the private local name — this body is
+    /// household-internal ledger truth and is NEVER serialized to a partner (the partner
+    /// gets only the reading text and its opaque handle).
+    Observed {
+        grant_id: String,
+        surface: String,
+    },
+    /// A rung-5 act that ran (the execution edge). `surface`/`label` are the private local
+    /// resolution; the partner-facing receipt carries neither.
+    Invoked {
+        grant_id: String,
+        surface: String,
+        operation: String,
+        parameters: Value,
+        label: String,
     },
     Refusal {
         idempotency_key: Option<String>,
@@ -416,6 +447,26 @@ fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
                 }
                 if !proposal_terminals.insert(proposal_id.clone()) {
                     return Err(invalid("proposal has multiple terminal transitions"));
+                }
+            }
+            // A rung-4/5 effect must reference a grant that exists, is owned by the same
+            // principal, and had not already terminated — corrupt effect history cannot be
+            // folded into a clean view. Effects are not themselves terminal (a grant survives
+            // being observed or invoked), so they add no terminal bookkeeping.
+            PartnerActBody::Observed { grant_id, surface } => {
+                if grants.get(grant_id) != Some(&(event.principal.clone(), surface.clone()))
+                    || grant_terminals.contains(grant_id)
+                {
+                    return Err(invalid("observe references missing or inactive authority"));
+                }
+            }
+            PartnerActBody::Invoked {
+                grant_id, surface, ..
+            } => {
+                if grants.get(grant_id) != Some(&(event.principal.clone(), surface.clone()))
+                    || grant_terminals.contains(grant_id)
+                {
+                    return Err(invalid("invoke references missing or inactive authority"));
                 }
             }
             PartnerActBody::ProposalRefused {

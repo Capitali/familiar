@@ -6,6 +6,62 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-24 — Rungs 4/5: the offering's execution edge (Ian: "wire it live now")
+
+The ADR-0044 ladder now reaches the top: `familiar.observe` (rung 4) and `familiar.invoke`
+(rung 5) let a registered, covenant-attested, actively-granted partner READ and ACTUATE the
+familiar's own declared surfaces. This is the first partner-driven execution edge in the
+system (before this, even an accepted proposal never ran), so it is built to the strictest
+posture the design has.
+
+**Ian chose "wire it live now"** over an inert build, after being shown the architectural
+finding: the actuator executor lives in `crates/cycle`, unreachable from the door
+(`mcp`/`mesh`). The bridge is a process-global `SurfaceExecutor` (new `crates/mcp/executor.rs`)
+that the daemon — the one process seeing both crates — registers at startup
+(`CycleSurfaceExecutor` in cli, backed by two new `crates/cycle` primitives,
+`partner_read_bucket` / `partner_run_act`). Fail-closed by construction: any process that is
+not the daemon leaves the door unwired, and observe/invoke answer "execution not available."
+
+Defense in depth — three human acts still gate every real effect, unchanged:
+`allow_actuate` open, a live bounded human grant, and a declared surface. On top of the
+executor the door adds: registered principal, covenant attestation, an active unexpired grant
+that carries the operation, parameters within the grant's bounds, and (invoke) an explicit
+`allow_actuate` check as an honest early gate before the executor re-checks it as the floor.
+
+Containment held by shape, not discipline:
+- observe returns the class's ABSTRACT state (`primary`/`reverted`), mapped from the concrete
+  bucket inside `grant.rs` — never raw device output; invoke's receipt echoes only the
+  abstract operation, never the surface or local act. The partner-act ledger records the
+  private surface/label internally and is never serialized to a partner.
+- `partner_run_act` attributes nothing to a human and runs no rule-revert logic (a partner's
+  act is not a human's reaction) — the partner-act ledger is the authoritative who-did-it.
+- observe became a separately-grantable leg (a new parameterless class operation), so a human
+  can grant read-only. This needed `validate_schema_bounds` / `parameter_bounds_narrow` to
+  admit a parameterless operation (empty bounds narrow only to empty).
+
+**The one flagged design choice** (in a `grant.rs` doc comment): the abstract→concrete
+resolver maps `primary`/`reverted` to the actuator's human-authored bucket ORDER. A human
+controls it via `actuators.json`, but which physical state is "primary" is not otherwise
+labelled — worth a review pass (an explicit label on the surface, or capturing the mapping
+into the grant at decision time). This is the natural thing for codex's reciprocal review to
+land on before any live exercise.
+
+### Checks run
+
+`cargo fmt --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 · workspace **813
+passed / 0 failed** (805 → 813, +8 hostile tests: invoke within bounds leaks nothing; out of
+bounds never reaches the executor; shut `allow_actuate` fails closed; expired grant; bad
+handle; a set_state grant does not authorize observe; observe maps to abstract and leaks
+nothing; an execution failure is a refusal not a false success). No gate opened; not yet
+deployed. Highest-stakes code in the system — should go through codex's reciprocal review
+before it is exercised live.
+
+### Next
+
+codex reciprocal review, focused on the resolver semantics and the door→executor bridge.
+Then the first live exercise on the least-dangerous partner, behind a deliberately-opened
+`allow_actuate` and a bounded grant.
+
 ## 2026-08-23 — ADR-0045 accepted; the world partition exists (`crates/world`)
 
 Ian accepted ADR-0045 ("Move forward adr-0045"), and build-order step 2 landed the same

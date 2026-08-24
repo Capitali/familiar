@@ -32,6 +32,7 @@ use familiar_kernel::guard::{self, Action, ActionKind, Decision};
 
 pub mod covenant;
 pub mod declaration;
+pub mod executor;
 pub mod grant;
 pub mod http;
 pub mod inbox;

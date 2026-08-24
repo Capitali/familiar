@@ -3226,6 +3226,29 @@ fn cmd_tool(args: &[String]) -> ExitCode {
     }
 }
 
+/// The rungs-4/5 bridge: it turns the door's authorized observe/invoke into the guarded local
+/// actuation path (`crates/cycle`), which crates/mcp cannot reach directly. It decides no
+/// authority — that is done in crates/mcp before this is called — and adds no attribution.
+struct CycleSurfaceExecutor;
+
+impl familiar_mcp::executor::SurfaceExecutor for CycleSurfaceExecutor {
+    fn observe(&self, dir: &std::path::Path, surface: &str) -> Result<String, String> {
+        match familiar_cycle::partner_read_bucket(dir, surface, now_secs()) {
+            Ok(result) => result,
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    fn invoke(&self, dir: &std::path::Path, surface: &str, label: &str) -> Result<(), String> {
+        match familiar_cycle::partner_run_act(dir, surface, label, now_secs()) {
+            Ok(result) => result,
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+static PARTNER_SURFACE_EXECUTOR: CycleSurfaceExecutor = CycleSurfaceExecutor;
+
 fn cmd_run(args: &[String]) -> ExitCode {
     let f = flags(args);
     let dir = store::data_dir(f.get("data-dir").map(String::as_str));
@@ -3258,6 +3281,13 @@ fn cmd_run(args: &[String]) -> ExitCode {
         // Make this process visible to `daemon status/start/stop` (incl. when launched
         // by launchd), so the two control paths agree and never double-spawn.
         daemon::record_self(&dir);
+        // Wire the rungs-4/5 surface executor before the door opens. crates/mcp (the door
+        // logic) and crates/mesh (the /mcp route) cannot reach the guarded actuator path in
+        // crates/cycle — this daemon is the one process that sees both, so it registers the
+        // bridge here. Registration is not a gate: `allow_actuate` and a live human grant
+        // still gate every effect, and an undeclared surface has nothing to drive. Until this
+        // line runs (any non-daemon process) the door answers observe/invoke "not available".
+        familiar_mcp::executor::register(&PARTNER_SURFACE_EXECUTOR);
         // Start the mesh transport on its own background thread. It self-gates on
         // allow_mesh each cycle (idle until a human opens the boundary and enrolls a
         // group), so this is safe to spawn unconditionally; opening the gate later via the

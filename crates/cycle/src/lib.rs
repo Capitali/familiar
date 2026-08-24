@@ -3693,6 +3693,63 @@ pub fn actuate_by_hand(
     Ok(Ok(lines.join("\n")))
 }
 
+/// Read a surface for a PARTNER's rung-4 observe, returning its concrete classified bucket
+/// (never raw device output). The guarded state tool runs through `execute_tool`; nothing is
+/// attributed to a human and no household observation is written — the partner-act ledger in
+/// crates/mcp is the authoritative record. crates/mcp cannot depend on this crate, so the
+/// daemon injects a `SurfaceExecutor` that lands here.
+pub fn partner_read_bucket(
+    dir: &Path,
+    surface: &str,
+    now: i64,
+) -> io::Result<Result<String, String>> {
+    let (acts_cfg, _) = familiar_kernel::actuator::load(dir)?;
+    let Some(a) = acts_cfg.iter().find(|a| a.surface == surface) else {
+        return Ok(Err(format!("no declared surface '{surface}'")));
+    };
+    sync_actuator_tools(dir, &acts_cfg, &[], now)?;
+    let Some(out) = run_surface_tool(dir, &actuator_tool_id(surface, "state"), now)? else {
+        return Ok(Err("the state read failed or was declined".to_string()));
+    };
+    match familiar_kernel::actuator::parse_state(a, &out) {
+        Some(reading) => Ok(Ok(familiar_kernel::actuator::bucket_of(a, &reading))),
+        None => Ok(Err(
+            "the surface's reading did not fit its contract".to_string()
+        )),
+    }
+}
+
+/// Run one declared act for a PARTNER's rung-5 invoke. Unlike [`actuate_by_hand`], this
+/// attributes NOTHING to a human and runs no rule-revert logic (a partner's act is not a
+/// human's reaction): it only runs the guarded act tool — `execute_tool` enforces
+/// `allow_actuate` as the final floor — and keeps the surface's own state tracking honest.
+/// Authority (an active human grant, bounds) is decided in crates/mcp before this is called.
+pub fn partner_run_act(
+    dir: &Path,
+    surface: &str,
+    label: &str,
+    now: i64,
+) -> io::Result<Result<(), String>> {
+    let (acts_cfg, _) = familiar_kernel::actuator::load(dir)?;
+    let Some(a) = acts_cfg.iter().find(|a| a.surface == surface) else {
+        return Ok(Err(format!("no declared surface '{surface}'")));
+    };
+    if !a.actions.contains_key(label) {
+        return Ok(Err(format!("'{label}' is not an act of {surface}")));
+    }
+    sync_actuator_tools(dir, &acts_cfg, &[], now)?;
+    if run_surface_tool(dir, &actuator_tool_id(surface, label), now)?.is_none() {
+        return Ok(Err(
+            "the act failed or was declined (allow_actuate closed?)".to_string(),
+        ));
+    }
+    // Keep the surface's own state tracking honest; attribute nothing to a human.
+    let mut state = familiar_kernel::actuator::load_state(dir);
+    state.entry(surface.to_string()).or_default().bucket = label.to_string();
+    familiar_kernel::actuator::save_state(dir, &state)?;
+    Ok(Ok(()))
+}
+
 fn last_cultivate_at(dir: &Path) -> i64 {
     fs::read_to_string(dir.join(LAST_CULTIVATE_FILE))
         .ok()

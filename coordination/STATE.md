@@ -37,7 +37,19 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
      rung 4/5 machinery fully guarded + fail-closed + hostile-tested but INERT (a
      `SurfaceExecutor` seam that answers "not wired" until a separate, reviewed daemon-side
      wiring step), so guards precede capability and the door still cannot actuate until a
-     deliberate act. Awaiting Ian's pick before code.
+     deliberate act. **IAN PICKED "wire it live now" (2026-08-24) — BUILT AND GREEN.**
+     `familiar.observe`/`familiar.invoke` on the door; bridge = process-global
+     `SurfaceExecutor` (crates/mcp/executor.rs) registered by the daemon
+     (`CycleSurfaceExecutor` → new cycle primitives `partner_read_bucket`/`partner_run_act`).
+     Fail-closed: unwired for any non-daemon process. Three human gates unchanged
+     (allow_actuate + live grant + declared surface). Containment by shape: observe returns
+     abstract primary/reverted (never raw output), invoke receipt echoes only the abstract op,
+     the partner-act ledger keeps the private surface/label and is never serialized to a
+     partner, partner acts attribute nothing to a human. observe is now a separately-grantable
+     read-only leg. Bar 813/0 (+8 hostile tests). ONE FLAGGED CHOICE for codex review: the
+     abstract→concrete resolver uses human-authored bucket ORDER for primary/reverted. NO gate
+     opened, NOT deployed — wants codex reciprocal review before any live exercise
+     (highest-stakes code in the system).
 
 - **ADR-0045 ACCEPTED (Ian, 2026-08-23, verbatim: "Move forward adr-0045") — T-205 STEP 2
   BUILT AND GREEN.** `crates/world` (familiar-world) is the partition made literal:

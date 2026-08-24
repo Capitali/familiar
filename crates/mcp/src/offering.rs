@@ -124,11 +124,25 @@ pub const CLASS_DEFS: &[ClassDef] = &[ClassDef {
     failure: "the act reports failure and the surface keeps its prior state; the revert \
               path remains available",
     required_gates: &["allow_actuate"],
-    operations: &[ClassOperationDef {
-        id: "set_state",
-        input_schema: r#"{"type":"object","properties":{"state":{"type":"string","enum":["primary","reverted"]}},"required":["state"]}"#,
-    }],
+    operations: &[
+        // Rung 4: read-only. Separately grantable so a human can grant observe WITHOUT
+        // invoke (least authority). No parameters — a read takes none.
+        ClassOperationDef {
+            id: "observe",
+            input_schema: r#"{"type":"object","properties":{},"additionalProperties":false}"#,
+        },
+        // Rung 5: the act leg. Bounds narrow the `state` enum a grant may drive.
+        ClassOperationDef {
+            id: "set_state",
+            input_schema: r#"{"type":"object","properties":{"state":{"type":"string","enum":["primary","reverted"]}},"required":["state"]}"#,
+        },
+    ],
 }];
+
+/// The reserved operation id for a rung-4 read. It is an operation like any other in a grant's
+/// `allowed_operations`, so observe is granted, bounded, and revoked through the same machinery
+/// as an act — a grant carrying only this is read-only.
+pub const OBSERVE_OP: &str = "observe";
 
 /// A class the compiler found present, at some assurance. Deliberately contains no
 /// household data AND no count — presence is the whole fact.
