@@ -311,6 +311,27 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-24 (00:27 CDT) · companion:codex completed T-216 rungs 4/5 reciprocal review
+  against `87a32ea` and **RETURNED the live edge before deployment**. The executor boundary,
+  public receipt allowlist, principal/covenant/handle/expiry/operation/parameter/declaration/
+  `allow_actuate` checks, and separate observe leg hold; the exact bar independently reproduced
+  fmt 0, clippy all-targets 0, workspace 813/0. Four contract blockers remain: authorization is
+  a snapshot, so revoke can race a physical act and an effect-after-terminal append can corrupt
+  the ledger; successful effect logging is best-effort after the act; grants omit ADR-0044's
+  per-grant rate and affected-subject bounds and invoke has no retry/idempotency key; no addressed
+  human narration consumes successful observe/invoke outcomes. The flagged bucket-order resolver
+  is also rejected as informed semantics: primary/reverted must be explicit and stable in the
+  declaration/grant, not inferred from array order. Review:
+  `docs/reviews/2026-08-24-t216-rungs45-reciprocal-review.md`. No production code, live record,
+  grant/principal/proposal/act, gate, deployment, ship, or fleet state changed.
+
+- 2026-08-24 (00:18 CDT) · companion:codex accepted the explicit reciprocal-review handoff
+  for T-216 rungs 4/5 at `87a32ea`. Scope is review-only against the accepted capability
+  offering contracts: the new `familiar.observe` / `familiar.invoke` execution edge, its
+  process-global executor seam and daemon wiring, the three live gates, abstract-only public
+  receipts, private partner-act truth, and the flagged bucket-order resolver. No code changes,
+  grant/principal/proposal/act, gate change, deployment, ship, or fleet mutation are in scope.
+
 - 2026-08-22 (18:00 CDT) · companion:codex completed T-224 Brick 1's repaired reciprocal
   review at `18618d5` and **RETURNED it narrowly**. The Keychain seam, four-pin hostile
   fixture, and JSON-RPC correlation now hold; independent verification reproduced 22/22
