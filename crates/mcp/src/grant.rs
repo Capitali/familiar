@@ -783,35 +783,40 @@ pub fn observe(
     now: i64,
     executor: &dyn crate::executor::SurfaceExecutor,
 ) -> Result<ObserveReceipt, Refusal> {
-    // Reserve the effect while the grant is provably live, under the authority lock so a
-    // concurrent revoke cannot interleave. The read runs after the lock is released.
-    let (grant, effect_id) = {
-        let _lock = authority_lock();
-        let grant = authorized_grant(
-            dir,
-            context,
-            &input.instance,
-            crate::offering::OBSERVE_OP,
-            PartnerOperation::Observe,
-            now,
-        )?;
-        let effect_id = partner::random_id("effect").map_err(internal)?;
-        reserve_effect(
-            dir,
-            context,
-            now,
-            &effect_id,
-            "observe",
-            &grant,
-            crate::offering::OBSERVE_OP,
-            &BTreeMap::new(),
-            "",
-            None,
-        )?;
-        (grant, effect_id)
-    };
+    // Hold the authority lock across reserve → read → settle: a revoke cannot be acknowledged
+    // while a read is in flight, and a read cannot begin after a revoke (the acknowledgement
+    // fence). Device I/O under the lock is fine at household scale.
+    let _lock = authority_lock();
+    let grant = authorized_grant(
+        dir,
+        context,
+        &input.instance,
+        crate::offering::OBSERVE_OP,
+        PartnerOperation::Observe,
+        now,
+    )?;
+    let effect_id = partner::random_id("effect").map_err(internal)?;
+    reserve_effect(
+        dir,
+        context,
+        now,
+        &effect_id,
+        "observe",
+        &grant,
+        crate::offering::OBSERVE_OP,
+        &BTreeMap::new(),
+        "",
+        None,
+    )?;
     let outcome = executor.observe(dir, &grant.surface);
-    settle_effect(dir, context, now, &effect_id, outcome.is_ok())?;
+    settle_effect(
+        dir,
+        context,
+        now,
+        &effect_id,
+        PartnerOperation::Observe,
+        outcome.is_ok(),
+    )?;
     match outcome {
         Ok(concrete_label) => {
             // Map the concrete current act back to the grant's ABSTRACT state before it reaches
@@ -851,97 +856,163 @@ pub fn invoke(
         operation,
     };
 
-    let (grant, effect_id, label, reservation) = {
-        let _lock = authority_lock();
-        let grant = authorized_grant(
-            dir,
-            context,
-            &input.instance,
-            &input.operation,
-            PartnerOperation::Invoke,
-            now,
-        )?;
-        // Bounds: the parameters must fit the grant's narrowing of this operation.
-        let bounds = grant
-            .allowed_operations
-            .get(&input.operation)
-            .expect("authorized_grant proved the operation is present");
-        if !parameters_fit(bounds, &input.parameters) {
-            let refusal = Refusal::new(
-                ReasonCode::BoundsInvalid,
-                "invoke parameters are outside the grant",
-            );
-            audit_access_refusal(dir, context, PartnerOperation::Invoke, refusal.code, now);
-            return Err(refusal);
+    // The invocation identity is derived from the OPAQUE HANDLE + key + payload, and looked up
+    // BEFORE any mutable authority/rate/gate check. An exact replay returns the original recorded
+    // outcome without re-running or re-checking — so a caller that lost the first response learns
+    // whether the device ran, even if the rate is now spent or the gate has since closed. The
+    // handle already encodes the grant + epoch, so the key cannot collide across grants or epochs.
+    let idem_key = format!(
+        "invoke:{}:{}:{}",
+        input.instance, context.principal, input.invoke_key
+    );
+    let payload_hash =
+        partner_act::payload_hash(&(&input.operation, &input.parameters)).map_err(internal)?;
+    if let Some((original, stored_hash)) = partner_act::idempotent_original(
+        dir,
+        &context.principal,
+        PartnerOperation::Invoke,
+        &idem_key,
+    )
+    .map_err(internal)?
+    {
+        if stored_hash == payload_hash {
+            return replay_outcome(dir, &original, &input.operation, &generic_receipt);
         }
-        // The boundary, as an honest early gate (the executor re-checks it as the final floor).
-        if !familiar_kernel::boundary::load(dir)
-            .map_err(internal)?
-            .allow_actuate
-        {
-            let refusal = Refusal::new(
-                ReasonCode::BoundaryClosed,
-                "allow_actuate is closed; the effect channel is not open",
-            );
-            audit_access_refusal(dir, context, PartnerOperation::Invoke, refusal.code, now);
-            return Err(refusal);
-        }
-        // The per-grant rate bound (ADR-0044): count this grant's invoke reservations in the
-        // trailing hour and refuse over the human's cap, so a partner cannot hammer a surface.
-        let max = if grant.max_invokes_per_hour > 0 {
-            grant.max_invokes_per_hour
-        } else {
-            DEFAULT_MAX_INVOKES_PER_HOUR
-        };
-        if invokes_in_last_hour(dir, &grant.grant_id, now)? >= max {
-            let refusal = Refusal::new(
-                ReasonCode::BoundsInvalid,
-                "the grant's invoke rate for this hour is spent",
-            );
-            audit_access_refusal(dir, context, PartnerOperation::Invoke, refusal.code, now);
-            return Err(refusal);
-        }
-        // Resolve the abstract operation to a concrete local act, under the grant, now.
-        let label = resolve_local_act(dir, &grant, &input.operation, &input.parameters)?;
-        // Reserve idempotently, keyed by the partner's invoke_key (namespaced to the grant +
-        // principal) + a hash of the exact payload.
-        let effect_id = partner::random_id("effect").map_err(internal)?;
-        let idem_key = format!(
-            "invoke:{}:{}:{}",
-            grant.grant_id, context.principal, input.invoke_key
-        );
-        let payload_hash = partner_act::payload_hash(&(
-            &grant.grant_id,
-            &grant.epoch_nonce,
-            &input.operation,
-            &input.parameters,
-        ))
-        .map_err(internal)?;
-        let reservation = reserve_effect(
-            dir,
-            context,
-            now,
-            &effect_id,
-            "invoke",
-            &grant,
-            &input.operation,
-            &input.parameters,
-            &label,
-            Some((&idem_key, &payload_hash)),
-        )?;
-        (grant, effect_id, label, reservation)
-    };
+        return Err(Refusal::new(
+            ReasonCode::IdempotencyConflict,
+            "that invoke_key was already used with a different invocation",
+        ));
+    }
 
-    // An exact replay of a prior invoke returns the original receipt WITHOUT running again.
+    // A genuinely new invocation: full admission, execution, and settlement all UNDER the lock,
+    // so a revoke cannot be acknowledged while this act is in flight and no act can begin after a
+    // revoke returns success (the acknowledgement fence).
+    let _lock = authority_lock();
+    let grant = authorized_grant(
+        dir,
+        context,
+        &input.instance,
+        &input.operation,
+        PartnerOperation::Invoke,
+        now,
+    )?;
+    // Bounds: the parameters must fit the grant's narrowing of this operation.
+    let bounds = grant
+        .allowed_operations
+        .get(&input.operation)
+        .expect("authorized_grant proved the operation is present");
+    if !parameters_fit(bounds, &input.parameters) {
+        let refusal = Refusal::new(
+            ReasonCode::BoundsInvalid,
+            "invoke parameters are outside the grant",
+        );
+        audit_access_refusal(dir, context, PartnerOperation::Invoke, refusal.code, now);
+        return Err(refusal);
+    }
+    // The boundary, as an honest early gate (the executor re-checks it as the final floor).
+    if !familiar_kernel::boundary::load(dir)
+        .map_err(internal)?
+        .allow_actuate
+    {
+        let refusal = Refusal::new(
+            ReasonCode::BoundaryClosed,
+            "allow_actuate is closed; the effect channel is not open",
+        );
+        audit_access_refusal(dir, context, PartnerOperation::Invoke, refusal.code, now);
+        return Err(refusal);
+    }
+    // The per-grant rate bound (ADR-0044): count this grant's invoke reservations in the
+    // trailing hour and refuse over the human's cap, so a partner cannot hammer a surface.
+    let max = if grant.max_invokes_per_hour > 0 {
+        grant.max_invokes_per_hour
+    } else {
+        DEFAULT_MAX_INVOKES_PER_HOUR
+    };
+    if invokes_in_last_hour(dir, &grant.grant_id, now)? >= max {
+        let refusal = Refusal::new(
+            ReasonCode::BoundsInvalid,
+            "the grant's invoke rate for this hour is spent",
+        );
+        audit_access_refusal(dir, context, PartnerOperation::Invoke, refusal.code, now);
+        return Err(refusal);
+    }
+    // Resolve the abstract operation to a concrete local act, under the grant, now.
+    let label = resolve_local_act(dir, &grant, &input.operation, &input.parameters)?;
+    let effect_id = partner::random_id("effect").map_err(internal)?;
+    let reservation = reserve_effect(
+        dir,
+        context,
+        now,
+        &effect_id,
+        "invoke",
+        &grant,
+        &input.operation,
+        &input.parameters,
+        &label,
+        Some((&idem_key, &payload_hash)),
+    )?;
+    // A concurrent identical new key raced us to the reservation: return its recorded outcome
+    // rather than running the device again.
     if matches!(reservation, Reservation::Replay) {
+        if let Some((original, _)) = partner_act::idempotent_original(
+            dir,
+            &context.principal,
+            PartnerOperation::Invoke,
+            &idem_key,
+        )
+        .map_err(internal)?
+        {
+            return replay_outcome(dir, &original, &input.operation, &generic_receipt);
+        }
         return Ok(generic_receipt(input.operation));
     }
 
     let outcome = executor.invoke(dir, &grant.surface, &label);
-    settle_effect(dir, context, now, &effect_id, outcome.is_ok())?;
+    settle_effect(
+        dir,
+        context,
+        now,
+        &effect_id,
+        PartnerOperation::Invoke,
+        outcome.is_ok(),
+    )?;
     match outcome {
         Ok(()) => Ok(generic_receipt(input.operation)),
         Err(_) => Err(Refusal::new(
+            ReasonCode::ExecutionRefused,
+            "the act did not run",
+        )),
+    }
+}
+
+/// Return the recorded outcome of an already-reserved invocation for an exact replay: the
+/// original receipt on a completed (or still-unsettled, i.e. recovery) act, or the same failure
+/// the original run reported. Never re-runs the device and never re-checks current authority.
+fn replay_outcome(
+    dir: &Path,
+    reservation: &PartnerAct,
+    operation: &str,
+    generic_receipt: &dyn Fn(String) -> InvokeReceipt,
+) -> Result<InvokeReceipt, Refusal> {
+    let PartnerActBody::EffectReserved { effect_id, .. } = &reservation.body else {
+        return Ok(generic_receipt(operation.to_string()));
+    };
+    let settlement = partner_act::load(dir)
+        .map_err(internal)?
+        .into_iter()
+        .find_map(|event| match event.body {
+            PartnerActBody::EffectSettled {
+                effect_id: id,
+                outcome,
+            } if &id == effect_id => Some(outcome),
+            _ => None,
+        });
+    match settlement.as_deref() {
+        // Completed, or reserved-but-unsettled (the recovery state — the act may have run; we
+        // never re-run it): the original success-shaped receipt.
+        Some("completed") | None => Ok(generic_receipt(operation.to_string())),
+        // The original run failed: replay the same failure, not a fresh attempt.
+        _ => Err(Refusal::new(
             ReasonCode::ExecutionRefused,
             "the act did not run",
         )),
@@ -1049,21 +1120,24 @@ fn settle_effect(
     context: &PartnerContext,
     now: i64,
     effect_id: &str,
+    operation: PartnerOperation,
     completed: bool,
 ) -> Result<(), Refusal> {
+    // The settlement carries the RESERVED operation (observe/invoke) so the durable audit event
+    // classifies an observation outcome as an observe, never as an invoke.
     let event = PartnerAct::partner(
         context,
         now,
-        PartnerOperation::Invoke,
+        operation,
         if completed {
             PartnerOutcome::Completed
         } else {
             PartnerOutcome::Failed
         },
-        if completed {
-            ReasonCode::Invoked
-        } else {
-            ReasonCode::ExecutionRefused
+        match (completed, operation) {
+            (false, _) => ReasonCode::ExecutionRefused,
+            (true, PartnerOperation::Observe) => ReasonCode::Observed,
+            (true, _) => ReasonCode::Invoked,
         },
         effect_id.to_string(),
         PartnerActBody::EffectSettled {
@@ -1113,16 +1187,22 @@ fn grant_roles(
             "the grant's affected-subject no longer matches its class",
         ));
     }
+    // Fail closed on a grant with no snapshotted roles rather than reinterpreting it against the
+    // live declaration — an empty snapshot must never silently follow a later edit. No grant of
+    // this shape has been minted (the field predates no deployment), so this only ever refuses a
+    // hypothetically-migrated legacy grant, which is the safe outcome.
+    if grant.roles.is_empty() {
+        return Err(Refusal::new(
+            ReasonCode::SurfaceMismatch,
+            "this grant carries no snapshotted roles",
+        ));
+    }
     let (acts, _skipped) = familiar_kernel::actuator::load(dir).map_err(internal)?;
     let actuator = acts
         .iter()
         .find(|a| a.surface == grant.surface)
         .ok_or_else(|| Refusal::new(ReasonCode::SurfaceMismatch, "the bound surface is gone"))?;
-    let roles = if grant.roles.is_empty() {
-        actuator.roles.clone()
-    } else {
-        grant.roles.clone()
-    };
+    let roles = grant.roles.clone();
     let (Some(primary), Some(reverted)) = (roles.get("primary"), roles.get("reverted")) else {
         return Err(Refusal::new(
             ReasonCode::SurfaceMismatch,
@@ -2495,6 +2575,183 @@ mod tests {
             1,
             "a revoked grant still actuated"
         );
+    }
+
+    #[test]
+    fn an_exact_replay_returns_the_original_outcome_even_when_the_rate_is_spent() {
+        let dir = temp("replay_rate");
+        let ctx = context("principal-a", "key-a");
+        let instance = handle(&granted_ops_rate(&dir, &ctx, "g", &["primary"], 1)); // 1/hour
+        open_actuate(&dir);
+        let exec = FakeExec::ok("private-on");
+        let call = |key: &str, now| {
+            invoke(
+                &dir,
+                &ctx,
+                InvokeInput {
+                    instance: instance.clone(),
+                    operation: "set_state".into(),
+                    invoke_key: key.into(),
+                    parameters: state("primary"),
+                },
+                now,
+                &exec,
+            )
+        };
+        call("once", NOW + 10).expect("first invoke consumes the 1/hour cap");
+        // Exact replay: same key + payload returns the original outcome without re-running and
+        // without being blocked by the now-spent rate.
+        call("once", NOW + 11).expect("exact replay returns the original outcome");
+        assert_eq!(
+            exec.invoked.lock().unwrap().len(),
+            1,
+            "replay re-ran the device"
+        );
+        // A genuinely NEW key is still refused by the spent rate.
+        assert_eq!(
+            call("two", NOW + 12).unwrap_err().code,
+            ReasonCode::BoundsInvalid
+        );
+    }
+
+    #[test]
+    fn an_exact_replay_returns_the_original_outcome_after_the_gate_closes() {
+        let dir = temp("replay_gate");
+        let ctx = context("principal-a", "key-a");
+        let instance = handle(&granted(&dir, &ctx, "g"));
+        open_actuate(&dir);
+        let exec = FakeExec::ok("private-on");
+        let call = |key: &str, now| {
+            invoke(
+                &dir,
+                &ctx,
+                InvokeInput {
+                    instance: instance.clone(),
+                    operation: "set_state".into(),
+                    invoke_key: key.into(),
+                    parameters: state("primary"),
+                },
+                now,
+                &exec,
+            )
+        };
+        call("once", NOW + 10).unwrap();
+        // The human closes the effect channel after the act.
+        let mut boundary = familiar_kernel::boundary::Boundary::closed();
+        boundary.allow_agent = true;
+        std::fs::write(
+            dir.join(familiar_kernel::boundary::BOUNDARY_FILE),
+            serde_json::to_vec(&boundary).unwrap(),
+        )
+        .unwrap();
+        // Exact replay still returns the original outcome — the caller learns the device ran.
+        call("once", NOW + 11).expect("replay is not blocked by the closed gate");
+        assert_eq!(exec.invoked.lock().unwrap().len(), 1);
+        // A new invocation is refused by the closed gate.
+        assert_eq!(
+            call("two", NOW + 12).unwrap_err().code,
+            ReasonCode::BoundaryClosed
+        );
+    }
+
+    #[test]
+    fn a_revoke_cannot_be_acknowledged_while_an_act_is_in_flight() {
+        use std::sync::mpsc;
+        use std::sync::Arc;
+
+        struct BlockingExec {
+            entered: std::sync::Mutex<mpsc::Sender<()>>,
+            release: std::sync::Mutex<mpsc::Receiver<()>>,
+        }
+        impl crate::executor::SurfaceExecutor for BlockingExec {
+            fn observe(&self, _dir: &Path, _surface: &str) -> Result<String, String> {
+                Ok("private-on".into())
+            }
+            fn invoke(&self, _dir: &Path, _surface: &str, _label: &str) -> Result<(), String> {
+                self.entered.lock().unwrap().send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                Ok(())
+            }
+        }
+
+        let dir = temp("fence");
+        let ctx = context("principal-a", "key-a");
+        let receipt = granted(&dir, &ctx, "g");
+        let instance = handle(&receipt);
+        let grant_id = grant_id_of(&receipt);
+        open_actuate(&dir);
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let exec = Arc::new(BlockingExec {
+            entered: std::sync::Mutex::new(entered_tx),
+            release: std::sync::Mutex::new(release_rx),
+        });
+
+        // Thread A: an invoke that blocks inside the executor while holding the authority lock.
+        let (a_dir, a_ctx, a_instance, a_exec) =
+            (dir.clone(), ctx.clone(), instance.clone(), exec.clone());
+        let invoker = std::thread::spawn(move || {
+            invoke(
+                &a_dir,
+                &a_ctx,
+                InvokeInput {
+                    instance: a_instance,
+                    operation: "set_state".into(),
+                    invoke_key: "a".into(),
+                    parameters: BTreeMap::from([("state".into(), Value::String("primary".into()))]),
+                },
+                NOW + 10,
+                &*a_exec,
+            )
+            .map(|_| ())
+        });
+
+        // Wait until the executor is mid-act (the lock is held).
+        entered_rx.recv().unwrap();
+
+        // Thread B: the human revokes. It must not be able to return while the act is in flight.
+        let revoke_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (b_dir, b_grant, b_done) = (dir.clone(), grant_id.clone(), revoke_done.clone());
+        let revoker = std::thread::spawn(move || {
+            revoke_grant(&b_dir, &human("ian"), &b_grant, NOW + 20).unwrap();
+            b_done.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // Give the revoke thread time to reach (and block on) the lock.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(
+            !revoke_done.load(std::sync::atomic::Ordering::SeqCst),
+            "revoke was acknowledged while the physical act was still in flight"
+        );
+
+        // Release the act; now the lock frees and the revoke can complete.
+        release_tx.send(()).unwrap();
+        invoker
+            .join()
+            .unwrap()
+            .expect("the in-flight invoke completes");
+        revoker.join().unwrap();
+        assert!(revoke_done.load(std::sync::atomic::Ordering::SeqCst));
+
+        // After the acknowledged revoke, no new act can begin.
+        let after = invoke(
+            &dir,
+            &ctx,
+            InvokeInput {
+                instance,
+                operation: "set_state".into(),
+                invoke_key: "b".into(),
+                parameters: state("primary"),
+            },
+            NOW + 30,
+            &FakeExec::ok("private-on"),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            after.code,
+            ReasonCode::GrantInactive | ReasonCode::GrantMissing
+        ));
     }
 
     #[test]
