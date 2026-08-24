@@ -379,6 +379,43 @@ fn infra_loop(l: &loops::Loop) -> bool {
 /// is the coin service is priced in (Law I).
 /// The id of an existing open/pursued thread this theory duplicates (Jaccard ≥ 0.5), if any —
 /// so the caller can REINFORCE the survivor instead of spawning a near-duplicate (C5).
+/// A theory/direction/question is one plain sentence, not a paragraph. These caps are the
+/// hard floor the parse enforces regardless of what the model returns.
+const MAX_THEORY_CHARS: usize = 240;
+const MAX_DIRECTION_CHARS: usize = 200;
+const MAX_QUESTION_CHARS: usize = 200;
+
+/// Trim and shorten one drafted line to at most `max` characters, cut at a word boundary and
+/// at the first sentence end if there is one within the cap — so a verbose multi-sentence
+/// draft lands as its first, load-bearing sentence rather than a mid-word truncation. Never
+/// adds an ellipsis: the stored theory should read as a clean sentence, not a teaser.
+fn cap_sentence(s: &str, max: usize) -> String {
+    let s = s.trim();
+    // Keep only the first sentence when the draft ran on into several.
+    let first = s
+        .find(['.', '!', '?'])
+        .map(|i| s[..=i].trim())
+        .filter(|first| !first.is_empty() && first.chars().count() <= max)
+        .unwrap_or(s);
+    if first.chars().count() <= max {
+        return first.trim_end_matches([' ', ',', ';', ':']).to_string();
+    }
+    // Still too long: cut at the last word boundary within the cap.
+    let mut cut = String::new();
+    for word in first.split_whitespace() {
+        let candidate = if cut.is_empty() {
+            word.to_string()
+        } else {
+            format!("{cut} {word}")
+        };
+        if candidate.chars().count() > max {
+            break;
+        }
+        cut = candidate;
+    }
+    cut.trim_end_matches([' ', ',', ';', ':']).to_string()
+}
+
 fn similar_thread_id(existing: &[Thread], theory: &str, direction: &str) -> Option<String> {
     let words = |s: &str| -> std::collections::HashSet<String> {
         s.to_lowercase()
@@ -399,9 +436,16 @@ fn similar_thread_id(existing: &[Thread], theory: &str, direction: &str) -> Opti
             if held.is_empty() {
                 return false;
             }
+            // Overlap coefficient, not Jaccard: inter / min(|a|,|b|). Jaccard divides by the
+            // UNION, so a verbose restatement — the same idea buried in different filler —
+            // inflates the union and slips under the bar, which is exactly the near-duplicate
+            // theory a human sees on the card again and again. The overlap coefficient asks
+            // instead "is the smaller theory mostly contained in the larger one?", which
+            // verbosity cannot defeat. A held theory that recurs reinforces the survivor, so
+            // nothing is lost by folding.
             let inter = candidate.intersection(&held).count() as f64;
-            let union = candidate.union(&held).count() as f64;
-            inter / union >= 0.5
+            let smaller = candidate.len().min(held.len()) as f64;
+            inter / smaller >= 0.6
         })
         .map(|t| t.id.clone())
 }
@@ -1379,6 +1423,9 @@ fn maybe_theorize(
          question arose (never a restatement of it), `turns_on` names the decision or \
          belief awaiting the answer, and `stake` says what the answer does to it — \
          continues, changes, or stops. A question with nothing turning on it is refused. \
+         Keep `theory`, `direction`, and `question` to ONE plain sentence each (~25 words \
+         max): state the idea once, do not restate the observations, do not pad. A verbose \
+         theory is truncated to its first sentence, so put the point first. \
          `defect_claims` lists observation classes (actor|action) your theory says are \
          MALFUNCTIONING — leave it empty unless you truly claim a defect. Predictions are \
          optional but a theory that predicts nothing settles nothing. When (and only \
@@ -1498,10 +1545,16 @@ fn maybe_theorize(
             return Ok(false);
         }
     }
+    // Brevity is enforced at the parse, not just asked for in the prompt (the prompt is
+    // advisory; the parse is the boundary). A theory the human reads on a card is one plain
+    // sentence, not a paragraph — a wall of near-identical prose is the "waste of time" a
+    // human calls out. The cap also sharpens dedup: two terse restatements of one idea share
+    // a far higher word fraction than two verbose ones, so held near-duplicates fold instead
+    // of multiplying.
     let (q, theory, direction) = (
-        draft.question.trim().to_string(),
-        draft.theory.trim().to_string(),
-        draft.direction.trim().to_string(),
+        cap_sentence(&draft.question, MAX_QUESTION_CHARS),
+        cap_sentence(&draft.theory, MAX_THEORY_CHARS),
+        cap_sentence(&draft.direction, MAX_DIRECTION_CHARS),
     );
     if q.is_empty() && theory.is_empty() {
         dispose(dir, now)?;
@@ -7592,6 +7645,42 @@ mod tests {
             "morning kitchen activity suggests breakfast routines matter",
             "prepare a morning summary of overnight events",
         ));
+        // The real complaint: the SAME idea buried in verbose, differently-worded filler.
+        // Jaccard let this through (the padding inflated the union); the overlap coefficient
+        // catches it, because the held theory's words are still mostly present.
+        assert!(similar_thread_exists(
+            &existing,
+            "Having carefully considered the situation at length, it seems quite plausibly \
+             the case that the repeated connectivity monitoring we keep seeing suggests, on \
+             balance, that Ian may perhaps be watching device reachability across the mesh \
+             network fairly closely for reasons of his own",
+            "it might be worth gently asking which device needs some attention",
+        ));
+    }
+
+    #[test]
+    fn a_verbose_theory_is_capped_to_its_first_sentence() {
+        let long = "Ian is watching device reachability across the mesh. This is a second \
+                    sentence that piles on more detail than anyone needs and should be dropped \
+                    entirely so the card stays legible.";
+        let capped = cap_sentence(long, MAX_THEORY_CHARS);
+        assert_eq!(
+            capped,
+            "Ian is watching device reachability across the mesh."
+        );
+
+        // A single over-long run-on with no early sentence end is cut at a word boundary,
+        // never mid-word, and never with an ellipsis.
+        let run_on = "word ".repeat(80);
+        let capped = cap_sentence(&run_on, MAX_THEORY_CHARS);
+        assert!(capped.chars().count() <= MAX_THEORY_CHARS);
+        assert!(capped.ends_with("word"));
+
+        // A terse theory passes through untouched but for trimming.
+        assert_eq!(
+            cap_sentence("  breakfast routines matter  ", MAX_THEORY_CHARS),
+            "breakfast routines matter"
+        );
     }
 
     #[test]
