@@ -141,6 +141,28 @@ Two consequences bind the building of this system:
   violation pass unnoticed — is an existential event, and must be triaged, tested, and reported
   as one, never merely ranked higher in the same list.
 
+### How governing law is amended
+
+> *(Ian, 2026-08-23, ruling on the open law-quotation question from the
+> [conduct dialogue](../reviews/2026-08-20-conduct-dialogue.md) — and stated as the general
+> rule it implies:)* **A rule that governs law is rejected by default.** It may be admitted
+> only two ways: it comes from the human observer (Ian), or it is **strictly more restrictive
+> than the rule it replaces and carries its justification.** A change that would *loosen* what
+> counts as law, or widen who may assert it, is never admissible except from Ian directly.
+
+This is itself a governing-law rule, and it is admissible under its own terms because it comes
+from Ian. Its shape is deliberate and matches the asymmetry above: the companions (or the
+familiar) may only ever ratchet the constitution **tighter**, and only with reasons on the
+record; loosening is reserved to the human. A proposed rule that arrives without Ian's word and
+is not strictly-more-restrictive-with-justification is refused at the door, the way an
+unfalsifiable prediction or an ungrounded law paraphrase already is — no dialogue closes it, no
+majority carries it.
+
+The pending "any claim presented as a governing Law must carry a canonical Law cite" rule
+qualifies under the second exception (it is strictly more restrictive — it narrows what may
+pass as law — and the conduct dialogue recorded its justification), so it becomes admissible as
+a guard; it is not thereby auto-adopted into code, which remains a separate, ordinary build.
+
 ---
 
 ## What humanity is

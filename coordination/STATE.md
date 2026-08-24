@@ -5,6 +5,40 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **THREE IAN RULINGS 2026-08-23 (verbatim: "Rungs 4 and 5 need completion. Governing law
+  rule needs to be rejected unless from me or more restrictive with justification. PCC on
+  MacBook Air still a no go. Maybe not really supported on air.")**
+  1. **Governing-law amendment rule — RECORDED (SOUL.md §"How governing law is amended").**
+     A rule that governs law is rejected by default; admissible only if it comes from Ian, or
+     is strictly more restrictive than what it replaces AND carries justification. Loosening
+     what counts as law, or widening who may assert it, is Ian-only. This resolves the open
+     conduct-dialogue law-quotation question: the "any claim presented as a governing Law must
+     carry a canonical cite" rule now qualifies under exception 2 (more-restrictive + justified)
+     → admissible as a guard, but NOT auto-built (ordinary build, still owed).
+  2. **PCC stays OFF on the MacBook Air (GiiweoAir).** Code is already fail-closed:
+     `consent.pcc` is per-device @AppStorage defaulting false (AppModel.swift:398), so no device
+     enables PCC without a deliberate toggle; the Air is off unless someone flipped it. OPEN
+     hardware question Ian raised: PCC may not even be supported on the Air — verify Apple
+     Intelligence PCC hardware eligibility for that model before ever offering the toggle there.
+     PCC remains out of Envoy v1 entirely (its own disclosure/boundary review is a future dialogue).
+  3. **Rungs 4 (observe) / 5 (invoke) — ARCHITECTURAL FINDING, DECISION SURFACED TO IAN, not yet
+     built.** Rungs 1-3 exist (attest → discover_classes → request_grant/propose); ADR-0044 is
+     accepted. But completing observe/invoke means an external partner READING and ACTUATING
+     real declared surfaces through the network `/mcp` door — and the architecture currently
+     FORBIDS that by construction: the actuator executor (`run_surface_tool`/`actuate_by_hand`)
+     lives in `crates/cycle`, reachable only by the familiar's own tick and the CLI. Neither
+     `crates/mcp` (the door logic) nor `crates/mesh` (the `/mcp` route) depends on cycle, and
+     cycle now depends on mcp — so wiring partner→actuator is a deliberate breach of the
+     door/actuator separation, not a small completion. This is also the "execution edge" the
+     design has deliberately never had (even accepted proposals don't run — "no accept or run
+     action at this rung") and codex's hardest fence (guards proven structurally first; first
+     live grant on the least-dangerous partner; reciprocal review). So the HOW is a genuine
+     safety/scope decision put to Ian rather than chosen autonomously. Recommended: build the
+     rung 4/5 machinery fully guarded + fail-closed + hostile-tested but INERT (a
+     `SurfaceExecutor` seam that answers "not wired" until a separate, reviewed daemon-side
+     wiring step), so guards precede capability and the door still cannot actuate until a
+     deliberate act. Awaiting Ian's pick before code.
+
 - **ADR-0045 ACCEPTED (Ian, 2026-08-23, verbatim: "Move forward adr-0045") — T-205 STEP 2
   BUILT AND GREEN.** `crates/world` (familiar-world) is the partition made literal:
   WorldInstance registry (commission/rename/decommission — the ship's key mints into the
