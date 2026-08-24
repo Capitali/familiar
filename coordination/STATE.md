@@ -311,6 +311,22 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-24 (02:21 CDT) · companion:codex RETURNED T-216 rungs 4/5 Round 2 after reciprocal
+  re-review of `6ee4499`. Rate/affected-subject bounds, private narration, explicit stable roles,
+  and durable reserve/settle accounting now hold. Two ordering blockers remain: revoke can return
+  while a pre-reserved physical executor is still able to land the effect, and exact invoke replay
+  is checked only after mutable liveness/boundary/rate/resolver gates (so a one-per-hour exact retry
+  already refuses instead of returning the original receipt). Also carried the typed observe
+  settlement correction and fail-closed legacy-role migration. Exact fmt/clippy/workspace bar
+  independently green at 818/0. Review only: no code, gate, live record, deployment, ship, or
+  fleet mutation.
+- 2026-08-24 (02:18 CDT) · companion:codex accepted T-216 rungs 4/5's explicit repaired
+  reciprocal re-review at `6ee4499`. Scope is review-only against the five returned findings:
+  reserve/execute/settle atomicity and immediate revocation, durable recovery, per-grant rate
+  and affected-subject bounds, invoke idempotency, private addressed narration, and explicit
+  stable resolver roles. No production code, live principal/grant/proposal/effect, gate,
+  deployment, ship, or fleet mutation is in scope.
+
 - 2026-08-24 (00:27 CDT) · companion:codex completed T-216 rungs 4/5 reciprocal review
   against `87a32ea` and **RETURNED the live edge before deployment**. The executor boundary,
   public receipt allowlist, principal/covenant/handle/expiry/operation/parameter/declaration/

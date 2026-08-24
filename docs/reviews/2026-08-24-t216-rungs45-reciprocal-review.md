@@ -102,3 +102,88 @@ Independently reproduced on clean `87a32ea`:
 The green bar establishes implementation consistency. The return is for missing accepted
 authority invariants at the first live partner execution edge. No gate was opened, and this review
 authorizes no deployment or live grant/invocation.
+
+## Re-review of `6ee4499` — RETURN
+
+- **Reviewer:** companion:codex
+- **Disposition:** **RETURNED before deployment or live exercise**
+- **Scope:** reciprocal re-review of the five repairs only; no production code changed
+
+Four repairs now have the right durable shape. Grants snapshot a per-grant invoke rate,
+affected-subject class, and an explicit one-to-one semantic role map; current declarations must
+still satisfy that snapshot. Effect intent precedes execution, settlement is durable rather than
+best-effort, and an unsettled reservation is an explicit recovery state. The private addressed
+inbox now narrates alias, credential fingerprint, local surface, effect, and outcome without
+entering partner output or worldview. `invoke_key` is required and exact-payload conflicts are
+durably refused. Those changes close the old rate/subject, narration, and bucket-order findings,
+and close the ledger-corruption / silently-lost-act halves of finding 1.
+
+Two execution-order invariants remain blocking.
+
+### 1. An acknowledged revoke can still be followed by the reserved physical effect
+
+The new lock ends when the reservation is appended (`grant.rs:854-925`). The executor then runs
+outside it (`grant.rs:940`), while `revoke_grant` needs only that same lock to append and return
+success (`grant.rs:448-490`). Therefore this legal ordering remains:
+
+1. invoke reserves while the grant is live and releases the lock;
+2. the human revokes, the terminal append succeeds, and the revoke is acknowledged;
+3. the blocked executor resumes and changes the physical surface;
+4. settlement is valid after terminal.
+
+The stream remains honest and loadable now, which is real progress, but revocation is not
+immediate at the physical boundary: an effect may first become visible after the human was told
+the authority ended. The existing revoke fixture is sequential (invoke completes, then revoke)
+and does not exercise this ordering.
+
+Repair needs an acknowledgement fence. A revoke must either cancel every reserved-but-unexecuted
+effect, or wait until all reservations that won before it have settled before it returns success;
+the executor must not be able to begin/complete after a successful terminal acknowledgement.
+Pin this with a blocking executor fixture: reserve, start revoke concurrently, prove revoke cannot
+return success while the physical act can still land, then prove no new reservation enters.
+
+### 2. Exact invoke replay is downstream of mutable authority and rate checks
+
+The implementation promises that a timed-out exact retry returns the original receipt, but it
+does not look up the invocation identity first. `invoke` currently re-runs grant liveness,
+parameter, `allow_actuate`, hourly-rate, and resolver checks (`grant.rs:854-906`) before
+`append_idempotent` can report `Replay` (`grant.rs:907-936`, `1026-1035`). Consequently an exact
+retry is refused rather than replayed when any current condition changed. The simplest witness is
+a grant capped at one invoke per hour: the first call consumes the reservation; its exact retry
+hits `invokes_in_last_hour >= 1` and never reaches the replay branch. Closing `allow_actuate`,
+revoking/expiring the grant, or changing the declaration produces the same defect.
+
+This is not merely a friendlier retry policy. A caller that lost the first response cannot learn
+whether the device ran, which is the ambiguity the idempotency identity exists to remove. The
+current replay fixture uses the default cap of 12 and leaves every mutable gate unchanged, so it
+does not cover the contract it names.
+
+Repair by deriving the stable idempotency namespace and payload hash from the opaque handle before
+current admission, then return the original recorded outcome for an exact key+payload replay.
+Only a genuinely new key should pass through current liveness, boundary, rate, bounds, and
+resolver checks. Pin exact replay after (a) a one-per-hour first invoke, (b) revoke/expiry, and
+(c) boundary closure; all must avoid the executor and return the original completed/failed result.
+
+### Typed-outcome correction carried with the repair
+
+`settle_effect` constructs every settlement as `PartnerOperation::Invoke` (`grant.rs:1047-1073`),
+including settlements called by `observe` (`grant.rs:814`). The reservation/narration kind remains
+correct, so this does not create a third independent authority hole, but the durable audit event
+misclassifies every observation outcome. Have settlement carry the reserved operation/kind (and
+validate it against the reservation) while repairing the protocol above.
+
+The compatibility fallback in `grant_roles` also deserves removal before any migration can mint
+legacy-shaped authority: an empty role snapshot currently follows the live declaration, contrary
+to the stable-snapshot rule. Since this edge has not been deployed and no live grants exist, the
+safe migration is to fail such a grant closed rather than reinterpret it.
+
+## Re-review verification
+
+Independently reproduced on clean `6ee4499`:
+
+- `cargo fmt --all -- --check` — exit 0
+- `cargo clippy --all-targets -- -D warnings` — exit 0
+- `cargo test --workspace` — exit 0; 818 passed, 0 failed
+
+The bar is green and the repaired ledger is materially safer. The edge remains inert: no gate was
+opened, no live principal/grant/effect was exercised, and this re-review authorizes no deployment.
