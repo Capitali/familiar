@@ -282,6 +282,30 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Standing directions from Ian (recorded, binding)
 
+- **THE CODEX LANE CONTINUES (2026-08-24, verbatim: "lets just keep working on the familiar
+  with CODEX. that's just the path we are on and should continue").** A reaffirmation, not a
+  change: the two-lane co-development with codex — claim on the board, iterative design
+  dialogue, reciprocal review before a land — stays the way this codebase is built. Read
+  together with the 2026-08-14 directions below (companion as full coding partner; design
+  directions emerge from iterative dialogue; claude + codex develop the reasoning engine
+  together). Practical effect on new work: **T-227 goes through the dialogue and reciprocal
+  review like T-216/T-224 did, not solo** — and the deployment-floor decision inside it is
+  Ian's word on an ADR either way.
+
+- **THE TARGET AUDIENCE IS APPLE SILICON WITH APPLE INTELLIGENCE ON (2026-08-24, verbatim:
+  "lets just keep enabling apple intelligence on Apple Silicone Mac software — we will just
+  assume the need to have all those devices boot locally and that apple inetelligence can be
+  enabled — even if we cant easily test today, that's the target audience. Ios/macos/ipados/
+  watchos with as much apple intelligence enabled as possible").** The shells are built for
+  Apple Silicon devices booting from their INTERNAL disk with Apple Intelligence enabled —
+  that assumption is now a premise, not a thing to detect around. Four platforms in scope:
+  iOS, macOS, iPadOS, watchOS. The standing instruction is *more* Apple Intelligence surface,
+  not less. Two consequences recorded rather than assumed: (1) MacOnStick's external-boot
+  ineligibility (T-226) is a BENCH limitation — it never was a product constraint, and it does
+  not gate this direction; (2) "we can't easily test today" is accepted by Ian as a known cost,
+  so work here lands behind availability guards and honest unavailable-states, and ships
+  untested-on-metal until a bench exists. Adoption sweep filed as T-227.
+
 - **The capability offering (2026-08-20):** everything the familiar learns how to control
   becomes part of a rich MCP offering to other AIs — anonymized so the original user
   learning doesn't leak. Design first; no gate opens without Ian. (T-216, dialogue Q5.)
