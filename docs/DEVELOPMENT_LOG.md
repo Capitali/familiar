@@ -6,6 +6,53 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-24 — Rungs 4/5 round 2: codex's five findings, closed (Ian: "take it now")
+
+codex's reciprocal review (`docs/reviews/2026-08-24-t216-rungs45-reciprocal-review.md`)
+RETURNED the execution edge with four blockers + a rejected resolver. All addressed:
+
+1. **Serialized reserve→execute→settle (blocker 1).** An effect is now a durable, idempotent
+   RESERVATION appended before the executor runs, then a typed `EffectSettled`
+   completed/failed after. A new `authority_lock` serializes revoke/expire with reservations,
+   so a revoke and an in-flight reservation on one grant can never interleave. `validate_sequence`
+   enforces the shape: a reservation must reference a live grant; a settlement must reference an
+   existing reservation and settle it once. An unsettled reservation is the explicit recovery
+   state — a physical act whose outcome could not be persisted is never lost, and a best-effort
+   append can no longer poison the ledger. (Old best-effort `record_effect` deleted.)
+2. **Rate + affected-subject bounds (blocker 2).** The grant now snapshots a per-grant
+   `max_invokes_per_hour` (human-chosen via the decide act, conservative default 12, ceiling
+   240) and the class's `affected_subject`. invoke counts the grant's reservations in the
+   trailing hour and refuses over the cap; the resolver refuses if the class's affected-subject
+   ever stops matching the snapshot.
+3. **invoke idempotency (blocker 3).** `InvokeInput` gains a required `invoke_key`; the
+   reservation is idempotent on it + a payload hash. A timed-out retry returns the original
+   receipt without re-running; the same key with a changed payload is an idempotency conflict.
+4. **Narration (blocker 4).** The partner inbox gains `recent_effects` — a private, addressed
+   projection naming the partner alias + fingerprint, the LOCAL surface, the operation/act, and
+   the outcome (completed/failed/pending), deduped by effect id. Never enters
+   worldview/federation/MCP; never attributes a partner's act to a human.
+5. **Explicit resolver (rejected bucket-order).** `primary`/`reverted` are now an explicit
+   one-to-one role map on the actuator declaration (`roles`), validated at load; a surface
+   without it is not offerable. The grant SNAPSHOTS the map at decision time, so a later
+   declaration reorder/edit cannot silently repoint an active grant. The same map drives the
+   reverse observe projection; the resolver refuses if a snapshotted label no longer exists.
+
+### Checks run
+
+`cargo fmt --check` 0 · `cargo clippy --all-targets -- -D warnings` 0 · workspace **818
+passed / 0 failed** (+ new tests: idempotent retry runs the device once; same key + changed
+payload conflicts; the hourly rate cap is enforced; a revoke ends invoke and the ledger stays
+loadable; plus the round-1 hostile suite updated to the reserve/settle model). Still inert (no
+gate opened, no live grant); NOT yet deployed — re-offered to codex for reciprocal re-review
+before any live exercise.
+
+### Next
+
+codex reciprocal re-review of round 2. Then deploy + the first live exercise on the
+least-dangerous partner behind a deliberately-opened `allow_actuate` and a bounded grant. UI
+control for the per-grant rate is the one deferred piece — enforced with a default now; the
+sphere card can add the human-facing number when next built.
+
 ## 2026-08-24 — Rungs 4/5: the offering's execution edge (Ian: "wire it live now")
 
 The ADR-0044 ladder now reaches the top: `familiar.observe` (rung 4) and `familiar.invoke`

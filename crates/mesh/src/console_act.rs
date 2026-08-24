@@ -40,6 +40,11 @@ pub enum ConsoleAct {
         surface: String,
         allowed_operations: familiar_mcp::grant::OperationBounds,
         expires_at: i64,
+        /// The human's per-grant invoke rate bound (ADR-0044). Absent (0) → the conservative
+        /// default is applied; grant_request clamps to [1, ceiling]. `#[serde(default)]` keeps
+        /// older console builds that never send it compatible.
+        #[serde(default)]
+        max_invokes_per_hour: i64,
     },
     DeclineGrant {
         request_id: String,
@@ -143,8 +148,16 @@ pub(crate) fn apply(
             surface,
             allowed_operations,
             expires_at,
+            max_invokes_per_hour,
         } => {
             let actor = decision_context(dir, &env.node.node_id)?;
+            // 0 = the console did not name a rate; grant_request applies the conservative
+            // default and clamps to the ceiling.
+            let rate = if max_invokes_per_hour <= 0 {
+                familiar_mcp::grant::DEFAULT_MAX_INVOKES_PER_HOUR
+            } else {
+                max_invokes_per_hour
+            };
             familiar_mcp::grant::grant_request(
                 dir,
                 &actor,
@@ -152,6 +165,7 @@ pub(crate) fn apply(
                 &surface,
                 allowed_operations,
                 expires_at,
+                rate,
                 now,
             )
             .map_err(grant_refusal)?;
@@ -440,7 +454,8 @@ mod tests {
                 "source":{"kind":"json","key":"power"}}}},
             "actions":{"on":"secret on","off":"secret off"},
             "buckets":[{"name":"on","when":[{"op":"eq","field":"power","value":"off"}]},
-                       {"name":"off","when":[]}]
+                       {"name":"off","when":[]}],
+            "roles":{"primary":"on","reverted":"off"}
         }]});
         std::fs::write(
             dir.join(familiar_kernel::actuator::ACTUATORS_FILE),

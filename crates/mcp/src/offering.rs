@@ -69,11 +69,16 @@ pub enum SubjectClass {
 }
 
 impl SubjectClass {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             SubjectClass::SharedEnvironment => "shared_environment",
         }
     }
+}
+
+/// The repo-authored class definition for `class_id`, if it is one we declassified.
+pub fn class_def(class_id: &str) -> Option<&'static ClassDef> {
+    CLASS_DEFS.iter().find(|def| def.id == class_id)
 }
 
 /// One generic operation a class offers (rung-3 contract): the id a grant's act leg
@@ -173,13 +178,16 @@ fn matches_def(def: &ClassDef, s: &familiar_kernel::actuator::Actuator) -> bool 
         "switchable.reversible/v1" => {
             // Exactly two acts forming a full revert pair: every bucket names an act and
             // every act is a bucket (loader already enforces bucket ⊆ actions; require
-            // the converse and the arity here).
+            // the converse and the arity here). Plus an explicit one-to-one primary/reverted
+            // role map — a surface without declared semantic roles is not offerable, because a
+            // partner's abstract state would otherwise have no human-labelled meaning.
             s.actions.len() == 2
                 && s.buckets.len() == 2
                 && s.buckets.iter().all(|b| s.actions.contains_key(&b.name))
                 && s.actions
                     .keys()
                     .all(|a| s.buckets.iter().any(|b| &b.name == a))
+                && familiar_kernel::actuator::has_reversible_roles(s)
         }
         _ => false,
     }
@@ -246,6 +254,7 @@ mod tests {
                   "when": [ { "op": "eq", "field": "power", "value": "restored" } ] },
                 { "name": "restore-ians-lamp", "when": [] }
             ],
+            "roles": { "primary": "dim-ians-lamp", "reverted": "restore-ians-lamp" },
             "keywords": "ian bedroom lamp"
         }]});
         std::fs::write(

@@ -235,16 +235,17 @@ fn observe_tool() -> Value {
 fn invoke_tool() -> Value {
     tool(
         "familiar.invoke",
-        "Run one bounded act on a bound surface, within an active human grant — the effect happens. Names the opaque instance handle and an abstract operation within the grant's bounds, never a local act. Fails closed unless the human has opened the effect channel.",
+        "Run one bounded act on a bound surface, within an active human grant — the effect happens. Names the opaque instance handle and an abstract operation within the grant's bounds, never a local act. `invoke_key` identifies THIS invocation so a timed-out retry is safe: replay returns the original result, a changed payload conflicts. Fails closed unless the human has opened the effect channel.",
         json!({
             "type": "object",
             "additionalProperties": false,
             "properties": {
                 "instance": { "type": "string", "maxLength": 128 },
                 "operation": { "type": "string" },
-                "parameters": { "type": "object" }
+                "parameters": { "type": "object" },
+                "invoke_key": { "type": "string", "maxLength": 64 }
             },
-            "required": ["instance", "operation", "parameters"]
+            "required": ["instance", "operation", "parameters", "invoke_key"]
         }),
         false,
     )
@@ -768,7 +769,8 @@ mod tests {
             "buckets": [
                 { "name": "private-on", "when": [{ "op": "eq", "field": "power", "value": "off" }] },
                 { "name": "private-off", "when": [] }
-            ]
+            ],
+            "roles": { "primary": "private-on", "reverted": "private-off" }
         }] });
         std::fs::write(
             dir.join(familiar_kernel::actuator::ACTUATORS_FILE),
@@ -1207,6 +1209,7 @@ mod tests {
                 )]),
             )]),
             302,
+            crate::grant::DEFAULT_MAX_INVOKES_PER_HOUR,
             3,
         )
         .unwrap();

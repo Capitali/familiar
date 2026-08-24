@@ -20,8 +20,29 @@ pub struct PartnerInboxView {
     pub pending_requests: Vec<HumanGrantRequestView>,
     pub active_grants: Vec<HumanGrantView>,
     pub pending_proposals: Vec<HumanProposalView>,
+    /// Recent rung-4/5 effects a partner actually performed, narrated to the authorized human
+    /// (ADR-0044): the partner's alias + fingerprint, the LOCAL surface, what was done, and its
+    /// outcome. Private to this human's signed read — it never enters worldview, federation, or
+    /// any partner-facing output, and never attributes the partner's act to a human.
+    pub recent_effects: Vec<HumanEffectView>,
     /// Local declaration problems. These are shown to the human and never enter partner output.
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HumanEffectView {
+    pub partner_alias: String,
+    pub credential_fingerprint: String,
+    /// The local surface the partner reached — shown to the human, never to the partner.
+    pub surface: String,
+    /// "observe" or "invoke".
+    pub kind: String,
+    /// The abstract operation, and (invoke) the local act it resolved to — human-facing.
+    pub operation: String,
+    pub local_act: String,
+    /// "completed", "failed", or "pending" (reserved but not yet settled — the recovery state).
+    pub outcome: String,
+    pub at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -244,11 +265,51 @@ pub fn assemble(
         }
     }
 
+    // Narrate the rung-4/5 effects this human's partners actually performed (ADR-0044). `events`
+    // is already filtered to grants addressed to this human, so every reservation here is theirs.
+    // Join each reservation to its settlement (unsettled = "pending", the recovery state), most
+    // recent first, bounded.
+    let mut settled: BTreeMap<String, String> = BTreeMap::new();
+    for event in &events {
+        if let PartnerActBody::EffectSettled { effect_id, outcome } = &event.body {
+            settled.insert(effect_id.clone(), outcome.clone());
+        }
+    }
+    let mut recent_effects: Vec<HumanEffectView> = events
+        .iter()
+        .filter_map(|event| match &event.body {
+            PartnerActBody::EffectReserved {
+                effect_id,
+                effect_kind,
+                surface,
+                operation,
+                label,
+                ..
+            } => Some(HumanEffectView {
+                partner_alias: event.alias_snapshot.clone(),
+                credential_fingerprint: event.credential.clone(),
+                surface: surface.clone(),
+                kind: effect_kind.clone(),
+                operation: operation.clone(),
+                local_act: label.clone(),
+                outcome: settled
+                    .get(effect_id)
+                    .cloned()
+                    .unwrap_or_else(|| "pending".to_string()),
+                at: event.at,
+            }),
+            _ => None,
+        })
+        .collect();
+    recent_effects.sort_by_key(|e| std::cmp::Reverse(e.at));
+    recent_effects.truncate(50);
+
     Ok(PartnerInboxView {
         pending_registrations,
         pending_requests,
         active_grants,
         pending_proposals,
+        recent_effects,
         warnings,
     })
 }
@@ -307,7 +368,8 @@ mod tests {
             "state_cmd":"private", "state":{"fields":{"power":{"kind":"enum",
                 "values":["on","off"],"source":{"kind":"json","key":"power"}}}},
             "actions":{"on":"secret on","off":"secret off"},
-            "buckets":[{"name":"on","when":[{"op":"eq","field":"power","value":"off"}]},{"name":"off","when":[]}]
+            "buckets":[{"name":"on","when":[{"op":"eq","field":"power","value":"off"}]},{"name":"off","when":[]}],
+            "roles":{"primary":"on","reverted":"off"}
         }]});
         std::fs::write(
             dir.join(familiar_kernel::actuator::ACTUATORS_FILE),

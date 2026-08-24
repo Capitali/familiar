@@ -51,6 +51,27 @@ pub struct Actuator {
     /// Extra words a need-direction may use to name this surface ("lamp led dim …").
     #[serde(default)]
     pub keywords: String,
+    /// Explicit semantic roles for the capability offering (ADR-0044): abstract role name
+    /// ("primary" / "reverted") → the local act label it means. This is what a human's grant
+    /// snapshots so a partner's abstract `set_state:primary` has a stable, declared meaning
+    /// — never inferred from bucket ORDER, which a later edit could silently invert. Local
+    /// actuation ignores this; only a surface with a complete one-to-one role map is offerable
+    /// as a `switchable.reversible` class. Empty = not offered to partners.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub roles: std::collections::BTreeMap<String, String>,
+}
+
+/// Does this surface carry a complete, one-to-one `primary`/`reverted` role map over its own
+/// act labels? Required before a surface may be offered or granted as a switchable class, so a
+/// partner's abstract state always resolves to a declared, human-labelled local act.
+pub fn has_reversible_roles(a: &Actuator) -> bool {
+    let (Some(primary), Some(reverted)) = (a.roles.get("primary"), a.roles.get("reverted")) else {
+        return false;
+    };
+    a.roles.len() == 2
+        && primary != reverted
+        && a.actions.contains_key(primary)
+        && a.actions.contains_key(reverted)
 }
 
 /// The typed reading contract for one surface.
@@ -273,6 +294,11 @@ fn valid_actuator(a: &Actuator) -> bool {
         || !valid_contract(&a.state)
         || a.buckets.is_empty()
     {
+        return false;
+    }
+    // A role map, when present, must be one-to-one over real act labels — a half-declared or
+    // colliding map is a broken offering, dropped loudly like any other invalid contract.
+    if !a.roles.is_empty() && !has_reversible_roles(a) {
         return false;
     }
     let last = a.buckets.len() - 1;
@@ -542,6 +568,7 @@ mod tests {
                 },
             ],
             keywords: "lamp led".into(),
+            roles: BTreeMap::new(),
         }
     }
 

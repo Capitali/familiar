@@ -118,6 +118,18 @@ pub enum PartnerActBody {
         granted_by: String,
         granted_at: i64,
         expires_at: i64,
+        /// The authority contract snapshotted at the human's decision (ADR-0044), so a later
+        /// declaration edit cannot silently change what an active grant means or permits:
+        /// the abstract→local role map, the affected-subject class, and the per-grant invoke
+        /// rate. `#[serde(default)]` so grants minted before this shape still load (they carry
+        /// no roles → the surface's declared roles are re-read, and the conservative default
+        /// rate applies).
+        #[serde(default)]
+        roles: std::collections::BTreeMap<String, String>,
+        #[serde(default)]
+        affected_subject: String,
+        #[serde(default)]
+        max_invokes_per_hour: i64,
     },
     GrantDeclined {
         request_id: String,
@@ -151,21 +163,27 @@ pub enum PartnerActBody {
         proposal_id: String,
         withdrawn_by: String,
     },
-    /// A rung-4 read that completed. `surface` is the private local name — this body is
-    /// household-internal ledger truth and is NEVER serialized to a partner (the partner
-    /// gets only the reading text and its opaque handle).
-    Observed {
-        grant_id: String,
-        surface: String,
-    },
-    /// A rung-5 act that ran (the execution edge). `surface`/`label` are the private local
-    /// resolution; the partner-facing receipt carries neither.
-    Invoked {
+    /// A rung-4/5 effect RESERVED before the executor runs (ADR-0044 immediate-revocation +
+    /// never-lose-an-act): the durable intent. Appended while the grant is live; the physical
+    /// act happens after. `surface`/`operation`/`parameters`/`label` are the private local
+    /// resolution and are NEVER serialized to a partner. `kind` is "observe" or "invoke".
+    EffectReserved {
+        effect_id: String,
+        effect_kind: String,
         grant_id: String,
         surface: String,
         operation: String,
         parameters: Value,
+        /// The resolved local act label (invoke only; empty for observe).
+        #[serde(default)]
         label: String,
+    },
+    /// The typed outcome of a reserved effect, appended after the executor returns. `outcome`
+    /// is "completed" or "failed". A reservation with no settlement is the explicit recovery
+    /// state — a physical act whose outcome could not be persisted, never a vanished act.
+    EffectSettled {
+        effect_id: String,
+        outcome: String,
     },
     Refusal {
         idempotency_key: Option<String>,
@@ -369,6 +387,8 @@ fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
     let mut grant_terminals = BTreeSet::<String>::new();
     let mut proposals = BTreeMap::<String, String>::new();
     let mut proposal_terminals = BTreeSet::<String>::new();
+    let mut effects = BTreeMap::<String, String>::new();
+    let mut effect_settlements = BTreeSet::<String>::new();
 
     for event in events {
         match &event.body {
@@ -449,24 +469,40 @@ fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
                     return Err(invalid("proposal has multiple terminal transitions"));
                 }
             }
-            // A rung-4/5 effect must reference a grant that exists, is owned by the same
-            // principal, and had not already terminated — corrupt effect history cannot be
-            // folded into a clean view. Effects are not themselves terminal (a grant survives
-            // being observed or invoked), so they add no terminal bookkeeping.
-            PartnerActBody::Observed { grant_id, surface } => {
-                if grants.get(grant_id) != Some(&(event.principal.clone(), surface.clone()))
-                    || grant_terminals.contains(grant_id)
-                {
-                    return Err(invalid("observe references missing or inactive authority"));
-                }
-            }
-            PartnerActBody::Invoked {
-                grant_id, surface, ..
+            // A reserved effect must reference a grant that exists, is owned by the same
+            // principal, and had NOT terminated at this point in the stream — corrupt effect
+            // history cannot be folded into a clean view. A reservation is not itself terminal
+            // (a grant survives being observed or invoked); it registers an effect_id that a
+            // later settlement may reference exactly once.
+            PartnerActBody::EffectReserved {
+                effect_id,
+                grant_id,
+                surface,
+                ..
             } => {
                 if grants.get(grant_id) != Some(&(event.principal.clone(), surface.clone()))
                     || grant_terminals.contains(grant_id)
                 {
-                    return Err(invalid("invoke references missing or inactive authority"));
+                    return Err(invalid("effect references missing or inactive authority"));
+                }
+                if effects
+                    .insert(effect_id.clone(), event.principal.clone())
+                    .is_some()
+                {
+                    return Err(invalid("duplicate effect reservation"));
+                }
+            }
+            // A settlement must reference an existing reservation by the same principal, and
+            // settle it at most once. It carries no grant-liveness requirement: the act already
+            // ran, and recording its honest outcome must always be valid — even after a revoke.
+            PartnerActBody::EffectSettled { effect_id, .. } => {
+                if effects.get(effect_id) != Some(&event.principal) {
+                    return Err(invalid(
+                        "effect settlement references a missing reservation",
+                    ));
+                }
+                if !effect_settlements.insert(effect_id.clone()) {
+                    return Err(invalid("effect settled more than once"));
                 }
             }
             PartnerActBody::ProposalRefused {
@@ -670,6 +706,9 @@ mod tests {
                 granted_by: "ian".into(),
                 granted_at: 2,
                 expires_at: 3,
+                roles: std::collections::BTreeMap::new(),
+                affected_subject: String::new(),
+                max_invokes_per_hour: 0,
             },
         )
         .unwrap()
@@ -704,6 +743,9 @@ mod tests {
                 granted_by: "ian".into(),
                 granted_at: 2,
                 expires_at: 3,
+                roles: std::collections::BTreeMap::new(),
+                affected_subject: String::new(),
+                max_invokes_per_hour: 0,
             },
         )
         .unwrap()
