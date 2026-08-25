@@ -161,6 +161,44 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Waiting on Ian
 
+**DECISIONS TAKEN 2026-08-24 (Ian answered the open questions in one pass — these are
+now closed; what remains of each is an ACT, listed at the bottom).**
+
+1. **Deployment floors → 26 on all four platforms.** T-227. Pre-26 devices lose the app;
+   stated and accepted.
+2. **The three held gates: ALL THREE OPEN** — `allow_microphone`, `allow_face_recognition`,
+   `allow_self_upgrade`. Recorded concern, raised once and overruled by his word: mic and face
+   recognition observe Betty and Leif, who have not themselves agreed, and self-upgrade lets
+   the familiar rewrite its own code. **No companion may open a gate (ADR-0005) — the act is
+   Ian's, on the lighthouse boundary.** Worth building alongside: the household-assent surface
+   these two gates imply, and a narrower per-person scope if he later wants one.
+3. **PCC reopened everywhere eligible** — supersedes the 2026-08-23 Air ruling. Consent stack
+   unchanged.
+4. **Writing Tools on his own text only**; no Genmoji, no Image Playground; the familiar's
+   voice stays constitutional.
+5. **Envoy registration keeps the human tap** — the fix is a card that carries the narrative
+   (what asked, what the tap creates, what follows), not removing the act. His automatic-
+   registration position is now ANSWERED, not standing.
+6. **Every client is an observatory** — see Standing directions; T-228, and he picked it FIRST.
+7. **Wildhorse geo: city-level coordinates** — good enough for weather and daylight, no
+   building named. Replaces both "real coordinates" and "zero it".
+8. **The dialogue path NEVER writes to the corruption ledger** (brick 4). A keyword classifier
+   recording a person's own questions against them, with no expunge, is out.
+9. **The foreign-law residual gap is LABELLED, not detected** (brick 4's second decision) —
+   the structural fix (law text unauthorable; cite-by-id + kernel splice) carries the weight;
+   no prose detector is built.
+10. **T-225 candidates approved: NASA, IO Aerospace, Signal K** — the first two need
+    credentials from Ian, the third needs him aboard GIIWEO (late September).
+
+**ACTS STILL OWED BY IAN** (nothing here is a question any more):
+- Open `allow_microphone`, `allow_face_recognition`, `allow_self_upgrade` on the lighthouse
+  boundary — plus the six operational gates there, still not mirrored from MacOnStick.
+- `bash vps/deploy-lighthouse.sh`
+- `rm -f /var/lib/familiar/familiar_data/llm/health.json` (the sticky budget cooldown)
+- Tap the "UCF Factory (Jeff)" card in the Partner ring, then send Jeff the note + import
+  bundle out of band.
+- An api.nasa.gov key (free) and an IO Aerospace account/key, for T-225.
+
 - ~~The lighthouse's LLM chain fix~~ **DONE by Ian 2026-08-22 13:42 UTC** — chain is
   `gemini,anthropic,cerebras`; first anthropic fallback response served at 13:43:30
   (2602 bytes). REMAINING DECISION: `CLAUDE_DAILY_TOKEN_BUDGET=2000` in the box's
@@ -238,7 +276,13 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   confirm window mint the first principal.** Ian's recorded word covers companion
   execution instead if he asks. Claude budget raised to 50000/day (done, verified
   earlier). IBM Bob backburnered.
-- **T-220's lights witness — a geography decision (2026-08-22).** Wildhorse is deployed
+- **T-220's lights witness — ANSWERED 2026-08-24, and answered bigger than asked.** Ian's
+  reply was "every client is an observatory" (see Standing directions / T-228): the shells
+  become the sensing and radio-bearing nodes, so the witness's BLE host is a phone or iPad
+  in Motorhorse rather than a Mac. **Note the distinction T-228 must not blur: he directed
+  DISCOVERY (scan, survey, report), while this witness needs ACTUATION over BLE — a further
+  step that still needs a declared surface and his `allow_actuate` on that device.** The
+  original geography choice below is superseded. Wildhorse is deployed
   and back on the mesh, but it is NOT in Motorhorse (192.168.1.x behind a different
   Starlink), and the SP548E strip is BLE-only in Motorhorse — out of range. Choose:
   (a) wait until wildhorse is physically home, or (b) move the lights surface to
@@ -270,17 +314,35 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   resume our co-planning and programming sessions"); Round 1 pushed at
   docs/reviews/2026-08-20-conduct-dialogue.md. Bricks 3/5/6 wait on its DECIDED blocks.
 
-- **ADR-0040 acceptance** — the reasoning engine's converged design (proposed;
-  docs/decision-records/0040-the-reasoning-engine-grows-honest.md). Building continues
-  on the decided tasks meanwhile; the ADR formalizes it.
+- ~~ADR-0040 acceptance~~ **STALE ENTRY, CLOSED 2026-08-24.** The ADR's own header has
+  read `accepted — Ian, 2026-08-15` since it landed ("you should complete ADR-0040");
+  this line outlived the acceptance it was waiting for. Nothing was owed.
 
-- **Wildhorse's real coordinates** → written to its `data/mesh/geo.json`, **or** "zero
-  it" → delete the file, node reads honestly unlocated. Until then its pin wears ≈.
+- ~~Wildhorse's real coordinates~~ **ANSWERED 2026-08-24: city-level only** — approximate
+  coordinates good enough for weather and daylight context, no building named. Write them
+  to `data/mesh/geo.json` when the node is next reachable.
 - (Dissolving:) the Codex/Aphelion mapping — discovery decides in pass step 2; manual
   naming only on unambiguous discovery, else skipped entirely.
 - Build 85 testing on his devices, once shipped (notification will be waiting).
 
 ## Standing directions from Ian (recorded, binding)
+
+- **EVERY CLIENT IS AN OBSERVATORY (2026-08-24, verbatim: "the ios and ipad os should be
+  doing discovery tasks as well, including BLE, Wifi, airplay services, etc... every client
+  is an observetory to be exploited").** Given as the answer to T-220's lights-witness
+  question, but it is broader than that task: every shell — iOS, iPadOS, macOS, watchOS — is
+  a sensing node, not just a window onto the familiar. What is ALREADY true (checked, not
+  assumed): iOS/iPadOS and macOS both run a Bonjour/mDNS survey over 27 declared service
+  types including `_airplay._tcp`, `_raop._tcp`, `_homekit._tcp` and `_googlecast._tcp`
+  (`ios/App/Sources/NetworkDiscovery.swift`, `ios/MacApp/Sources/MacSensing.swift`), and it
+  reports *derived* observations, never addresses. What is NOT: **BLE is absent from the
+  shells entirely** (no CoreBluetooth anywhere in `ios/`), **the watch observes nothing but
+  HealthKit**, and **WiFi scanning has no public API on iOS** — `NEHotspotHelper` needs a
+  special Apple entitlement, so "WiFi" here can honestly mean the current network and Bonjour
+  over it, not a survey of nearby SSIDs. Filed as T-228 and picked by Ian as the FIRST build.
+  Standing constraint that does not move: a survey reports what KIND of thing it saw, under
+  `allow_network_discovery`, with T-217's naming rules — pointing more radios at the
+  neighbours does not loosen what may be said about them.
 
 - **THE CODEX LANE CONTINUES (2026-08-24, verbatim: "lets just keep working on the familiar
   with CODEX. that's just the path we are on and should continue").** A reaffirmation, not a
@@ -305,6 +367,15 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
   not gate this direction; (2) "we can't easily test today" is accepted by Ian as a known cost,
   so work here lands behind availability guards and honest unavailable-states, and ships
   untested-on-metal until a bench exists. Adoption sweep filed as T-227.
+  **DECIDED 2026-08-24, Ian answering T-227's open questions:** (a) **raise ALL deployment
+  floors to 26** — iOS/iPadOS/macOS/watchOS; Apple Intelligence becomes a premise, the
+  availability guards mostly dissolve, and every pre-26 device loses the app (his call,
+  made with that cost stated); (b) **PCC is reopened everywhere eligible** — this REPLACES
+  the 2026-08-23 "stays off on the Air" ruling as the default posture; the consent stack
+  (boundary `cloud_ok` ∧ per-device `consent.pcc` ∧ OS 27 ∧ Apple reporting available) is
+  unchanged and still required, so nothing travels without it; (c) **Writing Tools on the
+  human's own text only** — chat input and notes, never the familiar's own words, which come
+  from the constitution and stay unauthorable; **no Genmoji, no Image Playground.**
 
 - **The capability offering (2026-08-20):** everything the familiar learns how to control
   becomes part of a rich MCP offering to other AIs — anonymized so the original user
