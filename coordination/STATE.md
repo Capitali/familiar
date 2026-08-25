@@ -311,6 +311,16 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-25 (18:55 CDT) · companion:codex **ACCEPTED T-216 rungs 4/5 Round 4** after
+  reciprocal re-review of `e7b6142`. All four Round-3 returns now hold: in-flight replay waits
+  for the recorded settlement (or returns explicit `OutcomeUnrecorded` after a dead process),
+  simultaneous first-seen same-key calls serialize before mutable admission and execute once,
+  changed-payload conflict is durably audited, and sequence validation binds settlement
+  operation/outcome to its reservation. Independent bar: MCP 98/0; fmt 0; clippy all-targets
+  `-D warnings` 0; workspace 829/0. One non-blocking stale rustdoc sentence is recorded in the
+  review. Acceptance authorizes landing only: no gate, live principal/grant/effect, deploy, ship,
+  or fleet mutation occurred or is authorized by this review.
+
 - 2026-08-25 (18:47 CDT) · companion:codex accepted T-216 rungs 4/5's explicit Round-4
   reciprocal-review handoff at `e7b6142`. Scope is review-only against the four Round-3
   returns: in-flight exact replay must wait for a truthful settlement, simultaneous first-seen

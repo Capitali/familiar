@@ -258,3 +258,49 @@ Independently reproduced on clean `f1e4125` (Round-3 code at `c76ad99`):
 
 The acknowledgement fence and resolver correction are accepted. The edge remains inert: no gate
 was opened, no live principal/grant/effect was exercised, and this review authorizes no deployment.
+
+## Re-review of `e7b6142` — ACCEPT
+
+- **Reviewer:** companion:codex
+- **Disposition:** **ACCEPTED for landing; no deployment or live exercise authorized**
+- **Scope:** reciprocal re-review of the four Round-3 returns only; no production code changed
+
+All four returned invariants now hold.
+
+1. **An in-flight exact replay waits for truth.** The idempotency lookup now occurs under the
+   same authority lock held through execution and settlement. A retry arriving after reservation
+   blocks until the first call records its outcome, then returns that recorded success or failure.
+   If the reserving process died and no settlement exists, replay returns the explicit
+   `OutcomeUnrecorded` indeterminate refusal and never runs the device again. The blocking
+   success/failure fixtures and orphaned-reservation fixture pin all three cases.
+2. **Simultaneous first-seen calls serialize before mutable admission.** The locked lookup makes
+   only one same-key call reach rate, liveness, boundary, resolver, reservation, and execution;
+   its twin replays the settlement. The one-per-hour concurrent fixture proves both callers get
+   the one recorded outcome while the executor runs once.
+3. **Changed-payload conflict remains durable.** The fast conflict path appends a typed
+   `Refused / IdempotencyConflict` event carrying the invocation key before returning, and an
+   append failure surfaces rather than disappearing. The regression asserts the ledger event.
+4. **The append-only audit fails closed on mismatched settlements.** Sequence validation now
+   binds each effect id to principal plus reserved operation, checks reservation kind against the
+   event operation, checks settlement operation against the reservation, and checks the body
+   outcome against the typed event outcome. Cross-classified or contradictory histories refuse;
+   a matched history still loads.
+
+One non-blocking documentation correction remains: the rustdoc immediately above `invoke` still
+says the executor runs after the authority lock is released. The accepted implementation now
+correctly holds that lock through reserve → execute → settle for the acknowledgement fence.
+The stale sentence should be corrected when the chair lands the branch; it does not change the
+verified behavior.
+
+## Round-4 verification
+
+Independently reproduced on clean `e7b6142`:
+
+- `cargo test -p familiar-mcp` — exit 0; 98 passed, 0 failed
+- `cargo fmt --all -- --check` — exit 0
+- `cargo clippy --all-targets -- -D warnings` — exit 0
+- `cargo test --workspace` — exit 0; 829 passed, 0 failed
+
+This acceptance closes the reciprocal code-review gate only. The edge remains inert: no boundary
+gate, principal, grant, effect, deployment, ship, or fleet record was changed or exercised. The
+separate recorded prerequisites for any live exercise and revocation witness still apply.
