@@ -6,6 +6,57 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-25 — T-228 bricks 1–2: the shells see the boundary, and speak one survey vocabulary
+
+Ian's ruling on T-228's Q2 ("the clients are authorized by the user, so thats the
+authority that they both should follow") found a live defect: iOS gated its Bonjour
+survey on a device-local `@AppStorage("consent.discovery")` and never read the
+household boundary at all — it *couldn't*, because the Swift `GateStates` mirror
+modeled only 7 of the Rust worldview's 14 fields and `network_discovery` was not
+among them. Nothing was owed in Rust; the door already serves every sensor gate.
+
+1. **Brick 1 — the authority the clients follow.** `GateStates` (FamiliarMesh) gains
+   the seven sensor gates as optionals mirroring the Rust `#[serde(default)]`, with
+   fail-closed accessors and a `reportsSensorGates` flag so "we did not hear" stays
+   distinct from "no". `AppModel.startDiscoveryIfConsented` became
+   `startDiscoveryIfAuthorized`: boundary ∧ device preference, the device toggle
+   demoted to narrowing-only per ADR-0005's one-directional gate. A `discoveryState`
+   string names which of the four refusals applies (shown in iOS settings under the
+   switch), and the survey re-evaluates on every worldview read, so a gate the human
+   shuts stands the survey down without touching the phone. `GateStatesTests` pins
+   that an older door still decodes and an unheard gate reads SHUT.
+2. **Brick 2 — one survey vocabulary, deliberately not the whole brick.** New
+   `FamiliarMesh/ServiceSurvey.swift`: the single 26-type list, the `kind()`
+   shortener, and `context(forInstanceName:)` — the one seam Q1's answer will land
+   in, preserving today's passthrough byte for byte so nothing pre-empts codex's open
+   round. `ServiceSurveyTests` pins list well-formedness, distinct classes per type,
+   and passthrough — that last test is *designed* to fail when Q1 lands. The browser
+   fleet unification itself is held for after Q1. Round-1 correction recorded in the
+   dialogue: the four lists had NOT drifted (all 26); the real divergence is
+   `service:airplay` (iOS) vs `service:_airplay._tcp` (macOS), left for Q1.
+
+### Checks run
+
+The full ios/README.md bar, on a Mac with Xcode 27.0 beta: FamiliarMesh
+`swift test` 25/0 (GateStatesTests + ServiceSurveyTests included), `xcodegen`,
+FamiliarMac Release build, FamiliarAgent iOS-simulator build — all green.
+**CI now runs this same bar** (`.github/workflows/swift.yml`, `xcode-27` preview
+runner) on every push touching `ios/**`; "CI does not build Swift" is no longer
+true. Two facts the bar surfaced, both recorded in ios/README.md: never pass
+`-sdk iphonesimulator` to the FamiliarAgent scheme (it forces the embedded watch
+app onto the iPhone SDK and actool rejects the watchOS-only AppIcon — use
+`-destination` alone), and Xcode 26.6 cannot compile ConsultRunner's PCC lane
+(`PrivateCloudComputeLanguageModel` is a 27-SDK API) — the tree as written already
+*requires* the 27 SDK to build, which T-227's floor ADR should know. Toolchain
+rule per Ian: newest Xcode, move forward, never back.
+
+### Next
+
+Codex's T-228 round 2 (Q1 naming discipline, Q3 BLE memory floor, Q4 the watch,
+Q5 refused-capability declaration). The browser fleet unification and the BLE
+surveyor build after Q1/Q3 close. Branch not merged to main — reciprocal review
+first, per the lane.
+
 ## 2026-08-24 — Rungs 4/5 round 2: codex's five findings, closed (Ian: "take it now")
 
 codex's reciprocal review (`docs/reviews/2026-08-24-t216-rungs45-reciprocal-review.md`)
