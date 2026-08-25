@@ -6,6 +6,38 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-25 — T-227 sweep brick 1: the familiar answers Siri, and says only kinds
+
+The first brick of the settled adoption order: read-only App Intents against the
+external-indexed projection. Siri, Spotlight, the lock screen, and shortcut history are
+an audience Apple indexes — never proof the viewer is the enrolled human — so what an
+intent may say is built once, in `FamiliarMesh.IntentProjection`: observation and peer
+COUNTS, canonical service KINDS (T-228's survey classes), the oracle's availability
+line, and the FACT that a question is open. Never its text, never its owner, never a
+device or human name, never observation context. The fence is structural — the type has
+no field that could carry those — and pinned: the projection test feeds a worldview
+full of personal strings ("Betty", peer labels, question text) and asserts none
+serialize.
+
+`FamiliarNoticedIntent` ("What has Familiar noticed") and `FamiliarOracleIntent` read
+the cache AppModel refreshes on every worldview read, and return words. Side-effect
+freedom is the second fence: nothing marked seen, nothing answered, nothing minted,
+nothing donated. No reasoning happens, so no `allow_llm` question arises — the day a
+reasoning intent is proposed it rides the full ADR-0038 stack. `authenticationPolicy`
+is `.requiresAuthentication` — stricter than kind-only content needs, on purpose;
+loosening it is a dialogue round.
+
+### Checks run
+
+FamiliarMesh 28/0 (projection leak + round-trip pins included); FamiliarAgent sim and
+FamiliarMac Release builds green with the intents compiled into both shells.
+
+### Next
+
+Sweep brick 2 per the settled order: typed generation contracts (kernel splice +
+admission authoritative). Untested on real Siri hardware until a bench exists — Ian
+accepted that cost 2026-08-24; the intents degrade to an honest "open the app once".
+
 ## 2026-08-25 — Round 3 both dialogues: the name drops, the gate holds at both ends, the floor is proven
 
 codex answered T-228 and T-227 round 2 in one push (with an independent Xcode 27 bar and

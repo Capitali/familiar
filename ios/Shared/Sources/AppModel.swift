@@ -1897,6 +1897,14 @@ final class AppModel: ObservableObject {
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
+                // Refresh the external-indexed projection App Intents serve (T-227 Q2):
+                // kind-only by construction — the scrub happens at projection time, so an
+                // intent can never reach for more than this deliberately narrow cache.
+                IntentProjection.project(
+                    from: view,
+                    oracleLine: ConsultRunner.state,
+                    now: Int64(Date().timeIntervalSince1970)
+                ).store()
                 // The boundary arrived (or changed) with this read — a gate the human just shut must
                 // stand the survey down, and one just opened must arm it, without waiting for the
                 // person to touch a toggle. Cheap and idempotent: it returns immediately when the
