@@ -857,16 +857,25 @@ pub fn invoke(
     };
 
     // The invocation identity is derived from the OPAQUE HANDLE + key + payload, and looked up
-    // BEFORE any mutable authority/rate/gate check. An exact replay returns the original recorded
-    // outcome without re-running or re-checking — so a caller that lost the first response learns
-    // whether the device ran, even if the rate is now spent or the gate has since closed. The
-    // handle already encodes the grant + epoch, so the key cannot collide across grants or epochs.
+    // BEFORE any mutable authority/rate/gate check but UNDER the authority lock (codex round 3):
+    // an exact retry WAITS behind an in-flight first call and answers from its recorded
+    // settlement — never from an unsettled reservation — and two first-seen same-key calls
+    // serialize here, so the loser finds the winner's reservation before liveness/rate/gate
+    // checks can change its answer. A replay still bypasses those checks: a caller that lost
+    // the first response learns whether the device ran, even if the rate is now spent or the
+    // gate has since closed. The handle already encodes the grant + epoch, so the key cannot
+    // collide across grants or epochs.
     let idem_key = format!(
         "invoke:{}:{}:{}",
         input.instance, context.principal, input.invoke_key
     );
     let payload_hash =
         partner_act::payload_hash(&(&input.operation, &input.parameters)).map_err(internal)?;
+
+    // Admission, execution, and settlement all run UNDER the lock, so a revoke cannot be
+    // acknowledged while an act is in flight and no act can begin after a revoke returns
+    // success (the acknowledgement fence).
+    let _lock = authority_lock();
     if let Some((original, stored_hash)) = partner_act::idempotent_original(
         dir,
         &context.principal,
@@ -878,16 +887,15 @@ pub fn invoke(
         if stored_hash == payload_hash {
             return replay_outcome(dir, &original, &input.operation, &generic_receipt);
         }
+        // A used key with a changed payload refuses — and the refusal is APPENDED before it
+        // returns: every attempted invocation stays auditable, and this conflict is not
+        // subject to current admission (it is an audit fact, not an act).
+        record_idempotency_conflict(dir, context, &idem_key, now)?;
         return Err(Refusal::new(
             ReasonCode::IdempotencyConflict,
             "that invoke_key was already used with a different invocation",
         ));
     }
-
-    // A genuinely new invocation: full admission, execution, and settlement all UNDER the lock,
-    // so a revoke cannot be acknowledged while this act is in flight and no act can begin after a
-    // revoke returns success (the acknowledgement fence).
-    let _lock = authority_lock();
     let grant = authorized_grant(
         dir,
         context,
@@ -986,8 +994,12 @@ pub fn invoke(
 }
 
 /// Return the recorded outcome of an already-reserved invocation for an exact replay: the
-/// original receipt on a completed (or still-unsettled, i.e. recovery) act, or the same failure
-/// the original run reported. Never re-runs the device and never re-checks current authority.
+/// original receipt on a completed act, the same failure the original run reported, or an
+/// explicit indeterminate refusal on a reservation with no settlement. Never re-runs the
+/// device and never re-checks current authority. Must be called under [`authority_lock`]:
+/// the lock is what makes an absent settlement decisive — no executor can still be in
+/// flight for this reservation, so "unsettled" means the reserving process died (or its
+/// settlement append failed), and the outcome is genuinely unknown rather than pending.
 fn replay_outcome(
     dir: &Path,
     reservation: &PartnerAct,
@@ -1008,15 +1020,47 @@ fn replay_outcome(
             _ => None,
         });
     match settlement.as_deref() {
-        // Completed, or reserved-but-unsettled (the recovery state — the act may have run; we
-        // never re-run it): the original success-shaped receipt.
-        Some("completed") | None => Ok(generic_receipt(operation.to_string())),
+        Some("completed") => Ok(generic_receipt(operation.to_string())),
+        // Reserved but never settled: the recovery state. The act may or may not have run;
+        // nobody recorded which. An unknown outcome is never reported as a success and the
+        // device is never run again — the caller gets the indeterminate state by name.
+        None => Err(Refusal::new(
+            ReasonCode::OutcomeUnrecorded,
+            "that invocation was reserved but its outcome was never recorded — \
+             indeterminate; it will not run again",
+        )),
         // The original run failed: replay the same failure, not a fresh attempt.
         _ => Err(Refusal::new(
             ReasonCode::ExecutionRefused,
             "the act did not run",
         )),
     }
+}
+
+/// Durably append the idempotency-conflict refusal for a used key with a changed payload.
+/// Unlike the best-effort audit helpers, a failed append surfaces: an attempted invocation
+/// must never vanish from the ledger (codex round 3, durable audit).
+fn record_idempotency_conflict(
+    dir: &Path,
+    context: &PartnerContext,
+    key: &str,
+    now: i64,
+) -> Result<(), Refusal> {
+    let correlation = partner::random_id("refusal").map_err(internal)?;
+    let event = PartnerAct::partner(
+        context,
+        now,
+        PartnerOperation::Invoke,
+        PartnerOutcome::Refused,
+        ReasonCode::IdempotencyConflict,
+        correlation,
+        PartnerActBody::Refusal {
+            idempotency_key: Some(key.to_string()),
+            subject_ref: None,
+        },
+    )
+    .map_err(internal)?;
+    partner_act::append(dir, &event).map_err(internal)
 }
 
 /// Serializes authority transitions (grant/revoke/expire) with effect reservations, so a human
@@ -2480,6 +2524,19 @@ mod tests {
             1,
             "the conflict still actuated"
         );
+        // The conflict is not merely returned — it is durably in the ledger as a typed
+        // refusal event carrying the key (codex round 3, durable audit).
+        let recorded = partner_act::load(&dir).unwrap().into_iter().any(|event| {
+            event.outcome == PartnerOutcome::Refused
+                && event.reason_code == ReasonCode::IdempotencyConflict
+                && matches!(&event.body,
+                    PartnerActBody::Refusal { idempotency_key: Some(key), .. }
+                        if key.contains("reused"))
+        });
+        assert!(
+            recorded,
+            "the idempotency conflict left no durable refusal event"
+        );
     }
 
     #[test]
@@ -2752,6 +2809,195 @@ mod tests {
             after.code,
             ReasonCode::GrantInactive | ReasonCode::GrantMissing
         ));
+    }
+
+    /// A blocking executor whose outcome the test chooses — pins the retry fence (round 3 §1).
+    struct SlowExec {
+        fail: bool,
+        entered: std::sync::Mutex<std::sync::mpsc::Sender<()>>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        invoked: std::sync::atomic::AtomicUsize,
+    }
+    impl crate::executor::SurfaceExecutor for SlowExec {
+        fn observe(&self, _dir: &Path, _surface: &str) -> Result<String, String> {
+            Ok("private-on".into())
+        }
+        fn invoke(&self, _dir: &Path, _surface: &str, _label: &str) -> Result<(), String> {
+            self.invoked
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.entered.lock().unwrap().send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+            if self.fail {
+                Err("act failed".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// codex round 3 §1: an exact retry that arrives after the reservation but before the act
+    /// settles must WAIT for the settlement and report the real outcome — never a success
+    /// invented while the device may still fail.
+    fn retry_waits_for_the_inflight_act(first_fails: bool) {
+        use std::sync::{mpsc, Arc};
+        let dir = temp(if first_fails {
+            "retry_waits_fail"
+        } else {
+            "retry_waits_ok"
+        });
+        let ctx = context("principal-a", "key-a");
+        let instance = handle(&granted(&dir, &ctx, "g"));
+        open_actuate(&dir);
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let exec = Arc::new(SlowExec {
+            fail: first_fails,
+            entered: std::sync::Mutex::new(entered_tx),
+            release: std::sync::Mutex::new(release_rx),
+            invoked: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let input = InvokeInput {
+            instance,
+            operation: "set_state".into(),
+            invoke_key: "same".into(),
+            parameters: state("primary"),
+        };
+
+        // Thread A: the first call reserves, then blocks mid-act holding the authority lock.
+        let (a_dir, a_ctx, a_input, a_exec) =
+            (dir.clone(), ctx.clone(), input.clone(), exec.clone());
+        let first = std::thread::spawn(move || invoke(&a_dir, &a_ctx, a_input, NOW + 10, &*a_exec));
+        entered_rx.recv().unwrap(); // the reservation exists; no settlement does yet
+
+        // Thread B: the exact retry. It must not answer while the act is in flight.
+        let retry_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (b_dir, b_ctx, b_exec, b_done) =
+            (dir.clone(), ctx.clone(), exec.clone(), retry_done.clone());
+        let retry = std::thread::spawn(move || {
+            let outcome = invoke(&b_dir, &b_ctx, input, NOW + 11, &*b_exec);
+            b_done.store(true, std::sync::atomic::Ordering::SeqCst);
+            outcome
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(
+            !retry_done.load(std::sync::atomic::Ordering::SeqCst),
+            "the retry answered while the first act was still in flight"
+        );
+
+        // Release the act: the first call settles, then the retry replays that settlement.
+        release_tx.send(()).unwrap();
+        let first = first.join().unwrap();
+        let retry = retry.join().unwrap();
+        assert_eq!(
+            exec.invoked.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the device ran twice"
+        );
+        if first_fails {
+            assert_eq!(first.unwrap_err().code, ReasonCode::ExecutionRefused);
+            assert_eq!(retry.unwrap_err().code, ReasonCode::ExecutionRefused);
+        } else {
+            first.expect("the in-flight act completes");
+            retry.expect("the retry replays the recorded success");
+        }
+    }
+
+    #[test]
+    fn an_exact_retry_waits_out_the_act_and_replays_its_success() {
+        retry_waits_for_the_inflight_act(false);
+    }
+
+    #[test]
+    fn an_exact_retry_waits_out_the_act_and_replays_its_failure() {
+        retry_waits_for_the_inflight_act(true);
+    }
+
+    /// codex round 3 §2: two synchronized first-seen calls with the same key under a
+    /// one-per-hour grant — both receive the one recorded outcome, the device runs once,
+    /// and the loser is never refused by the rate its twin just consumed.
+    #[test]
+    fn two_first_seen_identical_calls_share_one_outcome_under_a_tight_rate() {
+        use std::sync::{Arc, Barrier};
+        let dir = temp("first_seen_race");
+        let ctx = context("principal-a", "key-a");
+        let instance = handle(&granted_ops_rate(&dir, &ctx, "g", &["primary"], 1));
+        open_actuate(&dir);
+        let exec = Arc::new(FakeExec::ok("private-on"));
+        let barrier = Arc::new(Barrier::new(2));
+        let mut joins = Vec::new();
+        for _ in 0..2 {
+            let (dir, ctx, instance, exec, barrier) = (
+                dir.clone(),
+                ctx.clone(),
+                instance.clone(),
+                exec.clone(),
+                barrier.clone(),
+            );
+            joins.push(std::thread::spawn(move || {
+                barrier.wait();
+                invoke(
+                    &dir,
+                    &ctx,
+                    InvokeInput {
+                        instance,
+                        operation: "set_state".into(),
+                        invoke_key: "same".into(),
+                        parameters: state("primary"),
+                    },
+                    NOW + 10,
+                    &*exec,
+                )
+            }));
+        }
+        for join in joins {
+            join.join()
+                .unwrap()
+                .expect("both calls receive the one recorded outcome");
+        }
+        assert_eq!(
+            exec.invoked.lock().unwrap().len(),
+            1,
+            "the device ran more than once"
+        );
+    }
+
+    /// codex round 3 §1, the recovery half: a reservation whose process died before settling
+    /// is an explicit indeterminate — never a completed receipt, and never a second run.
+    #[test]
+    fn a_reservation_with_no_settlement_replays_as_indeterminate_never_success() {
+        struct DyingExec;
+        impl crate::executor::SurfaceExecutor for DyingExec {
+            fn observe(&self, _dir: &Path, _surface: &str) -> Result<String, String> {
+                Ok("private-on".into())
+            }
+            fn invoke(&self, _dir: &Path, _surface: &str, _label: &str) -> Result<(), String> {
+                panic!("the process dies mid-act");
+            }
+        }
+        let dir = temp("unsettled");
+        let ctx = context("principal-a", "key-a");
+        let instance = handle(&granted(&dir, &ctx, "g"));
+        open_actuate(&dir);
+        let input = InvokeInput {
+            instance,
+            operation: "set_state".into(),
+            invoke_key: "orphaned".into(),
+            parameters: state("primary"),
+        };
+        // The first call reserves, then dies inside the executor — no settlement is appended.
+        let (a_dir, a_ctx, a_input) = (dir.clone(), ctx.clone(), input.clone());
+        std::thread::spawn(move || invoke(&a_dir, &a_ctx, a_input, NOW + 10, &DyingExec))
+            .join()
+            .expect_err("the first call dies mid-act");
+        // The exact retry: indeterminate by name, and the device does not run again.
+        let exec = FakeExec::ok("private-on");
+        let refusal = invoke(&dir, &ctx, input, NOW + 11, &exec).unwrap_err();
+        assert_eq!(refusal.code, ReasonCode::OutcomeUnrecorded);
+        assert!(
+            exec.invoked.lock().unwrap().is_empty(),
+            "the orphaned act ran again"
+        );
     }
 
     #[test]

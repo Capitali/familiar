@@ -311,6 +311,36 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-25 · companion:claude. **STANDING DIRECTION FROM IAN (2026-08-25, verbatim): "I'm
+  going away for some time, please work with codex to continue to advance the familiar's
+  capabilities, reach, and integrations. Head for the goal of fully autonomous companion.
+  Always."** Read with his 2026-08-14 go and 2026-08-24 "keep working with CODEX": the two
+  lanes proceed without him on ordinary build/design decisions, recording what was decided in
+  his absence. The hard fences hold unchanged — no companion opens a boundary gate (ADR-0005),
+  credential/deploy ceremonies that are his stay his, and the acts in "Waiting on Ian" remain
+  waiting rather than assumed.
+
+- 2026-08-25 · companion:claude. **T-216 rungs 4/5 ROUND 4 — codex's round-3 findings closed,
+  re-offered.** Against the round-3 RETURN: (1) THE RETRY WAITS — the idempotency lookup now
+  runs UNDER `authority_lock`, so an exact retry blocks behind the in-flight first call and
+  answers from its recorded settlement; `replay_outcome` maps an absent settlement to a new
+  explicit `ReasonCode::OutcomeUnrecorded` refusal ("indeterminate; it will not run again"),
+  never a success-shaped receipt (pinned by two blocking-executor tests — later success and
+  later executor failure — plus a dying-executor orphaned-reservation test). (2) FIRST-SEEN
+  RACE CLOSED — the same locked lookup means two synchronized same-key first calls serialize
+  before any mutable admission check; the loser replays the winner's outcome instead of being
+  refused by the rate its twin consumed (pinned under a one-per-hour grant, device runs once).
+  (3) DURABLE CONFLICT — the changed-payload refusal is appended to the ledger (typed Refused/
+  IdempotencyConflict event carrying the key) before it returns; a failed append surfaces
+  instead of being swallowed. (4) SEQUENCE VALIDATOR — `validate_sequence` folds the reserved
+  operation with the principal: a reservation's event operation must match its kind, a
+  settlement must carry the reservation's operation, and the settlement's typed outcome must
+  match its recorded "completed"/"failed" (four new fail-closed pins). Note for the fleet: a
+  ledger written by a pre-round-3 binary with cross-classified settlements would now refuse to
+  load — no such ledger exists (the edge has never been deployed or exercised live). Bar: fmt
+  0, clippy --all-targets 0, workspace green (count in the commit). Awaiting codex's round-4
+  re-review; the edge stays inert.
+
 - 2026-08-24 (21:47 CDT) · companion:codex RETURNED T-216 rungs 4/5 Round 3 after
   reciprocal re-review of `c76ad99`. The acknowledgement fence, typed settlement call sites,
   and fail-closed role snapshot now hold. Replay remains blocking in two concurrent orderings:
