@@ -7,7 +7,12 @@ import PackageDescription
 // capture (CoreLocation/CoreMotion/HealthKit) and Keychain live in the app target, not here.
 let package = Package(
     name: "FamiliarMesh",
-    platforms: [.macOS(.v14), .iOS(.v17), .watchOS(.v9), .tvOS(.v17)],
+    // Floors are 26 everywhere (ADR-0046) — the package moves WITH the app targets, or it
+    // keeps compiling against the old floors while the apps claim 26. String form because
+    // tools-version 5.9 has no `.v26` constant; bumping the tools version would also flip
+    // the default language mode, which is its own decision, not a floor side effect.
+    // tvOS is deliberately unchanged: nobody has decided anything about tvOS (T-227 note).
+    platforms: [.macOS("26.0"), .iOS("26.0"), .watchOS("26.0"), .tvOS(.v17)],
     products: [
         .library(name: "FamiliarMesh", targets: ["FamiliarMesh"]),
         .executable(name: "familiar-observe", targets: ["familiar-observe"]),

@@ -422,6 +422,23 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 · companion:claude. **STANDING DIRECTION FROM IAN (2026-08-25, verbatim): "I'm
+  going away for some time, please work with codex to continue to advance the familiar's
+  capabilities, reach, and integrations. Head for the goal of fully autonomous companion.
+  Always."** The two lanes proceed without him on ordinary build/design decisions, recording
+  what was decided in his absence; the hard fences hold unchanged (no companion opens a
+  boundary gate per ADR-0005; his ceremonies stay his; "Waiting on Ian" acts keep waiting).
+
+- 2026-08-25 · companion:claude. **T-227 FLOOR-RAISE BRICK BUILT on this branch — ADR-0046.**
+  Ian's decided fork (a): `ios/project.yml` floors + the FamiliarWatch override → 26.0 on all
+  four platforms; `FamiliarMesh/Package.swift` platforms → 26.0 (string form, so the 5.9
+  tools-version — and its default language mode — stay untouched; tvOS deliberately unchanged,
+  undecided). ADR-0046 records the decision, the named device cost, and what it does NOT
+  decide (tvOS, guard dissolution, PCC posture). Bar green on Xcode 27.0 beta: FamiliarMesh
+  tests, xcodegen, FamiliarMac Release, FamiliarAgent sim build; CI (swift.yml) rides the
+  same push. This satisfies T-228's "floor raise lands first" dependency within one branch —
+  offered to codex for reciprocal review together with the T-228 bricks.
+
 - 2026-08-24 (21:40 CDT) · companion:claude. **T-228 DIALOGUE OPENED — Round 1 pushed** (`docs/reviews/2026-08-24-clients-as-observatories-dialogue.md`; codex's watcher wakes on this push). Ian's "every client is an observatory" is treated as a relocation of where the familiar's senses live — the daemon sits on a VPS with no radio while the shells are the things actually present — not as one more scanner. Ground truth traced before proposing: the 26-type Bonjour survey already runs on iOS/iPadOS and macOS (two separate implementations), BLE is absent from the shells entirely, the watch has HealthKit alone, and iOS gives apps no public WiFi-scan API. **Two findings in already-shipping code that the round puts to codex rather than fixing unilaterally:** (1) `NetworkDiscovery.report` writes the advertised Bonjour instance name into `ObsRecord.context`, so personal device names ("Betty's AirPods") land in observations that replicate mesh-wide — underneath the viewer-scoped naming T-217 built, and under a file header claiming kind-only; (2) iOS gates the survey on a device-local `@AppStorage("consent.discovery")` while macOS gates the same act on the boundary's `allow_network_discovery` — one act, two authorities. Also flagged for scope: if three more radios go behind the sensor gates, their zero Rust enforcement (Swift boolean reads only) gets harder to defend. No code touched.
 
 - 2026-08-24 · companion:claude. **T-226 FILED: why Apple Intelligence has never enabled on MacOnStick — it boots from an external drive.** Ian supplied the cause (AppleInsider, "how to enable Apple Intelligence when booting from an external drive"): `eligibilityd` reads `OS_ELIGIBILITY_INPUT_EXTERNAL_BOOT_DRIVE` from `/private/var/db/eligibilityd/eligibility.plist`, and MacOnStick is the M3 Air booting macOS off a stick — so it is disqualified by construction, not by a missing Apple Account (the hypothesis DEVELOPMENT_LOG 2026-08-13 left open). The published workaround edits that plist and locks it (`chflags uchg` / Finder "Locked") so eligibilityd cannot rewrite it. **Not attempted and not attemptable from here** — the machine is shut down/repurposed, the edit is SIP-protected system surgery on Ian's own hardware, and two published claims conflict about whether it is even needed or even works on macOS 27 (one source: the plist method fails past 26.5 beta 4; another: Tahoe and newer allow external-boot Apple Intelligence outright). First move when the machine returns is therefore to LOOK — `fm available`, System Settings, the live plist — before touching anything. Consumer of the answer is T-224 (the Envoy is a FoundationModels app; `apple_local` has no serving Mac without this). Distinct from Ian's 2026-08-23 PCC-on-the-Air ruling, which is a Private Cloud Compute hardware question. Sourcing caveat recorded on the task: every article domain is blocked by this session's egress proxy, so the procedure is reconstructed from search summaries plus one reachable corroborating repo; Ian's article still wants a direct read.

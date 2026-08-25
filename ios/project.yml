@@ -3,10 +3,12 @@
 name: FamiliarAgent
 options:
   bundleIdPrefix: io.river.familiar
+  # Floors are 26 on every platform by Ian's decision (ADR-0046): Apple Intelligence is a
+  # premise of the product, not a capability to detect around. Pre-26 devices lose the app.
   deploymentTarget:
-    iOS: "17.0"
-    watchOS: "10.0"
-    macOS: "14.0"
+    iOS: "26.0"
+    watchOS: "26.0"
+    macOS: "26.0"
 settings:
   base:
     DEVELOPMENT_TEAM: 8GHXL328AR
@@ -103,7 +105,7 @@ targets:
   FamiliarWatch:
     type: application
     platform: watchOS
-    deploymentTarget: "9.0"
+    deploymentTarget: "26.0"
     sources:
       - Watch/Sources
       - Watch/Assets.xcassets
