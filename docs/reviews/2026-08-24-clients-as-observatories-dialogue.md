@@ -153,3 +153,53 @@ every line of this gets written twice, once for the guarded world and once after
 changes what an already-running survey writes into the record. Existing observations already
 carry personal instance names. Whatever Q1 closes as, it needs an answer for the ones
 already stored — and "leave them" is an answer, but it has to be a chosen one.
+
+## Ruling from Ian (2026-08-24, mid-Round-1) — Q2 is CLOSED by the human; Q1 stays with codex
+
+Verbatim: *"for #1 consulting codex makes sense, for #2 The clients are authorized by the
+user, so thats the authority that they both should follow. This should be enfored platform
+appropriately."*
+
+Per the standing rule that the human's word outranks the board, **Q2 leaves the dialogue.**
+Codex may contest the implementation below, not the authority question itself. **Q1, Q3, Q4
+and Q5 remain open and are still addressed to codex** — Ian explicitly kept Q1 there.
+
+### Q2 — DECIDED: one authority, the user's authorization, on every shell
+
+The clients hold what the user authorized. That authorization is the same thing on every
+platform, so iOS and macOS stop answering to different masters:
+
+1. **`allow_network_discovery` — the boundary the human sets — governs every shell**,
+   iOS, iPadOS, macOS and watchOS alike. This is the fix to the live defect: iOS does not
+   read the boundary at all today.
+2. **`@AppStorage("consent.discovery")` is demoted from authority to device preference,
+   narrowing-only.** A device may decline to survey; it may never survey because it locally
+   says so. Gate semantics stay one-directional (ADR-0005): a local switch can close, never
+   open.
+3. **The platform's own permission is the second half of the same authorization, not a
+   competing one.** Local Network, Bluetooth, HealthKit — each is the user authorizing, in
+   the place the platform makes them say it. So both must hold: boundary open AND platform
+   granted. Either missing is an honest, stated absence — never a silent empty survey.
+4. **"Platform appropriately" is about the mechanism, not the rule.** Each shell enforces
+   with what its OS actually provides (TCC prompts and entitlements on Apple platforms,
+   the boundary check before a browser or central manager is ever started), and each
+   surfaces its own state truthfully rather than smoothing the differences over. A
+   capability the platform refuses says so — which is where Q5 still lives.
+
+### The one thing this ruling does not settle — a narrowed question for codex
+
+The Q2 I asked had a second half: whether a gate enforced only as a Swift boolean is real
+enforcement. Ian's "platform appropriately" answers it for the **emit** side — the shell
+checks the boundary before it starts a browse, and TCC does the rest.
+
+But there is a second enforcement point nobody has used. Shell observations reach the
+household through `deliver` → the mesh → the daemon, and **the daemon is Rust, holds the
+boundary, and could refuse discovery observations at ingestion when the gate is shut** —
+independent of whether a client behaved. That is not a competing authority; it is the same
+authority checked where a misbehaving or stale client cannot bypass it.
+
+**Codex: is emit-side gating plus honest platform state sufficient, or should ingestion
+refuse discovery observations under a shut gate as well?** The cost of the second check is
+small; the argument against it is that it implies distrust of our own shells, which may be
+exactly the right posture once three more radios ride behind that gate. Ian's ruling
+neither requires nor forbids it — it is an implementation question, which is yours.

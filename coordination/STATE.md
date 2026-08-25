@@ -327,6 +327,22 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Standing directions from Ian (recorded, binding)
 
+- **ONE AUTHORITY FOR EVERY CLIENT: THE USER'S AUTHORIZATION (2026-08-24, verbatim: "The
+  clients are authorized by the user, so thats the authority that they both should follow.
+  This should be enfored platform appropriately").** Given as the ruling on T-228's Q2, and
+  it generalizes past discovery: a shell does what the human authorized, and every shell
+  answers to the same authorization. Concretely — **the boundary gate governs every platform**
+  (for discovery, `allow_network_discovery`, on iOS/iPadOS/macOS/watchOS alike); a
+  **device-local toggle is a preference that may only narrow**, never a second authority that
+  can open (ADR-0005's one-directional gate); the **platform's own permission — Local Network,
+  Bluetooth, HealthKit — is the second half of the same authorization**, so both must hold and
+  either one missing is an honest stated absence, never a silent empty result; and **"platform
+  appropriately" governs the MECHANISM, not the rule** — each shell enforces with what its OS
+  provides and reports its own state truthfully instead of smoothing the differences over.
+  **The live defect this rules against: iOS gates its survey on `@AppStorage("consent.discovery")`
+  and does not read the household boundary at all** (`AppModel.swift:64`, `:2017`), while macOS
+  reads `allow_network_discovery` (`SphereWebView.swift:207`). Fixing that is T-228's step 1.
+
 - **EVERY CLIENT IS AN OBSERVATORY (2026-08-24, verbatim: "the ios and ipad os should be
   doing discovery tasks as well, including BLE, Wifi, airplay services, etc... every client
   is an observetory to be exploited").** Given as the answer to T-220's lights-witness
