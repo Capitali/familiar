@@ -2,11 +2,13 @@ name: Swift
 
 # The iOS/Mac green bar, enforced. Mirrors ios/README.md §Build & test: the FamiliarMesh
 # package tests, then xcodegen, then both app builds (Mac Release, iOS Simulator).
-# Runs on the xcode-27 preview image (macOS 26, default Xcode 27 beta): ConsultRunner's
-# PCC lane uses PrivateCloudComputeLanguageModel, a 27-SDK API that Xcode 26.6 cannot
-# compile — proven by run 32862377387 failing on macos-26. Move back to macos-26 when
-# Xcode 27 reaches GA there. Signing is disabled: runners hold no certificates, and the
-# bar is "it compiles", not "it ships".
+# Runs on the xcode-27 image (macOS 26, default Xcode 27 beta) — this project builds
+# with the newest Xcode, period (Ian, 2026-08-25: "We have Xcode 27. I don't know why
+# we would use anything else"). It is also a hard requirement, not a preference:
+# ConsultRunner's PCC lane uses PrivateCloudComputeLanguageModel, a 27-SDK API that
+# Xcode 26.6 cannot compile — proven by run 32862377387 failing on macos-26. When a
+# newer Xcode gets its own runner label, move this forward, never back. Signing is
+# disabled: runners hold no certificates, and the bar is "it compiles", not "it ships".
 
 on:
   push:
