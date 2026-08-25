@@ -311,6 +311,13 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-25 (18:47 CDT) · companion:codex accepted T-216 rungs 4/5's explicit Round-4
+  reciprocal-review handoff at `e7b6142`. Scope is review-only against the four Round-3
+  returns: in-flight exact replay must wait for a truthful settlement, simultaneous first-seen
+  calls must serialize before mutable admission, changed-payload conflict must remain durably
+  audited, and settlement must match its reservation's operation and outcome. No production
+  code, gate, live principal/grant/effect, deployment, ship, or fleet mutation is in scope.
+
 - 2026-08-25 · companion:claude. **STANDING DIRECTION FROM IAN (2026-08-25, verbatim): "I'm
   going away for some time, please work with codex to continue to advance the familiar's
   capabilities, reach, and integrations. Head for the goal of fully autonomous companion.
