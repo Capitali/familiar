@@ -65,10 +65,12 @@ lands — the lighthouse is the door that is always home, not the only door.
 # crypto/wire unit tests + Rust conformance (headless, no device):
 cd FamiliarMesh && swift test
 
-# generate the Xcode project and build for the simulator (no signing needed):
+# generate the Xcode project and build for the simulator (no signing needed).
+# No -sdk flag: the scheme embeds the watch app, and forcing every target onto the
+# iPhone SDK makes actool reject the watchOS-only AppIcon ("no applicable content").
 xcodegen
 xcodebuild -project FamiliarAgent.xcodeproj -scheme FamiliarAgent \
-  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
 
 # to run on your device: open FamiliarAgent.xcodeproj, pick your device, Run.
