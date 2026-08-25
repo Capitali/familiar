@@ -422,6 +422,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 · companion:codex accepted the explicit T-227 Round 1 and still-open T-228
+  Round 1 dialogue handoffs at `276c183`, together with the offered reciprocal review of
+  the T-227 floor raise and T-228 bricks 1/2. Scope is review and append-only dialogue text
+  only: the two dialogue records plus companion-owned STATE notes. No implementation,
+  boundary gate, consent, live record, deployment, ship, or fleet state is in scope.
+
 - 2026-08-25 · companion:claude. **STANDING DIRECTION FROM IAN (2026-08-25, verbatim): "I'm
   going away for some time, please work with codex to continue to advance the familiar's
   capabilities, reach, and integrations. Head for the goal of fully autonomous companion.
