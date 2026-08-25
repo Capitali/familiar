@@ -18,7 +18,24 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   3. **Orbital** (mcpmarket/orbital → BuildASpacePro/Orbit-MCP: access windows, TLE generation, 200-city database) — stdio like NASA; CAUTION flag: access-window queries against the household's real coordinates would leak location — use city-level/generic targets only.
   **Design note recorded:** consumed-for-gameplay data is SHIP-WORLD content — per ADR-0045/T-205, UCF/Purr wiring stores it in the ship's own data dir, never as household observations; familiar-side declaration (environmental/space context) can precede that, gameplay ingestion waits on T-205.
 - **Home-automation category surveyed 2026-08-22** (Ian: "many on this page might be worth evaluating" — mcpmarket home-automation search). Finding: the category is dominated by Home Assistant frontends (all FAIL here — no HA installed). The no-HA minority, ranked by fit: **(1) victron-tcp** (lubosstrejcek/victron-tcp — GX/Venus over local Modbus TCP/MQTT, read-only today, no cloud; PASS, stdio→loopback bridge needed); **(2) signalk-mcp-server** (tonybentley — read-only nav/electrical/AIS/environment off the boat's Signal K, which already sees the Victron gear; PASS — matches the T-225 Signal K pick, adds AIS/nav); **(3) HomeMCPBridge** (coalsi — native macOS HomeKit, the only HA-free path to the Apple/Thread/Matter estate; CAUTION — controls devices incl. locks, args carry room/accessory names, assent-gate); **(4) zigbee2mqtt-mcp** / **(5) MCP2ZigBee2MQTT** (only if a Zigbee dongle is added; CAUTION — controlling, but z2m has tiered write-gating worth copying); **(6) matter-mcp-server** (reference design for a native Rust `rs-matter` brick, not a dependency — PoC maturity). FAIL on cloud-account rubric: VRM cloud, Govee-cloud, Tuya, ThinQ, Wyze. **Standing infra finding: the whole category is stdio-first — build ONE reusable stdio→loopback-HTTP shim once (the familiar's client already permits loopback plain-HTTP, http.rs:47), and it unlocks NASA, orbital, victron-tcp, signalk, and most others.** BLE LED controllers (Govee/motorlights-class) are simple enough the familiar should speak them natively (as motorlights already proves), not via an MCP dependency.
-- owner: —
+- **THE SHIM IS BUILT — 2026-08-25, `crates/shim` (`familiar-shim`), offered for codex
+  reciprocal review.** One binary: `familiar-shim [--listen 127.0.0.1:0] [--key-file PATH]
+  -- COMMAND [ARGS…]` spawns the stdio server and serves it at `http://127.0.0.1:PORT/mcp`.
+  Postures, all pinned by tests (12/0): **it mints no authority** — declaration/tool
+  allowlist/guard::evaluate/allow_network all unchanged, the shim only moves bytes;
+  **loopback-only bind, refused otherwise**; **per-run bearer token** (getrandom, never
+  fixed) checked before body or path, written 0600 in the same env-format shape
+  `servers.json` already names via `key_file`/`key_name`; **bounded everything** (4MB
+  body/line, 16KB head, 256-line chatter budget — a chatty server is an error, not a
+  hang); **honest limits stated in the module doc** — request→response only,
+  server-initiated messages are skipped not relayed, single JSON-RPC objects (no
+  batches), one exchange at a time, a dead child is a stated 502 never a retry. Deps:
+  serde_json + getrandom only. NOT wired to any server: NASA/IO still need Ian's keys,
+  victron-tcp/signalk need the boat. Nothing lands in `mcp/servers.json` without Ian's
+  word per server (the accept below stands)
+- owner: **companion:claude — CLAIMED 2026-08-25 for the shim brick only** (the standing
+  infra finding above; no server adoption, no declaration, no key). The registry review
+  cadence and per-server adoption remain unclaimed
 - scope: review the official MCP Registry (registry.modelcontextprotocol.io) and community directories against the vetting rubric; each adopted server lands as a declared entry in mcp/servers.json plus a typed observation path (which wants T-205 for partner-report ingestion). First candidates, in order: Signal K MCP (read-only; GIIWEO's cerbo already runs Signal K — best fit when back aboard late September), NOAA tides/currents + marine buoys (anonymous station-id queries), NWS/NCEI weather (environmental context for presence/energy theories). Home Assistant MCP only as a possible bridge to radios the familiar lacks (Zigbee/Z-Wave/Matter), not as a parallel brain. Declined class: personal-account servers (email/calendar/Slack) — against the privacy posture absent their own boundary dialogue
 - depends: T-206 (client, built); T-205 (world partition) before any partner report becomes household observation
 - accept: a reviewed shortlist with a rubric verdict per candidate ((1) generic non-leaking query arguments, (2) read-only first, (3) local/self-hosted preferred, (4) guard::evaluate + allow_network as ever, (5) typed-observation ingestion path named); nothing declared without Ian's word per server; the review repeats on a cadence rather than once

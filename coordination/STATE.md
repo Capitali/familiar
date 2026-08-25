@@ -311,6 +311,18 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-25 · companion:claude. **T-225 SHIM BRICK BUILT — `crates/shim` (`familiar-shim`),
+  branch `claude/t225-stdio-shim`, offered for codex reciprocal review.** The standing infra
+  finding made real: one reusable stdio→loopback-HTTP bridge, so the familiar's declared-server
+  client (Streamable HTTP only, on purpose) can reach the stdio-first registry world — NASA,
+  orbital, victron-tcp, signalk. Mints no authority (declaration/allowlist/guards unchanged);
+  loopback-only bind refused otherwise; per-run getrandom bearer token checked before body or
+  path, key file 0600 in the `servers.json` `key_file` shape; everything bounded (4MB
+  body/line, 16KB head, 256-line chatter budget); honest limits in the module doc
+  (request→response only, no batches, skipped server-chatter is counted never relayed, dead
+  child = stated 502). 12/0 crate tests incl. a real sh child end-to-end; deps serde_json +
+  getrandom. No server declared, no key minted — per-server adoption still needs Ian's word.
+
 - 2026-08-24 (21:47 CDT) · companion:codex RETURNED T-216 rungs 4/5 Round 3 after
   reciprocal re-review of `c76ad99`. The acknowledgement fence, typed settlement call sites,
   and fail-closed role snapshot now hold. Replay remains blocking in two concurrent orderings:

@@ -6,6 +6,39 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-25 — T-225: the stdio→loopback shim (`crates/shim`)
+
+The registry survey's standing finding, made real: almost everything worth consuming
+(NASA, orbital, victron-tcp, signalk) speaks stdio, and the familiar's client speaks
+only Streamable HTTP — deliberately, because one small verifying HTTP client is a
+legible trust surface and a process-spawning transport inside `crates/mcp` would not be.
+`familiar-shim` bridges the two without moving that line: it spawns ONE declared vendor
+server as a child and serves it at `http://127.0.0.1:PORT/mcp`.
+
+What it deliberately is: a byte mover. The declaration is still the consent
+(`mcp/servers.json`, ADR-0032), the tool allowlist still gates calls, guard::evaluate +
+`allow_network` still stand. What it refuses: any non-loopback bind; any request without
+the per-run bearer token (minted from getrandom, written 0600 in the same env-format
+`key_file` shape the declaration already names — so any local process cannot drive the
+child through the port); bodies/lines past 4MB; batches; and a server that chatters 256
+lines without answering (an error, not a hang — the shim is request→response and says
+so). A dead child is a stated 502, never a retry. Server-initiated messages (sampling
+requests, log notifications) are skipped and counted, never relayed as an answer.
+
+### Checks run
+
+12/0 crate tests: the id-matched pump, chatter budget both sides of the line, bounded
+line refusal, notification semantics, EOF honesty, the 401-before-everything fence
+(pinned with a bridge that panics if reached), typed refusals (404/405/400/413/502),
+key-file mode 0600, token freshness, and a real `sh` stdio child end-to-end. Full bar
+(fmt/clippy/workspace) in the commit. Deps: serde_json + getrandom only.
+
+### Next
+
+codex reciprocal review of the brick. Then per-server adoption on Ian's word each time:
+NASA + IO Aerospace want his keys (T-225 acts list), victron-tcp/signalk want the boat
+(late September). The shim itself stays server-agnostic.
+
 ## 2026-08-24 — Rungs 4/5 round 2: codex's five findings, closed (Ian: "take it now")
 
 codex's reciprocal review (`docs/reviews/2026-08-24-t216-rungs45-reciprocal-review.md`)
