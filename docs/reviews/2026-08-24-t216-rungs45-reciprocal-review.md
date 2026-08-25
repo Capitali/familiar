@@ -187,3 +187,74 @@ Independently reproduced on clean `6ee4499`:
 
 The bar is green and the repaired ledger is materially safer. The edge remains inert: no gate was
 opened, no live principal/grant/effect was exercised, and this re-review authorizes no deployment.
+
+## Re-review of `c76ad99` — RETURN
+
+- **Reviewer:** companion:codex
+- **Disposition:** **RETURNED before deployment or live exercise**
+- **Scope:** reciprocal re-review of the Round-3 ordering repairs only; no production code changed
+
+The acknowledgement fence now holds. Observe and invoke retain the same authority lock through
+reservation, physical execution, and settlement; revoke needs that lock and cannot acknowledge
+while an effect can still land. The new blocking-executor fixture exercises the ordering the prior
+fixture missed. Typed settlement call sites now classify observe as observe, and empty resolver
+snapshots fail closed. Those Round-2 findings are closed.
+
+The replay protocol is closer, but two concurrent orderings still make its public answer false or
+mutable. They remain blocking at the first live physical edge.
+
+### 1. An in-flight replay returns success before any outcome exists
+
+The pre-admission lookup is intentionally outside `authority_lock` (`grant.rs:869-886`). As soon as
+the first call appends its reservation, an exact retry can find it while the first executor is
+still blocked. `replay_outcome` maps an absent settlement to the same success-shaped receipt as a
+completed act (`grant.rs:989-1018`). The retry can therefore report “applied” before the device has
+acted, and can report success even if the still-running executor later fails.
+
+An unsettled reservation is an explicit **unknown/recovery** state, not a recorded successful
+outcome. An exact retry must wait behind the in-flight authority fence and reload the settlement;
+if the process died and only the reservation remains, it must return an explicit indeterminate
+recovery result/refusal, never a completed receipt and never run the device again. Pin this with a
+blocking executor whose retry arrives after reservation but before release, once for a later
+success and once for a later executor failure.
+
+### 2. Two first-seen identical calls can still pass replay behind mutable admission
+
+Two same-key calls can both perform the initial indexed lookup before either has reserved. The
+first acquires the lock, reserves, executes, settles, and releases. The second then acquires the
+lock but goes directly through liveness, boundary, rate, bounds, and resolver checks
+(`grant.rs:893-952`) before `reserve_effect` can discover the replay (`grant.rs:953-980`). With a
+one-per-hour grant, that exact concurrent retry is refused by the rate already consumed by the
+first call. A revoke or gate transition that wins the lock next can similarly change its answer.
+
+Repeat the idempotency lookup immediately after acquiring `authority_lock`, before every mutable
+admission check. That closes the lookup/reservation race: only a genuinely absent key continues to
+authorization. Pin two synchronized first-seen same-key calls under a one-per-hour grant and prove
+both receive the recorded outcome while the executor runs once.
+
+### Durable audit corrections still incomplete
+
+The fast pre-admission changed-payload branch returns `IdempotencyConflict` directly
+(`grant.rs:878-885`), bypassing `append_idempotent`'s conflict append. The refusal is therefore no
+longer durable even though every attempted invocation must remain auditable. Record that conflict
+without subjecting it to current admission, and extend the existing changed-payload test to assert
+the typed refusal event.
+
+Also, Round 2 asked the sequence validator to validate a settlement against its reservation. The
+call sites now pass the right operation, but `validate_sequence` still records only
+`effect_id -> principal` and accepts an observe reservation followed by an invoke settlement (or
+vice versa). Fold the reserved operation/kind with the principal and require the settlement's
+operation and typed outcome to match. This is not a new public authority path, but it is required
+for the append-only audit stream to fail closed on the exact impossible history this correction
+was meant to exclude.
+
+## Round-3 verification
+
+Independently reproduced on clean `f1e4125` (Round-3 code at `c76ad99`):
+
+- `cargo fmt --all -- --check` — exit 0
+- `cargo clippy --all-targets -- -D warnings` — exit 0
+- `cargo test --workspace` — exit 0; 821 passed, 0 failed
+
+The acknowledgement fence and resolver correction are accepted. The edge remains inert: no gate
+was opened, no live principal/grant/effect was exercised, and this review authorizes no deployment.

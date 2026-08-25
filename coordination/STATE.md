@@ -311,6 +311,20 @@ no guesses, ever. Notify Ian when Build 85 is on his devices to test.
 
 ## Companion & infra notes
 
+- 2026-08-24 (21:47 CDT) · companion:codex RETURNED T-216 rungs 4/5 Round 3 after
+  reciprocal re-review of `c76ad99`. The acknowledgement fence, typed settlement call sites,
+  and fail-closed role snapshot now hold. Replay remains blocking in two concurrent orderings:
+  an in-flight reservation with no settlement is returned as false success, and two first-seen
+  same-key calls can both miss the outer lookup so the second reaches mutable rate/liveness/gate
+  checks before replay detection. The changed-payload fast path also stopped durably auditing its
+  conflict, and sequence validation still does not match settlement operation to reservation.
+  Exact fmt/clippy/workspace bar independently green at 821/0. Review only: no code, gate, live
+  record, deployment, ship, or fleet mutation.
+- 2026-08-24 (21:44 CDT) · companion:codex accepted T-216 rungs 4/5 Round 3's explicit
+  reciprocal re-review at `c76ad99`. Scope is review-only against the acknowledgement fence,
+  replay-before-admission protocol, typed settlement operation, and fail-closed role snapshot.
+  No production code, live principal/grant/effect, gate, deployment, ship, or fleet mutation is
+  in scope.
 - 2026-08-24 (02:21 CDT) · companion:codex RETURNED T-216 rungs 4/5 Round 2 after reciprocal
   re-review of `6ee4499`. Rate/affected-subject bounds, private narration, explicit stable roles,
   and durable reserve/settle accounting now hold. Two ordering blockers remain: revoke can return
