@@ -560,6 +560,10 @@ final class AppModel: ObservableObject {
             "deviceRole": deviceRole.rawValue,
             "deviceOwner": deviceOwner,
             "oracle": ConsultRunner.state,
+            // Why this device is or is not surveying, in the same spirit as "oracle" above:
+            // the console shows the state rather than inferring it from the toggle, because
+            // the toggle no longer decides it on its own (T-228 Q2).
+            "discovery_state": discoveryState,
             // Push-to-talk is wired on this shell — the dialogue screen shows its mic.
             "voice": dialogueVoiceAvailable,
             "watch": watchDict,
@@ -595,7 +599,7 @@ final class AppModel: ObservableObject {
         default: return
         }
         startSensingIfConsented()
-        startDiscoveryIfConsented()
+        startDiscoveryIfAuthorized()
         startFaceIfConsented()
         startReasoningIfConsented()
     }
@@ -955,7 +959,7 @@ final class AppModel: ObservableObject {
                 #endif
                 startFixBaseline()
                 startSensingIfConsented()
-                startDiscoveryIfConsented()
+                startDiscoveryIfAuthorized()
                 // The payload carried an invite (E3): identity filter, same motion. A NAMED
                 // token admits outright; an unnamed one asks the human to say who they are
                 // first, and the door's refusal text becomes the guest screen's copy.
@@ -1893,6 +1897,11 @@ final class AppModel: ObservableObject {
                 worldview = view
                 worldviewJSON = String(data: raw, encoding: .utf8)
                 worldviewError = nil
+                // The boundary arrived (or changed) with this read — a gate the human just shut must
+                // stand the survey down, and one just opened must arm it, without waiting for the
+                // person to touch a toggle. Cheap and idempotent: it returns immediately when the
+                // authorization is unchanged.
+                startDiscoveryIfAuthorized()
                 attemptLog = []
                 // This is a separate fresh signed request to the exact door that answered.
                 // It never becomes part of the worldview snapshot or its diagnostics.
@@ -2010,12 +2019,66 @@ final class AppModel: ObservableObject {
         #endif
     }
 
-    /// Survey the local network by Bonjour and report what's out there — the device's view of the
-    /// mesh's surroundings becomes the familiar's (and its peers'). Consent-gated; only while enrolled.
-    func startDiscoveryIfConsented() {
+    /// The household boundary as this device last read it — the human's authorization, which is the
+    /// authority every client follows (Ian, 2026-08-24: "The clients are authorized by the user, so
+    /// thats the authority that they both should follow"). Nil until the first worldview read lands,
+    /// and nil reads as shut everywhere it is consulted.
+    var boundaryGates: GateStates? { worldview?.gates }
+
+    /// Why this device is or is not surveying, in words a console can show — **iOS only**; empty on
+    /// macOS, where the Mac's own sensing owns this state. Four refusals that look alike from
+    /// outside are kept apart deliberately: a boundary we have not heard yet, a door too
+    /// old to report one, a gate the human shut, and a device that declined locally are different
+    /// facts, and collapsing them is how a system starts substituting a plausible surface for a
+    /// missing capability. Not modelled here: whether iOS itself has granted Local Network
+    /// permission — there is no API to ask, so this string must never imply it (that honesty is
+    /// T-228 Q5's, not this brick's).
+    var discoveryState: String {
         #if os(iOS)
-        guard enrolled, discoveryEnabled else { discovery?.stop(); return }
-        let d = discovery ?? NetworkDiscovery { [weak self] batch in await self?.deliver(batch) }
+        guard enrolled else { return "not enrolled" }
+        guard let gates = boundaryGates else { return "waiting to read the boundary" }
+        guard gates.reportsSensorGates else { return "this door does not report the boundary" }
+        guard gates.networkDiscoveryOpen else { return "closed by the household boundary" }
+        guard discoveryEnabled else { return "declined on this device" }
+        return discovery == nil ? "authorized" : "surveying \(NetworkDiscovery.serviceTypes.count) service kinds"
+        #else
+        // The Mac surveys too, but through its own path (`MacSensing`, gated on `MacBoundary`'s
+        // read of boundary.json on the local disk — platform-appropriate enforcement of the same
+        // authorization). This shared model cannot see that state and must not guess at it:
+        // "unsupported" would be a plain lie, and any confident string would be a fabricated
+        // surface for a capability this type does not own. Empty means "not reported here", the
+        // same convention `presence.handle` already uses for nobody.
+        return ""
+        #endif
+    }
+
+    /// Survey the local network by Bonjour and report what's out there — the device's view of the
+    /// mesh's surroundings becomes the familiar's (and its peers').
+    ///
+    /// **Authorization, not consent** (Ian, 2026-08-24, T-228 Q2). Two things must hold and they are
+    /// the same human speaking in two places: the household boundary's `network_discovery` gate, and
+    /// this device's own preference. The boundary is the authority; the local preference may only
+    /// narrow it — it can decline, never permit. Before this brick, iOS armed on the local toggle
+    /// alone and never read the boundary at all (it could not: the field was missing from the Swift
+    /// mirror of `GateStates`), while macOS gated the same act on the boundary. One act, two
+    /// authorities; this is the half that was wrong.
+    func startDiscoveryIfAuthorized() {
+        #if os(iOS)
+        guard enrolled,
+              let gates = boundaryGates, gates.networkDiscoveryOpen,
+              discoveryEnabled
+        else {
+            if discovery != nil { note("network discovery stood down — \(discoveryState)") }
+            discovery?.stop()
+            discovery = nil
+            return
+        }
+        // Already surveying: leave it alone. `NetworkDiscovery.start()` calls `stop()` first, which
+        // clears the per-run `seen` set — so re-arming on every worldview read would re-report every
+        // service on the network at the poll interval. This guard is what makes it safe to call this
+        // from the read path at all.
+        guard discovery == nil else { return }
+        let d = NetworkDiscovery { [weak self] batch in await self?.deliver(batch) }
         discovery = d
         d.start()
         note("network discovery armed — surveying \(NetworkDiscovery.serviceTypes.count) service kinds")

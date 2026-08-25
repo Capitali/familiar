@@ -153,6 +153,15 @@ public struct RuleView: Codable, Equatable, Identifiable {
 }
 
 /// The boundary gates (Law III) — mirrors the Rust `worldview::GateStates`.
+///
+/// The human's authorization is the authority every client follows (Ian, 2026-08-24), so a shell
+/// that cannot SEE a gate cannot obey it. The sensor gates below were served by the door all along
+/// (`crates/mesh/src/worldview.rs`, straight off the boundary with `Boundary::closed()` as the
+/// fail-closed fallback) but were missing from this mirror — which is why iOS gated its network
+/// survey on a device-local toggle instead of the boundary. They are optional here for the reason
+/// the rest of this file gives: an older familiar that predates a field still decodes. **Read them
+/// through the accessors below, never directly** — a gate we did not hear about is shut, and
+/// `Bool?` invites the opposite reading at every call site.
 public struct GateStates: Codable, Equatable {
     public var llm: Bool
     public var camera: Bool
@@ -161,6 +170,29 @@ public struct GateStates: Codable, Equatable {
     public var execute: Bool
     public var agent: Bool
     public var tool_install: Bool
+    public var microphone: Bool?
+    public var location: Bool?
+    public var motion: Bool?
+    public var network_discovery: Bool?
+    public var face_recognition: Bool?
+    public var outreach: Bool?
+    public var actuate: Bool?
+
+    /// Fail-closed readers. Absent (an older door, a field we do not model yet) reads as SHUT,
+    /// never as open — the same direction ADR-0005 gives every gate.
+    public var microphoneOpen: Bool { microphone ?? false }
+    public var locationOpen: Bool { location ?? false }
+    public var motionOpen: Bool { motion ?? false }
+    public var networkDiscoveryOpen: Bool { network_discovery ?? false }
+    public var faceRecognitionOpen: Bool { face_recognition ?? false }
+    public var outreachOpen: Bool { outreach ?? false }
+    public var actuateOpen: Bool { actuate ?? false }
+
+    /// Whether this door told us about the sensor gates at all. An older familiar answers `false`,
+    /// and a shell should say "this door does not report the boundary" rather than "the boundary is
+    /// shut" — a missing answer and a refusal are different facts, and the console must not merge
+    /// them (the same distinction ConsultRunner draws between "unsupported" and "off").
+    public var reportsSensorGates: Bool { network_discovery != nil }
 }
 
 /// A snapshot of what the familiar knows — mirrors the Rust `worldview::Worldview`. Enough to render

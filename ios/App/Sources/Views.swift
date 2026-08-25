@@ -315,7 +315,13 @@ struct StatusView: View {
                 Toggle("Motion — walking / driving / still", isOn: $model.motionEnabled)
                     .onChange(of: model.motionEnabled) { _ in model.startSensingIfConsented() }
                 Toggle("Network — devices & services nearby", isOn: $model.discoveryEnabled)
-                    .onChange(of: model.discoveryEnabled) { _ in model.startDiscoveryIfConsented() }
+                    .onChange(of: model.discoveryEnabled) { _ in model.startDiscoveryIfAuthorized() }
+                // This toggle can be ON while nothing is surveyed — the household boundary is the
+                // authority and this switch only narrows it (T-228 Q2). Without the state line the
+                // switch would quietly claim an authority it does not have.
+                Text(model.discoveryState)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 Button("Set “home” to my current location") { model.setHomeToCurrentLocation() }
             }
             Section("Voice & presence") {
@@ -330,7 +336,7 @@ struct StatusView: View {
             }
         }
         .navigationTitle("Familiar Agent")
-        .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented(); model.startDiscoveryIfConsented() }
+        .onAppear { model.startSensingIfConsented(); model.startFaceIfConsented(); model.startDiscoveryIfAuthorized() }
         .sheet(isPresented: $showJoinQR) {
             VStack(spacing: 16) {
                 Text(joinQRHandoff ? "Hand off to my new device" : "Join \(model.groupLabel)").font(.headline)
