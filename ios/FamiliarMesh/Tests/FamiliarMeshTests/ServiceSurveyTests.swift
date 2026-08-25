@@ -36,15 +36,39 @@ final class ServiceSurveyTests: XCTestCase {
         XCTAssertFalse(kinds.contains(""), "a service type produced an empty class")
     }
 
-    /// **This test is expected to change when T-228's Q1 closes, and that is its job.**
+    /// **Q1 CLOSED (codex round 2): no advertised name reaches an observation. Ever.**
     ///
-    /// The naming discipline passes the advertised instance name through unchanged — which is
-    /// today's shipping behaviour and precisely what Q1 is deciding (Bonjour instance names are
-    /// overwhelmingly personal, and they are being written into observations that replicate
-    /// mesh-wide). Pinning it means the policy cannot change by accident in one shell: whoever
-    /// implements Q1's answer must come here and say so.
-    func testTheNamingDisciplineIsStillPassthroughPendingQ1() {
-        XCTAssertEqual(ServiceSurvey.context(forInstanceName: "Ian's MacBook Pro"), "Ian's MacBook Pro")
+    /// This is the flip of the passthrough pin that stood while Q1 was open — that test's job
+    /// was to force whoever landed the answer to come here and say so. Said: the name drops,
+    /// with no exception for the familiar's own service and no salted stand-in (a stable
+    /// pseudonym is still a tracking token). Changing this back is a design reversal, not a
+    /// refactor — it reopens the dialogue.
+    func testNoAdvertisedNameSurvivesIntoContext() {
+        XCTAssertEqual(ServiceSurvey.context(forInstanceName: "Ian's MacBook Pro"), "")
+        XCTAssertEqual(ServiceSurvey.context(forInstanceName: "Betty's AirPods"), "")
+        XCTAssertEqual(ServiceSurvey.context(forInstanceName: "GIIWEO._familiar-mesh._tcp"), "")
         XCTAssertEqual(ServiceSurvey.context(forInstanceName: ""), "")
+    }
+
+    /// codex round 2's acceptance gap, closed: the shared list is only the whole truth if BOTH
+    /// app plists declare exactly the same `NSBonjourServices` — Apple resolves only declared
+    /// types, and a drifted plist fails SILENTLY (the browse returns nothing for the missing
+    /// type). This structural check makes that drift loud from `swift test`.
+    func testBothInfoPlistsDeclareExactlyTheSharedList() throws {
+        let root = URL(fileURLWithPath: #filePath) // …/FamiliarMesh/Tests/FamiliarMeshTests/…
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent() // …/ios
+        for plist in ["App/Support/Info.plist", "MacApp/Support/Info.plist"] {
+            let url = root.appendingPathComponent(plist)
+            let data = try Data(contentsOf: url)
+            let parsed = try PropertyListSerialization.propertyList(from: data, format: nil)
+            let declared = (parsed as? [String: Any])?["NSBonjourServices"] as? [String]
+            XCTAssertEqual(
+                declared, ServiceSurvey.serviceTypes,
+                "\(plist) NSBonjourServices has drifted from ServiceSurvey.serviceTypes"
+            )
+        }
     }
 }

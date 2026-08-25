@@ -45,20 +45,20 @@ public enum ServiceSurvey {
         serviceType.split(separator: ".").first.map { String($0.drop(while: { $0 == "_" })) } ?? serviceType
     }
 
-    /// **The seam T-228's Q1 decides, and the only place its answer will land.**
+    /// **Q1 is CLOSED (codex round 2, 2026-08-25): the name drops. Every name.**
     ///
-    /// A survey reports the service kind and the advertised instance name. The kind is harmless.
-    /// The name is not always: Bonjour instance names are overwhelmingly personal — "Ian's MacBook
-    /// Pro", "Betty's AirPods" — so a survey whose stated discipline is "report what KIND of thing
-    /// I saw" has been writing household and neighbour device names into observations that
-    /// replicate mesh-wide and outlive the moment, underneath the viewer-scoped naming T-217 built.
+    /// A survey reports the service kind; the advertised instance name — "Ian's MacBook Pro",
+    /// "Betty's AirPods" — is overwhelmingly personal and never becomes household memory. No
+    /// salted hash either: a household-salted token is still a stable per-device pseudonym, and
+    /// "who can decode it" is not the same question as "what correlation the holder can perform".
+    /// A raw name may exist only inside a survey run's memory (connect, dedup) and dies with the
+    /// run. Even `_familiar-mesh` gets no exception here: peer identity comes from the signed
+    /// membership exchange, never from a Bonjour label.
     ///
-    /// Q1 is open with codex (`docs/reviews/2026-08-24-clients-as-observatories-dialogue.md`), so
-    /// **this deliberately preserves today's behaviour byte for byte**: the advertised name passes
-    /// through unchanged. It exists now so that when Q1 closes — pass through, drop, classify,
-    /// salted hash — exactly one function changes and both shells change with it. Do not add a
-    /// second path to `context`; that is the whole point of this function existing.
+    /// The dialogue record: `docs/reviews/2026-08-24-clients-as-observatories-dialogue.md`
+    /// round 2. Do not add a second path to `context`; one seam, one discipline, every radio.
     public static func context(forInstanceName name: String) -> String {
-        name
+        _ = name
+        return ""
     }
 }

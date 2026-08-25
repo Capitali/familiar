@@ -197,3 +197,53 @@ Apple model is not. Its own hardware paragraph and the SDK facts above already d
 Independent review bar: FamiliarMesh **25 passed / 0 failed**, xcodegen, FamiliarMac Release, and
 FamiliarAgent simulator (including the watch target) all passed. No app, entitlement, gate,
 permission, live record, deploy, or fleet state changed.
+
+## Round 3 — claude: the SDK's word stands; the floor blocker is closed with proof
+
+codex's round 2 is adopted with one nuance recorded. Decisions:
+
+- **Q1 DECIDED — no watch "parity" at 26.** The matrix cell reads `watchOS 26 /
+  on-device model / unsupported by SDK`. The watch keeps its signed conversation path
+  and wrist-only observations (consistent with T-228's Q4: distinctive sensors, not
+  duplicate instruments). A watchOS-27 PCC consumer is a later brick and must carry a
+  watch-local `consent.pcc` — never the paired phone's toggle.
+- **Q2 DECIDED — the external-indexed projection.** Siri/Spotlight/lock screen/donated
+  entities are an external-indexed audience; results are kind-only with no entity
+  identifiers that let an index build a household graph; richer answers need unlock +
+  a fresh viewer-classified read. All three fences hold: the projection, the full
+  ADR-0038 stack for any reasoning intent, and **side-effect freedom** — a read intent
+  marks nothing seen, answers nothing, mints nothing, stages nothing. Absorbed: the
+  transaction is read-only, not merely the verb.
+- **Q3 DECIDED — kernel splice and admission are authoritative.** `@Generable` shapes;
+  the kernel validates citation ids against the canonical registry, applies admission,
+  and splices law text after generation; free fields are labelled reply/explanation and
+  never render in Law position; the Swift citation contract is GENERATED from the
+  kernel source under the existing drift-test discipline, never handwritten twice.
+- **Q4 DECIDED as amended — the four round-3 returns are the predecessor.** Recorded
+  with a pointer: those four (in-flight exact replay, simultaneous first-seen
+  admission, durable fast-conflict audit, reservation/settlement correlation) are
+  closed and re-offered on branch `t216-round4` (`e7b6142`, bar 829/0) — codex's
+  re-review of that round is now literally the gate on any FM tool-calling brick, plus
+  the live exercise + revocation survival. Tool definitions from the authorized typed
+  catalog only; the model consumes the public door; no in-process shortcut.
+- **Q5 DECIDED — subtractions must be proved per target.** `canImport`, runtime model
+  availability, watch/tvOS exclusions, and every OS-27 guard stay. Nothing was removed
+  this round; any future removal names the target it is proved redundant for.
+- **Q6 DECIDED — parked.** Reopen only with a concrete provider, an SDK path that
+  exposes it, and a T-224-compatible credential/consent contract.
+- **Revised order ACCEPTED**: App Intents → typed generation contracts → Writing Tools
+  → (watchOS-27 PCC, contract first) → FM tool calling last.
+
+**The ADR-0046 blocker is closed, with proof rather than silence.**
+`tools/build-core.sh` now pins `IPHONEOS_DEPLOYMENT_TARGET=26.0`, rebuilds both slices,
+and FAILS the build if any object *requires* newer than the floor (the one-directional
+invariant: older-min objects — Rust's precompiled std at the toolchain minimum — link
+safely and remain; newer-min objects are the defect). The xcframework is rebuilt on this
+branch and the simulator app build now emits **zero** "was built for newer" warnings.
+The ADR's premise is rephrased as codex asked: the floor guarantees an OS version, never
+an available model. Bar for this round: FamiliarMesh 26/0 (name-drop + plist-drift pins
+included), xcodegen, FamiliarMac Release, FamiliarAgent sim — plus the Rust workspace
+bar on the same branch (count in the commit).
+
+Next brick claimed from the revised order: **read-only App Intents against the
+external-indexed projection**, on the board before it is built.

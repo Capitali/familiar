@@ -151,7 +151,14 @@ pub fn build_outbox(
                         actor: o.actor.clone(),
                         action: o.action.clone(),
                         object: o.object.clone(),
-                        context: o.context.clone(),
+                        // A discovery row's context may carry a legacy personal device name
+                        // (T-228 Q1) — excluded from every federation payload; the stored
+                        // row stays local, the class travels.
+                        context: if crate::observe::is_network_discovery_object(&o.object) {
+                            String::new()
+                        } else {
+                            o.context.clone()
+                        },
                         ts: o.ts,
                         confidence_pct: (o.confidence * 100.0).round().clamp(0.0, 100.0) as u8,
                     })
@@ -535,7 +542,14 @@ fn merge_one(
                 s.actor.clone(),
                 s.action.clone(),
                 s.object.clone(),
-                s.context.clone(),
+                // Inbound half of the same exclusion: a peer still running older code may
+                // replicate discovery rows whose context carries a personal device name —
+                // no NEW derived record inherits it (T-228 Q1).
+                if crate::observe::is_network_discovery_object(&s.object) {
+                    String::new()
+                } else {
+                    s.context.clone()
+                },
                 format!("mesh:{}", s.origin),
                 s.ts,
                 (s.confidence_pct as f64 / 100.0).clamp(0.0, 1.0),

@@ -36,9 +36,25 @@ Two facts sharpen it beyond preference:
 
 Deployment floors are **26.0 on all four platforms** — iOS, iPadOS (same target), macOS,
 watchOS — in `ios/project.yml` (including the FamiliarWatch override) and in
-`FamiliarMesh/Package.swift`. Apple Intelligence availability becomes a premise of the
-product, not a capability to detect around: the shells are built for Apple Silicon
-devices booting from their internal disk with Apple Intelligence enabled.
+`FamiliarMesh/Package.swift`. The shells are built for Apple Silicon devices booting from
+their internal disk with Apple Intelligence enabled — that is the target audience.
+
+**Stated narrowly (codex round 2's correction, absorbed): what the floor guarantees is
+the OS version, never an available model.** 26-capable hardware can still be ineligible,
+Apple Intelligence can be off, the model can be loading, and several Foundation Models
+surfaces (`PrivateCloudComputeLanguageModel`, the `LanguageModel` protocol, any watch
+session) first exist at OS 27. Honest runtime unavailable-states therefore survive the
+floor raise; only per-target `#available(...26...)` branches proved redundant may go.
+
+**The embedded core moves with the floor.** `FamiliarCore.xcframework` is rebuilt with
+`IPHONEOS_DEPLOYMENT_TARGET=26.0` pinned in `tools/build-core.sh`, which now also
+verifies no object in either slice *requires* newer than 26.0 and fails the build
+otherwise (the 2026-08-25 review found 26.5-min objects inside a 26.0-linking app —
+a warning, not an error, and therefore easy to ship by accident). Objects *older* than
+the floor remain: Rust ships its precompiled standard library at the toolchain's own
+minimum, and an older-min object links safely into a newer-min binary — the invariant
+is one-directional by design. Verified 2026-08-25: the simulator app build emits zero
+"was built for newer" warnings.
 
 What this deliberately drops (Apple's published compatibility boundary for the 26 cycle;
 stated so the loss is chosen, not discovered):

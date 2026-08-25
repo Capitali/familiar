@@ -6,6 +6,60 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-25 — Round 3 both dialogues: the name drops, the gate holds at both ends, the floor is proven
+
+codex answered T-228 and T-227 round 2 in one push (with an independent Xcode 27 bar and
+a reciprocal review of everything staged). All of it absorbed, and built the same day:
+
+1. **The name drops (T-228 Q1, closed).** `ServiceSurvey.context(forInstanceName:)`
+   returns empty for every advertised name — no salted stand-in (a household-salted hash
+   is still a per-device tracking token), no `_familiar-mesh` exception (peer identity is
+   the signed membership exchange, never a Bonjour label). The designed-to-fail
+   passthrough pin flipped into `testNoAdvertisedNameSurvivesIntoContext`; macOS now
+   emits the short kind, ending the `service:_airplay._tcp` / `service:airplay` fork.
+2. **The two compat acts, read-side.** `canonical_service_kind` (crates/mesh/observe.rs)
+   maps legacy and unified wire forms to one class for analysis — rows preserved as
+   fossils, never rewritten. Legacy discovery context is excluded from the worldview's
+   `discovered_services` (name served empty), from outbound federation `ObsShare`
+   payloads, and from inbound replication into new records. Prompts were already
+   structurally excluded (`discovered` is an infra triple, never musing material).
+   The fossil-retention decision (delete the pre-Q1 contexts or keep them) is Ian's.
+3. **The ingestion gate (T-228 Q2).** `ingest_observations` refuses `service:*`/`ble:*`
+   rows while `allow_network_discovery` is shut — the daemon is the last
+   authority-bearing point, and a stale-but-validly-signed client (offline during the
+   revocation, old, defective) can no longer make survey rows durable. Class-scoped:
+   the rest of an honest batch lands. Refused means no row; the audit is a count and a
+   node id, never the payload. The `ble:` class is fenced before the radio exists.
+4. **Brick 2's acceptance gap.** `testBothInfoPlistsDeclareExactlyTheSharedList` reads
+   both `NSBonjourServices` plists from `swift test` and compares them exactly to
+   `ServiceSurvey.serviceTypes` — plist drift was silent, now it is loud.
+5. **The ADR-0046 floor blocker, closed with proof (T-227).** `tools/build-core.sh` pins
+   `IPHONEOS_DEPLOYMENT_TARGET=26.0`, rebuilds both xcframework slices, and FAILS if any
+   object requires newer than the floor (the caught defect: 26.5-min objects in a
+   26.0-linking app — a linker warning, so shippable by accident). Older-min objects
+   (Rust's precompiled std) are safe by construction and stay. The simulator build now
+   emits zero "was built for newer" warnings. ADR-0046 rephrased per codex: the floor
+   guarantees an OS version, never an available model.
+6. **T-227 order settled**: read-only App Intents (external-indexed projection,
+   kind-only, side-effect-free) → typed generation contracts (kernel splice + admission
+   authoritative, Swift citation contract generated from kernel source) → Writing Tools
+   on human text → watchOS-27 PCC only after a watch-local consent contract → FM tool
+   calling LAST, gated on the t216-round4 re-review and live revocation survival.
+
+### Checks run
+
+FamiliarMesh 26/0 (name-drop, plist-drift, and gate-mirror pins included); xcodegen;
+FamiliarMac Release; FamiliarAgent sim (zero min-version warnings); mesh crate 231/0
+with the new ingestion/classifier/viewer pins; full workspace bar + fmt + clippy in the
+commit. The rebuilt xcframework is committed alongside its build-script pin.
+
+### Next
+
+codex re-review of this round (and of t216-round4, which now also gates FM tool
+calling). Then, in order: the read-only App Intents brick (claimed on the board before
+built), the BLE surveyor behind the already-landed fence, the watch delegation status
+string. Ian's new owed act: the fossil-retention decision.
+
 ## 2026-08-25 — T-228 bricks 1–2: the shells see the boundary, and speak one survey vocabulary
 
 Ian's ruling on T-228's Q2 ("the clients are authorized by the user, so thats the

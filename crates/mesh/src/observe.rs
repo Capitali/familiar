@@ -64,6 +64,23 @@ pub struct ObserveEnvelope {
     pub observations: Vec<ObsRecord>,
 }
 
+/// Is this observation object a network-discovery survey row — Bonjour (`service:*`) or BLE
+/// (`ble:*`)? One definition for every enforcement and exclusion point: the ingestion gate
+/// here, the federation scrub in [`crate::merge`], and the viewer in [`crate::worldview`].
+pub(crate) fn is_network_discovery_object(object: &str) -> bool {
+    object.starts_with("service:") || object.starts_with("ble:")
+}
+
+/// One canonical survey class for both wire forms (T-228 Q1, compat act 1): legacy macOS rows
+/// carry `service:_airplay._tcp`, unified rows carry `service:airplay` — analysis must see ONE
+/// class per kind of thing. The original rows are preserved; this maps at read time.
+pub(crate) fn canonical_service_kind(kind: &str) -> &str {
+    kind.split('.')
+        .next()
+        .unwrap_or(kind)
+        .trim_start_matches('_')
+}
+
 /// A same-`(actor,action,object)` triple more often than this is dropped as noise. Derived
 /// observations are state-changes ("still" → "walking"); re-affirming an unchanged state every
 /// second carries no information and only floods the store. Transitions differ in `object`, so
@@ -134,10 +151,8 @@ pub(crate) fn ingest_observations(
     guard: &Mutex<IngestGuard>,
 ) -> Result<usize> {
     // Gate: the human must have opened the mesh and not disabled device ingestion.
-    if !familiar_kernel::boundary::load(dir)
-        .map_err(Error::Io)?
-        .allow_mesh
-    {
+    let boundary = familiar_kernel::boundary::load(dir).map_err(Error::Io)?;
+    if !boundary.allow_mesh {
         return Err(Error::Untrusted("mesh gate closed".into()));
     }
     if !crate::config::load(dir)?.accept_observations {
@@ -171,6 +186,29 @@ pub(crate) fn ingest_observations(
         return Err(Error::Untrusted("stale or future timestamp".into()));
     }
 
+    // The discovery gate, enforced at the LAST authority-bearing point (T-228 Q2, codex
+    // round 2): a client can be stale, offline during revocation, old, or defective without
+    // being malicious — emit-side gating is necessary but not sufficient. While
+    // `allow_network_discovery` is shut, no network-discovery observation becomes durable
+    // household evidence, whatever a signed client sends. Refusal is class-scoped (the rest
+    // of an honest batch still lands), the audit is bounded (a count and the node id — never
+    // the rejected payload), and this is defense in depth, not a second authority.
+    let discovery_shut = !boundary.allow_network_discovery;
+    if discovery_shut {
+        let refused = env
+            .observations
+            .iter()
+            .filter(|o| is_network_discovery_object(&o.object))
+            .count();
+        if refused > 0 {
+            eprintln!(
+                "observe: refused {refused} network-discovery observation(s) from mesh:{} — \
+                 allow_network_discovery is shut",
+                env.node.node_id
+            );
+        }
+    }
+
     // Under one short lock (no IO held): reject a replayed nonce, then pick the observations to
     // keep — complete triples that aren't an unchanged repeat within the debounce window. The
     // debounce protects the store from a chatty/buggy in-group device flooding it.
@@ -187,6 +225,7 @@ pub(crate) fn ingest_observations(
                     && !o.action.trim().is_empty()
                     && !o.object.trim().is_empty()
             })
+            .filter(|(_, o)| !(discovery_shut && is_network_discovery_object(&o.object)))
             .filter(|(_, o)| g.allow_triple(&o.actor, &o.action, &o.object, now))
             .map(|(i, _)| i)
             .collect()
@@ -554,5 +593,85 @@ mod tests {
             ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap_err(),
             Error::Untrusted(m) if m.contains("disabled")
         ));
+    }
+
+    // ---- The discovery gate at ingestion (T-228 Q2, codex round 2) ----
+
+    fn open_gate_with_discovery(dir: &Path, discovery: bool) {
+        let mut b = familiar_kernel::boundary::Boundary::closed();
+        b.allow_mesh = true;
+        b.allow_network_discovery = discovery;
+        std::fs::write(dir.join("boundary.json"), serde_json::to_vec(&b).unwrap()).unwrap();
+    }
+
+    /// The stale-signed-client scenario: a device whose signature and membership are fully
+    /// valid keeps sending survey rows after the human shut `allow_network_discovery` (it is
+    /// old, offline during the change, or defective — not malicious). The daemon is the last
+    /// authority-bearing point: refused means NO ROW, for the new Bonjour class, the legacy
+    /// macOS wire form, and the future BLE class alike — while the rest of the honest batch
+    /// still lands. Emit-side gating (brick 1) is necessary; this is the sufficient half.
+    #[test]
+    fn a_shut_discovery_gate_refuses_survey_rows_at_ingestion_but_keeps_the_rest() {
+        let (host, cred, device) = setup("discovery_shut");
+        open_gate_with_discovery(&host, false);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![
+                obs("service:airplay"),       // the unified class (iOS emit)
+                obs("service:_airplay._tcp"), // the legacy macOS wire form
+                obs("ble:lighting"),          // the BLE class Q3 shapes
+                obs("motion:still"),          // not discovery: still lands
+            ],
+        );
+        let n = ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap();
+        assert_eq!(n, 1, "only the non-discovery row records");
+        let stored = observation::load(&host).unwrap();
+        assert_eq!(stored.len(), 1, "refused means no row");
+        assert_eq!(stored[0].object, "motion:still");
+        // The rejected payloads are not preserved anywhere in the store.
+        let raw_store = serde_json::to_string(&stored).unwrap();
+        assert!(!raw_store.contains("service:"));
+        assert!(!raw_store.contains("ble:"));
+    }
+
+    /// The versioned classifier (Q1 compat act 1): both wire forms — the legacy full type and
+    /// the unified short kind — read as ONE canonical class; rows are never rewritten.
+    #[test]
+    fn legacy_and_unified_service_forms_share_one_canonical_class() {
+        assert_eq!(canonical_service_kind("_airplay._tcp"), "airplay");
+        assert_eq!(canonical_service_kind("airplay"), "airplay");
+        assert_eq!(
+            canonical_service_kind("_pdl-datastream._tcp"),
+            "pdl-datastream"
+        );
+        assert_eq!(
+            canonical_service_kind("_familiar-mesh._tcp"),
+            "familiar-mesh"
+        );
+        // Not a service form at all: unchanged rather than mangled.
+        assert_eq!(canonical_service_kind(""), "");
+    }
+
+    #[test]
+    fn an_open_discovery_gate_lets_survey_rows_land() {
+        let (host, cred, device) = setup("discovery_open");
+        open_gate_with_discovery(&host, true);
+        let (raw, sig) = signed(
+            &cred,
+            &device,
+            NOW,
+            "n1",
+            NOW,
+            DEFAULT_CERT_TTL_SECS,
+            vec![obs("service:airplay"), obs("ble:lighting")],
+        );
+        let n = ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(observation::load(&host).unwrap().len(), 2);
     }
 }

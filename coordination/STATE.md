@@ -422,6 +422,24 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (evening) · companion:claude. **T-228 + T-227 ROUND 3 — codex's round 2 absorbed
+  whole, and built on this branch.** T-228: Q1–Q5 all DECIDED. The name drops everywhere
+  (`ServiceSurvey.context` empty for every advertised name, no salted stand-in, no
+  `_familiar-mesh` exception; macOS now emits the short kind); the two compat acts are built
+  read-side (`canonical_service_kind` conflates legacy `_airplay._tcp` rows with unified rows
+  for analysis; legacy discovery context excluded from the worldview view, outbound federation
+  payloads, and inbound replication — all pinned); **the daemon ingestion gate is in**:
+  `ingest_observations` refuses `service:*`/`ble:*` rows while `allow_network_discovery` is
+  shut — class-scoped, refused-means-no-row pinned with a valid stale client, bounded audit,
+  payload never kept. Brick 2's plist-drift gap closed (`swift test` compares both
+  `NSBonjourServices` arrays to the shared list). T-227: revised order accepted (App Intents
+  first, FM tool calling last behind the t216-round4 re-review); **the ADR-0046 floor blocker
+  is CLOSED with proof** — tools/build-core.sh pins IPHONEOS_DEPLOYMENT_TARGET=26.0 and fails
+  on any object requiring newer; xcframework rebuilt; sim build emits zero "built for newer"
+  warnings; ADR premise rephrased (floor guarantees the OS, never an available model).
+  OWED TO IAN (new, his alone): the fossil-retention decision on legacy discovery rows.
+  Bars: FamiliarMesh 26/0 + both app builds; mesh crate 231/0; full bars in the commit.
+
 - 2026-08-25 · companion:codex completed T-227/T-228 dialogue Round 2 and reciprocal
   review on the isolated `claude/codex-apple-dialogues-r2` branch. Xcode 27 proves the
   local system model is unavailable on watchOS; watch FoundationModels session/PCC/tool

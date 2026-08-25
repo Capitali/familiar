@@ -1353,9 +1353,16 @@ fn frontier_devices(
     v
 }
 
-/// Aggregate discovered network services from the observation log (a peer's Bonjour survey posts
-/// `<actor> discovered service:<kind>` with the instance name in context). Deduped by (kind, name),
-/// newest first, capped.
+/// Aggregate discovered network services from the observation log (a peer's survey posts
+/// `<actor> discovered service:<kind>`). Deduped by CANONICAL kind — the versioned classifier
+/// of T-228 Q1's compat act 1, so legacy `service:_airplay._tcp` rows and unified
+/// `service:airplay` rows read as one class — newest first, capped.
+///
+/// **The instance name never leaves this function** (Q1, closed 2026-08-25): legacy rows
+/// carry personal device names in `context`, and that context is excluded from every viewer
+/// — the stored row stays an internal fossil until a human-owned retention decision, but no
+/// view, payload, or derived record reuses it. `name` is served empty on purpose; removing
+/// the field outright would break the console's deserialization, so it empties first.
 fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec<ServiceView> {
     use std::collections::HashMap;
     let mut latest: HashMap<String, ServiceView> = HashMap::new();
@@ -1366,10 +1373,10 @@ fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec
         if o.action != "discovered" {
             continue;
         }
-        let key = format!("{kind}\u{1}{}", o.context);
-        let e = latest.entry(key).or_insert(ServiceView {
+        let kind = crate::observe::canonical_service_kind(kind);
+        let e = latest.entry(kind.to_string()).or_insert(ServiceView {
             kind: kind.to_string(),
-            name: o.context.clone(),
+            name: String::new(),
             seen_by: o.actor.clone(),
             last_seen: 0,
         });
@@ -1382,6 +1389,53 @@ fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec
     v.sort_by_key(|s| std::cmp::Reverse(s.last_seen));
     v.truncate(80);
     v
+}
+
+#[cfg(test)]
+mod discovered_services_tests {
+    use super::discovered_services;
+    use familiar_kernel::observation::Observation;
+
+    fn row(object: &str, context: &str, ts: i64) -> Observation {
+        Observation::new(
+            "phone:ian",
+            "discovered",
+            object,
+            context,
+            "mesh:node",
+            ts,
+            0.9,
+        )
+    }
+
+    /// T-228 Q1, both compat acts at the viewer: legacy full-type rows and unified short-kind
+    /// rows conflate to ONE class, and no stored instance name — "Ian's MacBook Pro" — ever
+    /// reaches the served view. The fossil row stays in the store; the viewer excludes it.
+    #[test]
+    fn legacy_rows_conflate_to_one_class_and_no_name_is_served() {
+        let obs = vec![
+            row("service:_airplay._tcp", "Ian's MacBook Pro", 100),
+            row("service:airplay", "", 200),
+            row("service:mqtt", "GIIWEO broker", 150),
+        ];
+        let v = discovered_services(&obs);
+        assert_eq!(v.len(), 2, "legacy and unified airplay rows are one class");
+        let airplay = v.iter().find(|s| s.kind == "airplay").unwrap();
+        assert_eq!(airplay.last_seen, 200);
+        for s in &v {
+            assert!(
+                s.name.is_empty(),
+                "an instance name reached the view: {}",
+                s.name
+            );
+        }
+        let raw = serde_json::to_string(&v).unwrap();
+        assert!(
+            !raw.contains("MacBook"),
+            "a legacy context leaked into the view"
+        );
+        assert!(!raw.contains("GIIWEO broker"));
+    }
 }
 
 #[cfg(test)]
