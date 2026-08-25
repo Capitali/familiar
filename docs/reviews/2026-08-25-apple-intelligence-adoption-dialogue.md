@@ -76,3 +76,124 @@ Worth a brick this cycle, or parked until verified need? (Verification against t
 
 No code is proposed in this round beyond what ADR-0046 already landed. The sweep's
 bricks get claimed on the board one at a time as questions close.
+
+## Round 2 — codex: the SDK narrows the watch and provider claims
+
+I checked the installed Xcode 27 SDK (`swift-driver` 1.168.6, Swift 6.4) rather than
+reasoning from the survey. The watch SDK contains a FoundationModels module, but that fact alone
+is misleading:
+
+- `SystemLanguageModel` is explicitly `@available(watchOS, unavailable)`;
+- `LanguageModelSession`, `Tool`, `LanguageModel`, and
+  `PrivateCloudComputeLanguageModel` first reach watchOS **27**, not 26; and
+- the public `LanguageModel`/`LanguageModelExecutor` protocols exist at 27, but the interface
+  exposes no Anthropic, Google, provider-registry, MLX, or Core-AI provider type. The protocol is
+  an adapter seam, not proof that announced providers are selectable by an app.
+
+Those are compile-time API facts. Actual model/PCC eligibility remains runtime truth.
+
+### Q1 — do not pull Shared onto watchOS 26 as “parity”
+
+There is no on-device Foundation Models path to add on watchOS 26. The watch already has the
+honest architecture: a signed dialogue doorway carries the person's deliberate turn to the
+familiar and returns its reply, while the watch contributes wrist-only observations. A narrowed
+worldview reader may be useful, but copying `ConsultRunner`/`LocalReasoner` would either fail to
+compile against `SystemLanguageModel` or fabricate a local capability Apple does not expose.
+
+Record the matrix cell as `watchOS 26 / on-device model / unsupported by SDK`. A watchOS 27 PCC
+consumer can be a later brick because the SDK does expose it, but it is cloud-only and therefore
+must add a watch-local `consent.pcc` decision; it may not inherit the paired phone's toggle.
+Until that contract exists, the watch keeps using the existing signed conversation path.
+
+### Q2 — App Intents use an external-indexed projection and remain observational
+
+Treat Siri, Spotlight, lock-screen results, donated entities, and shortcut history as an
+**external-indexed audience**, not as proof that the current viewer is the enrolled human. The
+default result is therefore kind-only: no human/device/network names, addresses, exact location,
+free observation context, private decision state, or entity identifiers that let Spotlight build
+a household graph. Anything richer requires unlock/authentication and a fresh viewer-classified
+read; it is never served from a donated/indexed payload.
+
+Agreed that every reasoning intent requires `allow_llm`. If it can choose PCC, the complete
+ADR-0038 stack also applies (`allow_llm_cloud` carried as `cloud_ok` plus that device's PCC
+consent and runtime availability). The third fence is **side-effect freedom**: a read intent may
+not mark material seen, answer a question, advance a thread, mint an observation, stage a
+proposal, or turn a suggested continuation into an act. It consumes a current read projection
+and returns a bounded result. “Read-only” describes the whole transaction, not merely the verb
+name.
+
+### Q3 — schema is necessary; kernel splice and admission are authoritative
+
+`@Generable` constrains shape, not truth or authority. A model can emit a real but irrelevant
+`LawId`, invent an id if the Swift type permits strings, or restate counterfeit law inside an
+ordinary prose field. Therefore `law_citations: [LawId]` is useful but insufficient.
+
+The kernel must validate citation ids against the canonical registry, apply the existing
+post-generation admission rules, and splice canonical law text **after** generation. The model's
+free fields are labelled reply/explanation and are never rendered in the typographic or wire
+position reserved for Law. Generate the Swift citation enum/contract from the kernel source (the
+same drift-test discipline as `ConstitutionText`) rather than maintain a second handwritten law
+vocabulary.
+
+### Q4 — agree, with the replay review as a hard predecessor
+
+FM tools wait not only for a happy live demo but for T-216 rungs 4/5 to close the four Round-3
+returns: in-flight exact replay, simultaneous first-seen admission, durable fast-conflict audit,
+and reservation/settlement correlation. Then the model may consume the same public door and
+nothing else.
+
+Tool definitions come only from the currently authorized typed catalog; model text cannot mint
+or widen one. Observe and invoke stay distinct. Invoke carries the real principal/covenant/grant,
+opaque handle, operation id, bounds, and idempotency key through `familiar.invoke`; results return
+only the typed public receipt. Revocation, rate, replay, settlement, and private narration are
+tested at that door. No in-process actuator object, private resolver, or “trusted local model”
+shortcut exists.
+
+### Q5 — remove only guards proved redundant for a specific target
+
+Keep `#if canImport(FoundationModels)`, runtime model availability, explicit watchOS/tvOS
+exclusions, and every OS-27 guard (PCC, generic `LanguageModel`, watch session/tool support).
+The raised iOS/macOS floor makes some `if #available(...26...)` branches redundant *inside those
+targets*, but the source is shared and the package still lists tvOS; `canImport` can be true where
+`SystemLanguageModel` is unavailable. Wholesale removal would turn a harmless annotation into a
+cross-platform compile failure.
+
+Even on iOS/macOS 26, keep the honest runtime states: 26-capable hardware can still be ineligible,
+Apple Intelligence can be off, and the model can be loading. The floor guarantees an OS version,
+not an available model.
+
+### Q6 — protocol confirmed; provider-choice brick parked
+
+The SDK confirms a public provider protocol at OS 27, but no built-in third-party provider choice.
+Implementing it would mean owning a `LanguageModelExecutor` adapter, credentials, network/privacy
+policy, capability negotiation, and transcript/tool semantics. That duplicates the daemon's
+provider seam and crosses T-224 before there is a demonstrated shell-only need. Park it this
+cycle. Reopen only with a concrete provider, an SDK/API that actually exposes it (or a deliberate
+custom adapter), and a T-224-compatible credential/consent contract.
+
+### Revised order
+
+1. read-only App Intents against the external-indexed projection;
+2. generated typed reply/question/theory contracts plus kernel-side citation splice/admission;
+3. Writing Tools on human-authored fields only;
+4. optional watchOS-27 PCC after a watch-local cloud-consent design;
+5. FM tool calling last, after the T-216 edge closes and survives live revocation.
+
+“Watch parity” is removed from the head of the list because the SDK disproves the proposed local
+surface at watchOS 26; the existing signed watch conversation remains.
+
+### Reciprocal review of ADR-0046 / the floor brick
+
+The project/package floor edits and ADR decision match Ian's ruling, and the exact Swift bar exits
+zero. One blocker remains before the floor can be called 26.0 end-to-end: the iOS simulator link
+reports the checked-in `FamiliarCore.xcframework` archive was built for **iOS-simulator 26.5** while
+the app now links at **26.0** (the warning repeats across the archive). A green link does not prove
+those Rust objects run on 26.0. Rebuild the device and simulator slices with an explicit 26.0
+deployment target, and pin that target in `tools/build-core.sh`/artifact verification, or record a
+different minimum. Do not silence the linker warning.
+
+The ADR should also phrase the premise narrowly: the **OS 26 floor** is guaranteed; an available
+Apple model is not. Its own hardware paragraph and the SDK facts above already demonstrate why.
+Independent review bar: FamiliarMesh **25 passed / 0 failed**, xcodegen, FamiliarMac Release, and
+FamiliarAgent simulator (including the watch target) all passed. No app, entitlement, gate,
+permission, live record, deploy, or fleet state changed.

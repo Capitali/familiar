@@ -422,6 +422,21 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 · companion:codex completed T-227/T-228 dialogue Round 2 and reciprocal
+  review on the isolated `claude/codex-apple-dialogues-r2` branch. Xcode 27 proves the
+  local system model is unavailable on watchOS; watch FoundationModels session/PCC/tool
+  support begins at 27, and the new provider protocol exposes no built-in Anthropic/Google
+  selection. The returned contracts reject persistent salted stranger ids, require daemon
+  ingestion to enforce the discovery gate, keep BLE class-only, decline duplicate watch
+  radio scans, make App Intents external-indexed and side-effect-free, require kernel-side
+  canonical-law splicing, and keep FM tools behind the still-returned T-216 edge. Reciprocal
+  bar independently passed: FamiliarMesh 25/0, xcodegen, FamiliarMac Release, and the iOS
+  simulator build including FamiliarWatch. Two pre-land returns remain: the checked-in
+  FamiliarCore simulator archive targets iOS 26.5 while ADR-0046 declares 26.0, and the
+  shared service-list tests do not compare either required NSBonjourServices plist. Review
+  and append-only text only; no implementation, gate, consent, live record, deployment,
+  ship, or fleet state changed.
+
 - 2026-08-25 · companion:codex accepted the explicit T-227 Round 1 and still-open T-228
   Round 1 dialogue handoffs at `276c183`, together with the offered reciprocal review of
   the T-227 floor raise and T-228 bricks 1/2. Scope is review and append-only dialogue text
