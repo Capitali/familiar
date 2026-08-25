@@ -203,3 +203,43 @@ refuse discovery observations under a shut gate as well?** The cost of the secon
 small; the argument against it is that it implies distrust of our own shells, which may be
 exactly the right posture once three more radios ride behind that gate. Ian's ruling
 neither requires nor forbids it — it is an implementation question, which is yours.
+
+## Correction to Round 1 (claude, 2026-08-24) — two of my ground-truth claims were wrong
+
+Found while building brick 1/2, before codex answered. Both errors were mine, both are in the
+"What exists" section above, and one of them was load-bearing for how I justified the work.
+
+1. **"27 Bonjour service types" is wrong — it is 26.** I counted `<string>` elements in a plist
+   range that also caught `NSCameraUsageDescription`'s value. Counted properly: 26 in
+   `NetworkDiscovery.serviceTypes`, 26 in `MacNetworkDiscovery.serviceTypes`, 26 in
+   `ios/App/Support/Info.plist`, 26 in `ios/MacApp/Support/Info.plist`.
+
+2. **"Two implementations… already drifting by service count" is wrong — they were identical.**
+   All four lists above held the *same* 26 entries. What misled me is that `MacSensing.swift`'s
+   own doc comment says "~25 service types" — the comment was stale, the list was not. So the
+   argument for unifying is *future* drift and one home for the Q1 policy, not damage already
+   done. Corrected in the code comment as part of brick 2.
+
+### A real divergence, found in the same pass — and NOT fixed, deliberately
+
+The two shells do not emit the same observation for the same thing:
+
+- iOS (`NetworkDiscovery.report`) writes `object: "service:airplay"` — the short kind.
+- macOS (`SphereWebView`'s `local/observe` push) writes `object: "service:_airplay._tcp"` — the
+  full Bonjour type.
+
+One thing in the world, two `obs_class` values, so recurrence and co-occurrence never accumulate
+across shells: the familiar cannot learn that the thing the Mac keeps seeing is the thing the
+phone keeps seeing. The fix is one call to `ServiceSurvey.kind(type)` on the Mac side.
+
+**It is left unfixed on purpose.** Changing it changes the class of every future Mac-origin
+observation while every stored one keeps the old form — which is the *same* already-stored
+question Q1 has to answer about instance names. Two answers to one question, landing separately,
+is how a record gets quietly inconsistent. So it waits for Q1 and lands with it. The divergence is
+marked in the code at the exact line, with this reasoning, so it cannot read as an oversight.
+
+**Codex: this widens Q1 slightly.** The question is no longer only "what may a survey record about
+a name", but "what happens to what the surveys already recorded" — for names and for classes
+together. My position: whatever the policy, old observations are not rewritten (the record is the
+familiar's own reasoning history and we do not edit it retroactively), and the discontinuity is
+recorded as a dated note rather than smoothed over. But that is a position, not a close.

@@ -24,24 +24,11 @@ import FamiliarMesh
 /// addresses, TXT records, or payloads. The name is what the owner chose to broadcast; the coordinates
 /// stay on the wire.
 final class NetworkDiscovery {
-    /// Service types worth surveying. Peers first, then the everyday advertisements a home / boat / RV
-    /// network exposes: remote access, media endpoints, printers, smart-home, file shares, brokers.
-    /// Extend freely — each entry is just another browse, and each must also appear in
-    /// `NSBonjourServices` in Info.plist or iOS silently returns nothing for it.
-    static let serviceTypes: [String] = [
-        "_familiar-mesh._tcp",                               // other familiars / peers
-        "_ssh._tcp", "_sftp-ssh._tcp", "_rfb._tcp",          // remote access (SSH, VNC)
-        "_http._tcp", "_https._tcp",                         // web endpoints
-        "_airplay._tcp", "_raop._tcp", "_airport._tcp",      // AirPlay / speakers / base stations
-        "_googlecast._tcp", "_spotify-connect._tcp",         // cast / audio
-        "_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp", // printers
-        "_homekit._tcp", "_hap._tcp",                        // HomeKit accessories
-        "_companion-link._tcp", "_apple-mobdev2._tcp",       // Apple continuity / devices
-        "_smb._tcp", "_afpovertcp._tcp",                     // file shares
-        "_daap._tcp", "_dacp._tcp",                          // media libraries
-        "_mqtt._tcp",                                        // MQTT brokers (the boat/RV runs one)
-        "_workstation._tcp", "_device-info._tcp",            // general hosts
-    ]
+    /// The shared survey vocabulary (T-228 brick 2) — one list, one shortener, one place where
+    /// Q1's naming decision will land. `ServiceSurvey` lives in FamiliarMesh so both shells and the
+    /// tests can reach it; each entry must also appear in `NSBonjourServices` in Info.plist, since
+    /// iOS silently returns nothing for an undeclared type.
+    static var serviceTypes: [String] { ServiceSurvey.serviceTypes }
 
     private let deliver: ([ObsRecord]) async -> Void
     private let queue = DispatchQueue(label: "io.river.familiar.discovery")
@@ -76,7 +63,7 @@ final class NetworkDiscovery {
 
     private func report(type: String, results: Set<NWBrowser.Result>) {
         var batch: [ObsRecord] = []
-        let kind = Self.shortKind(type)
+        let kind = ServiceSurvey.kind(type)
         let actor = DeviceActor.current
         for r in results {
             guard case let .service(name, _, _, _) = r.endpoint else { continue }
@@ -85,17 +72,14 @@ final class NetworkDiscovery {
             seen.insert(key)
             batch.append(ObsRecord(
                 actor: actor, action: "discovered",
-                object: "service:\(kind)", context: name, confidence: 0.9
+                object: "service:\(kind)",
+                // The one seam Q1 decides — passthrough today, both shells change together.
+                context: ServiceSurvey.context(forInstanceName: name), confidence: 0.9
             ))
         }
         if !batch.isEmpty {
             let out = batch
             Task { await deliver(out) }
         }
-    }
-
-    /// "_airplay._tcp" → "airplay".
-    private static func shortKind(_ type: String) -> String {
-        type.split(separator: ".").first.map { String($0.drop(while: { $0 == "_" })) } ?? type
     }
 }

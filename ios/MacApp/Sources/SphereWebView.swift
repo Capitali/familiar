@@ -166,8 +166,18 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
         // with, so /local/observe (loopback, same trust class as local/answer) is its only
         // path to the daemon's observation/identity registries.
         discovery.onDiscovery = { [weak self] type, name in
+            // KNOWN DIVERGENCE, deliberately left alone (T-228 brick 2, reported to codex):
+            // this shell writes the FULL Bonjour type — `service:_airplay._tcp` — while the iOS
+            // shell writes the short kind, `service:airplay`. One thing in the world, two
+            // observation classes, so the kernel's obs_class matchers see them as unrelated and
+            // recurrence across shells never accumulates. Fixing it is one call to
+            // `ServiceSurvey.kind(type)`, but it changes the class of every future Mac-origin
+            // observation while the ones already stored keep the old form — the same
+            // already-stored question Q1 has to answer, so it lands with Q1, not before it.
             self?.post("local/observe", [
-                "actor": "host", "action": "discovered", "object": "service:\(type)", "context": name,
+                "actor": "host", "action": "discovered", "object": "service:\(type)",
+                // The naming seam, shared with iOS so Q1's answer reaches both shells at once.
+                "context": ServiceSurvey.context(forInstanceName: name),
             ])
         }
         face.onIdentityConfirmed = { [weak self] handle in

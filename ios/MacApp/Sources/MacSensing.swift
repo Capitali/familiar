@@ -1,4 +1,5 @@
 import Foundation
+import FamiliarMesh
 import AVFoundation
 import Speech
 import Network
@@ -88,7 +89,10 @@ final class MacMicrophone: NSObject, ObservableObject {
     }
 }
 
-/// Bonjour/mDNS service survey, mirroring iOS's `NetworkDiscovery.swift` (~25 service types).
+/// Bonjour/mDNS service survey. It no longer *mirrors* the iOS shell's list — since T-228
+/// brick 2 both browse `ServiceSurvey.serviceTypes`, one list, so they cannot drift apart
+/// silently (they had not yet: all four copies — two Swift, two Info.plists — were identical
+/// at 26 entries when they were merged).
 /// Gated by `allow_network_discovery` (SPEC.md R9/R1). Derived-only by design: reports service
 /// kind + advertised instance name, never a resolved address or payload.
 ///
@@ -104,14 +108,10 @@ final class MacNetworkDiscovery: NSObject, ObservableObject {
     /// already in `found`. The caller (SphereBridge) turns this into a `/local/observe` push.
     var onDiscovery: ((String, String) -> Void)?
 
-    static let serviceTypes = [
-        "_familiar-mesh._tcp", "_ssh._tcp", "_sftp-ssh._tcp", "_rfb._tcp", "_http._tcp",
-        "_https._tcp", "_airplay._tcp", "_raop._tcp", "_airport._tcp", "_googlecast._tcp",
-        "_spotify-connect._tcp", "_ipp._tcp", "_ipps._tcp", "_printer._tcp",
-        "_pdl-datastream._tcp", "_homekit._tcp", "_hap._tcp", "_companion-link._tcp",
-        "_apple-mobdev2._tcp", "_smb._tcp", "_afpovertcp._tcp", "_daap._tcp", "_dacp._tcp",
-        "_mqtt._tcp", "_workstation._tcp", "_device-info._tcp",
-    ]
+    /// The shared survey vocabulary (T-228 brick 2) — the same list the iOS shell browses, so the
+    /// two cannot drift apart silently. Every entry must also appear in `NSBonjourServices` in
+    /// `MacApp/Support/Info.plist`.
+    static var serviceTypes: [String] { ServiceSurvey.serviceTypes }
 
     func start() {
         guard browsers.isEmpty else { return }
