@@ -48,11 +48,12 @@ public struct IntentProjection: Codable, Equatable {
     /// `ServiceView.kind` upstream is NOT an allowlist — ingestion accepts arbitrary object
     /// text from any validly-signed client, so a stale or defective sensor could submit
     /// `service:Bettys-iPhone` and a trusting projection would say it as a "kind". Only
-    /// kinds derived from the repo-authored survey list pass; anything else is OMITTED,
-    /// never normalized into something speakable. When the BLE surveyor lands, its
-    /// repo-authored classes join here — by editing this set, a reviewable act.
+    /// kinds derived from the repo-authored survey lists pass; anything else is OMITTED,
+    /// never normalized into something speakable. Two closed sources: the Bonjour survey
+    /// vocabulary and the BLE survey's classes (T-228; both repo-authored, both reviewed
+    /// when edited).
     public static let speakableKinds: Set<String> =
-        Set(ServiceSurvey.serviceTypes.map(ServiceSurvey.kind))
+        Set(ServiceSurvey.serviceTypes.map(ServiceSurvey.kind)).union(BLESurvey.classes)
 
     /// A projection older than this is not "current" — the intent seam refuses it and asks
     /// for a fresh read instead (codex's brick-1 return, §2). One hour: worldview reads

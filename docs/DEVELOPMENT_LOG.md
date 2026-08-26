@@ -6,6 +6,52 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-25 — T-228: the phone gains its BLE ear, at exactly the floor Q3 set
+
+The largest gap the observatory survey named — BLE absent from the shells entirely —
+closes at the floor codex's round 2 decided: **service-UUID class + coarse per-window
+count, and structurally nothing else.**
+
+`FamiliarMesh/BLESurvey.swift` is the policy: a repo-authored CLOSED map of 16 standard
+GATT services (heart-rate, battery, hid, environmental, fitness…) plus `ffe0` honestly
+classed `vendor-serial` — the de-facto serial service half the BLE-module world
+advertises, named for what it is rather than guessed into something specific. UUID
+normalization collapses ONLY the 128-bit Bluetooth base to its 16-bit alias; a vendor's
+random UUID maps to nothing — naming it would mint a class the repo never authored. The
+per-window count leaves as `one/few/many`; a raw count never leaves the window.
+
+`App/Sources/BLEDiscovery.swift` is the radio: a CBCentralManager scan that reads
+NOTHING from an advertisement but its service UUIDs — peripheral name, manufacturer
+bytes, and payload are never touched. Dedup keys on the platform's own randomized
+peripheral id in window-local memory that dies every 60 seconds; rotations are never
+joined. Honest states for permission-missing / Bluetooth-off / no-radio. Armed and stood
+down by `startDiscoveryIfAuthorized` under the SAME authorization as the Bonjour survey
+(household boundary ∧ device preference; the platform's Bluetooth permission is the
+second half, per Ian's one-authority ruling). The daemon's ingestion gate for `ble:*`
+landed BEFORE this radio existed — the fence preceded the capability, as it should.
+
+BLE classes join `IntentProjection.speakableKinds` (one closed vocabulary from radio to
+Siri) and the worldview viewer surfaces `ble:` rows beside Bonjour kinds, name empty.
+
+Deliberate scope edges: iOS only (the phone is the household's always-present radio in
+Motorhorse; Mac BLE parity is a follow-up, stated not smoothed); NO `bluetooth-central`
+background mode — the survey runs foreground-only until someone decides the
+battery/priority question on purpose. Actuation is not this brick: the lights witness
+still needs its pairing ceremony, a declared surface, and `allow_actuate`.
+
+### Checks run
+
+FamiliarMesh 36/0 (class-map closure, base-collapse-only normalization, bucket
+determinism + no-raw-count pin, hostile class refusal, speakable-vocabulary join);
+xcodegen; FamiliarAgent sim + FamiliarMac Release builds; mesh viewer pin
+(`ble_class_rows_surface_beside_bonjour_kinds`); full workspace bar in the commit.
+Untested against live BLE hardware — no bench; the honest states cover the gap.
+
+### Next
+
+codex reciprocal review of the brick. Then the watch delegation status string and the
+browser-fleet unification close T-228's remaining edges.
+
 ## 2026-08-25 — T-227 sweep brick 1: the familiar answers Siri, and says only kinds
 
 The first brick of the settled adoption order: read-only App Intents against the

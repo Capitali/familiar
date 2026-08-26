@@ -326,6 +326,7 @@ final class AppModel: ObservableObject {
     #if os(iOS)
     private var coordinator: SensingCoordinator?
     private var discovery: NetworkDiscovery?
+    private var bleDiscovery: BLEDiscovery?
     #endif
 
     // The console's answer field (The Glass home screen). The human speaking to the familiar.
@@ -1274,6 +1275,8 @@ final class AppModel: ObservableObject {
         coordinator = nil
         discovery?.stop()
         discovery = nil
+        bleDiscovery?.stop()
+        bleDiscovery = nil
         #endif
         enrolled = false
         membership = .none
@@ -2051,7 +2054,10 @@ final class AppModel: ObservableObject {
         guard gates.reportsSensorGates else { return "this door does not report the boundary" }
         guard gates.networkDiscoveryOpen else { return "closed by the household boundary" }
         guard discoveryEnabled else { return "declined on this device" }
-        return discovery == nil ? "authorized" : "surveying \(NetworkDiscovery.serviceTypes.count) service kinds"
+        guard let ble = bleDiscovery else {
+            return discovery == nil ? "authorized" : "surveying \(NetworkDiscovery.serviceTypes.count) service kinds"
+        }
+        return "surveying \(NetworkDiscovery.serviceTypes.count) service kinds · BLE: \(ble.state)"
         #else
         // The Mac surveys too, but through its own path (`MacSensing`, gated on `MacBoundary`'s
         // read of boundary.json on the local disk — platform-appropriate enforcement of the same
@@ -2082,6 +2088,8 @@ final class AppModel: ObservableObject {
             if discovery != nil { note("network discovery stood down — \(discoveryState)") }
             discovery?.stop()
             discovery = nil
+            bleDiscovery?.stop()
+            bleDiscovery = nil
             return
         }
         // Already surveying: leave it alone. `NetworkDiscovery.start()` calls `stop()` first, which
@@ -2092,7 +2100,12 @@ final class AppModel: ObservableObject {
         let d = NetworkDiscovery { [weak self] batch in await self?.deliver(batch) }
         discovery = d
         d.start()
-        note("network discovery armed — surveying \(NetworkDiscovery.serviceTypes.count) service kinds")
+        // The BLE surveyor rides the SAME authorization — one gate, every radio (T-228).
+        // Its own honest state (permission missing, Bluetooth off) lives on the object.
+        let b = BLEDiscovery { [weak self] batch in await self?.deliver(batch) }
+        bleDiscovery = b
+        b.start()
+        note("network discovery armed — surveying \(NetworkDiscovery.serviceTypes.count) service kinds + BLE classes")
         #endif
     }
 

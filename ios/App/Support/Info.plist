@@ -62,6 +62,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to scan a familiar's join QR code, and (if you enable it) on-device facial presence analysis — never a stored image.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>The familiar listens for Bluetooth devices around you and reports only what KIND of thing it heard (a heart-rate sensor, a battery device) — never a name, identity, or contents.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>The familiar surveys the local network to notice devices and services around you (like printers, speakers, and other familiars) and reports what kind of thing it saw — never their addresses or contents.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

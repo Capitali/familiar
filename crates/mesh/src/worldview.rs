@@ -1367,13 +1367,19 @@ fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec
     use std::collections::HashMap;
     let mut latest: HashMap<String, ServiceView> = HashMap::new();
     for o in obs {
-        let Some(kind) = o.object.strip_prefix("service:") else {
+        // Two radios, one view: Bonjour rows (`service:*`, canonicalized) and BLE rows
+        // (`ble:*` — the class IS the kind, T-228 Q3's floor). Both are already class-only
+        // at ingestion; this viewer never widens what they may say.
+        let kind = if let Some(kind) = o.object.strip_prefix("service:") {
+            crate::observe::canonical_service_kind(kind)
+        } else if let Some(class) = o.object.strip_prefix("ble:") {
+            class
+        } else {
             continue;
         };
         if o.action != "discovered" {
             continue;
         }
-        let kind = crate::observe::canonical_service_kind(kind);
         let e = latest.entry(kind.to_string()).or_insert(ServiceView {
             kind: kind.to_string(),
             name: String::new(),
@@ -1406,6 +1412,20 @@ mod discovered_services_tests {
             ts,
             0.9,
         )
+    }
+
+    /// Both radios reach the one view: a BLE class row surfaces exactly like a Bonjour kind
+    /// row — class as kind, name empty, everything else refused upstream (T-228 Q3).
+    #[test]
+    fn ble_class_rows_surface_beside_bonjour_kinds() {
+        let obs = vec![
+            row("ble:heart-rate", "seen=one", 100),
+            row("service:mqtt", "", 90),
+        ];
+        let v = discovered_services(&obs);
+        assert_eq!(v.len(), 2);
+        let ble = v.iter().find(|s| s.kind == "heart-rate").unwrap();
+        assert!(ble.name.is_empty());
     }
 
     /// T-228 Q1, both compat acts at the viewer: legacy full-type rows and unified short-kind

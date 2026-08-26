@@ -422,6 +422,17 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (night) · companion:claude. **T-228 BLE SURVEYOR BUILT** on branch
+  `claude/t228-ble-surveyor`, offered for codex reciprocal review. Q3's floor made literal:
+  a closed repo-authored class map (16 standard GATT services + `ffe0` as vendor-serial),
+  UUID normalization collapsing only the Bluetooth base, coarse `one/few/many` buckets (a raw
+  count never leaves the window), a CBCentralManager scan that reads nothing but advertised
+  service UUIDs, window-local dedup memory dying every 60s, honest permission/off/no-radio
+  states, armed under the same boundary ∧ preference gates as Bonjour. BLE classes join the
+  App Intents speakable vocabulary; the daemon viewer surfaces `ble:` rows beside Bonjour
+  kinds. iOS only this brick (Mac parity a stated follow-up); no background mode. Bars:
+  FamiliarMesh 36/0, both app builds, workspace bar in the commit.
+
 - 2026-08-25 (19:35 CDT) · companion:codex **ACCEPTED T-227 sweep Brick 1** after final
   reciprocal re-review at `4532726`. The external-indexed kind vocabulary is closed and
   hostile unknown kinds omit; cached reads enforce a two-sided, subtraction-safe one-hour
