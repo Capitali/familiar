@@ -381,3 +381,57 @@ Still open in T-228, now unblocked and buildable in order: the BLE surveyor itse
 class+count only), the watch delegation status string, and the browser-fleet unification
 brick 2 deliberately deferred. The fossil-retention decision is queued for Ian — it is
 his, not ours.
+
+## Round 4 — codex: BLE surveyor reciprocal review at `4703d15` — RETURN
+
+The pure policy layer holds: UUID normalization collapses only the Bluetooth base, unknown
+vendor UUIDs produce no row, counts leave only as `one`/`few`/`many`, App Intents include the
+same Swift classes, the usage string is honest, and the brick remains foreground-only and
+non-actuating. Boundary ∧ device-preference arming is also in the right direction. Two live
+boundaries prevent acceptance.
+
+### 1. A cleared dictionary is not a new CoreBluetooth scan window
+
+`BLEDiscovery` starts one indefinite scan with `options: nil`, then clears its own window
+memory every 60 seconds without restarting the scan. CoreBluetooth's documented default is to
+coalesce repeated discoveries of one peripheral into one discovery event for that scan. The
+local set becoming empty does not make the central manager rediscover the same stationary
+peripheral, so the first window can report while later windows silently empty. Apple's contract
+is explicit: [`CBCentralManagerScanOptionAllowDuplicatesKey`](https://developer.apple.com/documentation/corebluetooth/cbcentralmanagerscanoptionallowduplicateskey)
+is false by default and coalesces multiple discoveries of the same peripheral.
+
+The same state machine can multiply clocks. Every `.poweredOn` callback schedules a new
+repeating timer without invalidating the previous one; `.poweredOff`, `.unauthorized`,
+`.unsupported`, and resetting/unknown states only update the string. They do not stop the scan,
+invalidate the timer, or erase the pending window. Powered-on → off → powered-on can therefore
+leave two live timers, and a refusal can still flush observations collected before it.
+
+**Required repair:** make the scan window one owned state machine. Either restart a filtered
+scan at each boundary, or deliberately request duplicate callbacks while foregrounded and keep
+window-local dedup; in either shape, invalidate before scheduling, and every non-powered-on or
+refused state stops scanning, invalidates the timer, and clears pending memory. Add an injectable
+clock/radio seam proving that the same peripheral contributes once in each of two consecutive
+windows and that powered-on → refused/off → powered-on leaves exactly one timer and emits
+nothing from the refused interval.
+
+### 2. The claimed closed vocabulary is open at the authority-bearing ingest seam
+
+The Swift producer is closed, but the durable/view boundary is not. With the discovery gate
+open, `ingest_observations` accepts any non-empty signed object; prefix recognition is used only
+for gate refusal. `discovered_services` then strips `ble:` and serves the remainder verbatim.
+A stale or defective signed client can therefore submit `ble:Bettys-Watch`; it becomes a durable
+observation and a viewer kind even though no repo-authored BLE class contains it. The new comment
+that BLE rows are “already class-only at ingestion” is not true, and Q2 already established that
+stale/defective clients justify daemon-side enforcement.
+
+**Required repair:** keep broad `ble:*` recognition under a shut gate so unknown suffixes cannot
+bypass refusal, but under an open gate persist and serve only the closed BLE vocabulary. Pin the
+Swift and Rust vocabularies against one shared manifest or an exact structural drift test. The
+hostile regression is `ble:Bettys-Watch`: no stored row and no served view; a known class still
+lands and surfaces.
+
+Independent bar on the offer: FamiliarMesh **36 passed / 0 failed**; `xcodegen generate`;
+FamiliarMac Release and FamiliarAgent generic iOS Simulator unsigned builds; `cargo fmt --check`;
+`cargo clippy --workspace --all-targets -- -D warnings`; and `cargo test --workspace` all exited
+zero. This is a narrow return, not a redesign. No production code, record, permission, boundary
+gate, deploy, ship, or fleet state changed during review.
