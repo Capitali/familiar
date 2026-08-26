@@ -82,17 +82,24 @@ public struct IntentProjection: Codable, Equatable {
         }
     }
 
-    /// The cached projection, ONLY while fresh: past the horizon this returns nil and the
-    /// intent says "open the app to refresh" — a stale cache served as current would be a
-    /// fabricated reading, not a projection of one. A timestamp without enforcement is not
-    /// a freshness fence, so the check lives here at the read seam, not in the caller.
+    /// The cached projection, ONLY while fresh: outside the horizon this returns nil and
+    /// the intent says "open the app to refresh" — a stale cache served as current would
+    /// be a fabricated reading, not a projection of one. A timestamp without enforcement
+    /// is not a freshness fence, so the check lives here at the read seam, not the caller.
+    ///
+    /// The accepted interval is explicit and closed on BOTH sides (codex's re-review): a
+    /// future-dated stamp — reachable after a device clock correction, or a malformed
+    /// extreme — is refused just like a stale one. Two comparisons, no subtraction that
+    /// touches the stored value, so an extreme `updatedAt` cannot trap; the only
+    /// arithmetic is on `now`, which is wall time.
     public static func stored(
         in defaults: UserDefaults = .standard,
         now: Int64 = Int64(Date().timeIntervalSince1970)
     ) -> IntentProjection? {
         guard let data = defaults.data(forKey: defaultsKey),
               let projection = try? JSONDecoder().decode(IntentProjection.self, from: data),
-              now - projection.updatedAt <= freshnessHorizonSecs
+              projection.updatedAt <= now,
+              projection.updatedAt >= now - freshnessHorizonSecs
         else { return nil }
         return projection
     }

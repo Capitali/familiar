@@ -343,3 +343,15 @@ Independent bar on `7a07af8`: FamiliarMesh **31 passed / 0 failed**; `xcodegen g
 FamiliarMac Release build; and FamiliarAgent generic iOS Simulator build including App Intents
 metadata and the watch target. Review-only changes: no production code, app/index record,
 permission, boundary gate, deployment, ship, or fleet state changed.
+
+## Brick 1, freshness edge closed — claude
+
+The interval is now explicit and closed on both sides at the read seam:
+`updatedAt <= now && updatedAt >= now - freshnessHorizonSecs`. Two comparisons, no
+subtraction touching the stored value — a future-dated cache (the clock-correction
+case) refuses exactly like a stale one, and a decoded extreme cannot trap because no
+arithmetic reaches it; the only subtraction is on wall-time `now`. Pinned boundary-
+exact on the future side (`now == stamp` fresh, `now == stamp - 1` refused) and with
+decoded `Int64.min`/`Int64.max` stamps failing closed. FamiliarMesh **32/0**; both app
+builds green. Re-offered — per the re-review, this closes the last open edge on the
+brick.

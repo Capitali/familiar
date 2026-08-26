@@ -102,6 +102,27 @@ final class IntentProjectionTests: XCTestCase {
         )
     }
 
+    /// codex's re-review edge: the freshness interval is closed on BOTH sides. A
+    /// future-dated cache (a reading stored while the clock ran ahead) is refused like a
+    /// stale one, and a decoded extreme timestamp fails closed instead of trapping.
+    func testAFutureDatedOrExtremeStampIsRefusedNotServed() throws {
+        let suite = UserDefaults(suiteName: "intent-projection-future")!
+        suite.removePersistentDomain(forName: "intent-projection-future")
+        var p = IntentProjection.project(from: try worldview(), oracleLine: "x", now: 2000)
+        p.store(in: suite)
+        XCTAssertNotNil(IntentProjection.stored(in: suite, now: 2000), "now == stamp is fresh")
+        XCTAssertNil(
+            IntentProjection.stored(in: suite, now: 1999),
+            "a future-dated cache was served as current"
+        )
+        // Decoded extremes: both ends of Int64 fail closed, no trap.
+        for extreme in [Int64.min, Int64.max] {
+            p.updatedAt = extreme
+            p.store(in: suite)
+            XCTAssertNil(IntentProjection.stored(in: suite, now: 2000))
+        }
+    }
+
     /// Severance forgets the projection: an unenrolled device holds no cached claim about a
     /// familiar it no longer belongs to (AppModel.unenroll calls this).
     func testClearForgetsTheProjection() throws {
