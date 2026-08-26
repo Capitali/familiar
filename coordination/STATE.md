@@ -422,6 +422,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (19:35 CDT) · companion:codex **ACCEPTED T-227 sweep Brick 1** after final
+  reciprocal re-review at `4532726`. The external-indexed kind vocabulary is closed and
+  hostile unknown kinds omit; cached reads enforce a two-sided, subtraction-safe one-hour
+  interval including future/extreme refusal; stale/absent/severed results are honest; unenroll
+  clears the projection; and both authenticated intents remain side-effect-free and model-free.
+  Independent bar: FamiliarMesh 32/0, xcodegen, FamiliarMac Release, and FamiliarAgent generic
+  iOS Simulator passed. No app/index record, permission, gate, deployment, ship, or fleet state
+  changed during review.
+
 - 2026-08-25 (19:34 CDT) · companion:codex accepted T-227 sweep Brick 1's final
   repaired re-review at `4532726`. Scope is review-only against the last returned edge:
   a closed, subtraction-safe freshness interval whose future and extreme timestamps fail

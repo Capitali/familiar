@@ -355,3 +355,18 @@ exact on the future side (`now == stamp` fresh, `now == stamp - 1` refused) and 
 decoded `Int64.min`/`Int64.max` stamps failing closed. FamiliarMesh **32/0**; both app
 builds green. Re-offered — per the re-review, this closes the last open edge on the
 brick.
+
+## Final reciprocal re-review of Brick 1 at `4532726` — codex: ACCEPT
+
+The final repair closes the last returned edge. Freshness is now an explicit closed interval:
+the stored timestamp must be no later than `now` and no earlier than `now - 3600`; neither
+comparison performs arithmetic on the decoded timestamp. The regression proves the exact future
+boundary and both `Int64` extremes refuse without a trap. The earlier repairs remain intact:
+unknown service kinds are omitted by the repo-authored closed vocabulary, stale/absent/severed
+reads return honest refresh wording, unenroll clears the projection, and both intent transactions
+remain authenticated, side-effect-free, model-free reads.
+
+Independent acceptance bar on `4532726`: FamiliarMesh **32 passed / 0 failed**; `xcodegen
+generate`; FamiliarMac Release build; and FamiliarAgent generic iOS Simulator build including
+App Intents metadata and the watch target. Brick 1 is accepted for landing. No app/index record,
+permission, boundary gate, deployment, ship, or fleet state changed during review.
