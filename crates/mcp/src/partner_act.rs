@@ -95,6 +95,10 @@ pub enum ReasonCode {
     ExecutionRefused,
     /// No executor is wired at this door — observe/invoke fail closed by construction.
     ExecutorUnavailable,
+    /// A reserved act whose settlement was never recorded — the reserving process died, or
+    /// its settlement append failed. The outcome is genuinely unknown: an exact replay
+    /// refuses with this code and the device is never run again.
+    OutcomeUnrecorded,
     Internal,
 }
 
@@ -387,7 +391,10 @@ fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
     let mut grant_terminals = BTreeSet::<String>::new();
     let mut proposals = BTreeMap::<String, String>::new();
     let mut proposal_terminals = BTreeSet::<String>::new();
-    let mut effects = BTreeMap::<String, String>::new();
+    // effect_id -> (principal, reserved operation): a settlement must match BOTH — the same
+    // principal and the operation the reservation declared (codex round 3: an observe
+    // reservation settled as an invoke is an impossible history and must fail closed).
+    let mut effects = BTreeMap::<String, (String, PartnerOperation)>::new();
     let mut effect_settlements = BTreeSet::<String>::new();
 
     for event in events {
@@ -476,6 +483,7 @@ fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
             // later settlement may reference exactly once.
             PartnerActBody::EffectReserved {
                 effect_id,
+                effect_kind,
                 grant_id,
                 surface,
                 ..
@@ -485,20 +493,50 @@ fn validate_sequence(events: &[PartnerAct]) -> io::Result<()> {
                 {
                     return Err(invalid("effect references missing or inactive authority"));
                 }
+                let operation = match effect_kind.as_str() {
+                    "invoke" => PartnerOperation::Invoke,
+                    "observe" => PartnerOperation::Observe,
+                    _ => return Err(invalid("effect reservation carries an unknown kind")),
+                };
+                if event.operation != operation {
+                    return Err(invalid(
+                        "effect reservation operation does not match its kind",
+                    ));
+                }
                 if effects
-                    .insert(effect_id.clone(), event.principal.clone())
+                    .insert(effect_id.clone(), (event.principal.clone(), operation))
                     .is_some()
                 {
                     return Err(invalid("duplicate effect reservation"));
                 }
             }
-            // A settlement must reference an existing reservation by the same principal, and
-            // settle it at most once. It carries no grant-liveness requirement: the act already
-            // ran, and recording its honest outcome must always be valid — even after a revoke.
-            PartnerActBody::EffectSettled { effect_id, .. } => {
-                if effects.get(effect_id) != Some(&event.principal) {
+            // A settlement must reference an existing reservation by the same principal, carry
+            // the operation that reservation declared with a typed outcome matching its recorded
+            // one, and settle it at most once. It carries no grant-liveness requirement: the act
+            // already ran, and recording its honest outcome must always be valid — even after a
+            // revoke.
+            PartnerActBody::EffectSettled { effect_id, outcome } => {
+                match effects.get(effect_id) {
+                    Some((principal, operation))
+                        if principal == &event.principal && *operation == event.operation => {}
+                    Some((principal, _)) if principal == &event.principal => {
+                        return Err(invalid(
+                            "effect settled under a different operation than it reserved",
+                        ));
+                    }
+                    _ => {
+                        return Err(invalid(
+                            "effect settlement references a missing reservation",
+                        ));
+                    }
+                }
+                let outcome_matches = matches!(
+                    (outcome.as_str(), event.outcome),
+                    ("completed", PartnerOutcome::Completed) | ("failed", PartnerOutcome::Failed)
+                );
+                if !outcome_matches {
                     return Err(invalid(
-                        "effect settlement references a missing reservation",
+                        "effect settlement outcome does not match its typed event",
                     ));
                 }
                 if !effect_settlements.insert(effect_id.clone()) {
@@ -752,5 +790,162 @@ mod tests {
         .by_human("ian");
         append(&dir, &event).unwrap();
         assert_eq!(load(&dir).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    // ---- The effect stream fails closed on operation/outcome mismatches (codex round 3) ----
+
+    fn grant_event(request_id: &str, grant_id: &str) -> PartnerAct {
+        PartnerAct::partner(
+            &context(),
+            2,
+            PartnerOperation::GrantDecision,
+            PartnerOutcome::Completed,
+            ReasonCode::HumanGranted,
+            request_id.into(),
+            PartnerActBody::GrantGranted {
+                request_id: request_id.into(),
+                grant_id: grant_id.into(),
+                surface: "ians-secret-lamp".into(),
+                allowed_operations: serde_json::json!({}),
+                epoch_nonce: "nonce".into(),
+                granted_by: "ian".into(),
+                granted_at: 2,
+                expires_at: 300,
+                roles: std::collections::BTreeMap::new(),
+                affected_subject: String::new(),
+                max_invokes_per_hour: 0,
+            },
+        )
+        .unwrap()
+        .by_human("ian")
+    }
+
+    fn reserved(
+        effect_id: &str,
+        grant_id: &str,
+        kind: &str,
+        operation: PartnerOperation,
+    ) -> PartnerAct {
+        PartnerAct::partner(
+            &context(),
+            3,
+            operation,
+            PartnerOutcome::Proposed,
+            ReasonCode::Observed,
+            effect_id.into(),
+            PartnerActBody::EffectReserved {
+                effect_id: effect_id.into(),
+                effect_kind: kind.into(),
+                grant_id: grant_id.into(),
+                surface: "ians-secret-lamp".into(),
+                operation: "set_state".into(),
+                parameters: serde_json::json!({}),
+                label: String::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn settled(
+        effect_id: &str,
+        operation: PartnerOperation,
+        outcome: PartnerOutcome,
+        recorded: &str,
+    ) -> PartnerAct {
+        PartnerAct::partner(
+            &context(),
+            4,
+            operation,
+            outcome,
+            ReasonCode::Invoked,
+            effect_id.into(),
+            PartnerActBody::EffectSettled {
+                effect_id: effect_id.into(),
+                outcome: recorded.into(),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_observe_reservation_settled_as_an_invoke_fails_closed() {
+        let dir = temp("cross_settle");
+        append(&dir, &request("request-a", "key")).unwrap();
+        append(&dir, &grant_event("request-a", "grant-a")).unwrap();
+        append(
+            &dir,
+            &reserved("effect-a", "grant-a", "observe", PartnerOperation::Observe),
+        )
+        .unwrap();
+        append(
+            &dir,
+            &settled(
+                "effect-a",
+                PartnerOperation::Invoke,
+                PartnerOutcome::Completed,
+                "completed",
+            ),
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_settlement_whose_typed_outcome_disagrees_with_its_record_fails_closed() {
+        let dir = temp("outcome_mismatch");
+        append(&dir, &request("request-a", "key")).unwrap();
+        append(&dir, &grant_event("request-a", "grant-a")).unwrap();
+        append(
+            &dir,
+            &reserved("effect-a", "grant-a", "invoke", PartnerOperation::Invoke),
+        )
+        .unwrap();
+        append(
+            &dir,
+            &settled(
+                "effect-a",
+                PartnerOperation::Invoke,
+                PartnerOutcome::Failed,
+                "completed",
+            ),
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_reservation_whose_operation_disagrees_with_its_kind_fails_closed() {
+        let dir = temp("kind_mismatch");
+        append(&dir, &request("request-a", "key")).unwrap();
+        append(&dir, &grant_event("request-a", "grant-a")).unwrap();
+        append(
+            &dir,
+            &reserved("effect-a", "grant-a", "observe", PartnerOperation::Invoke),
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_matched_settlement_still_loads() {
+        let dir = temp("matched_settle");
+        append(&dir, &request("request-a", "key")).unwrap();
+        append(&dir, &grant_event("request-a", "grant-a")).unwrap();
+        append(
+            &dir,
+            &reserved("effect-a", "grant-a", "invoke", PartnerOperation::Invoke),
+        )
+        .unwrap();
+        append(
+            &dir,
+            &settled(
+                "effect-a",
+                PartnerOperation::Invoke,
+                PartnerOutcome::Completed,
+                "completed",
+            ),
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap().len(), 4);
     }
 }
