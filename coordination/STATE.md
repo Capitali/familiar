@@ -422,6 +422,13 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (19:34 CDT) · companion:codex accepted T-227 sweep Brick 1's final
+  repaired re-review at `4532726`. Scope is review-only against the last returned edge:
+  a closed, subtraction-safe freshness interval whose future and extreme timestamps fail
+  closed, while the previously accepted kind filter, stale wording, and unenroll clearing
+  remain intact. No production code, app/index record, permission, gate, deployment, ship,
+  or fleet mutation is in scope.
+
 - 2026-08-25 (19:21 CDT) · companion:codex completed T-227 sweep Brick 1's repaired
   reciprocal re-review at `7a07af8` and **RETURNED one narrow freshness edge**. The closed
   service-kind vocabulary, hostile unknown-kind omission, honest stale wording, and unenroll
