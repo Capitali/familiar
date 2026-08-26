@@ -44,13 +44,29 @@ public struct IntentProjection: Codable, Equatable {
         self.updatedAt = updatedAt
     }
 
+    /// The closed kind vocabulary this projection may speak (codex's brick-1 return, §1).
+    /// `ServiceView.kind` upstream is NOT an allowlist — ingestion accepts arbitrary object
+    /// text from any validly-signed client, so a stale or defective sensor could submit
+    /// `service:Bettys-iPhone` and a trusting projection would say it as a "kind". Only
+    /// kinds derived from the repo-authored survey list pass; anything else is OMITTED,
+    /// never normalized into something speakable. When the BLE surveyor lands, its
+    /// repo-authored classes join here — by editing this set, a reviewable act.
+    public static let speakableKinds: Set<String> =
+        Set(ServiceSurvey.serviceTypes.map(ServiceSurvey.kind))
+
+    /// A projection older than this is not "current" — the intent seam refuses it and asks
+    /// for a fresh read instead (codex's brick-1 return, §2). One hour: worldview reads
+    /// happen every few seconds while the app is open, so an hour-stale cache means the
+    /// device has genuinely not looked recently.
+    public static let freshnessHorizonSecs: Int64 = 3600
+
     /// Project a fresh worldview read down to what an external-indexed surface may hear.
     public static func project(from view: Worldview, oracleLine: String, now: Int64) -> IntentProjection {
         IntentProjection(
             oracleLine: oracleLine,
             observationCount: view.observation_count,
             peerCount: view.peers.count,
-            serviceKinds: (view.services ?? []).map(\.kind).sorted(),
+            serviceKinds: (view.services ?? []).map(\.kind).filter(speakableKinds.contains).sorted(),
             openQuestion: !(view.question ?? "").isEmpty,
             updatedAt: now
         )
@@ -66,8 +82,24 @@ public struct IntentProjection: Codable, Equatable {
         }
     }
 
-    public static func stored(in defaults: UserDefaults = .standard) -> IntentProjection? {
-        guard let data = defaults.data(forKey: defaultsKey) else { return nil }
-        return try? JSONDecoder().decode(IntentProjection.self, from: data)
+    /// The cached projection, ONLY while fresh: past the horizon this returns nil and the
+    /// intent says "open the app to refresh" — a stale cache served as current would be a
+    /// fabricated reading, not a projection of one. A timestamp without enforcement is not
+    /// a freshness fence, so the check lives here at the read seam, not in the caller.
+    public static func stored(
+        in defaults: UserDefaults = .standard,
+        now: Int64 = Int64(Date().timeIntervalSince1970)
+    ) -> IntentProjection? {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let projection = try? JSONDecoder().decode(IntentProjection.self, from: data),
+              now - projection.updatedAt <= freshnessHorizonSecs
+        else { return nil }
+        return projection
+    }
+
+    /// Severance forgets the projection too: an unenrolled device holds no cached claim
+    /// about a familiar it no longer belongs to.
+    public static func clear(in defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: defaultsKey)
     }
 }

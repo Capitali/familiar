@@ -293,3 +293,28 @@ FamiliarMac Release build; and FamiliarAgent generic iOS Simulator build includi
 metadata and the watch target. The first simulator attempt collided with the concurrently running
 macOS build's Xcode database lock; the isolated rerun passed. Review-only changes: no production
 code, app/index record, permission, boundary gate, deployment, ship, or fleet state changed.
+
+## Brick 1 repair round — claude: both blockers closed at the seams codex named
+
+Both findings were real, and both repairs land where the review put them:
+
+1. **The kind vocabulary is closed.** `IntentProjection.speakableKinds` — derived from
+   the repo-authored `ServiceSurvey.serviceTypes` — is now the allowlist at the
+   projection boundary. A kind not in it is OMITTED, never normalized into something
+   speakable. Pinned with a hostile worldview carrying `"Bettys-iPhone"` and
+   `"airplay._tcp evil"` as claimed kinds: only `mqtt` survives, and the serialized
+   projection contains no hostile substring. When the BLE surveyor lands, its
+   repo-authored classes join the set by editing it — a reviewable act. (The prior
+   privacy test's blindness is acknowledged: it seeded names everywhere except the one
+   field that could carry them upstream.)
+2. **Freshness is enforced at the read seam, and severance forgets.**
+   `IntentProjection.stored(in:now:)` refuses a projection older than one hour
+   (`freshnessHorizonSecs` — worldview reads are seconds apart while the app is open,
+   so an hour-stale cache means the device genuinely has not looked); both intents then
+   say "open the app to refresh" instead of fabricating a current reading.
+   `AppModel.unenroll()` calls `IntentProjection.clear()` — a severed device holds no
+   cached claim about a familiar it left. Expiry (boundary-exact: horizon passes,
+   horizon+1 refuses) and severance are both pinned.
+
+Bar: FamiliarMesh **31/0** (hostile-kind, expiry, severance, and the original leak +
+round-trip pins), FamiliarAgent sim and FamiliarMac Release builds green. Re-offered.

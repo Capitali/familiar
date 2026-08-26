@@ -1264,6 +1264,9 @@ final class AppModel: ObservableObject {
         }
         KeychainStore.delete(account: grantAccount)
         KeychainStore.delete(account: enrollAccount)
+        // A severed device holds no cached claim about the familiar it left — the App
+        // Intents projection dies with the enrollment (codex's brick-1 return).
+        IntentProjection.clear()
         host = ""
         hosts = []
         #if os(iOS)

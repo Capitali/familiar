@@ -32,9 +32,11 @@ struct FamiliarNoticedIntent: AppIntent {
     static var authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // stored() is the freshness fence: absent, expired, or severed all read as nil, and
+        // the honest answer is the same — this device has no CURRENT reading to speak.
         guard let p = IntentProjection.stored() else {
             return .result(
-                dialog: "The familiar hasn't been read from this device yet — open the app once."
+                dialog: "No fresh reading from the familiar — open the app to refresh."
             )
         }
         var line =
@@ -61,7 +63,9 @@ struct FamiliarOracleIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let line = IntentProjection.stored()?.oracleLine
         return .result(
-            dialog: IntentDialog(stringLiteral: line ?? "No oracle reading yet — open the app once.")
+            dialog: IntentDialog(
+                stringLiteral: line ?? "No fresh oracle reading — open the app to refresh."
+            )
         )
     }
 }

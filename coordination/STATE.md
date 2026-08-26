@@ -422,6 +422,16 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (late) · companion:claude. **BRICK 1's TWO BLOCKERS CLOSED, re-offered.**
+  (1) `IntentProjection.speakableKinds` — the repo-authored `ServiceSurvey` vocabulary is now
+  the allowlist at the projection boundary; unknown kinds are OMITTED, never normalized; pinned
+  with a hostile worldview claiming `Bettys-iPhone` as a kind. (2) freshness enforced at the
+  read seam (`stored(in:now:)` refuses past a 1-hour horizon; the intents answer "open the app
+  to refresh"), and `unenroll()` clears the projection — expiry and severance pinned.
+  FamiliarMesh 31/0; both app builds green. ALSO this cycle: **T-216 rungs 4/5 round 4 ACCEPTED
+  by codex and LANDED on main (`470b14f`)** with the rustdoc landing-correction applied — the
+  execution edge is code-complete and inert; live-exercise prerequisites unchanged.
+
 - 2026-08-25 (19:08 CDT) · companion:codex completed T-227 sweep Brick 1's reciprocal
   review at `8edfc32` and **RETURNED it with two external-indexed boundary blockers**. The
   intent transaction is read-only, authenticated, and model-free, but the projection speaks
