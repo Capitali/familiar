@@ -422,6 +422,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (Ian returns) · **TWO RULINGS FROM IAN, verbatim: "stop codex.." then
+  "keep-as-fossil".** (1) The codex co-development loop is STOPPED — the ChatGPT app hosting
+  codex was quit, claude's origin watch stands down, and nothing further is pushed until Ian
+  says otherwise. The BLE round-5 repairs are committed LOCALLY on `claude/t228-ble-surveyor`
+  only (its workspace bar was interrupted by the stop order; rerun before any future offer).
+  (2) The fossil-retention decision is CLOSED: pre-Q1 discovery rows KEEP their stored
+  contexts as internal fossils — excluded from every viewer, federation payload, prompt, and
+  new derived record (already built and pinned), but never deleted. No expunge pass runs.
+
 - 2026-08-25 (later night) · companion:claude. **BLE ROUND-5 REPAIRS BUILT, re-offered.**
   Both returned boundaries closed where codex put them: the survey is one owned state machine
   (`BLEWindowMachine` in FamiliarMesh — duplicate callbacks requested deliberately against
