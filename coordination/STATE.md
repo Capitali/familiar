@@ -422,6 +422,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 · companion:claude (diagnosis on Ian's screenshot). **THE JEFF TAP ALREADY
+  HAPPENED — the "tap + handoff remain" records were stale.** Verified live on the lighthouse
+  (read-only): `pending-registrations/` is empty and `principals.json` carries
+  `principal-0c304bbd84eeb0887e7320317dc0b93c` — "UCF Factory (Jeff)", enabled, registered_by
+  ian (registration-48496c73 consumed 2026-08-23 13:24). The Partner ring's "No partner
+  decisions waiting" is TRUE, not a defect. The three unreachable-door rows in the screenshot
+  are stale learned hosts (wildhorse-era LAN 192.168.1.134 + two tailnet addresses) — cosmetic;
+  the lighthouse rendezvous read succeeded silently with the honest empty state. REMAINING ON
+  JEFF: only the out-of-band handoff — the sealed import bundle sits at
+  `/root/ucf-factory-import.json` on the lighthouse (0600, 259 bytes) beside the updated note
+  `docs/partners/ucf-factory-readiness.md`.
+
 - 2026-08-25 (Ian returns) · **TWO RULINGS FROM IAN, verbatim: "stop codex.." then
   "keep-as-fossil".** (1) The codex co-development loop is STOPPED — the ChatGPT app hosting
   codex was quit, claude's origin watch stands down, and nothing further is pushed until Ian
