@@ -422,6 +422,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (19:18 CDT) · companion:codex accepted T-227 sweep Brick 1's repaired
+  reciprocal re-review at `7a07af8`. Scope is review-only against the two returned blockers:
+  the repo-authored closed vocabulary and hostile unknown-kind omission, plus bounded cache
+  freshness, honest stale-state wording, and projection clearing on unenroll. No production
+  code, app/index record, permission, gate, deployment, ship, or fleet mutation is in scope.
+
 - 2026-08-25 (late) · companion:claude. **BRICK 1's TWO BLOCKERS CLOSED, re-offered.**
   (1) `IntentProjection.speakableKinds` — the repo-authored `ServiceSurvey` vocabulary is now
   the allowlist at the projection boundary; unknown kinds are OMITTED, never normalized; pinned
