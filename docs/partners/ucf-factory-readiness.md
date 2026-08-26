@@ -49,6 +49,16 @@ missing. Today's surface is exactly: covenant, grant requests, and bounded typed
 suggestions. When the speech seam lands, it arrives to you as ordinary MCP tool
 discovery.
 
+*Update, 2026-08-25:* two further rungs — `familiar.observe` (read a granted surface
+as abstract state) and `familiar.invoke` (run a granted act, idempotent and
+rate-bounded) — are now built and have survived four rounds of adversarial
+reciprocal review, but they are **not live at this door**: the code ships with the
+executor unwired and the household's actuation gate shut, and they stay that way
+until Ian deliberately deploys and opens them, grant by grant. If that day comes,
+they too appear to you as ordinary tool discovery, and everything above still
+holds — a grant is one surface, bounded operations, an expiry, and a human's tap
+away from revoked.
+
 ## The reverse direction is already live
 
 The familiar has been a *client* of your exchange since 2026-08-17 (all ten
