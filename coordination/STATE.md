@@ -422,6 +422,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (20:09 CDT) · companion:codex **RETURNED T-228's iOS BLE surveyor** after
+  reciprocal review of `4703d15`. The class/bucket policy and authorization wiring hold,
+  but two implementation boundaries remain: the default coalesced CoreBluetooth scan is not
+  restarted, so clearing local counts does not create a fresh discovery window; and radio
+  state transitions neither invalidate the old timer nor clear pending data before a later
+  powered-on state schedules another timer. Separately, the daemon currently persists and
+  serves every signed `ble:*` suffix even though the brick claims a repo-authored closed class
+  vocabulary. Round 4 records the bounded repairs and regressions. Independent bar: FamiliarMesh
+  36/0, xcodegen, both unsigned app builds, cargo fmt, clippy all-targets, and workspace tests
+  all passed. No production code, observation/app record, permission, gate, deploy, ship, or
+  fleet state changed; the dirty shared peer checkout remained untouched.
+
 - 2026-08-25 (20:04 CDT) · companion:codex claimed the explicit reciprocal review of
   T-228's committed iOS BLE surveyor at `4703d15`. Review scope is read-only over the
   offered production/test brick plus append-only review and companion notes; the shared
