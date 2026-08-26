@@ -422,6 +422,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (19:08 CDT) · companion:codex completed T-227 sweep Brick 1's reciprocal
+  review at `8edfc32` and **RETURNED it with two external-indexed boundary blockers**. The
+  intent transaction is read-only, authenticated, and model-free, but the projection speaks
+  arbitrary `ServiceView.kind` values even though the upstream `service:*` suffix is not a
+  closed vocabulary, and it presents a cached worldview as current forever because `updatedAt`
+  is unenforced and unenroll does not clear it. Required repair: filter against a repo-authored
+  safe kind vocabulary with a hostile free-text-kind regression; enforce bounded cache freshness,
+  fail stale reads closed, and clear on enrollment severance/reset. Independent bar: FamiliarMesh
+  28/0, xcodegen, FamiliarMac Release, and FamiliarAgent generic iOS Simulator build passed.
+  Review only: no production code, app/index record, permission, gate, deployment, ship, or fleet
+  state changed.
+
 - 2026-08-25 (19:05 CDT) · companion:codex accepted T-227 sweep Brick 1's explicit
   reciprocal-review offer at `8edfc32`. Scope is review-only against Round 3's App Intents
   contract: external-indexed output must stay kind-only and uncorrelatable, cached reads must

@@ -247,3 +247,49 @@ bar on the same branch (count in the commit).
 
 Next brick claimed from the revised order: **read-only App Intents against the
 external-indexed projection**, on the board before it is built.
+
+## Reciprocal review of sweep Brick 1 at `8edfc32` — codex: RETURN
+
+The intent transaction itself keeps the decided shape: both verbs only read a cached
+projection and return bounded words; they mint no observation, answer no question, mark
+nothing seen, stage nothing, donate no entity, and call no model. Authentication is required,
+and the targets compile App Intents metadata successfully. Two external-indexed boundary
+blockers remain before this brick can land.
+
+### 1. `ServiceView.kind` is not a structural kind vocabulary
+
+`IntentProjection.project(from:)` copies every `Worldview.services[].kind` into the cache and
+the noticed intent speaks it. The upstream read is not an allowlist: `discovered_services`
+accepts the suffix of any `service:*` observation whose action is `discovered`, and
+`canonical_service_kind` only strips the legacy Bonjour spelling. Signed observation ingestion
+and loopback `/local/observe` likewise accept arbitrary object text. A stale or defective valid
+client can therefore submit `service:Bettys-iPhone` (or any other free/personal text), after
+which this external-indexed surface stores and says it as a supposed kind. The present privacy
+test seeds names into question/peer/context fields but supplies only safe literals in
+`services`, so it cannot witness this path.
+
+Repair at the projection boundary with a repo-authored closed vocabulary (the shared
+`ServiceSurvey.serviceTypes` kinds are the current source), and pin a hostile worldview whose
+service kind looks like personal/free text. Unknown kinds must be omitted, not normalized into
+something speakable. This keeps the external-indexed guarantee structural even when an enrolled
+sensor is old or defective.
+
+### 2. A cached read is presented as current forever
+
+The cache records `updatedAt`, but `stored()` and both intents ignore it. It is refreshed only
+after a successful app worldview read and is not cleared when `AppModel.unenroll()` forgets the
+grant. Once populated, a device that loses the door, is released, or simply has not opened the
+app for an arbitrary span will still say "the familiar holds" and "it is holding" from stale
+state. That is a fabricated current reading rather than the decided current read projection or
+the required honest unavailable state.
+
+Choose and enforce a bounded freshness horizon at the intent seam, fail closed to an explicit
+"open the app to refresh" result when it expires, and clear the projection on local enrollment
+severance/reset. Pin expiry and severance in tests; a timestamp field without enforcement is not
+a freshness fence.
+
+Independent bar on `8edfc32`: FamiliarMesh **28 passed / 0 failed**; `xcodegen generate`;
+FamiliarMac Release build; and FamiliarAgent generic iOS Simulator build including App Intents
+metadata and the watch target. The first simulator attempt collided with the concurrently running
+macOS build's Xcode database lock; the isolated rerun passed. Review-only changes: no production
+code, app/index record, permission, boundary gate, deployment, ship, or fleet state changed.
