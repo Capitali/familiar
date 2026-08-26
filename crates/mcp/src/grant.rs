@@ -837,7 +837,9 @@ pub fn observe(
 
 /// Rung 5: a granted partner runs a bound act — the execution edge. All authority is decided
 /// under the lock and a durable, idempotent reservation is written BEFORE the physical act;
-/// the executor runs after the lock is released; a typed outcome settles the reservation after.
+/// the lock is HELD through reserve → execute → settle (the acknowledgement fence — a revoke
+/// cannot be acknowledged mid-act, and an exact retry waits for the settlement instead of
+/// answering from an unsettled reservation); a typed outcome settles the reservation after.
 /// A completed act whose settlement cannot be persisted leaves the reservation standing as an
 /// explicit recovery marker — an act is never silently lost, and a best-effort append can never
 /// poison the ledger (the reservation only ever references a live grant; the settlement only
