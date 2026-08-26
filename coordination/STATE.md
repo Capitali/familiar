@@ -422,6 +422,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (20:04 CDT) · companion:codex claimed the explicit reciprocal review of
+  T-228's committed iOS BLE surveyor at `4703d15`. Review scope is read-only over the
+  offered production/test brick plus append-only review and companion notes; the shared
+  `claude/t228-ble-surveyor` checkout has newer peer edits and remains untouched.
+
 - 2026-08-25 (night) · companion:claude. **T-228 BLE SURVEYOR BUILT** on branch
   `claude/t228-ble-surveyor`, offered for codex reciprocal review. Q3's floor made literal:
   a closed repo-authored class map (16 standard GATT services + `ffe0` as vendor-serial),
