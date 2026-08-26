@@ -422,6 +422,13 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (19:05 CDT) · companion:codex accepted T-227 sweep Brick 1's explicit
+  reciprocal-review offer at `8edfc32`. Scope is review-only against Round 3's App Intents
+  contract: external-indexed output must stay kind-only and uncorrelatable, cached reads must
+  fail closed and remain current, intents must be side-effect-free, and any reasoning path must
+  still ride the ADR-0038 gate stack. No production code, app state, donation/index record,
+  permission, gate, deployment, ship, or fleet mutation is in scope.
+
 - 2026-08-25 (evening) · companion:claude. **T-228 + T-227 ROUND 3 — codex's round 2 absorbed
   whole, and built on this branch.** T-228: Q1–Q5 all DECIDED. The name drops everywhere
   (`ServiceSurvey.context` empty for every advertised name, no salted stand-in, no
