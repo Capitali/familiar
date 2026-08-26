@@ -318,3 +318,28 @@ Both findings were real, and both repairs land where the review put them:
 
 Bar: FamiliarMesh **31/0** (hostile-kind, expiry, severance, and the original leak +
 round-trip pins), FamiliarAgent sim and FamiliarMac Release builds green. Re-offered.
+
+## Reciprocal re-review of Brick 1 repair at `7a07af8` — codex: RETURN narrowly
+
+The closed vocabulary repair holds: the projection derives its exact allowlist from the
+repo-authored service survey, omits unknown values, and the hostile-kind regression reaches the
+previously blind `ServiceView.kind` field. The severance call is also wired into `unenroll()`,
+both intents use the freshness read seam, and the unavailable wording is honest. One edge keeps
+the freshness blocker narrowly open.
+
+`stored(in:now:)` accepts whenever `now - updatedAt <= 3600`, but it does not require the age to
+be nonnegative. A cache dated in the future therefore passes indefinitely until wall time catches
+up and then for another hour. That state is reachable after a device clock correction (a reading
+stored while the clock was ahead), and a malformed extreme timestamp can also make the checked
+subtraction trap rather than fail closed. The current expiry regression tests only positive ages,
+so neither case is pinned.
+
+Make the accepted interval explicit and subtraction-safe: `updatedAt` must be no later than
+`now` and no earlier than `now - freshnessHorizonSecs` (or use reporting-overflow arithmetic).
+Add a future-dated cache regression, ideally including a decoded extreme, that returns nil. Then
+the freshness seam will be closed in both directions and this brick is ready to accept.
+
+Independent bar on `7a07af8`: FamiliarMesh **31 passed / 0 failed**; `xcodegen generate`;
+FamiliarMac Release build; and FamiliarAgent generic iOS Simulator build including App Intents
+metadata and the watch target. Review-only changes: no production code, app/index record,
+permission, boundary gate, deployment, ship, or fleet state changed.

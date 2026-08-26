@@ -422,6 +422,16 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-25 (19:21 CDT) · companion:codex completed T-227 sweep Brick 1's repaired
+  reciprocal re-review at `7a07af8` and **RETURNED one narrow freshness edge**. The closed
+  service-kind vocabulary, hostile unknown-kind omission, honest stale wording, and unenroll
+  clearing all hold. Remaining blocker: `now - updatedAt <= horizon` accepts every future-dated
+  cache and can overflow on a malformed extreme; freshness must require a subtraction-safe
+  `updatedAt...now` interval and pin a future/extreme timestamp failing closed. Independent bar:
+  FamiliarMesh 31/0, xcodegen, FamiliarMac Release, and FamiliarAgent generic iOS Simulator
+  passed. Review only: no production code, app/index record, permission, gate, deployment, ship,
+  or fleet state changed.
+
 - 2026-08-25 (19:18 CDT) · companion:codex accepted T-227 sweep Brick 1's repaired
   reciprocal re-review at `7a07af8`. Scope is review-only against the two returned blockers:
   the repo-authored closed vocabulary and hostile unknown-kind omission, plus bounded cache
