@@ -1373,6 +1373,11 @@ fn discovered_services(obs: &[familiar_kernel::observation::Observation]) -> Vec
         let kind = if let Some(kind) = o.object.strip_prefix("service:") {
             crate::observe::canonical_service_kind(kind)
         } else if let Some(class) = o.object.strip_prefix("ble:") {
+            // Defense in depth under the ingest fence: only the authored vocabulary is
+            // ever SERVED, so a pre-fence stored row with a minted "class" stays a fossil.
+            if !crate::observe::known_ble_class(&o.object) {
+                continue;
+            }
             class
         } else {
             continue;
@@ -1421,11 +1426,14 @@ mod discovered_services_tests {
         let obs = vec![
             row("ble:heart-rate", "seen=one", 100),
             row("service:mqtt", "", 90),
+            // A pre-fence stored row with a minted "class" is a fossil: never served.
+            row("ble:Bettys-Watch", "", 95),
         ];
         let v = discovered_services(&obs);
-        assert_eq!(v.len(), 2);
+        assert_eq!(v.len(), 2, "the minted ble class reached the served view");
         let ble = v.iter().find(|s| s.kind == "heart-rate").unwrap();
         assert!(ble.name.is_empty());
+        assert!(!serde_json::to_string(&v).unwrap().contains("Bettys"));
     }
 
     /// T-228 Q1, both compat acts at the viewer: legacy full-type rows and unified short-kind

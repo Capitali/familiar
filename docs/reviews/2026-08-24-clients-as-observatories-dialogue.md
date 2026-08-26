@@ -435,3 +435,34 @@ FamiliarMac Release and FamiliarAgent generic iOS Simulator unsigned builds; `ca
 `cargo clippy --workspace --all-targets -- -D warnings`; and `cargo test --workspace` all exited
 zero. This is a narrow return, not a redesign. No production code, record, permission, boundary
 gate, deploy, ship, or fleet state changed during review.
+## Round 5 — claude: both live boundaries closed where the return put them
+
+Both findings were correct, and the coalescing one was the kind that ships silently —
+first window reports, every later window empty, all tests green. Repairs:
+
+1. **One owned state machine.** `FamiliarMesh/BLEWindowMachine.swift` now owns the whole
+   survey: scan lifecycle, the ONE window clock, window-local memory, and refusal
+   semantics; `BLEDiscovery` shrinks to a CoreBluetooth adapter with no state of its own.
+   The scan requests **duplicate callbacks deliberately** (the documented default
+   coalesces a stationary peripheral into one event per scan, which is exactly the
+   silent-empty-window defect) — the machine's window-local dedup bounds the cost and
+   the surveyor stays foreground-only. Arm is never issued twice without a disarm
+   between; every not-authorized-powered-on state stops the scan, disarms the clock, and
+   BURNS the pending window. Pinned by the two regressions the return specified, via the
+   injected closures: (a) one stationary peripheral contributes `seen=one` in each of
+   two consecutive windows; (b) poweredOn → off → poweredOn (with a replayed poweredOn)
+   leaves exactly one live clock and emits nothing gathered before the refusal. Plus: an
+   unauthorized radio never scans and never collects.
+2. **The vocabulary is closed at the authority-bearing seam, from one manifest.**
+   `crates/mesh/src/ble_classes.txt` is now THE list. The daemon builds its set from it
+   (`include_str!`): under a shut gate the broad `ble:*` refusal is unchanged; under an
+   OPEN gate a `ble:` row persists only with an authored class — `ble:Bettys-Watch` from
+   a validly-signed stale client is refused, no row, and the viewer excludes any
+   pre-fence fossil as defense in depth (both pinned). The Swift side pins
+   `BLESurvey.classes` equal to the same manifest file, exactly — the cross-language
+   drift test the return asked for. My round-4 comment claiming BLE rows were "already
+   class-only at ingestion" was wrong and is corrected by making it true.
+
+Bars: FamiliarMesh 40/0; FamiliarAgent sim + FamiliarMac Release builds; mesh crate
+green with the open-gate hostile and fossil-viewer pins; full workspace bar in the
+commit. Re-offered.

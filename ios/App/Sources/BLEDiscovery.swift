@@ -2,76 +2,84 @@ import CoreBluetooth
 import FamiliarMesh
 import Foundation
 
-/// Surveys nearby BLE advertisements and reports CLASSES — the phone is the household's
-/// always-present radio (T-228, Ian: "every client is an observatory"), and this is the
-/// radio the shells never had.
+/// The CoreBluetooth adapter over [`BLEWindowMachine`] — the machine owns the survey's
+/// entire state (scan lifecycle, the one window clock, window-local memory, refusal
+/// semantics); this object only translates: delegate callbacks in, real scan/timer
+/// commands out. See the machine's doc for the two CoreBluetooth contracts that make
+/// this split load-bearing rather than taste (discovery coalescing and clock stacking).
 ///
-/// **What may be said** (Q3, closed): the service-UUID class plus a coarse per-window
-/// count — `ble:heart-rate / seen=few`. Never a peripheral name, manufacturer bytes,
-/// advertisement payload, or platform identifier; never a cross-window token. The only
-/// per-device state is `seenThisWindow`, an in-memory set of CoreBluetooth's (already
-/// per-host-randomized) peripheral ids used to avoid double-counting one device inside
-/// one window — it is cleared every window and never leaves this object.
-///
-/// **Authorization**: armed and stood down by `AppModel.startDiscoveryIfAuthorized`
-/// under exactly the gates the Bonjour survey rides — the household boundary's
-/// `allow_network_discovery` ∧ the device's narrowing preference — and the platform's
-/// own Bluetooth permission is the second half of the same authorization: without it
-/// this object reports an honest state and scans nothing.
-///
-/// **Actuation is not this file.** Driving a BLE device (the lights witness) needs a
-/// declared surface, a pairing ceremony, and `allow_actuate` — a survey only looks.
+/// **What may be said** (T-228 Q3, closed): the service-UUID class plus a coarse
+/// per-window count. Nothing else in an advertisement is even read. Actuation is not
+/// this file — a survey only looks.
 final class BLEDiscovery: NSObject, CBCentralManagerDelegate {
-    /// One survey window: sightings accumulate per class, then one bounded report leaves.
+    /// One survey window.
     static let windowSecs: TimeInterval = 60
 
-    private let deliver: ([ObsRecord]) async -> Void
     private var central: CBCentralManager?
-    private var classCounts: [String: Int] = [:]
-    private var seenThisWindow = Set<UUID>()
+    private var machine: BLEWindowMachine?
     private var windowTimer: Timer?
 
     /// The honest state string surfaced beside the survey toggle.
-    private(set) var state = "not started"
+    var state: String { machine?.state ?? "not started" }
 
     init(deliver: @escaping ([ObsRecord]) async -> Void) {
-        self.deliver = deliver
         super.init()
+        // The machine drives; these closures are its only hands.
+        machine = BLEWindowMachine(
+            startScan: { [weak self] allowDuplicates in
+                // Duplicates ON, deliberately: the default scan coalesces a stationary
+                // peripheral into one event per scan, which would empty every window
+                // after the first. The machine's window-local dedup bounds the cost,
+                // and the surveyor is foreground-only.
+                self?.central?.scanForPeripherals(
+                    withServices: nil,
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: allowDuplicates]
+                )
+            },
+            stopScan: { [weak self] in self?.central?.stopScan() },
+            armTimer: { [weak self] in
+                guard let self else { return }
+                self.windowTimer?.invalidate() // belt to the machine's braces
+                self.windowTimer = Timer.scheduledTimer(
+                    withTimeInterval: Self.windowSecs, repeats: true
+                ) { [weak self] _ in self?.machine?.tick() }
+            },
+            disarmTimer: { [weak self] in
+                self?.windowTimer?.invalidate()
+                self?.windowTimer = nil
+            },
+            report: { entries in
+                let actor = DeviceActor.current
+                let batch = entries.map { entry in
+                    ObsRecord(
+                        actor: actor, action: "discovered",
+                        object: entry.object, context: entry.context, confidence: 0.9
+                    )
+                }
+                Task { await deliver(batch) }
+            }
+        )
     }
 
     func start() {
-        stop()
-        // The manager prompts for Bluetooth permission on first creation; from then on the
-        // authorization is the human's standing answer, reported honestly either way.
+        // The manager prompts for Bluetooth permission on first creation; every state
+        // after that reaches the machine through the delegate below.
         central = CBCentralManager(delegate: self, queue: nil)
     }
 
     func stop() {
-        windowTimer?.invalidate()
-        windowTimer = nil
-        central?.stopScan()
+        machine?.radio(.unknown) // stands everything down: scan, clock, pending window
         central = nil
-        classCounts.removeAll()
-        seenThisWindow.removeAll()
-        state = "not started"
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
-            guard CBCentralManager.authorization == .allowedAlways else {
-                state = "Bluetooth permission not granted"
-                return
-            }
-            state = "surveying BLE classes"
-            central.scanForPeripherals(withServices: nil, options: nil)
-            windowTimer = Timer.scheduledTimer(
-                withTimeInterval: Self.windowSecs, repeats: true
-            ) { [weak self] _ in self?.closeWindow() }
-        case .unauthorized: state = "Bluetooth permission not granted"
-        case .poweredOff: state = "Bluetooth is off"
-        case .unsupported: state = "no BLE radio"
-        default: state = "waiting for Bluetooth"
+            machine?.radio(.poweredOn(authorized: CBCentralManager.authorization == .allowedAlways))
+        case .unauthorized: machine?.radio(.unauthorized)
+        case .poweredOff: machine?.radio(.poweredOff)
+        case .unsupported: machine?.radio(.unsupported)
+        default: machine?.radio(.unknown)
         }
     }
 
@@ -81,34 +89,11 @@ final class BLEDiscovery: NSObject, CBCentralManagerDelegate {
         advertisementData: [String: Any],
         rssi RSSI: NSNumber
     ) {
-        // One device counts once per window, keyed on the platform's own (per-host
-        // randomized) peripheral id — window-local memory only.
-        guard seenThisWindow.insert(peripheral.identifier).inserted else { return }
         let advertised =
             (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
-        // Each advertised service maps to a repo-authored class or to nothing at all —
-        // an unknown vendor UUID is never named, and nothing else in the advertisement
-        // (name, manufacturer data, payload) is even read.
-        for uuid in advertised {
-            if let cls = BLESurvey.bleClass(forServiceUUID: uuid.uuidString) {
-                classCounts[cls, default: 0] += 1
-            }
-        }
-    }
-
-    /// End of a window: one bounded, class-only report leaves; every per-window memory dies.
-    private func closeWindow() {
-        let report = BLESurvey.windowReport(classCounts: classCounts)
-        classCounts.removeAll()
-        seenThisWindow.removeAll()
-        guard !report.isEmpty else { return }
-        let actor = DeviceActor.current
-        let batch = report.map { entry in
-            ObsRecord(
-                actor: actor, action: "discovered",
-                object: entry.object, context: entry.context, confidence: 0.9
-            )
-        }
-        Task { await deliver(batch) }
+        machine?.sighting(
+            peripheral: peripheral.identifier,
+            serviceUUIDs: advertised.map(\.uuidString)
+        )
     }
 }

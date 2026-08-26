@@ -67,8 +67,32 @@ pub struct ObserveEnvelope {
 /// Is this observation object a network-discovery survey row — Bonjour (`service:*`) or BLE
 /// (`ble:*`)? One definition for every enforcement and exclusion point: the ingestion gate
 /// here, the federation scrub in [`crate::merge`], and the viewer in [`crate::worldview`].
+/// Deliberately BROAD on the `ble:` prefix — under a shut gate an unknown suffix must not
+/// bypass refusal; whether a suffix is a real class is [`known_ble_class`]'s question.
 pub(crate) fn is_network_discovery_object(object: &str) -> bool {
     object.starts_with("service:") || object.starts_with("ble:")
+}
+
+/// The closed BLE class vocabulary — THE one manifest (`ble_classes.txt`), shared with the
+/// Swift survey policy by a structural drift test on each side (codex's BLE review: the
+/// producer being closed is not enough; the authority-bearing ingest seam must enforce the
+/// same closure, or a stale/defective signed client can mint `ble:Bettys-Watch` into a
+/// durable row and a served kind).
+static BLE_CLASSES: std::sync::LazyLock<std::collections::BTreeSet<&'static str>> =
+    std::sync::LazyLock::new(|| {
+        include_str!("ble_classes.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect()
+    });
+
+/// Is this a `ble:` row whose class the repo authored? Only these persist or serve; an
+/// unknown suffix is refused at ingestion (and excluded by the viewer as defense in depth).
+pub(crate) fn known_ble_class(object: &str) -> bool {
+    object
+        .strip_prefix("ble:")
+        .is_some_and(|class| BLE_CLASSES.contains(class))
 }
 
 /// One canonical survey class for both wire forms (T-228 Q1, compat act 1): legacy macOS rows
@@ -194,19 +218,21 @@ pub(crate) fn ingest_observations(
     // of an honest batch still lands), the audit is bounded (a count and the node id — never
     // the rejected payload), and this is defense in depth, not a second authority.
     let discovery_shut = !boundary.allow_network_discovery;
-    if discovery_shut {
-        let refused = env
-            .observations
-            .iter()
-            .filter(|o| is_network_discovery_object(&o.object))
-            .count();
-        if refused > 0 {
-            eprintln!(
-                "observe: refused {refused} network-discovery observation(s) from mesh:{} — \
-                 allow_network_discovery is shut",
-                env.node.node_id
-            );
-        }
+    // Two refusals, one seam: under a shut gate EVERY discovery row is refused (broad
+    // prefix match, so an unknown suffix cannot bypass); under an open gate a `ble:` row
+    // must still carry a repo-authored class — the Swift producer being closed is not
+    // enough, because a stale or defective signed client is exactly Q2's threat model.
+    let refuse = |o: &ObsRecord| -> bool {
+        (discovery_shut && is_network_discovery_object(&o.object))
+            || (o.object.starts_with("ble:") && !known_ble_class(&o.object))
+    };
+    let refused = env.observations.iter().filter(|o| refuse(o)).count();
+    if refused > 0 {
+        eprintln!(
+            "observe: refused {refused} discovery observation(s) from mesh:{} — \
+             gate shut or class outside the authored vocabulary",
+            env.node.node_id
+        );
     }
 
     // Under one short lock (no IO held): reject a replayed nonce, then pick the observations to
@@ -225,7 +251,7 @@ pub(crate) fn ingest_observations(
                     && !o.action.trim().is_empty()
                     && !o.object.trim().is_empty()
             })
-            .filter(|(_, o)| !(discovery_shut && is_network_discovery_object(&o.object)))
+            .filter(|(_, o)| !refuse(o))
             .filter(|(_, o)| g.allow_triple(&o.actor, &o.action, &o.object, now))
             .map(|(i, _)| i)
             .collect()
@@ -668,10 +694,18 @@ mod tests {
             "n1",
             NOW,
             DEFAULT_CERT_TTL_SECS,
-            vec![obs("service:airplay"), obs("ble:lighting")],
+            vec![
+                obs("service:airplay"),
+                obs("ble:heart-rate"),
+                // An OPEN gate is not an open vocabulary: a minted "class" from a stale
+                // or defective signed client is refused even here (codex's BLE review).
+                obs("ble:Bettys-Watch"),
+            ],
         );
         let n = ingest_observations(&host, &raw, &sig, NOW, &ring()).unwrap();
-        assert_eq!(n, 2);
-        assert_eq!(observation::load(&host).unwrap().len(), 2);
+        assert_eq!(n, 2, "the minted ble class must not land");
+        let stored = observation::load(&host).unwrap();
+        assert_eq!(stored.len(), 2);
+        assert!(!serde_json::to_string(&stored).unwrap().contains("Bettys"));
     }
 }
