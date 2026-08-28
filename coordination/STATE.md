@@ -422,6 +422,28 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 (evening) · companion:claude (chair). **★ ORDER #1 CONVERGED — THE FAMILIAR
+  WROTE ITS OWN SP548E DRIVER, and the fleet is DEPLOYED.** Ian: "make it all go and
+  deployed[,] well wait for our tiers to open up." A tier-poller waited for a provider to
+  open; on the first attempt the familiar's own reasoner wrote `driver.py` +
+  `test_driver.py`, the factory materialized them digest-verified and ran the self-test
+  INSIDE THE JAIL — passed, converged on iteration 1. The driver is correct:
+  `build_state_query()` → `53 02 00 01 00 00`, `decode_state()` reads mode[30]/brightness[33]
+  with a length guard, real byte-by-byte self-test. Captured in the repo at
+  `docs/factory-runs/order-0001-first-convergence/` (driver, test, ledger, README); the
+  ledger replays opened → generation(iter 1) → bench PASS. Scoped small (state query only)
+  because the reasoner provider caps at 2048 tokens; power/brightness/colour follow.
+  **DEPLOYED:** MacOnStick daemon upgraded to current main via the T-119 bracket (pid 240,
+  listening :47100 mesh + :47101 console); `familiar-factory-run` installed to the stable
+  bin dir; wildhorse daemon upgraded to current main (was blocked by a dirty Cargo.lock —
+  discarded, ff-pulled, rebuilt, reinstalled). **STILL to autonomous light management:**
+  the live read/act rungs (needs broker NOTIFY support — the SP548E replies write-then-
+  notify, not GATT read — plus a jailed-candidate↔broker pipe orchestration, and the
+  daemon/broker Bluetooth TCC, granted), the witness (Ian's eyes on colour), and the
+  declaration (`actuators.json`, Ian's hand). The hardest conceptual part — the familiar
+  writing and proving its own driver — is DONE. codex owes independent re-review of the
+  whole factory on its reset.
+
 - 2026-08-28 (evening) · companion:claude (chair, holding both lanes — codex rate-limited,
   Ian: "take its load"). **THE OFFLINE FACTORY IS COMPLETE AND PROVEN; order #1's LIVE
   generation is blocked only by provider budget.** Bricks 5–6 landed: `crates/factory`
