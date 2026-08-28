@@ -25,23 +25,34 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   `allow_actuate` per ADR-0032; witness = human eyes for what the device never
   echoes); state derived by ledger replay, fail-closed; **the factory proposes
   exact `actuators.json`, Ian declares** (no daemon write, no ADR-0032 amendment).
-- bricks: (1) `crates/workshop` — orders/contract/manifests/ledger — **BUILT
-  2026-08-28, 23/0, clippy 0, offered for codex review; RECIPROCAL REVIEW
-  RETURNED 2026-08-28 — four repairs: derive declaration equality from digests,
-  bind witness/failure proof to the exact iteration, enforce the typed generation
-  contract at the ledger door, and serialize append**
-  (`docs/reviews/2026-08-28-t229-brick1-reciprocal-review.md`). **FOLLOW-UP REVIEW
-  RETURNED 2026-08-28:** the four repairs are present, but a later generation can inherit
-  an earlier declaration, and mtime-based stale-lock stealing can recreate concurrent
-  writers. Brick 2's jail is also returned: its combined SBPL allow grants ambient file
-  reads, the denylist is optional, output is truncated only after exit/timeout, and
-  CPU/memory/process/fd limits are absent. Broker ruling recorded in the same review:
-  trusted separate radio owner, candidate gets only fixed typed pipe FDs, no broad Mach
-  lookup or peripheral/UUID choice; no live session before jail acceptance.** (2) BLE
-  broker + jail with hostile fixtures; (3) FACTORY.md + coordination/AUTONOMY.md drafts
-  (owner confirms the three lists); (4) order #1 runs the loop live.
-- waits on Ian only: Bluetooth TCC for the daemon path at commissioning time, the
-  witness answers, and the declaration itself.
+- **BRICKS 1–6 BUILT AND ON MAIN 2026-08-28. All 8 of codex's blockers (two review
+  rounds) repaired + pinned. Then codex hit its usage limit; per Ian ("take its load")
+  claude took the review load — an adversarial chair self-review is recorded
+  (`docs/reviews/2026-08-28-t229-chair-self-review.md`), explicitly self-review not a
+  substitute for codex's independent eyes, staying open to codex's re-review.** Bricks:
+  (1) `crates/workshop` — orders/contract/manifests/ledger — 33/0. Blockers 1–4
+  (derive declaration equality; bind witness+failed-rung proof; enforce the generation
+  contract at the append door; serialize appends) and 5–6 (a new generation clears
+  proposed/declared; pid-lease lock replaces mtime-steal, +sync_all, +orphan reclaim)
+  all fixed. (2) `crates/jail` — macOS containment — 8/0. Blockers 7–8: MANDATORY
+  code-owned household denylist; radio hole closed (no mach-lookup — bleak reports
+  "Bluetooth unsupported" inside); streaming output cap w/ distinct OutputCapExceeded
+  kill; ulimits; live-listener network fixture; fork fan-out group-kill. Documented:
+  macOS-27 dyld forces a mandatory-denylist over a true read-allowlist (static/container
+  runtime is the recorded true-allowlist follow-up); ulimit -u is per-user. (4)
+  `tools/ble-broker/broker.py` — the trusted broker — 14/14. (5) `crates/factory`
+  materialize + bench oracle runner — 15/0. (6) the convergence loop + the real
+  ReasonerAdapter (consult-seam generation, prompt+parser). **The OFFLINE factory is
+  proven end to end: generate → validate → converge on the bench oracle (in the jail) →
+  ledger replay as sole truth.** (3) FACTORY.md + coordination/AUTONOMY.md (DRAFT — Ian
+  confirms the three lists) + docs/research/sp548e-protocol.md — done.
+- REMAINING to autonomous light management: live read/act rung runners (broker↔jailed
+  candidate over a pipe), the witness flow (console), and daemon integration (factory
+  tick + declared surface). These wait on: codex's re-review of the foundation, Ian's
+  `allow_llm` (real generation), Ian's Bluetooth TCC (**granted 2026-08-28**), the
+  witness answers, and the declaration.
+- waits on Ian only: `allow_llm` for generation; the witness answers; and the
+  declaration (`actuators.json`, ADR-0032 — the factory proposes, Ian installs).
 
 *(companions add here; the controller queues or declines)*
 
