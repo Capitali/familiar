@@ -1,0 +1,18 @@
+[package]
+name = "familiar-jail"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# The containment adapter (T-229 brick 2). Generates the macOS sandbox profile
+# (SBPL) for a factory candidate and launches the candidate under it with an
+# empty allowlisted env, read-only candidate tree, one writable scratch dir,
+# no network, no radio, and a wall-clock bound that kills the whole process
+# group on overrun. std only: a small, legible trust surface is part of what
+# makes this jail defensible. The BLE broker owns the radio; a candidate under
+# this jail can never reach it.
+[dependencies]
+
+[lib]
+name = "familiar_jail"
+path = "src/lib.rs"

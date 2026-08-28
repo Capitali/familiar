@@ -129,6 +129,16 @@ pub enum OrderError {
     DanglingPath(String),
     /// A candidate claims effects beyond the ordered capability surface.
     EffectBeyondOrder(String),
+    /// A candidate's declared capability surface exceeds the order's.
+    SurfaceBeyondOrder(String),
+    /// A candidate's toolchain lock is not the one the order provisioned.
+    ToolchainMismatch {
+        ordered: String,
+        got: String,
+    },
+    /// An entrypoint names a file whose role is not `Source`, or a self-test
+    /// names a file whose role is not `SelfTest`.
+    RoleMismatch(String),
     ManifestInvalid(String),
 }
 
@@ -149,6 +159,21 @@ impl std::fmt::Display for OrderError {
             OrderError::DanglingPath(p) => write!(f, "path not in manifest: {p}"),
             OrderError::EffectBeyondOrder(e) => {
                 write!(f, "declared effect beyond ordered surface: {e}")
+            }
+            OrderError::SurfaceBeyondOrder(s) => {
+                write!(
+                    f,
+                    "candidate capability surface beyond ordered surface: {s}"
+                )
+            }
+            OrderError::ToolchainMismatch { ordered, got } => {
+                write!(
+                    f,
+                    "toolchain lock mismatch: ordered {ordered:?}, candidate {got:?}"
+                )
+            }
+            OrderError::RoleMismatch(p) => {
+                write!(f, "file role inconsistent with its use: {p}")
             }
             OrderError::ManifestInvalid(e) => write!(f, "manifest invalid: {e}"),
         }
@@ -179,26 +204,58 @@ pub fn validate_order(o: &WorkOrder) -> Result<(), OrderError> {
     Ok(())
 }
 
-/// Validate a candidate against its order: manifest well-formed, every
-/// entrypoint/self-test inside the manifest, no effect beyond the ordered
-/// surface. A refusal is always valid — it is the contract's honest exit.
+/// Validate a candidate against its order: manifest well-formed; every
+/// entrypoint/self-test inside the manifest AND role-consistent (entrypoints
+/// are `Source`, self-tests are `SelfTest`); no declared effect or capability
+/// surface beyond the order; the toolchain lock exactly the one the order
+/// provisioned. A refusal is always valid — it is the contract's honest exit.
+///
+/// This is the authority door for generation: an outcome that does not pass
+/// here must never be minted into the ledger (see `Ledger::append_generation`).
 pub fn validate_outcome(order: &WorkOrder, outcome: &GenerationOutcome) -> Result<(), OrderError> {
-    let (manifest, entrypoints, self_tests, effects) = match outcome {
+    use crate::manifest::FileRole;
+    let (manifest, entrypoints, self_tests, effects, surface, lock) = match outcome {
         GenerationOutcome::Refused(_) => return Ok(()),
         GenerationOutcome::Candidate {
             manifest,
             entrypoints,
             self_tests,
             declared_effects,
-            ..
-        } => (manifest, entrypoints, self_tests, declared_effects),
+            capability_surface,
+            toolchain_lock,
+        } => (
+            manifest,
+            entrypoints,
+            self_tests,
+            declared_effects,
+            capability_surface,
+            toolchain_lock,
+        ),
     };
     crate::manifest::validate(manifest).map_err(|e| OrderError::ManifestInvalid(e.to_string()))?;
-    let known: std::collections::BTreeSet<&str> =
-        manifest.files.iter().map(|f| f.path.as_str()).collect();
-    for p in entrypoints.iter().chain(self_tests.iter()) {
-        if !known.contains(p.as_str()) {
-            return Err(OrderError::DanglingPath(p.clone()));
+    if *lock != order.toolchain.lock_digest {
+        return Err(OrderError::ToolchainMismatch {
+            ordered: order.toolchain.lock_digest.clone(),
+            got: lock.clone(),
+        });
+    }
+    let role_of: std::collections::BTreeMap<&str, FileRole> = manifest
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.role))
+        .collect();
+    for p in entrypoints {
+        match role_of.get(p.as_str()) {
+            None => return Err(OrderError::DanglingPath(p.clone())),
+            Some(FileRole::Source) => {}
+            Some(_) => return Err(OrderError::RoleMismatch(p.clone())),
+        }
+    }
+    for p in self_tests {
+        match role_of.get(p.as_str()) {
+            None => return Err(OrderError::DanglingPath(p.clone())),
+            Some(FileRole::SelfTest) => {}
+            Some(_) => return Err(OrderError::RoleMismatch(p.clone())),
         }
     }
     for e in effects {
@@ -206,7 +263,19 @@ pub fn validate_outcome(order: &WorkOrder, outcome: &GenerationOutcome) -> Resul
             return Err(OrderError::EffectBeyondOrder(e.clone()));
         }
     }
+    for s in surface {
+        if !order.capability_surface.contains(s) {
+            return Err(OrderError::SurfaceBeyondOrder(s.clone()));
+        }
+    }
     Ok(())
+}
+
+/// sha256 of a generation outcome's canonical JSON — its content-address, the
+/// digest the ledger cites.
+pub fn outcome_digest(outcome: &GenerationOutcome) -> String {
+    let json = serde_json::to_vec(outcome).unwrap_or_default();
+    crate::manifest::digest_bytes(&json)
 }
 
 #[cfg(test)]
@@ -326,6 +395,58 @@ mod tests {
         assert_eq!(
             validate_outcome(&order_one(), &c),
             Err(OrderError::EffectBeyondOrder("unlock-door".into()))
+        );
+    }
+
+    #[test]
+    fn a_capability_surface_beyond_the_order_is_refused() {
+        let mut c = candidate();
+        if let GenerationOutcome::Candidate {
+            capability_surface, ..
+        } = &mut c
+        {
+            capability_surface.push("unlock-door".into());
+        }
+        assert_eq!(
+            validate_outcome(&order_one(), &c),
+            Err(OrderError::SurfaceBeyondOrder("unlock-door".into()))
+        );
+    }
+
+    #[test]
+    fn a_toolchain_lock_other_than_the_ordered_one_is_refused() {
+        let mut c = candidate();
+        if let GenerationOutcome::Candidate { toolchain_lock, .. } = &mut c {
+            *toolchain_lock = digest_bytes(b"some-other-lock");
+        }
+        assert!(matches!(
+            validate_outcome(&order_one(), &c),
+            Err(OrderError::ToolchainMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn an_entrypoint_that_is_not_source_is_refused() {
+        // Point the entrypoint at the self-test file (role SelfTest).
+        let mut c = candidate();
+        if let GenerationOutcome::Candidate { entrypoints, .. } = &mut c {
+            *entrypoints = vec!["test_sp548e.py".into()];
+        }
+        assert_eq!(
+            validate_outcome(&order_one(), &c),
+            Err(OrderError::RoleMismatch("test_sp548e.py".into()))
+        );
+    }
+
+    #[test]
+    fn a_self_test_that_is_not_a_self_test_role_is_refused() {
+        let mut c = candidate();
+        if let GenerationOutcome::Candidate { self_tests, .. } = &mut c {
+            *self_tests = vec!["sp548e.py".into()]; // role Source
+        }
+        assert_eq!(
+            validate_outcome(&order_one(), &c),
+            Err(OrderError::RoleMismatch("sp548e.py".into()))
         );
     }
 }

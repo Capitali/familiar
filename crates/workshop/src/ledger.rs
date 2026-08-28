@@ -9,10 +9,29 @@
 //! Events carry digests, never artifacts: the ledger says *what happened and
 //! to which exact bytes*; the content-addressed store says what the bytes
 //! were.
+//!
+//! Four authority boundaries this module holds closed (codex's Brick-1
+//! review, 2026-08-28):
+//!   1. **Declaration equality is derived, never asserted.** An observed
+//!      declaration advances the order only when its digest equals the
+//!      proposed digest — no caller-supplied "it matches" bit exists.
+//!   2. **Proof cannot be manufactured inside an iteration.** A witness pass
+//!      requires a `Yes` bound to that exact request; a `No` fails the
+//!      iteration; and any failed rung bars every further rung until the next
+//!      counted generation.
+//!   3. **The generation contract is enforced at the door.** A
+//!      `GenerationReturned` event can only be minted from a
+//!      `validate_outcome`-passing outcome ([`Ledger::append_generation`]),
+//!      and replay re-checks the carried surface/lock against the order.
+//!   4. **Appends are serialized.** A cross-process lock file guards the
+//!      whole read→validate→write section, so concurrent writers cannot mint
+//!      duplicate sequence numbers.
 
 use serde::{Deserialize, Serialize};
 
-use crate::order::{validate_order, OracleRung, WorkOrder};
+use crate::order::{
+    outcome_digest, validate_order, validate_outcome, GenerationOutcome, OracleRung, WorkOrder,
+};
 
 /// A witness's permitted answers. `Unclear` records that a witness was
 /// attempted and supplies no proof in either direction.
@@ -41,12 +60,21 @@ pub enum EventKind {
     /// Always and only the first event. Carries the whole immutable order
     /// (boxed: this variant is far larger than the rest).
     Opened { order: Box<WorkOrder> },
-    /// A generation adapter returned. Iterations are counted from 1 and must
-    /// arrive in order; a refused outcome is recorded, not erased.
+    /// A generation adapter returned. Minted only through
+    /// [`Ledger::append_generation`], which validates the whole outcome; the
+    /// carried surface/lock let replay re-check the order fit. Iterations are
+    /// counted from 1 and must arrive in order; a refused outcome is
+    /// recorded, not erased.
     GenerationReturned {
         iteration: u32,
         outcome_digest: String,
         refused: bool,
+        /// The candidate's capability surface (empty for a refusal) — replay
+        /// re-checks it is within the order.
+        capability_surface: Vec<String>,
+        /// The candidate's toolchain lock (empty for a refusal) — replay
+        /// re-checks it equals the order's.
+        toolchain_lock: String,
     },
     /// An oracle rung's verdict for the current iteration's candidate.
     RungVerdict {
@@ -60,9 +88,11 @@ pub enum EventKind {
         iteration: u32,
         request_digest: String,
     },
-    /// The human answered that exact request.
+    /// The human answered that exact request — the digest must match the
+    /// outstanding one, so an answer cannot be re-bound to a different ask.
     WitnessAnswered {
         iteration: u32,
+        request_digest: String,
         answer: WitnessAnswer,
     },
     /// The order parked (gate shut, jail unavailable, witness outstanding…).
@@ -71,8 +101,10 @@ pub enum EventKind {
     /// The factory proposed an exact declaration for the human's hand.
     /// `reduced` means unproved operations were excluded from the proposal.
     DeclarationProposed { digest: String, reduced: bool },
-    /// The workshop independently observed the on-disk declaration.
-    DeclarationObserved { digest: String, matches: bool },
+    /// The workshop observed the on-disk declaration. Whether it advances the
+    /// order is DERIVED from digest equality with the proposal — there is no
+    /// caller-supplied match bit.
+    DeclarationObserved { digest: String },
     /// Post-declaration, post-restart smoke pass through the declared
     /// command. Terminal success.
     Commissioned { evidence_digest: String },
@@ -81,9 +113,7 @@ pub enum EventKind {
     Closed { reason: String },
 }
 
-/// The state replay derives. Deliberately small: rung progress lives in
-/// [`OrderState::iteration`]/[`OrderState::rungs_passed`], not in extra
-/// states.
+/// The state replay derives.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrderState {
     pub order: WorkOrder,
@@ -93,12 +123,18 @@ pub struct OrderState {
     pub refused: bool,
     /// Rungs passed by the current iteration, in plan order.
     pub rungs_passed: Vec<OracleRung>,
-    /// An outstanding witness request awaiting its answer.
-    pub witness_outstanding: bool,
+    /// Set when a rung fails or a witness answers `No`: no rung may pass and
+    /// no witness may be requested until the next counted generation.
+    pub iteration_broken: bool,
+    /// The request digest of an outstanding, unanswered witness ask.
+    pub witness_outstanding: Option<String>,
+    /// A `Yes` arrived for a witness request this iteration — the only thing
+    /// that admits a `Witness` rung pass.
+    pub witness_passed: bool,
     pub parked: Option<String>,
     /// Digest of a proposed declaration, once proposed.
     pub proposed: Option<String>,
-    /// True once the on-disk declaration matched the proposal.
+    /// True once an observed declaration's digest equalled the proposal.
     pub declared: bool,
     pub commissioned: bool,
     pub closed: Option<String>,
@@ -133,9 +169,23 @@ pub enum LedgerError {
     RungBeforePredecessor(OracleRung),
     RungWithoutCandidate,
     RungAfterRefusal,
+    /// A rung verdict or witness request after a failed rung / `No` witness,
+    /// with no new generation between — a failure demands a new iteration.
+    RungAfterFailure,
     DuplicateRung(OracleRung),
     WitnessNotRequested,
+    /// An answer whose request digest is not the outstanding one.
+    WitnessDigestMismatch,
     WitnessAlreadyOutstanding,
+    /// A `Witness` rung pass with no bound `Yes` for a request this iteration.
+    WitnessPassWithoutYes,
+    /// A generation event whose carried surface exceeds the order.
+    GenerationSurfaceBeyondOrder(String),
+    /// A generation event whose carried lock is not the order's.
+    GenerationToolchainMismatch,
+    /// A raw `append` was handed a `GenerationReturned` — those must go
+    /// through `append_generation`, which validates the outcome.
+    UseAppendGeneration,
     ProposalBeforeProof,
     /// A full (non-reduced) proposal with the plan's witness rung unpassed.
     FullProposalUnwitnessed,
@@ -166,10 +216,28 @@ impl std::fmt::Display for LedgerError {
             }
             LedgerError::RungWithoutCandidate => write!(f, "rung verdict before any candidate"),
             LedgerError::RungAfterRefusal => write!(f, "rung verdict on a refused iteration"),
+            LedgerError::RungAfterFailure => {
+                write!(f, "rung/witness after a failure without a new generation")
+            }
             LedgerError::DuplicateRung(r) => write!(f, "rung {r:?} judged twice this iteration"),
             LedgerError::WitnessNotRequested => write!(f, "witness answer without a request"),
+            LedgerError::WitnessDigestMismatch => {
+                write!(f, "witness answer digest is not the outstanding request")
+            }
             LedgerError::WitnessAlreadyOutstanding => {
                 write!(f, "second witness request while one is outstanding")
+            }
+            LedgerError::WitnessPassWithoutYes => {
+                write!(f, "witness rung passed without a bound yes")
+            }
+            LedgerError::GenerationSurfaceBeyondOrder(s) => {
+                write!(f, "generation surface beyond order: {s}")
+            }
+            LedgerError::GenerationToolchainMismatch => {
+                write!(f, "generation toolchain lock is not the order's")
+            }
+            LedgerError::UseAppendGeneration => {
+                write!(f, "generation events must be minted via append_generation")
             }
             LedgerError::ProposalBeforeProof => {
                 write!(f, "declaration proposed before bench/read/act closed")
@@ -212,7 +280,9 @@ pub fn replay(events: &[LedgerEvent]) -> Result<OrderState, LedgerError> {
                 iteration: 0,
                 refused: false,
                 rungs_passed: Vec::new(),
-                witness_outstanding: false,
+                iteration_broken: false,
+                witness_outstanding: None,
+                witness_passed: false,
                 parked: None,
                 proposed: None,
                 declared: false,
@@ -250,7 +320,11 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
     match &ev.kind {
         EventKind::Opened { .. } => Err(LedgerError::SecondOpening),
         EventKind::GenerationReturned {
-            iteration, refused, ..
+            iteration,
+            refused,
+            capability_surface,
+            toolchain_lock,
+            ..
         } => {
             let expected = state.iteration + 1;
             if *iteration != expected {
@@ -259,10 +333,22 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
                     got: *iteration,
                 });
             }
+            if !*refused {
+                for s in capability_surface {
+                    if !state.order.capability_surface.contains(s) {
+                        return Err(LedgerError::GenerationSurfaceBeyondOrder(s.clone()));
+                    }
+                }
+                if *toolchain_lock != state.order.toolchain.lock_digest {
+                    return Err(LedgerError::GenerationToolchainMismatch);
+                }
+            }
             state.iteration = *iteration;
             state.refused = *refused;
             state.rungs_passed.clear();
-            state.witness_outstanding = false;
+            state.iteration_broken = false;
+            state.witness_outstanding = None;
+            state.witness_passed = false;
             state.parked = None;
             Ok(())
         }
@@ -284,6 +370,9 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
             if state.refused {
                 return Err(LedgerError::RungAfterRefusal);
             }
+            if state.iteration_broken {
+                return Err(LedgerError::RungAfterFailure);
+            }
             let plan = &state.order.oracle_plan;
             let pos = plan
                 .iter()
@@ -296,28 +385,52 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
                 return Err(LedgerError::RungBeforePredecessor(*rung));
             }
             if *pass {
+                if *rung == OracleRung::Witness && !state.witness_passed {
+                    return Err(LedgerError::WitnessPassWithoutYes);
+                }
                 state.rungs_passed.push(*rung);
+            } else {
+                // A failed rung ends the iteration's authority to pass
+                // anything: the next legal progress is a new generation.
+                state.iteration_broken = true;
             }
-            // A failed rung leaves rungs_passed as it was: the next legal
-            // step is another generation iteration or a park, and replay
-            // shows exactly which rung refused to close.
             Ok(())
         }
-        EventKind::WitnessRequested { iteration, .. } => {
-            if *iteration != state.iteration || state.iteration == 0 {
+        EventKind::WitnessRequested {
+            iteration,
+            request_digest,
+        } => {
+            if state.iteration == 0 || *iteration != state.iteration {
                 return Err(LedgerError::RungWithoutCandidate);
             }
-            if state.witness_outstanding {
+            if state.iteration_broken {
+                return Err(LedgerError::RungAfterFailure);
+            }
+            if state.witness_outstanding.is_some() {
                 return Err(LedgerError::WitnessAlreadyOutstanding);
             }
-            state.witness_outstanding = true;
+            state.witness_outstanding = Some(request_digest.clone());
             Ok(())
         }
-        EventKind::WitnessAnswered { iteration, .. } => {
-            if !state.witness_outstanding || *iteration != state.iteration {
+        EventKind::WitnessAnswered {
+            iteration,
+            request_digest,
+            answer,
+        } => {
+            if *iteration != state.iteration {
                 return Err(LedgerError::WitnessNotRequested);
             }
-            state.witness_outstanding = false;
+            match &state.witness_outstanding {
+                None => return Err(LedgerError::WitnessNotRequested),
+                Some(d) if d != request_digest => return Err(LedgerError::WitnessDigestMismatch),
+                Some(_) => {}
+            }
+            state.witness_outstanding = None;
+            match answer {
+                WitnessAnswer::Yes => state.witness_passed = true,
+                WitnessAnswer::No => state.iteration_broken = true,
+                WitnessAnswer::Unclear => { /* unproved; order may park or re-ask */ }
+            }
             Ok(())
         }
         EventKind::Parked { reason } => {
@@ -342,13 +455,16 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
             state.parked = None;
             Ok(())
         }
-        EventKind::DeclarationObserved { matches, .. } => {
-            if state.proposed.is_none() {
-                return Err(LedgerError::ObservationBeforeProposal);
-            }
-            // A diverged declaration is recorded but does not advance the
-            // order — the changed surface must be revalidated upstream.
-            state.declared = *matches;
+        EventKind::DeclarationObserved { digest } => {
+            let proposed = state
+                .proposed
+                .as_deref()
+                .ok_or(LedgerError::ObservationBeforeProposal)?;
+            // Derived, never asserted: equality of digests is the only thing
+            // that advances the order. A diverged declaration is recorded but
+            // leaves `declared` false — the changed surface must be
+            // re-proposed and re-validated upstream.
+            state.declared = proposed == digest.as_str();
             Ok(())
         }
         EventKind::Commissioned { .. } => {
@@ -365,9 +481,63 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
     }
 }
 
-/// The on-disk ledger: one JSON event per line, append-only. Append
-/// revalidates the whole file plus the new event before a byte is written,
-/// so an illegal transition can never reach disk through this door.
+/// A cross-process advisory lock held for the duration of a critical section.
+/// A crashed holder's lock is stolen after [`LOCK_STALE_SECS`]; within a
+/// single daemon this is belt-and-suspenders, but the ledger is meant to be
+/// the sole truth, so the guard is real.
+struct LedgerLock {
+    path: std::path::PathBuf,
+}
+
+const LOCK_STALE_SECS: u64 = 30;
+
+impl LedgerLock {
+    fn acquire(base: &std::path::Path) -> Result<Self, String> {
+        let path = base.with_extension("lock");
+        for _ in 0..2_000 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(_) => return Ok(LedgerLock { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if Self::is_stale(&path) {
+                        let _ = std::fs::remove_file(&path);
+                        continue;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => return Err(format!("ledger lock: {e}")),
+            }
+        }
+        Err("ledger lock timeout".to_string())
+    }
+
+    fn is_stale(path: &std::path::Path) -> bool {
+        let Ok(meta) = std::fs::metadata(path) else {
+            return false;
+        };
+        let Ok(modified) = meta.modified() else {
+            return false;
+        };
+        modified
+            .elapsed()
+            .map(|age| age.as_secs() >= LOCK_STALE_SECS)
+            .unwrap_or(false)
+    }
+}
+
+impl Drop for LedgerLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// The on-disk ledger: one JSON event per line, append-only. Every append
+/// takes a cross-process lock, revalidates the whole file plus the new event
+/// by full replay, then writes one flushed line — so an illegal transition
+/// can never reach disk and two writers can never mint the same sequence.
 pub struct Ledger {
     path: std::path::PathBuf,
 }
@@ -395,11 +565,58 @@ impl Ledger {
         Ok(events)
     }
 
-    /// Replay the file (empty is only legal for a first append, which must
-    /// open the order), validate the new event against the proven state,
-    /// then append one line.
+    /// Append one event that is NOT a generation. Generation must go through
+    /// [`Ledger::append_generation`], which validates the outcome.
     pub fn append(&self, at: u64, order_id: &str, kind: EventKind) -> Result<OrderState, String> {
-        let mut events = self.read()?;
+        if matches!(kind, EventKind::GenerationReturned { .. }) {
+            return Err(LedgerError::UseAppendGeneration.to_string());
+        }
+        let _lock = LedgerLock::acquire(&self.path)?;
+        let events = self.read()?;
+        self.write_validated(events, at, order_id, kind)
+    }
+
+    /// Mint a generation event, but only from an outcome that passes the full
+    /// contract against the order recorded in this ledger. The event stores
+    /// the outcome's digest and its (order-fitting) surface/lock.
+    pub fn append_generation(
+        &self,
+        at: u64,
+        order_id: &str,
+        iteration: u32,
+        outcome: &GenerationOutcome,
+    ) -> Result<OrderState, String> {
+        let _lock = LedgerLock::acquire(&self.path)?;
+        let events = self.read()?;
+        let state = replay(&events).map_err(|e| e.to_string())?;
+        validate_outcome(&state.order, outcome).map_err(|e| e.to_string())?;
+        let (refused, surface, lock) = match outcome {
+            GenerationOutcome::Refused(_) => (true, Vec::new(), String::new()),
+            GenerationOutcome::Candidate {
+                capability_surface,
+                toolchain_lock,
+                ..
+            } => (false, capability_surface.clone(), toolchain_lock.clone()),
+        };
+        let kind = EventKind::GenerationReturned {
+            iteration,
+            outcome_digest: outcome_digest(outcome),
+            refused,
+            capability_surface: surface,
+            toolchain_lock: lock,
+        };
+        self.write_validated(events, at, order_id, kind)
+    }
+
+    /// With the lock already held: append the event to `events`, replay the
+    /// whole thing to prove legality, then write one flushed line.
+    fn write_validated(
+        &self,
+        mut events: Vec<LedgerEvent>,
+        at: u64,
+        order_id: &str,
+        kind: EventKind,
+    ) -> Result<OrderState, String> {
         let seq = events.len() as u64 + 1;
         events.push(LedgerEvent {
             seq,
@@ -417,6 +634,7 @@ impl Ledger {
             .open(&self.path)
             .map_err(|e| format!("ledger open: {e}"))?;
         writeln!(f, "{line}").map_err(|e| format!("ledger write: {e}"))?;
+        f.flush().map_err(|e| format!("ledger flush: {e}"))?;
         Ok(state)
     }
 
@@ -428,7 +646,7 @@ impl Ledger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::digest_bytes;
+    use crate::manifest::{digest_bytes, FileEntry, FileRole, Manifest};
     use crate::order::{OracleRung, ResearchEntry, Toolchain, WorkOrder};
 
     fn order_one() -> WorkOrder {
@@ -459,6 +677,30 @@ mod tests {
         }
     }
 
+    fn candidate() -> GenerationOutcome {
+        GenerationOutcome::Candidate {
+            manifest: Manifest {
+                files: vec![
+                    FileEntry {
+                        path: "sp548e.py".into(),
+                        digest: digest_bytes(b"driver"),
+                        role: FileRole::Source,
+                    },
+                    FileEntry {
+                        path: "test_sp548e.py".into(),
+                        digest: digest_bytes(b"tests"),
+                        role: FileRole::SelfTest,
+                    },
+                ],
+            },
+            entrypoints: vec!["sp548e.py".into()],
+            self_tests: vec!["test_sp548e.py".into()],
+            declared_effects: vec!["state".into(), "on".into(), "off".into()],
+            toolchain_lock: String::new(),
+            capability_surface: vec!["state".into(), "on".into(), "off".into()],
+        }
+    }
+
     fn ev(seq: u64, kind: EventKind) -> LedgerEvent {
         LedgerEvent {
             seq,
@@ -477,13 +719,17 @@ mod tests {
         )
     }
 
+    /// A well-formed generation event for a valid candidate (surface/lock
+    /// carried honestly), used to build legal histories in replay tests.
     fn generation(seq: u64, iteration: u32) -> LedgerEvent {
         ev(
             seq,
             EventKind::GenerationReturned {
                 iteration,
-                outcome_digest: digest_bytes(b"candidate"),
+                outcome_digest: outcome_digest(&candidate()),
                 refused: false,
+                capability_surface: vec!["state".into(), "on".into(), "off".into()],
+                toolchain_lock: String::new(),
             },
         )
     }
@@ -500,28 +746,38 @@ mod tests {
         )
     }
 
+    fn witness_yes(seq_req: u64, seq_ans: u64, iteration: u32) -> [LedgerEvent; 2] {
+        let req = digest_bytes(b"strip is red?");
+        [
+            ev(
+                seq_req,
+                EventKind::WitnessRequested {
+                    iteration,
+                    request_digest: req.clone(),
+                },
+            ),
+            ev(
+                seq_ans,
+                EventKind::WitnessAnswered {
+                    iteration,
+                    request_digest: req,
+                    answer: WitnessAnswer::Yes,
+                },
+            ),
+        ]
+    }
+
     #[test]
     fn the_whole_happy_path_replays_to_commissioned() {
+        let [wreq, wans] = witness_yes(6, 7, 1);
         let events = vec![
             opened(),
             generation(2, 1),
             verdict(3, 1, OracleRung::Bench, true),
             verdict(4, 1, OracleRung::Read, true),
             verdict(5, 1, OracleRung::Act, true),
-            ev(
-                6,
-                EventKind::WitnessRequested {
-                    iteration: 1,
-                    request_digest: digest_bytes(b"strip is red?"),
-                },
-            ),
-            ev(
-                7,
-                EventKind::WitnessAnswered {
-                    iteration: 1,
-                    answer: WitnessAnswer::Yes,
-                },
-            ),
+            wreq,
+            wans,
             verdict(8, 1, OracleRung::Witness, true),
             ev(
                 9,
@@ -534,7 +790,6 @@ mod tests {
                 10,
                 EventKind::DeclarationObserved {
                     digest: digest_bytes(b"actuators.json"),
-                    matches: true,
                 },
             ),
             ev(
@@ -551,17 +806,91 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_rung_loops_back_through_another_iteration() {
-        let events = vec![
+    fn a_failed_rung_bars_further_passes_until_a_new_iteration() {
+        let broken = vec![
+            opened(),
+            generation(2, 1),
+            verdict(3, 1, OracleRung::Bench, false),
+            verdict(4, 1, OracleRung::Bench, true),
+        ];
+        assert_eq!(replay(&broken), Err(LedgerError::RungAfterFailure));
+
+        let recovered = vec![
             opened(),
             generation(2, 1),
             verdict(3, 1, OracleRung::Bench, false),
             generation(4, 2),
             verdict(5, 2, OracleRung::Bench, true),
         ];
-        let s = replay(&events).expect("legal history");
+        let s = replay(&recovered).expect("legal history");
         assert_eq!(s.iteration, 2);
         assert_eq!(s.rungs_passed, vec![OracleRung::Bench]);
+    }
+
+    #[test]
+    fn a_witness_pass_requires_a_bound_yes() {
+        let events = vec![
+            opened(),
+            generation(2, 1),
+            verdict(3, 1, OracleRung::Bench, true),
+            verdict(4, 1, OracleRung::Read, true),
+            verdict(5, 1, OracleRung::Act, true),
+            verdict(6, 1, OracleRung::Witness, true),
+        ];
+        assert_eq!(replay(&events), Err(LedgerError::WitnessPassWithoutYes));
+    }
+
+    #[test]
+    fn a_witness_answer_must_match_the_outstanding_request() {
+        let events = vec![
+            opened(),
+            generation(2, 1),
+            ev(
+                3,
+                EventKind::WitnessRequested {
+                    iteration: 1,
+                    request_digest: digest_bytes(b"is it red?"),
+                },
+            ),
+            ev(
+                4,
+                EventKind::WitnessAnswered {
+                    iteration: 1,
+                    request_digest: digest_bytes(b"a DIFFERENT ask"),
+                    answer: WitnessAnswer::Yes,
+                },
+            ),
+        ];
+        assert_eq!(replay(&events), Err(LedgerError::WitnessDigestMismatch));
+    }
+
+    #[test]
+    fn a_no_witness_fails_the_iteration() {
+        let req = digest_bytes(b"is it red?");
+        let events = vec![
+            opened(),
+            generation(2, 1),
+            verdict(3, 1, OracleRung::Bench, true),
+            verdict(4, 1, OracleRung::Read, true),
+            verdict(5, 1, OracleRung::Act, true),
+            ev(
+                6,
+                EventKind::WitnessRequested {
+                    iteration: 1,
+                    request_digest: req.clone(),
+                },
+            ),
+            ev(
+                7,
+                EventKind::WitnessAnswered {
+                    iteration: 1,
+                    request_digest: req,
+                    answer: WitnessAnswer::No,
+                },
+            ),
+            verdict(8, 1, OracleRung::Witness, true),
+        ];
+        assert_eq!(replay(&events), Err(LedgerError::RungAfterFailure));
     }
 
     #[test]
@@ -586,15 +915,22 @@ mod tests {
     }
 
     #[test]
-    fn sequence_breaks_fail_closed() {
-        let mut e2 = generation(3, 1);
-        e2.seq = 3;
+    fn a_generation_surface_beyond_the_order_fails_replay() {
+        let bad = ev(
+            2,
+            EventKind::GenerationReturned {
+                iteration: 1,
+                outcome_digest: digest_bytes(b"x"),
+                refused: false,
+                capability_surface: vec!["unlock-door".into()],
+                toolchain_lock: String::new(),
+            },
+        );
         assert_eq!(
-            replay(&[opened(), e2]),
-            Err(LedgerError::BadSequence {
-                expected: 2,
-                got: 3
-            })
+            replay(&[opened(), bad]),
+            Err(LedgerError::GenerationSurfaceBeyondOrder(
+                "unlock-door".into()
+            ))
         );
     }
 
@@ -631,6 +967,8 @@ mod tests {
                 iteration: 1,
                 outcome_digest: digest_bytes(b"refusal"),
                 refused: true,
+                capability_surface: Vec::new(),
+                toolchain_lock: String::new(),
             },
         );
         assert_eq!(
@@ -672,7 +1010,7 @@ mod tests {
     }
 
     #[test]
-    fn commissioning_requires_a_matching_observed_declaration() {
+    fn a_diverged_declaration_never_becomes_declared_or_commissioned() {
         let mut events = vec![
             opened(),
             generation(2, 1),
@@ -682,30 +1020,20 @@ mod tests {
             ev(
                 6,
                 EventKind::DeclarationProposed {
-                    digest: digest_bytes(b"d"),
+                    digest: digest_bytes(b"the exact proposal"),
                     reduced: true,
                 },
             ),
+            ev(
+                7,
+                EventKind::DeclarationObserved {
+                    digest: digest_bytes(b"an EDITED declaration"),
+                },
+            ),
         ];
-        events.push(ev(
-            7,
-            EventKind::Commissioned {
-                evidence_digest: digest_bytes(b"smoke"),
-            },
-        ));
-        assert_eq!(
-            replay(&events),
-            Err(LedgerError::CommissionBeforeDeclaration)
-        );
+        let s = replay(&events).expect("observation is legal, it just doesn't match");
+        assert!(!s.declared, "a different digest must not declare");
 
-        events.pop();
-        events.push(ev(
-            7,
-            EventKind::DeclarationObserved {
-                digest: digest_bytes(b"edited"),
-                matches: false,
-            },
-        ));
         events.push(ev(
             8,
             EventKind::Commissioned {
@@ -716,6 +1044,34 @@ mod tests {
             replay(&events),
             Err(LedgerError::CommissionBeforeDeclaration)
         );
+    }
+
+    #[test]
+    fn a_matching_declaration_declares_and_permits_commissioning() {
+        let d = digest_bytes(b"actuators.json");
+        let events = vec![
+            opened(),
+            generation(2, 1),
+            verdict(3, 1, OracleRung::Bench, true),
+            verdict(4, 1, OracleRung::Read, true),
+            verdict(5, 1, OracleRung::Act, true),
+            ev(
+                6,
+                EventKind::DeclarationProposed {
+                    digest: d.clone(),
+                    reduced: true,
+                },
+            ),
+            ev(7, EventKind::DeclarationObserved { digest: d }),
+            ev(
+                8,
+                EventKind::Commissioned {
+                    evidence_digest: digest_bytes(b"smoke"),
+                },
+            ),
+        ];
+        let s = replay(&events).expect("legal");
+        assert!(s.declared && s.commissioned);
     }
 
     #[test]
@@ -734,30 +1090,70 @@ mod tests {
     }
 
     #[test]
-    fn witness_answers_require_an_outstanding_request() {
-        let events = vec![
-            opened(),
-            generation(2, 1),
-            ev(
-                3,
-                EventKind::WitnessAnswered {
-                    iteration: 1,
-                    answer: WitnessAnswer::Yes,
-                },
-            ),
-        ];
-        assert_eq!(replay(&events), Err(LedgerError::WitnessNotRequested));
-    }
-
-    #[test]
-    fn the_file_ledger_appends_validates_and_survives_reload() {
+    fn the_file_ledger_validates_generation_at_the_door_and_survives_reload() {
         let dir =
             std::env::temp_dir().join(format!("familiar-workshop-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("order-0001.jsonl");
+        let path = dir.join("order-file.jsonl");
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("lock"));
         let ledger = Ledger::at(&path);
+        let id = "order-0001-motorlights";
 
+        ledger
+            .append(
+                1_000,
+                id,
+                EventKind::Opened {
+                    order: Box::new(order_one()),
+                },
+            )
+            .expect("open");
+
+        // A raw append of a generation event is refused — it must be validated.
+        let raw = ledger.append(
+            1_001,
+            id,
+            EventKind::GenerationReturned {
+                iteration: 1,
+                outcome_digest: digest_bytes(b"x"),
+                refused: false,
+                capability_surface: vec!["state".into()],
+                toolchain_lock: String::new(),
+            },
+        );
+        assert!(raw.is_err());
+
+        // A candidate whose surface exceeds the order is refused at the door.
+        let mut bad = candidate();
+        if let GenerationOutcome::Candidate {
+            capability_surface, ..
+        } = &mut bad
+        {
+            capability_surface.push("unlock-door".into());
+        }
+        assert!(ledger.append_generation(1_002, id, 1, &bad).is_err());
+
+        // The honest candidate is accepted and survives a reload.
+        ledger
+            .append_generation(1_003, id, 1, &candidate())
+            .expect("valid generation");
+        let state = ledger.state().expect("replay from disk");
+        assert_eq!(state.iteration, 1);
+        assert!(!state.terminal());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn concurrent_appends_produce_one_replayable_ledger() {
+        let dir =
+            std::env::temp_dir().join(format!("familiar-workshop-conc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("order-conc.jsonl");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("lock"));
+        let ledger = std::sync::Arc::new(Ledger::at(&path));
         let id = "order-0001-motorlights";
         ledger
             .append(
@@ -768,35 +1164,30 @@ mod tests {
                 },
             )
             .expect("open");
-        ledger
-            .append(
-                1_001,
-                id,
-                EventKind::GenerationReturned {
-                    iteration: 1,
-                    outcome_digest: digest_bytes(b"candidate"),
-                    refused: false,
-                },
-            )
-            .expect("generation");
-        // An illegal event is refused AND leaves no line behind.
-        let before = std::fs::read_to_string(&path).unwrap();
-        let err = ledger.append(
-            1_002,
-            id,
-            EventKind::RungVerdict {
-                iteration: 1,
-                rung: OracleRung::Act,
-                pass: true,
-                evidence_digest: digest_bytes(b"evidence"),
-            },
-        );
-        assert!(err.is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 
-        let state = ledger.state().expect("replay from disk");
-        assert_eq!(state.iteration, 1);
-        assert!(!state.terminal());
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let l = ledger.clone();
+            handles.push(std::thread::spawn(move || {
+                l.append(
+                    2_000 + i,
+                    "order-0001-motorlights",
+                    EventKind::Parked {
+                        reason: format!("thread {i}"),
+                    },
+                )
+            }));
+        }
+        for h in handles {
+            h.join().unwrap().expect("each append legal");
+        }
+
+        let events = ledger.read().expect("read");
+        assert_eq!(events.len(), 9); // 1 open + 8 parks
+        for (i, e) in events.iter().enumerate() {
+            assert_eq!(e.seq, i as u64 + 1, "sequence must be consecutive");
+        }
+        ledger.state().expect("replays clean");
         let _ = std::fs::remove_file(&path);
     }
 }
