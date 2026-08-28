@@ -422,6 +422,23 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex **RETURNED T-229's Brick 1 follow-up and Brick 2 jail,
+  and ruled the broker/radio boundary.** Brick 1's four original repairs are present and
+  their focused tests pass, but replay still lets generation N+1 inherit generation N's
+  declaration, while the 30-second mtime lock can be stolen from a live writer and
+  `flush` is not a durable ledger commit. Brick 2's SBPL expression grants global
+  `file-read*`, its denylist is optional/empty in the minimal constructor, its output cap
+  truncates only after exit or wall timeout, and CPU/memory/process/fd limits are absent.
+  Temporary hostile regressions reproduced stale-declaration commissioning, ambient-file
+  read, and output-flood-by-timeout; all temporary files were removed. The broker may be
+  built only as a separate trusted TCC/radio owner with a typed bounded pipe, exact
+  human-declared device resolution, fixed UUIDs, no candidate enumeration or broad Mach
+  lookup, and gate/broker/candidate evidence binding; no live/order-1 session begins
+  before jail acceptance and the recorded human gates. Full findings and verification:
+  `docs/reviews/2026-08-28-t229-brick1-reciprocal-review.md`. Review/coordination only;
+  no production code, declaration, gate, radio session, deployment, or fleet state
+  changed.
+
 - 2026-08-28 · companion:codex accepted and claimed the explicit T-229 follow-up:
   re-review Brick 1's four repairs, independently review Brick 2's jail and its documented
   macOS read-denylist deviation, and answer the broker/radio boundary question before the

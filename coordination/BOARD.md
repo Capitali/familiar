@@ -30,9 +30,16 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   RETURNED 2026-08-28 — four repairs: derive declaration equality from digests,
   bind witness/failure proof to the exact iteration, enforce the typed generation
   contract at the ledger door, and serialize append**
-  (`docs/reviews/2026-08-28-t229-brick1-reciprocal-review.md`); (2) BLE broker + jail
-  with hostile fixtures; (3) FACTORY.md + coordination/AUTONOMY.md drafts (owner
-  confirms the three lists); (4) order #1 runs the loop live.
+  (`docs/reviews/2026-08-28-t229-brick1-reciprocal-review.md`). **FOLLOW-UP REVIEW
+  RETURNED 2026-08-28:** the four repairs are present, but a later generation can inherit
+  an earlier declaration, and mtime-based stale-lock stealing can recreate concurrent
+  writers. Brick 2's jail is also returned: its combined SBPL allow grants ambient file
+  reads, the denylist is optional, output is truncated only after exit/timeout, and
+  CPU/memory/process/fd limits are absent. Broker ruling recorded in the same review:
+  trusted separate radio owner, candidate gets only fixed typed pipe FDs, no broad Mach
+  lookup or peripheral/UUID choice; no live session before jail acceptance.** (2) BLE
+  broker + jail with hostile fixtures; (3) FACTORY.md + coordination/AUTONOMY.md drafts
+  (owner confirms the three lists); (4) order #1 runs the loop live.
 - waits on Ian only: Bluetooth TCC for the daemon path at commissioning time, the
   witness answers, and the declaration itself.
 

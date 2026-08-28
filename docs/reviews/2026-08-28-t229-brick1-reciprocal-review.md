@@ -86,3 +86,121 @@ Evidence: `crates/workshop/src/ledger.rs:368-420`.
 - `cargo test --workspace` — pass, 0 failed
 
 No production code, declaration, gate, deployment, or fleet state was changed.
+
+---
+
+## Follow-up re-review: Brick 1 repairs, Brick 2 jail, and broker boundary
+
+Reviewer: companion:codex
+
+Offers: `29c485e` (Brick 1 repairs + Brick 2), `3dff3b1` (Brick 3)
+
+Outcome: **RETURN — the four named Brick 1 repairs are present, but the sole-truth
+lifecycle and lock still admit unsafe histories; Brick 2 does not meet the accepted
+containment floor. The broker/radio boundary below is the ruling for the next brick.**
+
+The four original Brick 1 findings were repaired in substance: declaration equality is
+derived from digests; witness answers are request-bound and a failed rung breaks the
+iteration; the generation door validates the typed outcome, roles, surface, and
+toolchain; and normal concurrent append tests now serialize. Those focused regressions
+pass. Two adjacent sole-truth edges remain acceptance blockers.
+
+### 5. A later generation inherits an earlier declaration
+
+`GenerationReturned` clears rung, witness, failure, and parking state, but leaves
+`proposed` and `declared` untouched. Consequently a valid candidate can pass, be
+proposed and observed, then a different candidate can be generated and commissioned
+without any proposal or declaration for the new candidate. A temporary hostile
+regression reproduced this exact history and current replay accepted it.
+
+Repair: either make generation after proposal/declaration illegal, or clear every
+downstream proposal/declaration field when a new counted generation begins. Bind the
+commission event to the currently generated candidate/outcome and proposed declaration,
+then pin that generation N+1 can never commission using generation N's proof.
+
+Evidence: `crates/workshop/src/ledger.rs:322-353`, `:440-475`.
+
+### 6. Stale-lock stealing is not cross-process mutual exclusion or durable append
+
+The lock is deleted solely because its mtime is 30 seconds old. A legitimate holder
+paused for longer can therefore overlap a second writer; when the first guard drops it
+can also delete the second writer's replacement lock. The original duplicate-sequence
+race is then possible again. The append path calls `flush`, which moves bytes into the
+kernel but does not establish the claimed durable evidence line.
+
+Repair: use an OS advisory lock, or an owner-token/lease protocol whose takeover and
+drop paths prove ownership. If this ledger promises durable return, sync the appended
+file data before reporting success. Pin a holder delayed beyond the stale threshold and
+prove no second critical section enters.
+
+Evidence: `crates/workshop/src/ledger.rs:484-532`, `:612-638`.
+
+### 7. The Brick 2 read deviation grants all reads and depends on an optional denylist
+
+`(allow file-read* file-map-executable)` is not a narrow executable-mapping allowance;
+it allows both operations globally. `ContainmentProfile::minimal` supplies no hidden
+roots, so any unlisted household, key, repository, or host file is readable. A temporary
+hostile regression placed a secret outside candidate and scratch without listing its
+parent; the jailed process read it successfully. A caller-populated denylist cannot be
+the authority boundary for unknown or newly added host data. The documented dyld
+difficulty explains the implementation pressure but does not authorize a weaker floor.
+
+Repair: keep global `file-map-executable` separate from `file-read*`, and construct the
+jail only through a trusted mandatory policy that denies the complete ambient home/data/
+repository/key namespace before narrowly regranting candidate, scratch, and required
+runtime/toolchain reads. If macOS cannot honestly provide that property for dynamic
+Python, use an isolated static runtime, container, or VM rather than calling the denylist
+equivalent containment.
+
+Evidence: `crates/jail/src/lib.rs:59-70`, `:81-123`.
+
+### 8. Output and resource bounds are labels, not enforced limits
+
+The parent polls for process exit without draining either pipe. An output-flooding child
+fills the pipe and blocks until the wall timeout; only after exit/kill are bytes read and
+truncated. A temporary `/usr/bin/yes` regression with a 1 KiB cap reproduced that result:
+the run reported `timed_out`, not an output-limit refusal. There are no CPU, memory,
+process-count, or file-descriptor bounds, although those were part of the accepted jail
+floor.
+
+Repair: drain stdout/stderr concurrently, count the combined bytes, and kill the whole
+process group immediately at the cap with a distinct bounded refusal reason. Apply real
+CPU/address-space/process/fd limits (or a stronger structural equivalent), and pin output
+flood, fork/fan-out, memory, and descriptor exhaustion.
+
+Evidence: `crates/jail/src/lib.rs:126-233`.
+
+### Broker/radio ruling for the next brick
+
+The candidate never receives Bluetooth authority. A separate trusted broker process owns
+TCC and CoreBluetooth; the candidate receives only fixed inherited duplex pipe file
+descriptors, and the bench rung receives none. The current jail is not evidence for this
+boundary: broad `(allow mach-lookup)` plus `deny iokit-open` does not prove the candidate
+cannot reach `bluetoothd` or CoreBluetooth through XPC/Mach services.
+
+The broker, not the candidate, resolves the human-declared match rule (manufacturer
+`0x5053` plus exact Wi-Fi MAC) and refuses zero or multiple matches. It exposes only the
+fixed SP548E service/characteristic UUID allowlist and a rung-specific typed operation;
+the candidate cannot enumerate peripherals, choose a device, or choose UUIDs. The
+protocol bounds frame size, fragment count, rate, response size, and session lifetime.
+The trusted manager rechecks the current gate before opening the broker session, and the
+ledger binds candidate, broker, gate-snapshot, and request/response evidence digests.
+Hostile fixtures must attempt direct Bluetooth/Mach-service access and second-peripheral
+enumeration. The broker may be built to this boundary; no live/order-1 session begins
+until the jail is accepted and the existing human/TCC/gate/witness requirements are met.
+
+### Follow-up verification
+
+- `cargo fmt --all --check` — pass
+- `cargo clippy -p familiar-workshop -p familiar-jail --all-targets -- -D warnings` — pass
+- `cargo test -p familiar-workshop` — 31 passed, 0 failed
+- `cargo test -p familiar-jail -- --nocapture` — 6 passed, 0 failed; real
+  `sandbox-exec` fixtures ran on macOS
+- `cargo clippy --workspace --all-targets -- -D warnings` — pass
+- `cargo test --workspace` — pass, 0 failed
+- Three temporary diagnostic regressions reproduced the stale-declaration commission,
+  ambient-file read, and output-flood-via-wall-timeout defects; the temporary files were
+  removed after the runs
+
+No production code, declaration, gate, radio session, deployment, or fleet state was
+changed.
