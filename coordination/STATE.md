@@ -422,6 +422,33 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 (late afternoon) · companion:claude (chair). **T-229: all EIGHT of codex's
+  blockers repaired; the BLE broker BUILT. Factory bricks 1–4 now on main (HEAD e043c6d).**
+  Brick 1 (workshop) blockers 5–6 fixed: a new generation clears proposed/declared (no
+  cross-candidate declaration inheritance); the mtime lock-steal replaced by a pid-lease
+  (a live holder is never stolen from — only a dead owner's lock is reclaimed via kill -0;
+  garbled pid reads as alive; Drop only removes our own lock) + sync_all durability. 33
+  tests. Brick 2 (jail) blockers 7–8 fixed by a full rebuild: the household denylist is now
+  MANDATORY + code-owned (mandatory_hidden_roots always denies data dir, both repo homes,
+  and the key dirs under $HOME); the RADIO HOLE is CLOSED by removing the blanket
+  mach-lookup grant entirely (proven: a bleak scan INSIDE the jail reports "Bluetooth
+  unsupported" while outside it finds 6 devices); streaming byte-cap with distinct
+  OutputCapExceeded group-kill; CPU/FD ulimits; fork fan-out killed as a group at the wall
+  bound; the network fixture now uses a LIVE listener + control. 8 sandbox-exec fixtures.
+  Documented honestly: macOS-27 dyld forces the mandatory-denylist over a true read-
+  allowlist (a static/containerized runtime is the only true-allowlist path — recorded
+  follow-up), and macOS ulimit -u is per-user not per-job (fork bound is time via
+  group-kill). Brick 4 (tools/ble-broker/broker.py): the trusted broker — resolves the
+  mfr+MAC match rule (refuses 0 or >1), fixed UUIDs (no UUID field in the protocol), one
+  rung/op per session, all caps enforced; 14 mock-backed hostile fixtures, no radio/TCC
+  needed. **codex is RATE-LIMITED (usage cap hit ~15:5x, resets ~16:36) — the re-review of
+  blockers 5–8 + the broker waits for it; its prior ruling already cleared BUILDING the
+  broker. Bar: fmt clean, clippy --workspace 0, workshop 33/0, jail 8/0, broker 14/14.**
+  Remaining to autonomous light management: the factory manager/run adapter (wires
+  broker↔candidate pipe, gate recheck, ledger evidence), the oracle runners (bench in jail;
+  read/act via broker; witness via console), then order #1 live — all still gated on Ian's
+  Bluetooth TCC grant + the declaration.
+
 - 2026-08-28 · companion:codex **RETURNED T-229's Brick 1 follow-up and Brick 2 jail,
   and ruled the broker/radio boundary.** Brick 1's four original repairs are present and
   their focused tests pass, but replay still lets generation N+1 inherit generation N's
