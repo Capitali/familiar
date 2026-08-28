@@ -499,6 +499,16 @@ name = "familiar-exec"
 version = "0.1.0"
 
 [[package]]
+name = "familiar-factory"
+version = "0.1.0"
+dependencies = [
+ "familiar-jail",
+ "familiar-workshop",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "familiar-jail"
 version = "0.1.0"
 

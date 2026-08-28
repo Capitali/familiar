@@ -1,0 +1,23 @@
+[package]
+name = "familiar-factory"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# The factory run adapter (T-229 brick 5): the trusted manager that turns a
+# validated candidate into oracle verdicts and a proposed declaration. It
+# materializes a candidate's manifest into a scratch tree, runs the bench
+# oracle (the candidate's own self-tests) inside the containment jail, and
+# records every verdict to the workshop ledger. The live read/act rungs drive
+# the trusted BLE broker; the witness rung parks for a human. This crate spawns
+# processes and writes files, which is why it is separate from the pure
+# management core (crates/workshop).
+[dependencies]
+familiar-workshop = { path = "../workshop" }
+familiar-jail = { path = "../jail" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lib]
+name = "familiar_factory"
+path = "src/lib.rs"
