@@ -538,27 +538,51 @@ impl LedgerLock {
         Err("ledger lock timeout".to_string())
     }
 
-    /// True only if the lock records a pid that is no longer running. A
-    /// missing/garbled pid is treated as ALIVE (fail safe — never steal on
-    /// uncertainty).
+    /// True only if the lock is safe to reclaim. Two cases:
+    ///   - it records a pid that is no longer running (`kill -0` fails); or
+    ///   - it is UNIDENTIFIABLE (empty/garbled — e.g. a holder crashed between
+    ///     `create_new` and writing its pid) AND has sat untouched past
+    ///     [`LOCK_ORPHAN_SECS`]. This does not reintroduce the flaw codex
+    ///     rejected (stealing from an identifiable, live holder on a timer): an
+    ///     unidentifiable lock has no live-holder claim to protect, and a live
+    ///     holder always records a readable pid that reads as alive.
     fn owner_is_dead(path: &std::path::Path) -> bool {
-        let Ok(content) = std::fs::read_to_string(path) else {
-            return false;
-        };
-        let Ok(pid) = content.trim().parse::<u32>() else {
-            return false;
-        };
-        // `kill -0 <pid>` exits 0 iff the process exists and is signalable.
-        match std::process::Command::new("/bin/kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .status()
-        {
-            Ok(status) => !status.success(),
-            Err(_) => false,
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        match content.trim().parse::<u32>() {
+            Ok(pid) => {
+                // `kill -0 <pid>` exits 0 iff the process exists and is signalable.
+                match std::process::Command::new("/bin/kill")
+                    .arg("-0")
+                    .arg(pid.to_string())
+                    .status()
+                {
+                    Ok(status) => !status.success(),
+                    Err(_) => false,
+                }
+            }
+            Err(_) => Self::orphaned_beyond_threshold(path),
         }
     }
+
+    fn orphaned_beyond_threshold(path: &std::path::Path) -> bool {
+        let Ok(meta) = std::fs::metadata(path) else {
+            return false;
+        };
+        let Ok(modified) = meta.modified() else {
+            return false;
+        };
+        modified
+            .elapsed()
+            .map(|age| age.as_secs() >= LOCK_ORPHAN_SECS)
+            .unwrap_or(false)
+    }
 }
+
+/// How long an UNIDENTIFIABLE lock (empty/garbled pid) may sit before it is
+/// treated as an orphan and reclaimed. Long enough that it never races a
+/// healthy holder, which writes its pid within microseconds of creating the
+/// lock.
+const LOCK_ORPHAN_SECS: u64 = 120;
 
 impl Drop for LedgerLock {
     fn drop(&mut self) {
@@ -1169,11 +1193,12 @@ mod tests {
             !LedgerLock::owner_is_dead(&lockp),
             "our own pid reads as alive"
         );
-        // A garbled lock content is treated as alive (fail safe).
+        // A FRESH garbled lock is treated as alive (fail safe — no orphan
+        // threshold has passed).
         std::fs::write(&lockp, "not-a-pid").unwrap();
         assert!(
             !LedgerLock::owner_is_dead(&lockp),
-            "garbled pid must read as alive"
+            "a fresh garbled lock must read as alive"
         );
         // A dead pid IS reclaimable. Pid 999999 is almost certainly not running.
         std::fs::write(&lockp, "999999").unwrap();
