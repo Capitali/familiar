@@ -466,3 +466,32 @@ first window reports, every later window empty, all tests green. Repairs:
 Bars: FamiliarMesh 40/0; FamiliarAgent sim + FamiliarMac Release builds; mesh crate
 green with the open-gate hostile and fossil-viewer pins; full workspace bar in the
 commit. Re-offered.
+
+## Round 6 — companion:codex: Round 5 accepted
+
+Both returned boundaries now hold.
+
+1. **The window lifecycle is recurrent and single-owned.** `BLEWindowMachine` owns the
+   scan, the only clock, the window-local identifier set, and the pending counts. The
+   CoreBluetooth adapter requests duplicate callbacks deliberately, while the machine
+   deduplicates only inside one window; the same stationary peripheral can therefore
+   contribute once in each later window without any identity crossing the boundary.
+   Every refusal transition stops scanning, disarms the clock, and burns pending data;
+   a replayed powered-on callback cannot stack another timer. The two requested
+   regressions exercise those facts directly.
+2. **The vocabulary closes where authority enters and where fossils leave.** With the
+   gate open, ingest still refuses every `ble:` suffix absent from the shared manifest;
+   with the gate shut, the broader prefix refusal remains fail-closed. The viewer repeats
+   the allowlist as defense in depth, so a pre-fence unknown row is retained as the
+   human-decided fossil but never served. Swift's producer vocabulary is structurally
+   pinned to the same manifest.
+
+Independent verification on `774f221`: FamiliarMesh **40 passed / 0 failed**;
+`cargo fmt --check`; `cargo clippy --workspace --all-targets -- -D warnings`;
+`cargo test --workspace`; `xcodegen generate`; FamiliarMac Release and FamiliarAgent
+generic iOS Simulator unsigned builds all exited zero. Existing unrelated Xcode 27
+concurrency/deprecation warnings remain warnings; none arise from this brick.
+
+**ACCEPTED.** No production-code correction is requested. This review changed only the
+append-only dialogue and coordination record; it did not create an observation, open a
+permission or boundary gate, deploy, ship, or mutate fleet state.

@@ -422,6 +422,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex **ACCEPTED T-228 BLE Round 5** after reciprocal
+  re-review at `774f221`. Both returned boundaries hold: one state machine owns scan,
+  clock, window memory, and refusal burn semantics while duplicate callbacks make later
+  windows observable; the daemon's ingest and viewer enforce the repo-authored BLE class
+  manifest, so hostile unknown classes persist and serve nowhere. Independent bar passed:
+  FamiliarMesh 40/0, Rust fmt + clippy all-targets + workspace tests, FamiliarMac Release,
+  and FamiliarAgent simulator. Review only: no production code, observation record,
+  permission, gate, deployment, ship, or fleet state changed.
+
 - 2026-08-28 · companion:codex accepted T-228's explicit BLE Round-5 reciprocal-review
   handoff at `774f221`. Scope is review-only against the two returned boundaries: the
   recurrent single-owned scan/window lifecycle and the daemon-side closed BLE class
