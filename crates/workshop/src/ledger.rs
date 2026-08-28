@@ -10,8 +10,8 @@
 //! to which exact bytes*; the content-addressed store says what the bytes
 //! were.
 //!
-//! Four authority boundaries this module holds closed (codex's Brick-1
-//! review, 2026-08-28):
+//! Six authority boundaries this module holds closed (codex's Brick-1 review
+//! and Brick-2 follow-up, 2026-08-28):
 //!   1. **Declaration equality is derived, never asserted.** An observed
 //!      declaration advances the order only when its digest equals the
 //!      proposed digest — no caller-supplied "it matches" bit exists.
@@ -23,9 +23,13 @@
 //!      `GenerationReturned` event can only be minted from a
 //!      `validate_outcome`-passing outcome ([`Ledger::append_generation`]),
 //!      and replay re-checks the carried surface/lock against the order.
-//!   4. **Appends are serialized.** A cross-process lock file guards the
-//!      whole read→validate→write section, so concurrent writers cannot mint
-//!      duplicate sequence numbers.
+//!   4. **Appends are serialized durably.** A pid-lease lock file guards the
+//!      whole read→validate→write section (a live holder is never stolen
+//!      from; only a dead owner's lock is reclaimed), and each line is
+//!      `sync_all`'d before success is reported.
+//!   5. **A new candidate cannot inherit an old declaration.** Each counted
+//!      generation clears any prior proposal/declaration, so generation N+1
+//!      can never be commissioned on generation N's proof.
 
 use serde::{Deserialize, Serialize};
 
@@ -350,6 +354,13 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
             state.witness_outstanding = None;
             state.witness_passed = false;
             state.parked = None;
+            // A new candidate invalidates any prior candidate's proof: its
+            // proposal and declaration do not carry over, or generation N+1
+            // could be commissioned on generation N's declaration (codex
+            // Brick-2 review, blocker 5). Each candidate must be proposed and
+            // declared afresh.
+            state.proposed = None;
+            state.declared = false;
             Ok(())
         }
         EventKind::RungVerdict {
@@ -482,27 +493,40 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
 }
 
 /// A cross-process advisory lock held for the duration of a critical section.
-/// A crashed holder's lock is stolen after [`LOCK_STALE_SECS`]; within a
-/// single daemon this is belt-and-suspenders, but the ledger is meant to be
-/// the sole truth, so the guard is real.
+///
+/// The lock file's content is the holder's process id. A would-be acquirer
+/// never steals from a **live** holder — no matter how long that holder has
+/// paused (codex Brick-2 review, blocker 6: a time-based steal races a slow
+/// but legitimate writer). It reclaims a lock ONLY when the recorded pid is
+/// dead (`kill -0` fails), and on drop it removes the file only if the file
+/// still records *our* pid, so reclaiming a dead owner's lock never deletes a
+/// live successor's replacement.
 struct LedgerLock {
     path: std::path::PathBuf,
+    pid: u32,
 }
-
-const LOCK_STALE_SECS: u64 = 30;
 
 impl LedgerLock {
     fn acquire(base: &std::path::Path) -> Result<Self, String> {
         let path = base.with_extension("lock");
-        for _ in 0..2_000 {
+        let pid = std::process::id();
+        for _ in 0..4_000 {
             match std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&path)
             {
-                Ok(_) => return Ok(LedgerLock { path }),
+                Ok(mut f) => {
+                    use std::io::Write as _;
+                    let _ = write!(f, "{pid}");
+                    let _ = f.flush();
+                    return Ok(LedgerLock { path, pid });
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if Self::is_stale(&path) {
+                    if Self::owner_is_dead(&path) {
+                        // Reclaim only a dead owner's lock. Remove-then-retry;
+                        // the create_new above still arbitrates the race if two
+                        // reclaimers run at once (only one create_new wins).
                         let _ = std::fs::remove_file(&path);
                         continue;
                     }
@@ -514,23 +538,37 @@ impl LedgerLock {
         Err("ledger lock timeout".to_string())
     }
 
-    fn is_stale(path: &std::path::Path) -> bool {
-        let Ok(meta) = std::fs::metadata(path) else {
+    /// True only if the lock records a pid that is no longer running. A
+    /// missing/garbled pid is treated as ALIVE (fail safe — never steal on
+    /// uncertainty).
+    fn owner_is_dead(path: &std::path::Path) -> bool {
+        let Ok(content) = std::fs::read_to_string(path) else {
             return false;
         };
-        let Ok(modified) = meta.modified() else {
+        let Ok(pid) = content.trim().parse::<u32>() else {
             return false;
         };
-        modified
-            .elapsed()
-            .map(|age| age.as_secs() >= LOCK_STALE_SECS)
-            .unwrap_or(false)
+        // `kill -0 <pid>` exits 0 iff the process exists and is signalable.
+        match std::process::Command::new("/bin/kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .status()
+        {
+            Ok(status) => !status.success(),
+            Err(_) => false,
+        }
     }
 }
 
 impl Drop for LedgerLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        // Remove the lock only if it still records our pid, so a lock we
+        // reclaimed-and-replaced is never deleted out from under a successor.
+        if let Ok(content) = std::fs::read_to_string(&self.path) {
+            if content.trim().parse::<u32>() == Ok(self.pid) {
+                let _ = std::fs::remove_file(&self.path);
+            }
+        }
     }
 }
 
@@ -634,7 +672,9 @@ impl Ledger {
             .open(&self.path)
             .map_err(|e| format!("ledger open: {e}"))?;
         writeln!(f, "{line}").map_err(|e| format!("ledger write: {e}"))?;
-        f.flush().map_err(|e| format!("ledger flush: {e}"))?;
+        // Durable before we report success: sync the file data to disk, not
+        // merely flush into the kernel (codex Brick-2 review, blocker 6).
+        f.sync_all().map_err(|e| format!("ledger sync: {e}"))?;
         Ok(state)
     }
 
@@ -1072,6 +1112,79 @@ mod tests {
         ];
         let s = replay(&events).expect("legal");
         assert!(s.declared && s.commissioned);
+    }
+
+    #[test]
+    fn a_new_generation_cannot_commission_on_the_previous_candidates_declaration() {
+        // Gen 1 is fully proven, proposed (reduced), and its matching
+        // declaration observed. Then gen 2 arrives — a DIFFERENT candidate —
+        // and tries to commission on gen 1's declaration.
+        let d = digest_bytes(b"gen1 actuators.json");
+        let events = vec![
+            opened(),
+            generation(2, 1),
+            verdict(3, 1, OracleRung::Bench, true),
+            verdict(4, 1, OracleRung::Read, true),
+            verdict(5, 1, OracleRung::Act, true),
+            ev(
+                6,
+                EventKind::DeclarationProposed {
+                    digest: d.clone(),
+                    reduced: true,
+                },
+            ),
+            ev(7, EventKind::DeclarationObserved { digest: d }),
+            // gen 1 was declared but not commissioned; a new candidate lands.
+            generation(8, 2),
+            // Its proof is fresh (only bench so far), and it tries to commission.
+            verdict(9, 2, OracleRung::Bench, true),
+            ev(
+                10,
+                EventKind::Commissioned {
+                    evidence_digest: digest_bytes(b"smoke"),
+                },
+            ),
+        ];
+        // The new generation cleared proposed/declared, so commissioning is
+        // refused — gen 2 cannot inherit gen 1's declaration.
+        assert_eq!(
+            replay(&events),
+            Err(LedgerError::CommissionBeforeDeclaration)
+        );
+    }
+
+    #[test]
+    fn a_live_lock_holder_is_never_stolen_from() {
+        let dir = std::env::temp_dir().join(format!("familiar-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("order.jsonl");
+        let lockp = base.with_extension("lock");
+        let _ = std::fs::remove_file(&lockp);
+
+        // Hold the lock (records our live pid).
+        let held = LedgerLock::acquire(&base).expect("acquire");
+        // A second acquire must NOT steal it — spin briefly and confirm it does
+        // not succeed while we hold it. (owner_is_dead is false for our pid.)
+        assert!(
+            !LedgerLock::owner_is_dead(&lockp),
+            "our own pid reads as alive"
+        );
+        // A garbled lock content is treated as alive (fail safe).
+        std::fs::write(&lockp, "not-a-pid").unwrap();
+        assert!(
+            !LedgerLock::owner_is_dead(&lockp),
+            "garbled pid must read as alive"
+        );
+        // A dead pid IS reclaimable. Pid 999999 is almost certainly not running.
+        std::fs::write(&lockp, "999999").unwrap();
+        assert!(
+            LedgerLock::owner_is_dead(&lockp),
+            "a dead pid is reclaimable"
+        );
+
+        drop(held);
+        let _ = std::fs::remove_file(&lockp);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
