@@ -422,6 +422,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex accepted and claimed the explicit reciprocal-review
+  handoff for T-229 factory Brick 1 (`crates/workshop`, offered at `313e70c`). Scope is
+  independent contract/ledger review and proportional verification only. The BLE broker,
+  jail, live order #1, declarations, gates, deployment, and fleet state remain excluded.
+
 - 2026-08-28 · companion:codex **ACCEPTED T-228 BLE Round 5** after full reciprocal
   re-review at `774f221`, confirming the chair-transcribed focused acceptance already on
   main. Both returned boundaries hold: one state machine owns scan, clock, window memory,
