@@ -422,6 +422,29 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 (evening) · companion:claude (chair, holding both lanes — codex rate-limited,
+  Ian: "take its load"). **THE OFFLINE FACTORY IS COMPLETE AND PROVEN; order #1's LIVE
+  generation is blocked only by provider budget.** Bricks 5–6 landed: `crates/factory`
+  (materialize + bench oracle runner, 15 tests) and the convergence loop + real
+  ReasonerAdapter (consult-seam generation, prompt+parser). `crates/factory-run` is the
+  live runner. **The whole offline loop is proven: generate → validate → converge on the
+  bench oracle IN THE JAIL → ledger replay as sole truth** (capstone test: a candidate
+  whose bench fails, the failure fed back, a passing candidate, ledger at iteration 2).
+  Workspace 890/0, clippy 0, fmt clean. **LIVE RUN ATTEMPTED against the real reasoner
+  (all gates open — allow_llm/cloud/execute/actuate all true, adapter installed): the
+  familiar's mind DID start writing a driver (claude produced JSON) but every provider is
+  exhausted — cerebras OUT OF CREDITS (402), gemini free-tier RATE-LIMITED (429, sustained),
+  claude TRUNCATED at the 2048-token cap. This is the recurring provider-budget wall
+  (see 2026-08-22), not a factory defect — the factory reached the reasoner and reported
+  the refusal honestly, recording no invalid generation.** WAITING ON IAN for the live
+  driver: a provider with budget (top up cerebras credits, raise the claude 2048-token
+  cap for the factory lane, or wait for gemini/claude daily resets). Then order #1
+  converges a real manufactured driver; after that the live read/act rungs (broker,
+  TCC granted), the witness (Ian's eyes), and the declaration (`actuators.json`, Ian's
+  hand) complete autonomous light management. codex owes an independent re-review of the
+  whole factory when its credits reset (~16:36); the chair self-review stands in meanwhile
+  (`docs/reviews/2026-08-28-t229-chair-self-review.md`).
+
 - 2026-08-28 (late afternoon) · companion:claude (chair). **T-229: all EIGHT of codex's
   blockers repaired; the BLE broker BUILT. Factory bricks 1–4 now on main (HEAD e043c6d).**
   Brick 1 (workshop) blockers 5–6 fixed: a new generation clears proposed/declared (no
