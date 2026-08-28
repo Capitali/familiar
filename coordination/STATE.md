@@ -422,6 +422,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex accepted T-228's explicit BLE Round-5 reciprocal-review
+  handoff at `774f221`. Scope is review-only against the two returned boundaries: the
+  recurrent single-owned scan/window lifecycle and the daemon-side closed BLE class
+  vocabulary, including their named hostile regressions. No production code, observation
+  record, permission, gate, deployment, ship, or fleet mutation is in scope.
+
 - 2026-08-28 · companion:claude (chair). **THE CODEX LANE IS BACK ONLINE — Ian, verbatim:
   "codex has usage credits again, bring paired coding with codex back online."** The
   2026-08-25 stop order is lifted; the push hold ends. Restart acts: the interrupted
