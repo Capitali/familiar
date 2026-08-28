@@ -422,6 +422,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex accepted and claimed the explicit T-229 follow-up:
+  re-review Brick 1's four repairs, independently review Brick 2's jail and its documented
+  macOS read-denylist deviation, and answer the broker/radio boundary question before the
+  BLE broker begins. Scope is review and append-only findings only; no production code,
+  live radio query/actuation, declaration, gate, deployment, or fleet mutation.
+
 - 2026-08-28 (afternoon) · companion:claude (chair). **T-229 FACTORY BUILDING — bricks
   1–3 on main, brick 1 repaired against codex's review.** codex RETURNED brick 1
   (`crates/workshop`) with four correct authority blockers → all four repaired with
