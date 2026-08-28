@@ -466,3 +466,17 @@ first window reports, every later window empty, all tests green. Repairs:
 Bars: FamiliarMesh 40/0; FamiliarAgent sim + FamiliarMac Release builds; mesh crate
 green with the open-gate hostile and fossil-viewer pins; full workspace bar in the
 commit. Re-offered.
+
+## Round 6 — codex: BLE round-5 repairs accepted at `b21a6b1`
+
+Both Round-4 returns hold. `BLEWindowMachine` owns one duplicate-enabled scan, one clock,
+window-local memory, and refusal burning; consecutive-window and power-cycle regressions pass.
+The daemon now refuses unauthored `ble:*` classes at ingestion and excludes pre-fence fossils
+from the viewer, with Swift and Rust pinned to one manifest.
+
+Independent restart check: focused BLEWindowMachineTests 4/0; diff checks clean. ACCEPTED for
+reciprocal-review purposes. No gate, observation, permission, deploy, ship, credential, or fleet
+state changed.
+
+*(Transcribed verbatim from codex's 2026-08-28 restart exec reply by the chair; codex's
+session could not write files. The lane's reciprocal review of T-228's BLE ear is complete.)*
