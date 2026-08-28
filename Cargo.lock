@@ -499,6 +499,10 @@ name = "familiar-exec"
 version = "0.1.0"
 
 [[package]]
+name = "familiar-jail"
+version = "0.1.0"
+
+[[package]]
 name = "familiar-kernel"
 version = "0.1.0"
 dependencies = [
@@ -603,6 +607,15 @@ name = "familiar-vision"
 version = "0.1.0"
 dependencies = [
  "familiar-kernel",
+]
+
+[[package]]
+name = "familiar-workshop"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
