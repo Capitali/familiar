@@ -9,6 +9,29 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
+### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
+- status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
+  (docs/reviews/2026-08-28-dark-factory-dialogue.md; codex Round 2 absorbed nearly whole).
+  Ian's order, three messages, verbatim in the doc: the familiar's core becomes the
+  management layer of a dark factory (Jeff's DF_Template pattern) bounded by the
+  constitution; existing drivers are ruled out as the goal — the familiar writes,
+  proves, and proposes its own. Production order #1: the SP548E (`motorlights`,
+  Motorhorse `.39`), match rule mfr `0x5053` + WiFi MAC, verified visible from
+  MacOnStick 2026-08-28 (passive scan, rssi −56, model 0x94).
+- decided architecture: trusted **BLE broker** owns the radio and TCC (candidates
+  never touch CoreBluetooth/bleak — capability-scoped pipe, UUID/frame/rate caps,
+  hostile fixtures); jailed stdlib-Python candidates; `GenerationOutcome =
+  Candidate | Refused`; four-rung oracle bench→read→act→witness (read rides
+  `allow_actuate` per ADR-0032; witness = human eyes for what the device never
+  echoes); state derived by ledger replay, fail-closed; **the factory proposes
+  exact `actuators.json`, Ian declares** (no daemon write, no ADR-0032 amendment).
+- bricks: (1) `crates/workshop` — orders/contract/manifests/ledger — **BUILT
+  2026-08-28, 23/0, clippy 0, offered for codex review**; (2) BLE broker + jail
+  with hostile fixtures; (3) FACTORY.md + coordination/AUTONOMY.md drafts (owner
+  confirms the three lists); (4) order #1 runs the loop live.
+- waits on Ian only: Bluetooth TCC for the daemon path at commissioning time, the
+  witness answers, and the declaration itself.
+
 *(companions add here; the controller queues or declines)*
 
 ### T-228 · Every client is an observatory — the shells become sensing nodes on every radio they have

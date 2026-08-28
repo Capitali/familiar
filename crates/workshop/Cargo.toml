@@ -1,0 +1,20 @@
+[package]
+name = "familiar-workshop"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# The factory's management core (T-229): work orders, generation outcomes,
+# and the append-only ledger whose replay IS the order state. No radio, no
+# process spawning, no network — the workshop decides and records; adapters
+# (generation providers, the jailed runner, the BLE broker) act and report
+# back as typed events. Dependencies stay at the workspace's serde floor plus
+# sha2 for content addressing, matching mcp/mesh.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+
+[lib]
+name = "familiar_workshop"
+path = "src/lib.rs"
