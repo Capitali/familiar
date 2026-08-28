@@ -44,6 +44,8 @@ impl std::fmt::Display for MaterializeError {
     }
 }
 
+impl std::error::Error for MaterializeError {}
+
 fn safe_join(dest: &Path, rel: &str) -> Option<PathBuf> {
     if rel.is_empty() || rel.starts_with('/') || rel.contains('\\') || rel.contains(':') {
         return None;

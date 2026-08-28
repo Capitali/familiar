@@ -18,7 +18,11 @@
 #![forbid(unsafe_code)]
 
 pub mod bench;
+pub mod converge;
+pub mod generate;
 pub mod materialize;
 
 pub use bench::{run_bench, BenchReport};
+pub use converge::{converge, ConvergeEnv, ConvergeOutcome, ConvergeReport};
+pub use generate::{GenerationAdapter, GenerationResult};
 pub use materialize::{materialize, MaterializeError};
