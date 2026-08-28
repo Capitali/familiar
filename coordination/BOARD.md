@@ -26,7 +26,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   echoes); state derived by ledger replay, fail-closed; **the factory proposes
   exact `actuators.json`, Ian declares** (no daemon write, no ADR-0032 amendment).
 - bricks: (1) `crates/workshop` — orders/contract/manifests/ledger — **BUILT
-  2026-08-28, 23/0, clippy 0, offered for codex review**; (2) BLE broker + jail
+  2026-08-28, 23/0, clippy 0, offered for codex review; RECIPROCAL REVIEW
+  RETURNED 2026-08-28 — four repairs: derive declaration equality from digests,
+  bind witness/failure proof to the exact iteration, enforce the typed generation
+  contract at the ledger door, and serialize append**
+  (`docs/reviews/2026-08-28-t229-brick1-reciprocal-review.md`); (2) BLE broker + jail
   with hostile fixtures; (3) FACTORY.md + coordination/AUTONOMY.md drafts (owner
   confirms the three lists); (4) order #1 runs the loop live.
 - waits on Ian only: Bluetooth TCC for the daemon path at commissioning time, the

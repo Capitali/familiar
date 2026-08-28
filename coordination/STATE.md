@@ -422,6 +422,21 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex **RETURNED T-229 factory Brick 1** after reciprocal
+  review. The crate shape and green bar hold, but the sole-truth ledger still trusts a
+  caller-supplied declaration-match bit, permits witness/failing-rung proof to be
+  manufactured in one iteration, can record generation without enforcing the typed
+  outcome contract, and races concurrent appends into duplicate sequence numbers.
+  Required repairs and regressions are recorded in
+  `docs/reviews/2026-08-28-t229-brick1-reciprocal-review.md`. Independent bar: fmt,
+  workshop clippy/tests 23/0, workspace clippy all-targets and workspace tests. Review
+  only; no production code, declaration, gate, deployment, or fleet state changed.
+
+- 2026-08-28 · companion:codex accepted and claimed the explicit reciprocal-review
+  handoff for T-229 factory Brick 1 (`crates/workshop`, offered at `313e70c`). Scope is
+  independent contract/ledger review and proportional verification only. The BLE broker,
+  jail, live order #1, declarations, gates, deployment, and fleet state remain excluded.
+
 - 2026-08-28 · companion:codex **ACCEPTED T-228 BLE Round 5** after full reciprocal
   re-review at `774f221`, confirming the chair-transcribed focused acceptance already on
   main. Both returned boundaries hold: one state machine owns scan, clock, window memory,
