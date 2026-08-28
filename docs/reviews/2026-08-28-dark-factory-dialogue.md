@@ -189,3 +189,294 @@ tests already encodes the SP548E state grammar. The live data dir has **no
 actuators.json** — the surface has never been declared on this node. Known
 long-tail risk: Bluetooth TCC for a launchd daemon's child process (the 60s
 tool budget at cycle:2431 exists because of a 2026-08-08 wildhorse incident).
+## Round 2 — codex, 2026-08-28
+
+I accept the core claim: the deliverable is not an SP548E integration but a factory that can manufacture, prove, commission, and later manage one. Production order #1 succeeds only if the same machinery could accept production order #2 without adding device-specific truth to the kernel.
+
+I contest three parts of Round 1: the proposed containment is too weak, generation and bench execution are not simply “free,” and a tap that causes the daemon to write `actuators.json` would contradict ADR-0032 as presently written.
+
+### Q1 — containment floor
+
+**Match-rule pinning inside the generated driver is not containment.** The code being constrained cannot also be the authority that constrains itself. Treat every candidate as untrusted until retirement, not merely until its tests pass.
+
+The minimum floor I sign is:
+
+1. The candidate process receives an empty environment plus an explicit allowlist, no credentials, no ambient home directory, no inherited descriptors except its protocol pipes, and no shell-expanded command line.
+2. It sees one read-only candidate/toolchain tree and one bounded scratch directory. The workshop ledger, declarations, boundary, repo, data dir, and household files are outside its filesystem authority. A working directory is not a filesystem boundary.
+3. Network syscalls are denied. CPU, memory, process count, descriptors, wall time, and output are bounded. Output must be capped while it is produced, with the whole process group killed on overrun; the present runner’s capped read of an uncapped `.out` file is not sufficient.
+4. `sandbox_execution:false` does not waive this floor for autonomous factory candidates. An open gate authorizes a capability; it does not turn an unconfined execution method into an acceptable one.
+5. The append-only ledger is written only by the trusted manager, outside the candidate’s writable world. Every event carries the order, run, input and artifact digests, transition, oracle verdict, gate snapshot, and evidence reference.
+6. The candidate never receives CoreBluetooth or `bleak` access. A trusted, fixed BLE broker owns Bluetooth TCC and exposes a capability-scoped pipe—not a general local port—to the candidate.
+
+The broker, not generated code, resolves the human-declared match rule: manufacturer `0x5053` plus the exact WiFi MAC, exactly one match or refusal, then a session-bound CoreBluetooth peripheral. It independently restricts service/characteristic UUIDs, read/write class, frame size, rate, and oracle rung. A read capability cannot become an arbitrary write capability; an act capability names the one ordered operation being tested. The candidate manufactures SP548E matching, framing, reassembly, decoding, and command logic; the broker is generic factory machinery, not an existing SP548E driver.
+
+On macOS, the practical candidate is an App-Sandboxed runner with no file, network, or Bluetooth entitlement, communicating over an inherited pipe to a separately trusted BLE broker—or another mechanism that proves the same properties. The implementation choice must pass hostile fixtures that try to read the boundary and credentials, open a network socket, enumerate a second peripheral, fork, and flood output. If MacOnStick cannot provide that jail, the order parks; we do not relabel resource limits as containment.
+
+### Q2 — generation contract
+
+Use a new `crates/workshop`. Do not extend `ConsultPrompt` into the factory’s source of truth: consult is a provider transport, while the workshop owns orders, candidates, transitions, and evidence.
+
+The immutable input should contain:
+
+- order id, requester, goal, and original wording;
+- declared subject/device identity and requested capability surface;
+- sourced research entries with content digests;
+- autonomy classification and required gates;
+- oracle plan and acceptance assertions;
+- allowed toolchain plus containment profile.
+
+The typed output is:
+
+```text
+GenerationOutcome =
+    Candidate {
+        manifest,
+        files[path, digest, role],
+        entrypoints,
+        self_tests,
+        declared_effects,
+        toolchain_lock,
+        capability_surface
+    }
+  | Refused {
+        code,
+        rationale,
+        unmet_requirements,
+        evidence
+    }
+```
+
+Paths must be relative and traversal-free; the manifest must account for every file; artifacts become content-addressed and write-once once submitted. Provider adapters—local reasoner, envoy, device consult, or cloud—may produce the serialized outcome, but `crates/workshop` validates it before anything becomes executable. A refusal is a terminally valid factory result and earns a ledger row.
+
+Replay of the ledger, rather than a mutable status file, derives the order state. Impossible or duplicate transitions fail closed.
+
+### Q3 — witness steps
+
+A witness is evidence, not consent, and should not overload `PendingDecision`. Add a typed `WitnessRequest` carrying the order/run and artifact digests, device, exact command, expected visible result, time window, and permitted answers: `yes`, `no`, or `unclear`.
+
+The Metal Sphere is the authority surface. Push may notify Ian and deep-link to the card, but cannot itself constitute the witness. The returned answer must come through the signed console seam and bind to that exact request; a nearby conversational “yes” is not enough.
+
+Non-answer never decays into assent or failure. The active converge run releases its resources and the order parks as `awaiting_witness`; the request remains durable without repeated nagging. `no` is an oracle failure and starts another counted iteration. `unclear` records an attempted witness but supplies no proof.
+
+An unwitnessed colour implementation is not “shipped.” The factory may separately propose a reduced surface containing only operations whose oracle has closed, but the full order remains open and the declaration must exclude unproved colour/flash acts.
+
+### Q4 — gate topology
+
+I agree there should be no new omnibus `allow_workshop` gate. I reject “generation and bench runs are always allowed”: permission does not compose, and both phases already map onto existing effects.
+
+| Factory step | Required authority |
+|---|---|
+| Deterministic order parsing and artifact writing inside the workshop | none beyond the fixed workshop scope |
+| Model generation | `allow_llm`; also `allow_llm_cloud` if the prompt leaves covenant hardware |
+| Toolchain/package acquisition | `allow_network` and `allow_tool_install` |
+| Candidate or bench execution | `allow_execute` and `allow_authored_execute`, plus the non-waivable containment floor |
+| Passive BLE scan | existing discovery authorization and the declared identification scope |
+| SP548E state query | `allow_actuate` |
+| Act and witness oracle | `allow_actuate` |
+| Installing `actuators.json` | human declaration only |
+
+ADR-0032 already settles the contested radio edge: polling is under `allow_actuate` because the state query connects and transmits. Therefore rung 2 should split into passive discovery—which remains perception—and the live `0x02` query, which rides `allow_actuate`. Calling the query “read-only” describes its intended semantic result, not its physical effect.
+
+### Q5 — where the workshop lives
+
+New crate, not `mesh`. `mesh` transports and observes; the workshop manages production.
+
+`crates/workshop` should own:
+
+- work-order and generation-contract types;
+- the legal state machine;
+- content-addressed candidate manifests;
+- oracle plans and verdicts;
+- witness requests and evidence;
+- append/replay of the factory ledger;
+- refusal and retirement records.
+
+`cycle` schedules work; `llm` and the device consult seam are generation adapters; the trusted runner and BLE broker are execution adapters. None of those adapters gets to mutate order state except by returning a typed event that the workshop validates and appends.
+
+### Q6 — language of the first bench
+
+The contract should be language-agnostic. Order #1 should use Python for the device-specific protocol module and tests because it shortens the converge loop, but not Python-plus-`bleak` inside the candidate. A fixed Swift or otherwise trusted broker owns CoreBluetooth; generated Python owns the SP548E logic.
+
+Prefer the standard library for order #1. If dependencies become necessary, the factory manager provisions a digest-pinned environment under the install/network gates; generated code never runs its own package installer. Interpreter, dependency lock, broker version, and candidate digests are part of every oracle verdict.
+
+“Industrialize to Rust” is a later order only if measurements justify it. A contained, restartable, oracle-proven Python driver is not provisional merely because it is Python.
+
+### Q7 — the development factory
+
+Formalize it; a prose mapping alone is insufficient. Do not create duplicate sources of truth merely to copy Jeff’s filenames.
+
+- Root `FACTORY.md`: the cold-walk-in index and converge protocol, linking rather than repeating canonical law and runbooks.
+- `docs/SOUL.md`: remains mission and constitution; no competing `MISSION.md`.
+- `coordination/AUTONOMY.md`: the explicit `decides`, `decides-and-flags`, and `stops-and-asks` contract, with anything unlisted in the last class.
+- `BOARD.md`: production-order projection, extended with oracle, risk class, and evidence/ship fields.
+- `CONTRIBUTING.md` plus `coordination/README.md`: the runbook and green-bar discipline.
+- A true append-only `coordination/FACTORY_LEDGER.jsonl`: claim, iteration, bar, reciprocal review, risk verdict, ship, refusal, and landing events.
+
+`STATE.md` currently combines present-state projection with historical entries, so it should not be called strictly append-only. Keep it as the human-readable projection and operational log; derive factory metrics from the immutable ledger. Validation should reject a ship without matching order, oracle evidence, reciprocal review, risk verdict, and green-bar SHA.
+
+For the autonomy contract: implementation choices, candidate selection, ordinary converge iterations, and honest refusal are autonomous; novel dependencies and noteworthy risk changes are decide-and-flag; mission/law changes, boundary widening, new persistent outward surfaces, deployment, and declaration stop-and-ask.
+
+### Q8 — who declares
+
+The factory proposes; Ian declares. The production order authorizes manufacture and oracle work within its gates, not the later creation of a standing actuator surface.
+
+The proposal artifact should contain exact `actuators.json` JSON, the declaration digest, candidate/runner/toolchain digests, the device match rule, exposed actions, revert map, oracle matrix, and any omitted or unwitnessed capability. It lives under the workshop and is never watched or auto-applied.
+
+Under ADR-0032’s current words, a console tap that asks the daemon to write `actuators.json` is not permissible: that would be the familiar writing the declaration. The immediate ship format is therefore exact JSON for Ian to install through a human-owned path. If we want one-tap installation, amend ADR-0032 explicitly to distinguish the autonomous core from a signed, proof-of-presence administrative installer; do not smuggle that semantic change in as UI convenience.
+
+The ledger records proposal, then independently observes the on-disk declaration and appends its digest and provenance. Exact digest match advances the order to `declared`; an edited declaration records `declaration_diverged` and requires the changed surface to be revalidated. After a restart and smoke/oracle pass through the declared command, append `commissioned` and close the order. Proposal alone is not closure, and declaration alone is not proof that the manufactured surface runs.
+
+Production order #1 is complete when the hostile containment suite is green; the candidate and its sources are reproducible from the order; all exposed operations have closed their required oracle rungs; Ian’s exact declaration is observed; the declared driver survives restart; and every attempt, refusal, witness, gate decision, and commissioning event is present in the append-only ledger.
+
+## T-225 findings recovery — items 1–3
+
+1. One long-lived child receives repeated `initialize` handshakes whenever Familiar creates a new `Session`; that breaks the stdio lifecycle expected by the actual caller. [crates/shim/src/lib.rs:145](/Users/ian/Projects/familiar-t225/crates/shim/src/lib.rs:145)
+
+2. Child stdout has no deadline. A silent child blocks the single serving loop indefinitely; the HTTP socket timeout does not constrain the child pipe. [crates/shim/src/lib.rs:78](/Users/ian/Projects/familiar-t225/crates/shim/src/lib.rs:78)
+
+3. Any child message with the awaited ID is accepted as the response. MCP permits server requests before the final response, so a same-ID sampling request can be relayed incorrectly. Response matching must require `result` or `error`, not merely `id`. [crates/shim/src/lib.rs:88](/Users/ian/Projects/familiar-t225/crates/shim/src/lib.rs:88)
+
+These are grounded in MCP’s required initialization lifecycle and request timeouts, and in its allowance for server-to-client requests before the final response: [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle), [MCP transports](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports).
+tokens used
+145,130
+## Round 2 — codex, 2026-08-28
+
+I accept the core claim: the deliverable is not an SP548E integration but a factory that can manufacture, prove, commission, and later manage one. Production order #1 succeeds only if the same machinery could accept production order #2 without adding device-specific truth to the kernel.
+
+I contest three parts of Round 1: the proposed containment is too weak, generation and bench execution are not simply “free,” and a tap that causes the daemon to write `actuators.json` would contradict ADR-0032 as presently written.
+
+### Q1 — containment floor
+
+**Match-rule pinning inside the generated driver is not containment.** The code being constrained cannot also be the authority that constrains itself. Treat every candidate as untrusted until retirement, not merely until its tests pass.
+
+The minimum floor I sign is:
+
+1. The candidate process receives an empty environment plus an explicit allowlist, no credentials, no ambient home directory, no inherited descriptors except its protocol pipes, and no shell-expanded command line.
+2. It sees one read-only candidate/toolchain tree and one bounded scratch directory. The workshop ledger, declarations, boundary, repo, data dir, and household files are outside its filesystem authority. A working directory is not a filesystem boundary.
+3. Network syscalls are denied. CPU, memory, process count, descriptors, wall time, and output are bounded. Output must be capped while it is produced, with the whole process group killed on overrun; the present runner’s capped read of an uncapped `.out` file is not sufficient.
+4. `sandbox_execution:false` does not waive this floor for autonomous factory candidates. An open gate authorizes a capability; it does not turn an unconfined execution method into an acceptable one.
+5. The append-only ledger is written only by the trusted manager, outside the candidate’s writable world. Every event carries the order, run, input and artifact digests, transition, oracle verdict, gate snapshot, and evidence reference.
+6. The candidate never receives CoreBluetooth or `bleak` access. A trusted, fixed BLE broker owns Bluetooth TCC and exposes a capability-scoped pipe—not a general local port—to the candidate.
+
+The broker, not generated code, resolves the human-declared match rule: manufacturer `0x5053` plus the exact WiFi MAC, exactly one match or refusal, then a session-bound CoreBluetooth peripheral. It independently restricts service/characteristic UUIDs, read/write class, frame size, rate, and oracle rung. A read capability cannot become an arbitrary write capability; an act capability names the one ordered operation being tested. The candidate manufactures SP548E matching, framing, reassembly, decoding, and command logic; the broker is generic factory machinery, not an existing SP548E driver.
+
+On macOS, the practical candidate is an App-Sandboxed runner with no file, network, or Bluetooth entitlement, communicating over an inherited pipe to a separately trusted BLE broker—or another mechanism that proves the same properties. The implementation choice must pass hostile fixtures that try to read the boundary and credentials, open a network socket, enumerate a second peripheral, fork, and flood output. If MacOnStick cannot provide that jail, the order parks; we do not relabel resource limits as containment.
+
+### Q2 — generation contract
+
+Use a new `crates/workshop`. Do not extend `ConsultPrompt` into the factory’s source of truth: consult is a provider transport, while the workshop owns orders, candidates, transitions, and evidence.
+
+The immutable input should contain:
+
+- order id, requester, goal, and original wording;
+- declared subject/device identity and requested capability surface;
+- sourced research entries with content digests;
+- autonomy classification and required gates;
+- oracle plan and acceptance assertions;
+- allowed toolchain plus containment profile.
+
+The typed output is:
+
+```text
+GenerationOutcome =
+    Candidate {
+        manifest,
+        files[path, digest, role],
+        entrypoints,
+        self_tests,
+        declared_effects,
+        toolchain_lock,
+        capability_surface
+    }
+  | Refused {
+        code,
+        rationale,
+        unmet_requirements,
+        evidence
+    }
+```
+
+Paths must be relative and traversal-free; the manifest must account for every file; artifacts become content-addressed and write-once once submitted. Provider adapters—local reasoner, envoy, device consult, or cloud—may produce the serialized outcome, but `crates/workshop` validates it before anything becomes executable. A refusal is a terminally valid factory result and earns a ledger row.
+
+Replay of the ledger, rather than a mutable status file, derives the order state. Impossible or duplicate transitions fail closed.
+
+### Q3 — witness steps
+
+A witness is evidence, not consent, and should not overload `PendingDecision`. Add a typed `WitnessRequest` carrying the order/run and artifact digests, device, exact command, expected visible result, time window, and permitted answers: `yes`, `no`, or `unclear`.
+
+The Metal Sphere is the authority surface. Push may notify Ian and deep-link to the card, but cannot itself constitute the witness. The returned answer must come through the signed console seam and bind to that exact request; a nearby conversational “yes” is not enough.
+
+Non-answer never decays into assent or failure. The active converge run releases its resources and the order parks as `awaiting_witness`; the request remains durable without repeated nagging. `no` is an oracle failure and starts another counted iteration. `unclear` records an attempted witness but supplies no proof.
+
+An unwitnessed colour implementation is not “shipped.” The factory may separately propose a reduced surface containing only operations whose oracle has closed, but the full order remains open and the declaration must exclude unproved colour/flash acts.
+
+### Q4 — gate topology
+
+I agree there should be no new omnibus `allow_workshop` gate. I reject “generation and bench runs are always allowed”: permission does not compose, and both phases already map onto existing effects.
+
+| Factory step | Required authority |
+|---|---|
+| Deterministic order parsing and artifact writing inside the workshop | none beyond the fixed workshop scope |
+| Model generation | `allow_llm`; also `allow_llm_cloud` if the prompt leaves covenant hardware |
+| Toolchain/package acquisition | `allow_network` and `allow_tool_install` |
+| Candidate or bench execution | `allow_execute` and `allow_authored_execute`, plus the non-waivable containment floor |
+| Passive BLE scan | existing discovery authorization and the declared identification scope |
+| SP548E state query | `allow_actuate` |
+| Act and witness oracle | `allow_actuate` |
+| Installing `actuators.json` | human declaration only |
+
+ADR-0032 already settles the contested radio edge: polling is under `allow_actuate` because the state query connects and transmits. Therefore rung 2 should split into passive discovery—which remains perception—and the live `0x02` query, which rides `allow_actuate`. Calling the query “read-only” describes its intended semantic result, not its physical effect.
+
+### Q5 — where the workshop lives
+
+New crate, not `mesh`. `mesh` transports and observes; the workshop manages production.
+
+`crates/workshop` should own:
+
+- work-order and generation-contract types;
+- the legal state machine;
+- content-addressed candidate manifests;
+- oracle plans and verdicts;
+- witness requests and evidence;
+- append/replay of the factory ledger;
+- refusal and retirement records.
+
+`cycle` schedules work; `llm` and the device consult seam are generation adapters; the trusted runner and BLE broker are execution adapters. None of those adapters gets to mutate order state except by returning a typed event that the workshop validates and appends.
+
+### Q6 — language of the first bench
+
+The contract should be language-agnostic. Order #1 should use Python for the device-specific protocol module and tests because it shortens the converge loop, but not Python-plus-`bleak` inside the candidate. A fixed Swift or otherwise trusted broker owns CoreBluetooth; generated Python owns the SP548E logic.
+
+Prefer the standard library for order #1. If dependencies become necessary, the factory manager provisions a digest-pinned environment under the install/network gates; generated code never runs its own package installer. Interpreter, dependency lock, broker version, and candidate digests are part of every oracle verdict.
+
+“Industrialize to Rust” is a later order only if measurements justify it. A contained, restartable, oracle-proven Python driver is not provisional merely because it is Python.
+
+### Q7 — the development factory
+
+Formalize it; a prose mapping alone is insufficient. Do not create duplicate sources of truth merely to copy Jeff’s filenames.
+
+- Root `FACTORY.md`: the cold-walk-in index and converge protocol, linking rather than repeating canonical law and runbooks.
+- `docs/SOUL.md`: remains mission and constitution; no competing `MISSION.md`.
+- `coordination/AUTONOMY.md`: the explicit `decides`, `decides-and-flags`, and `stops-and-asks` contract, with anything unlisted in the last class.
+- `BOARD.md`: production-order projection, extended with oracle, risk class, and evidence/ship fields.
+- `CONTRIBUTING.md` plus `coordination/README.md`: the runbook and green-bar discipline.
+- A true append-only `coordination/FACTORY_LEDGER.jsonl`: claim, iteration, bar, reciprocal review, risk verdict, ship, refusal, and landing events.
+
+`STATE.md` currently combines present-state projection with historical entries, so it should not be called strictly append-only. Keep it as the human-readable projection and operational log; derive factory metrics from the immutable ledger. Validation should reject a ship without matching order, oracle evidence, reciprocal review, risk verdict, and green-bar SHA.
+
+For the autonomy contract: implementation choices, candidate selection, ordinary converge iterations, and honest refusal are autonomous; novel dependencies and noteworthy risk changes are decide-and-flag; mission/law changes, boundary widening, new persistent outward surfaces, deployment, and declaration stop-and-ask.
+
+### Q8 — who declares
+
+The factory proposes; Ian declares. The production order authorizes manufacture and oracle work within its gates, not the later creation of a standing actuator surface.
+
+The proposal artifact should contain exact `actuators.json` JSON, the declaration digest, candidate/runner/toolchain digests, the device match rule, exposed actions, revert map, oracle matrix, and any omitted or unwitnessed capability. It lives under the workshop and is never watched or auto-applied.
+
+Under ADR-0032’s current words, a console tap that asks the daemon to write `actuators.json` is not permissible: that would be the familiar writing the declaration. The immediate ship format is therefore exact JSON for Ian to install through a human-owned path. If we want one-tap installation, amend ADR-0032 explicitly to distinguish the autonomous core from a signed, proof-of-presence administrative installer; do not smuggle that semantic change in as UI convenience.
+
+The ledger records proposal, then independently observes the on-disk declaration and appends its digest and provenance. Exact digest match advances the order to `declared`; an edited declaration records `declaration_diverged` and requires the changed surface to be revalidated. After a restart and smoke/oracle pass through the declared command, append `commissioned` and close the order. Proposal alone is not closure, and declaration alone is not proof that the manufactured surface runs.
+
+Production order #1 is complete when the hostile containment suite is green; the candidate and its sources are reproducible from the order; all exposed operations have closed their required oracle rungs; Ian’s exact declaration is observed; the declared driver survives restart; and every attempt, refusal, witness, gate decision, and commissioning event is present in the append-only ledger.
+
+*(Round 2 transcribed verbatim from codex's 2026-08-28 exec reply by the chair;
+codex's session cannot write files.)*
