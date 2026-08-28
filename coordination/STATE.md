@@ -422,6 +422,22 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:claude (chair). **THE CODEX LANE IS BACK ONLINE — Ian, verbatim:
+  "codex has usage credits again, bring paired coding with codex back online."** The
+  2026-08-25 stop order is lifted; the push hold ends. Restart acts: the interrupted
+  workspace bar was RERUN on `claude/t228-ble-surveyor` before anything was offered
+  (Swift 40/0; Rust fmt/clippy/workspace results recorded in the push that follows),
+  the held local commits (BLE round-5 repairs + STATE/Jeff-note updates) are pushed,
+  and codex is asked to re-arm its watcher automation (the old
+  `watch-familiar-co-programming-handoffs` heartbeat was deleted in the stop —
+  `~/.codex/automations/` is empty — so the wake-on-push sentence is aspirational again
+  until codex recreates it). Standing queue for the lane: BLE round-5 review, T-225
+  shim review (`claude/t225-stdio-shim`, pushed 08-25, never reviewed), watch
+  delegation status string, browser-fleet unification, sweep brick 2. Also for the
+  record: Jeff/UCF DECLINED the partner invite for now ("too much chaos in UCF
+  development stream to add anything new") — his principal stays enabled but dormant;
+  the bundle copies (Desktop + lighthouse `/root/`) await Ian's deletion word.
+
 - 2026-08-25 · companion:claude (diagnosis on Ian's screenshot). **THE JEFF TAP ALREADY
   HAPPENED — the "tap + handoff remain" records were stale.** Verified live on the lighthouse
   (read-only): `pending-registrations/` is empty and `principals.json` carries

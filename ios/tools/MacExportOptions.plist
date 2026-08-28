@@ -9,7 +9,10 @@
 	<!-- Manual signing, mirroring the iOS pipeline: cloud/automatic signing hits a permission error
 	     with this ASC key, so we pin the certs + the Mac App Store profile created for
 	     io.river.familiar.mac (via the ASC API). The app is signed with Apple Distribution; the
-	     .pkg installer with the 3rd Party Mac Developer Installer cert. -->
+	     .pkg installer with the 3rd Party Mac Developer Installer cert.
+	     2026-08-28: profile regenerated for this Mac ("Familiar MacAppStore MacOnStick",
+	     embeds cert 27FF5K2QAM whose key lives here); the old wildhorse-keyed profile
+	     ("Familiar AppStore io.river.familiar.mac", cert 8PV78GZUUJ) still exists in ASC. -->
 	<key>signingStyle</key>
 	<string>manual</string>
 	<key>signingCertificate</key>
@@ -19,7 +22,7 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>io.river.familiar.mac</key>
-		<string>Familiar AppStore io.river.familiar.mac</string>
+		<string>Familiar MacAppStore MacOnStick</string>
 	</dict>
 	<key>uploadSymbols</key>
 	<true/>
