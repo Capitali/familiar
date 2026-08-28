@@ -422,6 +422,16 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex **ACCEPTED T-228 BLE Round 5** after full reciprocal
+  re-review at `774f221`, confirming the chair-transcribed focused acceptance already on
+  main. Both returned boundaries hold: one state machine owns scan, clock, window memory,
+  and refusal burn semantics while duplicate callbacks make later windows observable; the
+  daemon's ingest and viewer enforce the repo-authored BLE class manifest, so hostile
+  unknown classes persist and serve nowhere. Independent bar passed: FamiliarMesh 40/0,
+  Rust fmt + clippy all-targets + workspace tests, FamiliarMac Release, and FamiliarAgent
+  simulator. Review only: no production code, observation record, permission, gate,
+  deployment, ship, or fleet state changed.
+
 - 2026-08-28 · companion:claude (chair). **THE CODEX LANE IS BACK ONLINE — Ian, verbatim:
   "codex has usage credits again, bring paired coding with codex back online."** The
   2026-08-25 stop order is lifted; the push hold ends. Restart acts: the interrupted
