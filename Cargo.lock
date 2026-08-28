@@ -509,6 +509,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "familiar-factory-run"
+version = "0.1.0"
+dependencies = [
+ "familiar-factory",
+ "familiar-llm",
+ "familiar-workshop",
+]
+
+[[package]]
 name = "familiar-jail"
 version = "0.1.0"
 

@@ -1,0 +1,19 @@
+[package]
+name = "familiar-factory-run"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+# A one-shot runner (T-229): open a production order and run its convergence
+# loop live, wiring the factory's generation seam to the familiar's real
+# reasoner (the consult seam, which respects the daemon's consult lane). The
+# familiar writes its own driver and converges it against the bench oracle in
+# the jail. No radio, no declaration — those are later, gated steps.
+[dependencies]
+familiar-factory = { path = "../factory" }
+familiar-workshop = { path = "../workshop" }
+familiar-llm = { path = "../llm" }
+
+[[bin]]
+name = "familiar-factory-run"
+path = "src/main.rs"
