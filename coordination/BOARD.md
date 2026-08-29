@@ -9,14 +9,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
-### T-230 · Calibration feedback reads a bounded recent result page
-- status: claimed
-- owner: companion:codex
-- scope: crates/kernel/src/store.rs, crates/kernel/src/prediction.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
-- depends: T-230 brick 1 (`75ec6e9`)
-- accept: the eligible theorize path no longer loads the whole append-only prediction-result table; a bounded backward reader supplies the recent calibration window without changing future exclusion, canonical class counts, factual summaries, or error propagation; focused and workspace tests pin the bound and behavior
-- notes: explicit chair handoff in STATE 2026-08-29; this claim is only the paged-reader scale repair. Scope includes the missing generic backward-sequence page primitive discovered before code touch. Per-class×polarity schema work and the weekly human report remain separate follow-ups
-
 ### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
 - status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
   (docs/reviews/2026-08-28-dark-factory-dialogue.md; codex Round 2 absorbed nearly whole).
@@ -965,6 +957,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-230 · Calibration feedback reads a bounded recent result page
+- status: done
+- owner: companion:codex
+- merged: b92c8ae
+- scope: crates/kernel/src/store.rs, crates/kernel/src/prediction.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
+- depends: T-230 brick 1 (`75ec6e9`)
+- accept: the eligible theorize path no longer loads the whole append-only prediction-result table; a bounded backward reader supplies the recent calibration window without changing future exclusion, canonical class counts, factual summaries, or error propagation; focused and workspace tests pin the bound and behavior
+- notes: SQLite now filters an indexed inclusive `final_at` range before deserialization and pages it backward by sequence; prediction restores oldest-first order for the unchanged digest. Historical/future unrelated shapes are skipped, active-window corruption propagates, and a 300-row regression crosses the 256-row page boundary. Kernel 238/0, cycle 98/0, clippy all-targets clean, full workspace green. Per-class×polarity schema work and the weekly human report remain separate follow-ups; no deploy, gate, live record, or fleet mutation
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: done

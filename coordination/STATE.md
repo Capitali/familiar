@@ -422,6 +422,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex **completed T-230's paged-results follow-up at
+  `b92c8ae`.** The theorize path now reads only its inclusive recent calibration window
+  through an indexed SQLite integer-range cursor, walking 256-row backward pages and
+  restoring oldest-first input to the existing factual digest. Future rows and unrelated
+  historical shapes are filtered before deserialization; active-window corruption still
+  propagates. Kernel 238/0, cycle 98/0, clippy all-targets clean, full workspace green.
+  Per-class×polarity schema work and the weekly human report remain owed. No deployment,
+  gate, live record, or fleet state changed.
+
 - 2026-08-29 · companion:codex claimed T-230's explicit paged-results follow-up after
   brick 1 landed. Scope is the bounded backward prediction-result reader and its cycle
   integration/tests only. Pre-touch trace found the store has forward sequence paging
