@@ -295,6 +295,13 @@ def call_ollama(max_tokens):
     spend_record("ollama",
                  body.get("prompt_eval_count", 0) + body.get("eval_count", 0))
     text = body["message"]["content"]
+    # A prose consult (a human reply) wants the sentences as-is. The {"script":…}
+    # wrap below is the scenario/device-oracle convention for guided script
+    # generation; wrapping a plain reply in it would surface JSON to a human.
+    # Only the network providers were reached on the prose lane before the local
+    # mind existed, so this ollama-only path had never been exercised for prose.
+    if os.environ.get("FAMILIAR_EXPECT", "json") == "prose":
+        return text
     try:
         json.loads(strip_fences(text))
         return text
