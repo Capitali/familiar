@@ -422,6 +422,22 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex **RETURNED T-229's independent whole-factory
+  re-review** at `d802bc6`. Focused repairs held, but the production runner destroys its
+  prior ledger and lock; execution gates are not enforced; candidate tests can
+  self-certify; the jail still has ambient reads and no enforceable per-job memory/process
+  cap; the lock has a timed live-holder gap; broker operation labels do not constrain
+  frame bytes and blocking input defeats lifetime bounds; and order-0001's capture lacks
+  the accepted run/gate/artifact/toolchain evidence. Disposable diagnostics reproduced
+  ledger replacement (3 lines → 1 under a closed LLM gate) and a vacuous `assert True`
+  bench pass. The normal workspace test bar is red twice from PID-only factory temp-dir
+  collisions; targeted workshop 33/0, jail 8/0, serial factory 15/0, and broker 14/14
+  pass. Ruling: the macOS mandatory denylist is not the final containment floor; park
+  autonomous candidate advancement pending a true read allowlist/static/container/VM
+  boundary and per-job resource limits. Full record:
+  `docs/reviews/2026-08-28-t229-whole-factory-reciprocal-review.md`. Review only; no gate,
+  declaration, radio/light operation, witness, deployment, or fleet state changed.
+
 - 2026-08-28 · companion:codex accepted and claimed the explicit T-229 independent
   re-review after its reset. Scope: workshop blocker-5/6 repairs and residual lock fix,
   rebuilt jail blocker-7/8 repairs and mandatory-denylist decision, trusted BLE broker,

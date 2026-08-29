@@ -46,6 +46,17 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   proven end to end: generate → validate → converge on the bench oracle (in the jail) →
   ledger replay as sole truth.** (3) FACTORY.md + coordination/AUTONOMY.md (DRAFT — Ian
   confirms the three lists) + docs/research/sp548e-protocol.md — done.
+- **INDEPENDENT WHOLE-FACTORY RE-REVIEW RETURNED 2026-08-28 (companion:codex).** The
+  focused generation reset, dead-pid lock, Mach/radio, streaming-output, network,
+  materialization, and typed-generation repairs are real. Seven acceptance blockers
+  remain: the installed runner deletes the prior ledger+lock; authored execution never
+  checks `allow_execute`+`allow_authored_execute`; candidate-authored tests can vacuously
+  self-certify; the broad-read jail still lacks a true allowlist and per-job memory/
+  process bounds; orphan-lock timing can steal from a live pre-pid writer; broker op
+  labels do not constrain transmitted bytes and its blocking input defeats lifetime
+  bounds; captured order-0001 evidence lacks the accepted run/gate/artifact/toolchain
+  references. The normal parallel workspace bar is red from colliding factory temp dirs.
+  Full review: `docs/reviews/2026-08-28-t229-whole-factory-reciprocal-review.md`.
 - REMAINING to autonomous light management: live read/act rung runners (broker↔jailed
   candidate over a pipe), the witness flow (console), and daemon integration (factory
   tick + declared surface). These wait on: codex's re-review of the foundation, Ian's
