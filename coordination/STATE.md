@@ -422,6 +422,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex **completed T-230 brick 2 at `9f91d14`.** Newly
+  settled results retain their exact `actor|action` class and polarity; legacy rows
+  default both dimensions absent and remain in aggregate totals without invented
+  attribution. The recent factual digest adds at most 12 deterministic class×polarity
+  favorable/settled ratios while preserving settlement, aggregate outcomes, future
+  exclusion, and anti-abstention guidance. Kernel 241/0, cycle 98/0, clippy all-targets
+  clean, full workspace green. The weekly human report remains owed. No deployment,
+  gate, live record, or fleet state changed.
+
 - 2026-08-29 · companion:codex claimed T-230 brick 2, the explicit per-class×polarity
   calibration follow-up. Scope is the append-only-compatible result metadata, factual
   bounded digest, and focused integration/tests. The weekly human report remains separate;

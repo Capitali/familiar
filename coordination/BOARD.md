@@ -9,14 +9,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
-### T-230 · Calibration feedback reports per-class×polarity outcomes
-- status: claimed
-- owner: companion:codex
-- scope: crates/kernel/src/prediction.rs, crates/kernel/src/belief.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
-- depends: T-230 brick 1 (`75ec6e9`), paged-results follow-up (`c490333`)
-- accept: newly settled results record a canonical predicted class and polarity while legacy append-only rows still deserialize; the factual recent feedback reports bounded deterministic per-class×polarity outcome counts without changing settlement, aggregate totals, future exclusion, or prompt anti-gaming guidance; focused and workspace tests pin compatibility and behavior
-- notes: explicit chair handoff in STATE 2026-08-29, resolving dialogue Q2 as brick 2. This claim excludes the separately owed weekly human report, deployments, gates, live records, and fleet state
-
 ### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
 - status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
   (docs/reviews/2026-08-28-dark-factory-dialogue.md; codex Round 2 absorbed nearly whole).
@@ -966,14 +958,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Done (recent — pruned to ~10; history is git's)
 
-### T-230 · Calibration feedback reads a bounded recent result page
+### T-230 · Calibration feedback reads bounded recent results and reports class×polarity
 - status: done
 - owner: companion:codex
-- merged: b92c8ae
-- scope: crates/kernel/src/store.rs, crates/kernel/src/prediction.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
+- merged: b92c8ae, 9f91d14
+- scope: crates/kernel/src/store.rs, crates/kernel/src/prediction.rs, crates/kernel/src/belief.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
 - depends: T-230 brick 1 (`75ec6e9`)
-- accept: the eligible theorize path no longer loads the whole append-only prediction-result table; a bounded backward reader supplies the recent calibration window without changing future exclusion, canonical class counts, factual summaries, or error propagation; focused and workspace tests pin the bound and behavior
-- notes: SQLite now filters an indexed inclusive `final_at` range before deserialization and pages it backward by sequence; prediction restores oldest-first order for the unchanged digest. Historical/future unrelated shapes are skipped, active-window corruption propagates, and a 300-row regression crosses the 256-row page boundary. Kernel 238/0, cycle 98/0, clippy all-targets clean, full workspace green. Per-class×polarity schema work and the weekly human report remain separate follow-ups; no deploy, gate, live record, or fleet mutation
+- accept: the eligible theorize path reads a bounded recent result page rather than the whole append-only table; new settlements record canonical class and polarity while legacy rows still deserialize; the factual digest preserves aggregate totals and future exclusion while adding deterministic bounded class×polarity favorable ratios; focused and workspace tests pin compatibility and behavior
+- notes: SQLite filters an indexed inclusive `final_at` range before deserialization and pages backward by sequence; prediction restores oldest-first order. New exact-class results add defaulted class/polarity metadata, and the digest reports at most 12 lexicographic class×polarity ratios without editorializing; legacy rows remain aggregate-only. Kernel 241/0, cycle 98/0, clippy all-targets clean, full workspace green. The weekly human report remains separate; no deploy, gate, live record, or fleet mutation
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: done
