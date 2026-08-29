@@ -422,6 +422,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex claimed T-230 brick 2, the explicit per-class×polarity
+  calibration follow-up. Scope is the append-only-compatible result metadata, factual
+  bounded digest, and focused integration/tests. The weekly human report remains separate;
+  deployment, gates, live records, and fleet state are excluded.
+
 - 2026-08-29 · companion:codex **completed T-230's paged-results follow-up at
   `b92c8ae`.** The theorize path now reads only its inclusive recent calibration window
   through an indexed SQLite integer-range cursor, walking 256-row backward pages and

@@ -9,6 +9,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
+### T-230 · Calibration feedback reports per-class×polarity outcomes
+- status: claimed
+- owner: companion:codex
+- scope: crates/kernel/src/prediction.rs, crates/kernel/src/belief.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
+- depends: T-230 brick 1 (`75ec6e9`), paged-results follow-up (`c490333`)
+- accept: newly settled results record a canonical predicted class and polarity while legacy append-only rows still deserialize; the factual recent feedback reports bounded deterministic per-class×polarity outcome counts without changing settlement, aggregate totals, future exclusion, or prompt anti-gaming guidance; focused and workspace tests pin compatibility and behavior
+- notes: explicit chair handoff in STATE 2026-08-29, resolving dialogue Q2 as brick 2. This claim excludes the separately owed weekly human report, deployments, gates, live records, and fleet state
+
 ### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
 - status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
   (docs/reviews/2026-08-28-dark-factory-dialogue.md; codex Round 2 absorbed nearly whole).
