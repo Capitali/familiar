@@ -12,10 +12,10 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-230 · Calibration feedback reads a bounded recent result page
 - status: claimed
 - owner: companion:codex
-- scope: crates/kernel/src/prediction.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
+- scope: crates/kernel/src/store.rs, crates/kernel/src/prediction.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
 - depends: T-230 brick 1 (`75ec6e9`)
 - accept: the eligible theorize path no longer loads the whole append-only prediction-result table; a bounded backward reader supplies the recent calibration window without changing future exclusion, canonical class counts, factual summaries, or error propagation; focused and workspace tests pin the bound and behavior
-- notes: explicit chair handoff in STATE 2026-08-29; this claim is only the paged-reader scale repair. Per-class×polarity schema work and the weekly human report remain separate follow-ups
+- notes: explicit chair handoff in STATE 2026-08-29; this claim is only the paged-reader scale repair. Scope includes the missing generic backward-sequence page primitive discovered before code touch. Per-class×polarity schema work and the weekly human report remain separate follow-ups
 
 ### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
 - status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
