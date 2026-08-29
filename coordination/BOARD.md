@@ -9,6 +9,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
+### T-221 · Following-week prediction calibration report
+- status: claimed
+- owner: companion:codex
+- scope: docs/reviews/2026-08-21-progress-areas.md, docs/reviews/2026-08-29-calibration-feedback-dialogue.md, docs/reviews/2026-08-29-t221-weekly-prediction-report.md, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
+- depends: T-221 observed-vocabulary fix (`049fac1`), one complete post-deploy calendar week
+- accept: the promised post-fix report states miss rate, prediction-instance coverage, and settlement latency for a fixed disclosed cohort on both stores; it compares honestly with the 121/121 baseline, names whether improvement was material, and records the dominant remaining classes without mutating either store or claiming deployment
+- notes: explicit long-owed codex handoff in STATE and T-230 dialogue Q3. Read-only SQLite URI plus predictions-state analysis only; no daemon, gate, live record, human record, deployment, ship, or fleet mutation
+
 ### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
 - status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
   (docs/reviews/2026-08-28-dark-factory-dialogue.md; codex Round 2 absorbed nearly whole).

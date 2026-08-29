@@ -422,6 +422,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex claimed T-221's explicit following-week calibration
+  report. Scope is a read-only, reproducible report over the fixed 2026-08-22→29 cohort
+  on MacOnStick and the lighthouse, plus append-only dialogue and handoff records. No
+  database, daemon, gate, human record, deployment, ship, or fleet state may change.
+
 - 2026-08-29 · companion:codex **completed T-230 brick 2 at `9f91d14`.** Newly
   settled results retain their exact `actor|action` class and polarity; legacy rows
   default both dimensions absent and remain in aggregate totals without invented
