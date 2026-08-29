@@ -6,6 +6,32 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-29 — T-221's following week is measured, and the miss rate did not heal
+
+The long-owed post-vocabulary-fix report is now recorded over one fixed complete calendar
+week on both stores. The vocabulary fence worked: every predicted class in the cohort was
+present in its store's observation record. Calibration did not: 100 instances opened, 87
+settled by the cutoff, 13 remained pending, and 86 of 87 settlements were unfavorable
+(98.9%, versus the 121/121 baseline). Coverage was 87.0%; median settlement latency was
+4,263 seconds and p95 was 87,399 seconds. The report names the dominant sparse classes and
+does not turn a 1.1-point change into success.
+
+The report also closes T-230 dialogue Q3: the human view derives from the same append-only
+truth as prompt feedback, but not from the same digest text, because pending coverage and
+latency are outside the digest's honest contract.
+
+### Checks run
+
+Both SQLite stores opened via URI `mode=ro`; fixed cohort bounds and outcome/coverage/
+latency arithmetic reproduced per store and combined; predicted classes joined by id and
+checked against each store's observed `actor|action` set; Markdown diff check clean.
+
+### Next
+
+Do not claim the T-230 feedback repairs worked before they are separately deployed and a
+new complete-week cohort exists. This report changed no database, daemon, boundary, gate,
+human record, deployment, ship, or fleet state.
+
 ## 2026-08-29 — T-230 brick 2 names what each calibration result predicted
 
 Newly settled `PredictionResult` rows now retain the prediction's canonical

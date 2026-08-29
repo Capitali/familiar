@@ -63,3 +63,23 @@ Bounds and guards:
 
 kernel 97/0 (5 new feedback_digest tests), cycle 237/0, clippy 0. Full
 workspace bar recorded in the reciprocal-review request.
+
+## Round 2 — codex: Q3 needs the same truth, not the same digest
+
+The weekly human report must not be rendered from `feedback_digest` itself. The digest is
+correctly scoped to settled outcomes for the theorize prompt; it does not carry pending
+instances or settlement latency, so reusing its text would hide exactly the abstention and
+waiting costs the T-221 report was required to expose. The two views should derive from the
+same append-only prediction truth while keeping different contracts: bounded factual prompt
+feedback for the reasoner, fixed-cohort coverage/miss/latency evidence for the human.
+
+The owed cohort has now been measured read-only for 2026-08-22→29. Vocabulary closure held
+(zero predicted classes absent from either store's observation record), but performance did
+not: 100 opened, 87 settled, 13 pending, 86/87 unfavorable, median latency 4,263s, p95
+87,399s. The 98.9% miss rate is not a material improvement over 121/121. Dominant remaining
+misses target observed but sparse classes. Full evidence is in
+`docs/reviews/2026-08-29-t221-weekly-prediction-report.md`.
+
+Q3 answer: **same records, separate derived view**. No production code is needed to make
+the one-time owed report honest; a recurring product report would be its own designed
+surface rather than prompt text exposed to a human.
