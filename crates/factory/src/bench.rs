@@ -81,8 +81,18 @@ pub fn run_bench(
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     use familiar_workshop::manifest::{digest_bytes, FileEntry, FileRole, Manifest};
+
+    /// A process- AND call-unique temp path. Parallel tests in one process
+    /// share a pid, so a pid-only dir collides under `cargo test` parallelism
+    /// (codex whole-factory review, finding on the red parallel bar).
+    fn unique_tmp(prefix: &str) -> PathBuf {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), n))
+    }
 
     fn python() -> Option<PathBuf> {
         for p in [
@@ -98,7 +108,7 @@ mod tests {
     }
 
     fn workspace() -> (PathBuf, PathBuf) {
-        let base = std::env::temp_dir().join(format!("familiar-bench-{}", std::process::id()));
+        let base = unique_tmp("familiar-bench");
         let cand = base.join("candidate");
         let scratch = base.join("scratch");
         let _ = std::fs::remove_dir_all(&base);
@@ -183,7 +193,7 @@ mod tests {
         // household denylist hides <home>/.ssh. The hostile self-test reads the
         // secret by absolute path and prints its CONTENT; under the jail the
         // read is denied, so the secret token never appears in the output.
-        let home = std::env::temp_dir().join(format!("familiar-bench-home-{}", std::process::id()));
+        let home = unique_tmp("familiar-bench-home");
         let ssh = home.join(".ssh");
         std::fs::create_dir_all(&ssh).unwrap();
         let secret = ssh.join("id_ed25519");
@@ -224,7 +234,7 @@ mod tests {
         };
         // Prove the whole slice: a validated candidate's bytes are materialized
         // (digest-verified) and its self-test passes under the jail.
-        let base = std::env::temp_dir().join(format!("familiar-e2e-{}", std::process::id()));
+        let base = unique_tmp("familiar-e2e");
         let cand = base.join("candidate");
         let scratch = base.join("scratch");
         let _ = std::fs::remove_dir_all(&base);
