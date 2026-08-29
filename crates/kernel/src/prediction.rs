@@ -270,99 +270,50 @@ pub fn calibration(dir: &Path, thread_id: &str) -> Calibration {
     c
 }
 
-/// One observed event class and how often it occurred in the theorize window.
-/// The frequency is the *base rate* the reasoner should weigh: predicting an
-/// inevitable event is cheap; calling a rare one correctly is informative.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClassFrequency {
-    pub class: String,
-    pub count: usize,
-}
-
 /// The calibration feedback the familiar reads back into theorizing — closing
 /// the loop the measurement half already built (reasoning survey 2026-08-29,
-/// improvement #1). It is derived, deterministic, and honest: the familiar's
-/// own recent settled record, plus which event classes are common vs rare so
-/// it prefers *informative* predictions over inevitable ones.
+/// improvement #1). It is derived, deterministic, and — per codex's Round-2
+/// review — **factual, not editorial**: the familiar's own recent settled
+/// record with each of the four outcomes reported separately, and an explicit
+/// note that pending predictions are excluded. No "over-predicting", no
+/// "landing", no praise: an editorial nudge to predict *less* rewards
+/// abstention, exactly the T-221 failure (a theory that predicts nothing
+/// settles nothing). The anti-gaming guidance is a *static* instruction in the
+/// prompt template, not a data-derived diagnosis.
 ///
-/// Empty string when there is nothing to say (no settled results and no
-/// classes) so it never pads the prompt with noise. `window_secs` bounds the
-/// record to the recent past; classes are already the caller's bounded set.
-pub fn feedback_digest(
-    results: &[PredictionResult],
-    class_freqs: &[ClassFrequency],
-    now: i64,
-    window_secs: i64,
-) -> String {
+/// Both halves of the loop are windowed identically: this counts only results
+/// finalized in `[now - window_secs, now]` (future timestamps excluded), and
+/// the caller windows the observed-class counts to the same interval.
+///
+/// Empty string when nothing settled in the window, so it never pads the prompt.
+pub fn feedback_digest(results: &[PredictionResult], now: i64, window_secs: i64) -> String {
     let cutoff = now.saturating_sub(window_secs);
     let mut confirmed = 0usize;
-    let mut unfavorable = 0usize;
+    let mut missed = 0usize;
+    let mut absent_confirmed = 0usize;
+    let mut absent_violated = 0usize;
     for r in results {
-        if r.final_at < cutoff {
+        // Windowed AND no future records (a clock skew must not inflate the record).
+        if r.final_at < cutoff || r.final_at > now {
             continue;
         }
-        if r.outcome.favorable() {
-            confirmed += 1;
-        } else {
-            unfavorable += 1;
+        match r.outcome {
+            Outcome::Confirmed => confirmed += 1,
+            Outcome::Missed => missed += 1,
+            Outcome::AbsentConfirmed => absent_confirmed += 1,
+            Outcome::AbsentViolated => absent_violated += 1,
         }
     }
-    let settled = confirmed + unfavorable;
-
-    let mut out = String::new();
-    if settled > 0 {
-        out.push_str(&format!(
-            "Your recent prediction record: {confirmed} confirmed, {unfavorable} missed of \
-             {settled} settled. "
-        ));
-        // An honest nudge only when the record clearly says one thing — never
-        // manufactured encouragement.
-        if settled >= 4 && unfavorable * 3 >= confirmed * 7 {
-            out.push_str(
-                "You are over-predicting — predict less, and only what you can actually call. ",
-            );
-        } else if settled >= 4 && confirmed >= unfavorable * 3 {
-            out.push_str("Your calls are landing — you can reach for more informative ones. ");
-        }
-        out.push('\n');
+    let settled = confirmed + missed + absent_confirmed + absent_violated;
+    if settled == 0 {
+        return String::new();
     }
-
-    if !class_freqs.is_empty() {
-        // Bucket by base rate so the reasoner can prefer the rare-but-callable.
-        let max = class_freqs
-            .iter()
-            .map(|c| c.count)
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let mut many = Vec::new();
-        let mut few = Vec::new();
-        let mut rare = Vec::new();
-        for c in class_freqs {
-            let label = format!("{} ({})", c.class, c.count);
-            // Thirds of the observed range; the single-occurrence tail is "rare".
-            if c.count == 1 {
-                rare.push(label);
-            } else if c.count * 3 <= max {
-                few.push(label);
-            } else {
-                many.push(label);
-            }
-        }
-        out.push_str(
-            "Event frequency this window — a rare event called correctly teaches more than an \
-             inevitable one:\n",
-        );
-        let mut line = |name: &str, v: &[String]| {
-            if !v.is_empty() {
-                out.push_str(&format!("  {name}: {}\n", v.join(", ")));
-            }
-        };
-        line("often", &many);
-        line("sometimes", &few);
-        line("rare", &rare);
-    }
-    out
+    format!(
+        "Your settled predictions (last {} days): {confirmed} confirmed, {missed} missed, \
+         {absent_confirmed} absent-confirmed, {absent_violated} absent-violated. Pending \
+         predictions are not counted.\n",
+        window_secs / 86_400
+    )
 }
 
 /// One scoring pass (called each tick): open new instances on anchor matches, match
@@ -526,70 +477,52 @@ mod tests {
     }
 
     #[test]
-    fn feedback_digest_reports_the_recent_record_within_the_window() {
+    fn feedback_digest_splits_the_four_outcomes_within_the_window() {
         let now = 100_000;
         let win = 1_000;
         let results = vec![
             result(Outcome::Confirmed, now - 50),
             result(Outcome::Missed, now - 60),
             result(Outcome::Missed, now - 70),
+            result(Outcome::AbsentConfirmed, now - 80),
+            result(Outcome::AbsentViolated, now - 90),
             // Outside the window — excluded.
             result(Outcome::Confirmed, now - 5_000),
+            // Future — excluded (clock skew must not inflate the record).
+            result(Outcome::Confirmed, now + 100),
         ];
-        let d = feedback_digest(&results, &[], now, win);
-        assert!(d.contains("1 confirmed, 2 missed of 3 settled"), "{d}");
+        let d = feedback_digest(&results, now, win);
+        assert!(
+            d.contains("1 confirmed, 2 missed, 1 absent-confirmed, 1 absent-violated"),
+            "{d}"
+        );
+        assert!(d.contains("Pending predictions are not counted"), "{d}");
     }
 
     #[test]
-    fn feedback_digest_flags_over_prediction_honestly() {
+    fn feedback_digest_never_editorializes() {
+        // A miss-dominated record must NOT tell the reasoner to predict less
+        // (that rewards abstention — the T-221 failure). Facts only.
         let now = 100_000;
         let mut results = vec![result(Outcome::Confirmed, now - 10)];
         for _ in 0..9 {
             results.push(result(Outcome::Missed, now - 10));
         }
-        let d = feedback_digest(&results, &[], now, 10_000);
-        assert!(d.contains("over-predicting"), "{d}");
+        let d = feedback_digest(&results, now, 10_000);
+        assert!(!d.contains("over-predict"), "{d}");
+        assert!(!d.contains("predict less"), "{d}");
+        assert!(!d.contains("landing"), "{d}");
+        assert!(d.contains("1 confirmed, 9 missed"), "{d}");
     }
 
     #[test]
-    fn feedback_digest_praises_a_landing_record_only_when_earned() {
-        let now = 100_000;
-        let results = vec![
-            result(Outcome::Confirmed, now - 10),
-            result(Outcome::Confirmed, now - 11),
-            result(Outcome::Confirmed, now - 12),
-            result(Outcome::Missed, now - 13),
-        ];
-        let d = feedback_digest(&results, &[], now, 10_000);
-        assert!(d.contains("landing"), "{d}");
-        assert!(!d.contains("over-predicting"), "{d}");
-    }
-
-    #[test]
-    fn feedback_digest_buckets_classes_by_base_rate() {
-        let freqs = vec![
-            ClassFrequency {
-                class: "sensor|reading".into(),
-                count: 40,
-            },
-            ClassFrequency {
-                class: "aphelion|present".into(),
-                count: 5,
-            },
-            ClassFrequency {
-                class: "door|opens".into(),
-                count: 1,
-            },
-        ];
-        let d = feedback_digest(&[], &freqs, 100_000, 10_000);
-        assert!(d.contains("often: sensor|reading (40)"), "{d}");
-        assert!(d.contains("sometimes: aphelion|present (5)"), "{d}");
-        assert!(d.contains("rare: door|opens (1)"), "{d}");
-    }
-
-    #[test]
-    fn feedback_digest_is_empty_with_no_data() {
-        assert_eq!(feedback_digest(&[], &[], 100_000, 10_000), "");
+    fn feedback_digest_is_empty_with_no_settled_results_in_window() {
+        assert_eq!(feedback_digest(&[], 100_000, 10_000), "");
+        // A result entirely outside the window yields nothing.
+        assert_eq!(
+            feedback_digest(&[result(Outcome::Confirmed, 1_000)], 100_000, 10_000),
+            ""
+        );
     }
 
     fn dir(tag: &str) -> std::path::PathBuf {

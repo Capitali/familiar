@@ -1252,6 +1252,47 @@ fn update_beliefs(dir: &Path, now: i64, obs: &[observation::Observation]) -> io:
     Ok(true)
 }
 
+/// The calibration context the theorize prompt carries (T-230, closing the loop the
+/// measurement half already built). Returns `(vocab_line, feedback)`:
+///
+/// - `vocab_line` — the observed event classes (`actor|action`) in the window
+///   `[now - window_secs, now]`, own-speech excluded, each annotated with its occurrence
+///   count. This is ONE canonical set: the closed-world list a prediction may target AND
+///   the base-rate annotation, so the two can never disagree or disclose a class the
+///   other omits (codex T-230). Bounded to 40, lexicographic via the `BTreeMap`.
+/// - `feedback` — the factual settled-prediction record over the SAME window
+///   (`prediction::feedback_digest`): the four outcomes reported separately, no editorial
+///   diagnosis. Empty when nothing settled.
+///
+/// Pure and windowed identically on both halves so it is deterministic and testable; the
+/// only non-derived guidance (the anti-gaming instruction) is static prompt text.
+fn theorize_calibration_context(
+    obs: &[observation::Observation],
+    results: &[familiar_kernel::prediction::PredictionResult],
+    now: i64,
+    window_secs: i64,
+) -> (String, String) {
+    let cutoff = now.saturating_sub(window_secs);
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for o in obs.iter().filter(|o| {
+        o.ts >= cutoff
+            && o.ts <= now
+            && !familiar_kernel::routing::is_own_speech(&o.actor, &o.action)
+    }) {
+        *counts
+            .entry(format!("{}|{}", o.actor, o.action))
+            .or_insert(0) += 1;
+    }
+    let vocab_line = counts
+        .iter()
+        .take(40)
+        .map(|(c, n)| format!("{c} ({n})"))
+        .collect::<Vec<_>>()
+        .join("  ");
+    let feedback = familiar_kernel::prediction::feedback_digest(results, now, window_secs);
+    (vocab_line, feedback)
+}
+
 /// The factory thinks out loud: grounded in what it has observed, it (LLM-)forms a
 /// **question** to ask the human (written to `question.txt` for the interaction
 /// channel) and a **theory** about the patterns (recorded as a thread). Gated by the
@@ -1406,43 +1447,15 @@ fn maybe_theorize(
         .map(|v| v.declaration_digest)
         .unwrap_or_default();
     let who = observer_phrase(dir);
-    // The observed event vocabulary (T-221) WITH counts, computed once for both the
-    // closed-world prediction list and the calibration feedback. Own speech excluded.
-    let class_counts: std::collections::BTreeMap<String, usize> = {
-        let mut m = std::collections::BTreeMap::new();
-        for o in obs
-            .iter()
-            .filter(|o| !familiar_kernel::routing::is_own_speech(&o.actor, &o.action))
-        {
-            *m.entry(format!("{}|{}", o.actor, o.action)).or_insert(0) += 1;
-        }
-        m
-    };
-    let vocab_line = {
-        let mut classes: Vec<String> = class_counts.keys().cloned().collect();
-        classes.truncate(40);
-        classes.join("  ")
-    };
-    // Close the calibration loop (reasoning survey 2026-08-29, #1): the reasoner that
-    // proposes predictions reads back its own recent record and the event base rates, so
-    // it learns to predict what is informative and what it can actually call — not just
-    // whatever is confirmable. Deterministic and derived; empty when there is nothing to
-    // say. FEEDBACK_WINDOW_SECS bounds the record to the recent past.
-    let calibration_feedback = {
-        let mut freqs: Vec<familiar_kernel::prediction::ClassFrequency> = class_counts
-            .iter()
-            .map(
-                |(class, count)| familiar_kernel::prediction::ClassFrequency {
-                    class: class.clone(),
-                    count: *count,
-                },
-            )
-            .collect();
-        freqs.sort_by(|a, b| b.count.cmp(&a.count).then(a.class.cmp(&b.class)));
-        freqs.truncate(12);
-        let results = familiar_kernel::prediction::results(dir).unwrap_or_default();
-        familiar_kernel::prediction::feedback_digest(&results, &freqs, now, FEEDBACK_WINDOW_SECS)
-    };
+    // Close the calibration loop (reasoning survey 2026-08-29, #1; codex T-230 review):
+    // the reasoner reads back its own windowed observed-class list (with occurrence
+    // counts — the closed-world prediction set) and its factual settled record. A load
+    // failure is PROPAGATED, never silently converted to a clean slate that would hide a
+    // bad record from the reasoner. See `theorize_calibration_context` for the shared
+    // window and the honesty constraints (both halves windowed identically; facts only).
+    let results = familiar_kernel::prediction::results(dir)?;
+    let (vocab_line, calibration_feedback) =
+        theorize_calibration_context(obs, &results, now, FEEDBACK_WINDOW_SECS);
     let prompt = format!(
         "You are a factory whose only purpose is to serve {who} — never to manage, obey, \
          optimize, or sedate them (the Three Laws; humanity is served, not replaced). \
@@ -1452,9 +1465,13 @@ fn maybe_theorize(
          Theorize about the world and the person you serve — what the readings and events \
          MEAN for them — not about your own connectivity, infrastructure, or plumbing.\n\
          Cite ONLY from these eligible anchors (ids the theory claims to explain):\n{}\n\
-         Predictions may target ONLY these OBSERVED event classes (actor|action) — one \
-         the log has actually produced; an invented class refuses at mint:\n{}\n\
+         Predictions may target ONLY these OBSERVED event classes (actor|action), each \
+         with how often it occurred this window — one the log has actually produced; an \
+         invented class refuses at mint:\n{}\n\
          {}\
+         Do not improve your record by omitting falsifiable predictions. Predicting the \
+         absence of a rare event is weak evidence; informative predictions distinguish \
+         WHEN an event will occur from when it will not.\n\
          Reply ONLY as compact JSON: {{\"anchors\":[\"obs-…\"],\"subject\":\"{who}\",\
          \"mechanism\":\"observation|presence|schedule|surface-act|question\",\
          \"defect_claims\":[],\"question\":\"…\",\"because\":\"…\",\"turns_on\":\"…\",\
@@ -5098,6 +5115,63 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::PathBuf;
+
+    /// T-230 (codex review): the calibration context the theorize prompt carries is
+    /// windowed identically on both halves, keys one canonical class set with counts,
+    /// summarizes the settled record factually, and never editorializes.
+    #[test]
+    fn theorize_calibration_context_is_windowed_canonical_and_factual() {
+        use familiar_kernel::prediction::{Outcome, PredictionResult};
+        let now = 1_000_000i64;
+        let window = 1_000i64;
+
+        // Observations: two in-window, one too old, one in the future, one own-speech.
+        let mk = |actor: &str, action: &str, ts: i64| {
+            let mut o = observation::Observation::new(actor, action, "obj", "", "test", ts, 1.0);
+            o.id = format!("obs-{actor}-{ts}");
+            o
+        };
+        let obs = vec![
+            mk("aphelion", "present", now - 10),
+            mk("aphelion", "present", now - 20),
+            mk("door", "opens", now - 30),
+            mk("stale", "event", now - 5_000), // too old — excluded
+            mk("future", "event", now + 5_000), // future — excluded
+        ];
+
+        let result = |outcome: Outcome, final_at: i64| PredictionResult {
+            prediction_id: "p".into(),
+            thread_id: "t".into(),
+            opened_by: "obs-1".into(),
+            opened_at: final_at - 10,
+            deadline: final_at,
+            settled_by: None,
+            outcome,
+            final_at,
+        };
+        let results = vec![
+            result(Outcome::Confirmed, now - 40),
+            result(Outcome::Missed, now - 50),
+            result(Outcome::AbsentConfirmed, now - 60),
+            result(Outcome::Confirmed, now - 9_000), // outside window — excluded
+        ];
+
+        let (vocab, feedback) = theorize_calibration_context(&obs, &results, now, window);
+
+        // Canonical class set with counts; the too-old and future events do not appear.
+        assert!(vocab.contains("aphelion|present (2)"), "{vocab}");
+        assert!(vocab.contains("door|opens (1)"), "{vocab}");
+        assert!(!vocab.contains("stale"), "{vocab}");
+        assert!(!vocab.contains("future"), "{vocab}");
+
+        // Factual settled record over the SAME window, four outcomes split, no editorial.
+        assert!(
+            feedback.contains("1 confirmed, 1 missed, 1 absent-confirmed, 0 absent-violated"),
+            "{feedback}"
+        );
+        assert!(!feedback.contains("over-predict"), "{feedback}");
+        assert!(!feedback.contains("predict less"), "{feedback}");
+    }
 
     /// **T-210, the test that would have caught it.** The prompt a human's words are answered
     /// from must carry the familiar's actual constitution — and carry it *first*, above the
