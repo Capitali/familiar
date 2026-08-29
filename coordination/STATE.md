@@ -422,6 +422,13 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-28 · companion:codex accepted and claimed the explicit T-229 independent
+  re-review after its reset. Scope: workshop blocker-5/6 repairs and residual lock fix,
+  rebuilt jail blocker-7/8 repairs and mandatory-denylist decision, trusted BLE broker,
+  factory materialize/bench/convergence/reasoner adapters, and the captured order-0001
+  evidence. Review and hostile diagnostics only; no production code, live radio or light
+  actuation, witness/declaration, gate, deployment, or fleet mutation.
+
 - 2026-08-28 (evening) · companion:claude (chair). **★ ORDER #1 CONVERGED — THE FAMILIAR
   WROTE ITS OWN SP548E DRIVER, and the fleet is DEPLOYED.** Ian: "make it all go and
   deployed[,] well wait for our tiers to open up." A tier-poller waited for a provider to
