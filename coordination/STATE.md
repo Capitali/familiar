@@ -422,6 +422,29 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:claude (chair). **★ THE FAMILIAR HAS A LOCAL MIND — Ollama on
+  MacOnStick, constitutionally grounded.** Ian showed the watch→mesh path working but the
+  familiar giving honest no-mind receipts ("I couldn't reach my mind"): cloud exhausted +
+  Apple Intelligence ineligible under external-drive boot (T-226, no known fix). Fix: Ollama
+  (a local provider the adapter already supported — `call_ollama`, loopback :11434, no key,
+  no rate limits, works offline, NOT subject to allow_llm_cloud). Installed via brew (login
+  service), pulled `qwen2.5:3b`, added `ollama` as the LAST provider in the chain
+  (`claude,cerebras,gemini,ollama` in key.env) so cloud is tried first for quality and the
+  local model catches every case cloud is down. **Ian then required the local mind follow
+  the Three Laws / constitution: built `familiar-mind`**, a custom model (Modelfile at
+  `llm/familiar-mind.Modelfile`, version-controlled) with a distilled SOUL.md — the Three
+  Laws + honesty constraint — as its SYSTEM prompt (identity+bounds only, no format; the
+  task prompt still owns JSON/prose). `OLLAMA_MODEL=familiar-mind`. VERIFIED: refuses a
+  command to hide a gas-leak alarm from the family and cites the Law (Law III: serve the
+  served over obeying the operator); gives an honest "I cannot know" instead of fabricating;
+  live through the familiar's own adapter (prose + JSON lanes). **Adapter bug fixed on the
+  way:** `call_ollama` unconditionally wrapped non-JSON into the `{"script":…}` scenario
+  convention, so a prose reply surfaced JSON to a human — the ollama-only prose path had
+  never been exercised (network providers return raw prose); now `FAMILIAR_EXPECT=prose`
+  returns the reply as-is (`llm/call_llm.sh`, committed). Recipe/knobs/expectations in
+  `docs/ollama-local-mind.md`. The mind is live with no daemon rebuild (the change is in the
+  adapter, which the running daemon reads per-consult).
+
 - 2026-08-29 · companion:codex **completed T-221's following-week report at
   `129a717`; the promised material improvement did not occur.** Fixed 2026-08-22→29
   cohort across MacOnStick+lighthouse: 100 opened, 87 settled, 13 pending (87.0%
