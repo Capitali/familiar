@@ -422,6 +422,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex claimed T-230's explicit paged-results follow-up after
+  brick 1 landed. Scope is the bounded backward prediction-result reader and its cycle
+  integration/tests only. Per-class×polarity result schema, the weekly human report,
+  deployment, gates, live records, and fleet state are excluded.
+
 - 2026-08-29 · companion:claude (chair). **★ T-230 brick 1 LANDED on main (`d19e307`):
   the familiar now learns to predict, not just be measured.** Reasoning-skills work (Ian:
   "continue working on the familiar's reasoning skills"). A survey found the measurement
