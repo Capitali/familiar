@@ -422,6 +422,52 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex **completed T-221's following-week report at
+  `129a717`; the promised material improvement did not occur.** Fixed 2026-08-22→29
+  cohort across MacOnStick+lighthouse: 100 opened, 87 settled, 13 pending (87.0%
+  coverage); 1 favorable / 86 unfavorable (98.9% miss rate versus 100% baseline);
+  median settlement 4,263s, p95 87,399s. The vocabulary fence held — zero cohort
+  classes absent from either store's observations — but three observed sparse classes
+  produced 64/86 misses. Full read-only evidence is in
+  `docs/reviews/2026-08-29-t221-weekly-prediction-report.md`. T-230 is the next
+  correction, not retrospective success. No database, daemon, gate, human record,
+  deployment, ship, or fleet state changed.
+
+- 2026-08-29 · companion:codex claimed T-221's explicit following-week calibration
+  report. Scope is a read-only, reproducible report over the fixed 2026-08-22→29 cohort
+  on MacOnStick and the lighthouse, plus append-only dialogue and handoff records. No
+  database, daemon, gate, human record, deployment, ship, or fleet state may change.
+
+- 2026-08-29 · companion:codex **completed T-230 brick 2 at `9f91d14`.** Newly
+  settled results retain their exact `actor|action` class and polarity; legacy rows
+  default both dimensions absent and remain in aggregate totals without invented
+  attribution. The recent factual digest adds at most 12 deterministic class×polarity
+  favorable/settled ratios while preserving settlement, aggregate outcomes, future
+  exclusion, and anti-abstention guidance. Kernel 241/0, cycle 98/0, clippy all-targets
+  clean, full workspace green. The weekly human report remains owed. No deployment,
+  gate, live record, or fleet state changed.
+
+- 2026-08-29 · companion:codex claimed T-230 brick 2, the explicit per-class×polarity
+  calibration follow-up. Scope is the append-only-compatible result metadata, factual
+  bounded digest, and focused integration/tests. The weekly human report remains separate;
+  deployment, gates, live records, and fleet state are excluded.
+
+- 2026-08-29 · companion:codex **completed T-230's paged-results follow-up at
+  `b92c8ae`.** The theorize path now reads only its inclusive recent calibration window
+  through an indexed SQLite integer-range cursor, walking 256-row backward pages and
+  restoring oldest-first input to the existing factual digest. Future rows and unrelated
+  historical shapes are filtered before deserialization; active-window corruption still
+  propagates. Kernel 238/0, cycle 98/0, clippy all-targets clean, full workspace green.
+  Per-class×polarity schema work and the weekly human report remain owed. No deployment,
+  gate, live record, or fleet state changed.
+
+- 2026-08-29 · companion:codex claimed T-230's explicit paged-results follow-up after
+  brick 1 landed. Scope is the bounded backward prediction-result reader and its cycle
+  integration/tests only. Pre-touch trace found the store has forward sequence paging
+  and fixed `load_last`, but no backward cursor; scope therefore includes that generic
+  store primitive. Per-class×polarity result schema, the weekly human report, deployment,
+  gates, live records, and fleet state are excluded.
+
 - 2026-08-29 · companion:claude (chair). **★ T-230 brick 1 LANDED on main (`d19e307`):
   the familiar now learns to predict, not just be measured.** Reasoning-skills work (Ian:
   "continue working on the familiar's reasoning skills"). A survey found the measurement

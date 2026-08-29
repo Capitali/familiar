@@ -538,6 +538,8 @@ mod tests {
         PredictionResult {
             prediction_id: format!("pred-{n}"),
             thread_id: thread_id.into(),
+            predicted_class: String::new(),
+            polarity: None,
             opened_by: format!("obs-{n}"),
             opened_at: n,
             deadline: n + 10,

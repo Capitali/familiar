@@ -196,3 +196,22 @@ Every amendment stands:
 
 Build order in effect: **T-222 (now) → T-220 pending-decision brick → T-221 study**,
 codex on rung 3 throughout.
+
+## Round 4 — codex: the promised week is reported; vocabulary held, calibration did not
+
+The fixed post-deploy cohort is 2026-08-22 00:00 CDT through 2026-08-29 00:00 CDT.
+Across lighthouse and MacOnStick, 100 prediction instances opened, 87 settled by the
+cutoff, and 13 remained pending: **87.0% coverage**. Of the settlements, 1 was favorable
+and 86 unfavorable: **98.9% miss rate**, versus the study's 121/121 baseline. Median
+settlement latency was 4,263 seconds and p95 was 87,399 seconds.
+
+That 1.1-point change is not material improvement. The T-221 mechanism did hold — every
+predicted class in the cohort exists in its store's observation record; invented classes
+fell from 121/121 to 0. The residual failure moved to observed-but-sparse calls, led by
+`ian|answered` (37 misses), `ian|told the familiar` (14), and `host|reports` (13).
+
+The report therefore closes the owed measurement, not the performance criterion. Full
+method and per-store evidence:
+`docs/reviews/2026-08-29-t221-weekly-prediction-report.md`. Both stores were read through
+SQLite URI `mode=ro`; no database, daemon, gate, human record, deployment, ship, or fleet
+state changed.

@@ -193,6 +193,75 @@ pub fn load_last<T: DeserializeOwned>(dir: &Path, file: &str, limit: usize) -> i
     Ok(out)
 }
 
+/// Load one page of records whose integer JSON field is inside an inclusive range.
+///
+/// Results are newest first and have `seq < before`; pass `i64::MAX` for the first page,
+/// then the last returned sequence as the next cursor. Unlike [`load`], rows outside the
+/// requested range are filtered by SQLite before deserialization, so a windowed consumer
+/// does not materialize an append-only table's entire history merely to discard it.
+///
+/// `field` is a single JSON object key, not an arbitrary JSON path. The validated key builds
+/// the expression index and query path; the narrow validation keeps both SQL and the API
+/// honest about what they index.
+pub fn load_i64_range_before_seq<T: DeserializeOwned>(
+    dir: &Path,
+    file: &str,
+    field: &str,
+    min: i64,
+    max: i64,
+    before: i64,
+    limit: usize,
+) -> io::Result<Vec<(i64, T)>> {
+    if field.is_empty()
+        || !field
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "JSON range field must be a simple object key",
+        ));
+    }
+    if limit == 0 || min > max {
+        return Ok(Vec::new());
+    }
+    let table = table_of(file);
+    let arc = conn(dir)?;
+    let c = arc.lock().unwrap();
+    ensure(&c, &table, dir, file)?;
+    let path = format!("$.{field}");
+    // Build the range index once. Without it, SQLite would avoid deserializing old rows but
+    // still JSON-scan the whole historical table whenever the current window is sparse.
+    // `table` and `field` are identifier-safe here (table_of + validation above).
+    let index = format!("{table}_{field}_i64");
+    c.execute_batch(&format!(
+        "CREATE INDEX IF NOT EXISTS {index} ON {table}(\
+             CAST(json_extract(data, '{path}') AS INTEGER), seq\
+         ) WHERE json_type(data, '{path}') = 'integer';"
+    ))
+    .map_err(se)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT seq, data FROM {table} \
+             WHERE seq < ?1 \
+               AND json_type(data, '{path}') = 'integer' \
+               AND CAST(json_extract(data, '{path}') AS INTEGER) BETWEEN ?2 AND ?3 \
+             ORDER BY seq DESC LIMIT ?4"
+        ))
+        .map_err(se)?;
+    let rows = stmt
+        .query_map(rusqlite::params![before, min, max, limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(se)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (seq, data) = row.map_err(se)?;
+        out.push((seq, serde_json::from_str(&data).map_err(invalid_data)?));
+    }
+    Ok(out)
+}
+
 /// Load only the FIRST record of `<file>`'s table (the oldest), if any — for "since when"
 /// questions that don't justify loading the whole log.
 pub fn load_first<T: DeserializeOwned>(dir: &Path, file: &str) -> io::Result<Option<T>> {
@@ -656,6 +725,54 @@ mod tests {
         assert!(load_since_seq::<Rec>(d.path(), f, 9_999, 10)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn integer_range_pages_backward_without_deserializing_other_rows() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Timed {
+            id: String,
+            at: i64,
+        }
+
+        let d = TempDir::new("range_page");
+        let f = "timed.jsonl";
+        for (id, at) in [("old", 10), ("middle-a", 50), ("middle-b", 20), ("new", 70)] {
+            append(d.path(), f, &Timed { id: id.into(), at }).unwrap();
+        }
+        // This row is valid JSON but not a Timed value. Because it is outside the selected
+        // range, the store must filter it before deserializing the requested page.
+        append(
+            d.path(),
+            f,
+            &serde_json::json!({"id":"unrelated-shape", "at": 5}),
+        )
+        .unwrap();
+
+        let first: Vec<(i64, Timed)> =
+            load_i64_range_before_seq(d.path(), f, "at", 20, 50, i64::MAX, 1).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].1.id, "middle-b", "newest matching row first");
+
+        let second: Vec<(i64, Timed)> =
+            load_i64_range_before_seq(d.path(), f, "at", 20, 50, first[0].0, 1).unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].1.id, "middle-a");
+        assert!(
+            load_i64_range_before_seq::<Timed>(d.path(), f, "at", 20, 50, second[0].0, 1)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(load_i64_range_before_seq::<Timed>(
+            d.path(),
+            f,
+            "at); DROP TABLE timed;--",
+            0,
+            100,
+            i64::MAX,
+            1,
+        )
+        .is_err());
     }
 
     #[test]

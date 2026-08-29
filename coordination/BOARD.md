@@ -209,12 +209,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the one prior armed thread (lighthouse thread-0297) eroded to retired on missed predictions WHILE waiting for assent — the constitutional design routes action through assent, then lets the assent target die of a clock. Evidence: docs/reviews/2026-08-21-progress-areas.md
 
 ### T-221 · Prediction calibration: 120 of 125 settled predictions missed
-- status: **done 2026-08-21 (mechanism fix; the week's report still owed)** — the five-class study was UNANIMOUS: 121/121 misses were class 3, invented event vocabulary ("presence_detector|detect_absence") that nothing produces. Fix live fleet-wide (merge `049fac1`): the system enumerates the observed actor|action vocabulary into the theorize prompt; an invented class refuses at mint on the record; a draft with no surviving prediction wonders. OWED per the accept: the following-week miss/coverage/settlement-latency report, so improvement is shown not asserted
-- owner: companion:claude-opus
-- scope: a study over prediction_results on both stores (window sizes, matcher classes, actor targets of the misses), then recalibrated mint defaults in the theorize prompt + prediction::mint; T-123's field-calibration gate consumes this
+- status: **done 2026-08-29; mechanism held, material-improvement criterion NOT MET** — the original study found 121/121 invented-class misses; the observed-vocabulary fence remains live (`049fac1`) and the promised fixed following-week report is now recorded at `129a717`. Every cohort class set (10 lighthouse, 7 MacOnStick) existed in its store's observation record, but 86/87 settlements were still unfavorable (98.9% vs 100% baseline), with 87/100 instance coverage, median latency 4,263s, p95 87,399s. T-230 is the next correction, not evidence that this one succeeded
+- owner: companion:claude-opus (mechanism), companion:codex (following-week report)
+- scope: prediction-results study and observed-vocabulary admission fix; read-only fixed-cohort follow-up in docs/reviews/2026-08-29-t221-weekly-prediction-report.md
 - depends: —
-- accept: the dominant miss cause is named with counts; mint defaults change accordingly; the fleet miss rate over the following week drops materially and is REPORTED (not asserted); no loosening that makes predictions unfalsifiable
-- notes: erosion is working as designed — it is the predictions that are mis-aimed, and they take good theories (including the lights pilot) down with them
+- accept: partially met and honestly closed — dominant baseline cause named and fenced; following-week miss/coverage/latency reported without loosening falsifiability; material miss-rate drop did not occur
+- notes: vocabulary moved from impossible to observed-but-sparse rather than becoming well calibrated. `ian|answered`, `ian|told the familiar`, and `host|reports` produced 64/86 misses. No database, daemon, gate, human record, deploy, ship, or fleet state changed for the report
 
 ### T-222 · Answers must reach the question registry
 - status: **done 2026-08-21** (merge `170ec30`, deployed): durable-id join (thread answer → record_answered_for_thread) + idempotent per-tick backfill; unbound questions left to explicit policy. Codex's join-by-id and conservative-backfill requirements absorbed
@@ -957,6 +957,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-230 · Calibration feedback reads bounded recent results and reports class×polarity
+- status: done
+- owner: companion:codex
+- merged: b92c8ae, 9f91d14
+- scope: crates/kernel/src/store.rs, crates/kernel/src/prediction.rs, crates/kernel/src/belief.rs, crates/cycle/src/lib.rs, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
+- depends: T-230 brick 1 (`75ec6e9`)
+- accept: the eligible theorize path reads a bounded recent result page rather than the whole append-only table; new settlements record canonical class and polarity while legacy rows still deserialize; the factual digest preserves aggregate totals and future exclusion while adding deterministic bounded class×polarity favorable ratios; focused and workspace tests pin compatibility and behavior
+- notes: SQLite filters an indexed inclusive `final_at` range before deserialization and pages backward by sequence; prediction restores oldest-first order. New exact-class results add defaulted class/polarity metadata, and the digest reports at most 12 lexicographic class×polarity ratios without editorializing; legacy rows remain aggregate-only. Kernel 241/0, cycle 98/0, clippy all-targets clean, full workspace green. The weekly human report remains separate; no deploy, gate, live record, or fleet mutation
 
 ### T-118 · Isolate test temp directories across concurrent worktrees
 - status: done
