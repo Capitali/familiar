@@ -1453,7 +1453,7 @@ fn maybe_theorize(
     // failure is PROPAGATED, never silently converted to a clean slate that would hide a
     // bad record from the reasoner. See `theorize_calibration_context` for the shared
     // window and the honesty constraints (both halves windowed identically; facts only).
-    let results = familiar_kernel::prediction::results(dir)?;
+    let results = familiar_kernel::prediction::results_in_window(dir, now, FEEDBACK_WINDOW_SECS)?;
     let (vocab_line, calibration_feedback) =
         theorize_calibration_context(obs, &results, now, FEEDBACK_WINDOW_SECS);
     let prompt = format!(

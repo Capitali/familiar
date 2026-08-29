@@ -166,6 +166,42 @@ pub fn results(dir: &Path) -> io::Result<Vec<PredictionResult>> {
     store::load(dir, PREDICTION_RESULTS_FILE)
 }
 
+/// Settled results finalized inside `[now - window_secs, now]`, oldest first.
+///
+/// The append-only calibration table grows forever. The theorize loop needs only its recent
+/// feedback window, so this walks matching rows backward in bounded pages rather than loading
+/// and deserializing the whole table on every eligible consult. Filtering happens in SQLite;
+/// future-dated rows remain excluded exactly as they are in [`feedback_digest`].
+pub fn results_in_window(
+    dir: &Path,
+    now: i64,
+    window_secs: i64,
+) -> io::Result<Vec<PredictionResult>> {
+    const PAGE_SIZE: usize = 256;
+
+    let cutoff = now.saturating_sub(window_secs);
+    let mut before = i64::MAX;
+    let mut recent = Vec::new();
+    loop {
+        let page: Vec<(i64, PredictionResult)> = store::load_i64_range_before_seq(
+            dir,
+            PREDICTION_RESULTS_FILE,
+            "final_at",
+            cutoff,
+            now,
+            before,
+            PAGE_SIZE,
+        )?;
+        if page.is_empty() {
+            break;
+        }
+        before = page.last().expect("non-empty page").0;
+        recent.extend(page.into_iter().map(|(_, result)| result));
+    }
+    recent.reverse();
+    Ok(recent)
+}
+
 /// Mint a standing prediction. The consent/authorship story rides `minted_from`;
 /// this function only guards shape (a window must exist; an Absent claim without a
 /// bounded window would be unfalsifiable and is refused).
@@ -523,6 +559,51 @@ mod tests {
             feedback_digest(&[result(Outcome::Confirmed, 1_000)], 100_000, 10_000),
             ""
         );
+    }
+
+    #[test]
+    fn recent_results_page_the_exact_window_without_loading_other_shapes() {
+        let d = dir("recent_results");
+        let window = 1_000;
+        // Valid JSON with the right range key but not the result shape. These rows prove the
+        // window predicate runs before deserialization; a whole-table load would fail.
+        store::append(
+            &d,
+            PREDICTION_RESULTS_FILE,
+            &serde_json::json!({"final_at": NOW - window - 1, "old": true}),
+        )
+        .unwrap();
+        for offset in (1..=300).rev() {
+            let mut r = result(Outcome::Confirmed, NOW - offset);
+            r.prediction_id = format!("p-{offset:03}");
+            store::append(&d, PREDICTION_RESULTS_FILE, &r).unwrap();
+        }
+        store::append(
+            &d,
+            PREDICTION_RESULTS_FILE,
+            &serde_json::json!({"final_at": NOW + 1, "future": true}),
+        )
+        .unwrap();
+
+        let recent = results_in_window(&d, NOW, window).unwrap();
+        assert_eq!(recent.len(), 300, "more than one 256-row page is complete");
+        assert_eq!(recent.first().unwrap().final_at, NOW - 300);
+        assert_eq!(recent.last().unwrap().final_at, NOW - 1);
+        assert!(recent.windows(2).all(|w| w[0].final_at <= w[1].final_at));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn recent_results_propagate_corruption_inside_the_window() {
+        let d = dir("recent_results_corrupt");
+        store::append(
+            &d,
+            PREDICTION_RESULTS_FILE,
+            &serde_json::json!({"final_at": NOW, "not": "a prediction result"}),
+        )
+        .unwrap();
+        assert!(results_in_window(&d, NOW, 1_000).is_err());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn dir(tag: &str) -> std::path::PathBuf {

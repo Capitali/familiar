@@ -6,6 +6,36 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-29 — T-230 calibration reads its recent record, not its whole history
+
+The calibration feedback added in T-230 brick 1 no longer calls
+`prediction::results()` and deserializes the entire append-only results table on every
+eligible theorize consult. `store::load_i64_range_before_seq` now provides a generic,
+indexed integer-field range cursor: SQLite filters the requested time window first, and
+the caller walks matching rows newest-first in bounded pages. The store creates the
+validated expression index once, so a sparse recent window does not become a full JSON
+scan of historical results on every read.
+
+`prediction::results_in_window` uses that cursor in 256-row pages, restores the original
+oldest-first order for the existing factual digest, and selects exactly
+`[now - window, now]`. The cycle's theorize path now calls it directly. Future-dated rows
+remain excluded, historical rows with unrelated shapes are never deserialized, and
+corruption inside the active window still propagates as an error rather than pretending
+the familiar has a clean calibration record.
+
+### Checks run
+
+`cargo fmt --all --check`; kernel 238/0; cycle 98/0; focused multi-page, corruption,
+store-cursor, and calibration-context regressions; workspace clippy with all targets and
+`-D warnings`; full workspace tests green.
+
+### Next
+
+T-230 brick 2 remains separate: add backward-compatible class and polarity facts to each
+settled result, then derive per-class×polarity hit rates. The weekly human
+miss/coverage/latency report is also still owed. This brick changed no gates or live
+records and was not deployed.
+
 ## 2026-08-25 — T-228: the phone gains its BLE ear, at exactly the floor Q3 set
 
 The largest gap the observatory survey named — BLE absent from the shells entirely —
