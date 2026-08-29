@@ -14,7 +14,7 @@
 //! (or an absent-violation) is certain the moment its event arrives and finalizes
 //! immediately; only the quiet outcomes wait out the grace.
 
-use crate::obs_class::ObsMatch;
+use crate::obs_class::{FieldMatch, ObsMatch};
 use crate::observation::Observation;
 use crate::store;
 use serde::{Deserialize, Serialize};
@@ -122,6 +122,14 @@ impl Outcome {
 pub struct PredictionResult {
     pub prediction_id: String,
     pub thread_id: String,
+    /// The predicted event class (`actor|action`) at settlement time. Legacy rows
+    /// predate this calibration dimension and deserialize as empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub predicted_class: String,
+    /// The claim's polarity at settlement time. `None` identifies legacy rows that
+    /// cannot honestly contribute to per-class×polarity calibration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polarity: Option<Polarity>,
     pub opened_by: String,
     pub opened_at: i64,
     pub deadline: i64,
@@ -320,14 +328,29 @@ pub fn calibration(dir: &Path, thread_id: &str) -> Calibration {
 /// Both halves of the loop are windowed identically: this counts only results
 /// finalized in `[now - window_secs, now]` (future timestamps excluded), and
 /// the caller windows the observed-class counts to the same interval.
+/// Rows written since T-230 brick 2 additionally contribute a bounded,
+/// lexicographically ordered per-class×polarity favorable ratio. Legacy rows
+/// remain in the aggregate record but cannot be assigned to a group honestly.
 ///
 /// Empty string when nothing settled in the window, so it never pads the prompt.
 pub fn feedback_digest(results: &[PredictionResult], now: i64, window_secs: i64) -> String {
+    const CLASS_POLARITY_LIMIT: usize = 12;
+
+    #[derive(Default)]
+    struct Counts {
+        confirmed: usize,
+        missed: usize,
+        absent_confirmed: usize,
+        absent_violated: usize,
+    }
+
     let cutoff = now.saturating_sub(window_secs);
     let mut confirmed = 0usize;
     let mut missed = 0usize;
     let mut absent_confirmed = 0usize;
     let mut absent_violated = 0usize;
+    let mut by_class_polarity: std::collections::BTreeMap<(String, &'static str), Counts> =
+        std::collections::BTreeMap::new();
     for r in results {
         // Windowed AND no future records (a clock skew must not inflate the record).
         if r.final_at < cutoff || r.final_at > now {
@@ -339,17 +362,57 @@ pub fn feedback_digest(results: &[PredictionResult], now: i64, window_secs: i64)
             Outcome::AbsentConfirmed => absent_confirmed += 1,
             Outcome::AbsentViolated => absent_violated += 1,
         }
+        if !r.predicted_class.is_empty() {
+            if let Some(polarity) = r.polarity {
+                let polarity = match polarity {
+                    Polarity::Arrives => "arrives",
+                    Polarity::Absent => "absent",
+                };
+                let counts = by_class_polarity
+                    .entry((r.predicted_class.clone(), polarity))
+                    .or_default();
+                match r.outcome {
+                    Outcome::Confirmed => counts.confirmed += 1,
+                    Outcome::Missed => counts.missed += 1,
+                    Outcome::AbsentConfirmed => counts.absent_confirmed += 1,
+                    Outcome::AbsentViolated => counts.absent_violated += 1,
+                }
+            }
+        }
     }
     let settled = confirmed + missed + absent_confirmed + absent_violated;
     if settled == 0 {
         return String::new();
     }
-    format!(
+    let mut digest = format!(
         "Your settled predictions (last {} days): {confirmed} confirmed, {missed} missed, \
          {absent_confirmed} absent-confirmed, {absent_violated} absent-violated. Pending \
          predictions are not counted.\n",
         window_secs / 86_400
-    )
+    );
+    if !by_class_polarity.is_empty() {
+        let groups = by_class_polarity
+            .iter()
+            .take(CLASS_POLARITY_LIMIT)
+            .map(|((class, polarity), counts)| {
+                let favorable = counts.confirmed + counts.absent_confirmed;
+                let total = favorable + counts.missed + counts.absent_violated;
+                format!("{class} {polarity}: {favorable}/{total} favorable")
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        digest.push_str("By predicted class and polarity: ");
+        digest.push_str(&groups);
+        digest.push_str(".\n");
+    }
+    digest
+}
+
+fn predicted_class(then: &ObsMatch) -> String {
+    match (&then.actor, &then.action) {
+        (FieldMatch::Exact(actor), FieldMatch::Exact(action)) => format!("{actor}|{action}"),
+        _ => String::new(),
+    }
 }
 
 /// One scoring pass (called each tick): open new instances on anchor matches, match
@@ -473,6 +536,8 @@ pub fn score(
                 let r = PredictionResult {
                     prediction_id: pd.prediction_id,
                     thread_id: pd.thread_id,
+                    predicted_class: predicted_class(&p.then),
+                    polarity: Some(p.polarity),
                     opened_by: pd.opened_by,
                     opened_at: pd.opened_at,
                     deadline: pd.deadline,
@@ -503,6 +568,8 @@ mod tests {
         PredictionResult {
             prediction_id: "p".into(),
             thread_id: "t".into(),
+            predicted_class: String::new(),
+            polarity: None,
             opened_by: "obs-1".into(),
             opened_at: final_at - 100,
             deadline: final_at,
@@ -549,6 +616,70 @@ mod tests {
         assert!(!d.contains("predict less"), "{d}");
         assert!(!d.contains("landing"), "{d}");
         assert!(d.contains("1 confirmed, 9 missed"), "{d}");
+    }
+
+    #[test]
+    fn feedback_digest_groups_class_and_polarity_factually_and_bounds_the_list() {
+        let now = 100_000;
+        let mut results = Vec::new();
+        for n in 0..13 {
+            let mut r = result(Outcome::Confirmed, now - 10);
+            r.predicted_class = format!("actor{n:02}|acts");
+            r.polarity = Some(Polarity::Arrives);
+            results.push(r);
+        }
+        let mut miss = result(Outcome::Missed, now - 9);
+        miss.predicted_class = "actor00|acts".into();
+        miss.polarity = Some(Polarity::Arrives);
+        results.push(miss);
+        let mut absent_hit = result(Outcome::AbsentConfirmed, now - 8);
+        absent_hit.predicted_class = "actor00|acts".into();
+        absent_hit.polarity = Some(Polarity::Absent);
+        results.push(absent_hit);
+        // Legacy rows remain part of the aggregate totals without inventing a group.
+        results.push(result(Outcome::Missed, now - 7));
+
+        let d = feedback_digest(&results, now, 1_000);
+        assert!(
+            d.contains("actor00|acts absent: 1/1 favorable; actor00|acts arrives: 1/2 favorable"),
+            "{d}"
+        );
+        assert!(d.contains("actor10|acts arrives: 1/1 favorable"), "{d}");
+        assert!(
+            !d.contains("actor11|acts arrives"),
+            "only twelve groups: {d}"
+        );
+        assert!(!d.contains("|*"), "legacy rows have no invented group: {d}");
+    }
+
+    #[test]
+    fn legacy_result_rows_default_the_new_calibration_dimensions() {
+        let legacy = serde_json::json!({
+            "prediction_id": "p",
+            "thread_id": "t",
+            "opened_by": "o",
+            "opened_at": 10,
+            "deadline": 20,
+            "settled_by": null,
+            "outcome": "confirmed",
+            "final_at": 30
+        });
+        let parsed: PredictionResult = serde_json::from_value(legacy).unwrap();
+        assert!(parsed.predicted_class.is_empty());
+        assert_eq!(parsed.polarity, None);
+    }
+
+    #[test]
+    fn only_exact_actor_action_matchers_claim_a_canonical_prediction_class() {
+        let exact = m("door", "opened", "front:");
+        assert_eq!(predicted_class(&exact), "door|opened");
+        let wildcard = ObsMatch {
+            v: MATCH_VERSION,
+            actor: FieldMatch::Any,
+            action: FieldMatch::Exact("opened".into()),
+            object: FieldMatch::Any,
+        };
+        assert_eq!(predicted_class(&wildcard), "");
     }
 
     #[test]
@@ -662,6 +793,8 @@ mod tests {
         assert_eq!(written.len(), 1);
         assert_eq!(written[0].outcome, Outcome::Confirmed);
         assert_eq!(written[0].settled_by.as_deref(), Some("c1"));
+        assert_eq!(written[0].predicted_class, "wildhorse|reported");
+        assert_eq!(written[0].polarity, Some(Polarity::Arrives));
 
         // Cooldown blocks an immediate re-open; a later anchor opens a fresh window
         // that stays QUIET — pending through deadline+grace, then Missed.
@@ -676,6 +809,8 @@ mod tests {
         let final_pass = score(&d, &obs2, NOW + 700 + 300 + 61, 60).unwrap();
         assert_eq!(final_pass.len(), 1);
         assert_eq!(final_pass[0].outcome, Outcome::Missed);
+        assert_eq!(final_pass[0].predicted_class, "wildhorse|reported");
+        assert_eq!(final_pass[0].polarity, Some(Polarity::Arrives));
 
         let c = calibration(&d, "th-light");
         assert_eq!((c.confirmed, c.missed), (1, 1));

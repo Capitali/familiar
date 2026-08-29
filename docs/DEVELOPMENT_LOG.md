@@ -6,6 +6,32 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-08-29 — T-230 brick 2 names what each calibration result predicted
+
+Newly settled `PredictionResult` rows now retain the prediction's canonical
+`actor|action` class and polarity alongside the four-outcome verdict. Both additions
+are append-only compatible: old rows default to an empty class and absent polarity, stay
+in the aggregate calibration totals, and are not guessed into a group. A matcher that is
+not exact in both actor and action likewise makes no class claim.
+
+The recent theorize feedback still begins with the unchanged factual aggregate and keeps
+the same time window and future exclusion. Where the new metadata exists, it adds at most
+12 lexicographically ordered class×polarity groups as favorable/settled ratios. There is
+no praise, diagnosis, or instruction to predict less; the static anti-abstention guidance
+remains the only non-derived prompt text.
+
+### Checks run
+
+`cargo fmt --all --check`; kernel 241/0; cycle 98/0; focused legacy-schema,
+class×polarity grouping/bound, exact-class, settlement-metadata, and calibration-context
+regressions; workspace clippy with all targets and `-D warnings`; full workspace tests
+green.
+
+### Next
+
+The weekly human miss/coverage/latency report remains the separate T-230 follow-up. This
+brick changed no gates or live records and was not deployed.
+
 ## 2026-08-29 — T-230 calibration reads its recent record, not its whole history
 
 The calibration feedback added in T-230 brick 1 no longer calls

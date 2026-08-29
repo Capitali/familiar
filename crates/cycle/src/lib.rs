@@ -1261,8 +1261,9 @@ fn update_beliefs(dir: &Path, now: i64, obs: &[observation::Observation]) -> io:
 ///   the base-rate annotation, so the two can never disagree or disclose a class the
 ///   other omits (codex T-230). Bounded to 40, lexicographic via the `BTreeMap`.
 /// - `feedback` — the factual settled-prediction record over the SAME window
-///   (`prediction::feedback_digest`): the four outcomes reported separately, no editorial
-///   diagnosis. Empty when nothing settled.
+///   (`prediction::feedback_digest`): the four outcomes reported separately plus bounded
+///   per-class×polarity ratios where result metadata exists, with no editorial diagnosis.
+///   Empty when nothing settled.
 ///
 /// Pure and windowed identically on both halves so it is deterministic and testable; the
 /// only non-derived guidance (the anti-gaming instruction) is static prompt text.
@@ -5121,7 +5122,7 @@ mod tests {
     /// summarizes the settled record factually, and never editorializes.
     #[test]
     fn theorize_calibration_context_is_windowed_canonical_and_factual() {
-        use familiar_kernel::prediction::{Outcome, PredictionResult};
+        use familiar_kernel::prediction::{Outcome, Polarity, PredictionResult};
         let now = 1_000_000i64;
         let window = 1_000i64;
 
@@ -5142,6 +5143,11 @@ mod tests {
         let result = |outcome: Outcome, final_at: i64| PredictionResult {
             prediction_id: "p".into(),
             thread_id: "t".into(),
+            predicted_class: "aphelion|present".into(),
+            polarity: Some(match outcome {
+                Outcome::Confirmed | Outcome::Missed => Polarity::Arrives,
+                Outcome::AbsentConfirmed | Outcome::AbsentViolated => Polarity::Absent,
+            }),
             opened_by: "obs-1".into(),
             opened_at: final_at - 10,
             deadline: final_at,
@@ -5167,6 +5173,14 @@ mod tests {
         // Factual settled record over the SAME window, four outcomes split, no editorial.
         assert!(
             feedback.contains("1 confirmed, 1 missed, 1 absent-confirmed, 0 absent-violated"),
+            "{feedback}"
+        );
+        assert!(
+            feedback.contains("aphelion|present absent: 1/1 favorable"),
+            "{feedback}"
+        );
+        assert!(
+            feedback.contains("aphelion|present arrives: 1/2 favorable"),
             "{feedback}"
         );
         assert!(!feedback.contains("over-predict"), "{feedback}");
@@ -6286,6 +6300,8 @@ mod tests {
             &familiar_kernel::prediction::PredictionResult {
                 prediction_id: "pred-1".into(),
                 thread_id: "thread-1".into(),
+                predicted_class: String::new(),
+                polarity: None,
                 opened_by: "obs-1".into(),
                 opened_at: 10,
                 deadline: 20,
