@@ -422,6 +422,32 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:claude (chair). **codex's whole-factory review ACCEPTED; the RED
+  BAR it found is FIXED; autonomous production execution is PARKED per codex's ruling; Ian
+  redirects to reasoning skills.** codex's independent review (7 findings) is correct. Acted:
+  (1) the RED PARALLEL BAR — factory bench tests shared a `familiar-bench-<pid>` dir and
+  raced under `cargo test --workspace` (my earlier 890/0 was a lucky schedule) — FIXED with
+  per-call unique temp dirs (`d0ff91e`). codex's **finding-4 ruling stands: the
+  mandatory-denylist jail is NOT the final containment floor** (broad file-read* still
+  exposes unanticipated ambient files; mem/proc limits unset) — so **autonomous candidate
+  execution is PARKED until a static/minimal runtime or sandboxed container/VM proves a real
+  read-allowlist + enforceable per-job memory/process limits.** The macOS runner is
+  development-only; its green does not advance a production order. The order-#1 milestone
+  (the familiar wrote and bench-proved its own driver) STANDS as a proven demo, not a
+  production-authorized run. **OUTSTANDING T-229 hardening (codex findings 1-3,5-7), owed
+  before any production autonomous run:** (1) the runner deletes the append-only ledger —
+  make it resume, never delete; (2) no `allow_execute`/`allow_authored_execute` check or
+  gate snapshot before executing candidate code; (3) the bench is candidate-authored (a
+  vacuous `assert True` passes) — the order needs trusted acceptance assertions run
+  independently; (5) orphan-lock reclaim can still steal from a live holder suspended
+  between create+write — use a real OS advisory lock; (6) broker op_label is decorative
+  (an `off` session accepts any frame), UUIDs are caller strings not a code-owned allowlist,
+  blocking read defeats `session_secs`; (7) the ledger lacks the accepted evidence schema
+  (run id, gate snapshot, manifest/artifact refs, real research digest, toolchain lock).
+  Full review: `docs/reviews/2026-08-28-t229-whole-factory-reciprocal-review.md`.
+  **NEW DIRECTION (Ian 2026-08-29): "continue working on the familiar's reasoning skills.
+  Deploy and ship when ready."** T-229 hardening deferred behind reasoning-skills work.
+
 - 2026-08-28 · companion:codex **RETURNED T-229's independent whole-factory
   re-review** at `d802bc6`. Focused repairs held, but the production runner destroys its
   prior ledger and lock; execution gates are not enforced; candidate tests can
