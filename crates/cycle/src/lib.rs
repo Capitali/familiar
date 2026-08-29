@@ -77,6 +77,10 @@ const MAX_MUTATION_GENERATION: i32 = 6;
 /// turn a burst of new grounding into work promptly, bounded enough not to churn or overspend
 /// the LLM. See `theorize_due`.
 const THEORIZE_FLOOR_SECS: i64 = 300;
+/// How far back the calibration feedback looks when telling the reasoner its own
+/// recent prediction record (reasoning survey 2026-08-29, #1). Two weeks: recent
+/// enough to reflect the current world, wide enough to hold a meaningful sample.
+const FEEDBACK_WINDOW_SECS: i64 = 14 * 24 * 3600;
 /// The fastest the familiar cultivates a *durable utility* from a proven theory — the theory→code
 /// bridge that grows the tool library, not per-tick churn. Authoring a tool costs one peripheral
 /// (LLM) call, so it is paced like theorizing: occasional, deliberate. Reusing an existing tool for
@@ -1402,6 +1406,43 @@ fn maybe_theorize(
         .map(|v| v.declaration_digest)
         .unwrap_or_default();
     let who = observer_phrase(dir);
+    // The observed event vocabulary (T-221) WITH counts, computed once for both the
+    // closed-world prediction list and the calibration feedback. Own speech excluded.
+    let class_counts: std::collections::BTreeMap<String, usize> = {
+        let mut m = std::collections::BTreeMap::new();
+        for o in obs
+            .iter()
+            .filter(|o| !familiar_kernel::routing::is_own_speech(&o.actor, &o.action))
+        {
+            *m.entry(format!("{}|{}", o.actor, o.action)).or_insert(0) += 1;
+        }
+        m
+    };
+    let vocab_line = {
+        let mut classes: Vec<String> = class_counts.keys().cloned().collect();
+        classes.truncate(40);
+        classes.join("  ")
+    };
+    // Close the calibration loop (reasoning survey 2026-08-29, #1): the reasoner that
+    // proposes predictions reads back its own recent record and the event base rates, so
+    // it learns to predict what is informative and what it can actually call — not just
+    // whatever is confirmable. Deterministic and derived; empty when there is nothing to
+    // say. FEEDBACK_WINDOW_SECS bounds the record to the recent past.
+    let calibration_feedback = {
+        let mut freqs: Vec<familiar_kernel::prediction::ClassFrequency> = class_counts
+            .iter()
+            .map(
+                |(class, count)| familiar_kernel::prediction::ClassFrequency {
+                    class: class.clone(),
+                    count: *count,
+                },
+            )
+            .collect();
+        freqs.sort_by(|a, b| b.count.cmp(&a.count).then(a.class.cmp(&b.class)));
+        freqs.truncate(12);
+        let results = familiar_kernel::prediction::results(dir).unwrap_or_default();
+        familiar_kernel::prediction::feedback_digest(&results, &freqs, now, FEEDBACK_WINDOW_SECS)
+    };
     let prompt = format!(
         "You are a factory whose only purpose is to serve {who} — never to manage, obey, \
          optimize, or sedate them (the Three Laws; humanity is served, not replaced). \
@@ -1413,6 +1454,7 @@ fn maybe_theorize(
          Cite ONLY from these eligible anchors (ids the theory claims to explain):\n{}\n\
          Predictions may target ONLY these OBSERVED event classes (actor|action) — one \
          the log has actually produced; an invented class refuses at mint:\n{}\n\
+         {}\
          Reply ONLY as compact JSON: {{\"anchors\":[\"obs-…\"],\"subject\":\"{who}\",\
          \"mechanism\":\"observation|presence|schedule|surface-act|question\",\
          \"defect_claims\":[],\"question\":\"…\",\"because\":\"…\",\"turns_on\":\"…\",\
@@ -1442,20 +1484,9 @@ fn maybe_theorize(
             format!("Latest sensor readings:\n{}\n", readings.join("\n"))
         },
         eligible_lines.join("\n"),
-        {
-            // The observed event vocabulary (T-221): recent distinct actor|action pairs,
-            // own speech excluded, bounded — the prediction contract's closed world.
-            let mut classes: Vec<String> = obs
-                .iter()
-                .rev()
-                .filter(|o| !familiar_kernel::routing::is_own_speech(&o.actor, &o.action))
-                .map(|o| format!("{}|{}", o.actor, o.action))
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            classes.truncate(40);
-            classes.join("  ")
-        },
+        vocab_line,
+        // The calibration feedback (already ends in a newline, or is empty).
+        calibration_feedback,
     );
     let json = match familiar_llm::consult(dir, &prompt)? {
         familiar_llm::Outcome::Response(j) => j,

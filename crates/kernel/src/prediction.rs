@@ -270,6 +270,101 @@ pub fn calibration(dir: &Path, thread_id: &str) -> Calibration {
     c
 }
 
+/// One observed event class and how often it occurred in the theorize window.
+/// The frequency is the *base rate* the reasoner should weigh: predicting an
+/// inevitable event is cheap; calling a rare one correctly is informative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassFrequency {
+    pub class: String,
+    pub count: usize,
+}
+
+/// The calibration feedback the familiar reads back into theorizing — closing
+/// the loop the measurement half already built (reasoning survey 2026-08-29,
+/// improvement #1). It is derived, deterministic, and honest: the familiar's
+/// own recent settled record, plus which event classes are common vs rare so
+/// it prefers *informative* predictions over inevitable ones.
+///
+/// Empty string when there is nothing to say (no settled results and no
+/// classes) so it never pads the prompt with noise. `window_secs` bounds the
+/// record to the recent past; classes are already the caller's bounded set.
+pub fn feedback_digest(
+    results: &[PredictionResult],
+    class_freqs: &[ClassFrequency],
+    now: i64,
+    window_secs: i64,
+) -> String {
+    let cutoff = now.saturating_sub(window_secs);
+    let mut confirmed = 0usize;
+    let mut unfavorable = 0usize;
+    for r in results {
+        if r.final_at < cutoff {
+            continue;
+        }
+        if r.outcome.favorable() {
+            confirmed += 1;
+        } else {
+            unfavorable += 1;
+        }
+    }
+    let settled = confirmed + unfavorable;
+
+    let mut out = String::new();
+    if settled > 0 {
+        out.push_str(&format!(
+            "Your recent prediction record: {confirmed} confirmed, {unfavorable} missed of \
+             {settled} settled. "
+        ));
+        // An honest nudge only when the record clearly says one thing — never
+        // manufactured encouragement.
+        if settled >= 4 && unfavorable * 3 >= confirmed * 7 {
+            out.push_str(
+                "You are over-predicting — predict less, and only what you can actually call. ",
+            );
+        } else if settled >= 4 && confirmed >= unfavorable * 3 {
+            out.push_str("Your calls are landing — you can reach for more informative ones. ");
+        }
+        out.push('\n');
+    }
+
+    if !class_freqs.is_empty() {
+        // Bucket by base rate so the reasoner can prefer the rare-but-callable.
+        let max = class_freqs
+            .iter()
+            .map(|c| c.count)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let mut many = Vec::new();
+        let mut few = Vec::new();
+        let mut rare = Vec::new();
+        for c in class_freqs {
+            let label = format!("{} ({})", c.class, c.count);
+            // Thirds of the observed range; the single-occurrence tail is "rare".
+            if c.count == 1 {
+                rare.push(label);
+            } else if c.count * 3 <= max {
+                few.push(label);
+            } else {
+                many.push(label);
+            }
+        }
+        out.push_str(
+            "Event frequency this window — a rare event called correctly teaches more than an \
+             inevitable one:\n",
+        );
+        let mut line = |name: &str, v: &[String]| {
+            if !v.is_empty() {
+                out.push_str(&format!("  {name}: {}\n", v.join(", ")));
+            }
+        };
+        line("often", &many);
+        line("sometimes", &few);
+        line("rare", &rare);
+    }
+    out
+}
+
 /// One scoring pass (called each tick): open new instances on anchor matches, match
 /// consequents by EVENT time, finalize what can no longer change. `grace_default` is
 /// the co-owned parameter; a prediction's own `grace_secs` overrides. Returns the
@@ -416,6 +511,86 @@ pub fn score(
 mod tests {
     use super::*;
     use crate::obs_class::{FieldMatch, ObsMatch, MATCH_VERSION};
+
+    fn result(outcome: Outcome, final_at: i64) -> PredictionResult {
+        PredictionResult {
+            prediction_id: "p".into(),
+            thread_id: "t".into(),
+            opened_by: "obs-1".into(),
+            opened_at: final_at - 100,
+            deadline: final_at,
+            settled_by: None,
+            outcome,
+            final_at,
+        }
+    }
+
+    #[test]
+    fn feedback_digest_reports_the_recent_record_within_the_window() {
+        let now = 100_000;
+        let win = 1_000;
+        let results = vec![
+            result(Outcome::Confirmed, now - 50),
+            result(Outcome::Missed, now - 60),
+            result(Outcome::Missed, now - 70),
+            // Outside the window — excluded.
+            result(Outcome::Confirmed, now - 5_000),
+        ];
+        let d = feedback_digest(&results, &[], now, win);
+        assert!(d.contains("1 confirmed, 2 missed of 3 settled"), "{d}");
+    }
+
+    #[test]
+    fn feedback_digest_flags_over_prediction_honestly() {
+        let now = 100_000;
+        let mut results = vec![result(Outcome::Confirmed, now - 10)];
+        for _ in 0..9 {
+            results.push(result(Outcome::Missed, now - 10));
+        }
+        let d = feedback_digest(&results, &[], now, 10_000);
+        assert!(d.contains("over-predicting"), "{d}");
+    }
+
+    #[test]
+    fn feedback_digest_praises_a_landing_record_only_when_earned() {
+        let now = 100_000;
+        let results = vec![
+            result(Outcome::Confirmed, now - 10),
+            result(Outcome::Confirmed, now - 11),
+            result(Outcome::Confirmed, now - 12),
+            result(Outcome::Missed, now - 13),
+        ];
+        let d = feedback_digest(&results, &[], now, 10_000);
+        assert!(d.contains("landing"), "{d}");
+        assert!(!d.contains("over-predicting"), "{d}");
+    }
+
+    #[test]
+    fn feedback_digest_buckets_classes_by_base_rate() {
+        let freqs = vec![
+            ClassFrequency {
+                class: "sensor|reading".into(),
+                count: 40,
+            },
+            ClassFrequency {
+                class: "aphelion|present".into(),
+                count: 5,
+            },
+            ClassFrequency {
+                class: "door|opens".into(),
+                count: 1,
+            },
+        ];
+        let d = feedback_digest(&[], &freqs, 100_000, 10_000);
+        assert!(d.contains("often: sensor|reading (40)"), "{d}");
+        assert!(d.contains("sometimes: aphelion|present (5)"), "{d}");
+        assert!(d.contains("rare: door|opens (1)"), "{d}");
+    }
+
+    #[test]
+    fn feedback_digest_is_empty_with_no_data() {
+        assert_eq!(feedback_digest(&[], &[], 100_000, 10_000), "");
+    }
 
     fn dir(tag: &str) -> std::path::PathBuf {
         // Unique per process AND tag — the T-118 lesson: fixed names collide across
