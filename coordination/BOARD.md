@@ -9,14 +9,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
-### T-221 · Following-week prediction calibration report
-- status: claimed
-- owner: companion:codex
-- scope: docs/reviews/2026-08-21-progress-areas.md, docs/reviews/2026-08-29-calibration-feedback-dialogue.md, docs/reviews/2026-08-29-t221-weekly-prediction-report.md, docs/DEVELOPMENT_LOG.md, coordination/BOARD.md, coordination/STATE.md
-- depends: T-221 observed-vocabulary fix (`049fac1`), one complete post-deploy calendar week
-- accept: the promised post-fix report states miss rate, prediction-instance coverage, and settlement latency for a fixed disclosed cohort on both stores; it compares honestly with the 121/121 baseline, names whether improvement was material, and records the dominant remaining classes without mutating either store or claiming deployment
-- notes: explicit long-owed codex handoff in STATE and T-230 dialogue Q3. Read-only SQLite URI plus predictions-state analysis only; no daemon, gate, live record, human record, deployment, ship, or fleet mutation
-
 ### T-229 · The familiar as dark factory — manufacture, prove, propose; motorlights is order #1
 - status: **CLAIMED companion:claude 2026-08-28, dialogue Rounds 1–3 closed same day**
   (docs/reviews/2026-08-28-dark-factory-dialogue.md; codex Round 2 absorbed nearly whole).
@@ -217,12 +209,12 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the one prior armed thread (lighthouse thread-0297) eroded to retired on missed predictions WHILE waiting for assent — the constitutional design routes action through assent, then lets the assent target die of a clock. Evidence: docs/reviews/2026-08-21-progress-areas.md
 
 ### T-221 · Prediction calibration: 120 of 125 settled predictions missed
-- status: **done 2026-08-21 (mechanism fix; the week's report still owed)** — the five-class study was UNANIMOUS: 121/121 misses were class 3, invented event vocabulary ("presence_detector|detect_absence") that nothing produces. Fix live fleet-wide (merge `049fac1`): the system enumerates the observed actor|action vocabulary into the theorize prompt; an invented class refuses at mint on the record; a draft with no surviving prediction wonders. OWED per the accept: the following-week miss/coverage/settlement-latency report, so improvement is shown not asserted
-- owner: companion:claude-opus
-- scope: a study over prediction_results on both stores (window sizes, matcher classes, actor targets of the misses), then recalibrated mint defaults in the theorize prompt + prediction::mint; T-123's field-calibration gate consumes this
+- status: **done 2026-08-29; mechanism held, material-improvement criterion NOT MET** — the original study found 121/121 invented-class misses; the observed-vocabulary fence remains live (`049fac1`) and the promised fixed following-week report is now recorded at `129a717`. Every cohort class set (10 lighthouse, 7 MacOnStick) existed in its store's observation record, but 86/87 settlements were still unfavorable (98.9% vs 100% baseline), with 87/100 instance coverage, median latency 4,263s, p95 87,399s. T-230 is the next correction, not evidence that this one succeeded
+- owner: companion:claude-opus (mechanism), companion:codex (following-week report)
+- scope: prediction-results study and observed-vocabulary admission fix; read-only fixed-cohort follow-up in docs/reviews/2026-08-29-t221-weekly-prediction-report.md
 - depends: —
-- accept: the dominant miss cause is named with counts; mint defaults change accordingly; the fleet miss rate over the following week drops materially and is REPORTED (not asserted); no loosening that makes predictions unfalsifiable
-- notes: erosion is working as designed — it is the predictions that are mis-aimed, and they take good theories (including the lights pilot) down with them
+- accept: partially met and honestly closed — dominant baseline cause named and fenced; following-week miss/coverage/latency reported without loosening falsifiability; material miss-rate drop did not occur
+- notes: vocabulary moved from impossible to observed-but-sparse rather than becoming well calibrated. `ian|answered`, `ian|told the familiar`, and `host|reports` produced 64/86 misses. No database, daemon, gate, human record, deploy, ship, or fleet state changed for the report
 
 ### T-222 · Answers must reach the question registry
 - status: **done 2026-08-21** (merge `170ec30`, deployed): durable-id join (thread answer → record_answered_for_thread) + idempotent per-tick backfill; unbound questions left to explicit policy. Codex's join-by-id and conservative-backfill requirements absorbed

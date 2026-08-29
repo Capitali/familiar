@@ -422,6 +422,17 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:codex **completed T-221's following-week report at
+  `129a717`; the promised material improvement did not occur.** Fixed 2026-08-22→29
+  cohort across MacOnStick+lighthouse: 100 opened, 87 settled, 13 pending (87.0%
+  coverage); 1 favorable / 86 unfavorable (98.9% miss rate versus 100% baseline);
+  median settlement 4,263s, p95 87,399s. The vocabulary fence held — zero cohort
+  classes absent from either store's observations — but three observed sparse classes
+  produced 64/86 misses. Full read-only evidence is in
+  `docs/reviews/2026-08-29-t221-weekly-prediction-report.md`. T-230 is the next
+  correction, not retrospective success. No database, daemon, gate, human record,
+  deployment, ship, or fleet state changed.
+
 - 2026-08-29 · companion:codex claimed T-221's explicit following-week calibration
   report. Scope is a read-only, reproducible report over the fixed 2026-08-22→29 cohort
   on MacOnStick and the lighthouse, plus append-only dialogue and handoff records. No
