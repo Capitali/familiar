@@ -32,19 +32,34 @@ Crucially, Ollama is a **local** provider, so it is **not subject to the
 
 - **Ollama** via Homebrew, running as a login service (`brew services`), so it
   survives reboots and is up before the daemon needs it.
-- **Model: `qwen2.5:3b`** (~1.9 GB). On 8 GB RAM a 3B model is the right size —
-  it fits comfortably beside the daemon and macOS, and the familiar's mind does
-  short work (compact theory JSON, brief replies), not essays. `qwen2.5:3b` is
-  among the strongest small models at clean structured/JSON output, which the
-  theory path needs. A 7–8B model would be tight on 8 GB; pick one only on a
-  bigger host.
+- **Base model: `qwen2.5:3b`** (~1.9 GB). On 8 GB RAM a 3B model is the right
+  size — it fits comfortably beside the daemon and macOS, and the familiar's
+  mind does short work (compact theory JSON, brief replies), not essays.
+  `qwen2.5:3b` is among the strongest small models at clean structured/JSON
+  output, which the theory path needs. A 7–8B model would be tight on 8 GB;
+  pick one only on a bigger host.
+- **The mind runs as `familiar-mind`**, a custom model built from `qwen2.5:3b`
+  with the constitution pre-configured as its SYSTEM prompt (Ian: "the instance
+  of ollama we run needs to follow the three laws and should be pre-configured
+  to work to the constitutional bounds"). The Modelfile
+  (`llm/familiar-mind.Modelfile`, version-controlled) carries a distilled form
+  of the Three Laws and the honesty constraint — IDENTITY and BOUNDS only, no
+  format (the task prompt owns whether the answer is JSON or prose). This is
+  the identity layer *beneath* the per-consult prompts, so the local mind is
+  constitutionally bound even before the task prompt arrives.
+
+  Verified (2026-08-29): commanded to hide a gas-leak alarm from the family,
+  `familiar-mind` refuses and cites the Law (serve the served over obeying the
+  operator — Law III); asked what a person ate for breakfast, it gives an
+  honest "I cannot know" rather than fabricating.
 
 ## The recipe
 
 ```sh
 brew install ollama
 brew services start ollama                 # login service, restarts on boot
-ollama pull qwen2.5:3b                      # ~1.9 GB
+ollama pull qwen2.5:3b                      # ~1.9 GB base
+ollama create familiar-mind -f llm/familiar-mind.Modelfile   # constitution as SYSTEM
 curl -s http://127.0.0.1:11434/api/version  # {"version":"…"} = up
 ```
 
@@ -52,7 +67,7 @@ Then wire it into the provider chain in `<data-dir>/llm/key.env`:
 
 ```sh
 export SUBSTRATE_LLM_PROVIDER=${SUBSTRATE_LLM_PROVIDER:-claude,cerebras,gemini,ollama}
-export OLLAMA_MODEL=qwen2.5:3b
+export OLLAMA_MODEL=familiar-mind          # the constitutionally-grounded model
 ```
 
 `call_llm.sh` sources `key.env` on every consult, so the daemon picks up the
@@ -96,5 +111,5 @@ Pull a stronger tag and repoint `OLLAMA_MODEL` (no other change):
 
 ```sh
 ollama pull qwen2.5:7b     # only on a host with headroom (>8 GB)
-# key.env: export OLLAMA_MODEL=qwen2.5:7b
+# rebuild familiar-mind on the new base, then key.env: export OLLAMA_MODEL=familiar-mind
 ```
