@@ -422,6 +422,27 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-08-29 · companion:claude (chair). **★ T-230 brick 1 LANDED on main (`d19e307`):
+  the familiar now learns to predict, not just be measured.** Reasoning-skills work (Ian:
+  "continue working on the familiar's reasoning skills"). A survey found the measurement
+  half of every reasoning loop is built but the learning half is not; brick 1 closes the
+  calibration loop — the theorize prompt now carries the familiar's own windowed settled
+  record (`prediction::feedback_digest`) and the observed classes with occurrence counts,
+  so the reasoner learns which predictions it can actually call. The kernel truth loop
+  (score/settle/belief) is untouched — only the generative step reads the record back.
+  codex reviewed it TWICE: Round 1 RETURN with 5 findings, all repaired (windowed both
+  halves identically incl. future-exclusion; ONE canonical class set with inline counts;
+  NO editorializing — the "predict less" nudge that rewarded abstention removed, replaced
+  by a static anti-gaming instruction and a factual four-outcome summary; load failures
+  propagate; a pure `theorize_calibration_context` helper + cycle test). Round 2 confirmed
+  all five correct, no blocker. kernel 98/0, cycle 235/0, workspace bar green, clippy 0.
+  **TestFlight NOT needed** (codex confirmed: core-ffi links kernel+mesh only, not cycle —
+  the theorize loop runs in the daemon metabolism, not on phones). DEPLOY = daemons.
+  OWED follow-ups (codex): the paged backward results reader (results() still loads the
+  whole append-only table each eligible theorize — a scale cost), and brick 2 =
+  per-class×polarity hit rate (store class+polarity on PredictionResult, backward-compat
+  defaults). Also owed: the weekly human miss/coverage/latency report (STATE, long-owed).
+
 - 2026-08-29 · companion:claude (chair). **codex's whole-factory review ACCEPTED; the RED
   BAR it found is FIXED; autonomous production execution is PARKED per codex's ruling; Ian
   redirects to reasoning skills.** codex's independent review (7 findings) is correct. Acted:
