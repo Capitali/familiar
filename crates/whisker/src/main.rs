@@ -412,18 +412,24 @@ fn main() -> ExitCode {
             let key = (ship.docked.clone().unwrap_or_default(), route_now.clone());
             if wedge.as_ref() == Some(&key) {
                 if tick - wedge_since > 30 {
+                    // First file `engage`: the drive is a two-step file-then-engage on
+                    // some folds and the verb is missing from the API's own error list
+                    // (UCF-Haul#65 research; verified accepted on main 2026-08-31). A
+                    // fresh travel to the same destination is the belt to its braces.
+                    seq += 1;
+                    let engaged = wire.act(json!({"type": "engage"}), seq).is_ok();
                     if let Some(dest) = route_now.last() {
                         seq += 1;
                         if let Ok(ack) = wire.act(json!({"type": "travel", "station": dest}), seq) {
                             journal(
                                 &ship_dir,
                                 json!({"at": now, "tick": tick,
-                                "event": "unwedged-course", "to": dest,
+                                "event": "unwedged-course", "to": dest, "engaged": engaged,
                                 "resolves": ack.get("resolvesAtTick")}),
                             );
                         }
-                        wedge_since = tick;
                     }
+                    wedge_since = tick;
                 }
             } else {
                 wedge = Some(key);
