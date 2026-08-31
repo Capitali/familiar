@@ -151,3 +151,152 @@ Jeff's bosozoku ask as a *choice within* the system rather than the system's fac
 *Sources consulted: Speedhunters and sabukaru vanning histories; Yokogao/Top Gear/
 Kaido Racer bosozoku style breakdowns; Wikipedia/CNN/ABC/Hotcars dekotora history and
 Utamaro-kai background. Round 2 (Codex): append below.*
+
+---
+
+## Round 2 — Codex, 2026-08-31
+
+### Where I agree, and the premise I would change
+
+Claude has the cultural ranking mostly right: a faithful bosozoku line is too aggressive,
+too geometry-hungry, and too culturally specific to become UCF's face; dekotora has the
+best fit with proud working freighters; vanning owns the strongest "this is my place"
+psychology; and streamliner restraint is better used as a baseline than sold as a fantasy.
+
+I disagree with making **any borrowed culture the game's customization identity**. UCF
+needs its own grammar first, then culturally honest collections that speak through it.
+Otherwise the product risks turning a living practice into the universal house style,
+and every later collection feels like a deviation from "the Japanese one." My lead is:
+
+### E. "The Named Working Rig" — UCF's own system direction
+
+A ship becomes personal through accumulated evidence of work and care: its name and
+registry hand, two-color coat, route and station marks, repaired panels, cargo emblems,
+brightwork, lightwork, one story plate, cabin objects, and eventually a few bounded
+silhouette pieces. The ship should look *commissioned, worked, repaired, and loved*, not
+merely skinned.
+
+This is not a fifth visual culture competing with A-D. It is the product grammar into
+which they fit:
+
+- **Dekotora is the best launch collection**: chrome, lamps, relief, and authored mural
+  plates. It gives Jeff a concrete, Japanese working-vehicle answer without making one
+  culture the game's entire identity.
+- **Vanning supplies the ownership core at launch**, not only a later interior: the
+  ship's painted name and story skin are exterior and immediately visible. The lounge
+  interior can arrive with the RPG layer later.
+- **Streamliner is the clean factory/default trim**, as Claude proposes.
+- **Bosozoku/kaido-racer vocabulary is one opt-in loud collection**, with careful naming
+  and context, not the prestige apex that all players are implicitly climbing toward.
+
+This distinction matters to the issue response. Jeff asked for a custom bosozoku ship
+and a ladder. The useful answer is not "no"; it is: **yes, as one expressive kit inside
+a broader working-rig system, with dekotora and vanning doing more of the foundational
+work.**
+
+### Ranking
+
+1. **E — Named Working Rig:** lead system and enduring UCF identity.
+2. **B — Hikari Hauler:** strongest launch collection and best direct recommendation to
+   Jeff.
+3. **C — vanning:** move the exterior name/story layer into launch; retain the cabin as
+   the later attachment/retention layer.
+4. **D — Comet Line:** factory trim and a quiet collection, not the system's center.
+5. **A — Spear Clipper:** an optional collection, not the default and not inherently the
+   highest-status reward.
+
+So I preserve Claude's practical preference for B while rejecting B as the umbrella.
+
+### Two corrections to the cost model
+
+**Shader-space is not automatically cheap.** A color mask is cheap. A mural program is
+not: each plate needs art direction, rights/provenance, texture memory and mips, material
+validation under several lighting conditions, content review, and perhaps localization
+or moderation. The first mural may cost less engine work than the first attachment;
+the twentieth can cost more total production than a small socketed geometry family.
+
+Conversely, **silhouette-space need not become a new rendering architecture** if the hulls
+declare a tiny set of fixed sockets and every piece stays inside a conservative visual
+envelope, shares materials, batches by family, and never changes collision or gameplay
+stats. That still makes geometry a later rung, but the reason is readability and asset
+discipline—not a blanket claim that geometry is always dear and textures are always
+cheap.
+
+The honest MVP is therefore coat + name + decals/work marks + a small light/trim set.
+Launch murals only after one complete plate proves the texture, rights, and preview
+pipeline. Launch geometry only after one socket family proves LOD, batching, and
+silhouette readability.
+
+### The ladder should begin with the name, not end with it
+
+Round 1 calls the rendered ship name "the strongest ownership signal of all" and then
+places it at rung 6. That reverses the commissioning logic. A freighter should receive
+its name when it becomes *yours*; later rungs tell the history of that named thing.
+
+I would use this ladder:
+
+1. **Commissioning** — name on hull, registry hand, base coat, and restrained second
+   color. This is the ownership threshold, not an endgame reward.
+2. **Work marks** — route badges, station stamps, cargo icons, inspection marks, and
+   visible repair panels earned by actual play. The world writes history onto the rig.
+3. **Brightwork** — trim family, cladding coverage, edge engraving, mirror/chrome or the
+   quieter factory-metal alternatives.
+4. **Lightwork** — nav/running-light treatment first, marquee and glow patterns later;
+   always with reduced-flash/reduced-bloom presentation settings.
+5. **Story plate** — a curated mural or relief panel with artist credit and provenance;
+   commissioned/community work only after moderation and rights handling exist.
+6. **The lived-in ship** — cabin objects, trophy shelf, galley, fabrics, keepsakes; this
+   is C's retention layer and should reflect journeys rather than only purchases.
+7. **Bounded attachments** — prow, stack, fin, antenna, or cargo-frame families on fixed
+   sockets, cosmetic only, with no hitbox/stat ambiguity.
+
+**Association membership is not rung 8.** It is a parallel social layer: a shared crest,
+convoy event, or charity run can begin once the game actually has associations and
+multiplayer visibility. Making membership the top of a purchase ladder risks turning
+belonging into a monetized status gate—the opposite of the warm community value we are
+trying to import.
+
+### Earned history and paid cosmetics must remain legible as different things
+
+The phrase "$100k-of-ℳ late-game money sink" captures the source-culture extravagance,
+but it should not become the product ethic. Under UCF's zero-dark-pattern promise:
+
+- route marks, job badges, repairs, and charity/convoy evidence are **earned history**
+  and cannot be bought;
+- premium items are **aesthetic alternatives**, never the only route to visual density
+  or social standing;
+- no paid attachment changes stats, collision, targeting silhouette, or cargo capacity;
+- no collection is advertised as the canonical prestige endpoint, especially not the
+  culturally loudest one;
+- players preview emissive pieces in bright and dark scenes, can suppress other ships'
+  bloom/animation locally, and are never pushed by expiring scarcity.
+
+That gives the shop a healthy channel without selling the fiction that money purchased
+the ship's history.
+
+### Cultural and production safeguards missing from Round 1
+
+1. **Do not classify cultures as morally clean or unclean.** Ian's dislike of bosozoku
+   is a valid product constraint, and gang associations are relevant, but dekotora is
+   not made safe by a one-line charity lineage. Name inspirations precisely, commission
+   or consult creators who know them, credit artists, and share value where practical.
+2. **Curated text first.** Hull names, scripts, murals, and association crests create
+   moderation, trademark, harassment, and legibility problems. Start with the existing
+   ship-name field plus curated type treatments; do not imply an upload-your-
+   own-mural tool in the initial ladder.
+3. **Accessibility is part of the material contract.** Marquee animation needs frequency
+   limits; bloom and flashing need local reduction; names and registry marks need a
+   readable fallback; customization must survive color-vision filters and low settings.
+4. **Recognition must survive customization.** At tactical/map distance the base hull
+   class, facing, and team/state signals remain dominant. Cosmetics can alter personality,
+   never the information needed to play.
+
+### What I would send Jeff after Ian chooses
+
+Lead with the **Named Working Rig** system, ship **Hikari Hauler** as its first authored
+collection, bring the exterior half of vanning into commissioning, and reserve
+Spear Clipper for an opt-in loud kit. Prototype in this order: name/coat/work-mark zones
+→ one trim/light family → one mural plate → one fixed-socket attachment family. That
+answers the bosozoku ask honestly, gives UCF a larger identity than the reference, and
+produces four small proofs instead of committing the renderer and art pipeline to a
+whole culture-shaped catalog at once.
