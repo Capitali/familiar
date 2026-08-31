@@ -15,6 +15,16 @@ settings:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "103"
+    # The PCC lane names PrivateCloudComputeLanguageModel, a 27-SDK-only type, so the tree
+    # stopped BUILDING on Xcode 26.5 — which is the newest Xcode the Intel ship machine can
+    # run. The compiler version cannot discriminate (26.5 already carries Swift 6.3), so the
+    # SDK does: these conditionals define the flag exactly where the type exists, the PCC
+    # code compiles unchanged under a 27 SDK, and a 26-SDK build compiles it out — honestly,
+    # since a binary built against SDK 26 could never link the type anyway. Runtime consent
+    # gating (#available(27) + consent.pcc) is untouched.
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=macosx27*]": "$(inherited) FAMILIAR_SDK_HAS_PCC"
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphoneos27*]": "$(inherited) FAMILIAR_SDK_HAS_PCC"
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS[sdk=iphonesimulator27*]": "$(inherited) FAMILIAR_SDK_HAS_PCC"
 packages:
   FamiliarMesh:
     path: FamiliarMesh

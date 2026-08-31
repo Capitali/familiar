@@ -98,10 +98,12 @@ enum ConsultRunner {
     /// "+pcc" when this device could choose Private Cloud Compute right now (OS 27, consent
     /// on, Apple reports it available) — so the console's oracle status shows the dimension.
     private static func pccSuffix() -> String {
+        #if FAMILIAR_SDK_HAS_PCC
         if #available(iOS 27.0, macOS 27.0, *),
            UserDefaults.standard.bool(forKey: "consent.pcc") {
             if case .available = PrivateCloudComputeLanguageModel().availability { return "+pcc" }
         }
+        #endif
         return ""
     }
 
@@ -111,6 +113,7 @@ enum ConsultRunner {
     /// guided-generation calls are untouched — same respond(to:generating:) either way.
     @available(iOS 26.0, macOS 26.0, *)
     private static func makeSession(cloudOK: Bool) -> LanguageModelSession {
+        #if FAMILIAR_SDK_HAS_PCC
         if #available(iOS 27.0, macOS 27.0, *),
            cloudOK,
            UserDefaults.standard.bool(forKey: "consent.pcc") {
@@ -119,6 +122,7 @@ enum ConsultRunner {
                 return LanguageModelSession(model: pcc)
             }
         }
+        #endif
         return LanguageModelSession()
     }
 
