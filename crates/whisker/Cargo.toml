@@ -1,22 +1,18 @@
 [package]
-name = "familiar-cli"
+name = "familiar-whisker"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description = "The CLI shell for the Substrate factory."
+description = "whisker — the ship world's pilot: flies a UCF hull from the ship's own store, under the household's lease. A cat judges every clearance by its whiskers."
 
 [[bin]]
-name = "familiar"
+name = "whisker"
 path = "src/main.rs"
 
 [dependencies]
 familiar-kernel.workspace = true
-familiar-sense.workspace = true
-familiar-cycle.workspace = true
-familiar-llm.workspace = true
 familiar-mesh.workspace = true
 familiar-mcp.workspace = true
 familiar-world.workspace = true
-familiar-agent.workspace = true
-familiar-reach.workspace = true
+serde.workspace = true
 serde_json.workspace = true

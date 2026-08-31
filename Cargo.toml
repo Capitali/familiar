@@ -13,7 +13,7 @@ resolver = "2"
 # consoles) were removed 2026-07-24 — git history keeps them; see ADR-0007 (superseded)
 # and ADR-0008.
 members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/probe",
-    "crates/probe", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/catscan", "crates/world", "crates/workshop", "crates/jail", "crates/factory", "crates/factory-run"]
+    "crates/probe", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/catscan", "crates/world", "crates/workshop", "crates/jail", "crates/factory", "crates/factory-run", "crates/whisker"]
 
 [workspace.package]
 version = "0.1.0"

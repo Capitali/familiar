@@ -466,6 +466,7 @@ dependencies = [
  "familiar-mesh",
  "familiar-reach",
  "familiar-sense",
+ "familiar-world",
  "serde_json",
 ]
 
@@ -626,6 +627,18 @@ name = "familiar-vision"
 version = "0.1.0"
 dependencies = [
  "familiar-kernel",
+]
+
+[[package]]
+name = "familiar-whisker"
+version = "0.1.0"
+dependencies = [
+ "familiar-kernel",
+ "familiar-mcp",
+ "familiar-mesh",
+ "familiar-world",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

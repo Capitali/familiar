@@ -60,6 +60,11 @@ commands:
                  `mcp servers` | `mcp tools <server>` (discovery) |
                  `mcp call <server> <tool> [json]` — callable only if the human's
                  mcp/servers.json declares that tool; every reach passes the boundary
+  world          ship worlds (ADR-0045 — worlds are stores): `world list` |
+                 `world commission --label <name> [--store-root DIR]` (the ceremony:
+                 own store, own key, every gate shut) | `world lease <id> [--ttl-hours N]`
+                 (sign an expiring projection of the CURRENT boundary into the ship store)
+                 | `world rename <id> <label>` | `world decommission <id>`
   boundary       show the Pact — the capability boundary (the human's lever, Law III)
   guard          weigh a proposed action against the Pact (Law III)
   consult        consult the LLM (refused unless a human has opened the Pact)
@@ -129,6 +134,7 @@ fn main() -> ExitCode {
         Some("agent") => cmd_agent(rest),
         Some("mesh") => cmd_mesh(rest),
         Some("mcp") => cmd_mcp(rest),
+        Some("world") => cmd_world(rest),
         Some("outreach") => cmd_outreach(rest),
         Some("goal") => cmd_goal(rest),
         Some(cmd) => {
@@ -3788,6 +3794,250 @@ fn flags(args: &[String]) -> HashMap<String, String> {
         i += 1;
     }
     m
+}
+
+// ---------------------------------------------------------------------------
+// world — ship worlds (ADR-0045, T-205): the commissioning ceremony as a command
+// ---------------------------------------------------------------------------
+
+/// Where ship stores live by default: a `worlds/` directory BESIDE the household data
+/// dir, never inside it — a household scan must traverse a store that simply contains
+/// no ship data (ADR-0045 §1), and nesting would put ship files on that walk.
+fn world_store_root(dir: &std::path::Path, flag: Option<&str>) -> std::path::PathBuf {
+    match flag {
+        Some(p) => std::path::PathBuf::from(p),
+        None => dir
+            .parent()
+            .map(|p| p.join("worlds"))
+            .unwrap_or_else(|| dir.join("..").join("worlds")),
+    }
+}
+
+fn cmd_world(args: &[String]) -> ExitCode {
+    let sub = args.first().map(String::as_str).unwrap_or("list");
+    let f = flags(args);
+    let dir = store::data_dir(f.get("data-dir").map(String::as_str));
+    let positional: Vec<&String> = {
+        let mut out = Vec::new();
+        let mut skip_next = false;
+        for a in args.iter().skip(1) {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if let Some(key) = a.strip_prefix("--") {
+                skip_next = !key.contains('=');
+                continue;
+            }
+            out.push(a);
+        }
+        out
+    };
+
+    match sub {
+        "list" => match familiar_world::instance::load(&dir) {
+            Err(e) => {
+                eprintln!("world: {e}");
+                ExitCode::FAILURE
+            }
+            Ok(all) if all.is_empty() => {
+                println!(
+                    "world: none commissioned. A ship world begins by a human's word — \
+                     `familiar world commission --label <name>`."
+                );
+                ExitCode::SUCCESS
+            }
+            Ok(all) => {
+                for w in all {
+                    println!(
+                        "{} — \"{}\" ({:?}, epoch {}) commissioned by {} — key {}",
+                        w.id,
+                        w.label,
+                        w.lifecycle,
+                        w.grant_epoch,
+                        w.commissioner,
+                        &w.instance_pubkey[..16.min(w.instance_pubkey.len())]
+                    );
+                }
+                ExitCode::SUCCESS
+            }
+        },
+        "commission" => {
+            let Some(label) = f.get("label") else {
+                eprintln!("world commission: --label is required (the ship's human-given name)");
+                return ExitCode::FAILURE;
+            };
+            let commissioner = f
+                .get("commissioner")
+                .cloned()
+                .or_else(|| familiar_kernel::identity::current(&dir))
+                .unwrap_or_default();
+            if commissioner.is_empty() || commissioner == "observer" {
+                eprintln!(
+                    "world commission: no established commissioner — pass --commissioner <human>; \
+                     a world begins by a HUMAN's word, not an observer's"
+                );
+                return ExitCode::FAILURE;
+            }
+            let root = world_store_root(&dir, f.get("store-root").map(String::as_str));
+            let endpoint = f.get("endpoint").map(String::as_str).unwrap_or("");
+            match familiar_world::instance::commission(
+                &dir,
+                &root,
+                label,
+                &commissioner,
+                endpoint,
+                now_secs(),
+            ) {
+                Err(e) => {
+                    eprintln!("world commission: {e}");
+                    ExitCode::FAILURE
+                }
+                Ok((w, ship_dir)) => {
+                    // The ship must be able to verify future leases without ever reading
+                    // the household store: give it the ISSUER's public identity now, as
+                    // part of the ceremony. Public key only — no household data crosses.
+                    let issuer_written = familiar_mesh::node::NodeKey::load_or_mint(&dir, "")
+                        .map_err(|e| e.to_string())
+                        .and_then(|k| {
+                            serde_json::to_vec_pretty(&k.identity()).map_err(|e| e.to_string())
+                        })
+                        .and_then(|bytes| {
+                            std::fs::write(ship_dir.join("issuer.json"), bytes)
+                                .map_err(|e| e.to_string())
+                        });
+                    println!("commissioned {} — \"{}\"", w.id, w.label);
+                    println!("  store: {}", ship_dir.display());
+                    println!("  instance key: {}", w.instance_pubkey);
+                    println!("  boundary: every gate shut (authority arrives only as a lease)");
+                    match issuer_written {
+                        Ok(()) => println!("  issuer.json written — the ship can verify leases"),
+                        Err(e) => eprintln!("  WARNING: issuer.json not written ({e}) — leases cannot verify until it is"),
+                    }
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        "lease" => {
+            let Some(id) = positional.first() else {
+                eprintln!("world lease: which instance? `familiar world lease <world-id>`");
+                return ExitCode::FAILURE;
+            };
+            let w = match familiar_world::instance::find(&dir, id) {
+                Err(e) => {
+                    eprintln!("world lease: {e}");
+                    return ExitCode::FAILURE;
+                }
+                Ok(None) => {
+                    eprintln!("world lease: no instance {id}");
+                    return ExitCode::FAILURE;
+                }
+                Ok(Some(w)) => w,
+            };
+            if w.lifecycle == familiar_world::instance::Lifecycle::Decommissioned {
+                eprintln!("world lease: {id} is decommissioned — its authority has ended");
+                return ExitCode::FAILURE;
+            }
+            let ttl_hours: i64 = f
+                .get("ttl-hours")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(24);
+            let root_boundary = match boundary::load(&dir) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("world lease: cannot read the root boundary: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let key = match familiar_mesh::node::NodeKey::load_or_mint(&dir, "") {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("world lease: household key: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let signed = match familiar_world::lease::issue(
+                &root_boundary,
+                id,
+                ttl_hours.saturating_mul(3600),
+                now_secs(),
+                &key,
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("world lease: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let root = world_store_root(&dir, f.get("store-root").map(String::as_str));
+            let ship_dir = root.join(id.as_str());
+            let bytes = match serde_json::to_vec_pretty(&signed) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("world lease: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if ship_dir.is_dir() {
+                if let Err(e) = std::fs::write(ship_dir.join("lease.json"), &bytes) {
+                    eprintln!("world lease: write: {e}");
+                    return ExitCode::FAILURE;
+                }
+                println!(
+                    "leased {} for {}h — projection of the CURRENT boundary, written to {}",
+                    id,
+                    ttl_hours,
+                    ship_dir.join("lease.json").display()
+                );
+            } else {
+                // No store here (it may live on another machine): print, caller carries it.
+                println!("{}", String::from_utf8_lossy(&bytes));
+            }
+            ExitCode::SUCCESS
+        }
+        "rename" => {
+            let (Some(id), Some(label)) = (positional.first(), positional.get(1)) else {
+                eprintln!("world rename: `familiar world rename <world-id> <new label>`");
+                return ExitCode::FAILURE;
+            };
+            match familiar_world::instance::rename(&dir, id, label) {
+                Err(e) => {
+                    eprintln!("world rename: {e}");
+                    ExitCode::FAILURE
+                }
+                Ok(w) => {
+                    println!("renamed {} — \"{}\"", w.id, w.label);
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        "decommission" => {
+            let Some(id) = positional.first() else {
+                eprintln!("world decommission: `familiar world decommission <world-id>`");
+                return ExitCode::FAILURE;
+            };
+            match familiar_world::instance::decommission(&dir, id) {
+                Err(e) => {
+                    eprintln!("world decommission: {e}");
+                    ExitCode::FAILURE
+                }
+                Ok(w) => {
+                    println!(
+                        "decommissioned {} — authority ended, epoch now {}. The store is \
+                         untouched: archive or removal is a separate human retention act.",
+                        w.id, w.grant_epoch
+                    );
+                    ExitCode::SUCCESS
+                }
+            }
+        }
+        other => {
+            eprintln!(
+                "world: unknown subcommand `{other}` — list | commission | lease | rename | decommission"
+            );
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn now_secs() -> i64 {

@@ -44,6 +44,21 @@ impl Response {
 /// `https` verifies the certificate chain ([`crate::tls`]); `http` is permitted only for
 /// loopback, so a test stub can exist without opening a way to send a token in the clear.
 pub fn post_json(url: &Url, headers: &[(String, String)], body: &[u8]) -> Result<Response, Error> {
+    request("POST", url, headers, Some(body))
+}
+
+/// GET, under the same rules as [`post_json`] — same verifying TLS, same
+/// loopback-only-plain-http floor, same bounded read. A body is never sent.
+pub fn get(url: &Url, headers: &[(String, String)]) -> Result<Response, Error> {
+    request("GET", url, headers, None)
+}
+
+fn request(
+    method: &str,
+    url: &Url,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+) -> Result<Response, Error> {
     if !url.https && !url.is_loopback() {
         return Err(Error::Insecure(format!(
             "{} is plain http and not loopback — a credential never travels in the clear",
@@ -62,10 +77,12 @@ pub fn post_json(url: &Url, headers: &[(String, String)], body: &[u8]) -> Result
     sock.set_write_timeout(Some(IO_TIMEOUT))
         .map_err(|e| Error::Io(e.to_string()))?;
 
+    let body = body.unwrap_or(&[]);
     let mut head = format!(
-        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+        "{} {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
          Accept: application/json, text/event-stream\r\nContent-Length: {}\r\n\
          Connection: close\r\nUser-Agent: familiar-mcp/0.1\r\n",
+        method,
         url.path,
         url.host_header(),
         body.len()
