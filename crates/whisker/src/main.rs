@@ -64,11 +64,12 @@ impl Wire {
         serde_json::from_slice(&resp.body).map_err(|e| format!("GET {path}: {e}"))
     }
 
-    fn act(&self, mut body: Value, seq: u64) -> Result<Value, String> {
-        // The actionId is the idempotency handle (learned the hard way: the guide's
-        // examples omit it and the door refuses). Time+seq is unique per key, which
-        // is the scope idempotency actually has.
-        body["actionId"] = json!(format!("whisker-{}-{}", now_secs(), seq));
+    fn act(&self, mut body: Value, action_id: &str) -> Result<Value, String> {
+        // The actionId is the idempotency handle, and the contract is RETRY THE ID,
+        // NEVER THE INTENT (the owner's words, ucf-exchange#14): a re-sent intent
+        // must carry the SAME id, or a transient failure after server acceptance
+        // becomes a double-book. The caller owns the id for exactly that reason.
+        body["actionId"] = json!(action_id);
         let url = self.url("/v1/actions")?;
         let bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
         let resp = http::post_json(&url, &self.auth(), &bytes).map_err(|e| format!("{e:?}"))?;
@@ -267,7 +268,7 @@ fn main() -> ExitCode {
 
     let mut active: Option<Active> = None;
     let mut pending_until: i64 = -1;
-    let mut recent: HashMap<String, i64> = HashMap::new();
+    let mut recent: HashMap<String, (i64, String)> = HashMap::new();
     let mut seq: u64 = 0;
     let mut last_refusal = String::new();
     // Wedge watch: a course filed while dry never departs on its own after refuelling
@@ -417,10 +418,14 @@ fn main() -> ExitCode {
                     // (UCF-Haul#65 research; verified accepted on main 2026-08-31). A
                     // fresh travel to the same destination is the belt to its braces.
                     seq += 1;
-                    let engaged = wire.act(json!({"type": "engage"}), seq).is_ok();
+                    let engage_id = format!("whisker-{}-{}", now_secs(), seq);
+                    let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
                     if let Some(dest) = route_now.last() {
                         seq += 1;
-                        if let Ok(ack) = wire.act(json!({"type": "travel", "station": dest}), seq) {
+                        let travel_id = format!("whisker-{}-{}", now_secs(), seq);
+                        if let Ok(ack) =
+                            wire.act(json!({"type": "travel", "station": dest}), &travel_id)
+                        {
                             journal(
                                 &ship_dir,
                                 json!({"at": now, "tick": tick,
@@ -504,12 +509,24 @@ fn main() -> ExitCode {
             // The same intent inside the window is the same decision, never re-filed —
             // the zigzag-to-empty lesson.
             let sig = body.to_string();
-            let fresh = recent.get(&sig).map(|t| tick - t >= 15).unwrap_or(true);
+            let fresh = recent
+                .get(&sig)
+                .map(|(t, _)| tick - t >= 15)
+                .unwrap_or(true);
             if fresh {
-                seq += 1;
-                match wire.act(body.clone(), seq) {
+                // The id is minted once per INTENT and reused on every re-send of it,
+                // so a retry after a transient failure is idempotent at the exchange
+                // rather than a second order (retry the id, never the intent).
+                let action_id = recent
+                    .get(&sig)
+                    .map(|(_, id)| id.clone())
+                    .unwrap_or_else(|| {
+                        seq += 1;
+                        format!("whisker-{}-{}", now_secs(), seq)
+                    });
+                match wire.act(body.clone(), &action_id) {
                     Ok(ack) => {
-                        recent.insert(sig, tick);
+                        recent.insert(sig, (tick, action_id));
                         pending_until = ack
                             .get("resolvesAtTick")
                             .and_then(Value::as_i64)
