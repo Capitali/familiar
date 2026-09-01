@@ -65,13 +65,40 @@ fn request(
             url.origin()
         )));
     }
-    let addr = (url.host.as_str(), url.port)
+    // Try EVERY resolved address, not just the first. A dual-stack host whose
+    // IPv6 is dead (the UCF exchange over the RV's Starlink link, 2026-09-01:
+    // AAAA present but refusing, A fine) would otherwise fail whenever the
+    // resolver hands back the v6 address first — connection refused on a coin
+    // flip, while curl's happy-eyeballs sails through. v4 is tried first because
+    // on this network it is the working family; the loop still tries v6 if v4 is
+    // the one that is down. The last error is surfaced if none connect.
+    let mut addrs: Vec<_> = (url.host.as_str(), url.port)
         .to_socket_addrs()
         .map_err(|e| Error::Io(format!("resolve {}: {e}", url.origin())))?
-        .next()
-        .ok_or_else(|| Error::Io(format!("no address for {}", url.origin())))?;
-    let mut sock =
-        TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).map_err(|e| Error::Io(e.to_string()))?;
+        .collect();
+    if addrs.is_empty() {
+        return Err(Error::Io(format!("no address for {}", url.origin())));
+    }
+    addrs.sort_by_key(|a| a.is_ipv6());
+    let mut sock = {
+        let mut last = None;
+        let mut connected = None;
+        for addr in &addrs {
+            match TcpStream::connect_timeout(addr, CONNECT_TIMEOUT) {
+                Ok(s) => {
+                    connected = Some(s);
+                    break;
+                }
+                Err(e) => last = Some(e),
+            }
+        }
+        connected.ok_or_else(|| {
+            Error::Io(
+                last.map(|e| e.to_string())
+                    .unwrap_or_else(|| "connect failed".into()),
+            )
+        })?
+    };
     sock.set_read_timeout(Some(IO_TIMEOUT))
         .map_err(|e| Error::Io(e.to_string()))?;
     sock.set_write_timeout(Some(IO_TIMEOUT))
