@@ -360,3 +360,11 @@ Implications to flag for Codex Round 2 and the game side (metal#62):
   a spend fans out to a specific ship's gated wallet exactly like any other per-ship act.
 - **Racing (the branch):** pooled bankroll is where wagers are staked from — the fleet bets
   as one treasury, individual rigs still carry their own scorch-marked P&L.
+
+**Scope (Ian, 2026-09-01):** pooled earnings applies to **AI-driven ships under a cat
+captain** — i.e. exactly the familiar-commander scenario. The player is the cat captain;
+the familiar flies the member hulls; their earnings pool into the one bankroll the captain
+spends against. So this is not a generic guild-treasury feature bolted onto human co-op —
+it is the money model OF the familiar-commanded fleet, and it lands squarely on the
+fleet-actions abstraction (§3) rather than on human-to-human fleet politics. A fleet of
+AI hulls with one cat captain and one shared bankroll is the shape to design for first.
