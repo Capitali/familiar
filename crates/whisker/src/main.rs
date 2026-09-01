@@ -188,6 +188,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut ship_dir: Option<PathBuf> = None;
     let mut floor_secs: u64 = 5;
+    let mut allow_paws = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -199,9 +200,15 @@ fn main() -> ExitCode {
                 i += 1;
                 floor_secs = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(5);
             }
+            // Only pass this where the tanker is actually a rescue (LOCAL, instant).
+            // On a real-time world PAWS is a multi-day strand (metal#59) and the
+            // default distress-hold is the safe answer.
+            "--allow-paws" => allow_paws = true,
             other => {
                 eprintln!("whisker: unknown argument {other}");
-                eprintln!("usage: whisker --ship <ship-store-dir> [--interval-floor SECS]");
+                eprintln!(
+                    "usage: whisker --ship <ship-store-dir> [--interval-floor SECS] [--allow-paws]"
+                );
                 return ExitCode::FAILURE;
             }
         }
@@ -540,6 +547,28 @@ fn main() -> ExitCode {
                 std::thread::sleep(Duration::from_secs(60));
                 continue;
             }
+        }
+
+        // The PAWS guard. On a real-time world the tanker is a CATASTROPHE, not a
+        // rescue: PROD prices the call-out from raw km at a flat rate, so a tanker to
+        // the outer system is ~2,600 ticks = FIVE AND A HALF DAYS away (metal#59). So
+        // committing to PAWS strands the hull for days and bills it heavily. Unless a
+        // human opts in (`--allow-paws`, for LOCAL where the tanker is instant), a
+        // would-be PAWS call becomes a LOUD distress hold instead: safe, reversible,
+        // and surfaced — a new fuelable load or a human can still rescue her, where a
+        // filed tanker cannot be recalled.
+        if matches!(decision, Decision::CallPaws) && !allow_paws {
+            if last_refusal != "distress" {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "distress-hold",
+                           "docked": ship.docked, "fuel": ship.fuel,
+                           "why": "low fuel, no affordable pump; PAWS refused (would strand for days on this world) — holding for a fuelable load or a human"}),
+                );
+                last_refusal = "distress".to_string();
+            }
+            std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+            continue;
         }
 
         let body = match &decision {
