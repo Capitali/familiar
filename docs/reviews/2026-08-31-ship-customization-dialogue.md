@@ -300,3 +300,36 @@ Spear Clipper for an opt-in loud kit. Prototype in this order: name/coat/work-ma
 answers the bosozoku ask honestly, gives UCF a larger identity than the reference, and
 produces four small proofs instead of committing the renderer and art pipeline to a
 whole culture-shaped catalog at once.
+
+## Round 3 — decision (Ian, 2026-08-31)
+
+**Ian chose the E+B stack.** The direction is settled:
+
+- **System:** direction **E — "The Named Working Rig."** UCF grows its own customization
+  grammar; borrowed cultures are authored *collections* inside it, never the house style.
+- **Launch collection:** direction **B — "Hikari Hauler" (dekotora).** The working-trucker
+  art form is the first authored collection — chrome, marquee lightwork, gilded relief,
+  authored mural plates.
+- **Ownership at launch:** the exterior half of **C (vanning)** — the ship's painted name
+  and story skin — folds into commissioning, not a later interior-only layer.
+- **Default trim:** **D (streamliner)** restraint as the base language every collection
+  deviates from.
+- **Bosozoku (A):** one **opt-in loud kit**, carefully named and contextualized, NOT the
+  prestige apex and never the default — answering Jeff's original ask honestly as a choice
+  within the system rather than the system's face.
+
+Adopted from Codex's Round 2 without change: the **name-first ladder** (commissioning →
+work marks → brightwork → lightwork → story plate → lived-in ship → bounded attachments;
+association membership is a parallel social layer, not a purchase rung); the **cost
+correction** (murals are not automatically cheap — art direction, rights, moderation,
+texture memory; a socketed geometry family can be cheaper than the twentieth mural); and
+the **ethics rail** (earned history — route marks, repairs, convoy evidence — can never be
+bought; paid items are aesthetic alternatives, never status or capability gates; no paid
+piece changes stats, collision, or targeting silhouette; recognition survives customization
+at map range).
+
+**Prototype order** (Codex's, adopted): name/coat/work-mark zones → one trim/light family →
+one mural plate (only after the texture+rights+preview pipeline is proven) → one fixed-socket
+attachment family. Four small proofs, not a culture-shaped catalog committed at once.
+
+This goes to Jeff on ucf-exchange#11 as the household's recommendation.
