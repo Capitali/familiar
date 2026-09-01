@@ -368,3 +368,18 @@ spends against. So this is not a generic guild-treasury feature bolted onto huma
 it is the money model OF the familiar-commanded fleet, and it lands squarely on the
 fleet-actions abstraction (§3) rather than on human-to-human fleet politics. A fleet of
 AI hulls with one cat captain and one shared bankroll is the shape to design for first.
+
+**Two-tier money boundary (Ian, 2026-09-01):** pooling stops at the captain.
+- **Within a cat captain's own fleet** (their AI-driven ships): earnings POOL into that
+  captain's single bankroll — the model above.
+- **Across cat captains who join in a fleet together**: each captain keeps their OWN
+  balance, independently. Captains cooperate (shared objectives, coordination, a common
+  formation) but their treasuries do NOT merge.
+
+So the pooling boundary is the CAPTAIN's own command, never across player-captains. This
+resolves the trust question cleanly: you only ever pool money with hulls YOU command, so
+there is no cross-player shared-wallet drain risk to guard against — the Elite rank-gated-
+withdrawal concern applies to your own crew's authority over your pool, not to protecting
+you from a fleetmate. It maps to the naval/EVE split precisely: a captain's ships = a task
+group with one treasury; a fleet of captains = an alliance of independent treasuries under
+a shared objective.
