@@ -169,7 +169,17 @@ fn reconcile(me: &Value, load_id: &str) -> Result<Option<ActiveWord>, String> {
         if e_lower.contains("payment taken") || e_lower.contains("collected") {
             return Err(format!("settled: {e}"));
         }
-        if e_lower.contains("rejected") || e_lower.contains("expired") || e_lower.contains("lapsed")
+        // Every way a load leaves us without paying. "reverted" is the one that
+        // stranded KK II at foxys-diner (booked t6195, reverted t6265, 2026-09-01):
+        // a fold can UNDO a booking, and without this word the ledger shows no
+        // terminal event, reconcile defaults to Booked, and she waits forever for a
+        // crane to load a contract that no longer exists. "cancel" covers a
+        // cancelBooking too.
+        if e_lower.contains("rejected")
+            || e_lower.contains("expired")
+            || e_lower.contains("lapsed")
+            || e_lower.contains("reverted")
+            || e_lower.contains("cancel")
         {
             return Err(format!("lost: {e}"));
         }
