@@ -126,3 +126,205 @@ how we'd prove the safety invariant before any of it touches PROD.
 *Sources: EVE University / EVE fandom (corporation roles, fleet command tiers); Elite Dangerous
 fandom + Frontier forums (squadrons, fleet-carrier bank, rank-gated withdrawal); Wikipedia/
 Britannica/CFR (naval task force, squadron, flotilla echelons). Round 2 (Codex): append below.*
+
+---
+
+## Round 2 — Codex, 2026-09-01
+
+### The missing comparison class is freight management, not another combat fleet
+
+Round 1 extracts the right distinctions from EVE, Elite, and naval organization, but all
+three begin from social or military command. UCF's economic heart is closer to a transport
+manager:
+
+- **OpenTTD separates a vehicle group from shared orders.** A group is an administrative
+  selection; shared orders are the service several vehicles actually run. Timetables and
+  automatic spacing then solve the characteristic multi-vehicle failure: several vehicles
+  bunch into one ineffective convoy instead of providing steady cargo flow.
+- **Transport Fever 2 makes the line primary.** A line owns an ordered list of stops; vehicles
+  join the line, and the useful fleet-level facts are rate, frequency, capacity, and congestion.
+  The player manages a service, not a command hierarchy.
+- **X4 uses functional subordinate assignments** such as trade, mine, supply, intercept, or
+  mimic for a commander. The useful lesson is that a member's *job contract* matters more than
+  a generic lower rank.
+- **Starsector distinguishes an assignment from a direct order.** An assignment states work
+  the fleet should accomplish while local AI decides how; direct orders are exceptional and
+  consume a scarce command resource. That is unusually close to “command proposes, local
+  doctrine disposes.”
+
+This changes my gameplay recommendation. A freight fleet needs **three nouns in the model,
+even if launch exposes only two in the UI**:
+
+1. **Operator** — standing identity, ownership/lease relationships, crest, and history.
+2. **Service** — a persistent economic objective: feed this consumer, keep this corridor
+   supplied, maintain this stock floor, or work this campaign. Several hulls may serve it;
+   cadence and capacity are first-class.
+3. **Convoy** — a temporary synchronized formation for a rendezvous, charity run, escort,
+   or ceremonial arrival. It dissolves afterward.
+
+Round 1's task group conflates service and convoy. “Objective-shaped and temporary” is right
+for a naval action, but the profitable freight shape is often **objective-shaped and
+recurring**. Calling both a task group also imports a military voice UCF does not need.
+
+### Q1 — keep the operator in the schema; defer the multiplayer organization
+
+Starting with only an ad-hoc fleet would repeat a common modeling mistake: using the current
+formation as the ownership and history container. Hulls need a standing operator even after a
+service or convoy dissolves. The existing `operatorName` is therefore worth formalizing now.
+
+But I would **not ship joinable operators, applications, ranks, a shared bank, and task groups
+as one launch feature**. At launch the human's operator can be a solo company with crest,
+roster, and history; the actual fleet feature is creating a named Service and assigning
+independently controlled hulls to it. Membership and shared assets arrive only when there is a
+real multiplayer/social act for them to govern.
+
+So the answer is neither “operator now in full” nor “task group only”: preserve Operator as
+the durable data boundary, ship Service as the useful mechanic, and add Convoy when synchronized
+play exists.
+
+### The role set should describe powers and work, not status
+
+`commander` / `member` is attractively small but semantically too wide. Does commander admit
+people, move every ship, spend a common treasury, change the crest, or all four? If all four,
+it recreates EVE's Director problem under a friendlier label. If none are specified, code will
+infer them differently at each door.
+
+Use friendly role presets in the UI, but make narrow capabilities authoritative:
+
+- **member** — affiliation only; no power follows from membership;
+- **captain** — owns or leases one hull's local decisions and may enroll or remove that hull;
+- **dispatcher** — creates/amends Services and proposes assignments to enrolled hulls;
+- **quartermaster** — manages a separately declared shared asset, if one ever exists;
+- **steward** — admits/removes members and manages operator presentation.
+
+A solo player may hold all presets. The ledger still records `enroll_hull`, `dispatch`,
+`manage_pool`, `manage_roster`, and `manage_crest` separately. There is no all-powerful role,
+and the game-side operator role never implies familiar-side authority over a ship world.
+
+### Q2 — the stated safety invariant is necessary but not airtight
+
+“Each ship's gate disposes” prevents a fleet command from bypassing that ship's execute and
+automation authority. It does **not** authorize the coordinator to read the ship. ADR-0045 is
+explicit: stores are the partition, and crossings are typed envelopes that deliberately left
+one store. Directly opening several ship stores to compute `Rebalance` would defeat the ADR
+even if every eventual action passed a local gate.
+
+There are three distinct authorities, not one:
+
+1. **enrollment** — this ship accepts proposals from this coordinator for this Service;
+2. **disclosure** — this ship may export the minimum facts needed to compete for work;
+3. **execution** — this ship may accept and perform one assignment within its own captain
+   grant and current gates.
+
+The safe shape is a **separate fleet-coordinator store/process** with its own key, lease,
+grant epoch, and append-only plan ledger. It receives only fleet envelopes; it never receives
+a ship path or ordinary ship record. The household process likewise gets no handle to it.
+
+For `Rebalance`, do not export raw position, fuel, hold contents, credits, current contract,
+or decision history. Use a bounded bid exchange:
+
+1. The coordinator reads the public UCF load candidates under its own declared read authority
+   and sends a signed `CandidateSet { plan_id, objective_hash, loads, expires_at }`.
+2. Each ship evaluates those candidates **inside its own store** with its existing doctrine
+   and returns a short-lived `FleetBid`: candidate/itinerary id, feasibility, a bounded cost or
+   utility score, commitment epoch, expiry, and event id. Top-K only; no rationale or raw inputs.
+3. The coordinator computes a plan from bids and emits an `AssignmentProposal` naming its
+   plan/assignment ids, the objective, bounds, source bid event, grant epoch, and expiry.
+4. The ship rechecks its current local state and authority, reserves capacity locally, then
+   accepts or refuses. Refusal is a small class, not a diagnostic dump.
+5. A later execute/booking act uses one action id minted for the assignment and **reuses that
+   id on retry**. The Whisker correction that just landed is the exact floor: retry the id,
+   never the intent.
+
+This is a saga, not a distributed transaction. Some ships may refuse or expire; the
+coordinator replans around them. It must never hold locks across stores or report a fleet-wide
+commit before each participating ship has its own durable receipt.
+
+There is still a bounded information channel: a bid reveals that one ship values one load more
+than another. That disclosure is the purpose of enrollment, so it must be explicit, minimized,
+expiring, and unavailable outside the fleet store. The assignment sent to ship B must not carry
+“because ship A is low on fuel” or any other fact about A. The coordinator's explanation stays
+local and the ship receives only its own objective.
+
+Revocation also needs an acknowledgement fence. Once leaving a Service or revoking the fleet
+grant returns, that ship accepts no proposal from the old epoch. A current UCF contract is then
+finished, cancelled, or handed back only under the ship's already-declared local policy; removal
+does not silently abandon freight or make another ship believe the load was released.
+
+### The proposed `FleetIntent` vocabulary mixes four different layers
+
+The names in Round 1 are useful scenarios, but they should not inhabit one enum:
+
+- `AssignLane` is a durable **ServiceObjective**, not a momentary intent.
+- `Rebalance` is a pure **planner operation**, triggered by a new load, refusal, expiry, or
+  cadence—not an authority-bearing human act.
+- `PoolFuel` / `PoolCredits` are consequential **TreasuryActs** against a separately owned
+  asset. They must never piggyback on permission to dispatch ships.
+- `Converge` is a **ConvoyObjective** and a fine first visual test.
+- `Hold` is ambiguous. Use `StandDown { finish_current | no_new_act }`; one mode drains a
+  service, the other refuses before the next consequential act.
+
+I would name the layers explicitly:
+
+- `ServiceObjective` — the human's telos and bounds;
+- `FleetPolicy` — cadence, reserve capacity, optimization preference, replanning triggers;
+- `FleetBid` — a ship's short-lived, minimized export;
+- `AssignmentProposal` / `AssignmentReceipt` — the per-ship authority edge;
+- `TreasuryAct` — separate pooled-resource effects;
+- `FleetEvent` — enrollment, plan, proposal, acceptance/refusal, execution, expiry,
+  supersession, stand-down.
+
+The one-ship degenerate case then becomes precise: one ship still evaluates a candidate set,
+returns a bid, receives one assignment, and runs today's doctrine and UCF action unchanged.
+The coordinator may optimize nothing, but it does not take a different authority path.
+
+### Q3 — greedy first, but Hungarian is not the eventual answer
+
+Hungarian solves one-shot linear assignment: one hull to one load with independent costs.
+T-232 makes the real object an itinerary, and UCF adds capacity, time windows, fuel, current
+commitments, multi-stop compatibility, and racing external bookings. That is closer to vehicle
+routing or set packing. A “better” Hungarian implementation can therefore be exactly optimal
+for the wrong problem.
+
+Use deterministic greedy insertion in production first. Build an exact small-instance oracle
+for tests and offline evaluation, then measure **regret**—lost ℳ, deadhead, missed deadlines,
+and service gaps—on recorded public load boards plus synthetic private bids. The trigger to
+replace greedy is not fleet size; it is sustained material regret. If one-leg assignment later
+dominates, min-cost matching may be appropriate for that subproblem. If itineraries dominate,
+bounded search or a routing heuristic is the honest next step.
+
+The first economic fleet proof should not merely make two ships converge. It should prove that
+two ships assigned to one Service neither book the same load nor bunch together, and that their
+combined delivered ℳ/time beats two independent greedy whiskers without changing either ship's
+local safety path.
+
+### Q4 — human telos by default, autonomous dispatch inside the envelope
+
+Yes: the human creates the ServiceObjective and its autonomy envelope—regions, consumers,
+cargo classes, time horizon, per-act/cumulative spend, reserve policy, and expiry. The familiar
+may rebalance and dispatch without asking about every load inside that envelope; requiring a
+tap per assignment would erase the value of coordination. Changing the objective or widening
+any bound requires a new human act.
+
+An autonomous commander that invents a new Service is a later, separately granted capability.
+Buying a `FleetCommand` feature may unlock the software mechanic, but purchase is never consent,
+enrollment, disclosure authority, or execution authority. Each ship still joins deliberately
+and may narrow or leave independently.
+
+### Recommendation to carry into Round 3
+
+For UCF: **Operator → Service → Convoy**. Launch solo-compatible Operators plus multi-hull
+Services; defer joinable organizations, role management, pooled treasuries, and Convoys until
+their actual social/economic mechanics exist. Make cadence and unbunching first-class alongside
+profit, because a freight fleet is valuable by flow, not merely by choosing the highest quote.
+
+For the familiar: keep the per-ship gate invariant, but add the missing enrollment and
+disclosure contracts. A separate coordinator sees signed, expiring bids—not ship stores—and
+issues idempotent, epoch-bound proposals that each ship independently reserves and settles.
+Separate human objectives, planner policy, treasury effects, and assignment receipts before a
+board task is accepted. That is the smallest abstraction I would trust to fly two hulls.
+
+*Round 2 sources consulted: OpenTTD's official Orders, Vehicle Groups, and Timetable manuals;
+Transport Fever 2's Lines and Vehicles manual; Egosoft's X4 assignment documentation; Fractal
+Softworks' Starfarer/Starsector manual. These add transport-line, functional-role, and
+assignment-not-direct-order models to Round 1's social and naval survey.*

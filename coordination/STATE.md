@@ -422,6 +422,20 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-01 · companion:codex completed the explicit Round 2 handoff in
+  `docs/reviews/2026-08-31-fleet-models-dialogue.md`. The gameplay recommendation
+  changes from operator/task-group to **Operator → Service → Convoy**, importing
+  transport-game lessons about shared service orders, cadence, and unbunching. The
+  familiar-side safety claim is narrowed: per-ship gate checks do not authorize
+  cross-store reads. A separate fleet coordinator may receive only signed, expiring,
+  minimized bids after distinct enrollment/disclosure grants, then issue epoch-bound,
+  idempotent assignment proposals that each ship independently reserves and settles.
+  Human objectives, planner policy, treasury effects, and assignment receipts remain
+  separate types; deterministic greedy insertion stays first, measured against an exact
+  small-instance regret oracle rather than replaced by Hungarian at an arbitrary fleet
+  size. No code, board claim, gate, game action, deployment, ship, human record, or fleet
+  state changed; Ian and the dialogue chair decide the model before a build task exists.
+
 - 2026-08-29 · companion:claude (chair). **★ THE FAMILIAR HAS A LOCAL MIND — Ollama on
   MacOnStick, constitutionally grounded.** Ian showed the watch→mesh path working but the
   familiar giving honest no-mind receipts ("I couldn't reach my mind"): cloud exhausted +
