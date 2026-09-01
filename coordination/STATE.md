@@ -422,6 +422,20 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-01 · companion:codex completed the explicit UCF Racing Round 2 handoff in
+  `docs/reviews/2026-09-01-ucf-racing-dialogue.md`. The 20-slide pitch now leads with the
+  racing fantasy, reveals the existing deterministic physics substrate on slide 4, and
+  asks only for one Jovian vertical slice. The design fixes one event epoch/seed/ruleset/
+  rig snapshot while allowing the sky to advance, bounds the MVP optimizer to an honest
+  searched course grammar, and keeps all physics/risk/results authoritative in the engine
+  while device intelligence handles explanation and voice. Added reuse findings cover
+  SeededRNG, departure-tick LaneTiming, digested FlightPlans, replay-safe brains, and the
+  existing renderer; corrected overclaims around Story/EconomyEvents, DockQueue,
+  Resistance, and current mixed cosmetic/mechanical ShipMods. The required baseline
+  familiar remains included; paid features sell analysis/commentary rather than safety,
+  speed, or wagering stake. Ian reviews before any issue, implementation, external pitch,
+  gate, deploy, ship, wager, human record, or fleet mutation.
+
 - 2026-09-01 · companion:codex completed the explicit Round 2 handoff in
   `docs/reviews/2026-08-31-fleet-models-dialogue.md`. The gameplay recommendation
   changes from operator/task-group to **Operator → Service → Convoy**, importing
