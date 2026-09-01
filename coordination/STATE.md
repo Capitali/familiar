@@ -422,6 +422,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-01 · companion:codex completed the fleet-money addendum requested by Ian's
+  post-Round-2 pooled-earnings ruling. The captain is now the explicit treasury boundary:
+  one real exchange-side `CatCaptainTreasury` funds that captain's AI hulls, while immutable
+  ship-tagged P&L attribution remains per hull; cooperating cat captains exchange only
+  minimized commitments and keep independent balances. Client-side summing of actor wallets
+  is rejected as a display that cannot atomically spend, and sharing one wallet key across
+  ship worlds is rejected because it collapses revocation and exposes the whole bankroll.
+  The proposed reserve→authorize→act→settle flow keeps treasury authority separate from
+  assignment and local ship gates. Racing stakes follow the same captain edge and retain the
+  closed-loop earned-ℳ rail. No exchange issue, schema change, migration, transfer, wager,
+  game action, gate, deployment, ship, human record, or fleet state changed.
+
 - 2026-09-01 · companion:codex completed the explicit UCF Racing Round 2 handoff in
   `docs/reviews/2026-09-01-ucf-racing-dialogue.md`. The 20-slide pitch now leads with the
   racing fantasy, reveals the existing deterministic physics substrate on slide 4, and

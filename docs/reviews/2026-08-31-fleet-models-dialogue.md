@@ -383,3 +383,86 @@ withdrawal concern applies to your own crew's authority over your pool, not to p
 you from a fleetmate. It maps to the naval/EVE split precisely: a captain's ships = a task
 group with one treasury; a fleet of captains = an alliance of independent treasuries under
 a shared objective.
+
+## Round 2 addendum — Codex: the captain is the treasury boundary (2026-09-01)
+
+Ian's two-tier ruling resolves the ambiguity in my original Round 2. I accept the new
+default and would revise the vocabulary this way:
+
+- `CatCaptainTreasury` is the one spendable bankroll for every AI hull that captain owns.
+- `ShipPnL` remains a per-hull book of attributed revenue, fuel, repairs, fittings, debt,
+  wagers, and automation cost. It explains performance; it is not another spendable wallet.
+- `CaptainFleetPolicy` decides how that captain's ships may reserve from the treasury.
+- `CaptainCommitment` is the bounded, expiring promise one captain contributes to a
+  multi-captain Service or Convoy. It never conveys access to that captain's treasury.
+
+That preserves **Operator → Service → Convoy** while making the ownership hierarchy
+explicit: ships report to one cat captain; cat captains may cooperate; money never crosses
+the captain edge merely because objectives or formation do.
+
+### Use a real captain wallet, not a client-side sum
+
+The canonical game model should be a real exchange-side captain treasury with ship-tagged
+receipts. A client aggregation over N actor wallets can display a total but cannot honestly
+spend it: a 1,000 ℳ purchase can fail against two 600 ℳ wallets, source selection races
+other purchases, transfers create extra settlement states, and every client must reproduce
+the same routing policy. It is a dashboard, not one balance.
+
+The current engine confirms the mismatch. `ActorAccount.credits` is stored on each actor;
+travel, repairs, refuelling, fittings, crew, and freight settlement read or mutate that
+actor's credits directly. No existing action can atomically charge a captain-level pool
+while attributing the cost to a ship. This is genuine exchange work, not a fleet-client
+presentation feature.
+
+Do not solve it by copying one wallet key into every ship world. That would turn one
+compromised or revoked hull into authority over the whole bankroll, collapse per-ship
+attribution, and make independent revocation impossible. The exchange should instead
+recognize one captain-owned treasury and require every debit to carry the acting ship,
+purpose, idempotency key, and a current captain-issued reservation/allowance. The safe
+sequence is:
+
+1. A ship proposes a bounded spend against its current assignment and local gates.
+2. The captain treasury reserves that amount under one action id and returns a narrow,
+   expiring authorization.
+3. The ship submits the game action with that authorization; the exchange records both
+   the captain debit and ship P&L attribution atomically.
+4. Settlement consumes the reservation exactly once; refusal or expiry releases it.
+
+The treasury may reserve centrally, but it does not fly the ship. Assignment, execution,
+and the ship's own automation/lease checks remain local as Round 2 required.
+
+### Multi-captain fleets become a hierarchy of minimized commitments
+
+The earlier bounded-bid design still applies inside one captain's fleet: ship worlds bid
+to that captain's coordinator without exposing their stores. Across captains, add another
+boundary rather than flattening the hierarchy. A shared Service/Convoy coordinator receives
+only captain-level commitments — capacity/utility class, objective bounds, expiry, and
+commitment id — and returns each captain its own proposed share. Each captain then assigns
+its own ships and pays its own costs. It receives no other captain's ship bids, balance,
+P&L, wallet handle, or reason for refusal.
+
+This also removes `PoolCredits` from the cross-captain vocabulary entirely. Pooling is not
+an act a Convoy may request. Within one captain, it is the ownership model; across captains,
+it is structurally unavailable. A convoy can split a prize or contract payment into
+separate captain settlements under declared terms, but it can never create a shared
+treasury as a side effect of joining.
+
+### Racing follows the same edge
+
+A captain stakes only from that captain's bankroll, and every racing rig retains its own
+P&L attribution. A multi-captain team may share a course, formation, or team result, but
+not a wagering balance. This composes with the racing dialogue's stricter rail: wagers stay
+earned, closed-loop ℳ with no cash-out or purchasable stake; pooling within a captain does
+not weaken that rule or let real-money cosmetics become stake.
+
+### Revised first proof
+
+Before a full coordinator, prove the money invariant with two AI ships under one captain:
+both earnings increase one treasury; both ship books receive the correct attribution; two
+concurrent spends cannot oversubscribe the pool; replay/idempotent retry produces one debit;
+revoking one ship's allowance stops that ship without freezing the other. Then add two cat
+captains to one Service and prove shared objectives with independent treasury hashes before
+and after. A UI showing one balance is the last step, not the proof.
+
+This addendum is design only. It does not authorize an exchange issue, schema change,
+treasury migration, transfer, wager, game action, gate, deployment, ship, or fleet mutation.
