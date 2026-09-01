@@ -460,6 +460,45 @@ fn main() -> ExitCode {
             }
         }
 
+        // The two-step drive. On PROD, `travel` LAYS a course at the drive and a
+        // separate `engage` departs it — and a laid-but-unengaged course shows as
+        // `driveAwaiting: <station>` while `route` stays EMPTY, so the doctrine's
+        // route-based logic cannot see it and the ship sits forever (KK II lost 40
+        // minutes to exactly this, 2026-09-01). LOCAL's drive auto-engages, which is
+        // why it never surfaced there. Whenever a course is awaiting engagement,
+        // engaging it IS this fold's action — before anything else, since nothing
+        // else can move the ship. (UCF-Haul#65; the verb is real but undiscoverable.)
+        let awaiting = me
+            .get("driveAwaiting")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
+        if let Some(dest) = awaiting {
+            if tick >= pending_until {
+                seq += 1;
+                let id = format!("whisker-{}-{}", now_secs(), seq);
+                match wire.act(json!({"type": "engage"}), &id) {
+                    Ok(ack) => {
+                        pending_until = ack
+                            .get("resolvesAtTick")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(tick)
+                            + 1;
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "engaged-drive",
+                                   "to": dest, "resolves": pending_until - 1}),
+                        );
+                    }
+                    Err(e) => journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "engage-refused", "why": e}),
+                    ),
+                }
+            }
+            std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+            continue;
+        }
+
         // One intent in flight at a time: wait out the fold we already paid for.
         if tick < pending_until {
             std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
