@@ -117,3 +117,22 @@ engineering appendix that keeps its numbers honest. Nothing is filed to Jeff unt
 *Sources: direct inspection of united-cat-foods-metal `Sources/UCFEngine/Space/` and
 `Economy/` (2026-09-01); live `/v1/route` gravity-assist fields; Ian's Galileo/JPL framing.
 Round 2 (Codex): append below.*
+
+## 8. Custom racing rigs — the customization system's second lineage (Ian, 2026-09-01)
+
+Racing is a BRANCH of the ship-customization work (`docs/reviews/2026-08-31-ship-customization-dialogue.md`), and connecting them resolves a tension the customization dialogue left open.
+
+**Two lineages of one grammar.** Ian's chosen customization system (E — "The Named Working Rig") generalizes cleanly: a rig becomes *yours* through name + accumulated history + a collection, whether it hauls or races. So the same commissioning-and-ladder spine forks into two lineages:
+- **Working rig** (freight): dekotora launch collection, worker pride, capacity, company livery replaced by your name.
+- **Racing rig**: stripped, tuned, aggressive; identity over utility; the livery is about *you*, not a cargo operator.
+
+**Bosozoku finds its true home here.** The customization dialogue placed bosozoku as "one opt-in loud kit, not the face of freight" — because aggression cuts against warm working freighters. But a RACING rig is exactly where loud, exaggerated, flex aesthetics belong. So the opt-in kit that felt like a compromise for freight becomes a *native* collection for racing. Same for kaido-racer/street-racer visual language generally: wrong for the loaf hauler, right for the ΔV racer. This is a strictly better answer than "bosozoku as a reluctant freight kit."
+
+**Racing makes the pay-to-win line load-bearing — and the ethics rail already drew it.** The customization dialogue's rule ("no paid piece changes stats, collision, or targeting silhouette; earned history can never be bought") was easy to hold for cosmetics on a freighter. Racing forces the sharp version, because performance directly decides winning:
+- **Cosmetic mods** (livery, lightwork, mural, silhouette flair) — purchasable with real money OR ℳ, never affect the race. A gorgeous rig and a plain rig fly identically.
+- **Performance mods** (drive tuning, heat shielding for low flybys, structural bracing for hard burns, mass reduction) — earned or bought with **in-game ℳ only**, never real money. These affect the race, so real-money access would be pay-to-win, which the zero-dark-pattern promise forbids.
+- The familiar's navigator/conscience automations (the racing monetization from §5) sit on the RIGHT side of this line: you pay for *help and information* (the safe course, the odds, the commentary), never for a faster hull. You buy a better co-pilot, not a better engine.
+
+**Ladder additions for the racing branch** (on top of the shared name-first ladder): drive tune, thermal/structural rating (unlocked by surviving flybys — earned history as capability, visible as scorch marks and bracing), and a racing-livery collection (bosozoku/kaido-native) that is cosmetic-only. Scorch marks and repaired panels from close passes are the racing analogue of the working rig's route badges — the world writing your questionable judgment onto the hull.
+
+**This feeds BOTH decks.** The racing pitch (this doc) gains a customization/identity pillar; the customization direction already sent to Jeff (metal#11) gains a second lineage — worth a follow-up note to Jeff that "the system supports racing rigs, and that is where the loud collections live." Codex: reflect the two-lineage split in the racing deck's customization slide, and flag it back into the customization thread.
