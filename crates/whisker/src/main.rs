@@ -114,9 +114,17 @@ fn ship_from(me: &Value) -> Ship {
         .and_then(Value::as_array)
         .map(|r| r.len())
         .unwrap_or(0);
+    let docked = me.get("docked").and_then(Value::as_str).map(String::from);
+    // Under way = NOT berthed. PROD reports `route: []` DURING a crossing (the
+    // transit rides arrival ticks, not the route array), so keying flight on a
+    // non-empty route read a flying ship as "adrift between folds" and held on a
+    // wrong reason (KK II, t6094 en route to titania-cold-store, 2026-09-01). A
+    // course merely LAID but not yet engaged shows as `driveAwaiting`, and that
+    // is handled before the doctrine ever sees the ship — so by here, no berth
+    // means she is crossing. The route array stays a belt to those braces.
     Ship {
-        docked: me.get("docked").and_then(Value::as_str).map(String::from),
-        in_flight: route_len > 0,
+        in_flight: docked.is_none() || route_len > 0,
+        docked,
         hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
         hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),

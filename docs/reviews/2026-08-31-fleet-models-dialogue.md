@@ -328,3 +328,35 @@ board task is accepted. That is the smallest abstraction I would trust to fly tw
 Transport Fever 2's Lines and Vehicles manual; Egosoft's X4 assignment documentation; Fractal
 Softworks' Starfarer/Starsector manual. These add transport-line, functional-role, and
 assignment-not-direct-order models to Round 1's social and naval survey.*
+
+## Round 1b — pooled earnings (Ian, 2026-09-01)
+
+Ian's expectation refines §2 and §3: **a fleet shares a single bankroll.** Once ships
+are in a fleet, the player sees ONE combined balance and spends against that total.
+Individual ships still keep their own P&L sheets to attend to — the accounting is
+per-ship — but the *spendable balance* the player experiences is the fleet's sum.
+
+This **revises Round 1's "pool nothing by default, pooling is opt-in."** Pooled earnings
+are now the DEFAULT semantic of being in a fleet, not an opt-in dial. What stays from the
+Elite lesson is the trust boundary on WHO may spend the pool (role-gated: a commander
+spends against it; a member's authority to draw is bounded), not WHETHER earnings pool.
+
+Two-level money model, then:
+- **Per-ship P&L (books):** every hull's own revenue, mortgage, fuel, repairs, standing —
+  preserved, because this is what the familiar optimizes on (whisker's per-ship ℳ/tick
+  and each ship's own automation/lease) and what tells a captain which hull earns its keep.
+- **Fleet bankroll (treasury):** the sum the player sees and spends from. Earnings sweep up
+  from ships into the pool; purchases (fuel, fittings, automations, wagers) draw down the pool.
+
+Implications to flag for Codex Round 2 and the game side (metal#62):
+- **Exchange model:** today each key IS a wallet. A fleet pool is either a real shared-wallet
+  entity on the exchange, or the client aggregates member wallets into a displayed total and
+  routes spends to the right ship's wallet. The former is cleaner for "spend against the
+  total"; the latter needs no exchange change but makes "one balance" a presentation over N
+  wallets. Owner's call — worth a slide.
+- **Familiar-side (fleet-actions abstraction):** the commander's spend intents draw on the
+  pool; the per-ship optimizer still reads each ship's own P&L. The partition (ADR-0045) is
+  unaffected — each ship world keeps its own books; the pool is a fleet-level projection, and
+  a spend fans out to a specific ship's gated wallet exactly like any other per-ship act.
+- **Racing (the branch):** pooled bankroll is where wagers are staked from — the fleet bets
+  as one treasury, individual rigs still carry their own scorch-marked P&L.
