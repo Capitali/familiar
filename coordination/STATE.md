@@ -5,6 +5,21 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **PR #4 (Jeff, "market feed as observations") DECLINED FOR REWORK AND CLOSED —
+  2026-09-01, Ian's direction verbatim: "Decline jeff#4 pr with detailed reasoning for
+  a rework."** The PR predated ADR-0045 (worlds-are-stores) and recorded UCF market
+  triples into the HOUSEHOLD observation log with mesh replication — the exact
+  record-level partition ADR-0045 killed. Decline comment (posted from Ian's account,
+  companion:claude authoring):
+  https://github.com/Capitali/familiar/pull/4#issuecomment-5503660004 — credits the
+  engineering, names the three structural conflicts (household log, mesh propagation,
+  credential/gate shape), and offers the rework: the feed as SHIP-WORLD perception (a
+  `market` module beside whisker's doctrine/trade/ledger, ship-store keyed and
+  lease-gated), the fake-exchange loopback test pattern brought over, and any
+  household-visible signal only as a payload-free AttentionNotice / declared-partner
+  projection. metal#62 + ucf-exchange#15 named as the live threads.
+
+
 - **THREE IAN RULINGS 2026-08-23 (verbatim: "Rungs 4 and 5 need completion. Governing law
   rule needs to be rejected unless from me or more restrictive with justification. PCC on
   MacBook Air still a no go. Maybe not really supported on air.")**
