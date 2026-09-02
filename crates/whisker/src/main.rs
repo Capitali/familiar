@@ -795,6 +795,28 @@ fn main() -> ExitCode {
                 };
                 let td =
                     trade::decide_trade(&ledger, &board_here, &galaxy, &holdings, &pumps, &wire);
+                // Arrived at a position's market and it did not pay: re-aim it now, so
+                // the next idle fold does not ferry the goods straight back here.
+                if matches!(td, TradeDecision::Idle { .. }) {
+                    let mut notes = Vec::new();
+                    for h in holdings
+                        .iter_mut()
+                        .filter(|h| h.sell_target == here && tick >= h.sellable_at)
+                    {
+                        if let Some(n) = trade::retarget(h, &here, &galaxy) {
+                            notes.push(n);
+                        }
+                    }
+                    if !notes.is_empty() {
+                        trade::save_holdings(&ship_dir, &holdings);
+                        for n in notes {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "retargeted", "why": n}),
+                            );
+                        }
+                    }
+                }
                 // Say why the merchant passed — once per reason, so the journal reads
                 // "no fuel for a carry" / "no arbitrage on this board" without a line
                 // per fold.
