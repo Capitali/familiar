@@ -907,7 +907,10 @@ mod tests {
         assert_eq!(
             (clay.units, clay.avg_cost, clay.sellable_at),
             (60, 99, 11416 + 288)
-        assert_eq!(clay.sell_target, "far", "an adopted lot needs somewhere to go");
+        );
+        assert_eq!(
+            clay.sell_target, "far",
+            "an adopted lot needs somewhere to go"
         );
         let ore = book.iter().find(|h| h.good == "ore").unwrap();
         assert_eq!((ore.units, ore.avg_cost), (30, 11));
