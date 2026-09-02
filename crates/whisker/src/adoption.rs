@@ -98,6 +98,7 @@ mod tests {
     fn row(id: &str) -> LoadRow {
         LoadRow {
             load_id: id.into(),
+            good: "kibble".into(),
             origin: "a".into(),
             dest: "b".into(),
             units: 10,

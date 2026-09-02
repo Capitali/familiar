@@ -36,6 +36,8 @@ pub struct Ship {
 #[derive(Debug, Clone, Default)]
 pub struct LoadRow {
     pub load_id: String,
+    /// What the contract carries — the merchant must not mistake it for its own goods.
+    pub good: String,
     pub origin: String,
     pub dest: String,
     pub units: i64,
@@ -569,6 +571,7 @@ mod tests {
     fn load(id: &str, origin: &str, dest: &str, net: i64, ticks: (i64, i64)) -> LoadRow {
         LoadRow {
             load_id: id.into(),
+            good: String::new(),
             origin: origin.into(),
             dest: dest.into(),
             units: 25,
@@ -644,6 +647,7 @@ mod tests {
         let active = Active {
             row: LoadRow {
                 load_id: "L2605".into(),
+                good: "grain".into(),
                 origin: "whisker-hollow".into(),
                 dest: "foxys-diner".into(),
                 units: 120,
