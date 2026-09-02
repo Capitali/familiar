@@ -467,6 +467,7 @@ dependencies = [
  "familiar-reach",
  "familiar-sense",
  "familiar-world",
+ "serde",
  "serde_json",
 ]
 
