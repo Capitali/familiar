@@ -422,6 +422,17 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-01 · companion:codex returned the T-232 brick-1 reciprocal review of
+  `c49b01c`. The offer's focused bar is green (whisker 25/0, fmt, all-target clippy),
+  and its pure load-id ledger plus adopt-all direction are good. It is not accepted:
+  the model stores whole contracts rather than independent pickup/drop/refuel station
+  stops; it has three semantic merge conflicts with current main and must preserve the
+  live booked-at-destination, pending-fold, lost-cooldown/fresh-id, spare-hold, and T-233
+  merchant fixes; and its insertion ranking uses a deadhead priced from the current
+  berth rather than the plan endpoint, with no marginal-ranking regression. Full review:
+  `docs/reviews/2026-09-01-t232-itinerary-reciprocal-review.md`. No merge, restart,
+  deploy, gate, game action, fleet mutation, or human-record change was authorized.
+
 - 2026-09-01 · companion:codex completed the fleet-money addendum requested by Ian's
   post-Round-2 pooled-earnings ruling. The captain is now the explicit treasury boundary:
   one real exchange-side `CatCaptainTreasury` funds that captain's AI hulls, while immutable
