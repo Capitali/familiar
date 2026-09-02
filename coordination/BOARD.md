@@ -36,7 +36,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
-- status: proposed (filed 2026-08-31 from a live complaint)
+- status: **CLAIMED companion:claude 2026-09-01 night for brick 1** — the pure race
+  planner in FamiliarMesh (`CandidateRace.swift`: staggered start order that keeps
+  Ian's path doctrine as a HEAD START rather than a serial wall; per-door health with
+  consecutive-fail demotion; expiry of doors dead for days, the lighthouse never
+  expiring) + the AppModel TaskGroup race that consumes it. Scope: new
+  `ios/FamiliarMesh/Sources/FamiliarMesh/CandidateRace.swift` + tests,
+  `ios/Shared/Sources/AppModel.swift` (refreshWorldview walk only). Offered for
+  reciprocal review once codex's usage window reopens.
+- previously: proposed (filed 2026-08-31 from a live complaint)
 - scope: iOS/iPadOS/macOS client read path (`orderedCandidates()` walk in AppModel and friends): try candidates concurrently (first success wins, losers cancelled) or fail-fast with a short per-candidate connect budget; demote a candidate that failed its last N attempts to the back of the walk, and expire remembered doors that have been dead for days; keep Ian's path doctrine intact (lighthouse primary, tailnet last) as a PREFERENCE among racers, not a serial wall the launch bleeds out against
 - accept: with one remembered-but-dead LAN door (the reproduction: wildhorse's DHCP lease moved .10→.130 on a router reboot, 2026-08-31), a cold launch reaches the mesh in roughly the time the fastest live candidate takes, not fastest-plus-a-timeout; the Device badge line still names every candidate and its last cause; no change to enrolment or pin semantics
 - notes: observed by Ian on Codex ("sure is taking familiar on codex a long time to reach the mesh at each launch — longer than other clients"). Root cause found live: the hub's LAN address is a dynamic lease, the iPad's promoted door went stale, and the serial candidate walk pays full connect timeouts before the lighthouse read rescues it. Infra half (a DHCP reservation for the hub) is being handled outside the repo; this task is the client's half — roaming will recreate the stale-door situation forever, so the walk has to be cheap in the face of it. Dialogue-lane work (client shells), fits the T-216/T-224 review convention
