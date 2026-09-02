@@ -22,6 +22,7 @@
 use crate::doctrine::{Active, LoadRow};
 use crate::ledger;
 use serde_json::Value;
+use std::collections::{BTreeSet, HashMap};
 
 /// One adoption step's outcome for one load id.
 #[derive(Debug)]
@@ -78,6 +79,89 @@ pub fn adopt_step(
         }
     });
     outcomes
+}
+
+/// One fold's freight bookkeeping before ANY action selection, as a typed step
+/// the I/O loop matches on (the codex-lane round-3 review, finding 1). While
+/// `may_act` is false the loop journals and sleeps — no buy, carry, booking,
+/// diversion, or movement for a resolved newer load can even be REACHED,
+/// because action selection lives behind the match, not behind an inline flag.
+pub struct FreightStep {
+    /// Contracts whose board row resolved this fold — they join the plan.
+    pub adopted: Vec<Active>,
+    /// Contracts the ledger closed while pending — each goes through
+    /// [`close_transition`], never a silent drop.
+    pub closed: Vec<(String, String)>,
+    /// Every id still unresolved after this fold (for the once-per-life notice).
+    pub pending: Vec<String>,
+    /// False while ANY id is unresolved: the freight state is unknown and the
+    /// scheduler files no new commitment this fold.
+    pub may_act: bool,
+}
+
+/// Run one fold's adoption and gate decision as one pure transition.
+pub fn freight_step(
+    current: &[Active],
+    pending: &mut Vec<String>,
+    me: &Value,
+    lookup: &mut dyn FnMut(&str) -> Option<LoadRow>,
+) -> FreightStep {
+    let outcomes = adopt_step(current, pending, me, lookup);
+    let mut step = FreightStep {
+        adopted: Vec::new(),
+        closed: Vec::new(),
+        pending: pending.clone(),
+        may_act: pending.is_empty(),
+    };
+    for o in outcomes {
+        match o {
+            AdoptOutcome::Adopted(a) => step.adopted.push(a),
+            AdoptOutcome::Closed { load_id, reason } => step.closed.push((load_id, reason)),
+            AdoptOutcome::Pending { .. } => {}
+        }
+    }
+    step
+}
+
+/// The journal effect a close produces — the I/O shell writes it; the mutation
+/// itself already happened in [`close_transition`].
+#[derive(Debug, PartialEq, Eq)]
+pub struct CloseEffect {
+    pub load_id: String,
+    pub reason: String,
+}
+
+/// The ONE close mutation every load-leaving path goes through — tracked
+/// reconcile and pending adoption alike (the codex-lane round-3 review, finding
+/// 2). Its four effects, pinned: the cooldown starts (`lost_at`), the booking
+/// intent is forgotten so a dead fold's idempotency id never answers for a
+/// fresh one (`recent`), the adoption notice clears so a genuinely later life
+/// gets a fresh one (`adopt_noted`), and exactly one journal effect returns.
+pub fn close_transition(
+    lost_at: &mut HashMap<String, i64>,
+    recent: &mut HashMap<String, (i64, String)>,
+    adopt_noted: &mut BTreeSet<String>,
+    load_id: &str,
+    reason: String,
+    tick: i64,
+) -> CloseEffect {
+    lost_at.insert(load_id.to_string(), tick);
+    recent.retain(|sig, _| !sig.contains(load_id));
+    adopt_noted.remove(load_id);
+    CloseEffect {
+        load_id: load_id.to_string(),
+        reason,
+    }
+}
+
+/// May this load be booked again yet? The question the board filter asks of
+/// the cooldown [`close_transition`] wrote — pinned beside it so the two can
+/// never drift.
+pub fn bookable(lost_at: &HashMap<String, i64>, load_id: &str, tick: i64, cooldown: i64) -> bool {
+    lost_at
+        .get(load_id)
+        .map(|t| tick - t > cooldown)
+        .unwrap_or(true)
 }
 
 /// What one matured wedge firing is allowed to do — exactly ONE wire action
@@ -215,6 +299,7 @@ mod tests {
         LoadRow {
             load_id: id.into(),
             good: "kibble".into(),
+            class_bps: 10_000,
             origin: "a".into(),
             dest: "b".into(),
             units: 10,
@@ -224,6 +309,101 @@ mod tests {
             loading_ticks: 8,
             held_for_other: false,
         }
+    }
+
+    #[test]
+    fn no_action_can_be_reached_between_a_missed_lookup_and_its_adoption() {
+        // The codex-lane round-3 review, finding 1, end to end: fold one's board
+        // omits ledger-open L — the step says MAY NOT ACT, and the runner's
+        // action selection is structurally behind that gate. Fold two resolves
+        // L — the step adopts it and opens the scheduler in the same fold.
+        let me = me(&[("L1", "booked", 100)]);
+        let mut pending = Vec::new();
+
+        let mut miss = |_: &str| -> Option<LoadRow> { None };
+        let step = freight_step(&[], &mut pending, &me, &mut miss);
+        assert!(!step.may_act, "unknown freight state: nothing may be filed");
+        assert!(step.adopted.is_empty() && step.closed.is_empty());
+        assert_eq!(step.pending, vec!["L1".to_string()]);
+
+        let mut hit = |lid: &str| -> Option<LoadRow> { Some(row(lid)) };
+        let step = freight_step(&[], &mut pending, &me, &mut hit);
+        assert!(step.may_act, "resolved: the scheduler opens this fold");
+        assert_eq!(step.adopted.len(), 1);
+        assert_eq!(step.adopted[0].row.load_id, "L1");
+        assert!(step.pending.is_empty());
+    }
+
+    #[test]
+    fn the_close_transition_runs_its_full_sequence_cooldown_included() {
+        // The codex-lane round-3 review, finding 2, the whole life: pending
+        // open → reverted while pending → closed through the ONE transition →
+        // not bookable inside the cooldown → bookable after → a strictly later
+        // booked life arrives with a fresh notice and a fresh intent.
+        let mut lost_at: HashMap<String, i64> = HashMap::new();
+        let mut recent: HashMap<String, (i64, String)> = HashMap::new();
+        let mut adopt_noted: BTreeSet<String> = BTreeSet::new();
+
+        // The dead booking's intent and notice, as the runner would hold them.
+        recent.insert(
+            "{\"loadId\":\"L1\",\"type\":\"book\"}".to_string(),
+            (150, "whisker-1-1".to_string()),
+        );
+        adopt_noted.insert("L1".to_string());
+
+        // The ledger closes L1 while it is pending adoption.
+        let me1 = me(&[("L1", "booked", 100), ("L1", "reverted", 150)]);
+        let mut pending = vec!["L1".to_string()];
+        let mut lookup = |_: &str| -> Option<LoadRow> { panic!("closed ids are not looked up") };
+        let step = freight_step(&[], &mut pending, &me1, &mut lookup);
+        assert_eq!(
+            step.closed,
+            vec![("L1".to_string(), "lost: reverted".to_string())]
+        );
+        assert!(step.may_act, "the close resolved the pending id");
+
+        let (lid, reason) = step.closed.into_iter().next().unwrap();
+        let effect = close_transition(
+            &mut lost_at,
+            &mut recent,
+            &mut adopt_noted,
+            &lid,
+            reason,
+            150,
+        );
+        assert_eq!(
+            effect,
+            CloseEffect {
+                load_id: "L1".into(),
+                reason: "lost: reverted".into()
+            }
+        );
+        assert!(
+            recent.is_empty(),
+            "the dead booking's intent id is forgotten"
+        );
+        assert!(adopt_noted.is_empty(), "a later life earns a fresh notice");
+
+        // Re-listed inside the cooldown: not bookable. After it: bookable.
+        assert!(!bookable(&lost_at, "L1", 150 + 60, 60));
+        assert!(bookable(&lost_at, "L1", 150 + 61, 60));
+        assert!(bookable(&lost_at, "unrelated", 151, 60));
+
+        // A strictly later booked life is seen again — pending, fresh notice
+        // possible (adopt_noted no longer remembers the dead life).
+        let me2 = me(&[
+            ("L1", "booked", 100),
+            ("L1", "reverted", 150),
+            ("L1", "booked", 230),
+        ]);
+        let mut miss = |_: &str| -> Option<LoadRow> { None };
+        let step = freight_step(&[], &mut pending, &me2, &mut miss);
+        assert_eq!(step.pending, vec!["L1".to_string()]);
+        assert!(!step.may_act);
+        assert!(
+            adopt_noted.insert("L1".to_string()),
+            "the fresh life's notice is genuinely fresh"
+        );
     }
 
     #[test]

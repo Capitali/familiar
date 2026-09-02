@@ -168,6 +168,41 @@ pub fn basis_from_total(total: i64, units: i64, ask: i64) -> i64 {
     ((total + units - 1) / units).max(ask)
 }
 
+/// A position at its sell target whose bid did not clear has a STALE target: the
+/// mid that chose it has moved. Pick the dearest berth on the map (not here) whose
+/// haircut mid still clears basis + margin, or no target at all — then the goods
+/// ride under freight until a passing bid clears, rather than the hull ferrying
+/// them to a market that no longer pays (LOCAL gravy-base, 2026-09-02: three
+/// carries to velvet-array, three folds of no sale, between hauls).
+pub fn retarget(h: &mut Holding, here: &str, galaxy: &[MarketRow]) -> Option<String> {
+    let floor = h.avg_cost + bps(h.avg_cost, SELL_MARGIN_BPS);
+    let best = galaxy
+        .iter()
+        .filter(|r| r.good == h.good && r.station != here && r.mid > 0)
+        .filter(|r| r.mid - bps(r.mid, SELL_HAIRCUT_BPS) >= floor)
+        .max_by_key(|r| r.mid)
+        .map(|r| r.station.clone());
+    let was = std::mem::replace(&mut h.sell_target, best.clone().unwrap_or_default());
+    if was == h.sell_target {
+        None
+    } else {
+        Some(format!(
+            "{}: {} did not pay; now bound for {}",
+            h.good,
+            if was.is_empty() {
+                "no market"
+            } else {
+                was.as_str()
+            },
+            if h.sell_target.is_empty() {
+                "wherever a bid clears"
+            } else {
+                h.sell_target.as_str()
+            }
+        ))
+    }
+}
+
 /// Can a leg costing `cost` fuel be flown on `fuel` in the tank, reserve included?
 pub fn carry_affordable(cost: i64, fuel: i64) -> bool {
     fuel >= bps(cost, CARRY_RESERVE_BPS)
@@ -927,6 +962,30 @@ mod tests {
         assert_eq!(book[0].units, 12);
         reconcile_hold(&mut book, &[], &[], &hint, 6, 288);
         assert!(book.is_empty());
+    }
+
+    #[test]
+    fn a_target_that_did_not_pay_is_replaced_by_one_that_still_would() {
+        let mut h = held("gravy-base", 10, 16, 1, 1);
+        h.sell_target = "velvet-array".into();
+        // velvet's mid fell to 19 (−18% = 15 < 18 floor); tranquility still pays 25.
+        let galaxy = vec![
+            row("gravy-base", "velvet-array", 19),
+            row("gravy-base", "tranquility", 25),
+        ];
+        let note = retarget(&mut h, "velvet-array", &galaxy);
+        assert_eq!(h.sell_target, "tranquility");
+        assert!(note.unwrap().contains("tranquility"));
+        // Nowhere pays: no target, ride under freight.
+        let galaxy = vec![
+            row("gravy-base", "velvet-array", 19),
+            row("gravy-base", "tranquility", 20),
+        ];
+        let note = retarget(&mut h, "tranquility", &galaxy);
+        assert_eq!(h.sell_target, "");
+        assert!(note.is_some());
+        // Unchanged target: no note.
+        assert!(retarget(&mut h, "tranquility", &galaxy).is_none());
     }
 
     #[test]

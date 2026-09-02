@@ -22,7 +22,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
 use familiar_whisker::adoption::{
-    adopt_step, in_booking_order, resume_stale_course, AdoptOutcome, WedgeRemedy, WedgeWatch,
+    bookable, close_transition, freight_step, in_booking_order, resume_stale_course, WedgeRemedy,
+    WedgeWatch,
 };
 use familiar_whisker::doctrine::{
     self, Active, ActiveWord, Decision, Itinerary, LoadRow, Router, Ship,
@@ -51,8 +52,15 @@ struct Wire {
     routes: RefCell<RouteCache>,
 }
 
-/// (from, to) → (asked-at, fuel or unpriceable).
-type RouteCache = HashMap<(String, String), (i64, Option<i64>)>;
+/// One priced route: fuel at the reference drive, and each leg's separation in km.
+#[derive(Clone)]
+struct PricedRoute {
+    fuel: i64,
+    leg_km: Vec<i64>,
+}
+
+/// (from, to) → (asked-at, the route or unpriceable).
+type RouteCache = HashMap<(String, String), (i64, Option<PricedRoute>)>;
 
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
@@ -120,25 +128,43 @@ impl Wire {
     }
 }
 
-impl Router for Wire {
-    fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+impl Wire {
+    /// One priced route, remembered for a while.
+    fn route(&self, from: &str, to: &str) -> Option<PricedRoute> {
         if from == to {
-            return Some(0);
+            return Some(PricedRoute {
+                fuel: 0,
+                leg_km: Vec::new(),
+            });
         }
         let key = (from.to_string(), to.to_string());
         let now = now_secs();
-        if let Some((at, fuel)) = self.routes.borrow().get(&key) {
+        if let Some((at, r)) = self.routes.borrow().get(&key) {
             if now - at < ROUTE_CACHE_SECS {
-                return *fuel;
+                return r.clone();
             }
         }
-        let fuel = (|| {
+        let r = (|| {
             let v = self.get(&format!("/v1/route?from={from}&to={to}")).ok()?;
             let legs = v.get("legs")?.as_array()?;
-            Some(legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum())
+            let fuel = legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum();
+            let leg_km = legs
+                .iter()
+                .map(|l| l.get("distanceKm").and_then(Value::as_i64).unwrap_or(0))
+                .collect();
+            Some(PricedRoute { fuel, leg_km })
         })();
-        self.routes.borrow_mut().insert(key, (now, fuel));
-        fuel
+        self.routes.borrow_mut().insert(key, (now, r.clone()));
+        r
+    }
+}
+
+impl Router for Wire {
+    fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+        self.route(from, to).map(|r| r.fuel)
+    }
+    fn leg_distances_km(&self, from: &str, to: &str) -> Option<Vec<i64>> {
+        self.route(from, to).map(|r| r.leg_km)
     }
 }
 
@@ -155,12 +181,9 @@ fn journal(ship_dir: &Path, entry: Value) {
     println!("{entry}");
 }
 
-/// The ONE way a load leaves the runner's memory — tracked or pending alike
-/// (round-2 review, finding 4). Records the cooldown so a re-listed dead id is
-/// not re-booked inside 60 ticks, forgets the booking intent so a dead fold's
-/// idempotency id never answers for a fresh one (LOCAL L1849, 2026-09-01),
-/// clears the adoption notice so a genuinely new life gets a fresh one, and
-/// journals the close exactly once.
+/// The ONE way a load leaves the runner's memory — a thin I/O shell over
+/// [`familiar_whisker::adoption::close_transition`], where the four effects
+/// (cooldown, intent purge, notice reset, one journal) are pure and pinned.
 #[allow(clippy::too_many_arguments)]
 fn close_load(
     ship_dir: &Path,
@@ -173,13 +196,18 @@ fn close_load(
     reason: &str,
     credits: i64,
 ) {
-    lost_at.insert(load_id.to_string(), tick);
-    recent.retain(|sig, _| !sig.contains(load_id));
-    adopt_noted.remove(load_id);
+    let effect = close_transition(
+        lost_at,
+        recent,
+        adopt_noted,
+        load_id,
+        reason.to_string(),
+        tick,
+    );
     journal(
         ship_dir,
         json!({"at": now, "tick": tick, "event": "load-closed",
-               "load": load_id, "why": reason, "credits": credits}),
+               "load": effect.load_id, "why": effect.reason, "credits": credits}),
     );
 }
 
@@ -200,6 +228,17 @@ fn ship_from(me: &Value) -> Ship {
     Ship {
         in_flight: docked.is_none() || route_len > 0,
         docked,
+        accel_milli_g: me
+            .get("effectiveAccelMilliG")
+            .and_then(Value::as_i64)
+            .unwrap_or(doctrine::REFERENCE_ACCEL_MILLI_G),
+        wear_bps: me.get("wearBps").and_then(Value::as_i64).unwrap_or(0),
+        leased: !me.get("titled").and_then(Value::as_bool).unwrap_or(true)
+            && me
+                .get("leasePrincipal")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                > 0,
         hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
         hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
@@ -216,6 +255,16 @@ fn load_row(v: &Value) -> Option<LoadRow> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        class_bps: match v
+            .get("serviceClass")
+            .and_then(Value::as_str)
+            .unwrap_or("standard")
+        {
+            "economy" => 5_000,
+            "express" => 20_000,
+            "priority" => 30_000,
+            _ => 10_000,
+        },
         origin: v.get("origin")?.as_str()?.to_string(),
         dest: v.get("dest")?.as_str()?.to_string(),
         units: v.get("units").and_then(Value::as_i64).unwrap_or(0),
@@ -455,42 +504,39 @@ fn main() -> ExitCode {
                 }
                 None
             };
-            for outcome in adopt_step(&loads, &mut pending_adopt, &me, &mut lookup) {
-                match outcome {
-                    AdoptOutcome::Adopted(a) => {
-                        journal(
-                            &ship_dir,
-                            json!({"at": now, "tick": tick,
-                            "event": "adopted-held-contract", "load": a.row.load_id,
-                            "word": format!("{:?}", a.word)}),
-                        );
-                        adopt_noted.remove(&a.row.load_id);
-                        loads.push(a);
-                    }
-                    AdoptOutcome::Closed { load_id, reason } => {
-                        close_load(
-                            &ship_dir,
-                            &mut lost_at,
-                            &mut recent,
-                            &mut adopt_noted,
-                            now,
-                            tick,
-                            &load_id,
-                            &reason,
-                            ship.credits,
-                        );
-                    }
-                    AdoptOutcome::Pending { load_id } => {
-                        // Say so once per life, keep trying.
-                        if adopt_noted.insert(load_id.clone()) {
-                            journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
-                                "event": "adoption-pending", "load": load_id,
-                                "why": "ledger shows it open but no board row resolved this fold; retrying"}),
-                            );
-                        }
-                    }
+            let step = freight_step(&loads, &mut pending_adopt, &me, &mut lookup);
+            for a in step.adopted {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick,
+                    "event": "adopted-held-contract", "load": a.row.load_id,
+                    "word": format!("{:?}", a.word)}),
+                );
+                adopt_noted.remove(&a.row.load_id);
+                loads.push(a);
+            }
+            for (load_id, reason) in step.closed {
+                close_load(
+                    &ship_dir,
+                    &mut lost_at,
+                    &mut recent,
+                    &mut adopt_noted,
+                    now,
+                    tick,
+                    &load_id,
+                    &reason,
+                    ship.credits,
+                );
+            }
+            for load_id in step.pending {
+                // Say so once per life, keep trying.
+                if adopt_noted.insert(load_id.clone()) {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick,
+                        "event": "adoption-pending", "load": load_id,
+                        "why": "ledger shows it open but no board row resolved this fold; retrying"}),
+                    );
                 }
             }
             // The plan is booking order — (booked tick, load id), deterministic,
@@ -679,12 +725,7 @@ fn main() -> ExitCode {
                 Ok(Value::Array(rows)) => rows
                     .iter()
                     .filter_map(load_row)
-                    .filter(|l| {
-                        lost_at
-                            .get(&l.load_id)
-                            .map(|t| tick - t > LOST_COOLDOWN_TICKS)
-                            .unwrap_or(true)
-                    })
+                    .filter(|l| bookable(&lost_at, &l.load_id, tick, LOST_COOLDOWN_TICKS))
                     .collect(),
                 Ok(_) | Err(_) => Vec::new(),
             }
@@ -817,6 +858,28 @@ fn main() -> ExitCode {
                 };
                 let td =
                     trade::decide_trade(&ledger, &board_here, &galaxy, &holdings, &pumps, &wire);
+                // Arrived at a position's market and it did not pay: re-aim it now, so
+                // the next idle fold does not ferry the goods straight back here.
+                if matches!(td, TradeDecision::Idle { .. }) {
+                    let mut notes = Vec::new();
+                    for h in holdings
+                        .iter_mut()
+                        .filter(|h| h.sell_target == here && tick >= h.sellable_at)
+                    {
+                        if let Some(n) = trade::retarget(h, &here, &galaxy) {
+                            notes.push(n);
+                        }
+                    }
+                    if !notes.is_empty() {
+                        trade::save_holdings(&ship_dir, &holdings);
+                        for n in notes {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "retargeted", "why": n}),
+                            );
+                        }
+                    }
+                }
                 // Say why the merchant passed — once per reason, so the journal reads
                 // "no fuel for a carry" / "no arbitrage on this board" without a line
                 // per fold.
@@ -1075,6 +1138,7 @@ fn main() -> ExitCode {
         let body = match &decision {
             Decision::Hold { .. } => None,
             Decision::Refuel => Some(json!({"type": "refuel"})),
+            Decision::Repair => Some(json!({"type": "repair"})),
             Decision::CallPaws => Some(json!({"type": "paws"})),
             Decision::DivertToPump { pump } => Some(json!({"type": "travel", "station": pump})),
             Decision::Travel { station } => Some(json!({"type": "travel", "station": station})),

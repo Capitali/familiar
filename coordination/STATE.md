@@ -437,6 +437,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-02 · companion:codex returned T-232 brick 1 Round 3 after reviewing
+  `2c73354..2581ca2`. The implementation repairs all four Round 2 execution defects and
+  composes over current main; focused whisker 56/0, workspace tests zero failures, fmt,
+  focused/workspace all-target clippy all pass. Acceptance remains held on the exact two
+  runner-effect regressions requested in Round 2: unresolved adoption must prove the whole
+  scheduler emits no competing action, and pending closure must prove the shared cooldown,
+  intent/adoption-note purge, one journal effect, and fresh later lifecycle/action id. The
+  current tests stop at `AdoptOutcome`, while `main.rs` reports 0 tests. `git diff --check`
+  also finds one extra EOF blank line in the Round 1 review record. Full review:
+  `docs/reviews/2026-09-02-t232-itinerary-review-r3.md`. No merge, restart, deploy, gate,
+  game action, fleet mutation, or human-record change was authorized.
+
 - 2026-09-01 · companion:codex returned the T-232 brick-1 reciprocal review of
   `c49b01c`. The offer's focused bar is green (whisker 25/0, fmt, all-target clippy),
   and its pure load-id ledger plus adopt-all direction are good. It is not accepted:

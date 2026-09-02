@@ -207,4 +207,3 @@ actually observed.
 - `cargo clippy -p familiar-whisker --all-targets -- -D warnings` — pass
 - `cargo fmt --all --check` — **fail** at `crates/whisker/src/doctrine.rs:759`
 - `git diff --check 24ca44f..e8666a8` — pass
-
