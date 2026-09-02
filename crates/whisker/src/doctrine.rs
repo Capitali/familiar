@@ -756,7 +756,13 @@ mod tests {
             stops: vec![stop("HELD", "w", "far-y", ActiveWord::PickedUp)],
         };
         let cheap = load("CHEAP", "a", "b", 900, (5, 10));
-        let picked = best_insertion(&ship, &plan, std::slice::from_ref(&cheap), &pumps(&[]), &PerLeg);
+        let picked = best_insertion(
+            &ship,
+            &plan,
+            std::slice::from_ref(&cheap),
+            &pumps(&[]),
+            &PerLeg,
+        );
         assert_eq!(picked, None, "600 of fuel cannot fly 500·1.2 of legs");
         // A pump at the plan's own destination resets the tank — now it books.
         let picked = best_insertion(&ship, &plan, &[cheap], &pumps(&["far-y"]), &PerLeg);
