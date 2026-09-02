@@ -975,4 +975,42 @@ mod tests {
         let me = serde_json::json!({"cargo": [{"good": "ore", "units": 30}]});
         assert_eq!(parse_cargo(&me), vec![("ore".to_string(), 30)]);
     }
+    #[test]
+    fn a_merchant_lot_survives_its_goods_twin_being_delivered() {
+        // Round-3 review, finding 2's exact scenario: 30 merchant ore ride
+        // beside a 100-ore freight contract. While the contract is aboard
+        // (PickedUp) the slice says 100 and the book holds 30; the moment it is
+        // DELIVERED the crane has taken its 100 out of the hold and out of the
+        // slice — the merchant's 30, their basis, and their clock are untouched.
+        let hint = |_: &str| (99, "far".to_string());
+        let lot = Holding {
+            good: "ore".into(),
+            units: 30,
+            avg_cost: 7,
+            sell_target: "far".into(),
+            opened_tick: 100,
+            sellable_at: 388,
+        };
+        // Aboard: hold shows 130 (30 merchant + 100 freight), freight slice 100.
+        let mut book = vec![lot.clone()];
+        let notes = reconcile_hold(
+            &mut book,
+            &[("ore".into(), 130)],
+            &[("ore", 100)],
+            &hint,
+            200,
+            288,
+        );
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(book[0].units, 30);
+        assert_eq!(book[0].avg_cost, 7);
+        // Delivered: hold shows the merchant's 30, the slice shows NOTHING —
+        // the delivered load is not aboard (doctrine::freight_aboard).
+        let mut book = vec![lot];
+        let notes = reconcile_hold(&mut book, &[("ore".into(), 30)], &[], &hint, 210, 288);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(book[0].units, 30, "the genuine lot survives the delivery");
+        assert_eq!(book[0].avg_cost, 7, "and keeps its real basis");
+        assert_eq!(book[0].opened_tick, 100, "and its clock");
+    }
 }

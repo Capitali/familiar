@@ -80,6 +80,87 @@ pub fn adopt_step(
     outcomes
 }
 
+/// The stale-course watch, made a type so its dominance rule is PINNED (round-3
+/// review, finding 1): the belt — an `engage` plus a re-filed `travel` — is a
+/// COMMITMENT, and no commitment is filed while any ledger-open contract is
+/// unresolved. The watch keeps its own clock; a pending adoption does not reset
+/// it, so the belt fires promptly once the freight state is known again.
+#[derive(Debug, Default)]
+pub struct WedgeWatch {
+    key: Option<(String, Vec<String>)>,
+    since: i64,
+}
+
+impl WedgeWatch {
+    /// Ticks a docked, laid, healthy-tank course must sit unmoved before the
+    /// belt fires (ucf-exchange#16 — a course filed while dry never departs on
+    /// its own after refuelling).
+    pub const THRESHOLD_TICKS: i64 = 30;
+
+    /// Watch one fold. Returns true exactly when the belt should fire: docked,
+    /// the same non-empty route standing for over the threshold, a tank above
+    /// a tenth — and NOTHING pending adoption. Firing re-arms the clock.
+    pub fn observe(
+        &mut self,
+        docked: Option<&str>,
+        route: &[String],
+        fuel: i64,
+        fuel_capacity: i64,
+        pending_adoptions: usize,
+        tick: i64,
+    ) -> bool {
+        let (Some(here), false) = (docked, route.is_empty()) else {
+            self.key = None;
+            return false;
+        };
+        if fuel <= fuel_capacity / 10 {
+            self.key = None;
+            return false;
+        }
+        let key = (here.to_string(), route.to_vec());
+        if self.key.as_ref() != Some(&key) {
+            self.key = Some(key);
+            self.since = tick;
+            return false;
+        }
+        if tick - self.since <= Self::THRESHOLD_TICKS {
+            return false;
+        }
+        // The dominance rule: an unresolved contract holds the belt, without
+        // resetting the clock — the moment adoption settles, the belt may fire.
+        if pending_adoptions > 0 {
+            return false;
+        }
+        self.since = tick;
+        true
+    }
+}
+
+/// Booking order, deterministically (round-3 review, finding 3): the current
+/// life's booked tick, then the load id — never the order lookups happened to
+/// resolve in. A load the ledger has not shown yet sorts last with an id tie:
+/// it IS the newest (a booking acked this fold).
+pub fn in_booking_order(mut loads: Vec<Active>, opens: &[(i64, String)]) -> Vec<Active> {
+    let rank: std::collections::HashMap<&str, i64> =
+        opens.iter().map(|(t, l)| (l.as_str(), *t)).collect();
+    loads.sort_by(|a, b| {
+        let ka = (
+            rank.get(a.row.load_id.as_str())
+                .copied()
+                .unwrap_or(i64::MAX),
+            &a.row.load_id,
+        );
+        let kb = (
+            rank.get(b.row.load_id.as_str())
+                .copied()
+                .unwrap_or(i64::MAX),
+            &b.row.load_id,
+        );
+        ka.cmp(&kb)
+    });
+    loads
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +232,73 @@ mod tests {
                 if load_id == "L1" && reason == "lost: reverted"
         ));
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn the_belt_never_fires_while_an_adoption_is_unresolved() {
+        // Round-3 finding 1: ledger-open L is pending, the ship is docked with
+        // the same laid route past the threshold — the belt holds, and fires on
+        // the very fold the pending clears (its clock was never reset).
+        let mut w = WedgeWatch::default();
+        let route = vec!["titan-larder".to_string()];
+        assert!(!w.observe(Some("berth"), &route, 500, 600, 1, 100));
+        assert!(
+            !w.observe(Some("berth"), &route, 500, 600, 1, 140),
+            "past the threshold, still pending: held"
+        );
+        assert!(
+            w.observe(Some("berth"), &route, 500, 600, 0, 141),
+            "pending cleared: the belt fires without waiting a fresh threshold"
+        );
+        assert!(
+            !w.observe(Some("berth"), &route, 500, 600, 0, 142),
+            "firing re-armed the clock"
+        );
+    }
+
+    #[test]
+    fn the_belt_still_fires_normally_when_nothing_is_pending() {
+        let mut w = WedgeWatch::default();
+        let route = vec!["b".to_string()];
+        assert!(!w.observe(Some("a"), &route, 500, 600, 0, 100));
+        assert!(
+            !w.observe(Some("a"), &route, 500, 600, 0, 130),
+            "at the threshold: not yet"
+        );
+        assert!(w.observe(Some("a"), &route, 500, 600, 0, 131));
+        // A changed route, an empty route, or a thin tank all stand the watch down.
+        assert!(!w.observe(Some("a"), &[], 500, 600, 0, 132));
+        assert!(!w.observe(Some("a"), &route, 50, 600, 0, 170));
+    }
+
+    #[test]
+    fn plan_order_is_booked_tick_then_id_never_lookup_resolution_order() {
+        // Round-3 finding 3's delayed-resolution scenario: L1 and L2 booked the
+        // same tick, L2's lookup resolved a cycle earlier — the plan still reads
+        // [L1, L2], and a ledger-unseen load sorts last.
+        let resolved_order = vec![
+            Active {
+                row: row("L2"),
+                word: ActiveWord::Booked,
+            },
+            Active {
+                row: row("L3-just-acked"),
+                word: ActiveWord::Booked,
+            },
+            Active {
+                row: row("L1"),
+                word: ActiveWord::Booked,
+            },
+        ];
+        let opens = vec![(100, "L1".to_string()), (100, "L2".to_string())];
+        let ordered = in_booking_order(resolved_order, &opens);
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|a| a.row.load_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["L1", "L2", "L3-just-acked"]
+        );
     }
 
     #[test]

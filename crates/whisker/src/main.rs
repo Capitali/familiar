@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
-use familiar_whisker::adoption::{adopt_step, AdoptOutcome};
+use familiar_whisker::adoption::{adopt_step, in_booking_order, AdoptOutcome, WedgeWatch};
 use familiar_whisker::doctrine::{
     self, Active, ActiveWord, Decision, Itinerary, LoadRow, Router, Ship,
 };
@@ -341,8 +341,7 @@ fn main() -> ExitCode {
     let mut last_refusal = String::new();
     // Wedge watch: a course filed while dry never departs on its own after refuelling
     // (ucf-exchange#16) — docked + course filed + unmoved needs a re-filed travel.
-    let mut wedge: Option<(String, Vec<String>)> = None;
-    let mut wedge_since: i64 = -1;
+    let mut wedge = WedgeWatch::default();
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
     let trades = granted.contains(&Automation::Trade);
     let mut last_carry_block = String::new();
@@ -491,50 +490,44 @@ fn main() -> ExitCode {
                     }
                 }
             }
-            // The plan is booking order, whatever order adoptions resolved in.
-            // A load the ledger has not shown yet (a booking acked this fold)
-            // sorts last — it IS the newest.
-            let order: HashMap<String, i64> = ledger::open_loads(&me)
-                .into_iter()
-                .map(|(t, l)| (l, t))
-                .collect();
-            loads.sort_by_key(|a| order.get(&a.row.load_id).copied().unwrap_or(i64::MAX));
+            // The plan is booking order — (booked tick, load id), deterministic,
+            // never lookup-resolution order (adoption::in_booking_order, pinned).
+            loads = in_booking_order(loads, &ledger::open_loads(&me));
         }
 
         // The wedge: docked, healthy tank, course still filed, nothing moving.
-        if ship.docked.is_some() && !route_now.is_empty() && ship.fuel > ship.fuel_capacity / 10 {
-            let key = (ship.docked.clone().unwrap_or_default(), route_now.clone());
-            if wedge.as_ref() == Some(&key) {
-                if tick - wedge_since > 30 {
-                    // First file `engage`: the drive is a two-step file-then-engage on
-                    // some folds and the verb is missing from the API's own error list
-                    // (UCF-Haul#65 research; verified accepted on main 2026-08-31). A
-                    // fresh travel to the same destination is the belt to its braces.
-                    seq += 1;
-                    let engage_id = format!("whisker-{}-{}", now_secs(), seq);
-                    let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
-                    if let Some(dest) = route_now.last() {
-                        seq += 1;
-                        let travel_id = format!("whisker-{}-{}", now_secs(), seq);
-                        if let Ok(ack) =
-                            wire.act(json!({"type": "travel", "station": dest}), &travel_id)
-                        {
-                            journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
-                                "event": "unwedged-course", "to": dest, "engaged": engaged,
-                                "resolves": ack.get("resolvesAtTick")}),
-                            );
-                        }
-                    }
-                    wedge_since = tick;
+        // The watch's dominance rule is pinned in adoption::WedgeWatch (round-3
+        // review, finding 1): the belt is a COMMITMENT — an engage plus a fresh
+        // travel — and it never fires while any ledger-open contract is still
+        // unresolved. The clock keeps counting through the hold, so the belt
+        // fires the fold the freight state is known again.
+        if wedge.observe(
+            ship.docked.as_deref(),
+            &route_now,
+            ship.fuel,
+            ship.fuel_capacity,
+            pending_adopt.len(),
+            tick,
+        ) {
+            // First file `engage`: the drive is a two-step file-then-engage on
+            // some folds and the verb is missing from the API's own error list
+            // (UCF-Haul#65 research; verified accepted on main 2026-08-31). A
+            // fresh travel to the same destination is the belt to its braces.
+            seq += 1;
+            let engage_id = format!("whisker-{}-{}", now_secs(), seq);
+            let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
+            if let Some(dest) = route_now.last() {
+                seq += 1;
+                let travel_id = format!("whisker-{}-{}", now_secs(), seq);
+                if let Ok(ack) = wire.act(json!({"type": "travel", "station": dest}), &travel_id) {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick,
+                        "event": "unwedged-course", "to": dest, "engaged": engaged,
+                        "resolves": ack.get("resolvesAtTick")}),
+                    );
                 }
-            } else {
-                wedge = Some(key);
-                wedge_since = tick;
             }
-        } else {
-            wedge = None;
         }
 
         // Reconcile every contract of the plan against the ledger — the fold is the
@@ -708,13 +701,11 @@ fn main() -> ExitCode {
 
             // 2. The hold is the truth: bring the book to what is actually aboard.
             let cargo = trade::parse_cargo(&me);
-            // Every non-booked contract's cargo is freight aboard, per its own
-            // word — under the plan there can be several (T-232).
-            let freight_aboard: Vec<(&str, i64)> = loads
-                .iter()
-                .filter(|a| a.word != ActiveWord::Booked && !a.row.good.is_empty())
-                .map(|a| (a.row.good.as_str(), a.row.units))
-                .collect();
+            // What freight is genuinely ABOARD — PickedUp only, per each load's
+            // own word (doctrine::freight_aboard, pinned): a Delivered load's
+            // cargo already left with the crane, and counting it here deleted a
+            // real merchant lot (round-3 review, finding 2).
+            let freight_aboard = doctrine::freight_aboard(&loads);
             let galaxy_for_hint = if cargo.is_empty() {
                 Vec::new()
             } else {

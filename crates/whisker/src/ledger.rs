@@ -204,6 +204,17 @@ mod tests {
     }
 
     #[test]
+    fn equal_tick_bookings_tie_break_on_the_load_id() {
+        // Round-3 review, finding 3: the order must be deterministic even when
+        // two lives opened on one tick — id decides, never map iteration.
+        let me = me(&[("LB", "booked", 100), ("LA", "booked", 100)]);
+        assert_eq!(
+            open_loads(&me),
+            vec![(100, "LA".to_string()), (100, "LB".to_string())]
+        );
+    }
+
+    #[test]
     fn a_reverted_booking_is_closed_to_adoption_too() {
         // 058a87c taught reconcile "reverted"; adoption spoke an older vocabulary
         // and would have re-adopted the undone load on the next restart.

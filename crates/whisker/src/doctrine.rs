@@ -264,6 +264,20 @@ impl Itinerary {
     }
 }
 
+/// The freight genuinely ABOARD, per each load's own ledger word: `PickedUp`
+/// only. A Booked load's cargo is still at its origin and a Delivered load's
+/// has already left the hold (only its payment remains) — counting either
+/// against the merchant's book erases real positions (round-3 review, finding
+/// 2: 30 merchant ore beside a delivered 100-ore contract read as −70 and the
+/// book deleted a genuine lot). Loads whose contract names no good carry none.
+pub fn freight_aboard(loads: &[Active]) -> Vec<(&str, i64)> {
+    loads
+        .iter()
+        .filter(|a| a.word == ActiveWord::PickedUp && !a.row.good.is_empty())
+        .map(|a| (a.row.good.as_str(), a.row.units))
+        .collect()
+}
+
 /// The judgment over a one-contract world, exactly as it always was. This is the
 /// degenerate case of [`decide_plan`] — kept as the front door so every rule the
 /// LOCAL and PROD incidents taught stays pinned by its original test, unmodified.
@@ -1206,6 +1220,24 @@ mod tests {
             best_insertion(&ship, &plan, &[rich, near], &pumps(&[]), &FlatRouter(10)),
             Some("RICH".into())
         );
+    }
+
+    #[test]
+    fn only_picked_up_freight_is_aboard_delivered_and_booked_are_not() {
+        // Round-3 review, finding 2: the merchant's book subtracts what freight
+        // ACTUALLY occupies the hold — picked-up cargo, exactly once per load,
+        // summed across loads of one good; never a delivered load's (already
+        // craned off) or a booked one's (still at its origin).
+        let mut delivered = active("D", "a", "b", 100, ActiveWord::Delivered);
+        delivered.row.good = "ore".into();
+        let mut picked = active("P", "c", "d", 40, ActiveWord::PickedUp);
+        picked.row.good = "ore".into();
+        let mut picked2 = active("P2", "e", "f", 25, ActiveWord::PickedUp);
+        picked2.row.good = "ore".into();
+        let mut booked = active("B", "g", "h", 30, ActiveWord::Booked);
+        booked.row.good = "grain".into();
+        let loads = [delivered, picked, picked2, booked];
+        assert_eq!(freight_aboard(&loads), vec![("ore", 40), ("ore", 25)]);
     }
 
     #[test]
