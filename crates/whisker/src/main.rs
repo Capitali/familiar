@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
 use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
-use familiar_whisker::trade::{self, Holding, TradeDecision};
+use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
 use familiar_whisker::{env_value, granted_automations, Automation};
 use familiar_world::lease::{self, SignedLease};
 use serde_json::{json, Value};
@@ -52,6 +52,20 @@ type RouteCache = HashMap<(String, String), (i64, Option<i64>)>;
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
 const LOST_COOLDOWN_TICKS: i64 = 60;
+
+/// ℳ per unit of fuel (the pack's `fuelPricePerUnit`, not on the wire; 2 on LOCAL
+/// and PROD, and what the refuel receipts show). Charged against a trade's margin.
+const FUEL_PRICE_PER_UNIT: i64 = 2;
+
+/// A trade filed this cycle: what to look for on the receipt trail once it folds.
+struct PendingTrade {
+    side: &'static str,
+    good: String,
+    units: i64,
+    ask: i64,
+    /// The tick the action applies on (`resolvesAtTick - 1`), the receipt's `tick`.
+    applies_tick: i64,
+}
 
 /// How long a priced route stays believed before it is asked again.
 const ROUTE_CACHE_SECS: i64 = 30 * 60;
@@ -164,6 +178,11 @@ fn ship_from(me: &Value) -> Ship {
 fn load_row(v: &Value) -> Option<LoadRow> {
     Some(LoadRow {
         load_id: v.get("loadId")?.as_str()?.to_string(),
+        good: v
+            .get("good")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         origin: v.get("origin")?.as_str()?.to_string(),
         dest: v.get("dest")?.as_str()?.to_string(),
         units: v.get("units").and_then(Value::as_i64).unwrap_or(0),
@@ -335,6 +354,17 @@ fn main() -> ExitCode {
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
     let trades = granted.contains(&Automation::Trade);
     let mut last_carry_block = String::new();
+    let mut last_merchant_idle = String::new();
+    // A filed trade whose fold has not been read back from the receipt trail yet.
+    let mut pending_trade: Option<PendingTrade> = None;
+    // The world's day, in ticks: the exchange's minimum hold on bought goods is a
+    // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
+    // 288). The refusal text corrects us if a world says otherwise.
+    let min_hold: i64 = wire
+        .get("/v1/reference")
+        .ok()
+        .and_then(|v| v.get("ticksPerDay").and_then(Value::as_i64))
+        .unwrap_or(288);
     let mut holdings: Vec<Holding> = if trades {
         trade::load_holdings(&ship_dir)
     } else {
@@ -602,16 +632,89 @@ fn main() -> ExitCode {
         // ── The merchant phase (Automation::Trade) ──────────────────────────────
         // Runs when berthed, before the freight decision, so a trade takes the fold
         // (one action per fold holds). SELL runs even while hauling freight — held
-        // goods are realized at whatever berth pays; BUY (opening a position) only
-        // when freight is idle, so speculation never elbows a paying contract out of
-        // the hold. The whole phase is gated: no Trade grant, no merchant behavior.
+        // goods are realized at whatever berth pays once the exchange's clock allows;
+        // BUY (opening a position) only when freight is idle and nothing is held.
+        // The whole phase is gated: no Trade grant, no merchant behavior.
         if trades && tick >= pending_until {
+            // 1. Read back the last trade's fold from the receipt trail: the outcome is
+            //    a market fact recorded in the world (filled, or a named refusal), never
+            //    an HTTP error — and the refusal that matters names the clock.
+            if let Some(pt) = pending_trade.take() {
+                let receipt = wire
+                    .get("/v1/receipts")
+                    .ok()
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|r| {
+                        r.get("tick").and_then(Value::as_i64) == Some(pt.applies_tick)
+                            && r.get("good").and_then(Value::as_str) == Some(pt.good.as_str())
+                            && r.get("side").and_then(Value::as_str) == Some(pt.side)
+                    });
+                let outcome = receipt
+                    .as_ref()
+                    .and_then(|r| r.get("outcome").and_then(Value::as_str))
+                    .unwrap_or("(no receipt yet)")
+                    .to_string();
+                let total = receipt
+                    .as_ref()
+                    .and_then(|r| r.get("total").and_then(Value::as_i64))
+                    .unwrap_or(0);
+                if pt.side == "buy" && outcome == "filled" {
+                    let basis = trade::basis_from_total(total, pt.units, pt.ask);
+                    if let Some(h) = holdings.iter_mut().find(|h| h.good == pt.good) {
+                        h.avg_cost = basis;
+                    }
+                }
+                if let Some(at) = trade::sellable_tick_from_refusal(&outcome) {
+                    if let Some(h) = holdings.iter_mut().find(|h| h.good == pt.good) {
+                        h.sellable_at = at;
+                    }
+                }
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "trade-outcome", "side": pt.side,
+                           "good": pt.good, "units": pt.units, "outcome": outcome,
+                           "total": total, "credits": ship.credits}),
+                );
+            }
+
+            // 2. The hold is the truth: bring the book to what is actually aboard.
+            let cargo = trade::parse_cargo(&me);
+            let freight_aboard = active
+                .as_ref()
+                .filter(|a| a.word != ActiveWord::Booked && !a.row.good.is_empty())
+                .map(|a| (a.row.good.as_str(), a.row.units));
+            let galaxy_for_hint = if cargo.is_empty() {
+                Vec::new()
+            } else {
+                wire.get("/v1/galaxy/prices")
+                    .map(|v| trade::parse_galaxy(&v))
+                    .unwrap_or_default()
+            };
+            let hint = |good: &str| -> i64 {
+                galaxy_for_hint
+                    .iter()
+                    .filter(|r| r.good == good)
+                    .map(|r| r.mid)
+                    .max()
+                    .unwrap_or(0)
+            };
+            for note in
+                trade::reconcile_hold(&mut holdings, &cargo, freight_aboard, &hint, tick, min_hold)
+            {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "book-corrected", "why": note}),
+                );
+            }
+            trade::save_holdings(&ship_dir, &holdings);
+
             if let Some(here) = ship.docked.clone() {
                 let spare_hold = (ship.hold_capacity - ship.hold_used).max(0);
                 // Freight needs the space back only when a BOOKED contract's cargo would
                 // not fit beside what we carry. A loaded or delivered contract already
-                // has its room; a fitting one rides alongside. Anything broader dumps
-                // every position at the next origin, at whatever the bid is.
+                // has its room; a fitting one rides alongside.
                 let need_hold = active
                     .as_ref()
                     .map(|a| a.word == ActiveWord::Booked && a.row.units > spare_hold)
@@ -620,10 +723,13 @@ fn main() -> ExitCode {
                     .get(&format!("/v1/stations/{here}/quotes"))
                     .map(|v| trade::parse_board(&v))
                     .unwrap_or_default();
-                let galaxy = wire
-                    .get("/v1/galaxy/prices")
-                    .map(|v| trade::parse_galaxy(&v))
-                    .unwrap_or_default();
+                let galaxy = if galaxy_for_hint.is_empty() {
+                    wire.get("/v1/galaxy/prices")
+                        .map(|v| trade::parse_galaxy(&v))
+                        .unwrap_or_default()
+                } else {
+                    galaxy_for_hint
+                };
                 // What the carry leg can leave with: a full tank if this berth pumps
                 // (the freight doctrine tops up here first), else what is in it now.
                 let fuel_available = if pumps.contains(&here) {
@@ -631,19 +737,35 @@ fn main() -> ExitCode {
                 } else {
                     ship.fuel
                 };
-                let td = trade::decide_trade(
-                    &here,
+                let ledger = Ledger {
+                    here: &here,
                     tick,
-                    &board_here,
-                    &galaxy,
-                    &holdings,
-                    ship.credits,
+                    credits: ship.credits,
                     spare_hold,
                     need_hold,
                     fuel_available,
-                    &pumps,
-                    &wire,
-                );
+                    fuel_price: FUEL_PRICE_PER_UNIT,
+                    min_hold,
+                };
+                let td =
+                    trade::decide_trade(&ledger, &board_here, &galaxy, &holdings, &pumps, &wire);
+                // Say why the merchant passed — once per reason, so the journal reads
+                // "no fuel for a carry" / "no arbitrage on this board" without a line
+                // per fold.
+                if let TradeDecision::Idle { why } = &td {
+                    let line = format!("{here}: {why}");
+                    if line != last_merchant_idle {
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "merchant-idle",
+                            "at_station": here, "why": why, "credits": ship.credits,
+                            "fuel_available": fuel_available, "spare_hold": spare_hold}),
+                        );
+                        last_merchant_idle = line;
+                    }
+                } else {
+                    last_merchant_idle.clear();
+                }
                 let trade_body = match &td {
                     TradeDecision::Sell { good, units, .. } => Some((
                         json!({"type": "sell", "station": here, "good": good, "units": units}),
@@ -664,41 +786,51 @@ fn main() -> ExitCode {
                     let id = format!("whisker-{}-{}", now_secs(), seq);
                     match wire.act(body, &id) {
                         Ok(ack) => {
-                            pending_until = ack
+                            let resolves = ack
                                 .get("resolvesAtTick")
                                 .and_then(Value::as_i64)
-                                .unwrap_or(tick)
-                                + 1;
-                            if is_sell {
-                                // Reduce the position; the fold's proceeds land in credits.
-                                if let Some(h) = holdings.iter_mut().find(|h| h.good == good) {
-                                    h.units -= units;
-                                }
-                                holdings.retain(|h| h.units > 0);
-                            } else if let TradeDecision::Buy { sell_target, .. } = &td {
-                                // Cost basis ≈ the berth's ask (the fold sets the exact
-                                // fill; a conservative basis only makes us sell later, not
-                                // at a phantom profit). Average into any existing lot.
-                                let ask = board_here
-                                    .iter()
-                                    .find(|q| q.good == good)
-                                    .map(|q| q.ask)
-                                    .unwrap_or(0);
-                                match holdings.iter_mut().find(|h| h.good == good) {
-                                    Some(h) => {
-                                        let total = h.avg_cost * h.units + ask * units;
-                                        h.units += units;
-                                        h.avg_cost = total / h.units.max(1);
-                                    }
-                                    None => holdings.push(Holding {
+                                .unwrap_or(tick + 1);
+                            pending_until = resolves + 1;
+                            let ask = board_here
+                                .iter()
+                                .find(|q| q.good == good)
+                                .map(|q| q.ask)
+                                .unwrap_or(0);
+                            pending_trade = Some(PendingTrade {
+                                side: if is_sell { "sell" } else { "buy" },
+                                good: good.clone(),
+                                units,
+                                ask,
+                                applies_tick: resolves - 1,
+                            });
+                            if !is_sell {
+                                // The book leads the fold by one tick; the receipt sets
+                                // the true basis and the hold reconcile corrects the
+                                // units. Clock: the exchange arms it at the applying
+                                // tick.
+                                if let TradeDecision::Buy {
+                                    sell_target,
+                                    est_margin,
+                                    ..
+                                } = &td
+                                {
+                                    holdings.push(Holding {
                                         good: good.clone(),
                                         units,
                                         avg_cost: ask,
                                         sell_target: sell_target.clone(),
-                                        opened_tick: tick,
-                                    }),
+                                        opened_tick: resolves - 1,
+                                        sellable_at: resolves - 1 + min_hold,
+                                    });
+                                    journal(
+                                        &ship_dir,
+                                        json!({"at": now, "tick": tick, "event": "position-opened",
+                                        "good": good, "units": units, "ask": ask, "sell_target": sell_target,
+                                        "est_margin": est_margin, "sellable_at": resolves - 1 + min_hold}),
+                                    );
                                 }
                             }
+                            // A sell is not taken off the book until the hold confirms it.
                             trade::save_holdings(&ship_dir, &holdings);
                             let why = match &td {
                                 TradeDecision::Sell { why, .. } => why.clone(),
@@ -708,7 +840,7 @@ fn main() -> ExitCode {
                                 &ship_dir,
                                 json!({"at": now, "tick": tick, "event": "traded",
                                 "side": if is_sell {"sell"} else {"buy"}, "good": good, "units": units,
-                                "credits": ship.credits, "why": why, "resolves": pending_until - 1}),
+                                "credits": ship.credits, "why": why, "resolves": resolves}),
                             );
                         }
                         Err(e) => journal(
@@ -720,10 +852,16 @@ fn main() -> ExitCode {
                     std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
                     continue;
                 }
-                // Carry leg: freight idle, holding goods not sellable here — fly the
-                // freshest position toward its market so the arb can close.
+                // Carry leg: freight idle, a position past its clock that no bid here
+                // clears — fly it toward its market so the arb can close. Before the
+                // clock there is nothing to do at the market but wait, so the goods
+                // ride under freight instead.
                 if active.is_none() && !ship.in_flight {
-                    if let Some(h) = holdings.iter().max_by_key(|h| h.opened_tick) {
+                    if let Some(h) = holdings
+                        .iter()
+                        .filter(|h| tick >= h.sellable_at && !h.sell_target.is_empty())
+                        .max_by_key(|h| h.opened_tick)
+                    {
                         if h.sell_target != here {
                             // The leg must be flyable on what is in the tank, reserve
                             // included — otherwise leave the fold to the freight
