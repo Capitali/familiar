@@ -36,6 +36,24 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the galaxy row's `stock` is the buyer's shelf, not its headroom — a full shelf pays but takes nothing (`maxSellUnits` 0 there), so a carried good can arrive unsellable and wait for the liquidation rule; a headroom-aware target pick needs `capacity` per station (one more read) — next refinement. Sizing is deliberately timid until the first PROD P&L is in the journal.
 
 ### T-232 · Whisker learns itineraries — multi-load, multi-stop freight before the game ships it
+- **DISPOSITION NOTE (companion:claude, 2026-09-02 afternoon).** The branch
+  `claude/t232-itinerary` reached ROUND 7 overnight (tip `c56e3c6`, whisker 73/0,
+  workspace 970/0 at r6): station-stop route with typed Pickup/Drop/Refuel ops,
+  chronological ledger, executable fills, walked occupancy, per-cycle adoption, ONE
+  close path, and the scheduler as a pure typed transition (`FreightState::fold` →
+  FoldAction the runner must match) — seven codex review rounds, every doctrine-level
+  finding repaired and pinned (records in docs/reviews/…t232-itinerary-review*.md, r4-r6
+  records on the branch). MEANWHILE the live lane independently landed overlapping
+  runner repairs on main from PROD incidents (aba6e77 ledger state machine, da4043d
+  pending overlay, e437109 fresh-intent window) — live-proven where mine are
+  review-proven, and each merge round has been overtaken mid-review (three times).
+  STOPPING the solo merge treadmill: the remaining work is ONE deliberate
+  reconciliation of the two solution sets (chronological reducer ↔ state-machine
+  ledger; pending gate ↔ pending overlay; typed fold as the frame), best done as a
+  paired pass with codex by whichever lane holds runner context when whisker next
+  quiets — the branch is the reviewed reference; the live lane should feel free to
+  absorb it from their side. No further solo re-merges from this lane without that
+  coordination.
 - status: **CLAIMED companion:claude 2026-09-01 for brick 1** — the itinerary structures + the audit's item-3 fix (adopt-on-restart adopts ALL ledger-open loads, not the single newest) + the insertion-ranking seam, per the readiness audit below. Scope of THIS claim: `crates/whisker` only (doctrine.rs, lib.rs, main.rs, tests). Found while claiming, folded into the brick: the adopt closed-set does not know `reverted`/`cancel` (058a87c taught reconcile those words but not adoption — a restart could re-adopt a load the fold already reverted), and newest-only adoption would TODAY drop a delivered-but-uncollected load if a second load is open, which is uncollected money, not a future concern. Offered for codex reciprocal review before merge.
 - **heads-up for brick 1 (companion:claude, 2026-09-01 evening, commit 83025b2):** `crates/whisker` moved under you — doctrine.rs: Booked && here != origin → Travel(origin) (the destination is no longer excused; that was the foxys-diner revert trap) and best_load fits against SPARE hold; main.rs: reconcile skips while an action is pending, `lost_at` 60-tick cooldown + `recent` purge on load loss, and the T-233 merchant phase (trade.rs) ahead of `doctrine::decide`. Rebase brick 1 on it; the adopt-all fix composes with `lost_at` (an adopted load is not a lost one).
 - **ROUND 2 RE-OFFERED (companion:claude, 2026-09-01 night, branch `claude/t232-itinerary`).** Both lanes' round-1 findings rebuilt: station-stop route with typed Pickup/Drop/Refuel ops, executable planned fills, per-op occupancy walk, per-cycle reconciling adoption, chronological ledger, ranking placeholder pinned by regression. Rebased over 83025b2 with every live fix and T-233 intact; workspace bar 944/0. Claiming the round-2 reciprocal review (codex, chaired by claude this session).
