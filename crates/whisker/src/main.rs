@@ -20,8 +20,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
-use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
-use familiar_whisker::{env_value, granted_automations};
+use familiar_whisker::doctrine::{
+    self, Active, ActiveWord, Decision, Itinerary, LoadRow, Router, Ship,
+};
+use familiar_whisker::{env_value, granted_automations, ledger};
 use familiar_world::lease::{self, SignedLease};
 use serde_json::{json, Value};
 
@@ -150,50 +152,6 @@ fn load_row(v: &Value) -> Option<LoadRow> {
     })
 }
 
-/// The ledger's last word about a load, reduced to what decides. `None` = settled or
-/// lost — either way the caller stops tracking it (with the reason for the journal).
-fn reconcile(me: &Value, load_id: &str) -> Result<Option<ActiveWord>, String> {
-    let events = me
-        .get("freight")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter(|f| f.get("loadId").and_then(Value::as_str) == Some(load_id))
-                .filter_map(|f| f.get("event").and_then(Value::as_str))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let mut word = ActiveWord::Booked;
-    for e in events {
-        let e_lower = e.to_lowercase();
-        if e_lower.contains("payment taken") || e_lower.contains("collected") {
-            return Err(format!("settled: {e}"));
-        }
-        // Every way a load leaves us without paying. "reverted" is the one that
-        // stranded KK II at foxys-diner (booked t6195, reverted t6265, 2026-09-01):
-        // a fold can UNDO a booking, and without this word the ledger shows no
-        // terminal event, reconcile defaults to Booked, and she waits forever for a
-        // crane to load a contract that no longer exists. "cancel" covers a
-        // cancelBooking too.
-        if e_lower.contains("rejected")
-            || e_lower.contains("expired")
-            || e_lower.contains("lapsed")
-            || e_lower.contains("reverted")
-            || e_lower.contains("cancel")
-        {
-            return Err(format!("lost: {e}"));
-        }
-        if e_lower.contains("delivered") {
-            word = ActiveWord::Delivered;
-        } else if (e_lower.contains("pickedup") || e_lower.contains("picked up"))
-            && word == ActiveWord::Booked
-        {
-            word = ActiveWord::PickedUp;
-        }
-    }
-    Ok(Some(word))
-}
-
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut ship_dir: Option<PathBuf> = None;
@@ -291,7 +249,10 @@ fn main() -> ExitCode {
         Ok(_) | Err(_) => BTreeSet::new(),
     };
 
-    let mut active: Option<Active> = None;
+    // The plan (T-232): every contract the ship is committed to, booking order.
+    // Today's exchange enforces one at a time, so the live plan holds ≤1 stop —
+    // the structure already carries more for the day UCF-Haul#43 lifts the cap.
+    let mut plan = Itinerary::default();
     let mut pending_until: i64 = -1;
     let mut recent: HashMap<String, (i64, String)> = HashMap::new();
     let mut seq: u64 = 0;
@@ -370,45 +331,16 @@ fn main() -> ExitCode {
             })
             .unwrap_or_default();
 
-        // A restart must not forget a held contract — the exchange allows ONE at a
-        // time, and a pilot that assumes idle double-books and is refused. Adopt the
-        // newest load the ledger still shows open.
+        // A restart must not forget a held contract — and it must not forget ANY of
+        // them. Newest-only adoption abandoned a delivered-but-uncollected payout
+        // the moment a second load was open, and under a multi-load exchange
+        // (UCF-Haul#43) it would shed the whole rest of the plan on every restart
+        // (T-232 audit, item 3). Adopt every load the ledger still shows open, in
+        // booking order — the ledger scan speaks reconcile's own closed-vocabulary,
+        // `reverted`/`cancel` included, so an undone booking is never re-adopted.
         if !adopted {
             adopted = true;
-            let mut open: Vec<(i64, String)> = Vec::new();
-            if let Some(events) = me.get("freight").and_then(Value::as_array) {
-                let mut latest: HashMap<String, (i64, bool)> = HashMap::new();
-                for f in events {
-                    let Some(lid) = f.get("loadId").and_then(Value::as_str) else {
-                        continue;
-                    };
-                    let e = f
-                        .get("event")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_lowercase();
-                    let t = f.get("tick").and_then(Value::as_i64).unwrap_or(0);
-                    let closed = e.contains("payment taken")
-                        || e.contains("collected")
-                        || e.contains("rejected")
-                        || e.contains("expired")
-                        || e.contains("lapsed");
-                    let opens =
-                        e.contains("booked") || e.contains("picked") || e.contains("delivered");
-                    let entry = latest.entry(lid.to_string()).or_insert((t, false));
-                    if closed {
-                        entry.1 = true;
-                    } else if opens {
-                        *entry = (t, false);
-                    }
-                }
-                open = latest
-                    .into_iter()
-                    .filter(|(_, (_, closed))| !closed)
-                    .map(|(lid, (t, _))| (t, lid))
-                    .collect();
-            }
-            if let Some((_, lid)) = open.into_iter().max() {
+            for (_, lid) in ledger::open_loads(&me) {
                 for status in ["booked", "inTransit", "delivered"] {
                     if let Ok(Value::Array(rows)) =
                         wire.get(&format!("/v1/loadboard?status={status}"))
@@ -421,11 +353,8 @@ fn main() -> ExitCode {
                                 json!({"at": now, "tick": tick,
                                 "event": "adopted-held-contract", "load": lid, "status": status}),
                             );
-                            let word = reconcile(&me, &lid)
-                                .ok()
-                                .flatten()
-                                .unwrap_or(ActiveWord::Booked);
-                            active = Some(Active { row, word });
+                            let word = ledger::reconcile(&me, &lid).unwrap_or(ActiveWord::Booked);
+                            plan.stops.push(Active { row, word });
                             break;
                         }
                     }
@@ -469,21 +398,23 @@ fn main() -> ExitCode {
             wedge = None;
         }
 
-        // Reconcile the active load against the ledger — the fold is the truth.
-        if let Some(a) = &mut active {
-            match reconcile(&me, &a.row.load_id) {
-                Ok(Some(word)) => a.word = word,
-                Ok(None) => {}
+        // Reconcile every stop of the plan against the ledger — the fold is the
+        // truth, and each contract has its own word (T-232 audit, item 2).
+        plan.stops
+            .retain_mut(|stop| match ledger::reconcile(&me, &stop.row.load_id) {
+                Ok(word) => {
+                    stop.word = word;
+                    true
+                }
                 Err(reason) => {
                     journal(
                         &ship_dir,
                         json!({"at": now, "tick": tick, "event": "load-closed",
-                               "load": a.row.load_id, "why": reason, "credits": ship.credits}),
+                           "load": stop.row.load_id, "why": reason, "credits": ship.credits}),
                     );
-                    active = None;
+                    false
                 }
-            }
-        }
+            });
 
         // The two-step drive. On PROD, `travel` LAYS a course at the drive and a
         // separate `engage` departs it — and a laid-but-unengaged course shows as
@@ -530,8 +461,10 @@ fn main() -> ExitCode {
             continue;
         }
 
-        // The board, only when the judgment could use it.
-        let board: Vec<LoadRow> = if active.is_none() && !ship.in_flight {
+        // The board, only when the judgment could use it — an empty plan, while the
+        // exchange enforces one contract. (When UCF-Haul#43 lifts the cap, this
+        // widens to "plan has hold space", matching decide_plan's insertion seam.)
+        let board: Vec<LoadRow> = if plan.is_empty() && !ship.in_flight {
             match wire.get("/v1/loadboard?status=open") {
                 Ok(Value::Array(rows)) => rows.iter().filter_map(load_row).collect(),
                 Ok(_) | Err(_) => Vec::new(),
@@ -540,7 +473,7 @@ fn main() -> ExitCode {
             Vec::new()
         };
 
-        let decision = doctrine::decide(&ship, active.as_ref(), &board, &pumps, &wire);
+        let decision = doctrine::decide_plan(&ship, &plan, &board, &pumps, &wire);
 
         // Gate 2: the automation this decision spends must be granted (pay-per-feature).
         if let Some(auto) = decision.automation() {
@@ -626,7 +559,7 @@ fn main() -> ExitCode {
                         );
                         if let Decision::Book { load_id } = &decision {
                             if let Some(row) = board.iter().find(|l| &l.load_id == load_id) {
-                                active = Some(Active {
+                                plan.stops.push(Active {
                                     row: row.clone(),
                                     word: ActiveWord::Booked,
                                 });

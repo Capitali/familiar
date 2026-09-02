@@ -116,17 +116,85 @@ pub enum ActiveWord {
     Delivered,
 }
 
-/// One active load, as the caller tracks it.
+/// One active load, as the caller tracks it. Under an itinerary this is one STOP
+/// of the plan — the name keeps its history.
 #[derive(Debug, Clone)]
 pub struct Active {
     pub row: LoadRow,
     pub word: ActiveWord,
 }
 
-/// The judgment. Facts in, one decision out.
+/// The ordered plan: every contract the ship is committed to, in booking order.
+/// Today's exchange enforces one contract, so the live plan holds zero or one stop —
+/// but the STRUCTURE carries any number, so the day UCF-Haul#43 lifts the cap
+/// (multi-load, multi-stop freight) nothing here breaks or migrates (T-232).
+#[derive(Debug, Clone, Default)]
+pub struct Itinerary {
+    pub stops: Vec<Active>,
+}
+
+impl Itinerary {
+    /// The degenerate plan today's world flies: one contract, or none.
+    pub fn single(active: Option<Active>) -> Self {
+        Itinerary {
+            stops: active.into_iter().collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stops.is_empty()
+    }
+
+    /// Units the plan still owes hold space: everything not yet delivered.
+    /// (Delivered cargo has left the hold; its money is parked on the contract.)
+    pub fn units_held(&self) -> i64 {
+        self.stops
+            .iter()
+            .filter(|s| s.word != ActiveWord::Delivered)
+            .map(|s| s.row.units)
+            .sum()
+    }
+
+    /// The stop the ship is working toward: the first not-yet-delivered contract,
+    /// in plan order. Delivered stops wait only on a Collect, not on movement.
+    pub fn current(&self) -> Option<&Active> {
+        self.stops.iter().find(|s| s.word != ActiveWord::Delivered)
+    }
+}
+
+/// The judgment over a one-contract world, exactly as it always was. This is the
+/// degenerate case of [`decide_plan`] — kept as the front door so every rule the
+/// LOCAL and PROD incidents taught stays pinned by its original test, unmodified.
 pub fn decide(
     ship: &Ship,
     active: Option<&Active>,
+    board: &[LoadRow],
+    pumps: &BTreeSet<String>,
+    router: &dyn Router,
+) -> Decision {
+    decide_plan(
+        ship,
+        &Itinerary::single(active.cloned()),
+        board,
+        pumps,
+        router,
+    )
+}
+
+/// The judgment. Facts in, one decision out — now over an ordered PLAN of stops.
+///
+/// With zero or one stop this reduces to the judgment whisker has flown since
+/// LOCAL — the wrapper above pins that. With more (once the exchange allows it):
+/// delivered money is collected first, then the ship works the plan in order,
+/// navigating by each stop's own ledger word. One deliberate divergence from the
+/// single-stop rules, stated rather than smoothed: the single-contract case reads
+/// "cargo aboard" off the aggregate `hold_used` (the crane proxy the fold shows);
+/// a multi-stop plan cannot attribute aggregate units to one contract, so there
+/// the stop's reconciled word (`PickedUp`) is the evidence. UCF-Haul#43's API may
+/// hand us per-load hold rows — revisit this seam when its shape lands.
+pub fn decide_plan(
+    ship: &Ship,
+    plan: &Itinerary,
     board: &[LoadRow],
     pumps: &BTreeSet<String>,
     router: &dyn Router,
@@ -139,14 +207,13 @@ pub fn decide(
         return Decision::CallPaws;
     }
 
-    if let Some(active) = active {
-        match active.word {
-            ActiveWord::Delivered => {
-                return Decision::Collect {
-                    load_id: active.row.load_id.clone(),
-                }
-            }
-            ActiveWord::PickedUp | ActiveWord::Booked => {}
+    if !plan.is_empty() {
+        // Money first: a delivered contract never pays itself, and collecting
+        // costs no movement.
+        if let Some(done) = plan.stops.iter().find(|s| s.word == ActiveWord::Delivered) {
+            return Decision::Collect {
+                load_id: done.row.load_id.clone(),
+            };
         }
         if ship.in_flight {
             return Decision::Hold {
@@ -158,15 +225,27 @@ pub fn decide(
                 why: "adrift between folds".into(),
             };
         };
-        if here == active.row.origin && ship.hold_used > 0 {
+        // Every stop here is Booked or PickedUp, so current() is Some.
+        let Some(cur) = plan.current() else {
+            return Decision::Hold {
+                why: "waiting on the crane".into(),
+            };
+        };
+        // Cargo evidence: the single-contract crane proxy (aggregate hold), or —
+        // when the plan holds more than one contract — the stop's own word.
+        let laden = if plan.stops.len() == 1 {
+            ship.hold_used > 0
+        } else {
+            cur.word == ActiveWord::PickedUp
+        };
+        if here == cur.row.origin && laden {
             return Decision::Travel {
-                station: active.row.dest.clone(),
+                station: cur.row.dest.clone(),
             };
         }
-        if here != active.row.origin && here != active.row.dest && active.word == ActiveWord::Booked
-        {
+        if here != cur.row.origin && here != cur.row.dest && cur.word == ActiveWord::Booked {
             return Decision::Travel {
-                station: active.row.origin.clone(),
+                station: cur.row.origin.clone(),
             };
         }
         return Decision::Hold {
@@ -194,35 +273,13 @@ pub fn decide(
     // Deliberately BEFORE the low-fuel diversion: every plan below carries its own
     // reserve, and a load whose fuel-selling origin is reachable earns on the way
     // to the pump a bare diversion would fly for free.
-    let mut ranked: Vec<&LoadRow> = board
-        .iter()
-        .filter(|l| !l.held_for_other && l.units <= ship.hold_capacity)
-        .filter(|l| l.pilot_ticks() > 0 && l.estimated_net > 0)
-        .collect();
-    ranked.sort_by(|a, b| {
-        let ra = a.estimated_net as f64 / a.pilot_ticks() as f64;
-        let rb = b.estimated_net as f64 / b.pilot_ticks() as f64;
-        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    for l in ranked.into_iter().take(PRICED_CANDIDATES) {
-        let (Some(dead), Some(haul)) = (
-            router.fuel_between(here, &l.origin),
-            router.fuel_between(&l.origin, &l.dest),
-        ) else {
-            continue;
-        };
-        let whole = ((dead + haul) as f64 * RESERVE) as i64;
-        let dead_only = (dead as f64 * RESERVE) as i64;
-        let haul_only = (haul as f64 * RESERVE) as i64;
-        if ship.fuel >= whole
-            || (pumps.contains(l.origin.as_str())
-                && ship.fuel >= dead_only
-                && ship.fuel_capacity >= haul_only)
-        {
-            return Decision::Book {
-                load_id: l.load_id.clone(),
-            };
-        }
+    //
+    // Booking rides an EMPTY plan only while the exchange enforces one contract —
+    // filing a second would just be refused at the door. When UCF-Haul#43 lifts
+    // the cap, this gate widens to best_insertion over the live plan; the ranking
+    // below already speaks that shape.
+    if let Some(load_id) = best_insertion(ship, plan, board, pumps, router) {
+        return Decision::Book { load_id };
     }
 
     // No fuel-sound work. If the tank is the reason, go stand at a pump — but only
@@ -248,6 +305,99 @@ pub fn decide(
     Decision::Hold {
         why: "no fuelable work on the board".into(),
     }
+}
+
+/// Which open load best joins the plan — appended at its end, the minimal honest
+/// insertion heuristic (never a solver). Candidates that fit the hold beside the
+/// plan's own cargo are ranked by ℳ per tick of pilot time — with an empty plan
+/// that IS today's per-load rate, and appending changes no other stop's earnings,
+/// so the same number is the marginal rate — and the best one whose whole
+/// remaining journey the tank (plus pumps along the way) can actually fuel wins.
+pub fn best_insertion(
+    ship: &Ship,
+    plan: &Itinerary,
+    board: &[LoadRow],
+    pumps: &BTreeSet<String>,
+    router: &dyn Router,
+) -> Option<String> {
+    let here = ship.docked.as_deref()?;
+    let held = plan.units_held();
+    let mut ranked: Vec<&LoadRow> = board
+        .iter()
+        .filter(|l| !l.held_for_other && held + l.units <= ship.hold_capacity)
+        .filter(|l| l.pilot_ticks() > 0 && l.estimated_net > 0)
+        .collect();
+    ranked.sort_by(|a, b| {
+        let ra = a.estimated_net as f64 / a.pilot_ticks() as f64;
+        let rb = b.estimated_net as f64 / b.pilot_ticks() as f64;
+        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for l in ranked.into_iter().take(PRICED_CANDIDATES) {
+        let mut legs = plan_legs(plan, here);
+        let last = legs.last().map(|(_, to)| to.clone());
+        let pos = last.as_deref().unwrap_or(here);
+        legs.push((pos.to_string(), l.origin.clone()));
+        legs.push((l.origin.clone(), l.dest.clone()));
+        if plan_fuelable(ship, &legs, pumps, router) {
+            return Some(l.load_id.clone());
+        }
+    }
+    None
+}
+
+/// The plan's remaining flying, as (from, to) legs starting wherever the ship is:
+/// a Booked stop still owes the deadhead to its origin and the haul; a PickedUp
+/// stop owes only the haul. Delivered stops owe no movement.
+fn plan_legs(plan: &Itinerary, here: &str) -> Vec<(String, String)> {
+    let mut legs = Vec::new();
+    let mut pos = here.to_string();
+    for stop in &plan.stops {
+        match stop.word {
+            ActiveWord::Delivered => {}
+            ActiveWord::Booked => {
+                legs.push((pos.clone(), stop.row.origin.clone()));
+                legs.push((stop.row.origin.clone(), stop.row.dest.clone()));
+                pos = stop.row.dest.clone();
+            }
+            ActiveWord::PickedUp => {
+                legs.push((pos.clone(), stop.row.dest.clone()));
+                pos = stop.row.dest.clone();
+            }
+        }
+    }
+    legs
+}
+
+/// Can the tank fly this whole leg sequence? The walk splits at fuel-selling
+/// stations — arriving at a pump refills to capacity — so the check is: the FIRST
+/// stretch (before any pump) fits the tank as it stands, and every later stretch
+/// fits a full tank, each with the same reserve arithmetic the single-load rule
+/// has always used. A leg the router cannot price is a route the doctrine will
+/// not risk. With one candidate load and an empty plan this reduces exactly to
+/// the original pair of checks: `(dead+haul)·R ≤ fuel`, or a fuel-selling origin
+/// with `dead·R ≤ fuel` and `haul·R ≤ capacity`.
+fn plan_fuelable(
+    ship: &Ship,
+    legs: &[(String, String)],
+    pumps: &BTreeSet<String>,
+    router: &dyn Router,
+) -> bool {
+    let mut budget = ship.fuel;
+    let mut stretch: i64 = 0;
+    for (from, to) in legs {
+        let Some(cost) = router.fuel_between(from, to) else {
+            return false;
+        };
+        stretch += cost;
+        if pumps.contains(to.as_str()) {
+            if budget < (stretch as f64 * RESERVE) as i64 {
+                return false;
+            }
+            budget = ship.fuel_capacity;
+            stretch = 0;
+        }
+    }
+    stretch == 0 || budget >= (stretch as f64 * RESERVE) as i64
 }
 
 #[cfg(test)]
@@ -474,6 +624,179 @@ mod tests {
             Decision::Hold {
                 why: "no fuelable work on the board".into()
             }
+        );
+    }
+
+    // ——— T-232: the itinerary. Everything below exercises the plan layer over a
+    // stubbed multi-load world; the eleven tests above, unmodified, pin that the
+    // one-contract world still flies byte-for-byte through it.
+
+    fn stop(id: &str, origin: &str, dest: &str, word: ActiveWord) -> Active {
+        Active {
+            row: load(id, origin, dest, 500, (5, 10)),
+            word,
+        }
+    }
+
+    #[test]
+    fn the_wrapper_is_the_degenerate_plan_none_and_one_stop_agree() {
+        let ship = ship_at("tuna-prime", 500);
+        let board = [load("L1", "a", "b", 900, (5, 10))];
+        let one = stop("L2", "a", "b", ActiveWord::Booked);
+        for active in [None, Some(&one)] {
+            assert_eq!(
+                decide(&ship, active, &board, &pumps(&["a"]), &FlatRouter(10)),
+                decide_plan(
+                    &ship,
+                    &Itinerary::single(active.cloned()),
+                    &board,
+                    &pumps(&["a"]),
+                    &FlatRouter(10)
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn delivered_money_is_collected_before_the_rest_of_the_plan_moves() {
+        // Two contracts held: one delivered, one booked. The payout outranks the
+        // deadhead — collecting costs no movement.
+        let ship = ship_at("elsewhere", 500);
+        let plan = Itinerary {
+            stops: vec![
+                stop("EARN", "a", "b", ActiveWord::Delivered),
+                stop("NEXT", "c", "d", ActiveWord::Booked),
+            ],
+        };
+        let d = decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10));
+        assert_eq!(
+            d,
+            Decision::Collect {
+                load_id: "EARN".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_plan_is_worked_in_order_first_undelivered_stop_steers() {
+        // Docked away from everything, first stop booked: deadhead to ITS origin,
+        // not the second stop's.
+        let ship = ship_at("tuna-prime", 500);
+        let plan = Itinerary {
+            stops: vec![
+                stop("FIRST", "a", "b", ActiveWord::Booked),
+                stop("SECOND", "c", "d", ActiveWord::Booked),
+            ],
+        };
+        let d = decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10));
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "a".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_multi_stop_plan_reads_cargo_from_the_stops_own_word() {
+        // At the first stop's origin with its cargo aboard (per the ledger), the
+        // laden leg files — even though the aggregate hold can't say WHOSE units
+        // those are. The single-stop crane proxy (hold_used) stays pinned by
+        // a_full_hold_at_the_origin_files_the_laden_leg above.
+        let mut ship = ship_at("a", 500);
+        ship.hold_used = 0; // the aggregate lies; the word doesn't
+        let plan = Itinerary {
+            stops: vec![
+                stop("FIRST", "a", "b", ActiveWord::PickedUp),
+                stop("SECOND", "c", "d", ActiveWord::Booked),
+            ],
+        };
+        let d = decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10));
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "b".into()
+            }
+        );
+    }
+
+    #[test]
+    fn insertion_packs_the_hold_a_load_that_does_not_fit_beside_the_plan_waits() {
+        // 120-unit hold, 100 units committed: the fat lucrative load can't ride,
+        // the thin one can.
+        let ship = ship_at("here", 600);
+        let mut committed = stop("HELD", "x", "y", ActiveWord::PickedUp);
+        committed.row.units = 100;
+        let plan = Itinerary {
+            stops: vec![committed],
+        };
+        let mut fat = load("FAT", "a", "b", 10_000, (5, 10));
+        fat.units = 40;
+        let mut thin = load("THIN", "a", "b", 400, (5, 10));
+        thin.units = 20;
+        let picked = best_insertion(&ship, &plan, &[fat, thin], &pumps(&[]), &FlatRouter(10));
+        assert_eq!(picked, Some("THIN".into()));
+    }
+
+    #[test]
+    fn insertion_fuels_the_whole_remaining_plan_not_just_the_candidate() {
+        // The candidate's own legs are cheap — but the plan still owes a long
+        // laden leg first, and the shared tank must carry all of it.
+        struct PerLeg;
+        impl Router for PerLeg {
+            fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+                Some(match (from, to) {
+                    ("x", "far-y") => 400, // the plan's own laden leg
+                    _ => 50,
+                })
+            }
+        }
+        let ship = ship_at("x", 500); // covers 400+50+50 only without reserve
+        let plan = Itinerary {
+            stops: vec![stop("HELD", "w", "far-y", ActiveWord::PickedUp)],
+        };
+        let cheap = load("CHEAP", "a", "b", 900, (5, 10));
+        let picked = best_insertion(&ship, &plan, std::slice::from_ref(&cheap), &pumps(&[]), &PerLeg);
+        assert_eq!(picked, None, "600 of fuel cannot fly 500·1.2 of legs");
+        // A pump at the plan's own destination resets the tank — now it books.
+        let picked = best_insertion(&ship, &plan, &[cheap], &pumps(&["far-y"]), &PerLeg);
+        assert_eq!(picked, Some("CHEAP".into()));
+    }
+
+    #[test]
+    fn plan_fuel_walks_booked_stops_as_deadhead_plus_haul() {
+        // A booked (not picked-up) stop owes BOTH its legs before the candidate.
+        struct PerLeg;
+        impl Router for PerLeg {
+            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(100)
+            }
+        }
+        let ship = ship_at("here", 500);
+        let plan = Itinerary {
+            stops: vec![stop("HELD", "a", "b", ActiveWord::Booked)],
+        };
+        // Plan legs: here→a, a→b (200), candidate: b→c, c→d (200): 400·1.2 = 480 ≤ 500.
+        let ok = load("OK", "c", "d", 900, (5, 10));
+        assert_eq!(
+            best_insertion(&ship, &plan, &[ok], &pumps(&[]), &PerLeg),
+            Some("OK".into())
+        );
+        // One more unpriced leg anywhere refuses the whole plan.
+        struct OneBlind;
+        impl Router for OneBlind {
+            fn fuel_between(&self, from: &str, _: &str) -> Option<i64> {
+                if from == "a" {
+                    None
+                } else {
+                    Some(100)
+                }
+            }
+        }
+        let ok = load("OK", "c", "d", 900, (5, 10));
+        assert_eq!(
+            best_insertion(&ship, &plan, &[ok], &pumps(&[]), &OneBlind),
+            None
         );
     }
 

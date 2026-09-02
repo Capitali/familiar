@@ -6,6 +6,60 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-01 — T-232 brick 1: whisker's plan becomes an itinerary, and a restart forgets nothing
+
+Ian's direction (2026-08-31): multi-load, multi-stop freight is coming to the exchange
+(UCF-Haul#43) and "managing freight efficiently will be a key economic driver" — remove
+our blockers before the feature lands. The readiness audit found the shape already
+friendly and one live defect; this brick is the structures plus that fix.
+
+What changed, all in `crates/whisker`:
+
+- `doctrine::Itinerary { stops: Vec<Active> }` — the ordered plan, booking order.
+  `decide` stays as the front door and becomes the degenerate one-stop case of the new
+  `decide_plan`, so the eleven incident-pinned doctrine tests run **unmodified** — that
+  is the zero-behavior-change pin the task's accept bar names. Multi-stop navigation
+  works the plan in order by each stop's own ledger word; the one stated divergence is
+  that a multi-stop plan reads "cargo aboard" from the stop's `PickedUp` word, because
+  the aggregate `hold_used` cannot attribute units to one contract.
+- `doctrine::best_insertion` — the ranking generalized to the plan: candidates that fit
+  the hold BESIDE the plan's committed units, ranked by ℳ per pilot-tick (append-at-end
+  marginal rate; a heuristic, deliberately never a solver), fueled over the WHOLE
+  remaining leg sequence. `plan_fuelable` walks the legs and splits at fuel-selling
+  stations — with an empty plan the arithmetic reduces exactly to the original pair of
+  checks (`(dead+haul)·R ≤ fuel`, or pump-origin split), which the unmodified tests pin.
+- `ledger` (new module) — `reconcile` and `open_loads` move out of the runner as pure,
+  tested functions. `open_loads` is the audit's item-3 fix: **adoption takes every load
+  the ledger still shows open, oldest first, not the single newest** — newest-only
+  adoption would today abandon a delivered-but-uncollected payout the moment a second
+  load was open, and under multi-load would shed the rest of the plan on every restart.
+  The adoption closed-set now speaks reconcile's own vocabulary: `reverted`/`cancel`
+  (058a87c taught reconcile those words; the adoption scan had missed them, so a
+  restart could re-adopt a booking the fold had already undone). One deliberate
+  semantic tightening, stated for review: once a load's ledger shows closed, a later
+  "booked" noise event no longer resurrects it for adoption.
+- `main.rs` — tracks `plan: Itinerary` instead of `Option<Active>`; reconciles every
+  stop each cycle (`retain_mut`, journaling each closure); books only into an empty
+  plan while the exchange enforces one contract (widening to capacity-based booking is
+  the one-line change the day the cap lifts). No journal shape, file, or field changed
+  — nothing migrates.
+
+### Checks run
+
+Whisker: 25/0 (11 doctrine unmodified + 7 new plan-layer + 7 new ledger), fmt, clippy
+all-targets -D warnings. Full workspace bar run before merge (counts in the merge
+commit). No deploy in this commit; wildhorse's live whisker restarts on the landed
+main after codex's reciprocal review.
+
+### Next
+
+The seams UCF-Haul#43 will land in are marked in code: the board fetch and
+`decide_plan`'s booking gate both widen from "empty plan" to "plan has hold space";
+`best_insertion` may then try true insertion positions rather than append-at-end; the
+`laden` evidence seam wants per-load hold rows if the API offers them. LoadingOrder
+(metal#61 §1) becomes real exactly when multi-stop does — it is already a named, gated
+Automation in the enum.
+
 ## 2026-08-29 — T-221's following week is measured, and the miss rate did not heal
 
 The long-owed post-vocabulary-fix report is now recorded over one fixed complete calendar

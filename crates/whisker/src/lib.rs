@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 
 pub mod doctrine;
+pub mod ledger;
 
 /// One purchasable unit of ship automation. The names mirror the co-pilot-key scopes
 /// proposed to the exchange (ucf-exchange#15): a paid entitlement on the captain's
