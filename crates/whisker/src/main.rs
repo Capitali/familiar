@@ -22,14 +22,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
 use familiar_whisker::adoption::{
-    bookable, close_transition, freight_step, in_booking_order, resume_stale_course, WedgeRemedy,
-    WedgeWatch,
+    action_id_for, bookable, FoldAction, FoldFacts, FreightState, WedgeRemedy,
 };
-use familiar_whisker::doctrine::{
-    self, Active, ActiveWord, Decision, Itinerary, LoadRow, Router, Ship,
-};
+use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
-use familiar_whisker::{env_value, granted_automations, ledger, Automation};
+use familiar_whisker::{env_value, granted_automations, Automation};
 use familiar_world::lease::{self, SignedLease};
 use serde_json::{json, Value};
 
@@ -179,36 +176,6 @@ fn journal(ship_dir: &Path, entry: Value) {
         let _ = f.write_all(line.as_bytes());
     }
     println!("{entry}");
-}
-
-/// The ONE way a load leaves the runner's memory — a thin I/O shell over
-/// [`familiar_whisker::adoption::close_transition`], where the four effects
-/// (cooldown, intent purge, notice reset, one journal) are pure and pinned.
-#[allow(clippy::too_many_arguments)]
-fn close_load(
-    ship_dir: &Path,
-    lost_at: &mut HashMap<String, i64>,
-    recent: &mut HashMap<String, (i64, String)>,
-    adopt_noted: &mut BTreeSet<String>,
-    now: i64,
-    tick: i64,
-    load_id: &str,
-    reason: &str,
-    credits: i64,
-) {
-    let effect = close_transition(
-        lost_at,
-        recent,
-        adopt_noted,
-        load_id,
-        reason.to_string(),
-        tick,
-    );
-    journal(
-        ship_dir,
-        json!({"at": now, "tick": tick, "event": "load-closed",
-               "load": effect.load_id, "why": effect.reason, "credits": credits}),
-    );
 }
 
 fn ship_from(me: &Value) -> Ship {
@@ -377,22 +344,15 @@ fn main() -> ExitCode {
         Ok(_) | Err(_) => BTreeSet::new(),
     };
 
-    // The plan's contracts, booking order (T-232): today's exchange caps this at
-    // one, but nothing here assumes it. `pending_adopt` carries ledger-open load
-    // ids whose board row has not yet resolved — adoption is a RECONCILIATION
-    // that retries every cycle, never a startup one-shot (codex review, finding 1).
-    let mut loads: Vec<Active> = Vec::new();
-    let mut pending_adopt: Vec<String> = Vec::new();
-    let mut adopt_noted: BTreeSet<String> = BTreeSet::new();
+    // The runner's whole freight memory — contracts in booking order, the
+    // adoption retry list, the close cooldowns, the idempotency records, the
+    // stale-course watch — folded once per cycle as ONE pure typed transition
+    // (adoption::FreightState; the three reviews' converged shape). This shell
+    // journals the outcome and matches the action; it derives nothing itself.
+    let mut freight = FreightState::default();
     let mut pending_until: i64 = -1;
-    let mut recent: HashMap<String, (i64, String)> = HashMap::new();
-    // Loads that left us without paying, by the tick they did: not re-booked for a while.
-    let mut lost_at: HashMap<String, i64> = HashMap::new();
     let mut seq: u64 = 0;
     let mut last_refusal = String::new();
-    // Wedge watch: a course filed while dry never departs on its own after refuelling
-    // (ucf-exchange#16) — docked + course filed + unmoved needs a re-filed travel.
-    let mut wedge = WedgeWatch::default();
     let mut last_wedge_note = String::new();
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
     let trades = granted.contains(&Automation::Trade);
@@ -482,95 +442,75 @@ fn main() -> ExitCode {
             })
             .unwrap_or_default();
 
-        // A restart — or any drift — must not forget a held contract, and it must
-        // not forget ANY of them. Adoption is a per-cycle reconciliation with a
-        // pending-retry list (round-1 review finding 1; the step itself is pure and
-        // pinned in `adoption.rs`), and while ANY id is pending the scheduler below
-        // files no new commitment (round-2 review, finding 3). A close discovered
-        // here goes through the SAME close handler as a tracked load's (round-2
-        // review, finding 4) — cooldown, intent purge, journal, never silent.
-        if tick >= pending_until {
-            let mut lookup = |lid: &str| -> Option<LoadRow> {
-                for status in ["booked", "inTransit", "delivered"] {
-                    if let Ok(Value::Array(rows)) =
-                        wire.get(&format!("/v1/loadboard?status={status}"))
-                    {
-                        if let Some(row) =
-                            rows.iter().filter_map(load_row).find(|l| l.load_id == lid)
-                        {
-                            return Some(row);
-                        }
+        // ONE pure fold of the whole freight state (adoption with retry, tracked
+        // reconciliation, the shared close path, booking order, the belt's clock
+        // and validation) — the typed boundary every review round converged on.
+        // The shell journals what the fold decided and, below, MATCHES the
+        // action: nothing can reach trade or the doctrine except through
+        // FoldAction::Proceed.
+        let carry_intent: Option<String> = holdings
+            .iter()
+            .filter(|h| tick >= h.sellable_at && !h.sell_target.is_empty())
+            .max_by_key(|h| h.opened_tick)
+            .map(|h| h.sell_target.clone());
+        let mut lookup = |lid: &str| -> Option<LoadRow> {
+            for status in ["booked", "inTransit", "delivered"] {
+                if let Ok(Value::Array(rows)) = wire.get(&format!("/v1/loadboard?status={status}"))
+                {
+                    if let Some(row) = rows.iter().filter_map(load_row).find(|l| l.load_id == lid) {
+                        return Some(row);
                     }
                 }
-                None
-            };
-            let step = freight_step(&loads, &mut pending_adopt, &me, &mut lookup);
-            for a in step.adopted {
+            }
+            None
+        };
+        let (fold, gate) = freight.fold(
+            &FoldFacts {
+                me: &me,
+                docked: ship.docked.as_deref(),
+                route: &route_now,
+                fuel: ship.fuel,
+                fuel_capacity: ship.fuel_capacity,
+                tick,
+                folded: tick >= pending_until,
+                carry_intent: carry_intent.as_deref(),
+                pumps: &pumps,
+            },
+            &mut lookup,
+        );
+        for a in &fold.adopted {
+            journal(
+                &ship_dir,
+                json!({"at": now, "tick": tick,
+                "event": "adopted-held-contract", "load": a.row.load_id,
+                "word": format!("{:?}", a.word)}),
+            );
+        }
+        for c in &fold.closes {
+            journal(
+                &ship_dir,
+                json!({"at": now, "tick": tick, "event": "load-closed",
+                       "load": c.load_id, "why": c.reason, "credits": ship.credits}),
+            );
+        }
+        for lid in &fold.pending_notes {
+            journal(
+                &ship_dir,
+                json!({"at": now, "tick": tick,
+                "event": "adoption-pending", "load": lid,
+                "why": "ledger shows it open but no board row resolved this fold; retrying"}),
+            );
+        }
+        if let Some(note) = &fold.mismatch_note {
+            if *note != last_wedge_note {
                 journal(
                     &ship_dir,
-                    json!({"at": now, "tick": tick,
-                    "event": "adopted-held-contract", "load": a.row.load_id,
-                    "word": format!("{:?}", a.word)}),
+                    json!({"at": now, "tick": tick, "event": "stale-course-dropped", "why": note}),
                 );
-                adopt_noted.remove(&a.row.load_id);
-                loads.push(a);
+                last_wedge_note = note.clone();
             }
-            for (load_id, reason) in step.closed {
-                close_load(
-                    &ship_dir,
-                    &mut lost_at,
-                    &mut recent,
-                    &mut adopt_noted,
-                    now,
-                    tick,
-                    &load_id,
-                    &reason,
-                    ship.credits,
-                );
-            }
-            for load_id in step.pending {
-                // Say so once per life, keep trying.
-                if adopt_noted.insert(load_id.clone()) {
-                    journal(
-                        &ship_dir,
-                        json!({"at": now, "tick": tick,
-                        "event": "adoption-pending", "load": load_id,
-                        "why": "ledger shows it open but no board row resolved this fold; retrying"}),
-                    );
-                }
-            }
-            // The plan is booking order — (booked tick, load id), deterministic,
-            // never lookup-resolution order (adoption::in_booking_order, pinned).
-            loads = in_booking_order(loads, &ledger::open_loads(&me));
         }
-
-        // Reconcile every contract of the plan against the ledger — the fold is the
-        // truth, and each load has its own word (T-232). Not before a filed action
-        // has folded, though: until then the ledger's last word is about the
-        // PREVIOUS life of that load id (a re-booked contract still reads
-        // "reverted" for a tick), and closing on it books the same load a third time.
-        if tick >= pending_until {
-            loads.retain_mut(|a| match ledger::reconcile(&me, &a.row.load_id) {
-                Ok(word) => {
-                    a.word = word;
-                    true
-                }
-                Err(reason) => {
-                    close_load(
-                        &ship_dir,
-                        &mut lost_at,
-                        &mut recent,
-                        &mut adopt_noted,
-                        now,
-                        tick,
-                        &a.row.load_id,
-                        &reason,
-                        ship.credits,
-                    );
-                    false
-                }
-            });
-        }
+        let plan = fold.plan;
 
         // The two-step drive. On PROD, `travel` LAYS a course at the drive and a
         // separate `engage` departs it — and a laid-but-unengaged course shows as
@@ -617,69 +557,30 @@ fn main() -> ExitCode {
             continue;
         }
 
-        // The adoption gate (round-2 review, finding 3): while any ledger-open
-        // contract is still unresolved, the ship's freight state is UNKNOWN — no
-        // merchant buy, no carry leg, no new booking, no diversion, no movement
-        // for a resolved newer load. Engaging a laid course and waiting out a
-        // filed fold stayed above this line deliberately: they complete acts
-        // already in motion. A quiet hold, journaled once per change.
-        if !pending_adopt.is_empty() {
-            let why = format!(
-                "{} contract(s) unresolved; adopting first",
-                pending_adopt.len()
-            );
-            if why != last_refusal {
-                journal(
-                    &ship_dir,
-                    json!({"at": now, "tick": tick, "event": "holding-for-adoption",
-                           "pending": pending_adopt.clone(), "why": why}),
-                );
-                last_refusal = why;
+        // The fold's verdict, matched — the ONLY doorway to action selection
+        // (round-6 review, finding 1). A hold journals once per change and
+        // sleeps; a belt remedy is one validated wire action and the fold ends;
+        // Proceed alone reaches trade and the doctrine below.
+        match &gate {
+            FoldAction::HoldForAdoption { pending } => {
+                let why = format!("{} contract(s) unresolved; adopting first", pending.len());
+                if why != last_refusal {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "holding-for-adoption",
+                               "pending": pending, "why": why}),
+                    );
+                    last_refusal = why;
+                }
+                std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+                continue;
             }
-            std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
-            continue;
-        }
-
-        // The plan, compiled from the live ledger words — built HERE so the
-        // stale-course belt below validates against the same truth the decision
-        // at the bottom of the cycle uses.
-        let plan = Itinerary::sequential(loads.clone(), &pumps);
-
-        // The stale-course belt, an explicit scheduler action BELOW the adoption
-        // and pending-action gates (round-4 review, finding 1). The watch names
-        // exactly one remedy per firing (engage first; the re-filed travel only
-        // if the same course survives another threshold), the laid destination
-        // is validated against what the ship would head for NOW — the plan's
-        // working stop, or the merchant's carry intent when freight is empty —
-        // and a successful act sets pending_until and ends the fold: one wire
-        // action, then the next fold. A mismatched course is simply not
-        // resumed; the ordinary decision files the right travel itself.
-        if let Some(remedy) = wedge.observe(
-            ship.docked.as_deref(),
-            &route_now,
-            ship.fuel,
-            ship.fuel_capacity,
-            pending_adopt.len(),
-            tick,
-        ) {
-            let intended: Option<String> =
-                plan.current().map(|s| s.station.clone()).or_else(|| {
-                    holdings
-                        .iter()
-                        .filter(|h| tick >= h.sellable_at && !h.sell_target.is_empty())
-                        .max_by_key(|h| h.opened_tick)
-                        .map(|h| h.sell_target.clone())
-                });
-            let laid = route_now.last().cloned();
-            if resume_stale_course(laid.as_deref(), intended.as_deref()) {
+            FoldAction::Belt { remedy, dest } => {
                 seq += 1;
                 let id = format!("whisker-{}-{}", now_secs(), seq);
                 let (body, verb) = match remedy {
                     WedgeRemedy::Engage => (json!({"type": "engage"}), "engage"),
-                    WedgeRemedy::Refile => (
-                        json!({"type": "travel", "station": laid.clone().unwrap_or_default()}),
-                        "travel",
-                    ),
+                    WedgeRemedy::Refile => (json!({"type": "travel", "station": dest}), "travel"),
                 };
                 match wire.act(body, &id) {
                     Ok(ack) => {
@@ -691,7 +592,7 @@ fn main() -> ExitCode {
                         journal(
                             &ship_dir,
                             json!({"at": now, "tick": tick, "event": "unwedged-course",
-                            "remedy": verb, "to": laid, "resolves": pending_until - 1}),
+                            "remedy": verb, "to": dest, "resolves": pending_until - 1}),
                         );
                     }
                     Err(e) => journal(
@@ -703,29 +604,19 @@ fn main() -> ExitCode {
                 std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
                 continue;
             }
-            let note = format!(
-                "laid course to {laid:?} no longer matches intent {intended:?}; not resumed"
-            );
-            if note != last_wedge_note {
-                journal(
-                    &ship_dir,
-                    json!({"at": now, "tick": tick, "event": "stale-course-dropped", "why": note}),
-                );
-                last_wedge_note = note;
-            }
+            FoldAction::Proceed => {}
         }
 
         // The board, only when the judgment could use it.
         // No booking while any open contract is still unresolved (codex review,
         // finding 1): an unseen held contract plus a fresh booking is a refused
         // double-book at best and a forgotten commitment at worst.
-        let board: Vec<LoadRow> = if loads.is_empty() && pending_adopt.is_empty() && !ship.in_flight
-        {
+        let board: Vec<LoadRow> = if freight.loads.is_empty() && !ship.in_flight {
             match wire.get("/v1/loadboard?status=open") {
                 Ok(Value::Array(rows)) => rows
                     .iter()
                     .filter_map(load_row)
-                    .filter(|l| bookable(&lost_at, &l.load_id, tick, LOST_COOLDOWN_TICKS))
+                    .filter(|l| bookable(&freight.lost_at, &l.load_id, tick, LOST_COOLDOWN_TICKS))
                     .collect(),
                 Ok(_) | Err(_) => Vec::new(),
             }
@@ -789,7 +680,7 @@ fn main() -> ExitCode {
             // own word (doctrine::freight_aboard, pinned): a Delivered load's
             // cargo already left with the crane, and counting it here deleted a
             // real merchant lot (round-3 review, finding 2).
-            let freight_aboard = doctrine::freight_aboard(&loads);
+            let freight_aboard = doctrine::freight_aboard(&freight.loads);
             let galaxy_for_hint = if cargo.is_empty() {
                 Vec::new()
             } else {
@@ -825,7 +716,8 @@ fn main() -> ExitCode {
                 // Freight needs the space back only when a BOOKED contract's cargo would
                 // not fit beside what we carry. A loaded or delivered contract already
                 // has its room; a fitting one rides alongside.
-                let need_hold = loads
+                let need_hold = freight
+                    .loads
                     .iter()
                     .any(|a| a.word == ActiveWord::Booked && a.row.units > spare_hold);
                 let board_here = wire
@@ -907,7 +799,7 @@ fn main() -> ExitCode {
                         units,
                         sell_target,
                         est_margin,
-                    } if loads.is_empty() => {
+                    } if freight.loads.is_empty() => {
                         let takes = wire
                             .get(&format!("/v1/stations/{sell_target}/quotes"))
                             .map(|v| trade::parse_board(&v))
@@ -945,7 +837,7 @@ fn main() -> ExitCode {
                         *units,
                         true,
                     )),
-                    TradeDecision::Buy { good, units, .. } if loads.is_empty() => Some((
+                    TradeDecision::Buy { good, units, .. } if freight.loads.is_empty() => Some((
                         json!({"type": "buy", "station": here, "good": good, "units": units}),
                         good.clone(),
                         *units,
@@ -1028,7 +920,7 @@ fn main() -> ExitCode {
                 // clears — fly it toward its market so the arb can close. Before the
                 // clock there is nothing to do at the market but wait, so the goods
                 // ride under freight instead.
-                if loads.is_empty() && !ship.in_flight {
+                if freight.loads.is_empty() && !ship.in_flight {
                     if let Some(h) = holdings
                         .iter()
                         .filter(|h| tick >= h.sellable_at && !h.sell_target.is_empty())
@@ -1150,7 +1042,8 @@ fn main() -> ExitCode {
             // The same intent inside the window is the same decision, never re-filed —
             // the zigzag-to-empty lesson.
             let sig = body.to_string();
-            let fresh = recent
+            let fresh = freight
+                .recent
                 .get(&sig)
                 .map(|(t, _)| tick - t >= 15)
                 .unwrap_or(true);
@@ -1158,16 +1051,10 @@ fn main() -> ExitCode {
                 // The id is minted once per INTENT and reused on every re-send of it,
                 // so a retry after a transient failure is idempotent at the exchange
                 // rather than a second order (retry the id, never the intent).
-                let action_id = recent
-                    .get(&sig)
-                    .map(|(_, id)| id.clone())
-                    .unwrap_or_else(|| {
-                        seq += 1;
-                        format!("whisker-{}-{}", now_secs(), seq)
-                    });
+                let action_id = action_id_for(&freight.recent, &sig, &mut seq, now_secs());
                 match wire.act(body.clone(), &action_id) {
                     Ok(ack) => {
-                        recent.insert(sig, (tick, action_id));
+                        freight.recent.insert(sig, (tick, action_id));
                         pending_until = ack
                             .get("resolvesAtTick")
                             .and_then(Value::as_i64)
@@ -1181,7 +1068,7 @@ fn main() -> ExitCode {
                         );
                         if let Decision::Book { load_id } = &decision {
                             if let Some(row) = board.iter().find(|l| &l.load_id == load_id) {
-                                loads.push(Active {
+                                freight.loads.push(Active {
                                     row: row.clone(),
                                     word: ActiveWord::Booked,
                                 });

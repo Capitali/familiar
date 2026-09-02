@@ -19,7 +19,7 @@
 //! purge, journal — exactly like a tracked load's close (round-2 review, finding
 //! 4: a close that bypasses the cooldown re-books the same dead contract).
 
-use crate::doctrine::{Active, LoadRow};
+use crate::doctrine::{Active, Itinerary, LoadRow};
 use crate::ledger;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
@@ -146,12 +146,39 @@ pub fn close_transition(
     tick: i64,
 ) -> CloseEffect {
     lost_at.insert(load_id.to_string(), tick);
-    recent.retain(|sig, _| !sig.contains(load_id));
+    // Exact-match purge, never substring (round-6 review, finding 4): the
+    // signature is the action's JSON body, and "L1" is a substring of "L10" —
+    // closing one load must not delete another's idempotency record.
+    recent.retain(|sig, _| {
+        serde_json::from_str::<Value>(sig)
+            .ok()
+            .and_then(|v| v.get("loadId").and_then(|l| l.as_str().map(String::from)))
+            .map(|lid| lid != load_id)
+            .unwrap_or(true)
+    });
     adopt_noted.remove(load_id);
     CloseEffect {
         load_id: load_id.to_string(),
         reason,
     }
+}
+
+/// The idempotency id an intent files under — the SAME id for the same still-
+/// remembered intent (retry the id, never the intent; ucf-exchange#14), a
+/// freshly minted one otherwise. Pinned beside [`close_transition`] so "a dead
+/// life's id never answers for a fresh one" is a provable pair, not two code
+/// sites that agree by luck.
+pub fn action_id_for(
+    recent: &HashMap<String, (i64, String)>,
+    sig: &str,
+    seq: &mut u64,
+    now_secs: i64,
+) -> String {
+    if let Some((_, id)) = recent.get(sig) {
+        return id.clone();
+    }
+    *seq += 1;
+    format!("whisker-{now_secs}-{seq}")
 }
 
 /// May this load be booked again yet? The question the board filter asks of
@@ -162,6 +189,186 @@ pub fn bookable(lost_at: &HashMap<String, i64>, load_id: &str, tick: i64, cooldo
         .get(load_id)
         .map(|t| tick - t > cooldown)
         .unwrap_or(true)
+}
+
+/// What the fold decided the runner may DO next — the typed boundary the
+/// round-6 review required: action selection lives behind the `Proceed` arm of
+/// the runner's match, a hold journals-and-sleeps, and a belt remedy is one
+/// validated wire action. There is no way to reach the scheduler without
+/// consuming this value.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FoldAction {
+    /// Ledger-open contracts are unresolved: file NOTHING new this fold.
+    HoldForAdoption { pending: Vec<String> },
+    /// The stale-course belt fires: exactly this one remedy toward this laid
+    /// destination, already validated against the fold's own intent.
+    Belt { remedy: WedgeRemedy, dest: String },
+    /// The freight state is known — trade and the doctrine may act.
+    Proceed,
+}
+
+/// Everything one pre-action fold decided, for the I/O shell to journal and act on.
+#[derive(Debug)]
+pub struct FoldOutcome {
+    /// Contracts adopted this fold (already appended to the state's loads).
+    pub adopted: Vec<Active>,
+    /// Every close this fold — pending and tracked alike, each already applied
+    /// through [`close_transition`]; journal each exactly once.
+    pub closes: Vec<CloseEffect>,
+    /// Pending ids whose once-per-life notice is newly due.
+    pub pending_notes: Vec<String>,
+    /// A laid course that did NOT match the fold's intent (journal once).
+    pub mismatch_note: Option<String>,
+    /// The plan compiled AFTER this fold's bookkeeping — the decision's truth.
+    pub plan: Itinerary,
+}
+
+/// The facts one fold observes, handed in by the I/O shell.
+pub struct FoldFacts<'a> {
+    pub me: &'a Value,
+    pub docked: Option<&'a str>,
+    pub route: &'a [String],
+    pub fuel: i64,
+    pub fuel_capacity: i64,
+    pub tick: i64,
+    /// True when no filed action is still waiting on its fold — adoption,
+    /// reconciliation, and belt EXECUTION all defer to an unfolded action,
+    /// while the belt's clock keeps running (round-6 review, finding 2).
+    pub folded: bool,
+    /// Where the merchant would carry next, when freight is empty — the
+    /// second half of the belt's destination validation.
+    pub carry_intent: Option<&'a str>,
+    pub pumps: &'a std::collections::BTreeSet<String>,
+}
+
+/// The runner's whole freight memory, folded as ONE pure transition per cycle
+/// (all three reviews' converged demand): adoption with retry, tracked
+/// reconciliation, the shared close path, booking order, the belt's clock and
+/// validation — facts in, a typed action out. The I/O shell journals the
+/// outcome and matches the action; it derives nothing itself.
+#[derive(Debug, Default)]
+pub struct FreightState {
+    pub loads: Vec<Active>,
+    pub pending: Vec<String>,
+    pub lost_at: HashMap<String, i64>,
+    pub recent: HashMap<String, (i64, String)>,
+    pub adopt_noted: BTreeSet<String>,
+    pub wedge: WedgeWatch,
+}
+
+impl FreightState {
+    pub fn fold(
+        &mut self,
+        facts: &FoldFacts,
+        lookup: &mut dyn FnMut(&str) -> Option<LoadRow>,
+    ) -> (FoldOutcome, FoldAction) {
+        let mut adopted = Vec::new();
+        let mut closes = Vec::new();
+        let mut pending_notes = Vec::new();
+
+        if facts.folded {
+            // Adoption — every ledger-open contract, retried until resolved.
+            for outcome in adopt_step(&self.loads, &mut self.pending, facts.me, lookup) {
+                match outcome {
+                    AdoptOutcome::Adopted(a) => {
+                        self.adopt_noted.remove(&a.row.load_id);
+                        adopted.push(a.clone());
+                        self.loads.push(a);
+                    }
+                    AdoptOutcome::Closed { load_id, reason } => {
+                        closes.push(close_transition(
+                            &mut self.lost_at,
+                            &mut self.recent,
+                            &mut self.adopt_noted,
+                            &load_id,
+                            reason,
+                            facts.tick,
+                        ));
+                    }
+                    AdoptOutcome::Pending { load_id } => {
+                        if self.adopt_noted.insert(load_id.clone()) {
+                            pending_notes.push(load_id);
+                        }
+                    }
+                }
+            }
+            // Tracked reconciliation — the fold is the truth, through the SAME
+            // close path as a pending close.
+            let mut kept = Vec::with_capacity(self.loads.len());
+            for mut a in std::mem::take(&mut self.loads) {
+                match ledger::reconcile(facts.me, &a.row.load_id) {
+                    Ok(word) => {
+                        a.word = word;
+                        kept.push(a);
+                    }
+                    Err(reason) => {
+                        closes.push(close_transition(
+                            &mut self.lost_at,
+                            &mut self.recent,
+                            &mut self.adopt_noted,
+                            &a.row.load_id,
+                            reason,
+                            facts.tick,
+                        ));
+                    }
+                }
+            }
+            self.loads = in_booking_order(kept, &ledger::open_loads(facts.me));
+        }
+
+        let plan = Itinerary::sequential(self.loads.clone(), facts.pumps);
+
+        // The belt's clock runs EVERY fold — a pending adoption or an unfolded
+        // action holds the FIRING, never the counting (round-6 finding 2), so
+        // a course that stood ready through an adoption outage is engaged on
+        // the very fold the freight state clears.
+        let holds = self.pending.len() + usize::from(!facts.folded);
+        let fired = self.wedge.observe(
+            facts.docked,
+            facts.route,
+            facts.fuel,
+            facts.fuel_capacity,
+            holds,
+            facts.tick,
+        );
+
+        let mut mismatch_note = None;
+        let action = if !self.pending.is_empty() {
+            FoldAction::HoldForAdoption {
+                pending: self.pending.clone(),
+            }
+        } else if let Some(remedy) = fired {
+            let intended: Option<String> = plan
+                .current()
+                .map(|s| s.station.clone())
+                .or_else(|| facts.carry_intent.map(String::from));
+            let laid = facts.route.last().cloned();
+            if resume_stale_course(laid.as_deref(), intended.as_deref()) {
+                FoldAction::Belt {
+                    remedy,
+                    dest: laid.unwrap_or_default(),
+                }
+            } else {
+                mismatch_note = Some(format!(
+                    "laid course to {laid:?} no longer matches intent {intended:?}; not resumed"
+                ));
+                FoldAction::Proceed
+            }
+        } else {
+            FoldAction::Proceed
+        };
+
+        (
+            FoldOutcome {
+                adopted,
+                closes,
+                pending_notes,
+                mismatch_note,
+                plan,
+            },
+            action,
+        )
+    }
 }
 
 /// What one matured wedge firing is allowed to do — exactly ONE wire action
@@ -309,6 +516,191 @@ mod tests {
             loading_ticks: 8,
             held_for_other: false,
         }
+    }
+
+    fn facts<'a>(
+        me: &'a Value,
+        docked: Option<&'a str>,
+        route: &'a [String],
+        tick: i64,
+        pumps: &'a BTreeSet<String>,
+    ) -> FoldFacts<'a> {
+        FoldFacts {
+            me,
+            docked,
+            route,
+            fuel: 500,
+            fuel_capacity: 600,
+            tick,
+            folded: true,
+            carry_intent: None,
+            pumps,
+        }
+    }
+
+    #[test]
+    fn the_scheduler_is_unreachable_between_a_missed_lookup_and_its_adoption() {
+        // Round-6 finding 1, at the runner-facing boundary: the fold RETURNS the
+        // action, and the shell can only act by matching it — fold one holds,
+        // fold two proceeds with the contract adopted. No Buy, carry, booking,
+        // diversion, belt, or movement exists outside the Proceed/Belt arms.
+        let me = me(&[("L1", "booked", 100)]);
+        let pumps = BTreeSet::new();
+        let route: Vec<String> = Vec::new();
+        let mut state = FreightState::default();
+
+        let mut miss = |_: &str| -> Option<LoadRow> { None };
+        let (out, action) = state.fold(&facts(&me, Some("berth"), &route, 100, &pumps), &mut miss);
+        assert_eq!(
+            action,
+            FoldAction::HoldForAdoption {
+                pending: vec!["L1".to_string()]
+            }
+        );
+        assert!(out.adopted.is_empty() && out.closes.is_empty());
+        assert_eq!(
+            out.pending_notes,
+            vec!["L1".to_string()],
+            "one notice, once"
+        );
+
+        let mut hit = |lid: &str| -> Option<LoadRow> { Some(row(lid)) };
+        let (out, action) = state.fold(&facts(&me, Some("berth"), &route, 101, &pumps), &mut hit);
+        assert_eq!(action, FoldAction::Proceed);
+        assert_eq!(out.adopted.len(), 1);
+        assert!(out.pending_notes.is_empty(), "the notice was already given");
+        assert_eq!(state.loads.len(), 1);
+    }
+
+    #[test]
+    fn a_course_that_stood_ready_through_adoption_engages_on_the_resolving_fold() {
+        // Round-6 finding 2's exact production sequence: pending L plus an
+        // unchanged laid course at t100; still pending past the threshold; L
+        // resolves at t141 — and the belt fires EXACTLY ONE validated Engage on
+        // that same fold, because the clock ran through the hold.
+        let ledger_me = me(&[("L1", "booked", 90)]);
+        let pumps = BTreeSet::new();
+        let route = vec!["titan-larder".to_string()];
+        let mut state = FreightState::default();
+        let mut miss = |_: &str| -> Option<LoadRow> { None };
+
+        let (_, action) = state.fold(
+            &facts(&ledger_me, Some("berth"), &route, 100, &pumps),
+            &mut miss,
+        );
+        assert!(matches!(action, FoldAction::HoldForAdoption { .. }));
+        let (_, action) = state.fold(
+            &facts(&ledger_me, Some("berth"), &route, 135, &pumps),
+            &mut miss,
+        );
+        assert!(
+            matches!(action, FoldAction::HoldForAdoption { .. }),
+            "past the threshold, still pending: the belt holds but the clock ran"
+        );
+
+        // L resolves: Booked toward titan-larder — the laid course IS the plan's
+        // working station, so the resolution fold engages it, once.
+        let mut hit = |lid: &str| -> Option<LoadRow> {
+            let mut r = row(lid);
+            r.origin = "titan-larder".into();
+            Some(r)
+        };
+        let (out, action) = state.fold(
+            &facts(&ledger_me, Some("berth"), &route, 141, &pumps),
+            &mut hit,
+        );
+        assert_eq!(out.adopted.len(), 1);
+        assert_eq!(
+            action,
+            FoldAction::Belt {
+                remedy: WedgeRemedy::Engage,
+                dest: "titan-larder".to_string()
+            }
+        );
+        // And a course pointing somewhere the plan does NOT want is dropped.
+        let me2 = me(&[("L2", "booked", 150)]);
+        let stale = vec!["merchant-market".to_string()];
+        let mut state2 = FreightState::default();
+        let mut hit2 = |lid: &str| -> Option<LoadRow> { Some(row(lid)) }; // origin "a"
+        let (_, a1) = state2.fold(&facts(&me2, Some("berth"), &stale, 200, &pumps), &mut hit2);
+        assert_eq!(a1, FoldAction::Proceed);
+        let (out2, a2) = state2.fold(&facts(&me2, Some("berth"), &stale, 232, &pumps), &mut hit2);
+        assert_eq!(a2, FoldAction::Proceed, "mismatched course: never resumed");
+        assert!(out2.mismatch_note.is_some());
+    }
+
+    #[test]
+    fn both_close_paths_run_the_whole_life_cooldown_fresh_id_included() {
+        // Round-6 finding 3, end to end through the production transition, BOTH
+        // callers: a pending close and a tracked close each run close_transition;
+        // the cooldown feeds the same `bookable` the board filter uses; the dead
+        // life's intent id is never reused; a strictly later life gets a fresh
+        // notice.
+        let pumps = BTreeSet::new();
+        let route: Vec<String> = Vec::new();
+
+        // — the PENDING caller —
+        let mut state = FreightState::default();
+        let sig = "{\"loadId\":\"L1\",\"type\":\"book\"}".to_string();
+        let sib = "{\"loadId\":\"L10\",\"type\":\"book\"}".to_string();
+        state
+            .recent
+            .insert(sig.clone(), (90, "dead-id".to_string()));
+        state
+            .recent
+            .insert(sib.clone(), (90, "sibling-id".to_string()));
+        state.pending.push("L1".to_string());
+        state.adopt_noted.insert("L1".to_string());
+        let me1 = me(&[("L1", "booked", 100), ("L1", "reverted", 150)]);
+        let mut nolookup = |_: &str| -> Option<LoadRow> { panic!("closed ids are not looked up") };
+        let (out, action) = state.fold(
+            &facts(&me1, Some("berth"), &route, 150, &pumps),
+            &mut nolookup,
+        );
+        assert_eq!(out.closes.len(), 1, "exactly one close journal effect");
+        assert_eq!(action, FoldAction::Proceed);
+        // The cooldown the live board filter reads:
+        assert!(!bookable(&state.lost_at, "L1", 150 + 60, 60));
+        assert!(bookable(&state.lost_at, "L1", 150 + 61, 60));
+        // The dead life's id is gone — a fresh intent mints a fresh id — while
+        // the SIBLING L10's record survived the exact-match purge (finding 4):
+        let mut seq = 7u64;
+        let fresh = action_id_for(&state.recent, &sig, &mut seq, 999);
+        assert_ne!(fresh, "dead-id");
+        assert_eq!(
+            action_id_for(&state.recent, &sib, &mut seq, 999),
+            "sibling-id"
+        );
+        // A strictly later life is pending again WITH a fresh notice:
+        let me2 = me(&[
+            ("L1", "booked", 100),
+            ("L1", "reverted", 150),
+            ("L1", "booked", 230),
+        ]);
+        let mut miss = |_: &str| -> Option<LoadRow> { None };
+        let (out, action) = state.fold(&facts(&me2, Some("berth"), &route, 231, &pumps), &mut miss);
+        assert!(matches!(action, FoldAction::HoldForAdoption { .. }));
+        assert_eq!(
+            out.pending_notes,
+            vec!["L1".to_string()],
+            "the fresh life's notice"
+        );
+
+        // — the TRACKED caller —
+        let mut state = FreightState::default();
+        state.loads.push(Active {
+            row: row("L2"),
+            word: ActiveWord::Booked,
+        });
+        let me3 = me(&[("L2", "booked", 100), ("L2", "reverted", 160)]);
+        let mut nolookup2 = |_: &str| -> Option<LoadRow> { panic!("nothing pends") };
+        let (out, _) = state.fold(
+            &facts(&me3, Some("berth"), &route, 160, &pumps),
+            &mut nolookup2,
+        );
+        assert_eq!(out.closes.len(), 1, "the tracked close runs the same path");
+        assert!(state.loads.is_empty());
+        assert!(!bookable(&state.lost_at, "L2", 200, 60));
     }
 
     #[test]

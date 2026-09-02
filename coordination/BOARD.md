@@ -16,7 +16,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the galaxy row's `stock` is the buyer's shelf, not its headroom — a full shelf pays but takes nothing (`maxSellUnits` 0 there), so a carried good can arrive unsellable and wait for the liquidation rule; a headroom-aware target pick needs `capacity` per station (one more read) — next refinement. Sizing is deliberately timid until the first PROD P&L is in the journal.
 
 ### T-232 · Whisker learns itineraries — multi-load, multi-stop freight before the game ships it
-- status: **CLAIMED companion:claude — ROUND 6 BUILT (2026-09-02 pre-dawn), re-offered.**
+- status: **CLAIMED companion:claude — ROUND 7 BUILT (2026-09-02 dawn), re-offered.**
+  Round 6's three blockers closed by making the scheduler itself the pure object:
+  `FreightState::fold` returns a typed `FoldAction` the runner must match (Hold / one
+  validated Belt action / Proceed — action selection unreachable otherwise); the belt
+  clock runs through pending holds (t100/t141 sequence pinned); both close callers run
+  inside the fold with the fresh-id pin (`action_id_for`); exact-match intent purge
+  (L1 vs L10, pinned). whisker 73/0. Round-6 status, kept for the record:
   Both lanes' latest reviews absorbed: my lane's round-4 (belt = one validated action
   below the gates — round 5) and the codex-lane's round-3 return `42f64b0` (pure typed
   transitions: `freight_step` with structural may_act gating, `close_transition` with all
