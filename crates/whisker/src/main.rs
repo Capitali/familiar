@@ -766,6 +766,47 @@ fn main() -> ExitCode {
                 } else {
                     last_merchant_idle.clear();
                 }
+                // A buy is sized once more against the BUYER's shelf: the galaxy row
+                // says what a berth pays, not how much it will take, and a full shelf
+                // (bluefin at titania-cold-store: maxSellUnits 2) pays for nothing.
+                // One extra read, only on the fold that would spend money.
+                let td = match td {
+                    TradeDecision::Buy {
+                        good,
+                        units,
+                        sell_target,
+                        est_margin,
+                    } if active.is_none() => {
+                        let takes = wire
+                            .get(&format!("/v1/stations/{sell_target}/quotes"))
+                            .map(|v| trade::parse_board(&v))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .find(|q| q.good == good)
+                            .map(|q| q.max_sell)
+                            .unwrap_or(0);
+                        if takes <= 0 {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "merchant-idle",
+                                "at_station": here, "why": format!("{sell_target} takes no {good} right now (shelf full)"),
+                                "credits": ship.credits}),
+                            );
+                            TradeDecision::Idle {
+                                why: "buyer's shelf full".into(),
+                            }
+                        } else {
+                            let capped = units.min(takes);
+                            TradeDecision::Buy {
+                                good,
+                                units: capped,
+                                sell_target,
+                                est_margin: est_margin * capped / units.max(1),
+                            }
+                        }
+                    }
+                    other => other,
+                };
                 let trade_body = match &td {
                     TradeDecision::Sell { good, units, .. } => Some((
                         json!({"type": "sell", "station": here, "good": good, "units": units}),
