@@ -256,35 +256,7 @@ fn reconcile(me: &Value, load_id: &str) -> Result<Option<ActiveWord>, String> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let mut word = ActiveWord::Booked;
-    for e in events {
-        let e_lower = e.to_lowercase();
-        if e_lower.contains("payment taken") || e_lower.contains("collected") {
-            return Err(format!("settled: {e}"));
-        }
-        // Every way a load leaves us without paying. "reverted" is the one that
-        // stranded KK II at foxys-diner (booked t6195, reverted t6265, 2026-09-01):
-        // a fold can UNDO a booking, and without this word the ledger shows no
-        // terminal event, reconcile defaults to Booked, and she waits forever for a
-        // crane to load a contract that no longer exists. "cancel" covers a
-        // cancelBooking too.
-        if e_lower.contains("rejected")
-            || e_lower.contains("expired")
-            || e_lower.contains("lapsed")
-            || e_lower.contains("reverted")
-            || e_lower.contains("cancel")
-        {
-            return Err(format!("lost: {e}"));
-        }
-        if e_lower.contains("delivered") {
-            word = ActiveWord::Delivered;
-        } else if (e_lower.contains("pickedup") || e_lower.contains("picked up"))
-            && word == ActiveWord::Booked
-        {
-            word = ActiveWord::PickedUp;
-        }
-    }
-    Ok(Some(word))
+    familiar_whisker::doctrine::ledger_word(&events)
 }
 
 fn main() -> ExitCode {
@@ -399,6 +371,20 @@ fn main() -> ExitCode {
     let mut wedge: Option<(String, Vec<String>)> = None;
     let mut wedge_since: i64 = -1;
     let mut adopted = false;
+    // A restart inside a fold we filed: the journal's last "acted" line names the
+    // tick it resolves at. Until then the ledger and the load board do not show our
+    // own order, and deciding again re-files it (PROD L2831, 2026-09-02: booked,
+    // then "rejected: load is not open" for the restart's duplicate, same tick).
+    let mut pending_from_journal: i64 = std::fs::read_to_string(ship_dir.join("journal.jsonl"))
+        .ok()
+        .and_then(|j| {
+            j.lines()
+                .rev()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .find(|v| v.get("event").and_then(Value::as_str) == Some("acted"))
+                .and_then(|v| v.get("resolves").and_then(Value::as_i64))
+        })
+        .unwrap_or(-1);
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
     let trades = granted.contains(&Automation::Trade);
     let mut last_carry_block = String::new();
@@ -490,6 +476,18 @@ fn main() -> ExitCode {
         // A restart must not forget a held contract — the exchange allows ONE at a
         // time, and a pilot that assumes idle double-books and is refused. Adopt the
         // newest load the ledger still shows open.
+        if pending_from_journal >= 0 {
+            if tick <= pending_from_journal {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "awaiting-our-own-fold",
+                           "resolves": pending_from_journal}),
+                );
+                std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+                continue;
+            }
+            pending_from_journal = -1;
+        }
         if !adopted {
             adopted = true;
             let mut open: Vec<(i64, String)> = Vec::new();

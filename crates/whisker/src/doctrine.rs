@@ -121,6 +121,47 @@ pub fn contract_accel(ship_accel_milli_g: i64, class_bps: i64) -> i64 {
     (ship_accel_milli_g * class_bps / 10_000).max(1)
 }
 
+/// The ledger's word about one load, read as a STATE MACHINE over its events in
+/// order — never as "the first terminal-looking word". `Ok(Some(word))` is a live
+/// contract; `Err(reason)` is settled or lost, either way no longer ours to fly.
+///
+/// The order matters: a duplicate booking refused AFTER the real one ("booked",
+/// then "rejected: load is not open" — PROD L2831 when a restart re-filed inside the
+/// fold, 2026-09-02) is noise on a live contract, not its loss. A refusal only loses
+/// a load that was never ours; a revert, expiry, lapse or cancel loses it whenever.
+pub fn ledger_word(events: &[&str]) -> Result<Option<ActiveWord>, String> {
+    let mut word: Option<ActiveWord> = None;
+    for e in events {
+        let l = e.to_lowercase();
+        if l.contains("payment taken") || l.contains("collected") {
+            return Err(format!("settled: {e}"));
+        }
+        if l.contains("reverted")
+            || l.contains("expired")
+            || l.contains("lapsed")
+            || l.contains("cancel")
+        {
+            return Err(format!("lost: {e}"));
+        }
+        if l.contains("rejected") {
+            if word.is_none() {
+                return Err(format!("lost: {e}"));
+            }
+            continue; // a refused extra order on a contract we already hold
+        }
+        if l.contains("delivered") {
+            word = Some(ActiveWord::Delivered);
+        } else if l.contains("pickedup") || l.contains("picked up") {
+            if word != Some(ActiveWord::Delivered) {
+                word = Some(ActiveWord::PickedUp);
+            }
+        } else if l.contains("booked") && word.is_none() {
+            word = Some(ActiveWord::Booked);
+        }
+    }
+    Ok(Some(word.unwrap_or(ActiveWord::Booked)))
+}
+
 /// What the pilot wants to do next. Every consequential variant names the
 /// [`crate::Automation`] it exercises via [`Decision::automation`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,6 +536,38 @@ mod tests {
         ship.credits = 20_000;
         let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
         assert_eq!(d, Decision::Repair);
+    }
+
+    #[test]
+    fn the_ledger_is_read_in_order_and_a_refused_duplicate_is_not_a_loss() {
+        // PROD L2831: booked, then the restart's duplicate refused, same tick.
+        let w = ledger_word(&["booked", "rejected: load is not open"]);
+        assert_eq!(w, Ok(Some(ActiveWord::Booked)));
+        // Never ours: the refusal is the loss.
+        assert!(ledger_word(&["rejected: you let this contract lapse"]).is_err());
+        // Held, booked, reverted, then refused again: lost at the revert.
+        let w = ledger_word(&[
+            "the desk is holding this one for you",
+            "booked",
+            "reverted",
+            "rejected: you let this contract lapse",
+        ]);
+        assert!(
+            matches!(w, Err(ref r) if r.starts_with("lost: reverted")),
+            "{w:?}"
+        );
+        // The happy path, in order.
+        assert_eq!(
+            ledger_word(&["booked", "picked up 6 units"]),
+            Ok(Some(ActiveWord::PickedUp))
+        );
+        assert_eq!(
+            ledger_word(&["booked", "picked up", "delivered"]),
+            Ok(Some(ActiveWord::Delivered))
+        );
+        assert!(
+            ledger_word(&["booked", "picked up", "delivered", "settled: payment taken"]).is_err()
+        );
     }
 
     #[test]
