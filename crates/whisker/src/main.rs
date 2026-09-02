@@ -840,7 +840,15 @@ fn main() -> ExitCode {
             trade::save_holdings(&ship_dir, &holdings);
 
             if let Some(here) = ship.docked.clone() {
-                let spare_hold = (ship.hold_capacity - ship.hold_used).max(0);
+                // `holdUsed` counts the merchant's goods only (freight never enters the
+                // cargo map), so a contract aboard is subtracted here by hand.
+                let freight_aboard_units = active
+                    .as_ref()
+                    .filter(|a| a.word != ActiveWord::Booked)
+                    .map(|a| a.row.units)
+                    .unwrap_or(0);
+                let spare_hold =
+                    (ship.hold_capacity - ship.hold_used - freight_aboard_units).max(0);
                 // Freight needs the space back only when a BOOKED contract's cargo would
                 // not fit beside what we carry. A loaded or delivered contract already
                 // has its room; a fitting one rides alongside.
@@ -921,13 +929,22 @@ fn main() -> ExitCode {
                 // says what a berth pays, not how much it will take, and a full shelf
                 // (bluefin at titania-cold-store: maxSellUnits 2) pays for nothing.
                 // One extra read, only on the fold that would spend money.
+                //
+                // A position may be opened with freight idle OR with the contract's
+                // cargo already aboard and room to spare: it rides under the haul
+                // either way (the hold clock makes every position a rider). Never
+                // while a booking still needs its space.
+                let freight_allows_buy = active
+                    .as_ref()
+                    .map(|a| a.word == ActiveWord::PickedUp)
+                    .unwrap_or(true);
                 let td = match td {
                     TradeDecision::Buy {
                         good,
                         units,
                         sell_target,
                         est_margin,
-                    } if active.is_none() => {
+                    } if freight_allows_buy => {
                         let takes = wire
                             .get(&format!("/v1/stations/{sell_target}/quotes"))
                             .map(|v| trade::parse_board(&v))
@@ -965,7 +982,7 @@ fn main() -> ExitCode {
                         *units,
                         true,
                     )),
-                    TradeDecision::Buy { good, units, .. } if active.is_none() => Some((
+                    TradeDecision::Buy { good, units, .. } if freight_allows_buy => Some((
                         json!({"type": "buy", "station": here, "good": good, "units": units}),
                         good.clone(),
                         *units,
