@@ -751,7 +751,33 @@ fn main() -> ExitCode {
             .get("driveAwaiting")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty());
-        if let Some(dest) = awaiting {
+        // Only a BERTHED hull with no route engages: the marker stays set while a
+        // multi-leg voyage is already flying (PROD, 2026-09-02: fourteen engages in
+        // two hours, every one "rejected: already under way"), and a crane at work
+        // refuses it too ("the crew is in the housing until t6866") — that refusal
+        // names the tick to try again, so it is honoured.
+        let crane_until = me
+            .get("freight")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter(|f| f.get("outcome").and_then(Value::as_str) == Some("refused"))
+                    .filter_map(|f| f.get("event").and_then(Value::as_str))
+                    .filter_map(|e| {
+                        let i = e.find("until t")?;
+                        e[i + 7..]
+                            .chars()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect::<String>()
+                            .parse::<i64>()
+                            .ok()
+                    })
+                    .max()
+                    .unwrap_or(-1)
+            })
+            .unwrap_or(-1);
+        let berthed_and_still = ship.docked.is_some() && route_now.is_empty();
+        if let Some(dest) = awaiting.filter(|_| berthed_and_still && tick >= crane_until) {
             if tick >= pending_until {
                 seq += 1;
                 let id = format!("whisker-{}-{}", now_secs(), seq);
