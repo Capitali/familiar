@@ -46,8 +46,15 @@ struct Wire {
     routes: RefCell<RouteCache>,
 }
 
-/// (from, to) → (asked-at, (fuel, ticks) or unpriceable).
-type RouteCache = HashMap<(String, String), (i64, Option<(i64, i64)>)>;
+/// One priced route: fuel at the reference drive, and each leg's separation in km.
+#[derive(Clone)]
+struct PricedRoute {
+    fuel: i64,
+    leg_km: Vec<i64>,
+}
+
+/// (from, to) → (asked-at, the route or unpriceable).
+type RouteCache = HashMap<(String, String), (i64, Option<PricedRoute>)>;
 
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
@@ -116,39 +123,42 @@ impl Wire {
 }
 
 impl Wire {
-    /// One priced route, (fuel, ticks), remembered for a while.
-    fn route(&self, from: &str, to: &str) -> Option<(i64, i64)> {
+    /// One priced route, remembered for a while.
+    fn route(&self, from: &str, to: &str) -> Option<PricedRoute> {
         if from == to {
-            return Some((0, 0));
+            return Some(PricedRoute {
+                fuel: 0,
+                leg_km: Vec::new(),
+            });
         }
         let key = (from.to_string(), to.to_string());
         let now = now_secs();
         if let Some((at, r)) = self.routes.borrow().get(&key) {
             if now - at < ROUTE_CACHE_SECS {
-                return *r;
+                return r.clone();
             }
         }
         let r = (|| {
             let v = self.get(&format!("/v1/route?from={from}&to={to}")).ok()?;
             let legs = v.get("legs")?.as_array()?;
             let fuel = legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum();
-            let ticks = v
-                .get("totalTicks")
-                .and_then(Value::as_i64)
-                .unwrap_or_else(|| legs.iter().filter_map(|l| l.get("ticks")?.as_i64()).sum());
-            Some((fuel, ticks))
+            let leg_km = legs
+                .iter()
+                .map(|l| l.get("distanceKm").and_then(Value::as_i64).unwrap_or(0))
+                .collect();
+            Some(PricedRoute { fuel, leg_km })
         })();
-        self.routes.borrow_mut().insert(key, (now, r));
+        self.routes.borrow_mut().insert(key, (now, r.clone()));
         r
     }
 }
 
 impl Router for Wire {
     fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
-        self.route(from, to).map(|(fuel, _)| fuel)
+        self.route(from, to).map(|r| r.fuel)
     }
-    fn ticks_between(&self, from: &str, to: &str) -> Option<i64> {
-        self.route(from, to).map(|(_, ticks)| ticks)
+    fn leg_distances_km(&self, from: &str, to: &str) -> Option<Vec<i64>> {
+        self.route(from, to).map(|r| r.leg_km)
     }
 }
 
@@ -182,6 +192,11 @@ fn ship_from(me: &Value) -> Ship {
     Ship {
         in_flight: docked.is_none() || route_len > 0,
         docked,
+        accel_milli_g: me
+            .get("effectiveAccelMilliG")
+            .and_then(Value::as_i64)
+            .unwrap_or(doctrine::REFERENCE_ACCEL_MILLI_G),
+        wear_bps: me.get("wearBps").and_then(Value::as_i64).unwrap_or(0),
         hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
         hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
@@ -198,6 +213,16 @@ fn load_row(v: &Value) -> Option<LoadRow> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        class_bps: match v
+            .get("serviceClass")
+            .and_then(Value::as_str)
+            .unwrap_or("standard")
+        {
+            "economy" => 5_000,
+            "express" => 20_000,
+            "priority" => 30_000,
+            _ => 10_000,
+        },
         origin: v.get("origin")?.as_str()?.to_string(),
         dest: v.get("dest")?.as_str()?.to_string(),
         units: v.get("units").and_then(Value::as_i64).unwrap_or(0),

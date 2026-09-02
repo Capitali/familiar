@@ -23,6 +23,12 @@ use std::collections::BTreeSet;
 pub struct Ship {
     /// Berthed station id, or None under way.
     pub docked: Option<String>,
+    /// The drive as the hull actually delivers it, thousandths of a gravity
+    /// (`effectiveAccelMilliG` on `/v1/me`): the rated 189 derated by wear —
+    /// fully worn is half. KK II at 88% wear flies 105.
+    pub accel_milli_g: i64,
+    /// Wear, bps of fully worn (`wearBps`). Reported so the captain can see it.
+    pub wear_bps: i64,
     /// True when a course is filed / legs remain — the engine is flying us.
     pub in_flight: bool,
     pub hold_used: i64,
@@ -38,6 +44,11 @@ pub struct LoadRow {
     pub load_id: String,
     /// What the contract carries — the merchant must not mistake it for its own goods.
     pub good: String,
+    /// The contract's service class as a drive multiplier, bps: economy 5000 (half
+    /// drive), standard 10000, express 20000, priority 30000. The class throttles
+    /// or overdrives the hull on EVERY leg flown under the contract, the deadhead
+    /// to pickup included (engine `FreightShips.accelMilliG`).
+    pub class_bps: i64,
     pub origin: String,
     pub dest: String,
     pub units: i64,
@@ -62,11 +73,48 @@ impl LoadRow {
 /// nobody can price is a route the doctrine will not risk.
 pub trait Router {
     fn fuel_between(&self, from: &str, to: &str) -> Option<i64>;
-    /// The same route in ticks of flight. `None` = the router could not say; the
-    /// caller falls back to the board's own figure.
-    fn ticks_between(&self, _from: &str, _to: &str) -> Option<i64> {
+    /// The route's legs as separations in km, tonight's geometry (`distanceKm`
+    /// per leg of `/v1/route`). `None` = the router could not say; the caller
+    /// falls back to the board's own figure.
+    fn leg_distances_km(&self, _from: &str, _to: &str) -> Option<Vec<i64>> {
         None
     }
+}
+
+/// km per tick² at the reference drive (engine `FlightModel.referenceK`).
+const REFERENCE_K: i64 = 864_900;
+/// The reference drive, thousandths of a gravity (`FlightModel.referenceAccelMilliG`).
+pub const REFERENCE_ACCEL_MILLI_G: i64 = 189;
+/// Folds between a booking and the drive actually engaging (file travel, then
+/// engage on the next fold): counted against the pickup window.
+const ENGAGE_OVERHEAD_TICKS: i64 = 4;
+
+/// Flight time for legs of these separations at this drive, the engine's own
+/// arithmetic (`FlightModel.travelTicks`): ticks = ⌈√(D / K)⌉ per leg, K linear in
+/// acceleration. Pinned against PROD: cannery-row → titan-larder, 1,307,724,939 km,
+/// is 39 ticks at 189 mg and 74–75 at the 52 mg an 88%-worn hull makes on an
+/// economy contract.
+pub fn flight_ticks(distances_km: &[i64], accel_milli_g: i64) -> i64 {
+    let k = (REFERENCE_K * accel_milli_g.max(1) / REFERENCE_ACCEL_MILLI_G).max(1);
+    distances_km
+        .iter()
+        .map(|&d| {
+            if d <= 0 {
+                return 1;
+            }
+            // ⌈√(d/k)⌉ in integers: the smallest t with t² ≥ d/k, i.e. t²·k ≥ d.
+            let mut t = ((d as f64) / (k as f64)).sqrt().floor() as i64;
+            while t * t * k < d {
+                t += 1;
+            }
+            t.max(1)
+        })
+        .sum()
+}
+
+/// The drive a contract's legs are flown at: the hull throttled by the class.
+pub fn contract_accel(ship_accel_milli_g: i64, class_bps: i64) -> i64 {
+    (ship_accel_milli_g * class_bps / 10_000).max(1)
 }
 
 /// What the pilot wants to do next. Every consequential variant names the
@@ -234,11 +282,22 @@ pub fn decide(
             continue;
         };
         // Can we be at the origin, loaded, inside the desk's pickup window? The
-        // routed time is the honest figure; the board's is a fallback.
+        // honest deadhead is the engine's own arithmetic on tonight's separations at
+        // the drive THIS contract's class leaves us — L2706 on PROD (economy, 88%
+        // wear) took 74 ticks over a 39-tick lane and the desk took it back at +48.
+        // The board's figure is the fallback when the router cannot price legs.
+        let hull = if ship.accel_milli_g > 0 {
+            ship.accel_milli_g
+        } else {
+            REFERENCE_ACCEL_MILLI_G
+        };
+        let class = if l.class_bps > 0 { l.class_bps } else { 10_000 };
+        let accel = contract_accel(hull, class);
         let dead_ticks = router
-            .ticks_between(here, &l.origin)
+            .leg_distances_km(here, &l.origin)
+            .map(|d| flight_ticks(&d, accel))
             .unwrap_or(l.deadhead_ticks);
-        if dead_ticks + l.loading_ticks.max(8) > PICKUP_TTL_TICKS {
+        if dead_ticks + ENGAGE_OVERHEAD_TICKS + l.loading_ticks.max(8) > PICKUP_TTL_TICKS {
             continue;
         }
         let whole = ((dead + haul) as f64 * RESERVE) as i64;
@@ -301,6 +360,8 @@ mod tests {
         Ship {
             docked: Some(station.into()),
             in_flight: false,
+            accel_milli_g: REFERENCE_ACCEL_MILLI_G,
+            wear_bps: 0,
             hold_used: 0,
             hold_capacity: 120,
             fuel,
@@ -313,6 +374,7 @@ mod tests {
         LoadRow {
             load_id: id.into(),
             good: String::new(),
+            class_bps: 10_000,
             origin: origin.into(),
             dest: dest.into(),
             units: 25,
@@ -375,47 +437,83 @@ mod tests {
     }
 
     #[test]
-    fn a_load_whose_routed_deadhead_would_miss_the_pickup_window_is_not_booked() {
-        // L2166 on LOCAL, 2026-09-02: board said deadhead 19; the lane route was 57
-        // ticks; the desk reverted at booking + 48 (−54 ℳ) with the hull under way.
-        struct Slow(i64);
-        impl Router for Slow {
+    fn flight_time_is_the_engines_arithmetic() {
+        // PROD, 2026-09-02: cannery-row → titan-larder, 1,307,724,939 km. The route
+        // endpoint says 39 ticks at the reference drive; KK II (wear 8827 bps →
+        // 105 mg) on an ECONOMY contract (half drive → 52 mg) took 74.
+        let d = [1_307_724_939_i64];
+        assert_eq!(flight_ticks(&d, REFERENCE_ACCEL_MILLI_G), 39);
+        assert_eq!(contract_accel(105, 5_000), 52);
+        let t = flight_ticks(&d, 52);
+        assert!((74..=75).contains(&t), "{t}");
+        // Two legs sum; a zero-length leg still costs a tick.
+        assert_eq!(
+            flight_ticks(&[0, 1_307_724_939], REFERENCE_ACCEL_MILLI_G),
+            40
+        );
+    }
+
+    #[test]
+    fn a_load_whose_honest_deadhead_would_miss_the_pickup_window_is_not_booked() {
+        // L2706 on PROD: board deadhead 19; the honest figure on an economy
+        // contract with a worn hull is 74 (+ engage + loading) — the desk reverts
+        // at +48 (−232 ℳ). The same lane on a STANDARD contract at full drive is
+        // 39 + 4 + 8 = 51 — still over. A shorter leg fits.
+        struct Chart(i64);
+        impl Router for Chart {
             fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
                 Some(10)
             }
-            fn ticks_between(&self, _: &str, _: &str) -> Option<i64> {
-                Some(self.0)
+            fn leg_distances_km(&self, _: &str, _: &str) -> Option<Vec<i64>> {
+                Some(vec![self.0])
             }
         }
         let ship = Ship {
             docked: Some("cannery-row".into()),
+            accel_milli_g: 105,
+            wear_bps: 8827,
             fuel: 600,
             fuel_capacity: 600,
             hold_capacity: 120,
             ..Default::default()
         };
-        let row = LoadRow {
-            load_id: "L2166".into(),
+        let mut row = LoadRow {
+            load_id: "L2706".into(),
             good: "catnip".into(),
-            origin: "deimos-arbor".into(),
+            class_bps: 5_000,
+            origin: "titan-larder".into(),
             dest: "tuna-prime".into(),
             units: 40,
-            estimated_net: 500,
+            estimated_net: 928,
             deadhead_ticks: 19,
             haul_ticks: 30,
             loading_ticks: 8,
             held_for_other: false,
         };
-        let board = vec![row];
-        // Routed 57 + loading 8 > 48: not booked, whatever the board's 19 says.
-        let d = decide(&ship, None, &board, &BTreeSet::new(), &Slow(57));
+        let far = Chart(1_307_724_939);
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&row),
+            &BTreeSet::new(),
+            &far,
+        );
         assert!(!matches!(d, Decision::Book { .. }), "{d:?}");
-        // Routed 20 + 8 ≤ 48: booked.
-        let d = decide(&ship, None, &board, &BTreeSet::new(), &Slow(20));
+        // A leg a third the distance: 74/√3 ≈ 43 at 52 mg — over with overhead;
+        // at standard class (105 mg) it is ~30 + 4 + 8 = 42: booked.
+        row.class_bps = 10_000;
+        let near = Chart(1_307_724_939 / 3);
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&row),
+            &BTreeSet::new(),
+            &near,
+        );
         assert_eq!(
             d,
             Decision::Book {
-                load_id: "L2166".into()
+                load_id: "L2706".into()
             }
         );
     }
@@ -435,6 +533,7 @@ mod tests {
             row: LoadRow {
                 load_id: "L2605".into(),
                 good: "grain".into(),
+                class_bps: 10_000,
                 origin: "whisker-hollow".into(),
                 dest: "foxys-diner".into(),
                 units: 120,
