@@ -434,6 +434,7 @@ fn main() -> ExitCode {
             })
             .unwrap_or_default();
     let mut last_outfit_idle = String::new();
+    let mut last_pending_note = String::new();
     let mut holdings: Vec<Holding> = if trades {
         trade::load_holdings(&ship_dir)
     } else {
@@ -511,6 +512,45 @@ fn main() -> ExitCode {
         // A restart must not forget a held contract — the exchange allows ONE at a
         // time, and a pilot that assumes idle double-books and is refused. Adopt the
         // newest load the ledger still shows open.
+        // The exchange's own word on what is in flight for this key (UCF-Haul#65's
+        // pending overlay, 2026-09-02): every accepted, unfolded action with the tick
+        // it resolves at — ours from before a restart, or a captain's filed from the
+        // desk app on the same key. Wait them out, and look for a booked load again
+        // once a `book` among them has folded.
+        if let Some(pending) = me.get("pendingActions").and_then(Value::as_array) {
+            let latest = pending
+                .iter()
+                .filter_map(|p| p.get("resolvesAtTick").and_then(Value::as_i64))
+                .max();
+            if let Some(r) = latest {
+                if r + 1 > pending_until {
+                    pending_until = r + 1;
+                }
+            }
+            if pending
+                .iter()
+                .any(|p| p.get("verb").and_then(Value::as_str) == Some("book"))
+            {
+                adopted = false;
+            }
+            if !pending.is_empty() && tick <= latest.unwrap_or(-1) {
+                let verbs: Vec<&str> = pending
+                    .iter()
+                    .filter_map(|p| p.get("verb").and_then(Value::as_str))
+                    .collect();
+                let line = format!("pending {verbs:?}");
+                if line != last_pending_note {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "awaiting-pending-actions",
+                        "verbs": verbs, "resolves": latest}),
+                    );
+                    last_pending_note = line;
+                }
+            } else {
+                last_pending_note.clear();
+            }
+        }
         if pending_from_journal >= 0 {
             if tick <= pending_from_journal {
                 journal(
