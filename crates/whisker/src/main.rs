@@ -918,12 +918,14 @@ fn main() -> ExitCode {
                                     "carry {} → {} needs fuel {:?}, tank {}",
                                     h.good, h.sell_target, cost, ship.fuel
                                 );
-                                if why != last_carry_block {
+                                // Once per blocked carry, not once per fuel reading.
+                                let key = format!("{} → {}", h.good, h.sell_target);
+                                if key != last_carry_block {
                                     journal(
                                         &ship_dir,
                                         json!({"at": now, "tick": tick, "event": "carry-blocked", "why": why}),
                                     );
-                                    last_carry_block = why;
+                                    last_carry_block = key;
                                 }
                             } else {
                                 last_carry_block.clear();
