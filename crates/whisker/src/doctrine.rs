@@ -257,7 +257,7 @@ impl Itinerary {
     /// compiles one, and a future planner that wants standalone fuel diversions
     /// must add durable per-stop progress first — stated here so it is a known
     /// edge, not a trap.
-    fn current(&self) -> Option<&Stop> {
+    pub fn current(&self) -> Option<&Stop> {
         self.stops
             .iter()
             .find(|s| s.ops.iter().any(|op| !self.crane_op_done(op)))

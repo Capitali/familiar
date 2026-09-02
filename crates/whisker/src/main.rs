@@ -21,7 +21,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
-use familiar_whisker::adoption::{adopt_step, in_booking_order, AdoptOutcome, WedgeWatch};
+use familiar_whisker::adoption::{
+    adopt_step, in_booking_order, resume_stale_course, AdoptOutcome, WedgeRemedy, WedgeWatch,
+};
 use familiar_whisker::doctrine::{
     self, Active, ActiveWord, Decision, Itinerary, LoadRow, Router, Ship,
 };
@@ -342,6 +344,7 @@ fn main() -> ExitCode {
     // Wedge watch: a course filed while dry never departs on its own after refuelling
     // (ucf-exchange#16) — docked + course filed + unmoved needs a re-filed travel.
     let mut wedge = WedgeWatch::default();
+    let mut last_wedge_note = String::new();
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
     let trades = granted.contains(&Automation::Trade);
     let mut last_carry_block = String::new();
@@ -495,41 +498,6 @@ fn main() -> ExitCode {
             loads = in_booking_order(loads, &ledger::open_loads(&me));
         }
 
-        // The wedge: docked, healthy tank, course still filed, nothing moving.
-        // The watch's dominance rule is pinned in adoption::WedgeWatch (round-3
-        // review, finding 1): the belt is a COMMITMENT — an engage plus a fresh
-        // travel — and it never fires while any ledger-open contract is still
-        // unresolved. The clock keeps counting through the hold, so the belt
-        // fires the fold the freight state is known again.
-        if wedge.observe(
-            ship.docked.as_deref(),
-            &route_now,
-            ship.fuel,
-            ship.fuel_capacity,
-            pending_adopt.len(),
-            tick,
-        ) {
-            // First file `engage`: the drive is a two-step file-then-engage on
-            // some folds and the verb is missing from the API's own error list
-            // (UCF-Haul#65 research; verified accepted on main 2026-08-31). A
-            // fresh travel to the same destination is the belt to its braces.
-            seq += 1;
-            let engage_id = format!("whisker-{}-{}", now_secs(), seq);
-            let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
-            if let Some(dest) = route_now.last() {
-                seq += 1;
-                let travel_id = format!("whisker-{}-{}", now_secs(), seq);
-                if let Ok(ack) = wire.act(json!({"type": "travel", "station": dest}), &travel_id) {
-                    journal(
-                        &ship_dir,
-                        json!({"at": now, "tick": tick,
-                        "event": "unwedged-course", "to": dest, "engaged": engaged,
-                        "resolves": ack.get("resolvesAtTick")}),
-                    );
-                }
-            }
-        }
-
         // Reconcile every contract of the plan against the ledger — the fold is the
         // truth, and each load has its own word (T-232). Not before a filed action
         // has folded, though: until then the ledger's last word is about the
@@ -624,6 +592,81 @@ fn main() -> ExitCode {
             }
             std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
             continue;
+        }
+
+        // The plan, compiled from the live ledger words — built HERE so the
+        // stale-course belt below validates against the same truth the decision
+        // at the bottom of the cycle uses.
+        let plan = Itinerary::sequential(loads.clone(), &pumps);
+
+        // The stale-course belt, an explicit scheduler action BELOW the adoption
+        // and pending-action gates (round-4 review, finding 1). The watch names
+        // exactly one remedy per firing (engage first; the re-filed travel only
+        // if the same course survives another threshold), the laid destination
+        // is validated against what the ship would head for NOW — the plan's
+        // working stop, or the merchant's carry intent when freight is empty —
+        // and a successful act sets pending_until and ends the fold: one wire
+        // action, then the next fold. A mismatched course is simply not
+        // resumed; the ordinary decision files the right travel itself.
+        if let Some(remedy) = wedge.observe(
+            ship.docked.as_deref(),
+            &route_now,
+            ship.fuel,
+            ship.fuel_capacity,
+            pending_adopt.len(),
+            tick,
+        ) {
+            let intended: Option<String> =
+                plan.current().map(|s| s.station.clone()).or_else(|| {
+                    holdings
+                        .iter()
+                        .filter(|h| tick >= h.sellable_at && !h.sell_target.is_empty())
+                        .max_by_key(|h| h.opened_tick)
+                        .map(|h| h.sell_target.clone())
+                });
+            let laid = route_now.last().cloned();
+            if resume_stale_course(laid.as_deref(), intended.as_deref()) {
+                seq += 1;
+                let id = format!("whisker-{}-{}", now_secs(), seq);
+                let (body, verb) = match remedy {
+                    WedgeRemedy::Engage => (json!({"type": "engage"}), "engage"),
+                    WedgeRemedy::Refile => (
+                        json!({"type": "travel", "station": laid.clone().unwrap_or_default()}),
+                        "travel",
+                    ),
+                };
+                match wire.act(body, &id) {
+                    Ok(ack) => {
+                        pending_until = ack
+                            .get("resolvesAtTick")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(tick)
+                            + 1;
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "unwedged-course",
+                            "remedy": verb, "to": laid, "resolves": pending_until - 1}),
+                        );
+                    }
+                    Err(e) => journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "unwedge-refused",
+                        "remedy": verb, "why": e}),
+                    ),
+                }
+                std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+                continue;
+            }
+            let note = format!(
+                "laid course to {laid:?} no longer matches intent {intended:?}; not resumed"
+            );
+            if note != last_wedge_note {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "stale-course-dropped", "why": note}),
+                );
+                last_wedge_note = note;
+            }
         }
 
         // The board, only when the judgment could use it.
@@ -988,7 +1031,6 @@ fn main() -> ExitCode {
             }
         }
 
-        let plan = Itinerary::sequential(loads.clone(), &pumps);
         let decision = doctrine::decide_plan(&ship, &plan, &board, &pumps, &wire);
 
         // Gate 2: the automation this decision spends must be granted (pay-per-feature).

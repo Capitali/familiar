@@ -80,15 +80,28 @@ pub fn adopt_step(
     outcomes
 }
 
-/// The stale-course watch, made a type so its dominance rule is PINNED (round-3
-/// review, finding 1): the belt — an `engage` plus a re-filed `travel` — is a
+/// What one matured wedge firing is allowed to do — exactly ONE wire action
+/// (round-4 review, finding 1: the old belt released an engage AND a fresh
+/// travel in one fold). The first firing for a course engages it (the drive is
+/// a two-step file-then-engage on some folds, UCF-Haul#65); if the same course
+/// still stands a threshold later, the next firing re-files the travel — the
+/// belt to the braces, one buckle per fold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WedgeRemedy {
+    Engage,
+    Refile,
+}
+
+/// The stale-course watch, made a type so its rules are PINNED: the belt is a
 /// COMMITMENT, and no commitment is filed while any ledger-open contract is
-/// unresolved. The watch keeps its own clock; a pending adoption does not reset
-/// it, so the belt fires promptly once the freight state is known again.
+/// unresolved (round-3 finding 1 — the watch keeps its own clock through a
+/// pending hold, so it fires promptly once the freight state is known), and a
+/// firing names exactly one remedy (round-4 finding 1).
 #[derive(Debug, Default)]
 pub struct WedgeWatch {
     key: Option<(String, Vec<String>)>,
     since: i64,
+    engaged: bool,
 }
 
 impl WedgeWatch {
@@ -97,9 +110,11 @@ impl WedgeWatch {
     /// its own after refuelling).
     pub const THRESHOLD_TICKS: i64 = 30;
 
-    /// Watch one fold. Returns true exactly when the belt should fire: docked,
-    /// the same non-empty route standing for over the threshold, a tank above
-    /// a tenth — and NOTHING pending adoption. Firing re-arms the clock.
+    /// Watch one fold. Returns a remedy exactly when the belt should fire:
+    /// docked, the same non-empty route standing for over the threshold, a tank
+    /// above a tenth — and NOTHING pending adoption. A firing re-arms the clock
+    /// and names ONE action: engage first, a re-filed travel only if the same
+    /// course survives another whole threshold after the engage.
     pub fn observe(
         &mut self,
         docked: Option<&str>,
@@ -108,31 +123,51 @@ impl WedgeWatch {
         fuel_capacity: i64,
         pending_adoptions: usize,
         tick: i64,
-    ) -> bool {
+    ) -> Option<WedgeRemedy> {
         let (Some(here), false) = (docked, route.is_empty()) else {
             self.key = None;
-            return false;
+            return None;
         };
         if fuel <= fuel_capacity / 10 {
             self.key = None;
-            return false;
+            return None;
         }
         let key = (here.to_string(), route.to_vec());
         if self.key.as_ref() != Some(&key) {
             self.key = Some(key);
             self.since = tick;
-            return false;
+            self.engaged = false;
+            return None;
         }
         if tick - self.since <= Self::THRESHOLD_TICKS {
-            return false;
+            return None;
         }
         // The dominance rule: an unresolved contract holds the belt, without
         // resetting the clock — the moment adoption settles, the belt may fire.
         if pending_adoptions > 0 {
-            return false;
+            return None;
         }
         self.since = tick;
-        true
+        if self.engaged {
+            Some(WedgeRemedy::Refile)
+        } else {
+            self.engaged = true;
+            Some(WedgeRemedy::Engage)
+        }
+    }
+}
+
+/// May a stale laid course be RESUMED at all? Only when its destination is the
+/// station the now-known plan (or, with no freight, the merchant's carry
+/// intent) would head for anyway — a course laid before a crash or during an
+/// adoption gap can point at yesterday's errand, and resuming it flies a
+/// newly adopted contract the wrong way (round-4 review, finding 1). A
+/// mismatched course is simply NOT resumed: the ordinary decision below files
+/// the right travel itself, one action, this fold.
+pub fn resume_stale_course(route_last: Option<&str>, intended: Option<&str>) -> bool {
+    match (route_last, intended) {
+        (Some(dest), Some(want)) => dest == want,
+        _ => false,
     }
 }
 
@@ -241,17 +276,18 @@ mod tests {
         // the very fold the pending clears (its clock was never reset).
         let mut w = WedgeWatch::default();
         let route = vec!["titan-larder".to_string()];
-        assert!(!w.observe(Some("berth"), &route, 500, 600, 1, 100));
+        assert!(w.observe(Some("berth"), &route, 500, 600, 1, 100).is_none());
         assert!(
-            !w.observe(Some("berth"), &route, 500, 600, 1, 140),
+            w.observe(Some("berth"), &route, 500, 600, 1, 140).is_none(),
             "past the threshold, still pending: held"
         );
-        assert!(
+        assert_eq!(
             w.observe(Some("berth"), &route, 500, 600, 0, 141),
+            Some(WedgeRemedy::Engage),
             "pending cleared: the belt fires without waiting a fresh threshold"
         );
         assert!(
-            !w.observe(Some("berth"), &route, 500, 600, 0, 142),
+            w.observe(Some("berth"), &route, 500, 600, 0, 142).is_none(),
             "firing re-armed the clock"
         );
     }
@@ -260,15 +296,62 @@ mod tests {
     fn the_belt_still_fires_normally_when_nothing_is_pending() {
         let mut w = WedgeWatch::default();
         let route = vec!["b".to_string()];
-        assert!(!w.observe(Some("a"), &route, 500, 600, 0, 100));
+        assert!(w.observe(Some("a"), &route, 500, 600, 0, 100).is_none());
         assert!(
-            !w.observe(Some("a"), &route, 500, 600, 0, 130),
+            w.observe(Some("a"), &route, 500, 600, 0, 130).is_none(),
             "at the threshold: not yet"
         );
-        assert!(w.observe(Some("a"), &route, 500, 600, 0, 131));
+        assert_eq!(
+            w.observe(Some("a"), &route, 500, 600, 0, 131),
+            Some(WedgeRemedy::Engage)
+        );
         // A changed route, an empty route, or a thin tank all stand the watch down.
-        assert!(!w.observe(Some("a"), &[], 500, 600, 0, 132));
-        assert!(!w.observe(Some("a"), &route, 50, 600, 0, 170));
+        assert!(w.observe(Some("a"), &[], 500, 600, 0, 132).is_none());
+        assert!(w.observe(Some("a"), &route, 50, 600, 0, 170).is_none());
+    }
+
+    #[test]
+    fn one_remedy_per_firing_engage_first_refile_a_threshold_later() {
+        // Round-4 finding 1: a matured course gets exactly ONE action per fold —
+        // engage on the first firing; the re-filed travel only if the SAME
+        // course survives a further whole threshold; a new course starts over.
+        let mut w = WedgeWatch::default();
+        let route = vec!["b".to_string()];
+        assert!(w.observe(Some("a"), &route, 500, 600, 0, 100).is_none());
+        assert_eq!(
+            w.observe(Some("a"), &route, 500, 600, 0, 131),
+            Some(WedgeRemedy::Engage)
+        );
+        assert!(
+            w.observe(Some("a"), &route, 500, 600, 0, 160).is_none(),
+            "the engage bought the course a fresh threshold"
+        );
+        assert_eq!(
+            w.observe(Some("a"), &route, 500, 600, 0, 162),
+            Some(WedgeRemedy::Refile),
+            "still wedged a threshold after the engage: the belt to the braces"
+        );
+        let other = vec!["c".to_string()];
+        assert!(w.observe(Some("a"), &other, 500, 600, 0, 163).is_none());
+        assert_eq!(
+            w.observe(Some("a"), &other, 500, 600, 0, 194),
+            Some(WedgeRemedy::Engage),
+            "a different course starts its remedies over"
+        );
+    }
+
+    #[test]
+    fn a_mismatched_stale_course_is_never_resumed() {
+        // Round-4 finding 1: a course laid toward merchant market M while load L
+        // (A→B) was unresolved must NOT be resumed once L is known — the plan's
+        // own decision files the right travel instead.
+        assert!(!resume_stale_course(Some("market-m"), Some("origin-a")));
+        assert!(resume_stale_course(Some("origin-a"), Some("origin-a")));
+        assert!(
+            !resume_stale_course(Some("market-m"), None),
+            "no intent, no resume"
+        );
+        assert!(!resume_stale_course(None, Some("origin-a")));
     }
 
     #[test]

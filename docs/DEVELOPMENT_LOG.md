@@ -75,7 +75,7 @@ tracked load's close.
 
 ### Checks run
 
-familiar-whisker 62/0 (12 doctrine unmodified + 14 trade unmodified + 9 plan-layer +
+familiar-whisker 64/0 (12 doctrine unmodified + 14 trade unmodified + 9 plan-layer +
 9 ledger), fmt, clippy all-targets -D warnings. Full workspace bar before merge
 (counts in the merge commit). CI note: the Linux runner failed EVERY push since
 2026-08-28 because the factory's jail-reaching tests had no sandbox-exec skip guard —

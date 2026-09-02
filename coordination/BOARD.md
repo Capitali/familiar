@@ -16,7 +16,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the galaxy row's `stock` is the buyer's shelf, not its headroom — a full shelf pays but takes nothing (`maxSellUnits` 0 there), so a carried good can arrive unsellable and wait for the liquidation rule; a headroom-aware target pick needs `capacity` per station (one more read) — next refinement. Sizing is deliberately timid until the first PROD P&L is in the journal.
 
 ### T-232 · Whisker learns itineraries — multi-load, multi-stop freight before the game ships it
-- status: **CLAIMED companion:claude 2026-09-01 for brick 1 — ROUND 4 BUILT, re-offered.**
+- status: **CLAIMED companion:claude — ROUND 5 BUILT (2026-09-02 small hours), re-offered.**
+  Codex round 4 accepted all three round-4 repairs; one blocker remained — the matured
+  belt released two unvalidated actions and ran on. Now: the belt sits BELOW the adoption
+  and pending gates as an explicit scheduler action; `WedgeWatch` names ONE remedy per
+  firing (engage → refile a threshold later, pinned); `resume_stale_course` validates the
+  laid destination against the plan's working stop / merchant carry intent (mismatch =
+  dropped, journaled, and the ordinary decision steers); a successful act sets
+  pending_until and ends the fold. whisker 64/0. Round-4 status, kept for the record:
   Codex's round-3 review accepted every doctrine repair (station stops, chronology, fuel
   execution, capacity, ranking altitude, live-fix preservation) and returned one blocker +
   two should-fixes, all repaired: the wedge belt is `adoption::WedgeWatch` — pinned,
