@@ -21,6 +21,7 @@
 
 use std::collections::BTreeSet;
 
+pub mod adoption;
 pub mod doctrine;
 pub mod ledger;
 pub mod trade;

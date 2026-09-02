@@ -58,9 +58,24 @@ deliberate and documented on `decide_plan`: the executable pump fill above, and 
 picked-up load berthed at a third station now files for its destination instead of
 waiting on a crane with nothing to do.
 
+**Round 3 (same night):** codex's round-2 review REJECTED the rebuild with four
+sharper blockers, every one a real execution bug in the T-232/T-233 composition —
+repaired: the `hold_used > 0` crane proxy is GONE (merchant cargo could complete an
+unrelated booked pickup and launch the hull at the wrong station; pickup completion
+is now the load's own ledger word, period); navigation keys on CRANE ops only, whose
+words are monotonic, so a later-burned tank can never steer the route backwards to a
+visited pump — a planned fill executes opportunistically on arrival and fills to
+FULL (the exact state the fuel walk proves against; 90% stays the threshold only for
+off-route berths); adoption moved into `adoption.rs` as a pure, pinned step whose
+module doc states the contract the runner owes it, and the runner now HOLDS the whole
+scheduler — no buy, no carry, no booking, no diversion — while any open contract is
+unresolved; and a load closed while pending routes through the ONE `close_load`
+handler (cooldown, intent purge, adoption-note reset, journal) exactly like a
+tracked load's close.
+
 ### Checks run
 
-familiar-whisker 44/0 (12 doctrine unmodified + 14 trade unmodified + 9 plan-layer +
+familiar-whisker 50/0 (12 doctrine unmodified + 14 trade unmodified + 9 plan-layer +
 9 ledger), fmt, clippy all-targets -D warnings. Full workspace bar before merge
 (counts in the merge commit). CI note: the Linux runner failed EVERY push since
 2026-08-28 because the factory's jail-reaching tests had no sandbox-exec skip guard —

@@ -16,10 +16,19 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the galaxy row's `stock` is the buyer's shelf, not its headroom — a full shelf pays but takes nothing (`maxSellUnits` 0 there), so a carried good can arrive unsellable and wait for the liquidation rule; a headroom-aware target pick needs `capacity` per station (one more read) — next refinement. Sizing is deliberately timid until the first PROD P&L is in the journal.
 
 ### T-232 · Whisker learns itineraries — multi-load, multi-stop freight before the game ships it
-- status: **CLAIMED companion:claude 2026-09-01 for brick 1 — ROUND 2 BUILT to both codex
-  reviews, re-offered.** Round 1 (`c49b01c`) was REJECTED/RETURNED by two independent codex
+- status: **CLAIMED companion:claude 2026-09-01 for brick 1 — ROUND 3 BUILT, re-offered.**
+  Codex's round-2 review REJECTED round 2 with four execution blockers (all confirmed
+  real; `docs/reviews/2026-09-01-t232-itinerary-review-r2.md`), repaired same night:
+  pickup completion is the load's OWN ledger word only (the aggregate-hold crane proxy is
+  gone — merchant cargo could launch a still-Booked load at the wrong station); navigation
+  keys on crane ops only, so a burned tank never steers back to a visited pump, and a
+  route-stop fill executes to FULL (the state the fuel walk proves); adoption is a pure
+  pinned step (`adoption.rs`) whose unresolved ids now hold the WHOLE scheduler (no buy,
+  carry, booking, or diversion); a close-while-pending routes through the one `close_load`
+  handler (cooldown + intent purge + journal). whisker 50/0. Round-2 status, kept for the
+  record: Round 1 (`c49b01c`) was REJECTED/RETURNED by two independent codex
   reviews (one run from each lane; both under `docs/reviews/2026-09-01-t232-itinerary-*.md`)
-  — right, on every point. Round 2, rebased over `83025b2` with every live fix intact
+  — right, on every point. round 2 was rebased over `83025b2` with every live fix intact
   (booked-at-dest deadhead, pending-fold reconcile, lost-cooldown + fresh-id purge,
   spare-hold fit, the whole T-233 merchant): the route is STATION STOPS with typed
   Pickup/Drop/**Refuel** ops (a planned fill is an op the pilot executes — which also

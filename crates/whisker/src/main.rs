@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
+use familiar_whisker::adoption::{adopt_step, AdoptOutcome};
 use familiar_whisker::doctrine::{
     self, Active, ActiveWord, Decision, Itinerary, LoadRow, Router, Ship,
 };
@@ -136,6 +137,34 @@ fn journal(ship_dir: &Path, entry: Value) {
         let _ = f.write_all(line.as_bytes());
     }
     println!("{entry}");
+}
+
+/// The ONE way a load leaves the runner's memory — tracked or pending alike
+/// (round-2 review, finding 4). Records the cooldown so a re-listed dead id is
+/// not re-booked inside 60 ticks, forgets the booking intent so a dead fold's
+/// idempotency id never answers for a fresh one (LOCAL L1849, 2026-09-01),
+/// clears the adoption notice so a genuinely new life gets a fresh one, and
+/// journals the close exactly once.
+#[allow(clippy::too_many_arguments)]
+fn close_load(
+    ship_dir: &Path,
+    lost_at: &mut HashMap<String, i64>,
+    recent: &mut HashMap<String, (i64, String)>,
+    adopt_noted: &mut BTreeSet<String>,
+    now: i64,
+    tick: i64,
+    load_id: &str,
+    reason: &str,
+    credits: i64,
+) {
+    lost_at.insert(load_id.to_string(), tick);
+    recent.retain(|sig, _| !sig.contains(load_id));
+    adopt_noted.remove(load_id);
+    journal(
+        ship_dir,
+        json!({"at": now, "tick": tick, "event": "load-closed",
+               "load": load_id, "why": reason, "credits": credits}),
+    );
 }
 
 fn ship_from(me: &Value) -> Ship {
@@ -373,57 +402,65 @@ fn main() -> ExitCode {
             .unwrap_or_default();
 
         // A restart — or any drift — must not forget a held contract, and it must
-        // not forget ANY of them. Adoption is a per-cycle reconciliation, not a
-        // startup one-shot (codex review of the round-1 offer, finding 1): every
-        // load the ledger shows open and the plan does not carry becomes pending,
-        // and a pending id retries its board-row lookup every cycle until it
-        // resolves or a terminal ledger word closes it. A transient loadboard
-        // omission therefore delays adoption by a fold instead of losing the
-        // contract forever. Oldest booking adopts first — the plan is booking
-        // order (an action mid-fold defers this the same way it defers reconcile).
+        // not forget ANY of them. Adoption is a per-cycle reconciliation with a
+        // pending-retry list (round-1 review finding 1; the step itself is pure and
+        // pinned in `adoption.rs`), and while ANY id is pending the scheduler below
+        // files no new commitment (round-2 review, finding 3). A close discovered
+        // here goes through the SAME close handler as a tracked load's (round-2
+        // review, finding 4) — cooldown, intent purge, journal, never silent.
         if tick >= pending_until {
-            for (_, lid) in ledger::open_loads(&me) {
-                if loads.iter().all(|a| a.row.load_id != lid) && !pending_adopt.contains(&lid) {
-                    pending_adopt.push(lid);
-                }
-            }
-            let mut resolved: Vec<Active> = Vec::new();
-            pending_adopt.retain(|lid| {
-                let word = match ledger::reconcile(&me, lid) {
-                    Ok(word) => word,
-                    // The ledger closed it while it was pending — nothing to adopt.
-                    Err(_) => return false,
-                };
+            let mut lookup = |lid: &str| -> Option<LoadRow> {
                 for status in ["booked", "inTransit", "delivered"] {
                     if let Ok(Value::Array(rows)) =
                         wire.get(&format!("/v1/loadboard?status={status}"))
                     {
                         if let Some(row) =
-                            rows.iter().filter_map(load_row).find(|l| &l.load_id == lid)
+                            rows.iter().filter_map(load_row).find(|l| l.load_id == lid)
                         {
-                            journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
-                                "event": "adopted-held-contract", "load": lid, "status": status}),
-                            );
-                            adopt_noted.remove(lid);
-                            resolved.push(Active { row, word });
-                            return false;
+                            return Some(row);
                         }
                     }
                 }
-                // Not on any board this fold: say so once, keep trying.
-                if adopt_noted.insert(lid.clone()) {
-                    journal(
-                        &ship_dir,
-                        json!({"at": now, "tick": tick,
-                        "event": "adoption-pending", "load": lid,
-                        "why": "ledger shows it open but no board row resolved this fold; retrying"}),
-                    );
+                None
+            };
+            for outcome in adopt_step(&loads, &mut pending_adopt, &me, &mut lookup) {
+                match outcome {
+                    AdoptOutcome::Adopted(a) => {
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick,
+                            "event": "adopted-held-contract", "load": a.row.load_id,
+                            "word": format!("{:?}", a.word)}),
+                        );
+                        adopt_noted.remove(&a.row.load_id);
+                        loads.push(a);
+                    }
+                    AdoptOutcome::Closed { load_id, reason } => {
+                        close_load(
+                            &ship_dir,
+                            &mut lost_at,
+                            &mut recent,
+                            &mut adopt_noted,
+                            now,
+                            tick,
+                            &load_id,
+                            &reason,
+                            ship.credits,
+                        );
+                    }
+                    AdoptOutcome::Pending { load_id } => {
+                        // Say so once per life, keep trying.
+                        if adopt_noted.insert(load_id.clone()) {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
+                                "event": "adoption-pending", "load": load_id,
+                                "why": "ledger shows it open but no board row resolved this fold; retrying"}),
+                            );
+                        }
+                    }
                 }
-                true
-            });
-            loads.append(&mut resolved);
+            }
             // The plan is booking order, whatever order adoptions resolved in.
             // A load the ledger has not shown yet (a booking acked this fold)
             // sorts last — it IS the newest.
@@ -482,18 +519,16 @@ fn main() -> ExitCode {
                     true
                 }
                 Err(reason) => {
-                    // A load that left us is off the board for a while, and the intent
-                    // that booked it is forgotten: the idempotency id of a dead booking
-                    // must never answer for a fresh one (LOCAL L1849, 2026-09-01: the
-                    // replayed id acked the old fold and the pilot closed and re-booked
-                    // the same lapsed contract every 15 ticks).
-                    lost_at.insert(a.row.load_id.clone(), tick);
-                    let lid = a.row.load_id.clone();
-                    recent.retain(|sig, _| !sig.contains(&lid));
-                    journal(
+                    close_load(
                         &ship_dir,
-                        json!({"at": now, "tick": tick, "event": "load-closed",
-                               "load": a.row.load_id, "why": reason, "credits": ship.credits}),
+                        &mut lost_at,
+                        &mut recent,
+                        &mut adopt_noted,
+                        now,
+                        tick,
+                        &a.row.load_id,
+                        &reason,
+                        ship.credits,
                     );
                     false
                 }
@@ -541,6 +576,29 @@ fn main() -> ExitCode {
 
         // One intent in flight at a time: wait out the fold we already paid for.
         if tick < pending_until {
+            std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+            continue;
+        }
+
+        // The adoption gate (round-2 review, finding 3): while any ledger-open
+        // contract is still unresolved, the ship's freight state is UNKNOWN — no
+        // merchant buy, no carry leg, no new booking, no diversion, no movement
+        // for a resolved newer load. Engaging a laid course and waiting out a
+        // filed fold stayed above this line deliberately: they complete acts
+        // already in motion. A quiet hold, journaled once per change.
+        if !pending_adopt.is_empty() {
+            let why = format!(
+                "{} contract(s) unresolved; adopting first",
+                pending_adopt.len()
+            );
+            if why != last_refusal {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "holding-for-adoption",
+                           "pending": pending_adopt.clone(), "why": why}),
+                );
+                last_refusal = why;
+            }
             std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
             continue;
         }

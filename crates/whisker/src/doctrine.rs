@@ -226,36 +226,39 @@ impl Itinerary {
             .map(|a| a.word)
     }
 
-    /// Is this op done, judged from evidence the fold shows? A pickup completes
-    /// when the ledger's word says the cargo is aboard — or, for a single-contract
-    /// plan only, when the aggregate hold shows cargo (the crane proxy the old
-    /// doctrine flew by; with several contracts the aggregate cannot attribute
-    /// units, so the word is the only honest evidence). A drop completes on the
-    /// delivered word. A planned fill completes when the tank is above the
-    /// top-up line — a full tank has nothing to buy.
-    fn op_done(&self, op: &StopOp, ship: &Ship) -> bool {
+    /// Is this CRANE op done, judged from the ledger's own word about ITS load?
+    /// Load-id-scoped only (round-2 review, finding 1): the aggregate hold can
+    /// carry merchant cargo or another contract's units, so occupied hold is
+    /// never evidence that THIS pickup happened — a booked load waits for its
+    /// own `pickedUp` word, one fold behind the crane at worst, never departing
+    /// on someone else's cargo. A drop completes on the delivered word.
+    fn crane_op_done(&self, op: &StopOp) -> bool {
         match op {
-            StopOp::Pickup { load_id, .. } => match self.word_of(load_id) {
-                Some(ActiveWord::Booked) => self.loads.len() == 1 && ship.hold_used > 0,
-                Some(_) => true,
-                None => true,
-            },
+            StopOp::Pickup { load_id, .. } => {
+                !matches!(self.word_of(load_id), Some(ActiveWord::Booked))
+            }
             StopOp::Drop { load_id, .. } => {
                 matches!(self.word_of(load_id), Some(ActiveWord::Delivered) | None)
             }
-            StopOp::Refuel => ship.fuel as f64 >= TOP_UP_BELOW * ship.fuel_capacity.max(1) as f64,
+            // Not a crane op — never navigated to (see `current`).
+            StopOp::Refuel => true,
         }
     }
 
-    /// The station visit the ship is working: the first stop with an op not yet
-    /// evidenced complete, and that op.
-    fn current(&self, ship: &Ship) -> Option<(&Stop, &StopOp)> {
-        for s in &self.stops {
-            if let Some(op) = s.ops.iter().find(|op| !self.op_done(op, ship)) {
-                return Some((s, op));
-            }
-        }
-        None
+    /// The station visit the ship is working: the first stop with a CRANE op the
+    /// ledger has not yet completed. Navigation keys on crane ops ONLY, because
+    /// their words are monotonic (Booked → PickedUp → Delivered → settled) — a
+    /// planned fill is executed opportunistically ON ARRIVAL at its stop and
+    /// deliberately never steers, so later fuel burn can never point the route
+    /// backwards at a pump already visited (round-2 review, finding 2). A
+    /// refuel-ONLY stop is therefore invisible to navigation: `sequential` never
+    /// compiles one, and a future planner that wants standalone fuel diversions
+    /// must add durable per-stop progress first — stated here so it is a known
+    /// edge, not a trap.
+    fn current(&self) -> Option<&Stop> {
+        self.stops
+            .iter()
+            .find(|s| s.ops.iter().any(|op| !self.crane_op_done(op)))
     }
 }
 
@@ -282,14 +285,19 @@ pub fn decide(
 ///
 /// With zero or one contract this reduces to the judgment whisker has flown since
 /// LOCAL — the wrapper above pins that, including the booked-at-destination
-/// deadhead (the route's first unfinished op is the origin pickup, wherever the
-/// hull is berthed). Two stated divergences from the old single-load rules, both
-/// deliberate: berthed at a fuel-selling route stop below the top-up line, the
-/// pilot now FILLS before working the crane (the old code budgeted that fill in
-/// its booking arithmetic but could never execute it — both reviews' finding);
-/// and a picked-up load berthed at some third station now files for the
-/// destination rather than waiting on a crane that has nothing to do (the word
-/// outranks the old positional guess).
+/// deadhead (the route's first unfinished crane op is the origin pickup, wherever
+/// the hull is berthed). Three stated divergences from the old single-load rules,
+/// all deliberate: berthed at a fuel-selling route stop with anything less than a
+/// full tank, the pilot FILLS before working the crane (the old code budgeted a
+/// fill in its booking arithmetic that no active-load decision could execute —
+/// both round-1 reviews; filling to FULL, not the 90% line, because the fuel walk
+/// proved the route against a full tank — round-2 finding 2); a picked-up load
+/// berthed at some third station files for its destination rather than waiting on
+/// a crane with nothing to do (the word outranks the old positional guess); and
+/// the old `hold_used > 0` crane proxy is GONE — pickup completion is the load's
+/// own ledger word, never the aggregate hold, because merchant cargo or another
+/// contract's units in the hold must not launch a still-Booked load toward its
+/// destination (round-2 finding 1; T-233 coexistence).
 pub fn decide_plan(
     ship: &Ship,
     plan: &Itinerary,
@@ -323,21 +331,37 @@ pub fn decide_plan(
                 why: "adrift between folds".into(),
             };
         };
-        let Some((stop, op)) = plan.current(ship) else {
+        let Some(stop) = plan.current() else {
             return Decision::Hold {
                 why: "waiting on the crane".into(),
             };
         };
+        // At the working stop, a planned fill executes FIRST and fills ALL THE
+        // WAY — the fuel walk proved this route against a full tank at this
+        // berth, so anything short of full departs on a weaker tank than the
+        // proof used (round-2 review, finding 2). The pump fills to capacity in
+        // one act and rejects only an already-full tank, so the guard is exact.
+        if stop.station == here
+            && stop.ops.contains(&StopOp::Refuel)
+            && ship.fuel < ship.fuel_capacity
+        {
+            return Decision::Refuel;
+        }
+        // Berthed anywhere ELSE that pumps, below the top-up line: fill where
+        // the hull stands before departing — pump fuel over tanker fuel, the
+        // rule that has always held. This is filling in place, never travel;
+        // navigation itself keys only on crane ops, so a pump already visited
+        // is history, not a destination.
+        if pumps.contains(here) && frac(ship.fuel) < TOP_UP_BELOW {
+            return Decision::Refuel;
+        }
         if stop.station != here {
             return Decision::Travel {
                 station: stop.station.clone(),
             };
         }
-        return match op {
-            StopOp::Refuel => Decision::Refuel,
-            StopOp::Pickup { .. } | StopOp::Drop { .. } => Decision::Hold {
-                why: "waiting on the crane".into(),
-            },
+        return Decision::Hold {
+            why: "waiting on the crane".into(),
         };
     }
 
@@ -958,11 +982,121 @@ mod tests {
             decide_plan(&ship, &plan, &[], &pumps(&["pump-origin"]), &FlatRouter(10)),
             Decision::Refuel
         );
-        ship.fuel = 590; // filled — the op reads done, the crane wait begins
+        // 98% is still not the full tank the fuel walk proved this route
+        // against — the fill files until the fold shows capacity (round-2
+        // review, finding 2: the proof and the executor must meet exactly).
+        ship.fuel = 590;
+        assert_eq!(
+            decide_plan(&ship, &plan, &[], &pumps(&["pump-origin"]), &FlatRouter(10)),
+            Decision::Refuel
+        );
+        ship.fuel = 600; // full — the crane wait begins
         assert_eq!(
             decide_plan(&ship, &plan, &[], &pumps(&["pump-origin"]), &FlatRouter(10)),
             Decision::Hold {
                 why: "waiting on the crane".into()
+            }
+        );
+    }
+
+    #[test]
+    fn anothers_cargo_never_launches_a_still_booked_load() {
+        // Round-2 review, finding 1: merchant units (or any unattributed cargo)
+        // in the aggregate hold must not complete L's pickup. Booked L from a→b
+        // with 20 units of SOMETHING aboard: from a third station AND from L's
+        // own destination, the only honest move is the deadhead to a.
+        for berth in ["third-station", "b"] {
+            let mut ship = ship_at(berth, 500);
+            ship.hold_used = 20; // merchant cargo, not L's
+            let plan = Itinerary::sequential(
+                vec![active("L", "a", "b", 25, ActiveWord::Booked)],
+                &pumps(&[]),
+            );
+            assert_eq!(
+                decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10)),
+                Decision::Travel {
+                    station: "a".into()
+                },
+                "berthed at {berth}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_burned_tank_never_steers_the_route_backwards() {
+        // Round-2 review, finding 2: walk the pinned interleaved route PAST the
+        // fill. Both pickups done, B dropped at w (its fill executed there),
+        // only A's drop at z remains — and the tank has burned low again. The
+        // route must still point FORWARD to z, never back to w's pump.
+        let plan = Itinerary {
+            loads: vec![
+                active("A", "x", "z", 50, ActiveWord::PickedUp),
+                active("B", "y", "w", 60, ActiveWord::Delivered),
+            ],
+            stops: vec![
+                Stop {
+                    station: "x".into(),
+                    ops: vec![StopOp::Pickup {
+                        load_id: "A".into(),
+                        units: 50,
+                    }],
+                },
+                Stop {
+                    station: "y".into(),
+                    ops: vec![StopOp::Pickup {
+                        load_id: "B".into(),
+                        units: 60,
+                    }],
+                },
+                Stop {
+                    station: "w".into(),
+                    ops: vec![
+                        StopOp::Refuel,
+                        StopOp::Drop {
+                            load_id: "B".into(),
+                            units: 60,
+                        },
+                    ],
+                },
+                Stop {
+                    station: "z".into(),
+                    ops: vec![StopOp::Drop {
+                        load_id: "A".into(),
+                        units: 50,
+                    }],
+                },
+            ],
+        };
+        // B is Delivered → its Collect outranks movement; settle it first the
+        // way the runner would, then the moving case: drop B from the loads
+        // (collected) and keep its stops — the route STILL never looks back.
+        let mut moving = plan.clone();
+        moving.loads.retain(|a| a.row.load_id != "B");
+        // Thirsty AT the pump berth: fill where the hull stands — in place,
+        // which is not steering backwards.
+        let mut ship = ship_at("w", 100); // 17%
+        ship.hold_used = 50;
+        assert_eq!(
+            decide_plan(&ship, &moving, &[], &pumps(&["w"]), &FlatRouter(10)),
+            Decision::Refuel
+        );
+        // Topped up and departed context: from z's side of the run, w is
+        // history — the route points forward to z, never back to the pump.
+        ship.fuel = 590; // above the top-up line
+        assert_eq!(
+            decide_plan(&ship, &moving, &[], &pumps(&["w"]), &FlatRouter(10)),
+            Decision::Travel {
+                station: "z".into()
+            },
+            "a visited pump is history, not a destination"
+        );
+        // And mid-flight to z a burned tank still holds course.
+        ship.fuel = 100;
+        ship.in_flight = true;
+        assert_eq!(
+            decide_plan(&ship, &moving, &[], &pumps(&["w"]), &FlatRouter(10)),
+            Decision::Hold {
+                why: "under way".into()
             }
         );
     }
