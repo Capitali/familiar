@@ -1046,6 +1046,31 @@ mod tests {
     }
 
     #[test]
+    fn the_ranking_is_the_boards_rate_a_stated_placeholder_not_marginal() {
+        // The codex-lane review's required regression, pinning the PLACEHOLDER
+        // at its stated altitude: with a live plan ending far away, a candidate
+        // whose board-priced rate is higher still ranks first, even though a
+        // true marginal rate from the plan's endpoint would prefer the other.
+        // This is DOCUMENTED behavior — best_insertion's comment confines the
+        // booking gate to an empty plan for exactly this reason — so when a
+        // marginal rate is built (UCF-Haul#43, route ticks on the Router), this
+        // test is the one that must be deliberately rewritten, not silently.
+        let ship = ship_at("here", 600);
+        let plan = Itinerary::sequential(
+            vec![active("HELD", "a", "far-end", 25, ActiveWord::Booked)],
+            &pumps(&[]),
+        );
+        // RICH rates higher on the board (its deadhead was priced from "here");
+        // NEAR sits at the plan's endpoint. The placeholder picks RICH.
+        let rich = load("RICH", "elsewhere", "b", 2000, (5, 10));
+        let near = load("NEAR", "far-end", "b", 1000, (5, 10));
+        assert_eq!(
+            best_insertion(&ship, &plan, &[rich, near], &pumps(&[]), &FlatRouter(10)),
+            Some("RICH".into())
+        );
+    }
+
+    #[test]
     fn every_consequential_decision_names_the_freight_automation() {
         for d in [
             Decision::Refuel,
