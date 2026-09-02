@@ -692,13 +692,13 @@ fn main() -> ExitCode {
                     .map(|v| trade::parse_galaxy(&v))
                     .unwrap_or_default()
             };
-            let hint = |good: &str| -> i64 {
+            let hint = |good: &str| -> (i64, String) {
                 galaxy_for_hint
                     .iter()
                     .filter(|r| r.good == good)
-                    .map(|r| r.mid)
-                    .max()
-                    .unwrap_or(0)
+                    .max_by_key(|r| r.mid)
+                    .map(|r| (r.mid, r.station.clone()))
+                    .unwrap_or((0, String::new()))
             };
             for note in
                 trade::reconcile_hold(&mut holdings, &cargo, freight_aboard, &hint, tick, min_hold)

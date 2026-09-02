@@ -195,12 +195,14 @@ pub fn save_holdings(ship_dir: &Path, holdings: &[Holding]) {
 /// `freight` is the active contract's cargo when it is aboard (its good and units
 /// are not ours to sell). `basis_hint(good)` prices a good we find aboard but do not
 /// remember — the ask here if quoted, else the dearest mid on the map, so an
-/// adopted lot is never sold at a phantom profit. Returns a note per change.
+/// adopted lot is never sold at a phantom profit — and names the berth paying that
+/// mid, so the lot has somewhere to be carried once its clock passes. Returns a note
+/// per change.
 pub fn reconcile_hold(
     holdings: &mut Vec<Holding>,
     cargo: &[(String, i64)],
     freight: Option<(&str, i64)>,
-    basis_hint: &dyn Fn(&str) -> i64,
+    basis_hint: &dyn Fn(&str) -> (i64, String),
     tick: i64,
     min_hold: i64,
 ) -> Vec<String> {
@@ -236,15 +238,15 @@ pub fn reconcile_hold(
         if units <= 0 {
             continue;
         }
-        let basis = basis_hint(good);
+        let (basis, target) = basis_hint(good);
         notes.push(format!(
-            "{good}: {units} units aboard the book did not know — adopted at basis {basis}"
+            "{good}: {units} units aboard the book did not know — adopted at basis {basis}, for {target}"
         ));
         holdings.push(Holding {
             good: good.clone(),
             units,
             avg_cost: basis,
-            sell_target: String::new(),
+            sell_target: target,
             opened_tick: tick,
             sellable_at: tick + min_hold,
         });
@@ -892,13 +894,20 @@ mod tests {
             ("ore".to_string(), 30),
             ("grain".to_string(), 24),
         ];
-        let hint = |g: &str| if g == "ore" { 11 } else { 99 };
+        let hint = |g: &str| {
+            if g == "ore" {
+                (11, "io-slagworks".to_string())
+            } else {
+                (99, "far".to_string())
+            }
+        };
         let notes = reconcile_hold(&mut book, &cargo, Some(("grain", 24)), &hint, 11416, 288);
         assert_eq!(book.len(), 2, "{book:?}");
         let clay = book.iter().find(|h| h.good == "litter-clay").unwrap();
         assert_eq!(
             (clay.units, clay.avg_cost, clay.sellable_at),
             (60, 99, 11416 + 288)
+        assert_eq!(clay.sell_target, "far", "an adopted lot needs somewhere to go");
         );
         let ore = book.iter().find(|h| h.good == "ore").unwrap();
         assert_eq!((ore.units, ore.avg_cost), (30, 11));
