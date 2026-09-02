@@ -459,6 +459,8 @@ pub fn decide_trade(
             let Some(cost) = router.fuel_between(here, &row.station) else {
                 continue; // unreachable / unpriceable — not an arbitrage
             };
+            // ...plus the leg from that market to a pump, or the run ends there.
+            let cost = cost + crate::doctrine::onward_to_pump(&row.station, pumps, router);
             priced += 1;
             if !carry_affordable(cost, l.fuel_available) {
                 unfuelable += 1;

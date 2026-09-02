@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
 use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
+use familiar_whisker::outfit::{self, DeliveryStat, OutfitDecision, Purse};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
 use familiar_whisker::{env_value, granted_automations, Automation};
 use familiar_world::lease::{self, SignedLease};
@@ -59,6 +60,10 @@ type RouteCache = HashMap<(String, String), (i64, Option<PricedRoute>)>;
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
 const LOST_COOLDOWN_TICKS: i64 = 60;
+
+/// Lease service per day, as observed on KK II's lease (leaseServicePaid 778 over
+/// ~1.5 days); the pack's `leaseServiceChargeBps` is not on the wire.
+const LEASE_SERVICE_PER_DAY_EST: i64 = 520;
 
 /// ℳ per unit of fuel (the pack's `fuelPricePerUnit`, not on the wire; 2 on LOCAL
 /// and PROD, and what the refuel receipts show). Charged against a trade's margin.
@@ -394,11 +399,39 @@ fn main() -> ExitCode {
     // The world's day, in ticks: the exchange's minimum hold on bought goods is a
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
-    let min_hold: i64 = wire
-        .get("/v1/reference")
-        .ok()
+    let reference = wire.get("/v1/reference").ok();
+    let min_hold: i64 = reference
+        .as_ref()
         .and_then(|v| v.get("ticksPerDay").and_then(Value::as_i64))
         .unwrap_or(288);
+    // The pack's goods that rot in transit (decayBps > 0): what refrigeration is for.
+    let perishable: BTreeSet<String> = reference
+        .as_ref()
+        .and_then(|v| v.get("goods").and_then(Value::as_array))
+        .map(|goods| {
+            goods
+                .iter()
+                .filter(|g| g.get("decayBps").and_then(Value::as_i64).unwrap_or(0) > 0)
+                .filter_map(|g| g.get("id").and_then(Value::as_str).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    // The ship's fixed daily charges: the mortgage payment the pack names, plus the
+    // lease service (not on the wire; ~520/day observed on KK II's lease).
+    let mortgage_per_day = reference
+        .as_ref()
+        .and_then(|v| v.get("params")?.get("mortgagePaymentPerDay")?.as_i64())
+        .unwrap_or(600);
+    let outfits = granted.contains(&Automation::Outfit);
+    let mut deliveries: Vec<DeliveryStat> =
+        std::fs::read_to_string(ship_dir.join("deliveries.jsonl"))
+            .map(|j| {
+                j.lines()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+    let mut last_outfit_idle = String::new();
     let mut holdings: Vec<Holding> = if trades {
         trade::load_holdings(&ship_dir)
     } else {
@@ -593,6 +626,53 @@ fn main() -> ExitCode {
                 Ok(Some(word)) => a.word = word,
                 Ok(None) => {}
                 Err(reason) => {
+                    // A settled delivery goes on the ship's own record (what the
+                    // desk booked, what the fold paid): the outfitting doctrine
+                    // reads decay out of it.
+                    if reason.starts_with("settled") {
+                        let events: Vec<&Value> = me
+                            .get("freight")
+                            .and_then(Value::as_array)
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter(|f| {
+                                        f.get("loadId").and_then(Value::as_str)
+                                            == Some(a.row.load_id.as_str())
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let amount = |word: &str| -> i64 {
+                            events
+                                .iter()
+                                .find(|f| {
+                                    f.get("event")
+                                        .and_then(Value::as_str)
+                                        .map(|e| e.contains(word))
+                                        .unwrap_or(false)
+                                })
+                                .and_then(|f| f.get("freightPaid").and_then(Value::as_i64))
+                                .unwrap_or(0)
+                        };
+                        let stat = DeliveryStat {
+                            load_id: a.row.load_id.clone(),
+                            good: a.row.good.clone(),
+                            perishable: perishable.contains(&a.row.good),
+                            booked: amount("booked"),
+                            paid: amount("payment taken"),
+                        };
+                        if let Ok(line) = serde_json::to_string(&stat) {
+                            use std::io::Write;
+                            if let Ok(mut f) = std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(ship_dir.join("deliveries.jsonl"))
+                            {
+                                let _ = writeln!(f, "{line}");
+                            }
+                        }
+                        deliveries.push(stat);
+                    }
                     // A load that left us is off the board for a while, and the intent
                     // that booked it is forgotten: the idempotency id of a dead booking
                     // must never answer for a fresh one (LOCAL L1849, 2026-09-01: the
@@ -978,7 +1058,11 @@ fn main() -> ExitCode {
                             // doctrine, whose fuel rules (top-up here, divert to a pump)
                             // are what gets the tank filled. A carry that strands the
                             // hull is a PAWS bill, not a trade.
-                            let cost = wire.fuel_between(&here, &h.sell_target);
+                            // The carry plus the leg from the market to a pump — the
+                            // same PAWS lesson as the freight plan.
+                            let cost = wire.fuel_between(&here, &h.sell_target).map(|c| {
+                                c + doctrine::onward_to_pump(&h.sell_target, &pumps, &wire)
+                            });
                             let flyable = cost
                                 .map(|c| trade::carry_affordable(c, ship.fuel))
                                 .unwrap_or(false);
@@ -1026,6 +1110,74 @@ fn main() -> ExitCode {
                                     ),
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── The outfitting phase (Automation::Outfit) ──────────────────────────
+        // Berthed, freight idle, nothing else took the fold: buy the next fitting the
+        // purse can bear above its reserve. One of each ever, so this fires rarely.
+        if outfits && tick >= pending_until && active.is_none() && !ship.in_flight {
+            if let Some(here) = ship.docked.clone() {
+                let purse = Purse {
+                    credits: ship.credits,
+                    daily_fixed_cost: mortgage_per_day
+                        + if ship.leased {
+                            LEASE_SERVICE_PER_DAY_EST
+                        } else {
+                            0
+                        },
+                    tank_price: ship.fuel_capacity * FUEL_PRICE_PER_UNIT,
+                    titled: !ship.leased,
+                    fittings: me
+                        .get("fittings")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|f| f.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
+                match outfit::decide_outfit(&purse, &deliveries) {
+                    OutfitDecision::Refit { fitting, price } => {
+                        seq += 1;
+                        let id = format!("whisker-{}-{}", now_secs(), seq);
+                        match wire.act(json!({"type": "refit", "fitting": fitting.wire()}), &id) {
+                            Ok(ack) => {
+                                pending_until = ack
+                                    .get("resolvesAtTick")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(tick)
+                                    + 1;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "outfitted",
+                                    "fitting": fitting.wire(), "price": price, "at_station": here,
+                                    "credits": ship.credits, "reserve": outfit::reserve(&purse), "resolves": pending_until - 1}),
+                                );
+                                std::thread::sleep(Duration::from_secs(
+                                    (tick_secs * 3 / 5).max(floor_secs),
+                                ));
+                                continue;
+                            }
+                            Err(e) => journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
+                                "event": "refit-refused", "fitting": fitting.wire(), "why": e}),
+                            ),
+                        }
+                    }
+                    OutfitDecision::Idle { why } => {
+                        if why != last_outfit_idle {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "outfit-idle",
+                                "why": why, "credits": ship.credits, "reserve": outfit::reserve(&purse)}),
+                            );
+                            last_outfit_idle = why;
                         }
                     }
                 }

@@ -116,6 +116,20 @@ pub fn flight_ticks(distances_km: &[i64], accel_milli_g: i64) -> i64 {
         .sum()
 }
 
+/// Fuel from `at` to the nearest priceable pump — zero when `at` pumps. A leg that
+/// ends where no pump is reachable is a leg that ends the voyage.
+pub fn onward_to_pump(at: &str, pumps: &BTreeSet<String>, router: &dyn Router) -> i64 {
+    // No pumps on the chart at all (a pack that prices no fuel): nothing to reach.
+    if pumps.is_empty() || pumps.contains(at) {
+        return 0;
+    }
+    pumps
+        .iter()
+        .filter_map(|p| router.fuel_between(at, p))
+        .min()
+        .unwrap_or(i64::MAX / 4)
+}
+
 /// The drive a contract's legs are flown at: the hull throttled by the class.
 pub fn contract_accel(ship_accel_milli_g: i64, class_bps: i64) -> i64 {
     (ship_accel_milli_g * class_bps / 10_000).max(1)
@@ -375,9 +389,15 @@ pub fn decide(
         if dead_ticks + ENGAGE_OVERHEAD_TICKS + l.loading_ticks.max(8) > PICKUP_TTL_TICKS {
             continue;
         }
-        let whole = ((dead + haul) as f64 * RESERVE) as i64;
+        // The plan must reach a pump AFTER the delivery too: a hull that arrives at
+        // a pumpless destination with an empty tank has no move left but the
+        // tanker (LOCAL, titan-larder, 2026-09-02: fuel 94, no pump in reach, a
+        // PAWS call-out from Saturn for ~15,000 ℳ). Cost of the onward leg to the
+        // nearest priceable pump, zero when the destination pumps.
+        let onward = onward_to_pump(&l.dest, pumps, router);
+        let whole = ((dead + haul + onward) as f64 * RESERVE) as i64;
         let dead_only = (dead as f64 * RESERVE) as i64;
-        let haul_only = (haul as f64 * RESERVE) as i64;
+        let haul_only = ((haul + onward) as f64 * RESERVE) as i64;
         if ship.fuel >= whole
             || (pumps.contains(l.origin.as_str())
                 && ship.fuel >= dead_only
@@ -567,6 +587,37 @@ mod tests {
         );
         assert!(
             ledger_word(&["booked", "picked up", "delivered", "settled: payment taken"]).is_err()
+        );
+    }
+
+    #[test]
+    fn a_booking_reserves_fuel_for_the_leg_from_the_destination_to_a_pump() {
+        // Titan-larder pumps nothing; the nearest pump from it costs 60. A load
+        // whose dead + haul the tank covers, but not the onward 60, is not booked.
+        struct Chart;
+        impl Router for Chart {
+            fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+                Some(match (from, to) {
+                    (a, b) if a == b => 0,
+                    (_, "titan-larder") => 100,
+                    ("titan-larder", "foxys-diner") => 60,
+                    _ => 500,
+                })
+            }
+        }
+        let pumps = pumps(&["foxys-diner"]);
+        let board = vec![load("L1", "here", "titan-larder", 900, (0, 20))];
+        // dead 0 + haul 100 + onward 60 = 160 × 1.2 = 192 in the tank.
+        let mut ship = ship_at("here", 180);
+        let d = decide(&ship, None, &board, &pumps, &Chart);
+        assert!(!matches!(d, Decision::Book { .. }), "{d:?}");
+        ship.fuel = 200;
+        let d = decide(&ship, None, &board, &pumps, &Chart);
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L1".into()
+            }
         );
     }
 
