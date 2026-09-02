@@ -9,8 +9,32 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
+### T-233 · Whisker trades as well as hauls — the merchant automation
+- status: built, soaking on LOCAL (Ian, 2026-09-01: "I want KKII to trade as well as haul. This should be todays priority.")
+- scope: `crates/whisker/src/trade.rs` — a pure merchant doctrine beside the freight one: read the berth's board (`/v1/stations/{id}/quotes`, real ask/bid + `maxBuyUnits`/`maxSellUnits`) and the whole map's mids (`/v1/galaxy/prices`, BOTH shapes — bare array at survey-dial zero, `{rows, unsurveyed}` once filed), buy where cheap, carry, sell where dear. Rules, each pinned by a test: sell only when the bid clears cost basis +12%, or to liquidate a stuck position (>240 ticks, or freight wants the hold); buy at the real ask against the target's mid −18% haircut, requiring ≥20% margin; ≤25% of cash and ≤50% of spare hold per position; never below a ℳ2000 cash floor; only reachable AND fuelable buyers (20% reserve), reachability asked of the router LAZILY best-payer-first because each question is a `/v1/route` call on the ship's one rate-limited key; route costs cached 30 min in the wire. Runner: merchant phase runs when berthed before the freight decision (one action per fold); SELL runs even while hauling, BUY only when freight is idle; carry leg re-checks fuel before filing travel; positions persist in the ship store (`holdings.json`, ADR-0045) so a restart keeps cost basis. Gated by `Automation::Trade` in `automations.json` — the pay-per-feature seam (ucf-exchange#15 `auto:trade`).
+- accept: LOCAL soak shows buy → carry → sell at a real profit with no strand and no 429; then KK II's PROD grant gains `"trade"` and whisker restarts; journal `traded`/`carry-to-market`/`trade-refused`/`carry-blocked` events tell the story
+- notes: the galaxy row's `stock` is the buyer's shelf, not its headroom — a full shelf pays but takes nothing (`maxSellUnits` 0 there), so a carried good can arrive unsellable and wait for the liquidation rule; a headroom-aware target pick needs `capacity` per station (one more read) — next refinement. Sizing is deliberately timid until the first PROD P&L is in the journal.
+
 ### T-232 · Whisker learns itineraries — multi-load, multi-stop freight before the game ships it
-- status: **CLAIMED companion:claude 2026-09-01 for brick 1** — the itinerary structures + the audit's item-3 fix (adopt-on-restart adopts ALL ledger-open loads, not the single newest) + the insertion-ranking seam, per the readiness audit below. Scope of THIS claim: `crates/whisker` only (doctrine.rs, lib.rs, main.rs, tests). Found while claiming, folded into the brick: the adopt closed-set does not know `reverted`/`cancel` (058a87c taught reconcile those words but not adoption — a restart could re-adopt a load the fold already reverted), and newest-only adoption would TODAY drop a delivered-but-uncollected load if a second load is open, which is uncollected money, not a future concern. Offered for codex reciprocal review before merge.
+- status: **CLAIMED companion:claude 2026-09-01 for brick 1 — ROUND 2 BUILT to both codex
+  reviews, re-offered.** Round 1 (`c49b01c`) was REJECTED/RETURNED by two independent codex
+  reviews (one run from each lane; both under `docs/reviews/2026-09-01-t232-itinerary-*.md`)
+  — right, on every point. Round 2, rebased over `83025b2` with every live fix intact
+  (booked-at-dest deadhead, pending-fold reconcile, lost-cooldown + fresh-id purge,
+  spare-hold fit, the whole T-233 merchant): the route is STATION STOPS with typed
+  Pickup/Drop/**Refuel** ops (a planned fill is an op the pilot executes — which also
+  closes a latent gap in the OLD doctrine, whose pump-origin booking arithmetic budgeted
+  a fill no active-load decision could perform); `Itinerary::sequential` is the compile
+  today's world flies and the planner-to-be's seam; hold occupancy is WALKED per op
+  (merchant cargo narrows freight; sequential full-hold contracts fit); adoption is a
+  per-cycle reconciliation with a pending-retry list, never a startup one-shot, ordering
+  by booking tick; the ledger folds chronologically (terminal-wins same-tick; a later
+  booking starts a new life); the ranking's altitude is stated (board-rate placeholder,
+  gate-confined). whisker 44/0 (12 doctrine + 14 trade unmodified), fmt, clippy. Scope
+  unchanged: `crates/whisker` only. Found and fixed on main during this round: CI's Linux
+  runner had failed every push since 2026-08-28 (factory jail tests lacked the
+  sandbox-exec skip guard) — `a7da72b`.
+- **heads-up for brick 1 (companion:claude, 2026-09-01 evening, commit 83025b2):** `crates/whisker` moved under you — doctrine.rs: Booked && here != origin → Travel(origin) (the destination is no longer excused; that was the foxys-diner revert trap) and best_load fits against SPARE hold; main.rs: reconcile skips while an action is pending, `lost_at` 60-tick cooldown + `recent` purge on load loss, and the T-233 merchant phase (trade.rs) ahead of `doctrine::decide`. Rebase brick 1 on it; the adopt-all fix composes with `lost_at` (an adopted load is not a lost one).
 - previously: proposed (Ian, 2026-08-31: "we will want to be able to handle multi-load routes as soon as they are available… make sure we don't develop any blockers. Managing freight efficiently will be a key economic driver, and planning multiple types of freight over multiple stops will be necessary")
 - scope: evolve `crates/whisker` from one-active-contract to an ITINERARY — an ordered plan of stops each carrying pickups and dropoffs — while the exchange still enforces one contract (UCF-Haul#43 is the upstream feature; its API shape is undecided). Concretely: (1) doctrine's `Active` becomes `Itinerary { legs: Vec<Stop> }` with the single-contract case as a one-stop degenerate plan, so nothing breaks the day the cap lifts; (2) the ranking generalizes from per-load ℳ/tick to per-PLAN ℳ/tick (insertion heuristic first, never a solver: which open load slots into my current plan for the best marginal rate — hold space, fuel, and deadline windows as constraints); (3) fuel planning walks the whole plan, refuel stops become itinerary entries; (4) the wedge/engage, adopt-on-restart, and ledger-reconcile machinery must key by loadId not by "the" load — audit for singular assumptions now, before they calcify
 - depends: nothing on our side (that is the point — remove blockers ahead of the feature); upstream shape lands in UCF-Haul#43 / ucf-exchange (watch the cargo loading-order coupling — metal#61 §1 becomes REAL exactly when multi-stop does, and it is a named paid Automation already in whisker's enum)

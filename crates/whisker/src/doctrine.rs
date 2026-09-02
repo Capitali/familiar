@@ -116,49 +116,146 @@ pub enum ActiveWord {
     Delivered,
 }
 
-/// One active load, as the caller tracks it. Under an itinerary this is one STOP
-/// of the plan — the name keeps its history.
+/// One contract the ship is committed to, with the ledger's word about it.
+/// The itinerary's LIFECYCLE record — routing happens over [`Stop`]s, never
+/// over contracts (T-232, both reciprocal reviews).
 #[derive(Debug, Clone)]
 pub struct Active {
     pub row: LoadRow,
     pub word: ActiveWord,
 }
 
-/// The ordered plan: every contract the ship is committed to, in booking order.
-/// Today's exchange enforces one contract, so the live plan holds zero or one stop —
-/// but the STRUCTURE carries any number, so the day UCF-Haul#43 lifts the cap
-/// (multi-load, multi-stop freight) nothing here breaks or migrates (T-232).
+/// One typed thing to do at a berth. The routing atoms: a station visit carries
+/// any number of these, so one berth can take a pickup AND a dropoff AND a fill,
+/// and the day UCF-Haul#43 interleaves contracts the route can say
+/// pickup-A → pickup-B → drop-B → drop-A without the model moving.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopOp {
+    /// The crane loads this contract's cargo here.
+    Pickup { load_id: String, units: i64 },
+    /// The crane unloads this contract's cargo here.
+    Drop { load_id: String, units: i64 },
+    /// Top the tank up at this berth's pump — a planned fill, an itinerary
+    /// entry in its own right (the board's requirement; also the repair for
+    /// both reviews' finding that the fuel walk budgeted fills nothing ever
+    /// executed).
+    Refuel,
+}
+
+/// One station visit on the route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stop {
+    pub station: String,
+    pub ops: Vec<StopOp>,
+}
+
+/// The plan: contracts (lifecycle, booking order) plus the ordered station
+/// visits that serve them. The ROUTE is the navigation truth; contracts are
+/// evidence the ops complete against. Today's exchange enforces one contract,
+/// so the live route is the degenerate origin-pickup → dest-drop compile of
+/// [`Itinerary::sequential`] — but nothing in the navigation, fuel walk, or
+/// occupancy check assumes it.
 #[derive(Debug, Clone, Default)]
 pub struct Itinerary {
-    pub stops: Vec<Active>,
+    pub loads: Vec<Active>,
+    pub stops: Vec<Stop>,
 }
 
 impl Itinerary {
-    /// The degenerate plan today's world flies: one contract, or none.
-    pub fn single(active: Option<Active>) -> Self {
-        Itinerary {
-            stops: active.into_iter().collect(),
+    /// The compile today's world flies: each contract's remaining work in
+    /// booking order — origin pickup (if not yet aboard), then destination
+    /// drop — with same-station visits coalesced and a planned [`StopOp::Refuel`]
+    /// opening every visit to a fuel-selling berth (pump fuel over tanker fuel,
+    /// now AS an itinerary entry). A real multi-load planner replaces this
+    /// function, not these types, when UCF-Haul#43's shape lands.
+    pub fn sequential(loads: Vec<Active>, pumps: &BTreeSet<String>) -> Self {
+        let mut stops: Vec<Stop> = Vec::new();
+        let mut push_op = |station: &str, op: StopOp| match stops.last_mut() {
+            Some(s) if s.station == station => s.ops.push(op),
+            _ => stops.push(Stop {
+                station: station.to_string(),
+                ops: vec![op],
+            }),
+        };
+        for a in &loads {
+            match a.word {
+                ActiveWord::Delivered => {}
+                ActiveWord::Booked => {
+                    push_op(
+                        &a.row.origin,
+                        StopOp::Pickup {
+                            load_id: a.row.load_id.clone(),
+                            units: a.row.units,
+                        },
+                    );
+                    push_op(
+                        &a.row.dest,
+                        StopOp::Drop {
+                            load_id: a.row.load_id.clone(),
+                            units: a.row.units,
+                        },
+                    );
+                }
+                ActiveWord::PickedUp => {
+                    push_op(
+                        &a.row.dest,
+                        StopOp::Drop {
+                            load_id: a.row.load_id.clone(),
+                            units: a.row.units,
+                        },
+                    );
+                }
+            }
         }
+        for s in &mut stops {
+            if pumps.contains(s.station.as_str()) {
+                s.ops.insert(0, StopOp::Refuel);
+            }
+        }
+        Itinerary { loads, stops }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.stops.is_empty()
+        self.loads.is_empty()
     }
 
-    /// Units the plan still owes hold space: everything not yet delivered.
-    /// (Delivered cargo has left the hold; its money is parked on the contract.)
-    pub fn units_held(&self) -> i64 {
-        self.stops
+    fn word_of(&self, load_id: &str) -> Option<ActiveWord> {
+        self.loads
             .iter()
-            .filter(|s| s.word != ActiveWord::Delivered)
-            .map(|s| s.row.units)
-            .sum()
+            .find(|a| a.row.load_id == load_id)
+            .map(|a| a.word)
     }
 
-    /// The stop the ship is working toward: the first not-yet-delivered contract,
-    /// in plan order. Delivered stops wait only on a Collect, not on movement.
-    pub fn current(&self) -> Option<&Active> {
-        self.stops.iter().find(|s| s.word != ActiveWord::Delivered)
+    /// Is this op done, judged from evidence the fold shows? A pickup completes
+    /// when the ledger's word says the cargo is aboard — or, for a single-contract
+    /// plan only, when the aggregate hold shows cargo (the crane proxy the old
+    /// doctrine flew by; with several contracts the aggregate cannot attribute
+    /// units, so the word is the only honest evidence). A drop completes on the
+    /// delivered word. A planned fill completes when the tank is above the
+    /// top-up line — a full tank has nothing to buy.
+    fn op_done(&self, op: &StopOp, ship: &Ship) -> bool {
+        match op {
+            StopOp::Pickup { load_id, .. } => match self.word_of(load_id) {
+                Some(ActiveWord::Booked) => self.loads.len() == 1 && ship.hold_used > 0,
+                Some(_) => true,
+                None => true,
+            },
+            StopOp::Drop { load_id, .. } => {
+                matches!(self.word_of(load_id), Some(ActiveWord::Delivered) | None)
+            }
+            StopOp::Refuel => ship.fuel as f64 >= TOP_UP_BELOW * ship.fuel_capacity.max(1) as f64,
+        }
+    }
+
+    /// The station visit the ship is working: the first stop with an op not yet
+    /// evidenced complete, and that op.
+    fn current(&self, ship: &Ship) -> Option<(&Stop, &StopOp)> {
+        for s in &self.stops {
+            if let Some(op) = s.ops.iter().find(|op| !self.op_done(op, ship)) {
+                return Some((s, op));
+            }
+        }
+        None
     }
 }
 
@@ -174,24 +271,25 @@ pub fn decide(
 ) -> Decision {
     decide_plan(
         ship,
-        &Itinerary::single(active.cloned()),
+        &Itinerary::sequential(active.cloned().into_iter().collect(), pumps),
         board,
         pumps,
         router,
     )
 }
 
-/// The judgment. Facts in, one decision out — now over an ordered PLAN of stops.
+/// The judgment. Facts in, one decision out — over the ROUTE.
 ///
-/// With zero or one stop this reduces to the judgment whisker has flown since
-/// LOCAL — the wrapper above pins that. With more (once the exchange allows it):
-/// delivered money is collected first, then the ship works the plan in order,
-/// navigating by each stop's own ledger word. One deliberate divergence from the
-/// single-stop rules, stated rather than smoothed: the single-contract case reads
-/// "cargo aboard" off the aggregate `hold_used` (the crane proxy the fold shows);
-/// a multi-stop plan cannot attribute aggregate units to one contract, so there
-/// the stop's reconciled word (`PickedUp`) is the evidence. UCF-Haul#43's API may
-/// hand us per-load hold rows — revisit this seam when its shape lands.
+/// With zero or one contract this reduces to the judgment whisker has flown since
+/// LOCAL — the wrapper above pins that, including the booked-at-destination
+/// deadhead (the route's first unfinished op is the origin pickup, wherever the
+/// hull is berthed). Two stated divergences from the old single-load rules, both
+/// deliberate: berthed at a fuel-selling route stop below the top-up line, the
+/// pilot now FILLS before working the crane (the old code budgeted that fill in
+/// its booking arithmetic but could never execute it — both reviews' finding);
+/// and a picked-up load berthed at some third station now files for the
+/// destination rather than waiting on a crane that has nothing to do (the word
+/// outranks the old positional guess).
 pub fn decide_plan(
     ship: &Ship,
     plan: &Itinerary,
@@ -210,7 +308,7 @@ pub fn decide_plan(
     if !plan.is_empty() {
         // Money first: a delivered contract never pays itself, and collecting
         // costs no movement.
-        if let Some(done) = plan.stops.iter().find(|s| s.word == ActiveWord::Delivered) {
+        if let Some(done) = plan.loads.iter().find(|a| a.word == ActiveWord::Delivered) {
             return Decision::Collect {
                 load_id: done.row.load_id.clone(),
             };
@@ -225,31 +323,21 @@ pub fn decide_plan(
                 why: "adrift between folds".into(),
             };
         };
-        // Every stop here is Booked or PickedUp, so current() is Some.
-        let Some(cur) = plan.current() else {
+        let Some((stop, op)) = plan.current(ship) else {
             return Decision::Hold {
                 why: "waiting on the crane".into(),
             };
         };
-        // Cargo evidence: the single-contract crane proxy (aggregate hold), or —
-        // when the plan holds more than one contract — the stop's own word.
-        let laden = if plan.stops.len() == 1 {
-            ship.hold_used > 0
-        } else {
-            cur.word == ActiveWord::PickedUp
-        };
-        if here == cur.row.origin && laden {
+        if stop.station != here {
             return Decision::Travel {
-                station: cur.row.dest.clone(),
+                station: stop.station.clone(),
             };
         }
-        if here != cur.row.origin && here != cur.row.dest && cur.word == ActiveWord::Booked {
-            return Decision::Travel {
-                station: cur.row.origin.clone(),
-            };
-        }
-        return Decision::Hold {
-            why: "waiting on the crane".into(),
+        return match op {
+            StopOp::Refuel => Decision::Refuel,
+            StopOp::Pickup { .. } | StopOp::Drop { .. } => Decision::Hold {
+                why: "waiting on the crane".into(),
+            },
         };
     }
 
@@ -273,11 +361,6 @@ pub fn decide_plan(
     // Deliberately BEFORE the low-fuel diversion: every plan below carries its own
     // reserve, and a load whose fuel-selling origin is reachable earns on the way
     // to the pump a bare diversion would fly for free.
-    //
-    // Booking rides an EMPTY plan only while the exchange enforces one contract —
-    // filing a second would just be refused at the door. When UCF-Haul#43 lifts
-    // the cap, this gate widens to best_insertion over the live plan; the ranking
-    // below already speaks that shape.
     if let Some(load_id) = best_insertion(ship, plan, board, pumps, router) {
         return Decision::Book { load_id };
     }
@@ -307,12 +390,21 @@ pub fn decide_plan(
     }
 }
 
-/// Which open load best joins the plan — appended at its end, the minimal honest
-/// insertion heuristic (never a solver). Candidates that fit the hold beside the
-/// plan's own cargo are ranked by ℳ per tick of pilot time — with an empty plan
-/// that IS today's per-load rate, and appending changes no other stop's earnings,
-/// so the same number is the marginal rate — and the best one whose whole
-/// remaining journey the tank (plus pumps along the way) can actually fuel wins.
+/// Which open load may join the plan, appended after its last stop.
+///
+/// HONEST ALTITUDE (both reciprocal reviews): the RANK is the board row's own
+/// ship-relative rate — `estimated_net / pilot_ticks`, whose deadhead the
+/// exchange priced from the ship's berth — NOT a recomputed marginal rate from
+/// the plan's endpoint. That is exactly right for the empty plan the booking
+/// gate limits it to today (it IS the old ranking, unchanged), and it is a
+/// stated placeholder for a live multi-load plan: a true marginal rate needs
+/// route TICKS from the plan's tail, which the wire's Router cannot yet
+/// answer. Do not widen the booking gate past an empty plan on the strength
+/// of this ranking. What IS plan-aware, and correct now: the hold-occupancy
+/// walk (a candidate must fit the hold at its own pickup, beside merchant
+/// goods and every not-yet-dropped contract) and the fuel walk (the tank,
+/// plus planned fills at pump stops, must cover every leg of the remaining
+/// route with the candidate appended).
 pub fn best_insertion(
     ship: &Ship,
     plan: &Itinerary,
@@ -321,10 +413,9 @@ pub fn best_insertion(
     router: &dyn Router,
 ) -> Option<String> {
     let here = ship.docked.as_deref()?;
-    let held = plan.units_held();
     let mut ranked: Vec<&LoadRow> = board
         .iter()
-        .filter(|l| !l.held_for_other && held + l.units <= ship.hold_capacity)
+        .filter(|l| !l.held_for_other && fits_hold(ship, plan, l))
         .filter(|l| l.pilot_ticks() > 0 && l.estimated_net > 0)
         .collect();
     ranked.sort_by(|a, b| {
@@ -333,63 +424,85 @@ pub fn best_insertion(
         rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
     });
     for l in ranked.into_iter().take(PRICED_CANDIDATES) {
-        let mut legs = plan_legs(plan, here);
-        let last = legs.last().map(|(_, to)| to.clone());
-        let pos = last.as_deref().unwrap_or(here);
-        legs.push((pos.to_string(), l.origin.clone()));
-        legs.push((l.origin.clone(), l.dest.clone()));
-        if plan_fuelable(ship, &legs, pumps, router) {
+        let stops = with_candidate(plan, l, pumps);
+        if plan_fuelable(ship, here, &stops, router) {
             return Some(l.load_id.clone());
         }
     }
     None
 }
 
-/// The plan's remaining flying, as (from, to) legs starting wherever the ship is:
-/// a Booked stop still owes the deadhead to its origin and the haul; a PickedUp
-/// stop owes only the haul. Delivered stops owe no movement.
-fn plan_legs(plan: &Itinerary, here: &str) -> Vec<(String, String)> {
-    let mut legs = Vec::new();
-    let mut pos = here.to_string();
-    for stop in &plan.stops {
-        match stop.word {
-            ActiveWord::Delivered => {}
-            ActiveWord::Booked => {
-                legs.push((pos.clone(), stop.row.origin.clone()));
-                legs.push((stop.row.origin.clone(), stop.row.dest.clone()));
-                pos = stop.row.dest.clone();
-            }
-            ActiveWord::PickedUp => {
-                legs.push((pos.clone(), stop.row.dest.clone()));
-                pos = stop.row.dest.clone();
+/// The plan's route with the candidate's own stops appended (its origin pickup,
+/// its destination drop, planned fills at pump berths) — the append-at-end
+/// insertion this brick limits itself to.
+fn with_candidate(plan: &Itinerary, l: &LoadRow, pumps: &BTreeSet<String>) -> Vec<Stop> {
+    let mut stops = plan.stops.clone();
+    let mut tail = Itinerary::sequential(
+        vec![Active {
+            row: l.clone(),
+            word: ActiveWord::Booked,
+        }],
+        pumps,
+    )
+    .stops;
+    stops.append(&mut tail);
+    stops
+}
+
+/// Does this candidate's cargo fit the hold AT ITS OWN PICKUP, walked along the
+/// route? Occupancy starts at the aggregate hold (merchant goods and picked-up
+/// freight included), rises at each pickup, falls at each drop — so two
+/// sequential full-hold contracts fit a hold that could never carry them
+/// TOGETHER, and a merchant position genuinely narrows what freight can board
+/// (the summed-reservation check both reviews rejected is gone).
+fn fits_hold(ship: &Ship, plan: &Itinerary, l: &LoadRow) -> bool {
+    let mut occupancy = ship.hold_used;
+    let pumps_none = BTreeSet::new();
+    for stop in with_candidate(plan, l, &pumps_none) {
+        for op in &stop.ops {
+            match op {
+                StopOp::Pickup { units, load_id } => {
+                    // A picked-up contract's units already sit in the aggregate;
+                    // only not-yet-loaded cargo raises occupancy here.
+                    if plan.word_of(load_id) != Some(ActiveWord::PickedUp) {
+                        occupancy += units;
+                        if occupancy > ship.hold_capacity {
+                            return false;
+                        }
+                    }
+                }
+                StopOp::Drop { units, .. } => occupancy -= units,
+                StopOp::Refuel => {}
             }
         }
     }
-    legs
+    true
 }
 
-/// Can the tank fly this whole leg sequence? The walk splits at fuel-selling
-/// stations — arriving at a pump refills to capacity — so the check is: the FIRST
-/// stretch (before any pump) fits the tank as it stands, and every later stretch
-/// fits a full tank, each with the same reserve arithmetic the single-load rule
-/// has always used. A leg the router cannot price is a route the doctrine will
-/// not risk. With one candidate load and an empty plan this reduces exactly to
-/// the original pair of checks: `(dead+haul)·R ≤ fuel`, or a fuel-selling origin
-/// with `dead·R ≤ fuel` and `haul·R ≤ capacity`.
-fn plan_fuelable(
-    ship: &Ship,
-    legs: &[(String, String)],
-    pumps: &BTreeSet<String>,
-    router: &dyn Router,
-) -> bool {
+/// Can the tank fly this route? The walk splits at stops carrying a planned
+/// [`StopOp::Refuel`] — arriving at one fills to capacity, and unlike the
+/// version both reviews rejected, that fill is now a real itinerary op the
+/// pilot executes on arrival (`decide_plan` files Refuel at such a berth
+/// before working the crane). The FIRST stretch must fit the tank as it
+/// stands; every stretch after a fill must fit a full tank; the same reserve
+/// arithmetic the single-load rule always used applies per stretch, so with
+/// one candidate and an empty plan this reduces exactly to the original pair
+/// of checks: `(dead+haul)·R ≤ fuel`, or a fuel-selling origin with
+/// `dead·R ≤ fuel` and `haul·R ≤ capacity`. A leg the router cannot price is
+/// a route the doctrine will not risk.
+fn plan_fuelable(ship: &Ship, here: &str, stops: &[Stop], router: &dyn Router) -> bool {
     let mut budget = ship.fuel;
     let mut stretch: i64 = 0;
-    for (from, to) in legs {
-        let Some(cost) = router.fuel_between(from, to) else {
-            return false;
-        };
-        stretch += cost;
-        if pumps.contains(to.as_str()) {
+    let mut pos = here.to_string();
+    for stop in stops {
+        if stop.station != pos {
+            let Some(cost) = router.fuel_between(&pos, &stop.station) else {
+                return false;
+            };
+            stretch += cost;
+            pos = stop.station.clone();
+        }
+        if stop.ops.contains(&StopOp::Refuel) {
             if budget < (stretch as f64 * RESERVE) as i64 {
                 return false;
             }
@@ -489,6 +602,40 @@ mod tests {
             d,
             Decision::Travel {
                 station: "b".into()
+            }
+        );
+    }
+
+    #[test]
+    fn booked_while_berthed_at_the_destination_still_deadheads_to_the_origin() {
+        // KK II at foxys-diner, 2026-09-01: booked a load INTO the berth she sat at
+        // and waited for a crane that had nothing to load; the desk reverted it.
+        let ship = Ship {
+            docked: Some("foxys-diner".into()),
+            fuel: 600,
+            fuel_capacity: 600,
+            hold_capacity: 120,
+            ..Default::default()
+        };
+        let active = Active {
+            row: LoadRow {
+                load_id: "L2605".into(),
+                origin: "whisker-hollow".into(),
+                dest: "foxys-diner".into(),
+                units: 120,
+                estimated_net: 500,
+                deadhead_ticks: 19,
+                haul_ticks: 19,
+                loading_ticks: 8,
+                held_for_other: false,
+            },
+            word: ActiveWord::Booked,
+        };
+        let d = decide(&ship, Some(&active), &[], &BTreeSet::new(), &FlatRouter(50));
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "whisker-hollow".into()
             }
         );
     }
@@ -628,27 +775,27 @@ mod tests {
     }
 
     // ——— T-232: the itinerary. Everything below exercises the plan layer over a
-    // stubbed multi-load world; the eleven tests above, unmodified, pin that the
-    // one-contract world still flies byte-for-byte through it.
+    // stubbed multi-load world; the doctrine tests above, unmodified, pin that the
+    // one-contract world still flies the same through it (decide IS decide_plan
+    // over the sequential compile of ≤1 contract).
 
-    fn stop(id: &str, origin: &str, dest: &str, word: ActiveWord) -> Active {
-        Active {
-            row: load(id, origin, dest, 500, (5, 10)),
-            word,
-        }
+    fn active(id: &str, origin: &str, dest: &str, units: i64, word: ActiveWord) -> Active {
+        let mut row = load(id, origin, dest, 500, (5, 10));
+        row.units = units;
+        Active { row, word }
     }
 
     #[test]
-    fn the_wrapper_is_the_degenerate_plan_none_and_one_stop_agree() {
+    fn the_wrapper_is_the_degenerate_plan_none_and_one_contract_agree() {
         let ship = ship_at("tuna-prime", 500);
         let board = [load("L1", "a", "b", 900, (5, 10))];
-        let one = stop("L2", "a", "b", ActiveWord::Booked);
-        for active in [None, Some(&one)] {
+        let one = active("L2", "a", "b", 25, ActiveWord::Booked);
+        for a in [None, Some(&one)] {
             assert_eq!(
-                decide(&ship, active, &board, &pumps(&["a"]), &FlatRouter(10)),
+                decide(&ship, a, &board, &pumps(&["a"]), &FlatRouter(10)),
                 decide_plan(
                     &ship,
-                    &Itinerary::single(active.cloned()),
+                    &Itinerary::sequential(a.cloned().into_iter().collect(), &pumps(&["a"])),
                     &board,
                     &pumps(&["a"]),
                     &FlatRouter(10)
@@ -658,19 +805,115 @@ mod tests {
     }
 
     #[test]
-    fn delivered_money_is_collected_before_the_rest_of_the_plan_moves() {
-        // Two contracts held: one delivered, one booked. The payout outranks the
-        // deadhead — collecting costs no movement.
-        let ship = ship_at("elsewhere", 500);
+    fn the_route_is_stops_with_typed_ops_not_contracts() {
+        // The reviews' required pin: an interleaved route — pickup A, pickup B,
+        // drop B and refuel at one berth, drop A — expressed directly, with the
+        // hold occupancy walked per op. No sequential compile can make this
+        // shape; the STRUCTURE carries it, which is the point.
         let plan = Itinerary {
+            loads: vec![
+                active("A", "x", "z", 50, ActiveWord::Booked),
+                active("B", "y", "w", 60, ActiveWord::Booked),
+            ],
             stops: vec![
-                stop("EARN", "a", "b", ActiveWord::Delivered),
-                stop("NEXT", "c", "d", ActiveWord::Booked),
+                Stop {
+                    station: "x".into(),
+                    ops: vec![StopOp::Pickup {
+                        load_id: "A".into(),
+                        units: 50,
+                    }],
+                },
+                Stop {
+                    station: "y".into(),
+                    ops: vec![StopOp::Pickup {
+                        load_id: "B".into(),
+                        units: 60,
+                    }],
+                },
+                Stop {
+                    station: "w".into(),
+                    ops: vec![
+                        StopOp::Refuel,
+                        StopOp::Drop {
+                            load_id: "B".into(),
+                            units: 60,
+                        },
+                    ],
+                },
+                Stop {
+                    station: "z".into(),
+                    ops: vec![StopOp::Drop {
+                        load_id: "A".into(),
+                        units: 50,
+                    }],
+                },
             ],
         };
-        let d = decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10));
+        // Movement order: the first unfinished op steers, in stop order.
+        let ship = ship_at("elsewhere", 500);
         assert_eq!(
-            d,
+            decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10)),
+            Decision::Travel {
+                station: "x".into()
+            }
+        );
+        // Occupancy is walked per op, not summed per contract: in a 115-unit
+        // hold this route peaks at 110 (A and B aboard between y and w), so a
+        // 10-unit candidate appended after z fits — a summed reservation
+        // (50+60+10=120) would wrongly refuse it — while a candidate that
+        // cannot fit the hold even alone is refused at its own pickup.
+        let mut narrow = ship_at("elsewhere", 500);
+        narrow.hold_capacity = 115;
+        let fits = |units: i64| {
+            let mut cand = load("C", "z", "q", 400, (5, 10));
+            cand.units = units;
+            fits_hold(&narrow, &plan, &cand)
+        };
+        assert!(fits(10));
+        assert!(!fits(116));
+    }
+
+    #[test]
+    fn two_full_hold_contracts_fit_in_sequence_the_hold_is_walked_not_summed() {
+        // Both reviews rejected summed reservation: two 80-unit loads through a
+        // 120-unit hold are fine SEQUENTIALLY — the legs never carry them together.
+        let ship = ship_at("here", 600);
+        let plan = Itinerary::sequential(
+            vec![active("FIRST", "a", "b", 80, ActiveWord::Booked)],
+            &pumps(&[]),
+        );
+        let mut second = load("SECOND", "c", "d", 400, (5, 10));
+        second.units = 80;
+        assert!(fits_hold(&ship, &plan, &second));
+    }
+
+    #[test]
+    fn merchant_goods_narrow_what_freight_can_board() {
+        // T-233 coexistence (the other lane's required regression): units the
+        // merchant carries sit in the aggregate hold and genuinely reduce the
+        // capacity an insertion may claim.
+        let mut ship = ship_at("here", 600);
+        ship.hold_used = 70; // carried trade goods, no freight aboard
+        let plan = Itinerary::default();
+        let mut cand = load("C", "a", "b", 400, (5, 10));
+        cand.units = 51;
+        assert!(!fits_hold(&ship, &plan, &cand));
+        cand.units = 50;
+        assert!(fits_hold(&ship, &plan, &cand));
+    }
+
+    #[test]
+    fn delivered_money_is_collected_before_the_rest_of_the_plan_moves() {
+        let ship = ship_at("elsewhere", 500);
+        let plan = Itinerary::sequential(
+            vec![
+                active("EARN", "a", "b", 25, ActiveWord::Delivered),
+                active("NEXT", "c", "d", 25, ActiveWord::Booked),
+            ],
+            &pumps(&[]),
+        );
+        assert_eq!(
+            decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10)),
             Decision::Collect {
                 load_id: "EARN".into()
             }
@@ -678,42 +921,22 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_is_worked_in_order_first_undelivered_stop_steers() {
-        // Docked away from everything, first stop booked: deadhead to ITS origin,
-        // not the second stop's.
-        let ship = ship_at("tuna-prime", 500);
-        let plan = Itinerary {
-            stops: vec![
-                stop("FIRST", "a", "b", ActiveWord::Booked),
-                stop("SECOND", "c", "d", ActiveWord::Booked),
-            ],
-        };
-        let d = decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10));
-        assert_eq!(
-            d,
-            Decision::Travel {
-                station: "a".into()
-            }
-        );
-    }
-
-    #[test]
-    fn a_multi_stop_plan_reads_cargo_from_the_stops_own_word() {
-        // At the first stop's origin with its cargo aboard (per the ledger), the
-        // laden leg files — even though the aggregate hold can't say WHOSE units
-        // those are. The single-stop crane proxy (hold_used) stays pinned by
-        // a_full_hold_at_the_origin_files_the_laden_leg above.
+    fn a_multi_contract_plan_reads_cargo_from_each_loads_own_word() {
+        // The aggregate hold cannot attribute units to one contract, so with
+        // several contracts the ledger word is the pickup evidence: FIRST is
+        // aboard per its word (hold_used says nothing), so the route files for
+        // its destination.
         let mut ship = ship_at("a", 500);
-        ship.hold_used = 0; // the aggregate lies; the word doesn't
-        let plan = Itinerary {
-            stops: vec![
-                stop("FIRST", "a", "b", ActiveWord::PickedUp),
-                stop("SECOND", "c", "d", ActiveWord::Booked),
+        ship.hold_used = 0;
+        let plan = Itinerary::sequential(
+            vec![
+                active("FIRST", "a", "b", 25, ActiveWord::PickedUp),
+                active("SECOND", "c", "d", 25, ActiveWord::Booked),
             ],
-        };
-        let d = decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10));
+            &pumps(&[]),
+        );
         assert_eq!(
-            d,
+            decide_plan(&ship, &plan, &[], &pumps(&[]), &FlatRouter(10)),
             Decision::Travel {
                 station: "b".into()
             }
@@ -721,21 +944,27 @@ mod tests {
     }
 
     #[test]
-    fn insertion_packs_the_hold_a_load_that_does_not_fit_beside_the_plan_waits() {
-        // 120-unit hold, 100 units committed: the fat lucrative load can't ride,
-        // the thin one can.
-        let ship = ship_at("here", 600);
-        let mut committed = stop("HELD", "x", "y", ActiveWord::PickedUp);
-        committed.row.units = 100;
-        let plan = Itinerary {
-            stops: vec![committed],
-        };
-        let mut fat = load("FAT", "a", "b", 10_000, (5, 10));
-        fat.units = 40;
-        let mut thin = load("THIN", "a", "b", 400, (5, 10));
-        thin.units = 20;
-        let picked = best_insertion(&ship, &plan, &[fat, thin], &pumps(&[]), &FlatRouter(10));
-        assert_eq!(picked, Some("THIN".into()));
+    fn a_planned_fill_is_an_op_the_pilot_executes_then_leaves() {
+        // Both reviews' finding 3, closed: arriving at a pump berth on the route
+        // with a thirsty tank, the pilot FILES THE FILL before working the crane
+        // — the fuel walk's budget reset is this op, executed. Once the tank is
+        // above the line the same berth's crane work proceeds.
+        let plan = Itinerary::sequential(
+            vec![active("L", "pump-origin", "far", 25, ActiveWord::Booked)],
+            &pumps(&["pump-origin"]),
+        );
+        let mut ship = ship_at("pump-origin", 200); // 33% — thirsty
+        assert_eq!(
+            decide_plan(&ship, &plan, &[], &pumps(&["pump-origin"]), &FlatRouter(10)),
+            Decision::Refuel
+        );
+        ship.fuel = 590; // filled — the op reads done, the crane wait begins
+        assert_eq!(
+            decide_plan(&ship, &plan, &[], &pumps(&["pump-origin"]), &FlatRouter(10)),
+            Decision::Hold {
+                why: "waiting on the crane".into()
+            }
+        );
     }
 
     #[test]
@@ -746,49 +975,48 @@ mod tests {
         impl Router for PerLeg {
             fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
                 Some(match (from, to) {
-                    ("x", "far-y") => 400, // the plan's own laden leg
+                    ("x", "far-y") => 400,
                     _ => 50,
                 })
             }
         }
-        let ship = ship_at("x", 500); // covers 400+50+50 only without reserve
-        let plan = Itinerary {
-            stops: vec![stop("HELD", "w", "far-y", ActiveWord::PickedUp)],
-        };
-        let cheap = load("CHEAP", "a", "b", 900, (5, 10));
-        let picked = best_insertion(
-            &ship,
-            &plan,
-            std::slice::from_ref(&cheap),
+        let ship = ship_at("x", 500);
+        let plan = Itinerary::sequential(
+            vec![active("HELD", "w", "far-y", 25, ActiveWord::PickedUp)],
             &pumps(&[]),
-            &PerLeg,
         );
-        assert_eq!(picked, None, "600 of fuel cannot fly 500·1.2 of legs");
-        // A pump at the plan's own destination resets the tank — now it books.
-        let picked = best_insertion(&ship, &plan, &[cheap], &pumps(&["far-y"]), &PerLeg);
-        assert_eq!(picked, Some("CHEAP".into()));
+        let cheap = load("CHEAP", "a", "b", 900, (5, 10));
+        assert_eq!(
+            best_insertion(
+                &ship,
+                &plan,
+                std::slice::from_ref(&cheap),
+                &pumps(&[]),
+                &PerLeg
+            ),
+            None,
+            "500 of tank cannot fly 500·1.2 of legs"
+        );
+        // A pump at the plan's own destination is a planned fill the pilot will
+        // execute on arrival — the walk may bank on it, and the booking opens.
+        let plan_with_pump = Itinerary::sequential(
+            vec![active("HELD", "w", "far-y", 25, ActiveWord::PickedUp)],
+            &pumps(&["far-y"]),
+        );
+        assert_eq!(
+            best_insertion(
+                &ship,
+                &plan_with_pump,
+                std::slice::from_ref(&cheap),
+                &pumps(&["far-y"]),
+                &PerLeg
+            ),
+            Some("CHEAP".into())
+        );
     }
 
     #[test]
-    fn plan_fuel_walks_booked_stops_as_deadhead_plus_haul() {
-        // A booked (not picked-up) stop owes BOTH its legs before the candidate.
-        struct PerLeg;
-        impl Router for PerLeg {
-            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
-                Some(100)
-            }
-        }
-        let ship = ship_at("here", 500);
-        let plan = Itinerary {
-            stops: vec![stop("HELD", "a", "b", ActiveWord::Booked)],
-        };
-        // Plan legs: here→a, a→b (200), candidate: b→c, c→d (200): 400·1.2 = 480 ≤ 500.
-        let ok = load("OK", "c", "d", 900, (5, 10));
-        assert_eq!(
-            best_insertion(&ship, &plan, &[ok], &pumps(&[]), &PerLeg),
-            Some("OK".into())
-        );
-        // One more unpriced leg anywhere refuses the whole plan.
+    fn an_unpriceable_leg_refuses_the_whole_insertion() {
         struct OneBlind;
         impl Router for OneBlind {
             fn fuel_between(&self, from: &str, _: &str) -> Option<i64> {
@@ -799,9 +1027,20 @@ mod tests {
                 }
             }
         }
+        let ship = ship_at("here", 600);
+        let plan = Itinerary::sequential(
+            vec![active("HELD", "a", "b", 25, ActiveWord::Booked)],
+            &pumps(&[]),
+        );
         let ok = load("OK", "c", "d", 900, (5, 10));
         assert_eq!(
-            best_insertion(&ship, &plan, &[ok], &pumps(&[]), &OneBlind),
+            best_insertion(
+                &ship,
+                &plan,
+                std::slice::from_ref(&ok),
+                &pumps(&[]),
+                &OneBlind
+            ),
             None
         );
     }

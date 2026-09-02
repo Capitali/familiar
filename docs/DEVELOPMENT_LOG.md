@@ -6,59 +6,75 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
-## 2026-09-01 — T-232 brick 1: whisker's plan becomes an itinerary, and a restart forgets nothing
+## 2026-09-01 — T-232 brick 1, round 2: the itinerary is station stops, and a restart forgets nothing
 
-Ian's direction (2026-08-31): multi-load, multi-stop freight is coming to the exchange
-(UCF-Haul#43) and "managing freight efficiently will be a key economic driver" — remove
-our blockers before the feature lands. The readiness audit found the shape already
-friendly and one live defect; this brick is the structures plus that fix.
+Round 1 of this brick was REJECTED by two independent codex reviews (one run from each
+lane — `docs/reviews/2026-09-01-t232-itinerary-review.md` and
+`…-t232-itinerary-reciprocal-review.md`), and this round is rebuilt to their combined
+findings, rebased over the live fixes that landed mid-flight (`83025b2`: the
+booked-at-destination deadhead, the pending-fold reconcile guard, the lost-load
+cooldown with fresh-id purge, the spare-hold fit, and the whole T-233 merchant). All
+in `crates/whisker`:
 
-What changed, all in `crates/whisker`:
+- **The route is station stops, not contracts** (both reviews' P1). `StopOp` —
+  `Pickup`/`Drop`/`Refuel` — is the routing atom; a `Stop` is one berth visit carrying
+  any number of ops; `Itinerary` holds the contracts (lifecycle, booking order) AND
+  the ordered stops that serve them. `Itinerary::sequential` is the compile today's
+  one-contract world flies — origin pickup, destination drop, same-station visits
+  coalesced, a planned `Refuel` opening every visit to a fuel-selling berth — and a
+  real planner replaces that FUNCTION, not the types, when UCF-Haul#43's shape lands.
+  An interleaved route (pickup A, pickup B, drop B + refuel, drop A) is pinned in a
+  pure test with per-op hold occupancy.
+- **A planned fill is an op the pilot executes** (both reviews' finding 3 — and a
+  latent gap in the OLD doctrine, which budgeted a pump-origin fill in its booking
+  arithmetic that no active-load decision could ever perform). Berthed at a route
+  stop that pumps, below the top-up line, the decision is now `Refuel` before crane
+  work; the fuel walk's budget reset happens exactly at stops carrying that op.
+- **Occupancy is walked, not summed** (both reviews). A candidate must fit the hold
+  at its own pickup, beside merchant goods (T-233's cargo sits in the aggregate
+  `hold_used`) and every not-yet-dropped contract — two sequential full-hold
+  contracts fit; a merchant position genuinely narrows what freight can board.
+- **Adoption is reconciliation, not a startup one-shot** (my review's blocker 1).
+  Every cycle, ledger-open loads the plan does not carry become pending adoptions;
+  a pending id retries its board-row lookup each fold until it resolves or the
+  ledger closes it. A transient loadboard omission delays adoption one fold instead
+  of forgetting a live contract forever, and no booking happens while any open id
+  is unresolved.
+- **The ledger folds chronologically** (blockers 2 and 6). `ledger::reconcile` and
+  `ledger::open_loads` reduce each load's events in tick order with terminal-wins
+  same-tick precedence: array-order noise cannot resurrect a closed load, a
+  genuinely later booking starts a new life with ITS tick as the plan order, and
+  adoption orders by the booking tick — not the latest lifecycle event.
+- **The ranking's altitude is stated, not inflated** (both reviews' marginal-rate
+  finding). `best_insertion` ranks by the board row's own ship-relative rate —
+  exactly the old ranking for the empty plan the booking gate confines it to — and
+  its doc comment forbids widening that gate on the strength of this ranking; a
+  true marginal rate needs route ticks the wire cannot yet answer.
 
-- `doctrine::Itinerary { stops: Vec<Active> }` — the ordered plan, booking order.
-  `decide` stays as the front door and becomes the degenerate one-stop case of the new
-  `decide_plan`, so the eleven incident-pinned doctrine tests run **unmodified** — that
-  is the zero-behavior-change pin the task's accept bar names. Multi-stop navigation
-  works the plan in order by each stop's own ledger word; the one stated divergence is
-  that a multi-stop plan reads "cargo aboard" from the stop's `PickedUp` word, because
-  the aggregate `hold_used` cannot attribute units to one contract.
-- `doctrine::best_insertion` — the ranking generalized to the plan: candidates that fit
-  the hold BESIDE the plan's committed units, ranked by ℳ per pilot-tick (append-at-end
-  marginal rate; a heuristic, deliberately never a solver), fueled over the WHOLE
-  remaining leg sequence. `plan_fuelable` walks the legs and splits at fuel-selling
-  stations — with an empty plan the arithmetic reduces exactly to the original pair of
-  checks (`(dead+haul)·R ≤ fuel`, or pump-origin split), which the unmodified tests pin.
-- `ledger` (new module) — `reconcile` and `open_loads` move out of the runner as pure,
-  tested functions. `open_loads` is the audit's item-3 fix: **adoption takes every load
-  the ledger still shows open, oldest first, not the single newest** — newest-only
-  adoption would today abandon a delivered-but-uncollected payout the moment a second
-  load was open, and under multi-load would shed the rest of the plan on every restart.
-  The adoption closed-set now speaks reconcile's own vocabulary: `reverted`/`cancel`
-  (058a87c taught reconcile those words; the adoption scan had missed them, so a
-  restart could re-adopt a booking the fold had already undone). One deliberate
-  semantic tightening, stated for review: once a load's ledger shows closed, a later
-  "booked" noise event no longer resurrects it for adoption.
-- `main.rs` — tracks `plan: Itinerary` instead of `Option<Active>`; reconciles every
-  stop each cycle (`retain_mut`, journaling each closure); books only into an empty
-  plan while the exchange enforces one contract (widening to capacity-based booking is
-  the one-line change the day the cap lifts). No journal shape, file, or field changed
-  — nothing migrates.
+The old doctrine tests run UNMODIFIED through the plan layer (decide IS decide_plan
+over the sequential compile of ≤1 contract) — including `83025b2`'s
+booked-at-destination pin. Two divergences from the old single-load rules are
+deliberate and documented on `decide_plan`: the executable pump fill above, and a
+picked-up load berthed at a third station now files for its destination instead of
+waiting on a crane with nothing to do.
 
 ### Checks run
 
-Whisker: 25/0 (11 doctrine unmodified + 7 new plan-layer + 7 new ledger), fmt, clippy
-all-targets -D warnings. Full workspace bar run before merge (counts in the merge
-commit). No deploy in this commit; wildhorse's live whisker restarts on the landed
-main after codex's reciprocal review.
+familiar-whisker 44/0 (12 doctrine unmodified + 14 trade unmodified + 9 plan-layer +
+9 ledger), fmt, clippy all-targets -D warnings. Full workspace bar before merge
+(counts in the merge commit). CI note: the Linux runner failed EVERY push since
+2026-08-28 because the factory's jail-reaching tests had no sandbox-exec skip guard —
+fixed on main (`a7da72b`) during this round; this branch carries it via merge.
 
 ### Next
 
-The seams UCF-Haul#43 will land in are marked in code: the board fetch and
-`decide_plan`'s booking gate both widen from "empty plan" to "plan has hold space";
-`best_insertion` may then try true insertion positions rather than append-at-end; the
-`laden` evidence seam wants per-load hold rows if the API offers them. LoadingOrder
-(metal#61 §1) becomes real exactly when multi-stop does — it is already a named, gated
-Automation in the enum.
+The seams UCF-Haul#43 lands in, marked in code: `Itinerary::sequential` becomes a
+planner; the board fetch and booking gate widen from "empty plan" to "plan has hold
+space"; `best_insertion` earns a true marginal rate when the Router can answer route
+ticks; per-load hold evidence replaces the single-contract crane proxy if the API
+offers it. LoadingOrder (metal#61 §1) is the pack-order Automation exactly where
+`fits_hold` walks.
+
 
 ## 2026-08-29 — T-221's following week is measured, and the miss rate did not heal
 
