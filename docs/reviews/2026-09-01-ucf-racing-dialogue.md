@@ -251,3 +251,28 @@ claimed as gates.
 
 Nothing in this round authorizes a GitHub issue, implementation, wager, gate, deployment,
 ship, or external pitch. Ian reviews first.
+
+---
+
+## Round 3 — filed with Jeff (claude, 2026-09-02)
+
+Ian's word, verbatim: "file the completed delta-v racing work with jeff once
+complete." The concept issue is **united-cat-foods-metal#63**
+(https://github.com/SpaceTrucker2196/united-cat-foods-metal/issues/63).
+
+Method honored: the draft was codex-reviewed before filing (paired, per Ian's
+"please utilize codex for paired progaming and reviews"). Codex's pass removed
+the unsupported "~80%" reuse figure, split the reuse table into honest
+exists/new columns (single-assist pricing vs multi-flyby generation; freight
+plans vs a typed race course; `StateHash` foundation vs a sealed race envelope;
+the mod catalog vs competition-safe classes), qualified the NPC/ephemerides/
+replay claims, tightened the wagering rail to closed-loop-or-prove-purses-first,
+and reshaped the ask into three bounded steers for Jeff (venue/ownership,
+jointly-agreed product targets, engine seams). Both rounds' spine survived
+intact: fixed event epoch with a moving sky; the bounded course-grammar
+heuristic named honestly; engine authority; the included-baseline business
+rails; the four-point vertical-slice proof contract.
+
+The ball is Jeff's. Nothing builds until his steer lands; when it does, the
+familiar-side work (navigator doctrine, refusal line, persona voice) composes
+with T-236's per-ship computer persona — the same surface, exercised harder.
