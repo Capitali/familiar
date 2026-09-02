@@ -163,8 +163,14 @@ pub fn decide(
                 station: active.row.dest.clone(),
             };
         }
-        if here != active.row.origin && here != active.row.dest && active.word == ActiveWord::Booked
-        {
+        // Booked and not at the origin: deadhead there — WHEREVER we are, the
+        // destination included. The old rule excused the destination, so a hull
+        // that booked a contract while berthed at its dest sat "waiting on the
+        // crane" until the desk let the booking lapse: KK II at foxys-diner twice
+        // on 2026-09-01 (L2605 booked t6195, reverted t6308; L2658 booked t6308,
+        // reverted t6369 — ~8 hours idle and two revert penalties), reproduced
+        // on LOCAL with L1849 at tranquility the same evening.
+        if here != active.row.origin && active.word == ActiveWord::Booked {
             return Decision::Travel {
                 station: active.row.origin.clone(),
             };
@@ -196,7 +202,10 @@ pub fn decide(
     // to the pump a bare diversion would fly for free.
     let mut ranked: Vec<&LoadRow> = board
         .iter()
-        .filter(|l| !l.held_for_other && l.units <= ship.hold_capacity)
+        // Fit against the SPARE hold, not the whole one: with freight idle whatever is in
+        // the hold is the merchant's carried goods, and a contract that cannot load
+        // beside them is a contract that waits on the crane forever.
+        .filter(|l| !l.held_for_other && l.units <= ship.hold_capacity - ship.hold_used)
         .filter(|l| l.pilot_ticks() > 0 && l.estimated_net > 0)
         .collect();
     ranked.sort_by(|a, b| {
@@ -339,6 +348,40 @@ mod tests {
             d,
             Decision::Travel {
                 station: "b".into()
+            }
+        );
+    }
+
+    #[test]
+    fn booked_while_berthed_at_the_destination_still_deadheads_to_the_origin() {
+        // KK II at foxys-diner, 2026-09-01: booked a load INTO the berth she sat at
+        // and waited for a crane that had nothing to load; the desk reverted it.
+        let ship = Ship {
+            docked: Some("foxys-diner".into()),
+            fuel: 600,
+            fuel_capacity: 600,
+            hold_capacity: 120,
+            ..Default::default()
+        };
+        let active = Active {
+            row: LoadRow {
+                load_id: "L2605".into(),
+                origin: "whisker-hollow".into(),
+                dest: "foxys-diner".into(),
+                units: 120,
+                estimated_net: 500,
+                deadhead_ticks: 19,
+                haul_ticks: 19,
+                loading_ticks: 8,
+                held_for_other: false,
+            },
+            word: ActiveWord::Booked,
+        };
+        let d = decide(&ship, Some(&active), &[], &BTreeSet::new(), &FlatRouter(50));
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "whisker-hollow".into()
             }
         );
     }

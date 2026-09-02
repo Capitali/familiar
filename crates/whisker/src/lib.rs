@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 
 pub mod doctrine;
+pub mod trade;
 
 /// One purchasable unit of ship automation. The names mirror the co-pilot-key scopes
 /// proposed to the exchange (ucf-exchange#15): a paid entitlement on the captain's
@@ -32,6 +33,9 @@ pub enum Automation {
     /// management without which no hull hauls (pump top-up, pump diversion, the PAWS
     /// tanker as the expensive floor).
     Freight,
+    /// The merchant loop: observe prices across the map, buy a good where it is cheap,
+    /// carry it, sell it where it is dear (Ian, 2026-09-01 — "trade as well as haul").
+    Trade,
     /// Cargo loading order (metal#61 §1) — not yet implemented.
     LoadingOrder,
     /// Inertial dampening compensation (metal#61 §2) — not yet implemented.
@@ -48,6 +52,7 @@ impl Automation {
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s.trim() {
             "freight" => Self::Freight,
+            "trade" => Self::Trade,
             "loading-order" => Self::LoadingOrder,
             "dampening" => Self::Dampening,
             "reefer" => Self::Reefer,
