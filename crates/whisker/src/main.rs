@@ -46,8 +46,8 @@ struct Wire {
     routes: RefCell<RouteCache>,
 }
 
-/// (from, to) → (asked-at, fuel or unpriceable).
-type RouteCache = HashMap<(String, String), (i64, Option<i64>)>;
+/// (from, to) → (asked-at, (fuel, ticks) or unpriceable).
+type RouteCache = HashMap<(String, String), (i64, Option<(i64, i64)>)>;
 
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
@@ -115,25 +115,40 @@ impl Wire {
     }
 }
 
-impl Router for Wire {
-    fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+impl Wire {
+    /// One priced route, (fuel, ticks), remembered for a while.
+    fn route(&self, from: &str, to: &str) -> Option<(i64, i64)> {
         if from == to {
-            return Some(0);
+            return Some((0, 0));
         }
         let key = (from.to_string(), to.to_string());
         let now = now_secs();
-        if let Some((at, fuel)) = self.routes.borrow().get(&key) {
+        if let Some((at, r)) = self.routes.borrow().get(&key) {
             if now - at < ROUTE_CACHE_SECS {
-                return *fuel;
+                return *r;
             }
         }
-        let fuel = (|| {
+        let r = (|| {
             let v = self.get(&format!("/v1/route?from={from}&to={to}")).ok()?;
             let legs = v.get("legs")?.as_array()?;
-            Some(legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum())
+            let fuel = legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum();
+            let ticks = v
+                .get("totalTicks")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(|| legs.iter().filter_map(|l| l.get("ticks")?.as_i64()).sum());
+            Some((fuel, ticks))
         })();
-        self.routes.borrow_mut().insert(key, (now, fuel));
-        fuel
+        self.routes.borrow_mut().insert(key, (now, r));
+        r
+    }
+}
+
+impl Router for Wire {
+    fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+        self.route(from, to).map(|(fuel, _)| fuel)
+    }
+    fn ticks_between(&self, from: &str, to: &str) -> Option<i64> {
+        self.route(from, to).map(|(_, ticks)| ticks)
     }
 }
 

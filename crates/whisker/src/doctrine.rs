@@ -62,6 +62,11 @@ impl LoadRow {
 /// nobody can price is a route the doctrine will not risk.
 pub trait Router {
     fn fuel_between(&self, from: &str, to: &str) -> Option<i64>;
+    /// The same route in ticks of flight. `None` = the router could not say; the
+    /// caller falls back to the board's own figure.
+    fn ticks_between(&self, _from: &str, _to: &str) -> Option<i64> {
+        None
+    }
 }
 
 /// What the pilot wants to do next. Every consequential variant names the
@@ -106,6 +111,12 @@ const LOW_FUEL: f64 = 0.4;
 const CRITICAL_FUEL: f64 = 0.05;
 /// How many top board rows get route-priced. A route call per row would be impolite.
 const PRICED_CANDIDATES: usize = 5;
+/// The desk reverts a booking not picked up within this many ticks of it
+/// (`pickupTTLTicks` on `/v1/reference`; 48 on LOCAL and PROD, a revert penalty
+/// with it). The board's `deadheadTicks` is not OUR deadhead — L2166 on LOCAL
+/// advertised 19, the lane route ran 57 through foxys-diner and tuna-prime, and the
+/// desk took it back at booking + 48 while we were still under way.
+const PICKUP_TTL_TICKS: i64 = 48;
 
 /// The word the ledger last said about our active load, reduced to what decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,6 +233,14 @@ pub fn decide(
         ) else {
             continue;
         };
+        // Can we be at the origin, loaded, inside the desk's pickup window? The
+        // routed time is the honest figure; the board's is a fallback.
+        let dead_ticks = router
+            .ticks_between(here, &l.origin)
+            .unwrap_or(l.deadhead_ticks);
+        if dead_ticks + l.loading_ticks.max(8) > PICKUP_TTL_TICKS {
+            continue;
+        }
         let whole = ((dead + haul) as f64 * RESERVE) as i64;
         let dead_only = (dead as f64 * RESERVE) as i64;
         let haul_only = (haul as f64 * RESERVE) as i64;
@@ -351,6 +370,52 @@ mod tests {
             d,
             Decision::Travel {
                 station: "b".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_load_whose_routed_deadhead_would_miss_the_pickup_window_is_not_booked() {
+        // L2166 on LOCAL, 2026-09-02: board said deadhead 19; the lane route was 57
+        // ticks; the desk reverted at booking + 48 (−54 ℳ) with the hull under way.
+        struct Slow(i64);
+        impl Router for Slow {
+            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(10)
+            }
+            fn ticks_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(self.0)
+            }
+        }
+        let ship = Ship {
+            docked: Some("cannery-row".into()),
+            fuel: 600,
+            fuel_capacity: 600,
+            hold_capacity: 120,
+            ..Default::default()
+        };
+        let row = LoadRow {
+            load_id: "L2166".into(),
+            good: "catnip".into(),
+            origin: "deimos-arbor".into(),
+            dest: "tuna-prime".into(),
+            units: 40,
+            estimated_net: 500,
+            deadhead_ticks: 19,
+            haul_ticks: 30,
+            loading_ticks: 8,
+            held_for_other: false,
+        };
+        let board = vec![row];
+        // Routed 57 + loading 8 > 48: not booked, whatever the board's 19 says.
+        let d = decide(&ship, None, &board, &BTreeSet::new(), &Slow(57));
+        assert!(!matches!(d, Decision::Book { .. }), "{d:?}");
+        // Routed 20 + 8 ≤ 48: booked.
+        let d = decide(&ship, None, &board, &BTreeSet::new(), &Slow(20));
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L2166".into()
             }
         );
     }
