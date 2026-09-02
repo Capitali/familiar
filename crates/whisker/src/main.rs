@@ -635,7 +635,13 @@ fn main() -> ExitCode {
                     seq += 1;
                     let engage_id = format!("whisker-{}-{}", now_secs(), seq);
                     let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
-                    if let Some(dest) = route_now.last() {
+                    // Never a travel to the berth we are at: a stale route can still
+                    // list it after arrival, and the exchange returns the filing
+                    // ("no lane route remains to cannery-row", PROD 2026-09-02).
+                    if let Some(dest) = route_now
+                        .last()
+                        .filter(|d| Some(d.as_str()) != ship.docked.as_deref())
+                    {
                         seq += 1;
                         let travel_id = format!("whisker-{}-{}", now_secs(), seq);
                         if let Ok(ack) =
@@ -1316,6 +1322,9 @@ fn main() -> ExitCode {
             Decision::Repair => Some(json!({"type": "repair"})),
             Decision::CallPaws => Some(json!({"type": "paws"})),
             Decision::DivertToPump { pump } => Some(json!({"type": "travel", "station": pump})),
+            Decision::Travel { station } if Some(station.as_str()) == ship.docked.as_deref() => {
+                None
+            }
             Decision::Travel { station } => Some(json!({"type": "travel", "station": station})),
             Decision::Book { load_id } => Some(json!({"type": "book", "loadId": load_id})),
             Decision::Collect { load_id } => Some(json!({"type": "collect", "loadId": load_id})),
