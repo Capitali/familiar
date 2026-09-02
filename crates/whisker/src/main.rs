@@ -388,6 +388,8 @@ fn main() -> ExitCode {
     let mut active: Option<Active> = None;
     let mut pending_until: i64 = -1;
     let mut recent: HashMap<String, (i64, String)> = HashMap::new();
+    // Ids the exchange has acknowledged: a re-send of one is a no-op it can skip.
+    let mut acked_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Loads that left us without paying, by the tick they did: not re-booked for a while.
     let mut lost_at: HashMap<String, i64> = HashMap::new();
     let mut seq: u64 = 0;
@@ -727,10 +729,7 @@ fn main() -> ExitCode {
 
             // 2. The hold is the truth: bring the book to what is actually aboard.
             let cargo = trade::parse_cargo(&me);
-            let freight_aboard = active
-                .as_ref()
-                .filter(|a| a.word != ActiveWord::Booked && !a.row.good.is_empty())
-                .map(|a| (a.row.good.as_str(), a.row.units));
+            // (Contract freight never appears in the cargo map: nothing to exclude.)
             let galaxy_for_hint = if cargo.is_empty() {
                 Vec::new()
             } else {
@@ -746,9 +745,7 @@ fn main() -> ExitCode {
                     .map(|r| (r.mid, r.station.clone()))
                     .unwrap_or((0, String::new()))
             };
-            for note in
-                trade::reconcile_hold(&mut holdings, &cargo, freight_aboard, &hint, tick, min_hold)
-            {
+            for note in trade::reconcile_hold(&mut holdings, &cargo, &hint, tick, min_hold) {
                 journal(
                     &ship_dir,
                     json!({"at": now, "tick": tick, "event": "book-corrected", "why": note}),
@@ -1084,27 +1081,31 @@ fn main() -> ExitCode {
         };
 
         if let Some(body) = body {
-            // The same intent inside the window is the same decision, never re-filed —
-            // the zigzag-to-empty lesson.
+            // One id per INTENT, where an intent is this body filed within the last
+            // window of ticks: a re-send inside the window carries the SAME id (a retry
+            // after a transient failure is idempotent at the exchange, never a second
+            // order — retry the id, never the intent), and the same body after the
+            // window is a NEW intent with a NEW id. The earlier revision reused the
+            // old id forever, so every later refuel at the same pump, repair, or
+            // travel to the same berth was answered with the old fold's ack and
+            // nothing happened (LOCAL, 2026-09-02: a Repair "acted" with a resolve
+            // tick 366 ticks in the past).
             let sig = body.to_string();
-            let fresh = recent
-                .get(&sig)
-                .map(|(t, _)| tick - t >= 15)
-                .unwrap_or(true);
-            if fresh {
-                // The id is minted once per INTENT and reused on every re-send of it,
-                // so a retry after a transient failure is idempotent at the exchange
-                // rather than a second order (retry the id, never the intent).
-                let action_id = recent
-                    .get(&sig)
-                    .map(|(_, id)| id.clone())
-                    .unwrap_or_else(|| {
-                        seq += 1;
-                        format!("whisker-{}-{}", now_secs(), seq)
-                    });
+            let (action_id, retry) = match recent.get(&sig) {
+                Some((t, id)) if tick - t < 15 => (id.clone(), true),
+                _ => {
+                    seq += 1;
+                    (format!("whisker-{}-{}", now_secs(), seq), false)
+                }
+            };
+            // Inside the window, a decision the exchange already ACKED is not re-sent
+            // (the zigzag-to-empty lesson); only one it refused at the door is retried.
+            let acked = acked_ids.contains(&action_id);
+            if !(retry && acked) {
                 match wire.act(body.clone(), &action_id) {
                     Ok(ack) => {
-                        recent.insert(sig, (tick, action_id));
+                        recent.insert(sig, (tick, action_id.clone()));
+                        acked_ids.insert(action_id);
                         pending_until = ack
                             .get("resolvesAtTick")
                             .and_then(Value::as_i64)
@@ -1126,6 +1127,9 @@ fn main() -> ExitCode {
                         }
                     }
                     Err(e) => {
+                        // Keep the id: the exchange may have taken the order before the
+                        // wire broke, and the retry next fold must carry the same id.
+                        recent.insert(sig, (tick, action_id));
                         journal(
                             &ship_dir,
                             json!({"at": now, "tick": tick,

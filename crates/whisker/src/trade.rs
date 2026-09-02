@@ -226,9 +226,12 @@ pub fn save_holdings(ship_dir: &Path, holdings: &[Holding]) {
     }
 }
 
-/// Bring the book to what the hold actually holds. `cargo` is `/v1/me.cargo`;
-/// `freight` is the active contract's cargo when it is aboard (its good and units
-/// are not ours to sell). `basis_hint(good)` prices a good we find aboard but do not
+/// Bring the book to what the hold actually holds. `cargo` is `/v1/me.cargo`, which
+/// lists the MERCHANT'S goods only: contract freight never enters the actor's cargo
+/// map (engine: only `marketBuy`/`marketSell` and the galley touch it; `holdUsed` is
+/// the same sum). An earlier revision subtracted the active contract's units here and
+/// "corrected" a 32-unit lot to 22 while a 10-unit load rode along (LOCAL gravy-base,
+/// 2026-09-02). `basis_hint(good)` prices a good we find aboard but do not
 /// remember — the ask here if quoted, else the dearest mid on the map, so an
 /// adopted lot is never sold at a phantom profit — and names the berth paying that
 /// mid, so the lot has somewhere to be carried once its clock passes. Returns a note
@@ -236,23 +239,18 @@ pub fn save_holdings(ship_dir: &Path, holdings: &[Holding]) {
 pub fn reconcile_hold(
     holdings: &mut Vec<Holding>,
     cargo: &[(String, i64)],
-    freight: Option<(&str, i64)>,
     basis_hint: &dyn Fn(&str) -> (i64, String),
     tick: i64,
     min_hold: i64,
 ) -> Vec<String> {
     let mut notes = Vec::new();
     let ours = |good: &str| -> i64 {
-        let aboard = cargo
+        cargo
             .iter()
             .filter(|(g, _)| g == good)
             .map(|(_, u)| *u)
-            .sum::<i64>();
-        let theirs = match freight {
-            Some((g, u)) if g == good => u,
-            _ => 0,
-        };
-        (aboard - theirs).max(0)
+            .sum::<i64>()
+            .max(0)
     };
     for h in holdings.iter_mut() {
         let actual = ours(&h.good);
@@ -922,13 +920,9 @@ mod tests {
     fn the_hold_is_the_truth_refused_sells_restore_and_strangers_are_adopted() {
         // LOCAL t11416: the book had sold 60 litter-clay; the fold refused; the hold
         // still had them. And 30 ore aboard the book never heard of (a crash between
-        // ack and save), plus 24 units of freight cargo that are NOT ours.
+        // ack and save). Contract freight is never in this list.
         let mut book: Vec<Holding> = vec![]; // the sold-out book
-        let cargo = vec![
-            ("litter-clay".to_string(), 60),
-            ("ore".to_string(), 30),
-            ("grain".to_string(), 24),
-        ];
+        let cargo = vec![("litter-clay".to_string(), 60), ("ore".to_string(), 30)];
         let hint = |g: &str| {
             if g == "ore" {
                 (11, "io-slagworks".to_string())
@@ -936,7 +930,7 @@ mod tests {
                 (99, "far".to_string())
             }
         };
-        let notes = reconcile_hold(&mut book, &cargo, Some(("grain", 24)), &hint, 11416, 288);
+        let notes = reconcile_hold(&mut book, &cargo, &hint, 11416, 288);
         assert_eq!(book.len(), 2, "{book:?}");
         let clay = book.iter().find(|h| h.good == "litter-clay").unwrap();
         assert_eq!(
@@ -949,17 +943,13 @@ mod tests {
         );
         let ore = book.iter().find(|h| h.good == "ore").unwrap();
         assert_eq!((ore.units, ore.avg_cost), (30, 11));
-        assert!(
-            book.iter().all(|h| h.good != "grain"),
-            "freight cargo adopted as ours"
-        );
         assert_eq!(notes.len(), 2);
 
         // A partial fill reduces; an empty hold drops.
         let mut book = vec![held("ore", 30, 11, 1, 1)];
-        reconcile_hold(&mut book, &[("ore".into(), 12)], None, &hint, 5, 288);
+        reconcile_hold(&mut book, &[("ore".into(), 12)], &hint, 5, 288);
         assert_eq!(book[0].units, 12);
-        reconcile_hold(&mut book, &[], None, &hint, 6, 288);
+        reconcile_hold(&mut book, &[], &hint, 6, 288);
         assert!(book.is_empty());
     }
 
