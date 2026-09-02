@@ -19,4 +19,5 @@ familiar-mcp.workspace = true
 familiar-world.workspace = true
 familiar-agent.workspace = true
 familiar-reach.workspace = true
+serde.workspace = true
 serde_json.workspace = true

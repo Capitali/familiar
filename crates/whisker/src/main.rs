@@ -342,6 +342,8 @@ fn main() -> ExitCode {
         routes: RefCell::new(HashMap::new()),
     };
 
+    // The pid, for `familiar fleet` to know the pilot is aboard.
+    let _ = std::fs::write(ship_dir.join("whisker.pid"), std::process::id().to_string());
     let (granted, unknown) = granted_automations(&ship_dir);
     for u in &unknown {
         eprintln!("whisker: automations.json names unknown automation {u:?} — it grants nothing");

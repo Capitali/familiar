@@ -4,6 +4,7 @@
 //! legible trust surface is part of the Law III commitment.
 
 mod daemon;
+mod fleet;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -135,6 +136,7 @@ fn main() -> ExitCode {
         Some("mesh") => cmd_mesh(rest),
         Some("mcp") => cmd_mcp(rest),
         Some("world") => cmd_world(rest),
+        Some("fleet") => fleet::cmd_fleet(rest),
         Some("outreach") => cmd_outreach(rest),
         Some("goal") => cmd_goal(rest),
         Some(cmd) => {
