@@ -601,6 +601,12 @@ fn main() -> ExitCode {
                     lost_at.insert(a.row.load_id.clone(), tick);
                     let lid = a.row.load_id.clone();
                     recent.retain(|sig, _| !sig.contains(&lid));
+                    // Whatever else the ledger says we hold — a second contract the
+                    // exchange let us book, a delivery parked uncollected — gets looked
+                    // for again now that this one is done (KK II held L2831 AND L2835
+                    // on the same lane, 2026-09-02; until T-232's itinerary lands, one
+                    // is flown at a time and the other picked up when it closes).
+                    adopted = false;
                     journal(
                         &ship_dir,
                         json!({"at": now, "tick": tick, "event": "load-closed",
