@@ -172,6 +172,84 @@ fn last_journal_line(ship_dir: &Path) -> Option<Value> {
         .find_map(|l| serde_json::from_str::<Value>(l).ok())
 }
 
+/// The merchant's book from the exchange's own receipt trail: realized profit on
+/// sold lots (FIFO cost), what it cost, and what is still aboard at cost. The
+/// trail covers roughly the last day of ticks, so this is a rolling window on a
+/// fast world and the whole story on a slow one.
+#[derive(Debug, Default, Clone, Serialize)]
+struct TradeBook {
+    filled: i64,
+    rejected: i64,
+    realized: i64,
+    cost_of_sold: i64,
+    inventory_cost: i64,
+    inventory: BTreeMap<String, i64>,
+}
+
+fn trade_book(receipts: &Value) -> TradeBook {
+    let mut book = TradeBook::default();
+    let Some(rows) = receipts.as_array() else {
+        return book;
+    };
+    let mut fills: Vec<&Value> = rows
+        .iter()
+        .filter(|r| {
+            let filled = r.get("outcome").and_then(Value::as_str) == Some("filled");
+            if !filled {
+                book.rejected += 1;
+            }
+            filled
+        })
+        .collect();
+    fills.sort_by_key(|r| r.get("tick").and_then(Value::as_i64).unwrap_or(0));
+    // good → lots of (units, cost per unit ×1000 for integer arithmetic)
+    let mut lots: BTreeMap<String, std::collections::VecDeque<(i64, i64)>> = BTreeMap::new();
+    for r in fills {
+        book.filled += 1;
+        let good = r
+            .get("good")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let units = r.get("units").and_then(Value::as_i64).unwrap_or(0);
+        let total = r.get("total").and_then(Value::as_i64).unwrap_or(0);
+        if units <= 0 {
+            continue;
+        }
+        if r.get("side").and_then(Value::as_str) == Some("buy") {
+            lots.entry(good)
+                .or_default()
+                .push_back((units, total * 1000 / units));
+        } else {
+            let mut left = units;
+            let mut cost_milli = 0;
+            if let Some(q) = lots.get_mut(&good) {
+                while left > 0 {
+                    let Some(front) = q.front_mut() else { break };
+                    let take = front.0.min(left);
+                    cost_milli += take * front.1;
+                    front.0 -= take;
+                    left -= take;
+                    if front.0 == 0 {
+                        q.pop_front();
+                    }
+                }
+            }
+            let cost = cost_milli / 1000;
+            book.realized += total - cost;
+            book.cost_of_sold += cost;
+        }
+    }
+    for (good, q) in &lots {
+        let units: i64 = q.iter().map(|(u, _)| *u).sum();
+        if units > 0 {
+            book.inventory.insert(good.clone(), units);
+            book.inventory_cost += q.iter().map(|(u, c)| u * c).sum::<i64>() / 1000;
+        }
+    }
+    book
+}
+
 /// The ship's own delivery record, summed: hauls and freight paid.
 fn delivery_totals(ship_dir: &Path) -> (i64, i64) {
     let Ok(text) = std::fs::read_to_string(ship_dir.join("deliveries.jsonl")) else {
@@ -243,7 +321,12 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             }
             let automations: Vec<String> = f
                 .get("automations")
-                .map(|s| s.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect())
+                .map(|s| {
+                    s.split(',')
+                        .map(|a| a.trim().to_string())
+                        .filter(|a| !a.is_empty())
+                        .collect()
+                })
                 .unwrap_or_else(|| vec!["freight".to_string()]);
             let commissioner = f
                 .get("commissioner")
@@ -263,7 +346,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let ship_name = me.get("shipName").and_then(Value::as_str).unwrap_or("").to_string();
+            let ship_name = me
+                .get("shipName")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let (w, ship_dir) = match instance::commission(
                 &dir,
                 &root,
@@ -294,7 +381,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 ship_dir.join("automations.json"),
                 serde_json::to_vec_pretty(&automations).unwrap_or_default(),
             );
-            let key_id = key.trim_start_matches("ucfk_").chars().take(8).collect::<String>();
+            let key_id = key
+                .trim_start_matches("ucfk_")
+                .chars()
+                .take(8)
+                .collect::<String>();
             let record = Captain {
                 captain: captain.clone(),
                 key_id: key_id.clone(),
@@ -310,7 +401,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 ship_dir.join("captain.json"),
                 serde_json::to_vec_pretty(&record).unwrap_or_default(),
             );
-            let ttl: i64 = f.get("ttl-hours").and_then(|s| s.parse().ok()).unwrap_or(24);
+            let ttl: i64 = f
+                .get("ttl-hours")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(24);
             match issue_lease(&dir, &ship_dir, &w.id, ttl) {
                 Ok(exp) => println!(
                     "paired {} — \"{}\" for captain {captain}, leased to {exp}",
@@ -363,13 +457,21 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             let json_out = f.contains_key("json");
             let now = super::now_secs();
             let mut rows: Vec<Value> = Vec::new();
-            let mut per_captain: BTreeMap<String, (i64, i64, i64, i64)> = BTreeMap::new(); // credits, debt, hauls, paid
+            // credits, debt, hauls, freight paid, realized trade P&L, inventory at cost
+            let mut per_captain: BTreeMap<String, (i64, i64, i64, i64, i64, i64)> = BTreeMap::new();
             for s in &ships {
                 let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
                 let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
                     .unwrap_or_else(|| s.captain.server.clone());
                 let me = wire_get(&server, &key, "/v1/me").ok();
-                let g = |k: &str| me.as_ref().and_then(|m| m.get(k).cloned()).unwrap_or(Value::Null);
+                let book = wire_get(&server, &key, "/v1/receipts")
+                    .map(|r| trade_book(&r))
+                    .unwrap_or_default();
+                let g = |k: &str| {
+                    me.as_ref()
+                        .and_then(|m| m.get(k).cloned())
+                        .unwrap_or(Value::Null)
+                };
                 let (hauls, paid) = delivery_totals(&s.dir);
                 let credits = g("credits").as_i64().unwrap_or(0);
                 let debt = g("debt").as_i64().unwrap_or(0);
@@ -378,6 +480,8 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 e.1 += debt;
                 e.2 += hauls;
                 e.3 += paid;
+                e.4 += book.realized;
+                e.5 += book.inventory_cost;
                 let last = last_journal_line(&s.dir);
                 let expiry = lease_expiry(&s.dir);
                 rows.push(json!({
@@ -390,6 +494,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     "ship": g("shipName"), "docked": g("docked"), "credits": credits, "debt": debt,
                     "fuel": g("fuel"), "wearBps": g("wearBps"), "fittings": g("fittings"),
                     "titled": g("titled"), "hauls": hauls, "freight_paid": paid,
+                    "trades": {"filled": book.filled, "rejected": book.rejected, "realized": book.realized,
+                               "cost_of_sold": book.cost_of_sold,
+                               "margin_pct": if book.cost_of_sold > 0 { book.realized * 100 / book.cost_of_sold } else { 0 },
+                               "inventory_cost": book.inventory_cost, "inventory": book.inventory},
                     "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
                     "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
                     "reachable": me.is_some(),
@@ -398,8 +506,9 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             if json_out {
                 println!(
                     "{}",
-                    json!({"ships": rows, "captains": per_captain.iter().map(|(c, (cr, d, h, p))| json!({
-                        "captain": c, "pooled_credits": cr, "debt": d, "hauls": h, "freight_paid": p})).collect::<Vec<_>>()})
+                    json!({"ships": rows, "captains": per_captain.iter().map(|(c, (cr, d, h, p, rz, inv))| json!({
+                        "captain": c, "pooled_credits": cr, "debt": d, "hauls": h, "freight_paid": p,
+                        "trade_realized": rz, "inventory_cost": inv})).collect::<Vec<_>>()})
                 );
                 return ExitCode::SUCCESS;
             }
@@ -420,7 +529,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     r["captain"].as_str().unwrap_or(""),
                     pilot,
                     lease,
-                    if r["reachable"].as_bool().unwrap_or(false) { "on the wire" } else { "UNREACHABLE" }
+                    if r["reachable"].as_bool().unwrap_or(false) {
+                        "on the wire"
+                    } else {
+                        "UNREACHABLE"
+                    }
                 );
                 if r["reachable"].as_bool().unwrap_or(false) {
                     println!(
@@ -436,11 +549,21 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                         r["freight_paid"]
                     );
                 }
-                println!("    last: {} — automations {}", r["last_event"], r["automations"]);
+                let t = &r["trades"];
+                println!(
+                    "    trades: {} filled — realized ℳ{} on ℳ{} sold ({}%) — aboard at cost ℳ{} {}",
+                    t["filled"], t["realized"], t["cost_of_sold"], t["margin_pct"], t["inventory_cost"], t["inventory"]
+                );
+                println!(
+                    "    last: {} — automations {}",
+                    r["last_event"], r["automations"]
+                );
             }
             println!("— per captain (pooled within a captain, never across) —");
-            for (c, (cr, d, h, p)) in &per_captain {
-                println!("  {c}: ℳ{cr} pooled, debt {d}, {h} hauls, ℳ{p} freight paid");
+            for (c, (cr, d, h, p, rz, inv)) in &per_captain {
+                println!(
+                    "  {c}: ℳ{cr} pooled, debt {d}, {h} hauls, ℳ{p} freight paid, trades realized ℳ{rz}, ℳ{inv} aboard at cost"
+                );
             }
             ExitCode::SUCCESS
         }
@@ -458,14 +581,21 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     .unwrap_or_else(|| PathBuf::from("whisker")),
             };
             if !whisker.exists() {
-                eprintln!("fleet run: no whisker binary at {} — pass --whisker <path>", whisker.display());
+                eprintln!(
+                    "fleet run: no whisker binary at {} — pass --whisker <path>",
+                    whisker.display()
+                );
                 return ExitCode::FAILURE;
             }
             let once = f.contains_key("once");
             println!(
                 "fleet run: pilots from {} — renew {} — {}",
                 whisker.display(),
-                if renew { "ON (a human said so)" } else { "off (leases are the household's word)" },
+                if renew {
+                    "ON (a human said so)"
+                } else {
+                    "off (leases are the household's word)"
+                },
                 if once { "one pass" } else { "supervising" }
             );
             let mut backoff: BTreeMap<String, (i64, u32)> = BTreeMap::new(); // next try, failures
@@ -515,7 +645,8 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     }
                     match cmd.spawn() {
                         Ok(child) => {
-                            let _ = std::fs::write(s.dir.join("whisker.pid"), child.id().to_string());
+                            let _ =
+                                std::fs::write(s.dir.join("whisker.pid"), child.id().to_string());
                             println!(
                                 "{id}: pilot started (pid {}) for captain {} — \"{}\"",
                                 child.id(),
