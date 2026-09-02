@@ -197,6 +197,12 @@ fn ship_from(me: &Value) -> Ship {
             .and_then(Value::as_i64)
             .unwrap_or(doctrine::REFERENCE_ACCEL_MILLI_G),
         wear_bps: me.get("wearBps").and_then(Value::as_i64).unwrap_or(0),
+        leased: !me.get("titled").and_then(Value::as_bool).unwrap_or(true)
+            && me
+                .get("leasePrincipal")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                > 0,
         hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
         hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
@@ -1047,6 +1053,7 @@ fn main() -> ExitCode {
         let body = match &decision {
             Decision::Hold { .. } => None,
             Decision::Refuel => Some(json!({"type": "refuel"})),
+            Decision::Repair => Some(json!({"type": "repair"})),
             Decision::CallPaws => Some(json!({"type": "paws"})),
             Decision::DivertToPump { pump } => Some(json!({"type": "travel", "station": pump})),
             Decision::Travel { station } => Some(json!({"type": "travel", "station": station})),

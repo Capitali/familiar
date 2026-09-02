@@ -27,8 +27,12 @@ pub struct Ship {
     /// (`effectiveAccelMilliG` on `/v1/me`): the rated 189 derated by wear —
     /// fully worn is half. KK II at 88% wear flies 105.
     pub accel_milli_g: i64,
-    /// Wear, bps of fully worn (`wearBps`). Reported so the captain can see it.
+    /// Wear, bps of fully worn (`wearBps`). Derates the drive; repair clears it.
     pub wear_bps: i64,
+    /// True while the hull is U.C.F.'s iron on a lease (`titled` false with a
+    /// `leasePrincipal`): the yard clears wear and bills nobody — upkeep is what
+    /// the lease service charge buys. A titled hull pays `wearBps × 40 / 100`.
+    pub leased: bool,
     /// True when a course is filed / legs remain — the engine is flying us.
     pub in_flight: bool,
     pub hold_used: i64,
@@ -125,6 +129,8 @@ pub enum Decision {
     Hold { why: String },
     /// Top up at this berth's pump.
     Refuel,
+    /// Clear the drive's wear at this berth (any berth repairs; all or nothing).
+    Repair,
     /// Call the PAWS tanker — expensive, never terminal.
     CallPaws,
     /// Fly empty to a fuel seller.
@@ -151,6 +157,12 @@ impl Decision {
 
 /// The reserve margin over priced fuel: routes are honest but the world moves.
 const RESERVE: f64 = 1.2;
+/// A leased hull repairs (free) from this wear on: 10% wear is 5% of drive.
+const REPAIR_LEASED_AT_BPS: i64 = 1_000;
+/// A titled hull repairs (paid) from this wear on: half worn is a quarter of drive.
+const REPAIR_TITLED_AT_BPS: i64 = 5_000;
+/// The yard's rate for a titled hull (`repairCostPerHundredBps`, the pack: 40).
+const REPAIR_COST_PER_HUNDRED_BPS: i64 = 40;
 /// Below this fraction of capacity, a berthed ship with a pump tops up.
 const TOP_UP_BELOW: f64 = 0.9;
 /// Below this fraction, an idle ship diverts to a pump before taking work.
@@ -255,6 +267,28 @@ pub fn decide(
     // Fuel before work when it costs nothing: berthed at a seller, top up.
     if pumps.contains(here) && frac(ship.fuel) < TOP_UP_BELOW {
         return Decision::Refuel;
+    }
+
+    // The drive before work. Wear derates the drive linearly (fully worn is half),
+    // and every leg is flown at that drive — KK II at 88% wear was making 105 mg
+    // of 189 and missing pickup windows by it (L2706, 2026-09-02). On a leased
+    // hull the yard clears it for nothing, so it is cleared early and often; a
+    // titled hull pays for the work, so it waits for real wear and real cash.
+    if ship.wear_bps
+        >= if ship.leased {
+            REPAIR_LEASED_AT_BPS
+        } else {
+            REPAIR_TITLED_AT_BPS
+        }
+    {
+        let invoice = if ship.leased {
+            0
+        } else {
+            ship.wear_bps * REPAIR_COST_PER_HUNDRED_BPS / 100
+        };
+        if invoice <= ship.credits / 4 {
+            return Decision::Repair;
+        }
     }
 
     // Work: best net per tick of pilot time, dock included — of what we can fuel.
@@ -362,6 +396,7 @@ mod tests {
             in_flight: false,
             accel_milli_g: REFERENCE_ACCEL_MILLI_G,
             wear_bps: 0,
+            leased: false,
             hold_used: 0,
             hold_capacity: 120,
             fuel,
@@ -434,6 +469,32 @@ mod tests {
                 station: "b".into()
             }
         );
+    }
+
+    #[test]
+    fn a_worn_leased_hull_repairs_for_nothing_before_taking_work() {
+        // KK II, 2026-09-02: leased (titled false, principal 25000), wear 8827 bps.
+        let mut ship = ship_at("titan-larder", 500);
+        ship.wear_bps = 8_827;
+        ship.leased = true;
+        let board = vec![load("L1", "titan-larder", "tuna-prime", 900, (0, 20))];
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert_eq!(d, Decision::Repair);
+        // Barely worn: work first.
+        ship.wear_bps = 500;
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert!(matches!(d, Decision::Book { .. }), "{d:?}");
+        // A titled hull at the same 88%: invoice 8827 × 40 / 100 = 3530 — repaired
+        // with 10 000 in the bank (a quarter is 2 500: NOT affordable, so booked),
+        // repaired once cash allows.
+        ship.wear_bps = 8_827;
+        ship.leased = false;
+        ship.credits = 10_000;
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert!(matches!(d, Decision::Book { .. }), "{d:?}");
+        ship.credits = 20_000;
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert_eq!(d, Decision::Repair);
     }
 
     #[test]
@@ -692,6 +753,7 @@ mod tests {
     fn every_consequential_decision_names_the_freight_automation() {
         for d in [
             Decision::Refuel,
+            Decision::Repair,
             Decision::CallPaws,
             Decision::DivertToPump { pump: "p".into() },
             Decision::Book {
