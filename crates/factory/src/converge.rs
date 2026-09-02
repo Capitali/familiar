@@ -291,6 +291,12 @@ mod tests {
             eprintln!("skipping: no python3");
             return;
         }
+        // This one benches the candidate, and the bench runs only inside the
+        // macOS sandbox-exec jail — skip loudly where the platform lacks it.
+        if !std::path::Path::new("/usr/bin/sandbox-exec").exists() {
+            eprintln!("skipping: no /usr/bin/sandbox-exec");
+            return;
+        }
         let (e, ws) = env("two");
         let o = order();
         let ledger = open_ledger(&ws, &o);

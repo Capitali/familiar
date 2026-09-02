@@ -94,6 +94,13 @@ mod tests {
         std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), n))
     }
 
+    /// The bench runs candidates only inside the macOS sandbox-exec jail — on a
+    /// host without it (Linux CI) these tests skip the same loud way the jail
+    /// crate's own tests do, rather than failing for a missing platform.
+    fn jail_available() -> bool {
+        Path::new("/usr/bin/sandbox-exec").exists()
+    }
+
     fn python() -> Option<PathBuf> {
         for p in [
             "/opt/homebrew/bin/python3.13",
@@ -123,6 +130,10 @@ mod tests {
             eprintln!("skipping: no python3");
             return;
         };
+        if !jail_available() {
+            eprintln!("skipping: no /usr/bin/sandbox-exec");
+            return;
+        }
         let (cand, scratch) = workspace();
         // A stdlib-only self-test that exercises a tiny "driver" and exits 0.
         std::fs::write(
@@ -173,6 +184,10 @@ mod tests {
             eprintln!("skipping: no python3");
             return;
         };
+        if !jail_available() {
+            eprintln!("skipping: no /usr/bin/sandbox-exec");
+            return;
+        }
         let (cand, scratch) = workspace();
         std::fs::write(cand.join("test_bad.py"), "assert False, 'boom'\n").unwrap();
         let report =
@@ -188,6 +203,10 @@ mod tests {
             eprintln!("skipping: no python3");
             return;
         };
+        if !jail_available() {
+            eprintln!("skipping: no /usr/bin/sandbox-exec");
+            return;
+        }
         let (cand, scratch) = workspace();
         // Plant a secret under a fake home; pass that home so the mandatory
         // household denylist hides <home>/.ssh. The hostile self-test reads the
@@ -232,6 +251,10 @@ mod tests {
             eprintln!("skipping: no python3");
             return;
         };
+        if !jail_available() {
+            eprintln!("skipping: no /usr/bin/sandbox-exec");
+            return;
+        }
         // Prove the whole slice: a validated candidate's bytes are materialized
         // (digest-verified) and its self-test passes under the jail.
         let base = unique_tmp("familiar-e2e");
