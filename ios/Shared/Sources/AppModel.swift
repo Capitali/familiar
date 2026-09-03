@@ -1593,6 +1593,118 @@ final class AppModel: ObservableObject {
         return ObservationClient.Session(node: node, membership: g.membership, url: url)
     }
 
+    /// A worldview session pointed at ONE named door — the race runs several of
+    /// these concurrently (T-231), so none of them may read the mutable `host`.
+    func worldviewSession(for door: String) -> ObservationClient.Session? {
+        guard let g = storedGrant(), !door.isEmpty,
+              let url = WorldviewClient.worldviewURL(host: door, port: enrollPort)
+        else { return nil }
+        return ObservationClient.Session(node: node, membership: g.membership, url: url)
+    }
+
+    // MARK: - The candidate race (T-231)
+
+    /// Per-door health the race plans against — demotion after repeated misses,
+    /// expiry after a dead week (CandidateRace owns the rules; this is only the
+    /// memory). Persisted in defaults: a convenience, not a credential.
+    private var doorHealth: [String: DoorHealth] = [:]
+    private var doorHealthLoaded = false
+    private let doorHealthKey = "door.health.v1"
+
+    private func loadDoorHealthIfNeeded() {
+        guard !doorHealthLoaded else { return }
+        doorHealthLoaded = true
+        if let data = defaults.data(forKey: doorHealthKey),
+           let h = try? JSONDecoder().decode([String: DoorHealth].self, from: data) {
+            doorHealth = h
+        }
+    }
+
+    private func saveDoorHealth() {
+        if let data = try? JSONEncoder().encode(doorHealth) {
+            defaults.set(data, forKey: doorHealthKey)
+        }
+    }
+
+    /// One finished race: the door that answered and what it said, or nothing.
+    private struct RaceWin {
+        let host: String
+        let view: Worldview
+        let raw: Data
+    }
+
+    /// One lap's report, for health bookkeeping and diagnostics. A cancelled lap
+    /// (the race was already won) reports NOTHING — a loser cancelled mid-connect
+    /// must not be booked as a miss, or winning doors would demote their rivals.
+    private enum RaceLap {
+        case win(RaceWin)
+        case loss(host: String, cause: String)
+        case cancelled
+    }
+
+    /// Race the doors: every starter waits out its head start, then reads; the
+    /// first success wins and the rest are cancelled. Returns the win (if any),
+    /// the per-door failure diagnostics, and the outcomes to settle into health.
+    private func raceWorldview(
+        runners: [(host: String, delayMs: Int, session: ObservationClient.Session)],
+        fix: (lat: Double, lon: Double)?
+    ) async -> (winner: RaceWin?, attempts: [String], settled: [(String, Bool)]) {
+        let build = Self.appBuild
+        let os = Self.osRelease
+        var winner: RaceWin?
+        var attempts: [String] = []
+        var settled: [(String, Bool)] = []
+        await withTaskGroup(of: RaceLap.self) { group in
+            for runner in runners {
+                group.addTask {
+                    if runner.delayMs > 0 {
+                        try? await Task.sleep(nanoseconds: UInt64(runner.delayMs) * 1_000_000)
+                    }
+                    if Task.isCancelled { return .cancelled }
+                    do {
+                        let (view, raw) = try await WorldviewClient(session: runner.session)
+                            .fetchWithRaw(clientVersion: build, osVersion: os,
+                                          lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
+                        return .win(RaceWin(host: runner.host, view: view, raw: raw))
+                    } catch {
+                        if Task.isCancelled || (error as NSError).code == NSURLErrorCancelled {
+                            return .cancelled
+                        }
+                        // Compact, legible per-host cause (same vocabulary the
+                        // serial walk always surfaced on the Device screen).
+                        let cause: String
+                        switch error {
+                        case WorldviewClient.ReadError.http(let s, let b):
+                            cause = "h\(s):\(b.prefix(40))"
+                        case WorldviewClient.ReadError.transport(let m):
+                            cause = "t:\(m.prefix(30))"
+                        case WorldviewClient.ReadError.encoding: cause = "enc"
+                        case WorldviewClient.ReadError.decoding: cause = "dec"
+                        default: cause = "\((error as NSError).code)"
+                        }
+                        return .loss(host: runner.host, cause: cause)
+                    }
+                }
+            }
+            for await lap in group {
+                switch lap {
+                case .win(let w):
+                    if winner == nil {
+                        winner = w
+                        settled.append((w.host, true))
+                        group.cancelAll()
+                    }
+                case .loss(let host, let cause):
+                    attempts.append("\(host)→\(cause)")
+                    settled.append((host, false))
+                case .cancelled:
+                    break
+                }
+            }
+        }
+        return (winner, attempts, settled)
+    }
+
     /// A signing session pointed at one door's narrow console write seam.
     func consoleActSession(door: String) -> ObservationClient.Session? {
         guard let g = storedGrant(), !door.isEmpty,
@@ -1738,233 +1850,254 @@ final class AppModel: ObservableObject {
             joinStage(.reaching, "reaching the mesh — trying \(candidates.first ?? host)…",
                       host: candidates.first ?? host)
         }
-        for candidate in candidates {
-            host = candidate
-            let tried = candidate
-            if joinProgress.stage == .reaching {
-                joinProgress.host = candidate
-                joinProgress.detail = "reaching the mesh — asking \(candidate)…"
-                joinProgress.tries += 1
+        // The race (T-231): the doctrine's order becomes a HEAD START, not a serial
+        // wall. Every candidate starts after its stagger; the first success wins and
+        // the losers are cancelled — so a dead remembered door (the .10→.130 lease,
+        // 2026-08-31) costs the next runner milliseconds, not a connect timeout.
+        // CandidateRace also demotes doors on a losing streak and expires doors dead
+        // for a week (the lighthouse never expires). Preference is unchanged as a
+        // PREFERENCE: a healthy preferred door still wins every race, and only the
+        // five-miss hysteresis below may re-home the console.
+        loadDoorHealthIfNeeded()
+        #if os(iOS)
+        let fix = coordinator?.lastCoordinate
+        #else
+        // The Mac shell owns its own CoreLocation (MacSensing) and writes position
+        // through `emit`; the worldview read carries no fix of its own here.
+        let fix: (lat: Double, lon: Double)? = nil
+        #endif
+        // Remember our own fix so the status heartbeat can relay it to every door
+        // (B11/B19) — otherwise a device seen only via the lighthouse reads unlocated.
+        if let f = fix { setMyFix(lat: f.lat, lon: f.lon) }
+        let raceNow = Date().timeIntervalSince1970
+        let plan = CandidateRace.plan(ordered: candidates, health: doorHealth,
+                                      lighthouse: Self.rendezvousHost, now: raceNow)
+        // An empty plan cannot really happen (the lighthouse never expires), but a
+        // plan is advice, never a wall between this console and its mesh.
+        let order = plan.isEmpty
+            ? candidates.map { RaceStarter(host: $0, delayMs: 0) }
+            : plan
+        var runners: [(host: String, delayMs: Int, session: ObservationClient.Session)] = []
+        for starter in order {
+            if let session = worldviewSession(for: starter.host) {
+                runners.append((starter.host, starter.delayMs, session))
             }
-            guard let session = worldviewSession() else {
-                worldviewError = "no session: grant=\(storedGrant() != nil) host=\(host.isEmpty ? "empty" : host)"
-                return
-            }
-            do {
-                #if os(iOS)
-                let fix = coordinator?.lastCoordinate
-                #else
-                // The Mac shell owns its own CoreLocation (MacSensing) and writes position through
-                // `emit`; the worldview read carries no fix of its own here.
-                let fix: (lat: Double, lon: Double)? = nil
-                #endif
-                // Remember our own fix so the status heartbeat can relay it to every door
-                // (B11/B19) — otherwise a device seen only via the lighthouse reads unlocated,
-                // or scatters onto whoever is looking (Leif saw wildhorse "in Phoenix").
-                if let f = fix { setMyFix(lat: f.lat, lon: f.lon) }
-                let (view, raw) = try await WorldviewClient(session: session)
-                    .fetchWithRaw(clientVersion: Self.appBuild, osVersion: Self.osRelease,
-                                  lat: fix?.lat ?? 0, lon: fix?.lon ?? 0)
-                // Someone new has JOINED (ADR-0026: the welcome is a greeting, not a gate).
-                // Edge-triggered on arrival ids, and deliberately silent on the FIRST read after
-                // launch — otherwise every launch announces yesterday's arrivals. Falls back to
-                // the old guests-waiting edge against a familiar that predates arrivals.
-                if let arr = view.arrivals {
-                    let ids = Set(arr.map { $0.node_id })
-                    if let known = knownArrivalIds {
-                        let fresh = arr.filter { !known.contains($0.node_id) && $0.node_id != node.nodeId }
-                        if !fresh.isEmpty {
-                            Chime.guestWaiting()
-                            // The established handle leads the greeting; a device with no name
-                            // is greeted as what it is, never as a bare hex id.
-                            let names = fresh.map { a in
-                                !a.handle.isEmpty ? a.handle
-                                    : !Self.idLed(a.label, nodeId: a.node_id) ? a.label
-                                    : "an unnamed device (\(a.node_id.prefix(8)))"
-                            }
-                            note("welcome \(names.joined(separator: ", ")) — new to the mesh")
-                        }
-                        // ACCUMULATE, never replace: a read that momentarily lost an arrival
-                        // (door failover, a freshness-boundary flicker) made the same visitor
-                        // read as "new" again on the next poll — the join chime rang on loop
-                        // for one static guest, live, 2026-08-08. Once greeted, greeted.
-                        knownArrivalIds = known.union(ids)
-                    } else {
-                        knownArrivalIds = ids
-                    }
-                } else {
-                    let waiting = view.guests_waiting ?? 0
-                    if let before = lastGuestsWaiting, waiting > before {
+        }
+        guard !runners.isEmpty else {
+            worldviewError = "no session: grant=\(storedGrant() != nil) host=\(host.isEmpty ? "empty" : host)"
+            return
+        }
+        if joinProgress.stage == .reaching {
+            joinProgress.host = runners.first?.host ?? host
+            joinProgress.detail = "reaching the mesh — racing \(runners.count) door\(runners.count == 1 ? "" : "s")…"
+            joinProgress.tries += 1
+        }
+        let race = await raceWorldview(runners: runners, fix: fix)
+        // Book only real outcomes: a win, and every loss that genuinely failed.
+        // Cancelled laps (the race was already won) settle nothing.
+        let healthBefore = doorHealth
+        for (door, ok) in race.settled {
+            doorHealth = CandidateRace.settle(
+                doorHealth, host: door, outcome: ok ? .success : .failure, now: raceNow)
+        }
+        // Forget doors that left the walk entirely — roaming for years must not
+        // grow the health map without bound. The lighthouse and every current
+        // candidate keep their history.
+        doorHealth = doorHealth.filter { candidates.contains($0.key) || $0.key == Self.rendezvousHost }
+        // The read loop runs every few seconds; write the defaults only when a
+        // race actually changed something.
+        if doorHealth != healthBefore { saveDoorHealth() }
+        attempts = race.attempts
+        if let win = race.winner {
+            host = win.host
+            let tried = win.host
+            let view = win.view
+            let raw = win.raw
+            // Someone new has JOINED (ADR-0026: the welcome is a greeting, not a gate).
+            // Edge-triggered on arrival ids, and deliberately silent on the FIRST read after
+            // launch — otherwise every launch announces yesterday's arrivals. Falls back to
+            // the old guests-waiting edge against a familiar that predates arrivals.
+            if let arr = view.arrivals {
+                let ids = Set(arr.map { $0.node_id })
+                if let known = knownArrivalIds {
+                    let fresh = arr.filter { !known.contains($0.node_id) && $0.node_id != node.nodeId }
+                    if !fresh.isEmpty {
                         Chime.guestWaiting()
-                        note("someone new is at the door")
-                    }
-                    lastGuestsWaiting = waiting
-                }
-
-                // Someone's new device is claiming THIS device's human (E2 over the mesh) —
-                // the second person is us. A waiting acceptance must announce itself (B7): the
-                // old edge stayed silent for a REJOINING device (its node id was already known,
-                // so a fresh claim.ts moving forward was invisible) and only chimed while THIS
-                // console still read as a member. Now: key on (node_id, since) so a fresh claim
-                // re-triggers, drop the member guard, and keep a live count for the glyph to
-                // flash on. First read is still silent (seeded), but pendingClaimCount shows it.
-                if let claims = view.claims_waiting {
-                    let mine = claims.filter {
-                        $0.handle.caseInsensitiveCompare(attributedHuman) == .orderedSame
-                    }
-                    pendingClaimCount = mine.count
-                    let keys = Set(mine.map { "\($0.node_id):\($0.since)" })
-                    if let known = knownClaimKeys {
-                        let fresh = mine.filter { !known.contains("\($0.node_id):\($0.since)") }
-                        if !fresh.isEmpty {
-                            Chime.guestWaiting()
-                            let names = fresh.map { c in
-                                Self.idLed(c.label, nodeId: c.node_id)
-                                    ? "an unnamed device (\(c.node_id.prefix(8)))" : c.label
-                            }.joined(separator: ", ")
-                            note("\(names) says it is yours — confirm on the welcome screen")
+                        // The established handle leads the greeting; a device with no name
+                        // is greeted as what it is, never as a bare hex id.
+                        let names = fresh.map { a in
+                            !a.handle.isEmpty ? a.handle
+                                : !Self.idLed(a.label, nodeId: a.node_id) ? a.label
+                                : "an unnamed device (\(a.node_id.prefix(8)))"
                         }
+                        note("welcome \(names.joined(separator: ", ")) — new to the mesh")
                     }
-                    knownClaimKeys = keys
+                    // ACCUMULATE, never replace: a read that momentarily lost an arrival
+                    // (door failover, a freshness-boundary flicker) made the same visitor
+                    // read as "new" again on the next poll — the join chime rang on loop
+                    // for one static guest, live, 2026-08-08. Once greeted, greeted.
+                    knownArrivalIds = known.union(ids)
+                } else {
+                    knownArrivalIds = ids
                 }
-
-                // The ember reached this device (the mesh games): edge-triggered chime, so a
-                // player who wandered off hears their turn arrive.
-                // The turn belongs to the HUMAN: chime when the holder handle is this
-                // device's human — whichever of their devices they're nearest.
-                let myHandle = attributedHuman.lowercased()
-                let myTurn = view.game.map {
-                    $0.status == "open" && myHandle != "observer" && !myHandle.isEmpty
-                        && $0.holder.lowercased() == myHandle
-                } ?? false
-                if myTurn && !wasMyTurn {
+            } else {
+                let waiting = view.guests_waiting ?? 0
+                if let before = lastGuestsWaiting, waiting > before {
                     Chime.guestWaiting()
-                    switch view.game?.kind {
-                    case "campfire":
-                        note("🔥 the ember has reached you — add your line")
-                    case "changeling":
-                        note(view.game?.phase == "voting"
-                             ? "🎭 three lines, one human truth — come vote"
-                             : "🎭 your round to witness — one true line")
-                    case "pact":
-                        note(view.game?.phase == "gambit"
-                             ? "⚖️ your temptation — write the request"
-                             : "⚖️ the constitution has dealt — come rule")
-                    default:
-                        note("🧩 your turn — the riddle waits on you")
+                    note("someone new is at the door")
+                }
+                lastGuestsWaiting = waiting
+            }
+
+            // Someone's new device is claiming THIS device's human (E2 over the mesh) —
+            // the second person is us. A waiting acceptance must announce itself (B7): the
+            // old edge stayed silent for a REJOINING device (its node id was already known,
+            // so a fresh claim.ts moving forward was invisible) and only chimed while THIS
+            // console still read as a member. Now: key on (node_id, since) so a fresh claim
+            // re-triggers, drop the member guard, and keep a live count for the glyph to
+            // flash on. First read is still silent (seeded), but pendingClaimCount shows it.
+            if let claims = view.claims_waiting {
+                let mine = claims.filter {
+                    $0.handle.caseInsensitiveCompare(attributedHuman) == .orderedSame
+                }
+                pendingClaimCount = mine.count
+                let keys = Set(mine.map { "\($0.node_id):\($0.since)" })
+                if let known = knownClaimKeys {
+                    let fresh = mine.filter { !known.contains("\($0.node_id):\($0.since)") }
+                    if !fresh.isEmpty {
+                        Chime.guestWaiting()
+                        let names = fresh.map { c in
+                            Self.idLed(c.label, nodeId: c.node_id)
+                                ? "an unnamed device (\(c.node_id.prefix(8)))" : c.label
+                        }.joined(separator: ", ")
+                        note("\(names) says it is yours — confirm on the welcome screen")
                     }
                 }
-                #if os(iOS)
-                // The wrist is a device of the holder too (the law of the fire): flame on the
-                // rising edge, cleared on the falling one.
-                if myTurn != wasMyTurn {
-                    PhoneWatchLink.shared.sendEmber(myTurn, kind: view.game?.kind ?? "riddle")
-                }
-                #endif
-                wasMyTurn = myTurn
+                knownClaimKeys = keys
+            }
 
-                // A riddle just SOLVED (B13): ring the fanfare once, on the win edge. Reset when
-                // a game is open or absent so a finished game doesn't re-ring every poll.
-                let riddleWon = view.game.map {
-                    $0.status == "done" && !($0.winner ?? "").isEmpty && $0.kind == "riddle"
-                } ?? false
-                if riddleWon && !wonGameShown {
-                    wonGameShown = true
-                    Chime.fanfare()
-                } else if !(view.game.map { $0.status == "done" } ?? false) {
-                    wonGameShown = false
+            // The ember reached this device (the mesh games): edge-triggered chime, so a
+            // player who wandered off hears their turn arrive.
+            // The turn belongs to the HUMAN: chime when the holder handle is this
+            // device's human — whichever of their devices they're nearest.
+            let myHandle = attributedHuman.lowercased()
+            let myTurn = view.game.map {
+                $0.status == "open" && myHandle != "observer" && !myHandle.isEmpty
+                    && $0.holder.lowercased() == myHandle
+            } ?? false
+            if myTurn && !wasMyTurn {
+                Chime.guestWaiting()
+                switch view.game?.kind {
+                case "campfire":
+                    note("🔥 the ember has reached you — add your line")
+                case "changeling":
+                    note(view.game?.phase == "voting"
+                         ? "🎭 three lines, one human truth — come vote"
+                         : "🎭 your round to witness — one true line")
+                case "pact":
+                    note(view.game?.phase == "gambit"
+                         ? "⚖️ your temptation — write the request"
+                         : "⚖️ the constitution has dealt — come rule")
+                default:
+                    note("🧩 your turn — the riddle waits on you")
                 }
+            }
+            #if os(iOS)
+            // The wrist is a device of the holder too (the law of the fire): flame on the
+            // rising edge, cleared on the falling one.
+            if myTurn != wasMyTurn {
+                PhoneWatchLink.shared.sendEmber(myTurn, kind: view.game?.kind ?? "riddle")
+            }
+            #endif
+            wasMyTurn = myTurn
 
-                // Were WE just admitted? The moment this device's own id appears on the roll it
-                // had been absent from — an admission completed elsewhere (another door, a
-                // correction restored). Being accepted should be felt on the accepted device.
-                // Edge-triggered and silent on the first read; an introduce() on THIS device
-                // already chimed and pre-set the edge.
-                let recognisedNow = (view.standing_full ?? []).contains(node.nodeId)
-                if let was = wasRecognised, !was, recognisedNow {
-                    Chime.accepted()
-                    note("✓ admitted — reading the mesh in full")
-                }
-                wasRecognised = recognisedNow
-                // Keep the fine state honest against what the mesh actually serves: a device
-                // the roll knows is a member; one it doesn't reads projected, whatever we
-                // believed. The door's copy is kept when we already have specific words.
-                if recognisedNow {
-                    unrecognisedReads = 0
-                    if case .member = membership {} else { membership = .member(handle: "") }
-                } else if enrolled {
-                    unrecognisedReads += 1
-                    if unrecognisedReads >= 3 {
-                        if case .guest = membership {} else if case .held = membership {} else {
-                            membership = .guest(path: Self.admissionPath)
-                        }
+            // A riddle just SOLVED (B13): ring the fanfare once, on the win edge. Reset when
+            // a game is open or absent so a finished game doesn't re-ring every poll.
+            let riddleWon = view.game.map {
+                $0.status == "done" && !($0.winner ?? "").isEmpty && $0.kind == "riddle"
+            } ?? false
+            if riddleWon && !wonGameShown {
+                wonGameShown = true
+                Chime.fanfare()
+            } else if !(view.game.map { $0.status == "done" } ?? false) {
+                wonGameShown = false
+            }
+
+            // Were WE just admitted? The moment this device's own id appears on the roll it
+            // had been absent from — an admission completed elsewhere (another door, a
+            // correction restored). Being accepted should be felt on the accepted device.
+            // Edge-triggered and silent on the first read; an introduce() on THIS device
+            // already chimed and pre-set the edge.
+            let recognisedNow = (view.standing_full ?? []).contains(node.nodeId)
+            if let was = wasRecognised, !was, recognisedNow {
+                Chime.accepted()
+                note("✓ admitted — reading the mesh in full")
+            }
+            wasRecognised = recognisedNow
+            // Keep the fine state honest against what the mesh actually serves: a device
+            // the roll knows is a member; one it doesn't reads projected, whatever we
+            // believed. The door's copy is kept when we already have specific words.
+            if recognisedNow {
+                unrecognisedReads = 0
+                if case .member = membership {} else { membership = .member(handle: "") }
+            } else if enrolled {
+                unrecognisedReads += 1
+                if unrecognisedReads >= 3 {
+                    if case .guest = membership {} else if case .held = membership {} else {
+                        membership = .guest(path: Self.admissionPath)
                     }
                 }
-                worldview = view
-                worldviewJSON = String(data: raw, encoding: .utf8)
-                worldviewError = nil
-                // Refresh the external-indexed projection App Intents serve (T-227 Q2):
-                // kind-only by construction — the scrub happens at projection time, so an
-                // intent can never reach for more than this deliberately narrow cache.
-                IntentProjection.project(
-                    from: view,
-                    oracleLine: ConsultRunner.state,
-                    now: Int64(Date().timeIntervalSince1970)
-                ).store()
-                // The boundary arrived (or changed) with this read — a gate the human just shut must
-                // stand the survey down, and one just opened must arm it, without waiting for the
-                // person to touch a toggle. Cheap and idempotent: it returns immediately when the
-                // authorization is unchanged.
-                startDiscoveryIfAuthorized()
-                attemptLog = []
-                // This is a separate fresh signed request to the exact door that answered.
-                // It never becomes part of the worldview snapshot or its diagnostics.
-                await refreshPartnerInbox()
-                // The first successful read closes the join story (T-120) — but only on a
-                // transition, so the every-few-seconds poll doesn't churn the stage clock.
-                if joinProgress.stage != .joined {
-                    joinStage(.joined, "linked — the worldview is flowing", host: host)
-                }
-                // A voice turn is answered by voice — speak the reply this read carried in.
-                speakReplyIfDue(view)
-                // Loyalty with hysteresis: only a preferred door that keeps failing loses its
-                // place. Five consecutive misses ≈ 15s of silence — a real outage, not a hiccup.
-                if tried == preferred {
+            }
+            worldview = view
+            worldviewJSON = String(data: raw, encoding: .utf8)
+            worldviewError = nil
+            // Refresh the external-indexed projection App Intents serve (T-227 Q2):
+            // kind-only by construction — the scrub happens at projection time, so an
+            // intent can never reach for more than this deliberately narrow cache.
+            IntentProjection.project(
+                from: view,
+                oracleLine: ConsultRunner.state,
+                now: Int64(Date().timeIntervalSince1970)
+            ).store()
+            // The boundary arrived (or changed) with this read — a gate the human just shut must
+            // stand the survey down, and one just opened must arm it, without waiting for the
+            // person to touch a toggle. Cheap and idempotent: it returns immediately when the
+            // authorization is unchanged.
+            startDiscoveryIfAuthorized()
+            attemptLog = []
+            // This is a separate fresh signed request to the exact door that answered.
+            // It never becomes part of the worldview snapshot or its diagnostics.
+            await refreshPartnerInbox()
+            // The first successful read closes the join story (T-120) — but only on a
+            // transition, so the every-few-seconds poll doesn't churn the stage clock.
+            if joinProgress.stage != .joined {
+                joinStage(.joined, "linked — the worldview is flowing", host: host)
+            }
+            // A voice turn is answered by voice — speak the reply this read carried in.
+            speakReplyIfDue(view)
+            // Loyalty with hysteresis: only a preferred door that keeps failing loses its
+            // place. Five consecutive misses ≈ 15s of silence — a real outage, not a hiccup.
+            if tried == preferred {
+                preferredReadFails = 0
+                promoteHost(host)
+            } else {
+                preferredReadFails += 1
+                if preferredReadFails >= 5 {
                     preferredReadFails = 0
                     promoteHost(host)
-                } else {
-                    preferredReadFails += 1
-                    if preferredReadFails >= 5 {
-                        preferredReadFails = 0
-                        promoteHost(host)
-                        note("↪ reading from \(host) — \(preferred) stopped answering")
-                    }
+                    note("↪ reading from \(host) — \(preferred) stopped answering")
                 }
-                learnPins(view.pins)     // trust the group's pins before learning new hosts
-                learnHosts(view.hosts)
-                let readHost = host
-                Task { await self.heartbeatStatus(readHost: readHost) }
-                // Doctrine (ADR-0017 Phase C): a non-Tailscale path is now established — probe the
-                // tailnet, and if it answers, prefer Tailscale for data. On tailnet already, a failed
-                // read above would have failed us over to a non-Tailscale path (the fallback).
-                if !Self.isTailnet(readHost) { await maybeProbeTailnet() }
-                Task { await self.serviceConsults(host: readHost) }
-                return
-            } catch {
-                // Compact, legible per-host cause. A ReadError names WHAT failed and — for an HTTP
-                // rejection — the server's status + message, so the reason is on screen, not guessed.
-                let cause: String
-                switch error {
-                case WorldviewClient.ReadError.http(let s, let b):
-                    cause = "h\(s):\(b.prefix(40))"
-                case WorldviewClient.ReadError.transport(let m):
-                    cause = "t:\(m.prefix(30))"
-                case WorldviewClient.ReadError.encoding: cause = "enc"
-                case WorldviewClient.ReadError.decoding: cause = "dec"
-                default: cause = "\((error as NSError).code)"
-                }
-                attempts.append("\(tried)→\(cause)")
             }
+            learnPins(view.pins)     // trust the group's pins before learning new hosts
+            learnHosts(view.hosts)
+            let readHost = host
+            Task { await self.heartbeatStatus(readHost: readHost) }
+            // Doctrine (ADR-0017 Phase C): a non-Tailscale path is now established — probe the
+            // tailnet, and if it answers, prefer Tailscale for data. On tailnet already, a failed
+            // read above would have failed us over to a non-Tailscale path (the fallback).
+            if !Self.isTailnet(readHost) { await maybeProbeTailnet() }
+            Task { await self.serviceConsults(host: readHost) }
+            return
         }
         // Every candidate failed — surface the full picture so the cause is diagnosable at a glance:
         // trusted-pin counts (enrolled + baked) and each host's error code. The per-attempt lines
