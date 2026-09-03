@@ -696,8 +696,23 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 if once { "one pass" } else { "supervising" }
             );
             let mut backoff: BTreeMap<String, (i64, u32)> = BTreeMap::new(); // next try, failures
+                                                                             // The pilots this supervisor spawned, by ship: reaped every pass, because a
+                                                                             // child nobody waits for becomes a zombie that `kill(pid, 0)` still calls
+                                                                             // alive — both pilots sat dead for twenty minutes that way (2026-09-02).
+            let mut children: BTreeMap<String, std::process::Child> = BTreeMap::new();
             loop {
                 let now = super::now_secs();
+                let mut gone: Vec<String> = Vec::new();
+                for (id, child) in children.iter_mut() {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        println!("{id}: pilot exited ({status})");
+                        gone.push(id.clone());
+                    }
+                }
+                for id in gone {
+                    children.remove(&id);
+                    let _ = std::fs::remove_file(root.join(&id).join("whisker.pid"));
+                }
                 for s in paired_ships(&dir, &root) {
                     let id = s.world.id.clone();
                     // Leases: renew inside two hours of expiry when authorized.
@@ -713,7 +728,8 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                         }
                         _ => {}
                     }
-                    if pid_alive(&s.dir).is_some() {
+                    // Ours and still running, or somebody else's and answering signals.
+                    if children.contains_key(&id) || pid_alive(&s.dir).is_some() {
                         continue;
                     }
                     let (next, fails) = backoff.get(&id).cloned().unwrap_or((0, 0));
@@ -750,8 +766,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                                 s.captain.captain,
                                 s.world.label
                             );
-                            // Let it run free: the pid file is the handle, not this process.
-                            std::mem::forget(child);
+                            children.insert(id.clone(), child);
                             backoff.insert(id, (now + 30, fails));
                         }
                         Err(e) => {
