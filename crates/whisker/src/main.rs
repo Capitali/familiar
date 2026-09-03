@@ -835,6 +835,77 @@ fn main() -> ExitCode {
             Vec::new()
         };
 
+        // ── The outfitting phase (Automation::Outfit) ──────────────────────────
+        // Berthed, freight idle: buy the next fitting the purse can bear above its
+        // reserve — BEFORE the merchant may spend the same cash on a position. A
+        // fitting is permanent capacity; a position is one trade (PROD 2026-09-03: the
+        // merchant took 3,800 for bluefin on the fold that could have bought the
+        // drive-tune). One of each ever, so this fires rarely.
+        if outfits && tick >= pending_until && active.is_none() && !ship.in_flight {
+            if let Some(here) = ship.docked.clone() {
+                let purse = Purse {
+                    credits: ship.credits,
+                    daily_fixed_cost: mortgage_per_day
+                        + if ship.leased {
+                            LEASE_SERVICE_PER_DAY_EST
+                        } else {
+                            0
+                        },
+                    tank_price: ship.fuel_capacity * FUEL_PRICE_PER_UNIT,
+                    titled: !ship.leased,
+                    fittings: me
+                        .get("fittings")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|f| f.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
+                match outfit::decide_outfit(&purse, &deliveries) {
+                    OutfitDecision::Refit { fitting, price } => {
+                        seq += 1;
+                        let id = format!("whisker-{}-{}", now_secs(), seq);
+                        match wire.act(json!({"type": "refit", "fitting": fitting.wire()}), &id) {
+                            Ok(ack) => {
+                                pending_until = ack
+                                    .get("resolvesAtTick")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(tick)
+                                    + 1;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "outfitted",
+                                    "fitting": fitting.wire(), "price": price, "at_station": here,
+                                    "credits": ship.credits, "reserve": outfit::reserve(&purse), "resolves": pending_until - 1}),
+                                );
+                                std::thread::sleep(Duration::from_secs(
+                                    (tick_secs * 3 / 5).max(floor_secs),
+                                ));
+                                continue;
+                            }
+                            Err(e) => journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
+                                "event": "refit-refused", "fitting": fitting.wire(), "why": e}),
+                            ),
+                        }
+                    }
+                    OutfitDecision::Idle { why } => {
+                        if why != last_outfit_idle {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "outfit-idle",
+                                "why": why, "credits": ship.credits, "reserve": outfit::reserve(&purse)}),
+                            );
+                            last_outfit_idle = why;
+                        }
+                    }
+                }
+            }
+        }
+
         // ── The merchant phase (Automation::Trade) ──────────────────────────────
         // Runs when berthed, before the freight decision, so a trade takes the fold
         // (one action per fold holds). SELL runs even while hauling freight — held
@@ -1201,74 +1272,6 @@ fn main() -> ExitCode {
                                     ),
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── The outfitting phase (Automation::Outfit) ──────────────────────────
-        // Berthed, freight idle, nothing else took the fold: buy the next fitting the
-        // purse can bear above its reserve. One of each ever, so this fires rarely.
-        if outfits && tick >= pending_until && active.is_none() && !ship.in_flight {
-            if let Some(here) = ship.docked.clone() {
-                let purse = Purse {
-                    credits: ship.credits,
-                    daily_fixed_cost: mortgage_per_day
-                        + if ship.leased {
-                            LEASE_SERVICE_PER_DAY_EST
-                        } else {
-                            0
-                        },
-                    tank_price: ship.fuel_capacity * FUEL_PRICE_PER_UNIT,
-                    titled: !ship.leased,
-                    fittings: me
-                        .get("fittings")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|f| f.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                };
-                match outfit::decide_outfit(&purse, &deliveries) {
-                    OutfitDecision::Refit { fitting, price } => {
-                        seq += 1;
-                        let id = format!("whisker-{}-{}", now_secs(), seq);
-                        match wire.act(json!({"type": "refit", "fitting": fitting.wire()}), &id) {
-                            Ok(ack) => {
-                                pending_until = ack
-                                    .get("resolvesAtTick")
-                                    .and_then(Value::as_i64)
-                                    .unwrap_or(tick)
-                                    + 1;
-                                journal(
-                                    &ship_dir,
-                                    json!({"at": now, "tick": tick, "event": "outfitted",
-                                    "fitting": fitting.wire(), "price": price, "at_station": here,
-                                    "credits": ship.credits, "reserve": outfit::reserve(&purse), "resolves": pending_until - 1}),
-                                );
-                                std::thread::sleep(Duration::from_secs(
-                                    (tick_secs * 3 / 5).max(floor_secs),
-                                ));
-                                continue;
-                            }
-                            Err(e) => journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
-                                "event": "refit-refused", "fitting": fitting.wire(), "why": e}),
-                            ),
-                        }
-                    }
-                    OutfitDecision::Idle { why } => {
-                        if why != last_outfit_idle {
-                            journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick, "event": "outfit-idle",
-                                "why": why, "credits": ship.credits, "reserve": outfit::reserve(&purse)}),
-                            );
-                            last_outfit_idle = why;
                         }
                     }
                 }
