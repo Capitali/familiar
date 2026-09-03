@@ -6,6 +6,38 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-02 — T-238 brick 1: the supply chain, read as arithmetic
+
+Ian, with the Cannery Row works screen in hand: forward plans should use the
+production chain in P&L maximization. The finding that made this a small brick: the
+whole graph is already on the wire — `/v1/reference` serves every station's recipes
+(inputs/outputs/ticksPerCycle) and every good's decay; the quotes whisker already
+reads serve each shelf's stock/capacity/equilibrium.
+
+`crates/whisker/src/chain.rs`, pure and new-file-only (the live lane's hot files
+untouched): recipe/decay parsers that refuse broken rows; per-station×good FLOWS
+with rates in units-per-kilotick summed across a station's lines (Cannery Row's two
+fishmeal-eating lines read as one 4,200/kt appetite); RUNWAY (ticks until an input
+shelf starves its works) and HEADROOM (ticks until an output shelf jams its line)
+from the live shelf; `starving`/`glutting` selectors ranked by urgency inside a
+horizon. The honesty bound is carried in the module doc and types: the wire does not
+serve line utilization, so every rate assumes full lines — runway/headroom are
+lower bounds, corrected live by the shelf's own stock-vs-equilibrium pressure.
+
+### Checks run
+
+whisker 45/0 (4 chain pins, fixtures shaped exactly as PROD served them 2026-09-02
+— the Biscuit Press row's own numbers), fmt, clippy all-targets -D warnings.
+Chair-built solo (codex paused until Sept 6, Ian's word); design review owed to
+codex after.
+
+### Next
+
+Brick 2 (separate, coordinated claim — it touches the live lane's merchant): the
+buy-target consults `starving`/`glutting`, decay-charged; then feed-and-lift
+two-leg plans on T-232's structures; fleet-coordinated legs once metal#62 gives
+the captain binding. Ask Jeff whether line utilization can join the wire.
+
 ## 2026-09-02 — T-236 brick 1: the ship's computer is born named, and the captain may rename her
 
 Ian's ruling (verbatim on the board): each ship's computer is a unique instance — its
