@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
 use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
+use familiar_whisker::outfit::{self, DeliveryStat, OutfitDecision, Purse};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
 use familiar_whisker::{env_value, granted_automations, Automation};
 use familiar_world::lease::{self, SignedLease};
@@ -46,12 +47,23 @@ struct Wire {
     routes: RefCell<RouteCache>,
 }
 
-/// (from, to) → (asked-at, fuel or unpriceable).
-type RouteCache = HashMap<(String, String), (i64, Option<i64>)>;
+/// One priced route: fuel at the reference drive, and each leg's separation in km.
+#[derive(Clone)]
+struct PricedRoute {
+    fuel: i64,
+    leg_km: Vec<i64>,
+}
+
+/// (from, to) → (asked-at, the route or unpriceable).
+type RouteCache = HashMap<(String, String), (i64, Option<PricedRoute>)>;
 
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
 const LOST_COOLDOWN_TICKS: i64 = 60;
+
+/// Lease service per day, as observed on KK II's lease (leaseServicePaid 778 over
+/// ~1.5 days); the pack's `leaseServiceChargeBps` is not on the wire.
+const LEASE_SERVICE_PER_DAY_EST: i64 = 520;
 
 /// ℳ per unit of fuel (the pack's `fuelPricePerUnit`, not on the wire; 2 on LOCAL
 /// and PROD, and what the refuel receipts show). Charged against a trade's margin.
@@ -115,25 +127,43 @@ impl Wire {
     }
 }
 
-impl Router for Wire {
-    fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+impl Wire {
+    /// One priced route, remembered for a while.
+    fn route(&self, from: &str, to: &str) -> Option<PricedRoute> {
         if from == to {
-            return Some(0);
+            return Some(PricedRoute {
+                fuel: 0,
+                leg_km: Vec::new(),
+            });
         }
         let key = (from.to_string(), to.to_string());
         let now = now_secs();
-        if let Some((at, fuel)) = self.routes.borrow().get(&key) {
+        if let Some((at, r)) = self.routes.borrow().get(&key) {
             if now - at < ROUTE_CACHE_SECS {
-                return *fuel;
+                return r.clone();
             }
         }
-        let fuel = (|| {
+        let r = (|| {
             let v = self.get(&format!("/v1/route?from={from}&to={to}")).ok()?;
             let legs = v.get("legs")?.as_array()?;
-            Some(legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum())
+            let fuel = legs.iter().filter_map(|l| l.get("fuel")?.as_i64()).sum();
+            let leg_km = legs
+                .iter()
+                .map(|l| l.get("distanceKm").and_then(Value::as_i64).unwrap_or(0))
+                .collect();
+            Some(PricedRoute { fuel, leg_km })
         })();
-        self.routes.borrow_mut().insert(key, (now, fuel));
-        fuel
+        self.routes.borrow_mut().insert(key, (now, r.clone()));
+        r
+    }
+}
+
+impl Router for Wire {
+    fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+        self.route(from, to).map(|r| r.fuel)
+    }
+    fn leg_distances_km(&self, from: &str, to: &str) -> Option<Vec<i64>> {
+        self.route(from, to).map(|r| r.leg_km)
     }
 }
 
@@ -167,6 +197,17 @@ fn ship_from(me: &Value) -> Ship {
     Ship {
         in_flight: docked.is_none() || route_len > 0,
         docked,
+        accel_milli_g: me
+            .get("effectiveAccelMilliG")
+            .and_then(Value::as_i64)
+            .unwrap_or(doctrine::REFERENCE_ACCEL_MILLI_G),
+        wear_bps: me.get("wearBps").and_then(Value::as_i64).unwrap_or(0),
+        leased: !me.get("titled").and_then(Value::as_bool).unwrap_or(true)
+            && me
+                .get("leasePrincipal")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                > 0,
         hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
         hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
@@ -183,6 +224,16 @@ fn load_row(v: &Value) -> Option<LoadRow> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        class_bps: match v
+            .get("serviceClass")
+            .and_then(Value::as_str)
+            .unwrap_or("standard")
+        {
+            "economy" => 5_000,
+            "express" => 20_000,
+            "priority" => 30_000,
+            _ => 10_000,
+        },
         origin: v.get("origin")?.as_str()?.to_string(),
         dest: v.get("dest")?.as_str()?.to_string(),
         units: v.get("units").and_then(Value::as_i64).unwrap_or(0),
@@ -210,35 +261,7 @@ fn reconcile(me: &Value, load_id: &str) -> Result<Option<ActiveWord>, String> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let mut word = ActiveWord::Booked;
-    for e in events {
-        let e_lower = e.to_lowercase();
-        if e_lower.contains("payment taken") || e_lower.contains("collected") {
-            return Err(format!("settled: {e}"));
-        }
-        // Every way a load leaves us without paying. "reverted" is the one that
-        // stranded KK II at foxys-diner (booked t6195, reverted t6265, 2026-09-01):
-        // a fold can UNDO a booking, and without this word the ledger shows no
-        // terminal event, reconcile defaults to Booked, and she waits forever for a
-        // crane to load a contract that no longer exists. "cancel" covers a
-        // cancelBooking too.
-        if e_lower.contains("rejected")
-            || e_lower.contains("expired")
-            || e_lower.contains("lapsed")
-            || e_lower.contains("reverted")
-            || e_lower.contains("cancel")
-        {
-            return Err(format!("lost: {e}"));
-        }
-        if e_lower.contains("delivered") {
-            word = ActiveWord::Delivered;
-        } else if (e_lower.contains("pickedup") || e_lower.contains("picked up"))
-            && word == ActiveWord::Booked
-        {
-            word = ActiveWord::PickedUp;
-        }
-    }
-    Ok(Some(word))
+    familiar_whisker::doctrine::ledger_word(&events)
 }
 
 fn main() -> ExitCode {
@@ -319,6 +342,8 @@ fn main() -> ExitCode {
         routes: RefCell::new(HashMap::new()),
     };
 
+    // The pid, for `familiar fleet` to know the pilot is aboard.
+    let _ = std::fs::write(ship_dir.join("whisker.pid"), std::process::id().to_string());
     let (granted, unknown) = granted_automations(&ship_dir);
     for u in &unknown {
         eprintln!("whisker: automations.json names unknown automation {u:?} — it grants nothing");
@@ -342,6 +367,8 @@ fn main() -> ExitCode {
     let mut active: Option<Active> = None;
     let mut pending_until: i64 = -1;
     let mut recent: HashMap<String, (i64, String)> = HashMap::new();
+    // Ids the exchange has acknowledged: a re-send of one is a no-op it can skip.
+    let mut acked_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Loads that left us without paying, by the tick they did: not re-booked for a while.
     let mut lost_at: HashMap<String, i64> = HashMap::new();
     let mut seq: u64 = 0;
@@ -351,6 +378,20 @@ fn main() -> ExitCode {
     let mut wedge: Option<(String, Vec<String>)> = None;
     let mut wedge_since: i64 = -1;
     let mut adopted = false;
+    // A restart inside a fold we filed: the journal's last "acted" line names the
+    // tick it resolves at. Until then the ledger and the load board do not show our
+    // own order, and deciding again re-files it (PROD L2831, 2026-09-02: booked,
+    // then "rejected: load is not open" for the restart's duplicate, same tick).
+    let mut pending_from_journal: i64 = std::fs::read_to_string(ship_dir.join("journal.jsonl"))
+        .ok()
+        .and_then(|j| {
+            j.lines()
+                .rev()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .find(|v| v.get("event").and_then(Value::as_str) == Some("acted"))
+                .and_then(|v| v.get("resolves").and_then(Value::as_i64))
+        })
+        .unwrap_or(-1);
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
     let trades = granted.contains(&Automation::Trade);
     let mut last_carry_block = String::new();
@@ -360,11 +401,40 @@ fn main() -> ExitCode {
     // The world's day, in ticks: the exchange's minimum hold on bought goods is a
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
-    let min_hold: i64 = wire
-        .get("/v1/reference")
-        .ok()
+    let reference = wire.get("/v1/reference").ok();
+    let min_hold: i64 = reference
+        .as_ref()
         .and_then(|v| v.get("ticksPerDay").and_then(Value::as_i64))
         .unwrap_or(288);
+    // The pack's goods that rot in transit (decayBps > 0): what refrigeration is for.
+    let perishable: BTreeSet<String> = reference
+        .as_ref()
+        .and_then(|v| v.get("goods").and_then(Value::as_array))
+        .map(|goods| {
+            goods
+                .iter()
+                .filter(|g| g.get("decayBps").and_then(Value::as_i64).unwrap_or(0) > 0)
+                .filter_map(|g| g.get("id").and_then(Value::as_str).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    // The ship's fixed daily charges: the mortgage payment the pack names, plus the
+    // lease service (not on the wire; ~520/day observed on KK II's lease).
+    let mortgage_per_day = reference
+        .as_ref()
+        .and_then(|v| v.get("params")?.get("mortgagePaymentPerDay")?.as_i64())
+        .unwrap_or(600);
+    let outfits = granted.contains(&Automation::Outfit);
+    let mut deliveries: Vec<DeliveryStat> =
+        std::fs::read_to_string(ship_dir.join("deliveries.jsonl"))
+            .map(|j| {
+                j.lines()
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+    let mut last_outfit_idle = String::new();
+    let mut last_pending_note = String::new();
     let mut holdings: Vec<Holding> = if trades {
         trade::load_holdings(&ship_dir)
     } else {
@@ -442,6 +512,57 @@ fn main() -> ExitCode {
         // A restart must not forget a held contract — the exchange allows ONE at a
         // time, and a pilot that assumes idle double-books and is refused. Adopt the
         // newest load the ledger still shows open.
+        // The exchange's own word on what is in flight for this key (UCF-Haul#65's
+        // pending overlay, 2026-09-02): every accepted, unfolded action with the tick
+        // it resolves at — ours from before a restart, or a captain's filed from the
+        // desk app on the same key. Wait them out, and look for a booked load again
+        // once a `book` among them has folded.
+        if let Some(pending) = me.get("pendingActions").and_then(Value::as_array) {
+            let latest = pending
+                .iter()
+                .filter_map(|p| p.get("resolvesAtTick").and_then(Value::as_i64))
+                .max();
+            if let Some(r) = latest {
+                if r + 1 > pending_until {
+                    pending_until = r + 1;
+                }
+            }
+            if pending
+                .iter()
+                .any(|p| p.get("verb").and_then(Value::as_str) == Some("book"))
+            {
+                adopted = false;
+            }
+            if !pending.is_empty() && tick <= latest.unwrap_or(-1) {
+                let verbs: Vec<&str> = pending
+                    .iter()
+                    .filter_map(|p| p.get("verb").and_then(Value::as_str))
+                    .collect();
+                let line = format!("pending {verbs:?}");
+                if line != last_pending_note {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "awaiting-pending-actions",
+                        "verbs": verbs, "resolves": latest}),
+                    );
+                    last_pending_note = line;
+                }
+            } else {
+                last_pending_note.clear();
+            }
+        }
+        if pending_from_journal >= 0 {
+            if tick <= pending_from_journal {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "awaiting-our-own-fold",
+                           "resolves": pending_from_journal}),
+                );
+                std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+                continue;
+            }
+            pending_from_journal = -1;
+        }
         if !adopted {
             adopted = true;
             let mut open: Vec<(i64, String)> = Vec::new();
@@ -514,7 +635,13 @@ fn main() -> ExitCode {
                     seq += 1;
                     let engage_id = format!("whisker-{}-{}", now_secs(), seq);
                     let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
-                    if let Some(dest) = route_now.last() {
+                    // Never a travel to the berth we are at: a stale route can still
+                    // list it after arrival, and the exchange returns the filing
+                    // ("no lane route remains to cannery-row", PROD 2026-09-02).
+                    if let Some(dest) = route_now
+                        .last()
+                        .filter(|d| Some(d.as_str()) != ship.docked.as_deref())
+                    {
                         seq += 1;
                         let travel_id = format!("whisker-{}-{}", now_secs(), seq);
                         if let Ok(ack) =
@@ -547,6 +674,53 @@ fn main() -> ExitCode {
                 Ok(Some(word)) => a.word = word,
                 Ok(None) => {}
                 Err(reason) => {
+                    // A settled delivery goes on the ship's own record (what the
+                    // desk booked, what the fold paid): the outfitting doctrine
+                    // reads decay out of it.
+                    if reason.starts_with("settled") {
+                        let events: Vec<&Value> = me
+                            .get("freight")
+                            .and_then(Value::as_array)
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter(|f| {
+                                        f.get("loadId").and_then(Value::as_str)
+                                            == Some(a.row.load_id.as_str())
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let amount = |word: &str| -> i64 {
+                            events
+                                .iter()
+                                .find(|f| {
+                                    f.get("event")
+                                        .and_then(Value::as_str)
+                                        .map(|e| e.contains(word))
+                                        .unwrap_or(false)
+                                })
+                                .and_then(|f| f.get("freightPaid").and_then(Value::as_i64))
+                                .unwrap_or(0)
+                        };
+                        let stat = DeliveryStat {
+                            load_id: a.row.load_id.clone(),
+                            good: a.row.good.clone(),
+                            perishable: perishable.contains(&a.row.good),
+                            booked: amount("booked"),
+                            paid: amount("payment taken"),
+                        };
+                        if let Ok(line) = serde_json::to_string(&stat) {
+                            use std::io::Write;
+                            if let Ok(mut f) = std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(ship_dir.join("deliveries.jsonl"))
+                            {
+                                let _ = writeln!(f, "{line}");
+                            }
+                        }
+                        deliveries.push(stat);
+                    }
                     // A load that left us is off the board for a while, and the intent
                     // that booked it is forgotten: the idempotency id of a dead booking
                     // must never answer for a fresh one (LOCAL L1849, 2026-09-01: the
@@ -555,6 +729,12 @@ fn main() -> ExitCode {
                     lost_at.insert(a.row.load_id.clone(), tick);
                     let lid = a.row.load_id.clone();
                     recent.retain(|sig, _| !sig.contains(&lid));
+                    // Whatever else the ledger says we hold — a second contract the
+                    // exchange let us book, a delivery parked uncollected — gets looked
+                    // for again now that this one is done (KK II held L2831 AND L2835
+                    // on the same lane, 2026-09-02; until T-232's itinerary lands, one
+                    // is flown at a time and the other picked up when it closes).
+                    adopted = false;
                     journal(
                         &ship_dir,
                         json!({"at": now, "tick": tick, "event": "load-closed",
@@ -577,7 +757,33 @@ fn main() -> ExitCode {
             .get("driveAwaiting")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty());
-        if let Some(dest) = awaiting {
+        // Only a BERTHED hull with no route engages: the marker stays set while a
+        // multi-leg voyage is already flying (PROD, 2026-09-02: fourteen engages in
+        // two hours, every one "rejected: already under way"), and a crane at work
+        // refuses it too ("the crew is in the housing until t6866") — that refusal
+        // names the tick to try again, so it is honoured.
+        let crane_until = me
+            .get("freight")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter(|f| f.get("outcome").and_then(Value::as_str) == Some("refused"))
+                    .filter_map(|f| f.get("event").and_then(Value::as_str))
+                    .filter_map(|e| {
+                        let i = e.find("until t")?;
+                        e[i + 7..]
+                            .chars()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect::<String>()
+                            .parse::<i64>()
+                            .ok()
+                    })
+                    .max()
+                    .unwrap_or(-1)
+            })
+            .unwrap_or(-1);
+        let berthed_and_still = ship.docked.is_some() && route_now.is_empty();
+        if let Some(dest) = awaiting.filter(|_| berthed_and_still && tick >= crane_until) {
             if tick >= pending_until {
                 seq += 1;
                 let id = format!("whisker-{}-{}", now_secs(), seq);
@@ -681,10 +887,7 @@ fn main() -> ExitCode {
 
             // 2. The hold is the truth: bring the book to what is actually aboard.
             let cargo = trade::parse_cargo(&me);
-            let freight_aboard = active
-                .as_ref()
-                .filter(|a| a.word != ActiveWord::Booked && !a.row.good.is_empty())
-                .map(|a| (a.row.good.as_str(), a.row.units));
+            // (Contract freight never appears in the cargo map: nothing to exclude.)
             let galaxy_for_hint = if cargo.is_empty() {
                 Vec::new()
             } else {
@@ -692,17 +895,15 @@ fn main() -> ExitCode {
                     .map(|v| trade::parse_galaxy(&v))
                     .unwrap_or_default()
             };
-            let hint = |good: &str| -> i64 {
+            let hint = |good: &str| -> (i64, String) {
                 galaxy_for_hint
                     .iter()
                     .filter(|r| r.good == good)
-                    .map(|r| r.mid)
-                    .max()
-                    .unwrap_or(0)
+                    .max_by_key(|r| r.mid)
+                    .map(|r| (r.mid, r.station.clone()))
+                    .unwrap_or((0, String::new()))
             };
-            for note in
-                trade::reconcile_hold(&mut holdings, &cargo, freight_aboard, &hint, tick, min_hold)
-            {
+            for note in trade::reconcile_hold(&mut holdings, &cargo, &hint, tick, min_hold) {
                 journal(
                     &ship_dir,
                     json!({"at": now, "tick": tick, "event": "book-corrected", "why": note}),
@@ -711,7 +912,15 @@ fn main() -> ExitCode {
             trade::save_holdings(&ship_dir, &holdings);
 
             if let Some(here) = ship.docked.clone() {
-                let spare_hold = (ship.hold_capacity - ship.hold_used).max(0);
+                // `holdUsed` counts the merchant's goods only (freight never enters the
+                // cargo map), so a contract aboard is subtracted here by hand.
+                let freight_aboard_units = active
+                    .as_ref()
+                    .filter(|a| a.word != ActiveWord::Booked)
+                    .map(|a| a.row.units)
+                    .unwrap_or(0);
+                let spare_hold =
+                    (ship.hold_capacity - ship.hold_used - freight_aboard_units).max(0);
                 // Freight needs the space back only when a BOOKED contract's cargo would
                 // not fit beside what we carry. A loaded or delivered contract already
                 // has its room; a fitting one rides alongside.
@@ -749,6 +958,28 @@ fn main() -> ExitCode {
                 };
                 let td =
                     trade::decide_trade(&ledger, &board_here, &galaxy, &holdings, &pumps, &wire);
+                // Arrived at a position's market and it did not pay: re-aim it now, so
+                // the next idle fold does not ferry the goods straight back here.
+                if matches!(td, TradeDecision::Idle { .. }) {
+                    let mut notes = Vec::new();
+                    for h in holdings
+                        .iter_mut()
+                        .filter(|h| h.sell_target == here && tick >= h.sellable_at)
+                    {
+                        if let Some(n) = trade::retarget(h, &here, &galaxy) {
+                            notes.push(n);
+                        }
+                    }
+                    if !notes.is_empty() {
+                        trade::save_holdings(&ship_dir, &holdings);
+                        for n in notes {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "retargeted", "why": n}),
+                            );
+                        }
+                    }
+                }
                 // Say why the merchant passed — once per reason, so the journal reads
                 // "no fuel for a carry" / "no arbitrage on this board" without a line
                 // per fold.
@@ -770,13 +1001,22 @@ fn main() -> ExitCode {
                 // says what a berth pays, not how much it will take, and a full shelf
                 // (bluefin at titania-cold-store: maxSellUnits 2) pays for nothing.
                 // One extra read, only on the fold that would spend money.
+                //
+                // A position may be opened with freight idle OR with the contract's
+                // cargo already aboard and room to spare: it rides under the haul
+                // either way (the hold clock makes every position a rider). Never
+                // while a booking still needs its space.
+                let freight_allows_buy = active
+                    .as_ref()
+                    .map(|a| a.word == ActiveWord::PickedUp)
+                    .unwrap_or(true);
                 let td = match td {
                     TradeDecision::Buy {
                         good,
                         units,
                         sell_target,
                         est_margin,
-                    } if active.is_none() => {
+                    } if freight_allows_buy => {
                         let takes = wire
                             .get(&format!("/v1/stations/{sell_target}/quotes"))
                             .map(|v| trade::parse_board(&v))
@@ -814,7 +1054,7 @@ fn main() -> ExitCode {
                         *units,
                         true,
                     )),
-                    TradeDecision::Buy { good, units, .. } if active.is_none() => Some((
+                    TradeDecision::Buy { good, units, .. } if freight_allows_buy => Some((
                         json!({"type": "buy", "station": here, "good": good, "units": units}),
                         good.clone(),
                         *units,
@@ -909,7 +1149,11 @@ fn main() -> ExitCode {
                             // doctrine, whose fuel rules (top-up here, divert to a pump)
                             // are what gets the tank filled. A carry that strands the
                             // hull is a PAWS bill, not a trade.
-                            let cost = wire.fuel_between(&here, &h.sell_target);
+                            // The carry plus the leg from the market to a pump — the
+                            // same PAWS lesson as the freight plan.
+                            let cost = wire.fuel_between(&here, &h.sell_target).map(|c| {
+                                c + doctrine::onward_to_pump(&h.sell_target, &pumps, &wire)
+                            });
                             let flyable = cost
                                 .map(|c| trade::carry_affordable(c, ship.fuel))
                                 .unwrap_or(false);
@@ -918,12 +1162,14 @@ fn main() -> ExitCode {
                                     "carry {} → {} needs fuel {:?}, tank {}",
                                     h.good, h.sell_target, cost, ship.fuel
                                 );
-                                if why != last_carry_block {
+                                // Once per blocked carry, not once per fuel reading.
+                                let key = format!("{} → {}", h.good, h.sell_target);
+                                if key != last_carry_block {
                                     journal(
                                         &ship_dir,
                                         json!({"at": now, "tick": tick, "event": "carry-blocked", "why": why}),
                                     );
-                                    last_carry_block = why;
+                                    last_carry_block = key;
                                 }
                             } else {
                                 last_carry_block.clear();
@@ -955,6 +1201,74 @@ fn main() -> ExitCode {
                                     ),
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── The outfitting phase (Automation::Outfit) ──────────────────────────
+        // Berthed, freight idle, nothing else took the fold: buy the next fitting the
+        // purse can bear above its reserve. One of each ever, so this fires rarely.
+        if outfits && tick >= pending_until && active.is_none() && !ship.in_flight {
+            if let Some(here) = ship.docked.clone() {
+                let purse = Purse {
+                    credits: ship.credits,
+                    daily_fixed_cost: mortgage_per_day
+                        + if ship.leased {
+                            LEASE_SERVICE_PER_DAY_EST
+                        } else {
+                            0
+                        },
+                    tank_price: ship.fuel_capacity * FUEL_PRICE_PER_UNIT,
+                    titled: !ship.leased,
+                    fittings: me
+                        .get("fittings")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|f| f.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
+                match outfit::decide_outfit(&purse, &deliveries) {
+                    OutfitDecision::Refit { fitting, price } => {
+                        seq += 1;
+                        let id = format!("whisker-{}-{}", now_secs(), seq);
+                        match wire.act(json!({"type": "refit", "fitting": fitting.wire()}), &id) {
+                            Ok(ack) => {
+                                pending_until = ack
+                                    .get("resolvesAtTick")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(tick)
+                                    + 1;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "outfitted",
+                                    "fitting": fitting.wire(), "price": price, "at_station": here,
+                                    "credits": ship.credits, "reserve": outfit::reserve(&purse), "resolves": pending_until - 1}),
+                                );
+                                std::thread::sleep(Duration::from_secs(
+                                    (tick_secs * 3 / 5).max(floor_secs),
+                                ));
+                                continue;
+                            }
+                            Err(e) => journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
+                                "event": "refit-refused", "fitting": fitting.wire(), "why": e}),
+                            ),
+                        }
+                    }
+                    OutfitDecision::Idle { why } => {
+                        if why != last_outfit_idle {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "outfit-idle",
+                                "why": why, "credits": ship.credits, "reserve": outfit::reserve(&purse)}),
+                            );
+                            last_outfit_idle = why;
                         }
                     }
                 }
@@ -1005,35 +1319,43 @@ fn main() -> ExitCode {
         let body = match &decision {
             Decision::Hold { .. } => None,
             Decision::Refuel => Some(json!({"type": "refuel"})),
+            Decision::Repair => Some(json!({"type": "repair"})),
             Decision::CallPaws => Some(json!({"type": "paws"})),
             Decision::DivertToPump { pump } => Some(json!({"type": "travel", "station": pump})),
+            Decision::Travel { station } if Some(station.as_str()) == ship.docked.as_deref() => {
+                None
+            }
             Decision::Travel { station } => Some(json!({"type": "travel", "station": station})),
             Decision::Book { load_id } => Some(json!({"type": "book", "loadId": load_id})),
             Decision::Collect { load_id } => Some(json!({"type": "collect", "loadId": load_id})),
         };
 
         if let Some(body) = body {
-            // The same intent inside the window is the same decision, never re-filed —
-            // the zigzag-to-empty lesson.
+            // One id per INTENT, where an intent is this body filed within the last
+            // window of ticks: a re-send inside the window carries the SAME id (a retry
+            // after a transient failure is idempotent at the exchange, never a second
+            // order — retry the id, never the intent), and the same body after the
+            // window is a NEW intent with a NEW id. The earlier revision reused the
+            // old id forever, so every later refuel at the same pump, repair, or
+            // travel to the same berth was answered with the old fold's ack and
+            // nothing happened (LOCAL, 2026-09-02: a Repair "acted" with a resolve
+            // tick 366 ticks in the past).
             let sig = body.to_string();
-            let fresh = recent
-                .get(&sig)
-                .map(|(t, _)| tick - t >= 15)
-                .unwrap_or(true);
-            if fresh {
-                // The id is minted once per INTENT and reused on every re-send of it,
-                // so a retry after a transient failure is idempotent at the exchange
-                // rather than a second order (retry the id, never the intent).
-                let action_id = recent
-                    .get(&sig)
-                    .map(|(_, id)| id.clone())
-                    .unwrap_or_else(|| {
-                        seq += 1;
-                        format!("whisker-{}-{}", now_secs(), seq)
-                    });
+            let (action_id, retry) = match recent.get(&sig) {
+                Some((t, id)) if tick - t < 15 => (id.clone(), true),
+                _ => {
+                    seq += 1;
+                    (format!("whisker-{}-{}", now_secs(), seq), false)
+                }
+            };
+            // Inside the window, a decision the exchange already ACKED is not re-sent
+            // (the zigzag-to-empty lesson); only one it refused at the door is retried.
+            let acked = acked_ids.contains(&action_id);
+            if !(retry && acked) {
                 match wire.act(body.clone(), &action_id) {
                     Ok(ack) => {
-                        recent.insert(sig, (tick, action_id));
+                        recent.insert(sig, (tick, action_id.clone()));
+                        acked_ids.insert(action_id);
                         pending_until = ack
                             .get("resolvesAtTick")
                             .and_then(Value::as_i64)
@@ -1055,6 +1377,9 @@ fn main() -> ExitCode {
                         }
                     }
                     Err(e) => {
+                        // Keep the id: the exchange may have taken the order before the
+                        // wire broke, and the retry next fold must carry the same id.
+                        recent.insert(sig, (tick, action_id));
                         journal(
                             &ship_dir,
                             json!({"at": now, "tick": tick,

@@ -5,6 +5,30 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
+  codex as coding partner till sept 6th. Pull any work back that's left for codex and
+  lets finish that ourselves.").** Pulled back to the claude lane: the T-232 round-7
+  review (codex ran out of budget mid-review twice), the T-231 candidate-race review
+  (never started), and T-236 brick 1's review (landed with a recorded chair
+  self-review, three gaps found and fixed — the T-229 precedent). Until the 6th:
+  chair self-reviews recorded in the log, codex re-verification owed after. The
+  racing pitch (metal#63) made it out codex-reviewed before the pause.
+
+- **PR #4 (Jeff, "market feed as observations") DECLINED FOR REWORK AND CLOSED —
+  2026-09-01, Ian's direction verbatim: "Decline jeff#4 pr with detailed reasoning for
+  a rework."** The PR predated ADR-0045 (worlds-are-stores) and recorded UCF market
+  triples into the HOUSEHOLD observation log with mesh replication — the exact
+  record-level partition ADR-0045 killed. Decline comment (posted from Ian's account,
+  companion:claude authoring):
+  https://github.com/Capitali/familiar/pull/4#issuecomment-5503660004 — credits the
+  engineering, names the three structural conflicts (household log, mesh propagation,
+  credential/gate shape), and offers the rework: the feed as SHIP-WORLD perception (a
+  `market` module beside whisker's doctrine/trade/ledger, ship-store keyed and
+  lease-gated), the fake-exchange loopback test pattern brought over, and any
+  household-visible signal only as a payload-free AttentionNotice / declared-partner
+  projection. metal#62 + ucf-exchange#15 named as the live threads.
+
+
 - **THREE IAN RULINGS 2026-08-23 (verbatim: "Rungs 4 and 5 need completion. Governing law
   rule needs to be rejected unless from me or more restrictive with justification. PCC on
   MacBook Air still a no go. Maybe not really supported on air.")**
@@ -421,6 +445,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
   what is built. Planning brief: docs/reviews/2026-08-14-reasoning-engine.md.
 
 ## Companion & infra notes
+
+- 2026-09-02 · companion:codex returned T-232 brick 1 Round 3 after reviewing
+  `2c73354..2581ca2`. The implementation repairs all four Round 2 execution defects and
+  composes over current main; focused whisker 56/0, workspace tests zero failures, fmt,
+  focused/workspace all-target clippy all pass. Acceptance remains held on the exact two
+  runner-effect regressions requested in Round 2: unresolved adoption must prove the whole
+  scheduler emits no competing action, and pending closure must prove the shared cooldown,
+  intent/adoption-note purge, one journal effect, and fresh later lifecycle/action id. The
+  current tests stop at `AdoptOutcome`, while `main.rs` reports 0 tests. `git diff --check`
+  also finds one extra EOF blank line in the Round 1 review record. Full review:
+  `docs/reviews/2026-09-02-t232-itinerary-review-r3.md`. No merge, restart, deploy, gate,
+  game action, fleet mutation, or human-record change was authorized.
 
 - 2026-09-01 · companion:codex returned the T-232 brick-1 reciprocal review of
   `c49b01c`. The offer's focused bar is green (whisker 25/0, fmt, all-target clippy),

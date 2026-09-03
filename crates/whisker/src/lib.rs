@@ -21,7 +21,9 @@
 
 use std::collections::BTreeSet;
 
+pub mod chain;
 pub mod doctrine;
+pub mod outfit;
 pub mod trade;
 
 /// One purchasable unit of ship automation. The names mirror the co-pilot-key scopes
@@ -36,6 +38,10 @@ pub enum Automation {
     /// The merchant loop: observe prices across the map, buy a good where it is cheap,
     /// carry it, sell it where it is dear (Ian, 2026-09-01 — "trade as well as haul").
     Trade,
+    /// Outfitting: fittings (drive-tune, hold-extension, refrigeration on evidence)
+    /// and, after title, crew — bought out of earnings above a reserve (Ian,
+    /// 2026-09-02: "expansion capabilities that should be managed as well").
+    Outfit,
     /// Cargo loading order (metal#61 §1) — not yet implemented.
     LoadingOrder,
     /// Inertial dampening compensation (metal#61 §2) — not yet implemented.
@@ -53,6 +59,7 @@ impl Automation {
         Some(match s.trim() {
             "freight" => Self::Freight,
             "trade" => Self::Trade,
+            "outfit" => Self::Outfit,
             "loading-order" => Self::LoadingOrder,
             "dampening" => Self::Dampening,
             "reefer" => Self::Reefer,

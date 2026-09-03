@@ -23,6 +23,16 @@ use std::collections::BTreeSet;
 pub struct Ship {
     /// Berthed station id, or None under way.
     pub docked: Option<String>,
+    /// The drive as the hull actually delivers it, thousandths of a gravity
+    /// (`effectiveAccelMilliG` on `/v1/me`): the rated 189 derated by wear —
+    /// fully worn is half. KK II at 88% wear flies 105.
+    pub accel_milli_g: i64,
+    /// Wear, bps of fully worn (`wearBps`). Derates the drive; repair clears it.
+    pub wear_bps: i64,
+    /// True while the hull is U.C.F.'s iron on a lease (`titled` false with a
+    /// `leasePrincipal`): the yard clears wear and bills nobody — upkeep is what
+    /// the lease service charge buys. A titled hull pays `wearBps × 40 / 100`.
+    pub leased: bool,
     /// True when a course is filed / legs remain — the engine is flying us.
     pub in_flight: bool,
     pub hold_used: i64,
@@ -38,6 +48,11 @@ pub struct LoadRow {
     pub load_id: String,
     /// What the contract carries — the merchant must not mistake it for its own goods.
     pub good: String,
+    /// The contract's service class as a drive multiplier, bps: economy 5000 (half
+    /// drive), standard 10000, express 20000, priority 30000. The class throttles
+    /// or overdrives the hull on EVERY leg flown under the contract, the deadhead
+    /// to pickup included (engine `FreightShips.accelMilliG`).
+    pub class_bps: i64,
     pub origin: String,
     pub dest: String,
     pub units: i64,
@@ -62,6 +77,103 @@ impl LoadRow {
 /// nobody can price is a route the doctrine will not risk.
 pub trait Router {
     fn fuel_between(&self, from: &str, to: &str) -> Option<i64>;
+    /// The route's legs as separations in km, tonight's geometry (`distanceKm`
+    /// per leg of `/v1/route`). `None` = the router could not say; the caller
+    /// falls back to the board's own figure.
+    fn leg_distances_km(&self, _from: &str, _to: &str) -> Option<Vec<i64>> {
+        None
+    }
+}
+
+/// km per tick² at the reference drive (engine `FlightModel.referenceK`).
+const REFERENCE_K: i64 = 864_900;
+/// The reference drive, thousandths of a gravity (`FlightModel.referenceAccelMilliG`).
+pub const REFERENCE_ACCEL_MILLI_G: i64 = 189;
+/// Folds between a booking and the drive actually engaging (file travel, then
+/// engage on the next fold): counted against the pickup window.
+const ENGAGE_OVERHEAD_TICKS: i64 = 4;
+
+/// Flight time for legs of these separations at this drive, the engine's own
+/// arithmetic (`FlightModel.travelTicks`): ticks = ⌈√(D / K)⌉ per leg, K linear in
+/// acceleration. Pinned against PROD: cannery-row → titan-larder, 1,307,724,939 km,
+/// is 39 ticks at 189 mg and 74–75 at the 52 mg an 88%-worn hull makes on an
+/// economy contract.
+pub fn flight_ticks(distances_km: &[i64], accel_milli_g: i64) -> i64 {
+    let k = (REFERENCE_K * accel_milli_g.max(1) / REFERENCE_ACCEL_MILLI_G).max(1);
+    distances_km
+        .iter()
+        .map(|&d| {
+            if d <= 0 {
+                return 1;
+            }
+            // ⌈√(d/k)⌉ in integers: the smallest t with t² ≥ d/k, i.e. t²·k ≥ d.
+            let mut t = ((d as f64) / (k as f64)).sqrt().floor() as i64;
+            while t * t * k < d {
+                t += 1;
+            }
+            t.max(1)
+        })
+        .sum()
+}
+
+/// Fuel from `at` to the nearest priceable pump — zero when `at` pumps. A leg that
+/// ends where no pump is reachable is a leg that ends the voyage.
+pub fn onward_to_pump(at: &str, pumps: &BTreeSet<String>, router: &dyn Router) -> i64 {
+    // No pumps on the chart at all (a pack that prices no fuel): nothing to reach.
+    if pumps.is_empty() || pumps.contains(at) {
+        return 0;
+    }
+    pumps
+        .iter()
+        .filter_map(|p| router.fuel_between(at, p))
+        .min()
+        .unwrap_or(i64::MAX / 4)
+}
+
+/// The drive a contract's legs are flown at: the hull throttled by the class.
+pub fn contract_accel(ship_accel_milli_g: i64, class_bps: i64) -> i64 {
+    (ship_accel_milli_g * class_bps / 10_000).max(1)
+}
+
+/// The ledger's word about one load, read as a STATE MACHINE over its events in
+/// order — never as "the first terminal-looking word". `Ok(Some(word))` is a live
+/// contract; `Err(reason)` is settled or lost, either way no longer ours to fly.
+///
+/// The order matters: a duplicate booking refused AFTER the real one ("booked",
+/// then "rejected: load is not open" — PROD L2831 when a restart re-filed inside the
+/// fold, 2026-09-02) is noise on a live contract, not its loss. A refusal only loses
+/// a load that was never ours; a revert, expiry, lapse or cancel loses it whenever.
+pub fn ledger_word(events: &[&str]) -> Result<Option<ActiveWord>, String> {
+    let mut word: Option<ActiveWord> = None;
+    for e in events {
+        let l = e.to_lowercase();
+        if l.contains("payment taken") || l.contains("collected") {
+            return Err(format!("settled: {e}"));
+        }
+        if l.contains("reverted")
+            || l.contains("expired")
+            || l.contains("lapsed")
+            || l.contains("cancel")
+        {
+            return Err(format!("lost: {e}"));
+        }
+        if l.contains("rejected") {
+            if word.is_none() {
+                return Err(format!("lost: {e}"));
+            }
+            continue; // a refused extra order on a contract we already hold
+        }
+        if l.contains("delivered") {
+            word = Some(ActiveWord::Delivered);
+        } else if l.contains("pickedup") || l.contains("picked up") {
+            if word != Some(ActiveWord::Delivered) {
+                word = Some(ActiveWord::PickedUp);
+            }
+        } else if l.contains("booked") && word.is_none() {
+            word = Some(ActiveWord::Booked);
+        }
+    }
+    Ok(Some(word.unwrap_or(ActiveWord::Booked)))
 }
 
 /// What the pilot wants to do next. Every consequential variant names the
@@ -72,6 +184,8 @@ pub enum Decision {
     Hold { why: String },
     /// Top up at this berth's pump.
     Refuel,
+    /// Clear the drive's wear at this berth (any berth repairs; all or nothing).
+    Repair,
     /// Call the PAWS tanker — expensive, never terminal.
     CallPaws,
     /// Fly empty to a fuel seller.
@@ -98,6 +212,12 @@ impl Decision {
 
 /// The reserve margin over priced fuel: routes are honest but the world moves.
 const RESERVE: f64 = 1.2;
+/// A leased hull repairs (free) from this wear on: 10% wear is 5% of drive.
+const REPAIR_LEASED_AT_BPS: i64 = 1_000;
+/// A titled hull repairs (paid) from this wear on: half worn is a quarter of drive.
+const REPAIR_TITLED_AT_BPS: i64 = 5_000;
+/// The yard's rate for a titled hull (`repairCostPerHundredBps`, the pack: 40).
+const REPAIR_COST_PER_HUNDRED_BPS: i64 = 40;
 /// Below this fraction of capacity, a berthed ship with a pump tops up.
 const TOP_UP_BELOW: f64 = 0.9;
 /// Below this fraction, an idle ship diverts to a pump before taking work.
@@ -106,6 +226,12 @@ const LOW_FUEL: f64 = 0.4;
 const CRITICAL_FUEL: f64 = 0.05;
 /// How many top board rows get route-priced. A route call per row would be impolite.
 const PRICED_CANDIDATES: usize = 5;
+/// The desk reverts a booking not picked up within this many ticks of it
+/// (`pickupTTLTicks` on `/v1/reference`; 48 on LOCAL and PROD, a revert penalty
+/// with it). The board's `deadheadTicks` is not OUR deadhead — L2166 on LOCAL
+/// advertised 19, the lane route ran 57 through foxys-diner and tuna-prime, and the
+/// desk took it back at booking + 48 while we were still under way.
+const PICKUP_TTL_TICKS: i64 = 48;
 
 /// The word the ledger last said about our active load, reduced to what decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +324,28 @@ pub fn decide(
         return Decision::Refuel;
     }
 
+    // The drive before work. Wear derates the drive linearly (fully worn is half),
+    // and every leg is flown at that drive — KK II at 88% wear was making 105 mg
+    // of 189 and missing pickup windows by it (L2706, 2026-09-02). On a leased
+    // hull the yard clears it for nothing, so it is cleared early and often; a
+    // titled hull pays for the work, so it waits for real wear and real cash.
+    if ship.wear_bps
+        >= if ship.leased {
+            REPAIR_LEASED_AT_BPS
+        } else {
+            REPAIR_TITLED_AT_BPS
+        }
+    {
+        let invoice = if ship.leased {
+            0
+        } else {
+            ship.wear_bps * REPAIR_COST_PER_HUNDRED_BPS / 100
+        };
+        if invoice <= ship.credits / 4 {
+            return Decision::Repair;
+        }
+    }
+
     // Work: best net per tick of pilot time, dock included — of what we can fuel.
     // Deliberately BEFORE the low-fuel diversion: every plan below carries its own
     // reserve, and a load whose fuel-selling origin is reachable earns on the way
@@ -222,9 +370,34 @@ pub fn decide(
         ) else {
             continue;
         };
-        let whole = ((dead + haul) as f64 * RESERVE) as i64;
+        // Can we be at the origin, loaded, inside the desk's pickup window? The
+        // honest deadhead is the engine's own arithmetic on tonight's separations at
+        // the drive THIS contract's class leaves us — L2706 on PROD (economy, 88%
+        // wear) took 74 ticks over a 39-tick lane and the desk took it back at +48.
+        // The board's figure is the fallback when the router cannot price legs.
+        let hull = if ship.accel_milli_g > 0 {
+            ship.accel_milli_g
+        } else {
+            REFERENCE_ACCEL_MILLI_G
+        };
+        let class = if l.class_bps > 0 { l.class_bps } else { 10_000 };
+        let accel = contract_accel(hull, class);
+        let dead_ticks = router
+            .leg_distances_km(here, &l.origin)
+            .map(|d| flight_ticks(&d, accel))
+            .unwrap_or(l.deadhead_ticks);
+        if dead_ticks + ENGAGE_OVERHEAD_TICKS + l.loading_ticks.max(8) > PICKUP_TTL_TICKS {
+            continue;
+        }
+        // The plan must reach a pump AFTER the delivery too: a hull that arrives at
+        // a pumpless destination with an empty tank has no move left but the
+        // tanker (LOCAL, titan-larder, 2026-09-02: fuel 94, no pump in reach, a
+        // PAWS call-out from Saturn for ~15,000 ℳ). Cost of the onward leg to the
+        // nearest priceable pump, zero when the destination pumps.
+        let onward = onward_to_pump(&l.dest, pumps, router);
+        let whole = ((dead + haul + onward) as f64 * RESERVE) as i64;
         let dead_only = (dead as f64 * RESERVE) as i64;
-        let haul_only = (haul as f64 * RESERVE) as i64;
+        let haul_only = ((haul + onward) as f64 * RESERVE) as i64;
         if ship.fuel >= whole
             || (pumps.contains(l.origin.as_str())
                 && ship.fuel >= dead_only
@@ -282,6 +455,9 @@ mod tests {
         Ship {
             docked: Some(station.into()),
             in_flight: false,
+            accel_milli_g: REFERENCE_ACCEL_MILLI_G,
+            wear_bps: 0,
+            leased: false,
             hold_used: 0,
             hold_capacity: 120,
             fuel,
@@ -294,6 +470,7 @@ mod tests {
         LoadRow {
             load_id: id.into(),
             good: String::new(),
+            class_bps: 10_000,
             origin: origin.into(),
             dest: dest.into(),
             units: 25,
@@ -356,6 +533,177 @@ mod tests {
     }
 
     #[test]
+    fn a_worn_leased_hull_repairs_for_nothing_before_taking_work() {
+        // KK II, 2026-09-02: leased (titled false, principal 25000), wear 8827 bps.
+        let mut ship = ship_at("titan-larder", 500);
+        ship.wear_bps = 8_827;
+        ship.leased = true;
+        let board = vec![load("L1", "titan-larder", "tuna-prime", 900, (0, 20))];
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert_eq!(d, Decision::Repair);
+        // Barely worn: work first.
+        ship.wear_bps = 500;
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert!(matches!(d, Decision::Book { .. }), "{d:?}");
+        // A titled hull at the same 88%: invoice 8827 × 40 / 100 = 3530 — repaired
+        // with 10 000 in the bank (a quarter is 2 500: NOT affordable, so booked),
+        // repaired once cash allows.
+        ship.wear_bps = 8_827;
+        ship.leased = false;
+        ship.credits = 10_000;
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert!(matches!(d, Decision::Book { .. }), "{d:?}");
+        ship.credits = 20_000;
+        let d = decide(&ship, None, &board, &pumps(&[]), &FlatRouter(10));
+        assert_eq!(d, Decision::Repair);
+    }
+
+    #[test]
+    fn the_ledger_is_read_in_order_and_a_refused_duplicate_is_not_a_loss() {
+        // PROD L2831: booked, then the restart's duplicate refused, same tick.
+        let w = ledger_word(&["booked", "rejected: load is not open"]);
+        assert_eq!(w, Ok(Some(ActiveWord::Booked)));
+        // Never ours: the refusal is the loss.
+        assert!(ledger_word(&["rejected: you let this contract lapse"]).is_err());
+        // Held, booked, reverted, then refused again: lost at the revert.
+        let w = ledger_word(&[
+            "the desk is holding this one for you",
+            "booked",
+            "reverted",
+            "rejected: you let this contract lapse",
+        ]);
+        assert!(
+            matches!(w, Err(ref r) if r.starts_with("lost: reverted")),
+            "{w:?}"
+        );
+        // The happy path, in order.
+        assert_eq!(
+            ledger_word(&["booked", "picked up 6 units"]),
+            Ok(Some(ActiveWord::PickedUp))
+        );
+        assert_eq!(
+            ledger_word(&["booked", "picked up", "delivered"]),
+            Ok(Some(ActiveWord::Delivered))
+        );
+        assert!(
+            ledger_word(&["booked", "picked up", "delivered", "settled: payment taken"]).is_err()
+        );
+    }
+
+    #[test]
+    fn a_booking_reserves_fuel_for_the_leg_from_the_destination_to_a_pump() {
+        // Titan-larder pumps nothing; the nearest pump from it costs 60. A load
+        // whose dead + haul the tank covers, but not the onward 60, is not booked.
+        struct Chart;
+        impl Router for Chart {
+            fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
+                Some(match (from, to) {
+                    (a, b) if a == b => 0,
+                    (_, "titan-larder") => 100,
+                    ("titan-larder", "foxys-diner") => 60,
+                    _ => 500,
+                })
+            }
+        }
+        let pumps = pumps(&["foxys-diner"]);
+        let board = vec![load("L1", "here", "titan-larder", 900, (0, 20))];
+        // dead 0 + haul 100 + onward 60 = 160 × 1.2 = 192 in the tank.
+        let mut ship = ship_at("here", 180);
+        let d = decide(&ship, None, &board, &pumps, &Chart);
+        assert!(!matches!(d, Decision::Book { .. }), "{d:?}");
+        ship.fuel = 200;
+        let d = decide(&ship, None, &board, &pumps, &Chart);
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn flight_time_is_the_engines_arithmetic() {
+        // PROD, 2026-09-02: cannery-row → titan-larder, 1,307,724,939 km. The route
+        // endpoint says 39 ticks at the reference drive; KK II (wear 8827 bps →
+        // 105 mg) on an ECONOMY contract (half drive → 52 mg) took 74.
+        let d = [1_307_724_939_i64];
+        assert_eq!(flight_ticks(&d, REFERENCE_ACCEL_MILLI_G), 39);
+        assert_eq!(contract_accel(105, 5_000), 52);
+        let t = flight_ticks(&d, 52);
+        assert!((74..=75).contains(&t), "{t}");
+        // Two legs sum; a zero-length leg still costs a tick.
+        assert_eq!(
+            flight_ticks(&[0, 1_307_724_939], REFERENCE_ACCEL_MILLI_G),
+            40
+        );
+    }
+
+    #[test]
+    fn a_load_whose_honest_deadhead_would_miss_the_pickup_window_is_not_booked() {
+        // L2706 on PROD: board deadhead 19; the honest figure on an economy
+        // contract with a worn hull is 74 (+ engage + loading) — the desk reverts
+        // at +48 (−232 ℳ). The same lane on a STANDARD contract at full drive is
+        // 39 + 4 + 8 = 51 — still over. A shorter leg fits.
+        struct Chart(i64);
+        impl Router for Chart {
+            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(10)
+            }
+            fn leg_distances_km(&self, _: &str, _: &str) -> Option<Vec<i64>> {
+                Some(vec![self.0])
+            }
+        }
+        let ship = Ship {
+            docked: Some("cannery-row".into()),
+            accel_milli_g: 105,
+            wear_bps: 8827,
+            fuel: 600,
+            fuel_capacity: 600,
+            hold_capacity: 120,
+            ..Default::default()
+        };
+        let mut row = LoadRow {
+            load_id: "L2706".into(),
+            good: "catnip".into(),
+            class_bps: 5_000,
+            origin: "titan-larder".into(),
+            dest: "tuna-prime".into(),
+            units: 40,
+            estimated_net: 928,
+            deadhead_ticks: 19,
+            haul_ticks: 30,
+            loading_ticks: 8,
+            held_for_other: false,
+        };
+        let far = Chart(1_307_724_939);
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&row),
+            &BTreeSet::new(),
+            &far,
+        );
+        assert!(!matches!(d, Decision::Book { .. }), "{d:?}");
+        // A leg a third the distance: 74/√3 ≈ 43 at 52 mg — over with overhead;
+        // at standard class (105 mg) it is ~30 + 4 + 8 = 42: booked.
+        row.class_bps = 10_000;
+        let near = Chart(1_307_724_939 / 3);
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&row),
+            &BTreeSet::new(),
+            &near,
+        );
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L2706".into()
+            }
+        );
+    }
+
+    #[test]
     fn booked_while_berthed_at_the_destination_still_deadheads_to_the_origin() {
         // KK II at foxys-diner, 2026-09-01: booked a load INTO the berth she sat at
         // and waited for a crane that had nothing to load; the desk reverted it.
@@ -370,6 +718,7 @@ mod tests {
             row: LoadRow {
                 load_id: "L2605".into(),
                 good: "grain".into(),
+                class_bps: 10_000,
                 origin: "whisker-hollow".into(),
                 dest: "foxys-diner".into(),
                 units: 120,
@@ -528,6 +877,7 @@ mod tests {
     fn every_consequential_decision_names_the_freight_automation() {
         for d in [
             Decision::Refuel,
+            Decision::Repair,
             Decision::CallPaws,
             Decision::DivertToPump { pump: "p".into() },
             Decision::Book {

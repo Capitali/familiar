@@ -6,6 +6,80 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-02 — T-238 brick 1: the supply chain, read as arithmetic
+
+Ian, with the Cannery Row works screen in hand: forward plans should use the
+production chain in P&L maximization. The finding that made this a small brick: the
+whole graph is already on the wire — `/v1/reference` serves every station's recipes
+(inputs/outputs/ticksPerCycle) and every good's decay; the quotes whisker already
+reads serve each shelf's stock/capacity/equilibrium.
+
+`crates/whisker/src/chain.rs`, pure and new-file-only (the live lane's hot files
+untouched): recipe/decay parsers that refuse broken rows; per-station×good FLOWS
+with rates in units-per-kilotick summed across a station's lines (Cannery Row's two
+fishmeal-eating lines read as one 4,200/kt appetite); RUNWAY (ticks until an input
+shelf starves its works) and HEADROOM (ticks until an output shelf jams its line)
+from the live shelf; `starving`/`glutting` selectors ranked by urgency inside a
+horizon. The honesty bound is carried in the module doc and types: the wire does not
+serve line utilization, so every rate assumes full lines — runway/headroom are
+lower bounds, corrected live by the shelf's own stock-vs-equilibrium pressure.
+
+### Checks run
+
+whisker 45/0 (4 chain pins, fixtures shaped exactly as PROD served them 2026-09-02
+— the Biscuit Press row's own numbers), fmt, clippy all-targets -D warnings.
+Chair-built solo (codex paused until Sept 6, Ian's word); design review owed to
+codex after.
+
+### Next
+
+Brick 2 (separate, coordinated claim — it touches the live lane's merchant): the
+buy-target consults `starving`/`glutting`, decay-charged; then feed-and-lift
+two-leg plans on T-232's structures; fleet-coordinated legs once metal#62 gives
+the captain binding. Ask Jeff whether line utilization can join the wire.
+
+## 2026-09-02 — T-236 brick 1: the ship's computer is born named, and the captain may rename her
+
+Ian's ruling (verbatim on the board): each ship's computer is a unique instance — its
+own name, personality, memory, and relationship with its captain. Brick 1 commissions
+the NAMED instance on the persona seam T-210 built, per the Round-2 dialogue ruling:
+
+- `kernel::persona` grows the backward-compatible v2 contract: a bounded `Style`
+  block (warmth, formality, humor, sentence length, contractions, vocabulary flavour,
+  greeting, form of address — every axis cadence, none judgment; the exclusions are
+  documented ON the type), loud validation in writer AND loader (v1+style refused,
+  out-of-bounds refused, unknown versions refused), an atomic `write`, and the
+  naming-provenance trail (`persona-names.jsonl`, typed `NameEvent`s).
+- `fleet pair` births the computer explicitly: `persona.json` in the ship store
+  defaulting to **Purr exactly** (`--computer-name` is the captain's act at pairing;
+  no generated names — a name is a gift, not a seed), the naming trail seeded, and
+  the `/v1/me` hull display name recorded in `captain.json` as `hull_name` — labeled
+  a courtesy, not an identity: the operational binding stays `(server, key_id)`.
+- `fleet rename <world> <name>` is the naming ceremony (persona written atomically,
+  trail appended with the acting human); `world rename` still touches only the
+  registry label — hull, world, and computer are three names, never collapsed.
+- `fleet status` shows all three distinctly (text + JSON); a pre-T-236 ship reads
+  "(unnamed — `fleet rename` her)" rather than borrowing the household's default;
+  `unpair` keeps the persona record with the journal for the captain.
+
+### Checks run
+
+kernel+cli 246/0 (6 new persona pins: v2 bounds loud, v1+style refused, atomic
+round-trip, two-ships-no-byte-bleed with provenance trail), fmt, clippy all-targets
+-D warnings, full workspace 943/0. **CHAIR SELF-REVIEW, recorded:** codex is paused
+until Sept 6 (Ian's word, this session) — reviewed adversarially against codex's own
+Round-2 acceptance bar; three gaps found and fixed before landing (hull name missing
+from the text summary, pre-persona ships would have worn the household default name,
+naming-trail failures were silently swallowed). Open to codex re-verification after
+the pause, per the T-229 precedent.
+
+### Next
+
+Brick 2 per the Round-2 ruling: the ship's log told in her voice (deterministic
+renderer over the journal — the voice lives at the telling, never in the log). The
+captain's card (T-237) presents what this brick persists; the persona surfaces are
+its enrollment/naming substrate.
+
 ## 2026-08-29 — T-221's following week is measured, and the miss rate did not heal
 
 The long-owed post-vocabulary-fix report is now recorded over one fixed complete calendar

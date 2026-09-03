@@ -168,6 +168,41 @@ pub fn basis_from_total(total: i64, units: i64, ask: i64) -> i64 {
     ((total + units - 1) / units).max(ask)
 }
 
+/// A position at its sell target whose bid did not clear has a STALE target: the
+/// mid that chose it has moved. Pick the dearest berth on the map (not here) whose
+/// haircut mid still clears basis + margin, or no target at all — then the goods
+/// ride under freight until a passing bid clears, rather than the hull ferrying
+/// them to a market that no longer pays (LOCAL gravy-base, 2026-09-02: three
+/// carries to velvet-array, three folds of no sale, between hauls).
+pub fn retarget(h: &mut Holding, here: &str, galaxy: &[MarketRow]) -> Option<String> {
+    let floor = h.avg_cost + bps(h.avg_cost, SELL_MARGIN_BPS);
+    let best = galaxy
+        .iter()
+        .filter(|r| r.good == h.good && r.station != here && r.mid > 0)
+        .filter(|r| r.mid - bps(r.mid, SELL_HAIRCUT_BPS) >= floor)
+        .max_by_key(|r| r.mid)
+        .map(|r| r.station.clone());
+    let was = std::mem::replace(&mut h.sell_target, best.clone().unwrap_or_default());
+    if was == h.sell_target {
+        None
+    } else {
+        Some(format!(
+            "{}: {} did not pay; now bound for {}",
+            h.good,
+            if was.is_empty() {
+                "no market"
+            } else {
+                was.as_str()
+            },
+            if h.sell_target.is_empty() {
+                "wherever a bid clears"
+            } else {
+                h.sell_target.as_str()
+            }
+        ))
+    }
+}
+
 /// Can a leg costing `cost` fuel be flown on `fuel` in the tank, reserve included?
 pub fn carry_affordable(cost: i64, fuel: i64) -> bool {
     fuel >= bps(cost, CARRY_RESERVE_BPS)
@@ -191,31 +226,31 @@ pub fn save_holdings(ship_dir: &Path, holdings: &[Holding]) {
     }
 }
 
-/// Bring the book to what the hold actually holds. `cargo` is `/v1/me.cargo`;
-/// `freight` is the active contract's cargo when it is aboard (its good and units
-/// are not ours to sell). `basis_hint(good)` prices a good we find aboard but do not
+/// Bring the book to what the hold actually holds. `cargo` is `/v1/me.cargo`, which
+/// lists the MERCHANT'S goods only: contract freight never enters the actor's cargo
+/// map (engine: only `marketBuy`/`marketSell` and the galley touch it; `holdUsed` is
+/// the same sum). An earlier revision subtracted the active contract's units here and
+/// "corrected" a 32-unit lot to 22 while a 10-unit load rode along (LOCAL gravy-base,
+/// 2026-09-02). `basis_hint(good)` prices a good we find aboard but do not
 /// remember — the ask here if quoted, else the dearest mid on the map, so an
-/// adopted lot is never sold at a phantom profit. Returns a note per change.
+/// adopted lot is never sold at a phantom profit — and names the berth paying that
+/// mid, so the lot has somewhere to be carried once its clock passes. Returns a note
+/// per change.
 pub fn reconcile_hold(
     holdings: &mut Vec<Holding>,
     cargo: &[(String, i64)],
-    freight: Option<(&str, i64)>,
-    basis_hint: &dyn Fn(&str) -> i64,
+    basis_hint: &dyn Fn(&str) -> (i64, String),
     tick: i64,
     min_hold: i64,
 ) -> Vec<String> {
     let mut notes = Vec::new();
     let ours = |good: &str| -> i64 {
-        let aboard = cargo
+        cargo
             .iter()
             .filter(|(g, _)| g == good)
             .map(|(_, u)| *u)
-            .sum::<i64>();
-        let theirs = match freight {
-            Some((g, u)) if g == good => u,
-            _ => 0,
-        };
-        (aboard - theirs).max(0)
+            .sum::<i64>()
+            .max(0)
     };
     for h in holdings.iter_mut() {
         let actual = ours(&h.good);
@@ -236,15 +271,15 @@ pub fn reconcile_hold(
         if units <= 0 {
             continue;
         }
-        let basis = basis_hint(good);
+        let (basis, target) = basis_hint(good);
         notes.push(format!(
-            "{good}: {units} units aboard the book did not know — adopted at basis {basis}"
+            "{good}: {units} units aboard the book did not know — adopted at basis {basis}, for {target}"
         ));
         holdings.push(Holding {
             good: good.clone(),
             units,
             avg_cost: basis,
-            sell_target: String::new(),
+            sell_target: target,
             opened_tick: tick,
             sellable_at: tick + min_hold,
         });
@@ -424,6 +459,8 @@ pub fn decide_trade(
             let Some(cost) = router.fuel_between(here, &row.station) else {
                 continue; // unreachable / unpriceable — not an arbitrage
             };
+            // ...plus the leg from that market to a pump, or the run ends there.
+            let cost = cost + crate::doctrine::onward_to_pump(&row.station, pumps, router);
             priced += 1;
             if !carry_affordable(cost, l.fuel_available) {
                 unfuelable += 1;
@@ -885,35 +922,61 @@ mod tests {
     fn the_hold_is_the_truth_refused_sells_restore_and_strangers_are_adopted() {
         // LOCAL t11416: the book had sold 60 litter-clay; the fold refused; the hold
         // still had them. And 30 ore aboard the book never heard of (a crash between
-        // ack and save), plus 24 units of freight cargo that are NOT ours.
+        // ack and save). Contract freight is never in this list.
         let mut book: Vec<Holding> = vec![]; // the sold-out book
-        let cargo = vec![
-            ("litter-clay".to_string(), 60),
-            ("ore".to_string(), 30),
-            ("grain".to_string(), 24),
-        ];
-        let hint = |g: &str| if g == "ore" { 11 } else { 99 };
-        let notes = reconcile_hold(&mut book, &cargo, Some(("grain", 24)), &hint, 11416, 288);
+        let cargo = vec![("litter-clay".to_string(), 60), ("ore".to_string(), 30)];
+        let hint = |g: &str| {
+            if g == "ore" {
+                (11, "io-slagworks".to_string())
+            } else {
+                (99, "far".to_string())
+            }
+        };
+        let notes = reconcile_hold(&mut book, &cargo, &hint, 11416, 288);
         assert_eq!(book.len(), 2, "{book:?}");
         let clay = book.iter().find(|h| h.good == "litter-clay").unwrap();
         assert_eq!(
             (clay.units, clay.avg_cost, clay.sellable_at),
             (60, 99, 11416 + 288)
         );
+        assert_eq!(
+            clay.sell_target, "far",
+            "an adopted lot needs somewhere to go"
+        );
         let ore = book.iter().find(|h| h.good == "ore").unwrap();
         assert_eq!((ore.units, ore.avg_cost), (30, 11));
-        assert!(
-            book.iter().all(|h| h.good != "grain"),
-            "freight cargo adopted as ours"
-        );
         assert_eq!(notes.len(), 2);
 
         // A partial fill reduces; an empty hold drops.
         let mut book = vec![held("ore", 30, 11, 1, 1)];
-        reconcile_hold(&mut book, &[("ore".into(), 12)], None, &hint, 5, 288);
+        reconcile_hold(&mut book, &[("ore".into(), 12)], &hint, 5, 288);
         assert_eq!(book[0].units, 12);
-        reconcile_hold(&mut book, &[], None, &hint, 6, 288);
+        reconcile_hold(&mut book, &[], &hint, 6, 288);
         assert!(book.is_empty());
+    }
+
+    #[test]
+    fn a_target_that_did_not_pay_is_replaced_by_one_that_still_would() {
+        let mut h = held("gravy-base", 10, 16, 1, 1);
+        h.sell_target = "velvet-array".into();
+        // velvet's mid fell to 19 (−18% = 15 < 18 floor); tranquility still pays 25.
+        let galaxy = vec![
+            row("gravy-base", "velvet-array", 19),
+            row("gravy-base", "tranquility", 25),
+        ];
+        let note = retarget(&mut h, "velvet-array", &galaxy);
+        assert_eq!(h.sell_target, "tranquility");
+        assert!(note.unwrap().contains("tranquility"));
+        // Nowhere pays: no target, ride under freight.
+        let galaxy = vec![
+            row("gravy-base", "velvet-array", 19),
+            row("gravy-base", "tranquility", 20),
+        ];
+        let note = retarget(&mut h, "tranquility", &galaxy);
+        assert_eq!(h.sell_target, "");
+        assert!(note.is_some());
+        // Unchanged target: no note.
+        assert!(retarget(&mut h, "tranquility", &galaxy).is_none());
     }
 
     #[test]
