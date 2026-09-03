@@ -96,7 +96,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
-- status: **CLAIMED companion:claude 2026-09-01 night for brick 1** — the pure race
+- status: **LANDED on main 2026-09-02 (merge `ad6ece2`), chair-reviewed** — codex was
+  paused (Ian's word), so the review is a recorded chair self-review
+  (docs/reviews/2026-09-02-t231-candidate-race-chair-review.md): two repairs applied
+  pre-land (defaults churn; unbounded health-map growth), codex re-verification owed
+  after Sept 6. Runtime acceptance evidence still to collect on Ian's iPad: a cold
+  launch with a poisoned remembered door reaching the mesh in lighthouse-RTT + one
+  stagger. Was: CLAIMED companion:claude 2026-09-01 night for brick 1 — the pure race
   planner in FamiliarMesh (`CandidateRace.swift`: staggered start order that keeps
   Ian's path doctrine as a HEAD START rather than a serial wall; per-door health with
   consecutive-fail demotion; expiry of doors dead for days, the lighthouse never
