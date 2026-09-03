@@ -1895,11 +1895,18 @@ final class AppModel: ObservableObject {
         let race = await raceWorldview(runners: runners, fix: fix)
         // Book only real outcomes: a win, and every loss that genuinely failed.
         // Cancelled laps (the race was already won) settle nothing.
+        let healthBefore = doorHealth
         for (door, ok) in race.settled {
             doorHealth = CandidateRace.settle(
                 doorHealth, host: door, outcome: ok ? .success : .failure, now: raceNow)
         }
-        saveDoorHealth()
+        // Forget doors that left the walk entirely — roaming for years must not
+        // grow the health map without bound. The lighthouse and every current
+        // candidate keep their history.
+        doorHealth = doorHealth.filter { candidates.contains($0.key) || $0.key == Self.rendezvousHost }
+        // The read loop runs every few seconds; write the defaults only when a
+        // race actually changed something.
+        if doorHealth != healthBefore { saveDoorHealth() }
         attempts = race.attempts
         if let win = race.winner {
             host = win.host
