@@ -413,7 +413,12 @@ pub fn decide(
     // one THE TANK CAN REACH: the engine refuses an unaffordable route at the fold
     // ("route needs about 217 in the tank and it holds 157"), so filing one is a
     // slow way to stand still. No affordable pump means the tanker, at ANY level.
-    if frac(ship.fuel) < LOW_FUEL {
+    // ...or, berthed where nothing pumps, whatever the tank reads: from a pumpless
+    // berth every plan must also carry the leg to a pump, and a half tank can make the
+    // whole board "unfuelable" — KK II sat 179 folds (5½ hours) at titania-cold-store
+    // on 306 of 600 that way (2026-09-03). At a pump the plan is priced against a full
+    // tank, so going there is never the wrong move when there is no work here.
+    if frac(ship.fuel) < LOW_FUEL || (!pumps.is_empty() && !pumps.contains(here)) {
         let mut best: Option<(i64, &String)> = None;
         for p in pumps {
             if let Some(cost) = router.fuel_between(here, p) {
@@ -426,7 +431,12 @@ pub fn decide(
         }
         return match best {
             Some((_, pump)) => Decision::DivertToPump { pump: pump.clone() },
-            None => Decision::CallPaws,
+            // A pumpless berth with no reachable pump on a healthy tank is not a
+            // distress; only a genuinely low tank calls the tanker.
+            None if frac(ship.fuel) < LOW_FUEL => Decision::CallPaws,
+            None => Decision::Hold {
+                why: "no fuelable work on the board, no pump in reach".into(),
+            },
         };
     }
     Decision::Hold {
@@ -619,6 +629,26 @@ mod tests {
                 load_id: "L1".into()
             }
         );
+    }
+
+    #[test]
+    fn idle_at_a_pumpless_berth_goes_to_the_pump_whatever_the_tank_reads() {
+        // titania-cold-store, 2026-09-03: fuel 306/600, an empty board of fuelable
+        // work, no pump here → go stand at the nearest affordable pump, do not sit.
+        let mut ship = ship_at("titania-cold-store", 306);
+        let pumps = pumps(&["foxys-diner"]);
+        let d = decide(&ship, None, &[], &pumps, &FlatRouter(60));
+        assert_eq!(
+            d,
+            Decision::DivertToPump {
+                pump: "foxys-diner".into()
+            }
+        );
+        // Berthed AT a pump, tank full, nothing to do: hold, do not shuttle.
+        ship.docked = Some("foxys-diner".into());
+        ship.fuel = 600;
+        let d = decide(&ship, None, &[], &pumps, &FlatRouter(60));
+        assert!(matches!(d, Decision::Hold { .. }), "{d:?}");
     }
 
     #[test]
