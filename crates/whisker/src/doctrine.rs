@@ -130,6 +130,19 @@ pub fn onward_to_pump(at: &str, pumps: &BTreeSet<String>, router: &dyn Router) -
         .unwrap_or(i64::MAX / 4)
 }
 
+/// Fuel for a leg the route priced at the reference drive, re-priced for the drive
+/// it will actually be flown at: propellant scales with √(acceleration) (engine
+/// `FlightModel.deltaVQ8`). A tuned hull (217 mg) burns ~7% more than the quote
+/// and a worn one less; KK II arrived at foxys-diner with 40 in the tank after a
+/// leg quoted near 240 cost 266 (2026-09-03, ucf-exchange#18). Rounded up.
+pub fn fuel_at_drive(quoted: i64, accel_milli_g: i64) -> i64 {
+    if quoted <= 0 {
+        return quoted;
+    }
+    let ratio = (accel_milli_g.max(1) as f64 / REFERENCE_ACCEL_MILLI_G as f64).sqrt();
+    ((quoted as f64) * ratio).ceil() as i64
+}
+
 /// The drive a contract's legs are flown at: the hull throttled by the class.
 pub fn contract_accel(ship_accel_milli_g: i64, class_bps: i64) -> i64 {
     (ship_accel_milli_g * class_bps / 10_000).max(1)
@@ -395,6 +408,10 @@ pub fn decide(
         // PAWS call-out from Saturn for ~15,000 ℳ). Cost of the onward leg to the
         // nearest priceable pump, zero when the destination pumps.
         let onward = onward_to_pump(&l.dest, pumps, router);
+        // The quote is for the reference drive; these legs fly at the contract's.
+        let dead = fuel_at_drive(dead, accel);
+        let haul = fuel_at_drive(haul, accel);
+        let onward = fuel_at_drive(onward, accel);
         let whole = ((dead + haul + onward) as f64 * RESERVE) as i64;
         let dead_only = (dead as f64 * RESERVE) as i64;
         let haul_only = ((haul + onward) as f64 * RESERVE) as i64;
@@ -649,6 +666,17 @@ mod tests {
         ship.fuel = 600;
         let d = decide(&ship, None, &[], &pumps, &FlatRouter(60));
         assert!(matches!(d, Decision::Hold { .. }), "{d:?}");
+    }
+
+    #[test]
+    fn fuel_is_repriced_for_the_drive_it_flies_at() {
+        assert_eq!(fuel_at_drive(240, REFERENCE_ACCEL_MILLI_G), 240);
+        // drive-tune: 217 mg → √(217/189) ≈ 1.071 → 258 (the leg cost 266 with the
+        // haircut the quote already carries).
+        assert_eq!(fuel_at_drive(240, 217), 258);
+        // worn to 105 mg: less propellant, not more.
+        assert!(fuel_at_drive(240, 105) < 240);
+        assert_eq!(fuel_at_drive(0, 217), 0);
     }
 
     #[test]

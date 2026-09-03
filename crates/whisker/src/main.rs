@@ -1232,7 +1232,10 @@ fn main() -> ExitCode {
                             // The carry plus the leg from the market to a pump — the
                             // same PAWS lesson as the freight plan.
                             let cost = wire.fuel_between(&here, &h.sell_target).map(|c| {
-                                c + doctrine::onward_to_pump(&h.sell_target, &pumps, &wire)
+                                doctrine::fuel_at_drive(
+                                    c + doctrine::onward_to_pump(&h.sell_target, &pumps, &wire),
+                                    ship.accel_milli_g,
+                                )
                             });
                             let flyable = cost
                                 .map(|c| trade::carry_affordable(c, ship.fuel))
