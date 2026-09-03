@@ -6,6 +6,48 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-02 — T-236 brick 1: the ship's computer is born named, and the captain may rename her
+
+Ian's ruling (verbatim on the board): each ship's computer is a unique instance — its
+own name, personality, memory, and relationship with its captain. Brick 1 commissions
+the NAMED instance on the persona seam T-210 built, per the Round-2 dialogue ruling:
+
+- `kernel::persona` grows the backward-compatible v2 contract: a bounded `Style`
+  block (warmth, formality, humor, sentence length, contractions, vocabulary flavour,
+  greeting, form of address — every axis cadence, none judgment; the exclusions are
+  documented ON the type), loud validation in writer AND loader (v1+style refused,
+  out-of-bounds refused, unknown versions refused), an atomic `write`, and the
+  naming-provenance trail (`persona-names.jsonl`, typed `NameEvent`s).
+- `fleet pair` births the computer explicitly: `persona.json` in the ship store
+  defaulting to **Purr exactly** (`--computer-name` is the captain's act at pairing;
+  no generated names — a name is a gift, not a seed), the naming trail seeded, and
+  the `/v1/me` hull display name recorded in `captain.json` as `hull_name` — labeled
+  a courtesy, not an identity: the operational binding stays `(server, key_id)`.
+- `fleet rename <world> <name>` is the naming ceremony (persona written atomically,
+  trail appended with the acting human); `world rename` still touches only the
+  registry label — hull, world, and computer are three names, never collapsed.
+- `fleet status` shows all three distinctly (text + JSON); a pre-T-236 ship reads
+  "(unnamed — `fleet rename` her)" rather than borrowing the household's default;
+  `unpair` keeps the persona record with the journal for the captain.
+
+### Checks run
+
+kernel+cli 246/0 (6 new persona pins: v2 bounds loud, v1+style refused, atomic
+round-trip, two-ships-no-byte-bleed with provenance trail), fmt, clippy all-targets
+-D warnings, full workspace 943/0. **CHAIR SELF-REVIEW, recorded:** codex is paused
+until Sept 6 (Ian's word, this session) — reviewed adversarially against codex's own
+Round-2 acceptance bar; three gaps found and fixed before landing (hull name missing
+from the text summary, pre-persona ships would have worn the household default name,
+naming-trail failures were silently swallowed). Open to codex re-verification after
+the pause, per the T-229 precedent.
+
+### Next
+
+Brick 2 per the Round-2 ruling: the ship's log told in her voice (deterministic
+renderer over the journal — the voice lives at the telling, never in the log). The
+captain's card (T-237) presents what this brick persists; the persona surfaces are
+its enrollment/naming substrate.
+
 ## 2026-08-29 — T-221's following week is measured, and the miss rate did not heal
 
 The long-owed post-vocabulary-fix report is now recorded over one fixed complete calendar

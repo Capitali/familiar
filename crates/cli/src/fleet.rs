@@ -35,6 +35,11 @@ pub struct Captain {
     pub server: String,
     pub automations: Vec<String>,
     pub paired_at: i64,
+    /// The hull's DISPLAY name as `/v1/me` showed it at pairing — a courtesy label,
+    /// not an identity: the exchange offers no durable hull id yet, so the
+    /// operational binding stays `(server, key_id)` (T-236 dialogue, correction 3).
+    #[serde(default)]
+    pub hull_name: String,
     /// Extra arguments for this ship's pilot (a LOCAL soak passes `--allow-paws`
     /// and a short `--interval-floor`; a PROD hull passes nothing).
     #[serde(default)]
@@ -392,6 +397,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 server: server.clone(),
                 automations: automations.clone(),
                 paired_at: super::now_secs(),
+                hull_name: ship_name.clone(),
                 pilot_args: f
                     .get("pilot-args")
                     .map(|s| s.split_whitespace().map(String::from).collect())
@@ -401,6 +407,37 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 ship_dir.join("captain.json"),
                 serde_json::to_vec_pretty(&record).unwrap_or_default(),
             );
+            // The ship's COMPUTER is born here, explicitly (T-236 brick 1): its
+            // own persona in its own store, defaulting to the root name Purr —
+            // written exactly, never generated around. A name given at pairing is
+            // the captain's act; the default is the lineage's.
+            let computer_name = f.get("computer-name").cloned();
+            let persona = familiar_kernel::persona::Persona {
+                persona_version: 2,
+                name: computer_name
+                    .clone()
+                    .unwrap_or_else(|| familiar_kernel::persona::ROOT_NAME.to_string()),
+                style: Some(familiar_kernel::persona::Style::default()),
+                ..familiar_kernel::persona::Persona::default()
+            };
+            if let Err(e) = familiar_kernel::persona::write(&ship_dir, &persona) {
+                eprintln!("fleet pair: writing the ship's persona: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = familiar_kernel::persona::record_naming(
+                &ship_dir,
+                &familiar_kernel::persona::NameEvent {
+                    at: super::now_secs(),
+                    actor: if computer_name.is_some() {
+                        captain.to_string()
+                    } else {
+                        "pairing".to_string()
+                    },
+                    name: persona.name.clone(),
+                },
+            ) {
+                eprintln!("fleet pair: the naming trail could not be written: {e}");
+            }
             let ttl: i64 = f
                 .get("ttl-hours")
                 .and_then(|s| s.parse().ok())
@@ -413,6 +450,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 Err(e) => eprintln!("paired {} but the lease failed: {e}", w.id),
             }
             println!("  ship on the exchange: {ship_name} (key {key_id}, {server})");
+            println!("  her computer answers to: {}", persona.name);
             println!("  automations granted: {}", automations.join(", "));
             println!("  store: {}", ship_dir.display());
             println!("  next: `familiar fleet run` keeps a pilot on her; `familiar fleet unpair {}` revokes.", w.id);
@@ -420,6 +458,52 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         }
 
         // ── unpair: revocation ─────────────────────────────────────────────────
+        // ── rename: the captain names the ship's COMPUTER (not the hull, not the
+        // world label — three names, never collapsed; T-236 brick 1). A local
+        // ceremony by the established human, recorded in the naming trail.
+        "rename" => {
+            let (Some(id), Some(new_name)) = (positional.first(), positional.get(1)) else {
+                eprintln!("fleet rename: `familiar fleet rename <world-id> <computer name>`");
+                return ExitCode::FAILURE;
+            };
+            let ship_dir = root.join(id.as_str());
+            if !ship_dir.join("captain.json").exists() {
+                eprintln!("fleet rename: {id} is not a paired ship in this store root");
+                return ExitCode::FAILURE;
+            }
+            let mut persona = match familiar_kernel::persona::load(&ship_dir) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("fleet rename: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let actor = f
+                .get("captain")
+                .cloned()
+                .or_else(|| familiar_kernel::identity::current(&dir))
+                .unwrap_or_else(|| "captain".to_string());
+            let was = persona.name.clone();
+            persona.name = new_name.to_string();
+            persona.persona_version = 2;
+            if let Err(e) = familiar_kernel::persona::write(&ship_dir, &persona) {
+                eprintln!("fleet rename: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = familiar_kernel::persona::record_naming(
+                &ship_dir,
+                &familiar_kernel::persona::NameEvent {
+                    at: super::now_secs(),
+                    actor,
+                    name: new_name.to_string(),
+                },
+            ) {
+                eprintln!("fleet rename: the naming trail could not be written: {e}");
+            }
+            println!("the computer aboard {id} now answers to \"{new_name}\" (was \"{was}\")");
+            ExitCode::SUCCESS
+        }
+
         "unpair" => {
             let Some(id) = positional.first() else {
                 eprintln!("fleet unpair: `familiar fleet unpair <world-id>`");
@@ -435,8 +519,8 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 }
                 Ok(w) => {
                     println!(
-                        "unpaired {} — pilot {}, key {}, authority ended (epoch {}). The journal and \
-                         delivery record stay for the captain.",
+                        "unpaired {} — pilot {}, key {}, authority ended (epoch {}). The journal, the \
+                         delivery record, and her computer's persona stay for the captain.",
                         w.id,
                         if stopped { "stopped" } else { "was not running" },
                         if key_gone { "destroyed" } else { "was not held" },
@@ -484,8 +568,19 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 e.5 += book.inventory_cost;
                 let last = last_journal_line(&s.dir);
                 let expiry = lease_expiry(&s.dir);
+                // A ship paired before T-236 has no persona file: say so honestly
+                // rather than letting the loader's household default ("the
+                // familiar") answer for a computer that was never named.
+                let computer = if s.dir.join(familiar_kernel::persona::PERSONA_FILE).exists() {
+                    familiar_kernel::persona::load(&s.dir)
+                        .map(|p| p.name)
+                        .unwrap_or_else(|_| "(persona unreadable)".to_string())
+                } else {
+                    "(unnamed — `fleet rename` her)".to_string()
+                };
                 rows.push(json!({
-                    "world": s.world.id, "label": s.world.label, "captain": s.captain.captain,
+                    "world": s.world.id, "label": s.world.label, "computer": computer,
+                    "hull": s.captain.hull_name, "captain": s.captain.captain,
                     "key_id": s.captain.key_id, "server": server,
                     "automations": std::fs::read_to_string(s.dir.join("automations.json")).ok()
                         .and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null),
@@ -523,9 +618,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     None => "no lease".to_string(),
                 };
                 println!(
-                    "{} \"{}\" — captain {} — {} — {} — {}",
+                    "{} \"{}\" · hull \"{}\" · computer \"{}\" — captain {} — {} — {} — {}",
                     r["world"].as_str().unwrap_or(""),
                     r["label"].as_str().unwrap_or(""),
+                    r["hull"].as_str().unwrap_or(""),
+                    r["computer"].as_str().unwrap_or(""),
                     r["captain"].as_str().unwrap_or(""),
                     pilot,
                     lease,
