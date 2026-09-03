@@ -5,6 +5,15 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
+  codex as coding partner till sept 6th. Pull any work back that's left for codex and
+  lets finish that ourselves.").** Pulled back to the claude lane: the T-232 round-7
+  review (codex ran out of budget mid-review twice), the T-231 candidate-race review
+  (never started), and T-236 brick 1's review (landed with a recorded chair
+  self-review, three gaps found and fixed — the T-229 precedent). Until the 6th:
+  chair self-reviews recorded in the log, codex re-verification owed after. The
+  racing pitch (metal#63) made it out codex-reviewed before the pause.
+
 - **PR #4 (Jeff, "market feed as observations") DECLINED FOR REWORK AND CLOSED —
   2026-09-01, Ian's direction verbatim: "Decline jeff#4 pr with detailed reasoning for
   a rework."** The PR predated ADR-0045 (worlds-are-stores) and recorded UCF market
