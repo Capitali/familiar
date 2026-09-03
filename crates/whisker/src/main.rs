@@ -388,7 +388,11 @@ fn main() -> ExitCode {
             j.lines()
                 .rev()
                 .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-                .find(|v| v.get("event").and_then(Value::as_str) == Some("acted"))
+                // Any filed action journals its resolve tick — freight ("acted"), the
+                // merchant ("traded", "carry-to-market"), the yard ("outfitted"), the
+                // drive ("engaged-drive"). A restart that only honoured "acted" bought a
+                // 9,000 ℳ fitting on the same tick as a 3,800 ℳ position (2026-09-03).
+                .find(|v| v.get("resolves").and_then(Value::as_i64).is_some())
                 .and_then(|v| v.get("resolves").and_then(Value::as_i64))
         })
         .unwrap_or(-1);
@@ -841,7 +845,12 @@ fn main() -> ExitCode {
         // fitting is permanent capacity; a position is one trade (PROD 2026-09-03: the
         // merchant took 3,800 for bluefin on the fold that could have bought the
         // drive-tune). One of each ever, so this fires rarely.
-        if outfits && tick >= pending_until && active.is_none() && !ship.in_flight {
+        if outfits
+            && tick >= pending_until
+            && pending_trade.is_none()
+            && active.is_none()
+            && !ship.in_flight
+        {
             if let Some(here) = ship.docked.clone() {
                 let purse = Purse {
                     credits: ship.credits,
