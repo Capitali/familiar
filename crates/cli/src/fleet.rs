@@ -191,6 +191,27 @@ struct TradeBook {
     inventory: BTreeMap<String, i64>,
 }
 
+/// The ship's own record of its fills — every `trade-outcome` the pilot journaled —
+/// as receipt-shaped rows. The exchange's `/v1/receipts` covers roughly a day of
+/// ticks, so a buy older than that vanishes and its sale reads as pure profit
+/// (KK II's salmon-mousse, 2026-09-03: "realized 6074 on 0 sold"). The journal is
+/// the whole story; the wire is the fallback for a store without one.
+fn journal_fills(ship_dir: &Path) -> Value {
+    let Ok(text) = std::fs::read_to_string(ship_dir.join("journal.jsonl")) else {
+        return Value::Null;
+    };
+    let rows: Vec<Value> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v.get("event").and_then(Value::as_str) == Some("trade-outcome"))
+        .collect();
+    if rows.is_empty() {
+        Value::Null
+    } else {
+        Value::Array(rows)
+    }
+}
+
 fn trade_book(receipts: &Value) -> TradeBook {
     let mut book = TradeBook::default();
     let Some(rows) = receipts.as_array() else {
@@ -548,9 +569,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
                     .unwrap_or_else(|| s.captain.server.clone());
                 let me = wire_get(&server, &key, "/v1/me").ok();
-                let book = wire_get(&server, &key, "/v1/receipts")
-                    .map(|r| trade_book(&r))
-                    .unwrap_or_default();
+                let fills = match journal_fills(&s.dir) {
+                    Value::Null => wire_get(&server, &key, "/v1/receipts").unwrap_or(Value::Null),
+                    j => j,
+                };
+                let book = trade_book(&fills);
                 let g = |k: &str| {
                     me.as_ref()
                         .and_then(|m| m.get(k).cloned())
