@@ -42,6 +42,10 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   conversation, spoken answers) — Ian's iPad is its first live mic test. Use 108. Filed with Jeff the
   same day at Ian's ask: metal#75, rescue by another hull (fleet fuel transfer / bought fuel) as an
   alternative to the PAWS tanker — KK is stranded on exactly that.
+  **BUILD 109 (wildhorse) SUPERSEDES 108 — B3.2 after Ian's speech test ("voice was terrible… no
+  conversation about refueling… context makes all the difference"):** a chosen better voice, the
+  host's /fuel and /brief as documents Felix reads with tools and is grounded on, the per-ship frame.
+  The captain's fleet brief (/captains/{slug}/brief, 7e96daa) rides in the next build. Use 109.
 
 
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
