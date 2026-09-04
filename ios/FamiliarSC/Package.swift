@@ -21,16 +21,20 @@ let package = Package(
     platforms: [.macOS("26.0"), .iOS("26.0"), .visionOS("26.0")],
     products: [
         .library(name: "FamiliarSC", targets: ["FamiliarSC"]),
+        // T-237 B3: the captain's bridge screens (SwiftUI) over FamiliarSC — hostable by
+        // either SKU shape (a mode inside the Familiar app, or a separate Familiar SC app).
+        .library(name: "FamiliarSCUI", targets: ["FamiliarSCUI"]),
         // A macOS stand-in for the captain's bridge: reads a ship store and speaks the
         // report — the visible proof for B2 ("what did you do today", from a real journal).
         .executable(name: "familiar-bridge", targets: ["familiar-bridge"]),
     ],
     targets: [
         .target(name: "FamiliarSC"),
-        .executableTarget(name: "familiar-bridge", dependencies: ["FamiliarSC"]),
+        .target(name: "FamiliarSCUI", dependencies: ["FamiliarSC"]),
+        .executableTarget(name: "familiar-bridge", dependencies: ["FamiliarSC", "FamiliarSCUI"]),
         .testTarget(
             name: "FamiliarSCTests",
-            dependencies: ["FamiliarSC"],
+            dependencies: ["FamiliarSC", "FamiliarSCUI"],
             resources: [.copy("Fixtures")]
         ),
     ]

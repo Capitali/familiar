@@ -5,14 +5,14 @@ import Foundation
 // denied, lapsed. The persona voices these; the app's approve/deny buttons write the
 // approval line (the captain's act). This is the feed; it never decides anything.
 
-public struct MessageItem: Equatable {
-    public enum Kind: Equatable {
+public struct MessageItem: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
         /// `advice`: what the computer would do and why; it did nothing.
         case advice(would: String, why: String)
         /// `proposed` + its state.
         case proposal(id: String, would: String, why: String, expiresTick: Int64, state: ProposalState)
     }
-    public enum ProposalState: Equatable {
+    public enum ProposalState: Equatable, Sendable {
         case open
         case approved(at: Int64)
         case denied(at: Int64)

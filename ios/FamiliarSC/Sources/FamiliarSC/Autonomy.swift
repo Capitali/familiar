@@ -21,7 +21,7 @@ public enum AutonomyLevel: String, Codable, CaseIterable, Equatable, Sendable {
 }
 
 /// A control surface, `family.category` — the pilot's doors today, plus racing's.
-public enum ControlSurface: String, CaseIterable, Equatable {
+public enum ControlSurface: String, CaseIterable, Equatable, Sendable {
     case navigationCourse = "navigation.course"
     case navigationFuel = "navigation.fuel"
     case navigationRescue = "navigation.rescue"
@@ -63,7 +63,7 @@ public enum ControlSurface: String, CaseIterable, Equatable {
 }
 
 /// The dial as the store holds it: `{"navigation.course": "auto", "market": "confirm", "*": "auto"}`.
-public struct AutonomyDial: Equatable {
+public struct AutonomyDial: Equatable, Sendable {
     public var settings: [String: AutonomyLevel]
 
     public init(settings: [String: AutonomyLevel] = [:]) { self.settings = settings }
@@ -108,7 +108,7 @@ public struct AutonomyDial: Equatable {
     }
 
     /// What whisker's own loader does with the file — and what the captain must be told.
-    public enum Loaded: Equatable {
+    public enum Loaded: Equatable, Sendable {
         /// No file: every bought surface is auto (KK II today).
         case absent
         case dial(AutonomyDial)
