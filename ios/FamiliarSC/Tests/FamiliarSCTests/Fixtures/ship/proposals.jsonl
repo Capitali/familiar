@@ -1,0 +1,2 @@
+{"id": "p-0123456789abcdef", "tick": 201, "expires_tick": 205, "surface": "freight.book", "describe": "book L3", "why": "best rate on the board", "body": {"type": "book", "loadId": "L3"}}
+{"id": "p-fedcba9876543210", "tick": 210, "expires_tick": 214, "surface": "market.sell", "describe": "sell 40 ore at 22", "why": "bid clears basis +12%", "body": {"type": "sell", "good": "ore", "units": 40}}

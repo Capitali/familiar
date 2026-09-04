@@ -1,0 +1,13 @@
+[
+  {
+    "good": "bluefin-reserve",
+    "outcome": "filled",
+    "side": "sell",
+    "station": "tuna-prime",
+    "subtotal": 5696,
+    "tax": 113,
+    "tick": 7434,
+    "total": 5583,
+    "units": 53
+  }
+]

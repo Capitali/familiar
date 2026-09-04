@@ -1,0 +1,36 @@
+{"at": 1700000000, "event": "watch-begins", "instance": "world-fixture", "exchange": "http://exchange.example", "automations": ["Freight", "Trade", "Outfit"]}
+{"at": 1700000100, "tick": 100, "event": "adopted-held-contract", "load": "L1", "status": "inTransit"}
+{"at": 1700000200, "tick": 101, "event": "holding", "credits": 5000, "docked": "whisker-hollow", "fuel": 500, "why": "waiting on the crane"}
+{"at": 1700000300, "tick": 102, "event": "holding", "credits": 5000, "docked": "whisker-hollow", "fuel": 500, "why": "waiting on the crane"}
+{"at": 1700000400, "tick": 103, "event": "acted", "credits": 5000, "decision": "Collect { load_id: \"L1\" }", "fuel": 500, "resolves": 104}
+{"at": 1700000500, "tick": 104, "event": "awaiting-our-own-fold", "resolves": 105}
+{"at": 1700000600, "tick": 105, "event": "engaged-drive", "resolves": 120, "to": "foxys-diner"}
+{"at": 1700000700, "tick": 110, "event": "holding", "credits": 5000, "docked": null, "fuel": 470, "why": "under way"}
+{"at": 1700000800, "tick": 120, "event": "load-closed", "credits": 5600, "load": "L1", "why": "settled: payment taken"}
+{"at": 1700000900, "tick": 121, "event": "merchant-idle", "at_station": "foxys-diner", "credits": 5600, "fuel_available": 470, "spare_hold": 120, "why": "no profitable, carryable arbitrage on the board"}
+{"at": 1700001000, "tick": 122, "event": "traded", "credits": 5000, "good": "ore", "resolves": 123, "side": "buy", "units": 40, "why": ""}
+{"at": 1700001100, "tick": 123, "event": "fill", "basis": 15, "credits": 5000, "good": "ore", "spent": 600, "units": 40}
+{"at": 1700001200, "tick": 123, "event": "position-opened", "ask": 15, "est_margin": 120, "good": "ore", "sell_target": "io-slagworks", "sellable_at": 411, "units": 40}
+{"at": 1700001300, "tick": 124, "event": "book-corrected", "why": "ore: 40 units aboard the book did not know — adopted at basis 15"}
+{"at": 1700001400, "tick": 130, "event": "carry-blocked", "why": "carry ore → io-slagworks needs fuel Some(82), tank 70"}
+{"at": 1700001500, "tick": 131, "event": "acted", "credits": 5000, "decision": "DivertToPump { pump: \"foxys-diner\" }", "fuel": 70, "resolves": 132}
+{"at": 1700001600, "tick": 140, "event": "carry-to-market", "good": "ore", "resolves": 160, "to": "io-slagworks"}
+{"at": 1700001700, "tick": 160, "event": "trade-outcome", "credits": 5000, "good": "ore", "outcome": "rejected: minimum hold (sellable at tick 411)", "side": "sell", "total": 0, "units": 40}
+{"at": 1700001800, "tick": 161, "event": "retargeted", "why": "ore: io-slagworks did not pay; now bound for wherever a bid clears"}
+{"at": 1700001900, "tick": 170, "event": "outfit-idle", "credits": 5000, "reserve": 4560, "why": "saving for drive-tune: ℳ9000 + reserve ℳ4560 > ℳ5000 in hand"}
+{"at": 1700002000, "tick": 180, "event": "awaiting-pending-actions", "resolves": 181, "verbs": ["book"]}
+{"at": 1700002100, "tick": 181, "event": "refused-at-the-door", "decision": "Book { load_id: \"L2\" }", "why": "HTTP 429"}
+{"at": 1700002200, "event": "exchange-unreachable", "why": "Io(\"Connection refused (os error 61)\")"}
+{"at": 1700002300, "event": "exchange-unreachable", "why": "Io(\"Connection refused (os error 61)\")"}
+{"at": 1700002400, "tick": 190, "event": "held-at-the-gate", "decision": "Book { load_id: \"L2\" }", "why": "freight automation not granted"}
+{"at": 1700002500, "tick": 200, "event": "advice", "surface": "market.buy", "would": "buy 30 gravy-base at 20", "why": "margin 25% at velvet-array", "body": {"type": "buy", "good": "gravy-base", "units": 30}}
+{"at": 1700002600, "tick": 201, "event": "proposed", "id": "p-0123456789abcdef", "surface": "freight.book", "would": "book L3", "why": "best rate on the board", "expires": 205}
+{"at": 1700002700, "tick": 206, "event": "proposal-lapsed", "id": "p-0123456789abcdef", "surface": "freight.book", "would": "book L3"}
+{"at": 1700002800, "tick": 210, "event": "proposed", "id": "p-fedcba9876543210", "surface": "market.sell", "would": "sell 40 ore at 22", "why": "bid clears basis +12%", "expires": 214}
+{"at": 1700002900, "tick": 215, "event": "outfitted", "at_station": "titania-cold-store", "credits": 1200, "fitting": "drive-tune", "price": 9000, "reserve": 4560, "resolves": 216}
+{"at": 1700003000, "tick": 216, "event": "refit-refused", "fitting": "hold-extension", "why": "ℳ1200 in hand under reserve"}
+{"at": 1700003100, "tick": 220, "event": "engage-refused", "why": "crane says: until t222"}
+{"at": 1700003200, "tick": 223, "event": "unwedged-course", "engaged": true, "resolves": 240, "to": "cannery-row"}
+{"at": 1700003300, "tick": 241, "event": "carry-refused", "good": "ore", "to": "cannery-row", "why": "HTTP 503"}
+{"at": 1700003400, "tick": 250, "event": "distress-hold", "why": "stranded at 12 fuel, no pump in range, tanker on advise"}
+{"at": 1700003500, "tick": 251, "event": "sighted-comet", "tail_km": 123456, "note": "a word this build never learned"}

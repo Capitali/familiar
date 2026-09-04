@@ -6,6 +6,81 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-03 — T-237 B2: the ship's computer's Apple half, `FamiliarSC`
+
+Ian's line for familiar-sc (dialogue §3): decisions that spend, move or bind the ship stay
+deterministic doctrine; Apple Intelligence speaks. B2 is the Swift package that half needs,
+built on the MacOnStick lane while the wildhorse session holds B1 and the live pilots —
+`ios/FamiliarSC`, pure logic, `swift test` on macOS with no device, key or network:
+
+- **The ship-store reader** (`ShipStore.swift`), typed to the Rust side's own records:
+  persona v2 + style (the loader mirrors `persona.rs` exactly — unknown fields, unknown
+  versions and out-of-bounds axes are refused, never clamped; a ship paired before T-236
+  reads "unnamed", never the household default), captain.json, automations, holdings,
+  deliveries, proposals/approvals, the naming trail, and the journal — every line typed
+  loosely enough that an event this build never learned still renders, neutrally.
+- **The autonomy dial** (`Autonomy.swift`), in lockstep with `whisker/src/autonomy.rs`: the
+  17 surfaces, the same precedence (category → family → `*` → auto, the tanker advising on
+  its own), the same `set` vocabulary; the four Rust pins re-pinned in Swift. One truth the
+  app must tell loudly: a MALFORMED autonomy.json is read by whisker as absent — auto
+  everywhere — so the reader reports `.malformed(why)` instead of quietly defaulting.
+- **The message window** (`MessageWindow.swift`): advice and proposal lines from the
+  journal joined with proposals ∪ approvals into open / approved / denied / lapsed; the
+  approval line the app appends is generated here in the exact shape autonomy.rs reads.
+- **The `/v1` wire, READ-ONLY** (`Exchange.swift`): typed models for status, me (with the
+  pending overlay, absent when nothing is in flight), both load-board views, quotes, galaxy
+  prices in BOTH shapes, receipts, stations, route, profile, reference (the integer sky for
+  B4), and `ActionAck` as the clock it is. Pinned by scrubbed PROD captures the wildhorse
+  session made for this brick. There is no method that POSTs an action, by design.
+- **Pairing** (`Pairing.swift`): the key parse (paste, URL, QR), the key id exactly as
+  fleet.rs derives it, and a `fleet pair` argv that carries the key by FILE, so no secret
+  ever sits in a process list.
+- **Notices** (`Notices.swift`): which journal lines deserve the captain's phone — money,
+  a proposal, a distress, a refusal, the lease — and which are the pilot's routine (a leg
+  engaged, a quiet fold) and are not.
+- **The bridge voice** (`TemplatedVoice.swift`, `BridgeVoice.swift`): a typed
+  `BridgeReport` (headline, facts, next act, mood) rendered by a deterministic floor —
+  the T-236 brick-2 discipline: byte-identical across runs, style bends cadence and never
+  facts, humor reads as zero around danger, unknown events neutral, the position line says
+  "riding under freight till t…" rather than promising a flip — and the ladder above it:
+  on-device Foundation Models, Private Cloud Compute on OS 27 behind entitlement AND the
+  captain's consent (default off), the floor beneath both. Whatever spoke is checked by
+  `Grounding` before it is shown: any number, id, tick or station the floor did not say, or
+  a mood softer than the floor's, and the floor's own words are shown instead. Tools read
+  the store and PROPOSE (a dial change waits in `pendingDialChanges` for the captain's
+  tap); no tool writes.
+- **`familiar-bridge`**, the macOS stand-in for the captain's bridge: report / window /
+  notices / dial / voices over a real ship store, `--wire` for the hull line.
+
+### Checks run
+
+`swift test --package-path ios/FamiliarSC`: 35/0, no warnings. Release build. **Live proof:**
+`familiar-bridge report` over a read-only copy of KK II's journal (one PROD day, 436 lines)
+speaks a correct concerned report — three loads settled with their ℳ, the bluefin sale at
+tuna-prime with basis and bid, the repair, the booking of L3249, an exchange outage
+collapsed to one line with its count, 402 quiet folds summarised — through the templated
+floor. **The Foundation Models lane did not run here:** this Mac reports the on-device
+model as `modelNotReady` (still loading — note, not `deviceNotEligible` as T-226 recorded)
+and PCC as `systemNotReady`; the ladder fell to the floor as designed and the report
+still stood. The grounded retelling waits for an eligible device (Ian's iPad, or this Mac
+once the model lands). CI: the package's `swift test` joins `swift.yml`.
+
+Chair-built and self-reviewed (codex paused until Sept 6): three defects found in the
+KK II run and fixed before landing — the next-act line ignored a run of outages, identical
+outage lines were listed one by one, and "drive engaged" would have pushed a notification
+every leg. Two review nits fixed: a force-unwrapped URL in the client, and the
+executable's tasks made detached so a main-actor caller cannot deadlock on the semaphore.
+Known limit, in the safe direction: the grounding tokenizer treats any hyphenated word as
+a station slug, so a retelling that says "well-known" is refused and the floor shown.
+
+### Next
+
+B3 (the iPhone/iPad companion) consumes this package as-is: ships list from
+`fleet status --json`, the message window with approve/deny writing the approval line,
+the dial editor writing autonomy.json, notices → UNUserNotification, the voice on the
+captain's device. B1 (wildhorse) gives it `status --json` as the wire; until then the
+store is read directly. Re-verify against codex after the pause.
+
 ## 2026-09-02 — T-238 brick 1: the supply chain, read as arithmetic
 
 Ian, with the Cannery Row works screen in hand: forward plans should use the

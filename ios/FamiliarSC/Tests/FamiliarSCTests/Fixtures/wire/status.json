@@ -1,0 +1,10 @@
+{
+  "contentVersion": 28,
+  "epochUnixSeconds": 1787140800,
+  "nextTickAt": "2026-09-04T04:39:00Z",
+  "stateHash": "7aa777d67b4029c0ffc6f7427cb748f73a7d0ebf848a81b055dc207176ddd531",
+  "tick": 7532,
+  "tickDurationSec": 180,
+  "worldFingerprint": "c2faa156c9f0",
+  "worldName": "PROD"
+}

@@ -33,6 +33,13 @@ jobs:
       - name: FamiliarMesh package tests
         run: swift test --package-path ios/FamiliarMesh
 
+      # T-237 B2: the ship's computer's Apple half. Pure logic + the Foundation Models
+      # lane (27 SDK); the runner has no model, so the voice tests prove the templated
+      # floor and the grounding check, which is the bar (the model is the voice, the
+      # floor is the product).
+      - name: FamiliarSC package tests
+        run: swift test --package-path ios/FamiliarSC
+
       - name: Install xcodegen
         run: brew install xcodegen
 

@@ -1,0 +1,43 @@
+{
+  "deltaVSavedByAssists": 17.8,
+  "driveAccelG": 0.189,
+  "from": "foxys-diner",
+  "hoursSavedByAssists": 4.1,
+  "legs": [
+    {
+      "assistBody": "jupiter",
+      "assistDeltaVKmS": 17.8,
+      "assistHoursSaved": 4.1,
+      "deltaVKmS": 114.67006407811506,
+      "distanceKm": 1773298,
+      "from": "foxys-diner",
+      "fromBody": "Amalthea, Jupiter",
+      "fuel": 7,
+      "hours": 13.111696125241927,
+      "note": "A local transfer. Jupiter is close enough to swing past on the way.",
+      "peakSpeedKmS": 57.33503203905753,
+      "ticks": 2,
+      "to": "cannery-row",
+      "toBody": "Callisto, Jupiter"
+    },
+    {
+      "deltaVKmS": 5014.708114436356,
+      "distanceKm": 3391352500,
+      "from": "cannery-row",
+      "fromBody": "Callisto, Jupiter",
+      "fuel": 158,
+      "hours": 751.4234843692353,
+      "note": "A long haul. Pack for it. Too fast for a slingshot to help.",
+      "peakSpeedKmS": 2507.354057218178,
+      "ticks": 63,
+      "to": "titania-cold-store",
+      "toBody": "Titania"
+    }
+  ],
+  "summary": "Amalthea, Jupiter to Titania, 31.9 days under continuous thrust across 2 legs, 5,129 km/s of delta-v, with 4 hours bought back by gravity.",
+  "to": "titania-cold-store",
+  "totalDeltaVKmS": 5129.4,
+  "totalFuel": 165,
+  "totalHours": 764.5,
+  "totalTicks": 65
+}

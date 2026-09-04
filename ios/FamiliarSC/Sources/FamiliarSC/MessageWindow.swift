@@ -1,0 +1,84 @@
+import Foundation
+
+// The message window (dialogue §3.5): the journal's advice and proposal lines, joined with
+// proposals.jsonl ∪ approvals.jsonl so each proposal shows its state — open, approved,
+// denied, lapsed. The persona voices these; the app's approve/deny buttons write the
+// approval line (the captain's act). This is the feed; it never decides anything.
+
+public struct MessageItem: Equatable {
+    public enum Kind: Equatable {
+        /// `advice`: what the computer would do and why; it did nothing.
+        case advice(would: String, why: String)
+        /// `proposed` + its state.
+        case proposal(id: String, would: String, why: String, expiresTick: Int64, state: ProposalState)
+    }
+    public enum ProposalState: Equatable {
+        case open
+        case approved(at: Int64)
+        case denied(at: Int64)
+        case lapsed
+    }
+
+    public var at: Int64
+    public var tick: Int64
+    public var surface: ControlSurface?
+    public var surfaceKey: String
+    public var kind: Kind
+
+    public var needsTheCaptain: Bool {
+        if case .proposal(_, _, _, _, .open) = kind { return true }
+        return false
+    }
+}
+
+public enum MessageWindow {
+    /// Build the feed. `nowTick` decides whether an unanswered proposal is still open; pass
+    /// the wire's tick when reachable, else the journal's last tick.
+    public static func build(journal: [JournalEntry], proposals: [Proposal], approvals: [Approval], nowTick: Int64?) -> [MessageItem] {
+        // The last word per proposal id wins.
+        var verdict: [String: Approval] = [:]
+        for a in approvals { verdict[a.id] = a }
+        let lapsedIDs = Set(journal.filter { $0.event == "proposal-lapsed" }.compactMap { $0.string("id") })
+        let filed: [String: Proposal] = Dictionary(proposals.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
+
+        var items: [MessageItem] = []
+        for e in journal {
+            switch e.event {
+            case "advice":
+                let key = e.string("surface") ?? ""
+                items.append(MessageItem(
+                    at: e.at, tick: e.tick ?? 0, surface: ControlSurface.parse(key), surfaceKey: key,
+                    kind: .advice(would: e.string("would") ?? "", why: e.string("why") ?? "")
+                ))
+            case "proposed":
+                guard let id = e.string("id") else { continue }
+                let key = e.string("surface") ?? filed[id]?.surface ?? ""
+                let expires = e.int("expires") ?? filed[id]?.expiresTick ?? (e.tick ?? 0)
+                let state: MessageItem.ProposalState
+                if let v = verdict[id] {
+                    state = v.approved ? .approved(at: v.at) : .denied(at: v.at)
+                } else if lapsedIDs.contains(id) {
+                    state = .lapsed
+                } else if let now = nowTick, now > expires {
+                    state = .lapsed
+                } else {
+                    state = .open
+                }
+                items.append(MessageItem(
+                    at: e.at, tick: e.tick ?? 0, surface: ControlSurface.parse(key), surfaceKey: key,
+                    kind: .proposal(id: id, would: e.string("would") ?? filed[id]?.describe ?? "",
+                                    why: e.string("why") ?? filed[id]?.why ?? "", expiresTick: expires, state: state)
+                ))
+            default:
+                continue
+            }
+        }
+        return items
+    }
+
+    /// The approval line the app appends to approvals.jsonl on the captain's tap — the
+    /// exact shape autonomy.rs reads. Kept here so the writer and the reader share one truth.
+    public static func approvalLine(id: String, approved: Bool, at: Int64) -> String {
+        "{\"id\":\(JSONValue.string(id).description),\"approved\":\(approved ? "true" : "false"),\"at\":\(at)}"
+    }
+}

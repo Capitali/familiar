@@ -1,0 +1,548 @@
+[
+  {
+    "good": "biscuit-substrate",
+    "mid": 34,
+    "station": "cannery-row",
+    "stock": 48
+  },
+  {
+    "good": "catnip",
+    "mid": 18,
+    "station": "cannery-row",
+    "stock": 530
+  },
+  {
+    "good": "fishmeal",
+    "mid": 12,
+    "station": "cannery-row",
+    "stock": 802
+  },
+  {
+    "good": "grain",
+    "mid": 10,
+    "station": "cannery-row",
+    "stock": 346
+  },
+  {
+    "good": "gravy-base",
+    "mid": 13,
+    "station": "cannery-row",
+    "stock": 1154
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 20,
+    "station": "cannery-row",
+    "stock": 367
+  },
+  {
+    "good": "litter-clay",
+    "mid": 13,
+    "station": "cannery-row",
+    "stock": 127
+  },
+  {
+    "good": "pate",
+    "mid": 29,
+    "station": "cannery-row",
+    "stock": 238
+  },
+  {
+    "good": "salmon-mousse",
+    "mid": 159,
+    "station": "cannery-row",
+    "stock": 83
+  },
+  {
+    "good": "tinplate",
+    "mid": 32,
+    "station": "cannery-row",
+    "stock": 449
+  },
+  {
+    "good": "water-ice",
+    "mid": 5,
+    "station": "cannery-row",
+    "stock": 468
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 35,
+    "station": "clawson-drift",
+    "stock": 25
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 32,
+    "station": "clawson-drift",
+    "stock": 0
+  },
+  {
+    "good": "litter-clay",
+    "mid": 6,
+    "station": "clawson-drift",
+    "stock": 2381
+  },
+  {
+    "good": "ore",
+    "mid": 9,
+    "station": "clawson-drift",
+    "stock": 2466
+  },
+  {
+    "good": "pate",
+    "mid": 48,
+    "station": "clawson-drift",
+    "stock": 17
+  },
+  {
+    "good": "tinplate",
+    "mid": 17,
+    "station": "clawson-drift",
+    "stock": 1796
+  },
+  {
+    "good": "catnip",
+    "mid": 12,
+    "station": "deimos-arbor",
+    "stock": 761
+  },
+  {
+    "good": "grain",
+    "mid": 6,
+    "station": "deimos-arbor",
+    "stock": 599
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 32,
+    "station": "deimos-arbor",
+    "stock": 0
+  },
+  {
+    "good": "litter-clay",
+    "mid": 6,
+    "station": "deimos-arbor",
+    "stock": 2597
+  },
+  {
+    "good": "pate",
+    "mid": 45,
+    "station": "deimos-arbor",
+    "stock": 25
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "enceladus-draw",
+    "stock": 0
+  },
+  {
+    "good": "bluefin-reserve",
+    "mid": 123,
+    "station": "enceladus-draw",
+    "stock": 68
+  },
+  {
+    "good": "fishmeal",
+    "mid": 6,
+    "station": "enceladus-draw",
+    "stock": 2393
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 25,
+    "station": "enceladus-draw",
+    "stock": 80
+  },
+  {
+    "good": "litter-clay",
+    "mid": 16,
+    "station": "enceladus-draw",
+    "stock": 13
+  },
+  {
+    "good": "water-ice",
+    "mid": 3,
+    "station": "enceladus-draw",
+    "stock": 2992
+  },
+  {
+    "good": "bluefin-reserve",
+    "mid": 134,
+    "station": "foxys-diner",
+    "stock": 112
+  },
+  {
+    "good": "gravy-base",
+    "mid": 22,
+    "station": "foxys-diner",
+    "stock": 90
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "ganymede-yards",
+    "stock": 0
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 24,
+    "station": "ganymede-yards",
+    "stock": 109
+  },
+  {
+    "good": "litter-clay",
+    "mid": 12,
+    "station": "ganymede-yards",
+    "stock": 146
+  },
+  {
+    "good": "ore",
+    "mid": 14,
+    "station": "ganymede-yards",
+    "stock": 478
+  },
+  {
+    "good": "pate",
+    "mid": 35,
+    "station": "ganymede-yards",
+    "stock": 50
+  },
+  {
+    "good": "tinplate",
+    "mid": 17,
+    "station": "ganymede-yards",
+    "stock": 1595
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "io-slagworks",
+    "stock": 0
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 26,
+    "station": "io-slagworks",
+    "stock": 77
+  },
+  {
+    "good": "litter-clay",
+    "mid": 16,
+    "station": "io-slagworks",
+    "stock": 6
+  },
+  {
+    "good": "ore",
+    "mid": 9,
+    "station": "io-slagworks",
+    "stock": 2968
+  },
+  {
+    "good": "catnip",
+    "mid": 38,
+    "station": "titan-larder",
+    "stock": 343
+  },
+  {
+    "good": "grain",
+    "mid": 5,
+    "station": "titan-larder",
+    "stock": 2588
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 31,
+    "station": "titan-larder",
+    "stock": 19
+  },
+  {
+    "good": "litter-clay",
+    "mid": 12,
+    "station": "titan-larder",
+    "stock": 341
+  },
+  {
+    "good": "pate",
+    "mid": 35,
+    "station": "titan-larder",
+    "stock": 116
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "titania-cold-store",
+    "stock": 0
+  },
+  {
+    "good": "bluefin-reserve",
+    "mid": 64,
+    "station": "titania-cold-store",
+    "stock": 500
+  },
+  {
+    "good": "fishmeal",
+    "mid": 12,
+    "station": "titania-cold-store",
+    "stock": 669
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 32,
+    "station": "titania-cold-store",
+    "stock": 0
+  },
+  {
+    "good": "litter-clay",
+    "mid": 16,
+    "station": "titania-cold-store",
+    "stock": 0
+  },
+  {
+    "good": "pate",
+    "mid": 37,
+    "station": "titania-cold-store",
+    "stock": 654
+  },
+  {
+    "good": "salmon-mousse",
+    "mid": 157,
+    "station": "titania-cold-store",
+    "stock": 185
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 24,
+    "station": "tranquility",
+    "stock": 314
+  },
+  {
+    "good": "grain",
+    "mid": 10,
+    "station": "tranquility",
+    "stock": 456
+  },
+  {
+    "good": "gravy-base",
+    "mid": 25,
+    "station": "tranquility",
+    "stock": 293
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 32,
+    "station": "tranquility",
+    "stock": 0
+  },
+  {
+    "good": "litter-clay",
+    "mid": 13,
+    "station": "tranquility",
+    "stock": 264
+  },
+  {
+    "good": "pate",
+    "mid": 38,
+    "station": "tranquility",
+    "stock": 120
+  },
+  {
+    "good": "tinplate",
+    "mid": 34,
+    "station": "tranquility",
+    "stock": 426
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "triton-outpost",
+    "stock": 0
+  },
+  {
+    "good": "catnip",
+    "mid": 11,
+    "station": "triton-outpost",
+    "stock": 897
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 32,
+    "station": "triton-outpost",
+    "stock": 0
+  },
+  {
+    "good": "litter-clay",
+    "mid": 16,
+    "station": "triton-outpost",
+    "stock": 0
+  },
+  {
+    "good": "ore",
+    "mid": 11,
+    "station": "triton-outpost",
+    "stock": 820
+  },
+  {
+    "good": "pate",
+    "mid": 41,
+    "station": "triton-outpost",
+    "stock": 231
+  },
+  {
+    "good": "water-ice",
+    "mid": 3,
+    "station": "triton-outpost",
+    "stock": 2596
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 29,
+    "station": "tuna-prime",
+    "stock": 368
+  },
+  {
+    "good": "bluefin-reserve",
+    "mid": 112,
+    "station": "tuna-prime",
+    "stock": 212
+  },
+  {
+    "good": "gravy-base",
+    "mid": 24,
+    "station": "tuna-prime",
+    "stock": 314
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 30,
+    "station": "tuna-prime",
+    "stock": 111
+  },
+  {
+    "good": "litter-clay",
+    "mid": 10,
+    "station": "tuna-prime",
+    "stock": 443
+  },
+  {
+    "good": "pate",
+    "mid": 35,
+    "station": "tuna-prime",
+    "stock": 440
+  },
+  {
+    "good": "salmon-mousse",
+    "mid": 163,
+    "station": "tuna-prime",
+    "stock": 178
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "velvet-array",
+    "stock": 0
+  },
+  {
+    "good": "bluefin-reserve",
+    "mid": 47,
+    "station": "velvet-array",
+    "stock": 361
+  },
+  {
+    "good": "catnip",
+    "mid": 32,
+    "station": "velvet-array",
+    "stock": 189
+  },
+  {
+    "good": "fishmeal",
+    "mid": 9,
+    "station": "velvet-array",
+    "stock": 1078
+  },
+  {
+    "good": "gravy-base",
+    "mid": 24,
+    "station": "velvet-array",
+    "stock": 219
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 24,
+    "station": "velvet-array",
+    "stock": 104
+  },
+  {
+    "good": "litter-clay",
+    "mid": 15,
+    "station": "velvet-array",
+    "stock": 53
+  },
+  {
+    "good": "pate",
+    "mid": 38,
+    "station": "velvet-array",
+    "stock": 78
+  },
+  {
+    "good": "salmon-mousse",
+    "mid": 62,
+    "station": "velvet-array",
+    "stock": 310
+  },
+  {
+    "good": "tinplate",
+    "mid": 31,
+    "station": "velvet-array",
+    "stock": 133
+  },
+  {
+    "good": "water-ice",
+    "mid": 3,
+    "station": "velvet-array",
+    "stock": 2748
+  },
+  {
+    "good": "biscuit-substrate",
+    "mid": 38,
+    "station": "whisker-hollow",
+    "stock": 0
+  },
+  {
+    "good": "catnip",
+    "mid": 12,
+    "station": "whisker-hollow",
+    "stock": 693
+  },
+  {
+    "good": "grain",
+    "mid": 4,
+    "station": "whisker-hollow",
+    "stock": 3000
+  },
+  {
+    "good": "kibble-loaf",
+    "mid": 28,
+    "station": "whisker-hollow",
+    "stock": 52
+  },
+  {
+    "good": "litter-clay",
+    "mid": 11,
+    "station": "whisker-hollow",
+    "stock": 192
+  },
+  {
+    "good": "pate",
+    "mid": 43,
+    "station": "whisker-hollow",
+    "stock": 37
+  },
+  {
+    "good": "tinplate",
+    "mid": 31,
+    "station": "whisker-hollow",
+    "stock": 137
+  }
+]
