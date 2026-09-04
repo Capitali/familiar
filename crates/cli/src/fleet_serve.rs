@@ -25,8 +25,8 @@ use familiar_whisker::autonomy::{self, Approval, Dial, Level, Surface};
 use serde_json::{json, Value};
 
 use super::fleet::{
-    delivery_totals, journal_fills, last_journal_line, lease_expiry, paired_ships, pid_alive,
-    read_env_value, trade_book, wire_get, Ship,
+    aboard, delivery_totals, journal_fills, last_journal_line, lease_expiry, paired_ships,
+    pid_alive, read_env_value, trade_book, wire_get, Ship,
 };
 
 const MAX_REQUEST: usize = 64 * 1024;
@@ -199,6 +199,7 @@ fn ship_row(s: &Ship, now: i64) -> Value {
             .unwrap_or(Value::Null)
     };
     let (hauls, paid) = delivery_totals(&s.dir);
+    let (aboard_units, aboard_cost) = aboard(&s.dir);
     let mut fills: Vec<Value> = journal_fills(&s.dir)
         .as_array()
         .cloned()
@@ -241,8 +242,11 @@ fn ship_row(s: &Ship, now: i64) -> Value {
         "holdUsed": g("holdUsed"), "holdCapacity": g("holdCapacity"), "cargo": g("cargo"),
         "hauls": hauls, "freight_paid": paid,
         "trades": {"filled": book.filled, "rejected": book.rejected, "realized": book.realized,
-                   "cost_of_sold": book.cost_of_sold, "inventory_cost": book.inventory_cost,
-                   "inventory": book.inventory},
+                   "cost_of_sold": book.cost_of_sold, "inventory_cost": aboard_cost,
+                   "inventory": aboard_units,
+                   "unmatched_units": book.unmatched_units,
+                   "unmatched_proceeds": book.unmatched_proceeds,
+                   "quoted_basis_lots": book.quoted_basis_lots},
         "dial": dial.settings,
         "open_proposals": open_proposals,
         // The computer's own persona record (T-236, kernel persona.rs), when she has one.

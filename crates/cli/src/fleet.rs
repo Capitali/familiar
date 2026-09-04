@@ -194,6 +194,12 @@ pub(crate) struct TradeBook {
     pub(crate) cost_of_sold: i64,
     pub(crate) inventory_cost: i64,
     pub(crate) inventory: BTreeMap<String, i64>,
+    /// Units sold whose purchase this book never saw, and what they fetched. NEVER
+    /// counted as profit — a sale with no cost is not a gain, it is a gap.
+    pub(crate) unmatched_units: i64,
+    pub(crate) unmatched_proceeds: i64,
+    /// Lots whose basis came from the pilot's quoted ask rather than a fill receipt.
+    pub(crate) quoted_basis_lots: i64,
 }
 
 /// The ship's own record of its fills — every `trade-outcome` the pilot journaled —
@@ -201,15 +207,56 @@ pub(crate) struct TradeBook {
 /// ticks, so a buy older than that vanishes and its sale reads as pure profit
 /// (KK II's salmon-mousse, 2026-09-03: "realized 6074 on 0 sold"). The journal is
 /// the whole story; the wire is the fallback for a store without one.
+///
+/// One gap the journal can carry: a pilot restarted between filing a buy and reading
+/// its receipt never journals that fill, and by the time anyone asks, the wire's
+/// window has rolled past it (KK II's bluefin, bought t7078, sold t7436). The
+/// `position-opened` line the pilot writes when it files the buy carries the good,
+/// the units and the QUOTED ask, so a lot with no fill of its own is reconstructed
+/// from it — marked `basis_from: "quote"`, because a quote is not a fill: the real
+/// total carries tax and walks the curve, so this basis is a floor and the profit it
+/// implies is a ceiling.
 pub(crate) fn journal_fills(ship_dir: &Path) -> Value {
     let Ok(text) = std::fs::read_to_string(ship_dir.join("journal.jsonl")) else {
         return Value::Null;
     };
-    let rows: Vec<Value> = text
+    let lines: Vec<Value> = text
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|v| v.get("event").and_then(Value::as_str) == Some("trade-outcome"))
         .collect();
+    let ev = |v: &Value| {
+        v.get("event")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let mut rows: Vec<Value> = lines
+        .iter()
+        .filter(|v| ev(v) == "trade-outcome")
+        .cloned()
+        .collect();
+    for op in lines.iter().filter(|v| ev(v) == "position-opened") {
+        let good = op.get("good").and_then(Value::as_str).unwrap_or("");
+        let tick = op.get("tick").and_then(Value::as_i64).unwrap_or(0);
+        let units = op.get("units").and_then(Value::as_i64).unwrap_or(0);
+        let ask = op.get("ask").and_then(Value::as_i64).unwrap_or(0);
+        if good.is_empty() || units <= 0 || ask <= 0 {
+            continue;
+        }
+        // Its own fill, if the pilot ever read one back: same good, buy, within a
+        // few ticks of the filing.
+        let read_back = rows.iter().any(|r| {
+            r.get("side").and_then(Value::as_str) == Some("buy")
+                && r.get("good").and_then(Value::as_str) == Some(good)
+                && (r.get("tick").and_then(Value::as_i64).unwrap_or(0) - tick).abs() <= 6
+        });
+        if !read_back {
+            rows.push(
+                json!({"tick": tick + 1, "side": "buy", "good": good, "units": units,
+                             "total": ask * units, "outcome": "filled", "basis_from": "quote"}),
+            );
+        }
+    }
     if rows.is_empty() {
         Value::Null
     } else {
@@ -248,6 +295,9 @@ pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
             continue;
         }
         if r.get("side").and_then(Value::as_str) == Some("buy") {
+            if r.get("basis_from").and_then(Value::as_str) == Some("quote") {
+                book.quoted_basis_lots += 1;
+            }
             lots.entry(good)
                 .or_default()
                 .push_back((units, total * 1000 / units));
@@ -266,9 +316,20 @@ pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
                     }
                 }
             }
+            // `left` units were sold out of a lot this book never saw bought. Their
+            // share of the proceeds is set aside, not banked: counting it as profit
+            // is how KK II's bluefin read as +5,583 on a cost of nothing.
+            let matched = units - left;
+            let matched_proceeds = if units > 0 {
+                total * matched / units
+            } else {
+                0
+            };
             let cost = cost_milli / 1000;
-            book.realized += total - cost;
+            book.realized += matched_proceeds - cost;
             book.cost_of_sold += cost;
+            book.unmatched_units += left;
+            book.unmatched_proceeds += total - matched_proceeds;
         }
     }
     for (good, q) in &lots {
@@ -279,6 +340,33 @@ pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
         }
     }
     book
+}
+
+/// What is actually in the hold, from the pilot's own reconciled book
+/// (`holdings.json`, checked against `/v1/me.cargo` every fold): good → units, and
+/// the total at cost. The trade book's leftover lots are a derived guess and drift
+/// whenever a fill was never read back; this is the truth the captain is shown.
+pub(crate) fn aboard(ship_dir: &Path) -> (BTreeMap<String, i64>, i64) {
+    let mut units = BTreeMap::new();
+    let mut cost = 0;
+    if let Ok(text) = std::fs::read_to_string(ship_dir.join("holdings.json")) {
+        if let Ok(Value::Array(rows)) = serde_json::from_str::<Value>(&text) {
+            for h in rows {
+                let good = h
+                    .get("good")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let u = h.get("units").and_then(Value::as_i64).unwrap_or(0);
+                let basis = h.get("avg_cost").and_then(Value::as_i64).unwrap_or(0);
+                if !good.is_empty() && u > 0 {
+                    *units.entry(good).or_insert(0) += u;
+                    cost += u * basis;
+                }
+            }
+        }
+    }
+    (units, cost)
 }
 
 /// The ship's own delivery record, summed: hauls and freight paid.
@@ -616,6 +704,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                         .unwrap_or(Value::Null)
                 };
                 let (hauls, paid) = delivery_totals(&s.dir);
+                let (aboard_units, aboard_cost) = aboard(&s.dir);
                 let credits = g("credits").as_i64().unwrap_or(0);
                 let debt = g("debt").as_i64().unwrap_or(0);
                 let e = per_captain.entry(s.captain.captain.clone()).or_default();
@@ -624,7 +713,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 e.2 += hauls;
                 e.3 += paid;
                 e.4 += book.realized;
-                e.5 += book.inventory_cost;
+                e.5 += aboard_cost;
                 let last = last_journal_line(&s.dir);
                 let expiry = lease_expiry(&s.dir);
                 // A ship paired before T-236 has no persona file: say so honestly
@@ -651,7 +740,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     "trades": {"filled": book.filled, "rejected": book.rejected, "realized": book.realized,
                                "cost_of_sold": book.cost_of_sold,
                                "margin_pct": if book.cost_of_sold > 0 { book.realized * 100 / book.cost_of_sold } else { 0 },
-                               "inventory_cost": book.inventory_cost, "inventory": book.inventory},
+                               "inventory_cost": aboard_cost, "inventory": aboard_units,
+                               "unmatched_units": book.unmatched_units,
+                               "unmatched_proceeds": book.unmatched_proceeds,
+                               "quoted_basis_lots": book.quoted_basis_lots},
                     "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
                     "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
                     "reachable": me.is_some(),
@@ -710,6 +802,14 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     "    trades: {} filled — realized ℳ{} on ℳ{} sold ({}%) — aboard at cost ℳ{} {}",
                     t["filled"], t["realized"], t["cost_of_sold"], t["margin_pct"], t["inventory_cost"], t["inventory"]
                 );
+                if t["unmatched_units"].as_i64().unwrap_or(0) > 0
+                    || t["quoted_basis_lots"].as_i64().unwrap_or(0) > 0
+                {
+                    println!(
+                        "      ({} units sold whose purchase this book never saw, ℳ{} set aside; {} lot(s) priced from the quoted ask)",
+                        t["unmatched_units"], t["unmatched_proceeds"], t["quoted_basis_lots"]
+                    );
+                }
                 println!(
                     "    last: {} — automations {}",
                     r["last_event"], r["automations"]
