@@ -9,6 +9,11 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   act across his entire fleet under a name he chooses. I choose Felix."** Supersedes the per-hull
   reading of T-236 (codex's "different names per ship" bar). Felix = Luke SkyWhisker's computer across
   KK II (PROD, renamed) and every hull he pairs; the persona record moves to captain scope in brick 2+.
+  **The captain's NAME is his game identity (Ian, 2026-09-04, verbatim): "Ian is playing game as Luke
+  SkyWhisker - that should be the captains name, Felix should be the name of the ships computer (as
+  named by the captain) and the ships are kibble klipper And kibble klipper II."** Captain string =
+  "Luke SkyWhisker" (the keys' /v1/profile traderName) on both PROD hulls; the LOCAL rig keeps a separate
+  books string. Re-homing asked of wildhorse 2026-09-04.
 
 - **MACONSTICK'S ROLE (Ian, 2026-09-04, verbatim): "much like Wildhorse is KKII focused, I want
   MacOnStick to be focused on KK and my manual test activities and watching for bugs and issues i
