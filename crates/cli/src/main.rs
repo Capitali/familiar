@@ -3,6 +3,7 @@
 //! Argument parsing is hand-rolled and dependency-free on purpose: a small,
 //! legible trust surface is part of the Law III commitment.
 
+mod autonomy_cmd;
 mod daemon;
 mod fleet;
 
@@ -137,6 +138,7 @@ fn main() -> ExitCode {
         Some("mcp") => cmd_mcp(rest),
         Some("world") => cmd_world(rest),
         Some("fleet") => fleet::cmd_fleet(rest),
+        Some("autonomy") => autonomy_cmd::cmd_autonomy(rest),
         Some("outreach") => cmd_outreach(rest),
         Some("goal") => cmd_goal(rest),
         Some(cmd) => {

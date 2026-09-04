@@ -577,15 +577,29 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     .cloned()
                     .unwrap_or_default();
                 if let Ok(Value::Array(wire_rows)) = wire_get(&server, &key, "/v1/receipts") {
-                    let seen: std::collections::HashSet<String> = fills
+                    // The wire's tick is the tick the action APPLIED on; the journal's is
+                    // the fold the pilot read it back. Same good, side and units within a
+                    // few ticks is the same fill.
+                    let journaled: Vec<(String, String, i64, i64)> = fills
                         .iter()
                         .map(|f| {
-                            format!("{}|{}|{}|{}", f["tick"], f["good"], f["side"], f["units"])
+                            (
+                                f["good"].as_str().unwrap_or("").to_string(),
+                                f["side"].as_str().unwrap_or("").to_string(),
+                                f["units"].as_i64().unwrap_or(0),
+                                f["tick"].as_i64().unwrap_or(0),
+                            )
                         })
                         .collect();
                     for r in wire_rows {
-                        let k = format!("{}|{}|{}|{}", r["tick"], r["good"], r["side"], r["units"]);
-                        if !seen.contains(&k) {
+                        let good = r["good"].as_str().unwrap_or("");
+                        let side = r["side"].as_str().unwrap_or("");
+                        let units = r["units"].as_i64().unwrap_or(0);
+                        let tick = r["tick"].as_i64().unwrap_or(0);
+                        let dup = journaled.iter().any(|(g, s, u, t)| {
+                            g == good && s == side && *u == units && (t - tick).abs() <= 3
+                        });
+                        if !dup {
                             fills.push(r);
                         }
                     }

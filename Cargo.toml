@@ -41,3 +41,4 @@ familiar-scenario = { path = "crates/scenario" }
 familiar-recipe = { path = "crates/recipe" }
 familiar-mcp = { path = "crates/mcp" }
 familiar-world = { path = "crates/world" }
+familiar-whisker = { path = "crates/whisker" }

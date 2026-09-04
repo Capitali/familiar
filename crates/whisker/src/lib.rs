@@ -21,6 +21,7 @@
 
 use std::collections::BTreeSet;
 
+pub mod autonomy;
 pub mod chain;
 pub mod doctrine;
 pub mod outfit;

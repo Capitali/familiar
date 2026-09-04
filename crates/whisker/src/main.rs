@@ -21,6 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
+use familiar_whisker::autonomy::{self, Dial, Gate, Surface};
 use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
 use familiar_whisker::outfit::{self, DeliveryStat, OutfitDecision, Purse};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
@@ -264,6 +265,96 @@ fn reconcile(me: &Value, load_id: &str) -> Result<Option<ActiveWord>, String> {
     familiar_whisker::doctrine::ledger_word(&events)
 }
 
+/// The captain's dial at the action door. `allow` answers whether THIS act may be
+/// filed now; when it may not, the reason is on the journal — advice the message
+/// window shows, a proposal waiting for a yes, or a lapse.
+struct DialGate {
+    dial: Dial,
+    /// (surface|body) → the tick advice was last journaled, so a standing advice
+    /// is said once per window, not every fold.
+    last_advice: HashMap<String, i64>,
+}
+
+impl DialGate {
+    #[allow(clippy::too_many_arguments)]
+    fn allow(
+        &mut self,
+        ship_dir: &Path,
+        surface: Surface,
+        tick: i64,
+        now: i64,
+        body: &Value,
+        describe: &str,
+        why: &str,
+    ) -> bool {
+        let proposals = autonomy::load_proposals(ship_dir);
+        let approvals = autonomy::load_approvals(ship_dir);
+        let mut fresh = None;
+        let g = autonomy::gate(
+            &self.dial, surface, tick, body, describe, why, &proposals, &approvals, &mut fresh,
+        );
+        if let Some(p) = &fresh {
+            autonomy::append_proposal(ship_dir, p);
+            journal(
+                ship_dir,
+                json!({"at": now, "tick": tick, "event": "proposed",
+                "id": p.id, "surface": p.surface, "would": describe, "why": why,
+                "expires": p.expires_tick}),
+            );
+        }
+        match g {
+            Gate::Act => true,
+            Gate::Proposed => false,
+            Gate::Lapsed => {
+                let id = autonomy::proposal_id(surface, body);
+                let key = format!("lapsed|{id}");
+                if self
+                    .last_advice
+                    .get(&key)
+                    .map(|t| tick - t > 20)
+                    .unwrap_or(true)
+                {
+                    journal(
+                        ship_dir,
+                        json!({"at": now, "tick": tick, "event": "proposal-lapsed",
+                        "id": id, "surface": surface.key(), "would": describe}),
+                    );
+                    self.last_advice.insert(key, tick);
+                }
+                false
+            }
+            Gate::Advise => {
+                let key = format!("advice|{}|{}", surface.key(), body);
+                if self
+                    .last_advice
+                    .get(&key)
+                    .map(|t| tick - t > 20)
+                    .unwrap_or(true)
+                {
+                    journal(
+                        ship_dir,
+                        json!({"at": now, "tick": tick, "event": "advice",
+                        "surface": surface.key(), "would": describe, "why": why, "body": body}),
+                    );
+                    self.last_advice.insert(key, tick);
+                }
+                false
+            }
+        }
+    }
+}
+
+fn surface_of(d: &Decision) -> Surface {
+    match d {
+        Decision::Refuel | Decision::DivertToPump { .. } => Surface::NavigationFuel,
+        Decision::CallPaws => Surface::NavigationRescue,
+        Decision::Travel { .. } | Decision::Hold { .. } => Surface::NavigationCourse,
+        Decision::Repair => Surface::ShipRepair,
+        Decision::Book { .. } => Surface::FreightBook,
+        Decision::Collect { .. } => Surface::FreightCollect,
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut ship_dir: Option<PathBuf> = None;
@@ -439,6 +530,10 @@ fn main() -> ExitCode {
             .unwrap_or_default();
     let mut last_outfit_idle = String::new();
     let mut last_pending_note = String::new();
+    let mut dial_gate = DialGate {
+        dial: Dial::load(&ship_dir),
+        last_advice: HashMap::new(),
+    };
     let mut holdings: Vec<Holding> = if trades {
         trade::load_holdings(&ship_dir)
     } else {
@@ -447,6 +542,8 @@ fn main() -> ExitCode {
 
     loop {
         let now = now_secs();
+        // The captain may turn the dial at any time.
+        dial_gate.dial = Dial::load(&ship_dir);
 
         // Gate 1: the lease, re-read every cycle so refresh and expiry both bite.
         let signed: Option<SignedLease> = std::fs::read_to_string(ship_dir.join("lease.json"))
@@ -636,15 +733,25 @@ fn main() -> ExitCode {
                     // some folds and the verb is missing from the API's own error list
                     // (UCF-Haul#65 research; verified accepted on main 2026-08-31). A
                     // fresh travel to the same destination is the belt to its braces.
+                    let wedge_ok = dial_gate.allow(
+                        &ship_dir,
+                        Surface::NavigationCourse,
+                        tick,
+                        now,
+                        &json!({"type": "engage", "wedge": route_now.last()}),
+                        "engage and re-file the wedged course",
+                        "docked with a course on file and nothing moving for 30 ticks",
+                    );
                     seq += 1;
                     let engage_id = format!("whisker-{}-{}", now_secs(), seq);
-                    let engaged = wire.act(json!({"type": "engage"}), &engage_id).is_ok();
+                    let engaged =
+                        wedge_ok && wire.act(json!({"type": "engage"}), &engage_id).is_ok();
                     // Never a travel to the berth we are at: a stale route can still
                     // list it after arrival, and the exchange returns the filing
                     // ("no lane route remains to cannery-row", PROD 2026-09-02).
                     if let Some(dest) = route_now
                         .last()
-                        .filter(|d| Some(d.as_str()) != ship.docked.as_deref())
+                        .filter(|d| wedge_ok && Some(d.as_str()) != ship.docked.as_deref())
                     {
                         seq += 1;
                         let travel_id = format!("whisker-{}-{}", now_secs(), seq);
@@ -788,7 +895,17 @@ fn main() -> ExitCode {
             .unwrap_or(-1);
         let berthed_and_still = ship.docked.is_some() && route_now.is_empty();
         if let Some(dest) = awaiting.filter(|_| berthed_and_still && tick >= crane_until) {
-            if tick >= pending_until {
+            if tick >= pending_until
+                && dial_gate.allow(
+                    &ship_dir,
+                    Surface::NavigationCourse,
+                    tick,
+                    now,
+                    &json!({"type": "engage"}),
+                    &format!("engage the drive for {dest}"),
+                    "a course is laid at the drive and the berth is still",
+                )
+            {
                 seq += 1;
                 let id = format!("whisker-{}-{}", now_secs(), seq);
                 match wire.act(json!({"type": "engage"}), &id) {
@@ -873,7 +990,17 @@ fn main() -> ExitCode {
                         .unwrap_or_default(),
                 };
                 match outfit::decide_outfit(&purse, &deliveries) {
-                    OutfitDecision::Refit { fitting, price } => {
+                    OutfitDecision::Refit { fitting, price }
+                        if dial_gate.allow(
+                            &ship_dir,
+                            Surface::ShipRefit,
+                            tick,
+                            now,
+                            &json!({"type": "refit", "fitting": fitting.wire()}),
+                            &format!("buy {} for ℳ{price} at {here}", fitting.wire()),
+                            "next fitting the purse can bear above its reserve",
+                        ) =>
+                    {
                         seq += 1;
                         let id = format!("whisker-{}-{}", now_secs(), seq);
                         match wire.act(json!({"type": "refit", "fitting": fitting.wire()}), &id) {
@@ -901,6 +1028,7 @@ fn main() -> ExitCode {
                             ),
                         }
                     }
+                    OutfitDecision::Refit { .. } => {} // advised or proposed
                     OutfitDecision::Idle { why } => {
                         if why != last_outfit_idle {
                             journal(
@@ -1143,6 +1271,33 @@ fn main() -> ExitCode {
                     _ => None,
                 };
                 if let Some((body, good, units, is_sell)) = trade_body {
+                    let surface = if is_sell {
+                        Surface::MarketSell
+                    } else {
+                        Surface::MarketBuy
+                    };
+                    let describe = format!(
+                        "{} {units} {good} at {here}",
+                        if is_sell { "sell" } else { "buy" }
+                    );
+                    let why_text = match &td {
+                        TradeDecision::Sell { why, .. } => why.clone(),
+                        TradeDecision::Buy {
+                            sell_target,
+                            est_margin,
+                            ..
+                        } => {
+                            format!("for {sell_target}, est. margin ℳ{est_margin}")
+                        }
+                        _ => String::new(),
+                    };
+                    if !dial_gate.allow(&ship_dir, surface, tick, now, &body, &describe, &why_text)
+                    {
+                        std::thread::sleep(Duration::from_secs(
+                            (tick_secs * 3 / 5).max(floor_secs),
+                        ));
+                        continue;
+                    }
                     seq += 1;
                     let id = format!("whisker-{}-{}", now_secs(), seq);
                     match wire.act(body, &id) {
@@ -1254,6 +1409,16 @@ fn main() -> ExitCode {
                                     );
                                     last_carry_block = key;
                                 }
+                            } else if !dial_gate.allow(
+                                &ship_dir,
+                                Surface::MarketCarry,
+                                tick,
+                                now,
+                                &json!({"type": "travel", "station": h.sell_target}),
+                                &format!("carry {} {} to {}", h.units, h.good, h.sell_target),
+                                "the position's clock has passed and no bid here clears it",
+                            ) {
+                                // advised or proposed; the freight doctrine may still act
                             } else {
                                 last_carry_block.clear();
                                 seq += 1;
@@ -1345,6 +1510,17 @@ fn main() -> ExitCode {
             Decision::Collect { load_id } => Some(json!({"type": "collect", "loadId": load_id})),
         };
 
+        let body = body.filter(|b| {
+            dial_gate.allow(
+                &ship_dir,
+                surface_of(&decision),
+                tick,
+                now,
+                b,
+                &format!("{decision:?}"),
+                "the freight doctrine's decision this fold",
+            )
+        });
         if let Some(body) = body {
             // One id per INTENT, where an intent is this body filed within the last
             // window of ticks: a re-send inside the window carries the SAME id (a retry
