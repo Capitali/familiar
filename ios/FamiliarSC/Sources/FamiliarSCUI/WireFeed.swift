@@ -72,7 +72,9 @@ public struct WireFeed: ShipsFeed, CaptainActs {
             pilotAlive: row["pilot_pid"]?.int != nil, leaseHoursLeft: row["lease_expires_in_h"]?.int,
             reachable: row["reachable"]?.bool ?? false, lastEvent: row["last_event"]?.string, lastAt: row["last_at"]?.int,
             mood: BridgeReport.Mood(rawValue: row["mood"]?.string ?? "") ?? .steady,
-            openProposals: Int(row["open_proposals"]?.int ?? 0)
+            openProposals: Int(row["open_proposals"]?.int ?? 0),
+            leasePrincipal: row["leasePrincipal"]?.int, leaseServicePaid: row["leaseServicePaid"]?.int,
+            trades: row["trades"].map { TradeBook(row: $0) }
         )
     }
 

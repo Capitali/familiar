@@ -64,6 +64,17 @@ final class UITests: XCTestCase {
         XCTAssertEqual(n.fresh(notices, world: "w2").count, notices.count, "another ship's notices are their own")
     }
 
+    func testTradeBookCaveatsFromTheRow() throws {
+        let row = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w","computer":"Felix","hull":"","captain":"","server":"","automations":[],"trades":{"filled":3,"rejected":1,"realized":5583,"cost_of_sold":0,"margin_pct":0,"inventory_cost":860,"inventory":[],"unmatched_units":116,"unmatched_proceeds":1453,"quoted_basis_lots":1}}"#.utf8))
+        let s = try XCTUnwrap(WireFeed.summary(from: row, tick: nil))
+        let t = try XCTUnwrap(s.trades)
+        XCTAssertEqual(t.realized, 5583); XCTAssertEqual(t.filled, 3); XCTAssertEqual(t.inventoryCost, 860)
+        XCTAssertEqual(t.caveat, "ℳ1453 from 116 unmatched units set aside; 1 lot at a quoted basis, so the profit is a ceiling")
+        XCTAssertNil(TradeBook().caveat)
+        let clean = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w","computer":"Felix","hull":"","captain":"","server":"","automations":[]}"#.utf8))
+        XCTAssertNil(try XCTUnwrap(WireFeed.summary(from: clean, tick: nil)).trades, "no trades block on the row means no card")
+    }
+
     func testWireSummaryReadsAFleetStatusRow() throws {
         let row = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"world-1","label":"KK II","computer":"Purr","hull":"Kibble Klipper II","captain":"ian","server":"https://x","automations":["freight","trade"],"pilot_pid":123,"lease_expires_in_h":20,"credits":7132,"debt":21400,"fuel":166,"wearBps":1104,"docked":null,"reachable":true,"last_event":"holding","last_at":1}"#.utf8))
         let s = try XCTUnwrap(WireFeed.summary(from: row, tick: 7532))

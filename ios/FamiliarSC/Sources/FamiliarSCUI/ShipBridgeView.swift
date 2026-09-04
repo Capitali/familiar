@@ -60,10 +60,19 @@ public struct ShipBridgeView: View {
 
     /// Trades / Freight / Lease — the canvas's three cards.
     func cards(_ b: ShipBook, _ s: ShipSummary?) -> some View {
-        HStack(spacing: 10) {
-            card("Freight", SC.money(b.freightPaid), "\(b.hauls) haul\(b.hauls == 1 ? "" : "s")")
-            card("Positions", b.holdings.isEmpty ? "none" : SC.money(b.inventoryAtCost), b.holdings.isEmpty ? "nothing aboard" : "\(b.holdings.count) at cost")
-            if let p = s?.leasePrincipal { card("Lease", SC.money(p), "principal left") } else if let d = s?.debt { card("Debt", SC.money(d), "on the wire") } else { card("Lease", "—", "not on the wire") }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                if let t = s?.trades {
+                    card("Trades", (t.realized >= 0 ? "+" : "") + "ℳ\(t.realized)", "\(t.filled) fill\(t.filled == 1 ? "" : "s"), \(t.marginPct)% margin")
+                } else {
+                    card("Positions", b.holdings.isEmpty ? "none" : SC.money(b.inventoryAtCost), b.holdings.isEmpty ? "nothing aboard" : "\(b.holdings.count) at cost")
+                }
+                card("Freight", SC.money(b.freightPaid), "\(b.hauls) haul\(b.hauls == 1 ? "" : "s")")
+                if let p = s?.leasePrincipal { card("Lease", SC.money(p), "principal left") } else if let d = s?.debt { card("Debt", SC.money(d), "on the wire") } else { card("Lease", "—", "not on the wire") }
+            }
+            if let c = s?.trades?.caveat {
+                Label(c, systemImage: "info.circle").font(.caption2).foregroundStyle(SC.amber)
+            }
         }
     }
 
