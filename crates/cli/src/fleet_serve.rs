@@ -6,7 +6,8 @@
 //! Reads: `GET /ships`, `GET /ships/{world}/journal?since=N`,
 //! `GET /ships/{world}/proposals`, `GET /ships/{world}/dial`, `GET /ships/{world}/book`
 //! (holdings + deliveries), `GET /ships/{world}/fuel` (the fuel conversation's facts),
-//! `GET /ships/{world}/brief` and `GET /brief` (one call for the context on screen). Writes:
+//! `GET /ships/{world}/brief`, `GET /captains/{slug}/brief` and `GET /brief` (one call for
+//! whichever context is on screen). Writes:
 //! `POST /ships/{world}/approve {id, approved}`, `PUT /ships/{world}/dial {…}`,
 //! `PUT /ships/{world}/automations {automations: […]}`, `POST /ships/{world}/rename {name}`,
 //! `PUT /ships/{world}/captain {captain}`,
@@ -337,6 +338,55 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                         "pooled_credits": rows.iter().filter_map(|r| r["credits"].as_i64()).sum::<i64>(),
                         "open_proposals": rows.iter().filter_map(|r| r["open_proposals"].as_i64()).sum::<i64>(),
                     })).collect::<Vec<_>>(),
+                }),
+            )
+        }
+        // A captain's own frame: who they are, whose computer flies for them, their
+        // hulls and their one book. The same `context` shape as a ship's brief, so a
+        // client can put a captain on screen and the conversation follows.
+        ("GET", ["captains", slug, "brief"]) => {
+            let mine: Vec<&Ship> = ships
+                .iter()
+                .filter(|s| {
+                    super::fleet::captain_store(root, &s.captain.captain)
+                        .file_name()
+                        .map(|f| f.to_string_lossy() == *slug)
+                        .unwrap_or(false)
+                })
+                .collect();
+            let Some(first) = mine.first() else {
+                return (404, json!({"error": "no captain by that name flies here"}));
+            };
+            let captain = first.captain.captain.clone();
+            let computer = persona_for(root, &first.dir, &captain)
+                .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from));
+            let mut rows = Vec::new();
+            let (mut credits, mut debt, mut realized, mut aboard_cost, mut open) = (0, 0, 0, 0, 0);
+            for s in &mine {
+                let (t, ts) = clock(s, clk);
+                let mut row = ship_row(s, root, now);
+                row["tick"] = json!(t);
+                row["tick_seconds"] = json!(ts);
+                credits += row["credits"].as_i64().unwrap_or(0);
+                debt += row["debt"].as_i64().unwrap_or(0);
+                realized += row["trades"]["realized"].as_i64().unwrap_or(0);
+                aboard_cost += row["trades"]["inventory_cost"].as_i64().unwrap_or(0);
+                open += proposals_with_state(&s.dir, t)
+                    .into_iter()
+                    .filter(|p| p["state"] == "open")
+                    .count() as i64;
+                rows.push(row);
+            }
+            (
+                200,
+                json!({
+                    "context": {"kind": "captain", "name": captain, "computer": computer,
+                                "ships": rows.iter().map(|r| r["label"].clone()).collect::<Vec<_>>()},
+                    "captain": captain, "computer": computer, "ships": rows,
+                    // Pooled within this captain, never across (the fleet money boundary).
+                    "book": {"pooled_credits": credits, "debt": debt,
+                             "trades_realized": realized, "aboard_at_cost": aboard_cost},
+                    "open_proposals": open,
                 }),
             )
         }
