@@ -22,8 +22,21 @@
 //!   left 60 units in the hold and zero in the book. The book is reconciled against
 //!   `/v1/me.cargo` every fold: refused sells restore, partial fills reduce, goods
 //!   we do not remember are adopted at a conservative basis.
-//! - **Sell only at a real profit — or to cut a stuck position.** Bid must clear
-//!   basis by a margin; liquidation only well past the clock.
+//! - **Sell where the lot is worth most from HERE, not where it stops hurting.**
+//!   What a lot cost is spent and casts no vote: the question is only whether the
+//!   counter in front of us beats the dearest berth on the map net of the fuel to
+//!   reach it, the spoilage on the way, and what the hull costs to keep while it
+//!   travels. A loss taken to free a hold for better work is a good trade, and a
+//!   position held for the dignity of its purchase price is neither dignified nor
+//!   a position. Basis returns as the fallback in exactly one case: a map that
+//!   says nothing about the good, where what we paid is the only reference left.
+//!
+//! The disposition this doctrine is meant to have, per Ian (2026-09-04), is
+//! acquisitive and unsentimental — expansion as the objective, opportunity
+//! weighed on instinct and arithmetic together, information treated as the thing
+//! that pays, and no attachment whatsoever to a cargo that has stopped earning.
+//! It is a posture, not a rulebook, and nothing here should be read as a number
+//! to be obeyed rather than a judgement to be made.
 //! - **Buy conservatively.** Real ask in; target MID minus a haircut (spread, tax,
 //!   drift) out; margin floors per unit AND in total, and the total must clear the
 //!   fuel a dedicated carry would burn — the litter-clay run cleared its unit margin
@@ -32,7 +45,7 @@
 //!   buyers**, asked of the router lazily best-payer-first (each question is a
 //!   `/v1/route` call on the ship's one rate-limited key).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -175,11 +188,13 @@ pub fn basis_from_total(total: i64, units: i64, ask: i64) -> i64 {
 /// them to a market that no longer pays (LOCAL gravy-base, 2026-09-02: three
 /// carries to velvet-array, three folds of no sale, between hauls).
 pub fn retarget(h: &mut Holding, here: &str, galaxy: &[MarketRow]) -> Option<String> {
-    let floor = h.avg_cost + bps(h.avg_cost, SELL_MARGIN_BPS);
+    // Aim at the dearest berth that counters the good, full stop. It used to have to
+    // clear what the lot cost as well, which meant a lot bought badly had nowhere to
+    // be aimed at all and rode along unaddressed. Where a lot is worth MOST is a
+    // question about the map; what it cost is a question about the past.
     let best = galaxy
         .iter()
         .filter(|r| r.good == h.good && r.station != here && r.mid > 0)
-        .filter(|r| r.mid - bps(r.mid, SELL_HAIRCUT_BPS) >= floor)
         .max_by_key(|r| r.mid)
         .map(|r| r.station.clone());
     let was = std::mem::replace(&mut h.sell_target, best.clone().unwrap_or_default());
@@ -206,6 +221,93 @@ pub fn retarget(h: &mut Holding, here: &str, galaxy: &[MarketRow]) -> Option<Str
 /// Can a leg costing `cost` fuel be flown on `fuel` in the tank, reserve included?
 pub fn carry_affordable(cost: i64, fuel: i64) -> bool {
     fuel >= bps(cost, CARRY_RESERVE_BPS)
+}
+
+/// What a lot is worth if we carry it somewhere else: the dearest berth on the
+/// map, net of the fuel to reach it, and how long that takes.
+///
+/// Deliberately says nothing about what the lot COST. Cost is spent; the only
+/// question a held lot poses is where it is worth most from here.
+pub fn best_forward(
+    h: &Holding,
+    here: &str,
+    galaxy: &[MarketRow],
+    l: &Ledger,
+    router: &dyn Router,
+) -> Option<Forward> {
+    let mut best: Option<Forward> = None;
+    // Dearest first, and stop at the first one the router can actually price and
+    // the tank can reach: every question here is a /v1/route on the ship's one
+    // rate-limited key.
+    let mut rows: Vec<&MarketRow> = galaxy
+        .iter()
+        .filter(|r| r.good == h.good && r.station != here && r.mid > 0)
+        .collect();
+    rows.sort_by_key(|r| -r.mid);
+    for r in rows.iter().take(4) {
+        let Some(fuel) = router.fuel_between(here, &r.station) else {
+            continue;
+        };
+        if !carry_affordable(fuel, l.fuel_available) {
+            continue;
+        }
+        let unit = r.mid - bps(r.mid, SELL_HAIRCUT_BPS);
+        let ticks = router
+            .leg_distances_km(here, &r.station)
+            .map(|legs| {
+                crate::doctrine::flight_ticks(&legs, crate::doctrine::REFERENCE_ACCEL_MILLI_G)
+            })
+            .unwrap_or(l.min_hold.max(1))
+            .max(1);
+        // Arrive with less than we left with. The hold is not a vault.
+        let net = unit * surviving(h, ticks, l) - fuel * l.fuel_price.max(0);
+        if best.as_ref().map(|b| net > b.net).unwrap_or(true) {
+            best = Some(Forward {
+                station: r.station.clone(),
+                net,
+                ticks,
+            });
+        }
+    }
+    best
+}
+
+/// The units of a lot still there after `ticks` of carrying it, at the pack's own
+/// daily decay. Rounded DOWN, because a merchant who rounds spoilage up is lying
+/// to himself about his own hold.
+pub fn surviving(h: &Holding, ticks: i64, l: &Ledger) -> i64 {
+    let decay = l
+        .decay_bps
+        .and_then(|d| d.get(&h.good).copied())
+        .unwrap_or(0);
+    if decay <= 0 || ticks <= 0 {
+        return h.units;
+    }
+    let days = ticks as f64 / l.ticks_per_day.max(1) as f64;
+    let kept = (1.0 - decay as f64 / 10_000.0).max(0.0).powf(days);
+    ((h.units as f64) * kept).floor() as i64
+}
+
+/// A lot's best realization away from here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forward {
+    pub station: String,
+    /// Proceeds after the carry's fuel.
+    pub net: i64,
+    /// Ticks to get there.
+    pub ticks: i64,
+}
+
+/// The bar a waiting lot has to clear, in ℳ per tick.
+///
+/// A hold full of cargo that is not improving faster than the hull costs to keep
+/// is a hold losing money, however the cargo's basis reads. The lease is the
+/// honest floor: on PROD it is 600 a day over 288 ticks, so a little over 2 ℳ a
+/// tick of pure hurdle before any question of a better cargo arises.
+pub fn hurdle_per_tick(l: &Ledger) -> f64 {
+    let per_day = l.daily_fixed_cost.max(0) as f64;
+    let ticks = l.ticks_per_day.max(1) as f64;
+    per_day / ticks
 }
 
 /// Load the speculative book from the ship store (`holdings.json`). Absent or
@@ -349,6 +451,16 @@ pub struct Ledger<'a> {
     pub fuel_price: i64,
     /// The world's minimum hold, ticks.
     pub min_hold: i64,
+    /// Mortgage payment + lease service per day: what the hull costs to merely
+    /// exist. It is the floor under every hurdle rate here, because a position
+    /// improving slower than the lease bites is losing money while it waits.
+    pub daily_fixed_cost: i64,
+    /// Ticks in a world-day, for turning that daily charge into a per-tick one.
+    pub ticks_per_day: i64,
+    /// How fast each good rots, bps per day (the pack's `decayBps`). Cargo waiting
+    /// for a better price is cargo spoiling at the same time, and on the luxuries
+    /// that is not a rounding error: bluefin sheds 23% of itself a day.
+    pub decay_bps: Option<&'a BTreeMap<String, i64>>,
 }
 
 /// The merchant judgment.
@@ -386,17 +498,77 @@ pub fn decide_trade(
         if sellable <= 0 {
             continue;
         }
-        let profit_floor = h.avg_cost + bps(h.avg_cost, SELL_MARGIN_BPS);
         // Stuck is measured from when the lot came into our care, never from an
         // unknown clock: a lot adopted this fold is not "carried too long".
         let stuck = l.tick > h.opened_tick + (STUCK_HOLDS + 1) * l.min_hold.max(1) || l.need_hold;
-        if q.bid >= profit_floor {
+
+        // THE SELL TEST IS FORWARD-LOOKING. What the lot cost is spent and gone,
+        // and a rule that waits for the bid to clear basis is a rule that lets a
+        // bad buy freeze a good hold for as long as the market disagrees — Ian,
+        // 2026-09-04: "maximizing profits and continuous growth are the doctrine.
+        // If that means taking a loss to gain a more profitable route, cargo,
+        // contract, then that needs to be part of the calculation."
+        //
+        // So the only question is which is worth more from HERE: the bid on the
+        // counter in front of us, or the dearest berth on the map net of the fuel
+        // to reach it — and if the far berth is worth more, whether it is worth
+        // more FAST ENOUGH to beat what the hull costs to keep while it waits.
+        let here_now = q.bid * sellable;
+        // Do we know anything about this good's market at all? An empty map is not
+        // the news that nowhere pays better — it is no news, and the difference
+        // matters. Blind, the only reference a merchant has is what he paid, so the
+        // old basis floor stands as the fallback; sighted, basis has no vote.
+        let sighted = galaxy.iter().any(|r| r.good == h.good && r.station != here);
+        if !sighted {
+            if q.bid >= h.avg_cost + bps(h.avg_cost, SELL_MARGIN_BPS) {
+                return TradeDecision::Sell {
+                    good: h.good.clone(),
+                    units: sellable,
+                    why: format!(
+                        "bid {} clears basis {} (+margin) at {here}, and the map is blank                          for this good",
+                        q.bid, h.avg_cost
+                    ),
+                };
+            }
+            if stuck {
+                return TradeDecision::Sell {
+                    good: h.good.clone(),
+                    units: sellable,
+                    why: format!(
+                        "liquidating stuck position: bid {} vs basis {} ({})",
+                        q.bid,
+                        h.avg_cost,
+                        if l.need_hold {
+                            "hold needed"
+                        } else {
+                            "carried too long"
+                        }
+                    ),
+                };
+            }
+            continue;
+        }
+
+        let forward = best_forward(h, here, galaxy, l, router);
+        let improvement = forward
+            .as_ref()
+            .map(|f| (f.net - here_now) as f64 / f.ticks.max(1) as f64)
+            .unwrap_or(0.0);
+        let hurdle = hurdle_per_tick(l);
+        if q.bid > 0 && improvement <= hurdle {
+            let against = match &forward {
+                Some(f) => format!(
+                    "{} would net {} in {} ticks ({:.1} ℳ/tick, hurdle {:.1})",
+                    f.station, f.net, f.ticks, improvement, hurdle
+                ),
+                None => "no berth on the map pays better and is reachable".into(),
+            };
             return TradeDecision::Sell {
                 good: h.good.clone(),
                 units: sellable,
                 why: format!(
-                    "bid {} clears basis {} (+margin) at {here}",
-                    q.bid, h.avg_cost
+                    "taking {} here at bid {} (basis {}): {against}",
+                    here_now, q.bid, h.avg_cost
                 ),
             };
         }
@@ -590,6 +762,9 @@ mod tests {
             fuel_available: 500,
             fuel_price: 2,
             min_hold: 288,
+            daily_fixed_cost: 600,
+            ticks_per_day: 288,
+            decay_bps: None,
         }
     }
 
@@ -617,7 +792,10 @@ mod tests {
         // clears is still not a sale until the clock — and no buy stacks on top.
         let hold = vec![held("litter-clay", 60, 13, 11367, 11655)];
         let board = vec![q("litter-clay", 18, 40, 0)];
-        let galaxy = vec![row("litter-clay", "elsewhere", 90)];
+        // The far berth pays WORSE than this counter, so the sell rule has no reason
+        // to carry and the only thing standing between the lot and a sale is the
+        // clock — which is what this test is about.
+        let galaxy = vec![row("litter-clay", "elsewhere", 20)];
         let d = decide_trade(
             &at("io-slagworks", 11415),
             &board,
@@ -686,6 +864,85 @@ mod tests {
             &Reach(true),
         );
         assert!(!matches!(d, TradeDecision::Sell { .. }));
+    }
+
+    /// Ian's ruling, 2026-09-04: "maximizing profits and continuous growth are the
+    /// doctrine — if that means taking a loss to gain a more profitable route,
+    /// cargo, contract, then that needs to be part of the calculation."
+    ///
+    /// A lot bought at 140 with the best counter on the map at 48. Under the old
+    /// rule it sat until it was declared stuck, because the bid never cleared what
+    /// it cost. Cost is spent. The hold is not.
+    #[test]
+    fn takes_a_loss_rather_than_hold_cargo_no_one_will_pay_more_for() {
+        let hold = vec![held("bluefin-reserve", 114, 140, 100, 100)];
+        let board = vec![q("bluefin-reserve", 94, 80, 186)];
+        // The map is seen, and nowhere on it pays better than the counter here.
+        let galaxy = vec![row("bluefin-reserve", "velvet-array", 48)];
+        let d = decide_trade(
+            &at("foxys-diner", 150),
+            &board,
+            &galaxy,
+            &hold,
+            &pumps(),
+            &Reach(true),
+        );
+        match d {
+            TradeDecision::Sell { good, why, .. } => {
+                assert_eq!(good, "bluefin-reserve");
+                assert!(
+                    why.contains("basis 140"),
+                    "the book still says what it cost: {why}"
+                );
+            }
+            other => panic!("expected the loss to be taken, got {other:?}"),
+        }
+    }
+
+    /// ...and the same lot is CARRIED, not dumped, when the map says somewhere pays
+    /// enough more to beat what the hull costs while it travels.
+    #[test]
+    fn carries_a_lot_when_a_dearer_berth_beats_the_hurdle() {
+        let hold = vec![held("bluefin-reserve", 114, 140, 100, 100)];
+        let board = vec![q("bluefin-reserve", 94, 80, 186)];
+        let galaxy = vec![row("bluefin-reserve", "tuna-prime", 300)];
+        let d = decide_trade(
+            &at("foxys-diner", 150),
+            &board,
+            &galaxy,
+            &hold,
+            &pumps(),
+            &Reach(true),
+        );
+        assert!(!matches!(d, TradeDecision::Sell { .. }), "{d:?}");
+    }
+
+    /// Cargo waiting for a better price is cargo spoiling. Bluefin sheds 23% a day,
+    /// so a berth that pays a little more a long way off pays less than it looks.
+    #[test]
+    fn spoilage_is_charged_against_the_carry() {
+        let h = held("bluefin-reserve", 100, 140, 100, 100);
+        let mut decay = std::collections::BTreeMap::new();
+        decay.insert("bluefin-reserve".to_string(), 2_300_i64);
+        let mut l = at("foxys-diner", 150);
+        l.decay_bps = Some(&decay);
+        assert_eq!(surviving(&h, 0, &l), 100);
+        // One world-day out: 77 of the 100 arrive.
+        assert_eq!(surviving(&h, 288, &l), 77);
+        // Two days: 59.
+        assert_eq!(surviving(&h, 576, &l), 59);
+        // A good the pack does not rot arrives whole.
+        let ore = held("ore", 100, 10, 100, 100);
+        assert_eq!(surviving(&ore, 576, &l), 100);
+    }
+
+    /// The lease is the floor under the whole calculation: a lot improving slower
+    /// than the hull costs to keep is not improving.
+    #[test]
+    fn the_hurdle_is_what_the_hull_costs_to_keep() {
+        let l = at("foxys-diner", 150);
+        // 600 a day over 288 ticks.
+        assert!((hurdle_per_tick(&l) - 2.083).abs() < 0.01);
     }
 
     #[test]
@@ -976,16 +1233,23 @@ mod tests {
         let note = retarget(&mut h, "velvet-array", &galaxy);
         assert_eq!(h.sell_target, "tranquility");
         assert!(note.unwrap().contains("tranquility"));
-        // Nowhere pays: no target, ride under freight.
+        // Berthed at the dearest counter, the lot is re-aimed at the next dearest —
+        // even one paying less than the lot cost. Where it is worth MOST is the only
+        // question a target answers; whether the trip is worth making at all is the
+        // sell rule's business, and it asks that fresh at every berth.
         let galaxy = vec![
             row("gravy-base", "velvet-array", 19),
             row("gravy-base", "tranquility", 20),
         ];
         let note = retarget(&mut h, "tranquility", &galaxy);
-        assert_eq!(h.sell_target, "");
+        assert_eq!(h.sell_target, "velvet-array");
         assert!(note.is_some());
         // Unchanged target: no note.
         assert!(retarget(&mut h, "tranquility", &galaxy).is_none());
+        // Nothing on the map counters the good at all: no target, ride under freight.
+        let note = retarget(&mut h, "tranquility", &[]);
+        assert_eq!(h.sell_target, "");
+        assert!(note.is_some());
     }
 
     #[test]

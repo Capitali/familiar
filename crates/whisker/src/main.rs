@@ -14,7 +14,7 @@
 //! pilot keeps watch for a fresh lease the way it waits out a fold.
 
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -502,6 +502,22 @@ fn main() -> ExitCode {
         .as_ref()
         .and_then(|v| v.get("ticksPerDay").and_then(Value::as_i64))
         .unwrap_or(288);
+    // How fast each good rots, bps per day: the merchant charges it against any
+    // plan to carry a lot somewhere dearer, because the lot arrives smaller.
+    let decay_bps: BTreeMap<String, i64> = reference
+        .as_ref()
+        .and_then(|v| v.get("goods").and_then(Value::as_array))
+        .map(|goods| {
+            goods
+                .iter()
+                .filter_map(|g| {
+                    let id = g.get("id").and_then(Value::as_str)?;
+                    let d = g.get("decayBps").and_then(Value::as_i64).unwrap_or(0);
+                    (d > 0).then(|| (id.to_string(), d))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     // The pack's goods that rot in transit (decayBps > 0): what refrigeration is for.
     let perishable: BTreeSet<String> = reference
         .as_ref()
@@ -1170,6 +1186,14 @@ fn main() -> ExitCode {
                     fuel_available,
                     fuel_price: FUEL_PRICE_PER_UNIT,
                     min_hold,
+                    daily_fixed_cost: mortgage_per_day
+                        + if ship.leased {
+                            LEASE_SERVICE_PER_DAY_EST
+                        } else {
+                            0
+                        },
+                    ticks_per_day: min_hold,
+                    decay_bps: Some(&decay_bps),
                 };
                 let td =
                     trade::decide_trade(&ledger, &board_here, &galaxy, &holdings, &pumps, &wire);
