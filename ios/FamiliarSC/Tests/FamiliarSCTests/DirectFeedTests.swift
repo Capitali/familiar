@@ -29,19 +29,24 @@ final class DirectFeedTests: XCTestCase {
         let legs = route.legs.compactMap { $0.distanceKm.map { Int64($0) } }
         XCTAssertEqual(legs.count, 2); XCTAssertEqual(route.fuel, 168)
         XCTAssertTrue(BurnRungs.modelAgrees(legsKm: legs, quotedAtReference: 168), "the shipped constants describe this world")
-        // KK's own drive (wear 1094 bps → 178 mG): standard (162) does not reach on 135, economy does.
-        // The fold charged 112 on the day's geometry; today's legs price economy at 109 — the same
-        // curve, the sky having moved — so the pin is the model's own figure, not a remembered one.
-        let plan = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 178, tank: 135)
-        XCTAssertEqual(plan.burn, "economy"); XCTAssertTrue(plan.reaches)
-        XCTAssertEqual(plan.fuel, BurnRungs.routeFuel(legsKm: legs, hullAccelMilliG: 178, burnBps: BurnRungs.economyBps))
-        XCTAssertEqual(plan.fuel, 109)
-        XCTAssertEqual(BurnRungs.routeFuel(legsKm: legs, hullAccelMilliG: 178, burnBps: BurnRungs.standardBps), 162)
-        let full = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 178, tank: 600)
+        // The day KK flew out (2026-09-04): legs 3,491,917,000 + 1,774,626 km, hull 189 mG (wear 0,
+        // effectiveAccelMilliG straight off /v1/me — the one number with everything applied).
+        // Standard 168 = the exchange's own quote; economy 112 = what the fold charged, leg one
+        // 106 to the unit (the tank went 135 → 29). Wildhorse's arithmetic and this one agree.
+        let day: [Int64] = [3_491_917_000, 1_774_626]
+        XCTAssertEqual(BurnRungs.routeFuel(legsKm: day, hullAccelMilliG: 189, burnBps: BurnRungs.standardBps), 168)
+        XCTAssertEqual(BurnRungs.routeFuel(legsKm: day, hullAccelMilliG: 189, burnBps: BurnRungs.economyBps), 112)
+        XCTAssertEqual(BurnRungs.legFuel(distanceKm: day[0], accelMilliG: 94), 106)
+        let plan = BurnRungs.plan(legsKm: day, quotedAtReference: 168, hullAccelMilliG: 189, tank: 135)
+        XCTAssertEqual(plan, BurnRungs.Plan(burn: "economy", fuel: 112, reaches: true))
+        // A derated hull (178 mG, wear 1094 bps) is priced off ITS drive while the reference check stays at 189.
+        XCTAssertEqual(BurnRungs.routeFuel(legsKm: day, hullAccelMilliG: 178, burnBps: BurnRungs.economyBps), 109)
+        XCTAssertTrue(BurnRungs.modelAgrees(legsKm: day, quotedAtReference: 168))
+        let full = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 189, tank: 600)
         XCTAssertEqual(full.burn, "standard", "a healthy tank flies the throttle it always flew"); XCTAssertTrue(full.reaches)
-        let dry = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 178, tank: 20)
+        let dry = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 189, tank: 20)
         XCTAssertEqual(dry.burn, "economy"); XCTAssertFalse(dry.reaches)
-        let foreign = BurnRungs.plan(legsKm: legs, quotedAtReference: 1000, hullAccelMilliG: 178, tank: 135)
+        let foreign = BurnRungs.plan(legsKm: legs, quotedAtReference: 1000, hullAccelMilliG: 189, tank: 135)
         XCTAssertEqual(foreign, BurnRungs.Plan(burn: "standard", fuel: 1000, reaches: false), "a world the model does not describe gets only the quote")
     }
 

@@ -8,6 +8,11 @@ import FamiliarSC
 // only reaches the physics on an unbooked voyage — the run to a pump, the merchant carry.
 // Kibble Klipper sat three days at titania on 135 of 600 with foxys-diner 168 away at
 // standard and 112 away at economy (2026-09-04); nothing was wrong with the tank.
+//
+// Two figures, deliberately different: the exchange's /v1/route quote is ALWAYS at the
+// reference drive (189 mG) whatever the hull flies, so `modelAgrees` checks at 189; the rung's
+// own fuel uses the hull's drive × bps, where the hull's drive is `effectiveAccelMilliG` read
+// off /v1/me — the one number with wear and fittings already applied. Never derive it.
 
 public enum BurnRungs {
     public static let referenceAccelMilliG: Int64 = 189
