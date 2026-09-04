@@ -4,7 +4,8 @@
 //! are the contract agreed with the MacOnStick lane on 2026-09-04.
 //!
 //! Reads: `GET /ships`, `GET /ships/{world}/journal?since=N`,
-//! `GET /ships/{world}/proposals`, `GET /ships/{world}/dial`. Writes:
+//! `GET /ships/{world}/proposals`, `GET /ships/{world}/dial`, `GET /ships/{world}/book`
+//! (holdings + deliveries). Writes:
 //! `POST /ships/{world}/approve {id, approved}`, `PUT /ships/{world}/dial {…}`,
 //! `POST /pair {label, captain, server, key, automations, pilot_args?}`,
 //! `POST /unpair {world}`. Every reply carries `tick` and `tick_seconds` from the
@@ -244,6 +245,9 @@ fn ship_row(s: &Ship, now: i64) -> Value {
                    "inventory": book.inventory},
         "dial": dial.settings,
         "open_proposals": open_proposals,
+        // The computer's own persona record (T-236, kernel persona.rs), when she has one.
+        "persona": std::fs::read_to_string(s.dir.join("persona.json")).ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null),
         "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
         "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
         "reachable": me.is_some(),
@@ -335,6 +339,27 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 200,
                 json!({"tick": tick, "tick_seconds": tick_seconds,
                          "proposals": proposals_with_state(&s.dir, tick)}),
+            )
+        }
+        ("GET", ["ships", id, "book"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let holdings: Value = std::fs::read_to_string(s.dir.join("holdings.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or(json!([]));
+            let deliveries: Vec<Value> = std::fs::read_to_string(s.dir.join("deliveries.jsonl"))
+                .map(|t| {
+                    t.lines()
+                        .filter_map(|l| serde_json::from_str(l).ok())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (
+                200,
+                json!({"tick": tick, "tick_seconds": tick_seconds,
+                         "holdings": holdings, "deliveries": deliveries}),
             )
         }
         ("GET", ["ships", id, "dial"]) => {
