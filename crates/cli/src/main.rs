@@ -6,6 +6,7 @@
 mod autonomy_cmd;
 mod daemon;
 mod fleet;
+mod fleet_serve;
 
 use std::collections::HashMap;
 use std::process::ExitCode;

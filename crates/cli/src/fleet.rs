@@ -46,7 +46,7 @@ pub struct Captain {
     pub pilot_args: Vec<String>,
 }
 
-fn read_env_value(path: &Path, key: &str) -> Option<String> {
+pub(crate) fn read_env_value(path: &Path, key: &str) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     text.lines()
         .filter_map(|l| l.split_once('='))
@@ -65,7 +65,7 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// GET on the exchange with the ship's own key. Bounded: one call, one timeout.
-fn wire_get(server: &str, key: &str, path: &str) -> Result<Value, String> {
+pub(crate) fn wire_get(server: &str, key: &str, path: &str) -> Result<Value, String> {
     let url = Url::parse(&format!("{}{}", server.trim_end_matches('/'), path))
         .map_err(|e| format!("{e:?}"))?;
     let headers = vec![
@@ -82,7 +82,12 @@ fn wire_get(server: &str, key: &str, path: &str) -> Result<Value, String> {
 /// Issue a fresh lease for a ship from the household's boundary and key — the same
 /// act as `familiar world lease`, callable by the supervisor when a human has said
 /// `--renew`.
-fn issue_lease(dir: &Path, ship_dir: &Path, id: &str, ttl_hours: i64) -> Result<i64, String> {
+pub(crate) fn issue_lease(
+    dir: &Path,
+    ship_dir: &Path,
+    id: &str,
+    ttl_hours: i64,
+) -> Result<i64, String> {
     let root_boundary = familiar_kernel::boundary::load(dir).map_err(|e| e.to_string())?;
     let key = familiar_mesh::node::NodeKey::load_or_mint(dir, "").map_err(|e| e.to_string())?;
     let now = super::now_secs();
@@ -100,14 +105,14 @@ fn issue_lease(dir: &Path, ship_dir: &Path, id: &str, ttl_hours: i64) -> Result<
 }
 
 /// When the ship's current lease expires, if it can be read.
-fn lease_expiry(ship_dir: &Path) -> Option<i64> {
+pub(crate) fn lease_expiry(ship_dir: &Path) -> Option<i64> {
     let raw = std::fs::read_to_string(ship_dir.join("lease.json")).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
     let inner: Value = serde_json::from_str(v.get("lease_json")?.as_str()?).ok()?;
     inner.get("expires_at")?.as_i64()
 }
 
-fn pid_alive(ship_dir: &Path) -> Option<u32> {
+pub(crate) fn pid_alive(ship_dir: &Path) -> Option<u32> {
     let pid: u32 = std::fs::read_to_string(ship_dir.join("whisker.pid"))
         .ok()?
         .trim()
@@ -129,7 +134,7 @@ extern "C" {
     fn libc_kill(pid: i32, sig: i32) -> i32;
 }
 
-fn stop_pilot(ship_dir: &Path) -> bool {
+pub(crate) fn stop_pilot(ship_dir: &Path) -> bool {
     match pid_alive(ship_dir) {
         Some(pid) => {
             #[cfg(unix)]
@@ -144,13 +149,13 @@ fn stop_pilot(ship_dir: &Path) -> bool {
 }
 
 /// A paired ship: the record, its store, and who it flies for.
-struct Ship {
-    world: WorldInstance,
-    dir: PathBuf,
-    captain: Captain,
+pub(crate) struct Ship {
+    pub(crate) world: WorldInstance,
+    pub(crate) dir: PathBuf,
+    pub(crate) captain: Captain,
 }
 
-fn paired_ships(dir: &Path, root: &Path) -> Vec<Ship> {
+pub(crate) fn paired_ships(dir: &Path, root: &Path) -> Vec<Ship> {
     let Ok(all) = instance::load(dir) else {
         return Vec::new();
     };
@@ -170,7 +175,7 @@ fn paired_ships(dir: &Path, root: &Path) -> Vec<Ship> {
         .collect()
 }
 
-fn last_journal_line(ship_dir: &Path) -> Option<Value> {
+pub(crate) fn last_journal_line(ship_dir: &Path) -> Option<Value> {
     let text = std::fs::read_to_string(ship_dir.join("journal.jsonl")).ok()?;
     text.lines()
         .rev()
@@ -182,13 +187,13 @@ fn last_journal_line(ship_dir: &Path) -> Option<Value> {
 /// trail covers roughly the last day of ticks, so this is a rolling window on a
 /// fast world and the whole story on a slow one.
 #[derive(Debug, Default, Clone, Serialize)]
-struct TradeBook {
-    filled: i64,
-    rejected: i64,
-    realized: i64,
-    cost_of_sold: i64,
-    inventory_cost: i64,
-    inventory: BTreeMap<String, i64>,
+pub(crate) struct TradeBook {
+    pub(crate) filled: i64,
+    pub(crate) rejected: i64,
+    pub(crate) realized: i64,
+    pub(crate) cost_of_sold: i64,
+    pub(crate) inventory_cost: i64,
+    pub(crate) inventory: BTreeMap<String, i64>,
 }
 
 /// The ship's own record of its fills — every `trade-outcome` the pilot journaled —
@@ -196,7 +201,7 @@ struct TradeBook {
 /// ticks, so a buy older than that vanishes and its sale reads as pure profit
 /// (KK II's salmon-mousse, 2026-09-03: "realized 6074 on 0 sold"). The journal is
 /// the whole story; the wire is the fallback for a store without one.
-fn journal_fills(ship_dir: &Path) -> Value {
+pub(crate) fn journal_fills(ship_dir: &Path) -> Value {
     let Ok(text) = std::fs::read_to_string(ship_dir.join("journal.jsonl")) else {
         return Value::Null;
     };
@@ -212,7 +217,7 @@ fn journal_fills(ship_dir: &Path) -> Value {
     }
 }
 
-fn trade_book(receipts: &Value) -> TradeBook {
+pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
     let mut book = TradeBook::default();
     let Some(rows) = receipts.as_array() else {
         return book;
@@ -277,7 +282,7 @@ fn trade_book(receipts: &Value) -> TradeBook {
 }
 
 /// The ship's own delivery record, summed: hauls and freight paid.
-fn delivery_totals(ship_dir: &Path) -> (i64, i64) {
+pub(crate) fn delivery_totals(ship_dir: &Path) -> (i64, i64) {
     let Ok(text) = std::fs::read_to_string(ship_dir.join("deliveries.jsonl")) else {
         return (0, 0);
     };
@@ -720,6 +725,13 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         }
 
         // ── run: one pilot per ship, kept alive; leases renewed on a human's word ──
+        "serve" => {
+            let bind = f
+                .get("bind")
+                .cloned()
+                .unwrap_or_else(|| "127.0.0.1:7899".to_string());
+            super::fleet_serve::serve(&dir, &root, &bind)
+        }
         "run" => {
             let renew = f.contains_key("renew");
             let allow_paws = f.contains_key("allow-paws");
@@ -838,7 +850,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | run");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | run | serve");
             ExitCode::FAILURE
         }
     }
