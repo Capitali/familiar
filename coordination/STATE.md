@@ -5,6 +5,11 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **ONE COMPUTER PER CAPTAIN (Ian, 2026-09-04, verbatim): "One 'ships computer' per captain that can
+  act across his entire fleet under a name he chooses. I choose Felix."** Supersedes the per-hull
+  reading of T-236 (codex's "different names per ship" bar). Felix = Luke SkyWhisker's computer across
+  KK II (PROD, renamed) and every hull he pairs; the persona record moves to captain scope in brick 2+.
+
 - **MACONSTICK'S ROLE (Ian, 2026-09-04, verbatim): "much like Wildhorse is KKII focused, I want
   MacOnStick to be focused on KK and my manual test activities and watching for bugs and issues i
   am encountering in addition the other coding activities that need to continue."** Wildhorse =
