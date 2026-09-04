@@ -41,6 +41,23 @@ final class MessageWindowTests: XCTestCase {
         XCTAssertEqual(st, .denied(at: 2))
     }
 
+    func testRepeatedAdviceCollapsesToOneLineWithACount() {
+        let j = Journal.parse("""
+        {"at":1,"tick":100,"event":"advice","surface":"navigation.rescue","would":"fly to foxys-diner now","why":"a tanker call is days"}
+        {"at":2,"tick":120,"event":"advice","surface":"navigation.rescue","would":"fly to foxys-diner now","why":"a tanker call is days"}
+        {"at":3,"tick":130,"event":"proposed","id":"p-1","surface":"market.buy","would":"buy 30 ore","why":"margin","expires":134}
+        {"at":4,"tick":140,"event":"advice","surface":"navigation.rescue","would":"fly to foxys-diner now","why":"a tanker call is days"}
+        {"at":5,"tick":141,"event":"advice","surface":"market.buy","would":"buy 30 gravy-base at 20","why":"margin 25%"}
+        """).entries
+        let raw = MessageWindow.build(journal: j, proposals: [], approvals: [], nowTick: 141)
+        XCTAssertEqual(raw.count, 5)
+        let c = MessageWindow.collapsed(raw)
+        XCTAssertEqual(c.count, 3)
+        XCTAssertEqual(c[0].surfaceKey, "market.buy"); if case .proposal = c[0].kind {} else { XCTFail("the proposal stays its own item") }
+        XCTAssertEqual(c[1].repeats, 3); XCTAssertEqual(c[1].sinceTick, 100); XCTAssertEqual(c[1].tick, 140)
+        XCTAssertEqual(c[2].repeats, 1); XCTAssertEqual(c[2].sinceTick, 141)
+    }
+
     func testApprovalLineIsTheRustShape() {
         XCTAssertEqual(MessageWindow.approvalLine(id: "p-1", approved: true, at: 5), #"{"id":"p-1","approved":true,"at":5}"#)
         let back = try! JSONDecoder().decode(Approval.self, from: Data(MessageWindow.approvalLine(id: "p-1", approved: false, at: 6).utf8))

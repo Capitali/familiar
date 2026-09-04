@@ -6,6 +6,41 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-04 — T-237 B3.1: the bridge is Felix — one path, speech that works
+
+Ian, after the first iPad test (verbatim): "The flow of the ships computer interface on
+familiar is unacceptable. Needs to be very precise, the repeating messages, dial, etc
+access points and overlays are confusing. This should be simple and elegant and the speech
+interface should work." Three faults, three fixes:
+
+- **One path.** Ships → a ship, and that screen is her. The tab bar, the Bridge's door
+  buttons to Messages/Dial, the overlay close button and the floating fixture banner are
+  gone. Autonomy and the Log are two rows that open on demand; Messages is one row under
+  her advice ("Everything she has said"); settings stay behind the gear.
+- **Repeats folded.** The pilot re-says standing advice every twenty ticks; the captain
+  now sees it once with "since t…, said N times" (`MessageWindow.collapsed`, pinned).
+- **Speech.** `Dictation` (on-device SpeechAnalyzer + SpeechTranscriber, iOS/macOS 26;
+  AVAudioEngine tap → AVAudioConverter → AnalyzerInput stream; asset install on first use)
+  and `Speaker` (AVSpeechSynthesizer, the best English voice on the device). Press the
+  mic, talk, press again: the transcript goes to `Conversation`, a multi-turn
+  LanguageModelSession with her tools; every answer is checked against the journal
+  (numbers, ids, ticks, stations must come from the facts) or the journal's own matching
+  lines answer instead, with a note saying why. Typed questions take the same road.
+  Answers are spoken unless muted.
+
+### Checks run
+
+`swift test --package-path ios/FamiliarSC`: 44/0. Package builds on macOS 27 (the Speech
+path compiles against the 27 SDK); FamiliarAgent builds for the iOS Simulator. **Not yet
+exercised with a microphone**: dictation needs a device (the simulator's mic path and this
+Mac's model availability are both unproven here), so the first live test of the speech
+loop is Ian's, on build 108. Chair-built and self-reviewed (codex paused).
+
+### Next
+
+Felix's voice choice per persona style; a wake word is deliberately NOT built (press to
+talk keeps the mic the captain's act); the fold cards stay in the Log; Vision Pro (B4).
+
 ## 2026-09-04 — T-237 B3: the captain's bridge — `FamiliarSCUI` and the flagged host in the Familiar app
 
 Ian, relayed by the wildhorse session (2026-09-04): the familiar UI work moves now; the

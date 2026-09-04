@@ -357,3 +357,90 @@ struct ProposeAutonomyTool: Tool {
     }
 }
 #endif
+
+// MARK: - Conversation: the captain talks to her, she answers from the journal
+
+/// A running conversation with the ship's computer. The model keeps the turns; every
+/// answer is checked against what the journal and the hull actually say before it is
+/// shown or spoken — a number, id, tick or station the context never contained means the
+/// answer is refused and the floor answers instead. The floor answer is the journal's own
+/// lines that match the question, so the captain is never left with nothing.
+public final class Conversation: @unchecked Sendable {
+    public struct Turn: Equatable, Sendable {
+        public var question: String
+        public var answer: String
+        public var lane: VoiceLane
+        public var note: String?
+    }
+
+    public let voice: BridgeVoice
+    public var context: BridgeContext
+    public var consent: VoiceConsent
+    public private(set) var turns: [Turn] = []
+    private let lock = NSLock()
+    #if canImport(FoundationModels)
+    @available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
+    private var session: LanguageModelSession? {
+        get { _session as? LanguageModelSession }
+        set { _session = newValue }
+    }
+    #endif
+    private var _session: Any?
+
+    public init(voice: BridgeVoice, context: BridgeContext, consent: VoiceConsent = VoiceConsent()) {
+        self.voice = voice; self.context = context; self.consent = consent
+    }
+
+    /// The floor's answer: the journal lines that mention the question's words, told plainly.
+    public func floorAnswer(_ question: String) -> String {
+        let floor = voice.floor(context)
+        let words = question.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" }).map(String.init).filter { $0.count > 2 }
+        let facts = floor.facts.filter { f in words.contains { f.lowercased().contains($0) } }
+        if !facts.isEmpty { return facts.prefix(4).joined(separator: "\n") }
+        return floor.headline + "\n" + floor.facts.prefix(3).joined(separator: "\n") + "\n" + floor.nextAct
+    }
+
+    /// Ask her. Always answers; the lane says who spoke.
+    public func ask(_ question: String) async -> Turn {
+        let floor = voice.floor(context)
+        let floorText = floorAnswer(question)
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *), case .available = SystemLanguageModel.default.availability {
+            let s: LanguageModelSession
+            if let existing = session { s = existing } else {
+                s = LanguageModelSession(tools: voice.tools(context), instructions: voice.instructions())
+                session = s
+            }
+            let prompt = """
+            The captain says: "\(question)"
+            Answer in one to three sentences, in your voice, from these FACTS only (every number, id, tick and station must come from them):
+            \(floor.facts.map { "- " + $0 }.joined(separator: "\n"))
+            Hull now: \(context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? "not on the wire")
+            Mood: \(floor.mood.rawValue). If the facts do not answer, say what you do know and what you do not.
+            """
+            do {
+                let reply = try await s.respond(to: prompt).content
+                let allowed = Grounding.tokens(in: (floor.facts + [floor.headline, floor.nextAct, context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? ""]).joined(separator: "\n"))
+                let said = Grounding.tokens(in: reply).filter { $0.first?.isNumber ?? false || $0.hasPrefix("L") || $0.hasPrefix("t") || $0.hasPrefix("p-") }
+                let invented = said.subtracting(allowed)
+                if invented.isEmpty {
+                    return record(Turn(question: question, answer: reply, lane: .onDevice, note: nil))
+                }
+                return record(Turn(question: question, answer: floorText, lane: .templated, note: "her answer named \(invented.sorted().joined(separator: ", ")), which the journal does not; the journal's own words instead"))
+            } catch {
+                session = nil
+                return record(Turn(question: question, answer: floorText, lane: .templated, note: "\(error)"))
+            }
+        }
+        #endif
+        return record(Turn(question: question, answer: floorText, lane: .templated, note: "the on-device model is not available here"))
+    }
+
+    private func record(_ t: Turn) -> Turn {
+        lock.lock(); defer { lock.unlock() }
+        turns.append(t)
+        return t
+    }
+
+    public func reset() { lock.lock(); turns.removeAll(); _session = nil; lock.unlock() }
+}

@@ -10,7 +10,7 @@ public struct MessageWindowView: View {
     public init(model: BridgeModel) { self.model = model }
 
     var open: [MessageItem] { model.window.filter(\.needsTheCaptain).reversed() }
-    var advice: [MessageItem] { model.window.filter { if case .advice = $0.kind { return true }; return false }.reversed() }
+    var advice: [MessageItem] { model.advice.reversed() }
     var record: [MessageItem] { model.window.filter { if case .proposal(_, _, _, _, let st) = $0.kind { return st != .open }; return false }.reversed() }
 
     public var body: some View {
@@ -22,7 +22,7 @@ public struct MessageWindowView: View {
                 Section("Waiting on you") { ForEach(open, id: \.at) { item in ProposalRow(item: item, model: model) } }
             }
             if !advice.isEmpty {
-                Section("She would have…") { ForEach(advice, id: \.at) { item in AdviceRow(item: item) } }
+                Section("She would have…") { ForEach(advice, id: \.at) { item in AdviceLine(item: item) } }
             }
             if !record.isEmpty {
                 Section("The record") { ForEach(record, id: \.at) { item in ProposalRow(item: item, model: model) } }

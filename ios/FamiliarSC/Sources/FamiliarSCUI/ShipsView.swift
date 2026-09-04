@@ -6,10 +6,11 @@ import FamiliarSC
 public struct ShipsView: View {
     @Bindable var model: BridgeModel
     let scanner: PairingScanner?
+    let fixtureNote: String?
     @State private var pairing = false
 
-    public init(model: BridgeModel, scanner: PairingScanner? = nil) {
-        self.model = model; self.scanner = scanner
+    public init(model: BridgeModel, scanner: PairingScanner? = nil, fixtureNote: String? = nil) {
+        self.model = model; self.scanner = scanner; self.fixtureNote = fixtureNote
     }
 
     public var body: some View {
@@ -29,6 +30,9 @@ public struct ShipsView: View {
             ForEach(model.ships) { ship in
                 NavigationLink(value: ship.world) { ShipRow(ship: ship) }
                     .listRowBackground(SC.panel)
+            }
+            if let n = fixtureNote {
+                Section { Text(n).font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
             }
         }
         .scrollContentBackground(.hidden)
