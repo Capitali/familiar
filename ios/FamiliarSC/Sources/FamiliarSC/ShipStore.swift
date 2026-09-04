@@ -148,7 +148,7 @@ public struct Persona: Codable, Equatable, Sendable {
 }
 
 /// One naming act (persona-names.jsonl).
-public struct NameEvent: Codable, Equatable {
+public struct NameEvent: Codable, Equatable, Sendable {
     public var at: Int64
     public var actor: String
     public var name: String
@@ -157,7 +157,7 @@ public struct NameEvent: Codable, Equatable {
 /// Who the ship flies for (fleet.rs `Captain`). `keyID` is the key's public id — the first
 /// eight characters after `ucfk_` — never the secret, which lives in ucf.env (0600) and is
 /// not read by this package.
-public struct Captain: Codable, Equatable {
+public struct Captain: Codable, Equatable, Sendable {
     public var captain: String
     public var keyID: String
     public var server: String
@@ -187,7 +187,7 @@ public struct Captain: Codable, Equatable {
 }
 
 /// A speculative position aboard (trade.rs `Holding`).
-public struct Holding: Codable, Equatable {
+public struct Holding: Codable, Equatable, Sendable {
     public var good: String
     public var units: Int64
     public var avgCost: Int64
@@ -217,7 +217,7 @@ public struct Holding: Codable, Equatable {
 /// One settled delivery (outfit.rs `DeliveryStat`). Deliveries pay a fixed company share
 /// (~85% of the booked rate) — `paid` under `booked` is the share, not decay; decay shows
 /// as a FURTHER shortfall on a perishable.
-public struct DeliveryStat: Codable, Equatable {
+public struct DeliveryStat: Codable, Equatable, Sendable {
     public var loadID: String
     public var good: String
     public var perishable: Bool
@@ -231,7 +231,7 @@ public struct DeliveryStat: Codable, Equatable {
 }
 
 /// A proposed act waiting on the captain (autonomy.rs `Proposal`, proposals.jsonl).
-public struct Proposal: Codable, Equatable {
+public struct Proposal: Codable, Equatable, Sendable {
     public var id: String
     public var tick: Int64
     public var expiresTick: Int64
@@ -244,13 +244,19 @@ public struct Proposal: Codable, Equatable {
         case id, tick, surface, describe, why, body
         case expiresTick = "expires_tick"
     }
+
+    public init(id: String, tick: Int64, expiresTick: Int64, surface: String, describe: String, why: String, body: JSONValue) {
+        self.id = id; self.tick = tick; self.expiresTick = expiresTick; self.surface = surface
+        self.describe = describe; self.why = why; self.body = body
+    }
 }
 
 /// The captain's word on a proposal (approvals.jsonl).
-public struct Approval: Codable, Equatable {
+public struct Approval: Codable, Equatable, Sendable {
     public var id: String
     public var approved: Bool
     public var at: Int64
+    public init(id: String, approved: Bool, at: Int64) { self.id = id; self.approved = approved; self.at = at }
 }
 
 /// One journal line. `event` is the vocabulary word; everything else stays typed-loose so
@@ -279,9 +285,11 @@ public struct JournalEntry: Equatable, Sendable {
 }
 
 /// The journal, read whole. Malformed lines are counted, never silently dropped.
-public struct Journal: Equatable {
+public struct Journal: Equatable, Sendable {
     public var entries: [JournalEntry]
     public var malformed: Int
+
+    public init(entries: [JournalEntry], malformed: Int) { self.entries = entries; self.malformed = malformed }
 
     public static func parse(_ text: String) -> Journal {
         var entries: [JournalEntry] = []

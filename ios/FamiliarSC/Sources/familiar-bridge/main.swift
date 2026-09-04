@@ -1,5 +1,6 @@
 import Foundation
 import FamiliarSC
+import FamiliarSCUI
 
 // familiar-bridge — a macOS stand-in for the captain's bridge (T-237 B2's visible proof).
 // Reads a ship store and speaks the report through the voice ladder; shows the message
@@ -12,6 +13,7 @@ usage:
   familiar-bridge notices <ship-dir> [--since-ticks N]
   familiar-bridge dial    <ship-dir>
   familiar-bridge voices  [--consent-pcc]
+  familiar-bridge fleet   <feed-url> --token-file <file> [--json]     # `familiar fleet serve` over the wire
 """
 
 func fail(_ msg: String) -> Never {
@@ -44,6 +46,36 @@ if cmd == "voices" {
         print("\(lane.rawValue): \(why)")
     }
     exit(0)
+}
+
+if cmd == "fleet" {
+    guard let urlArg = args.first, let base = URL(string: urlArg) else { fail(usage) }
+    args.removeFirst()
+    guard let tokenFile = option("--token-file"), let token = try? String(contentsOfFile: tokenFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) else { fail("--token-file is required") }
+    let wire = WireFeed(base: base, bearer: token)
+    let model = BridgeModel(feed: wire, acts: wire, voiceConsent: consent)
+    // BridgeModel's loads are main-actor: keep the main thread free (dispatchMain) and
+    // exit from the task, rather than blocking it on a semaphore it would deadlock on.
+    Task {
+        await model.refreshShips()
+        if let e = model.error { print("error: \(e)") }
+        for s in model.ships {
+            print("\(s.world) \"\(s.label)\" · hull \"\(s.hull)\" · computer \"\(s.computer)\" · \(s.moodWord) · ℳ\(s.credits ?? 0) · fuel \(s.fuel ?? 0) · \(s.pilotAlive ? "pilot" : "NO PILOT") · \(s.docked ?? s.enRouteTo.map { "→ \($0)" } ?? "under way") · \(s.openProposals) waiting")
+        }
+        if let first = model.ships.first {
+            await model.open(world: first.world)
+            if let e = model.error { print("error: \(e)") }
+            print("journal lines: \(model.journal.count) · window items: \(model.window.count) · open: \(model.openProposals)")
+            if let d = model.dial { print("dial: \(d.loaded) bought \(d.bought)") }
+            if let r = model.reports.first {
+                print("[t\(r.fromTick)–t\(r.toTick)] \(r.report.mood.rawValue): \(r.report.headline)")
+                for f in r.report.facts.prefix(6) { print("  · \(f)") }
+                print("→ \(r.report.nextAct)")
+            }
+        }
+        exit(0)
+    }
+    dispatchMain()
 }
 
 guard let dirArg = args.first else { fail(usage) }

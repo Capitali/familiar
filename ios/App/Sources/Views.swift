@@ -40,6 +40,9 @@ struct RootView: View {
                 EnrollView().background(Fam.bg.ignoresSafeArea()).preferredColorScheme(.dark)
             }
         }
+        // T-237 B3 preview: the ship's computer's bridge, behind its Settings flag — on both
+        // sides of enrolment, because a captain's ship is not the household's business.
+        .overlay(alignment: .bottomLeading) { ShipsComputerDoor() }
         .onAppear {
             model.syncWatch()
             if model.enrolled { PushRegistration.request(model, delegate: pushDelegate) }

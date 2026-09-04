@@ -6,6 +6,67 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-04 — T-237 B3: the captain's bridge — `FamiliarSCUI` and the flagged host in the Familiar app
+
+Ian, relayed by the wildhorse session (2026-09-04): the familiar UI work moves now; the
+screens ahead of the re-verifications. Built against wildhorse's design canvas (five phone
+artboards in the app's Fam palette; Ian: "I like the familiar ucf captains cards — they seem
+appropriate, looking forward to testing them on the ipad and phone") and the `fleet serve`
+contract we agreed in the same hour (wildhorse's host half: 2b8b7f5, 8310c4c on main).
+
+`FamiliarSCUI`, a SwiftUI target in `ios/FamiliarSC` so either SKU shape can host it:
+
+- **The feed and the acts as protocols** (`Feed.swift`): `ShipsFeed` (ships, persona,
+  journal, window, dial, book) and `CaptainActs` (approve/deny, set the dial, pair,
+  unpair). Three feeds: `StoreFeed` over ship stores on a host, `FixtureFeed` for
+  previews and the phone until the host serves, `WireFeed` against `fleet serve`
+  (paths and envelopes verbatim: bearer, journal paged by line offset with `next`,
+  proposals with `state`/`answered_at`, dial `{dial, bought}`, lapse settled from the
+  envelope's tick exactly as whisker settles it). Every act is the captain's tap; the
+  screens re-read after it and show the store's truth.
+- **`BridgeModel`** (`@Observable`): the fleet, one open ship, the journal cut into fold
+  windows each told by the templated floor, and `speakLatest` through the voice ladder.
+- **The screens, in Ian's ruling order:** Ships (the computer's own name, her mood word,
+  one sentence in her voice, Cash / Fuel / Wear / Waiting), Bridge (Freight / Positions /
+  Lease cards, the hull line, the doors, "Today, in her words"), Messages (open proposals
+  first with Approve / Deny at ≥44pt, then advice, then the record), Dial (one segmented
+  control per category grouped by family, a family override, `*`, rescue advising by
+  default, a loud banner when the file is malformed because whisker reads that as auto),
+  Pairing (paste or scan, "check it answers on the exchange" — a read-only `/v1/me` with
+  the key — name the computer, the automations bought, "Pair and lease for a day"), and
+  `CaptainNotifier` scheduling `NoticePolicy` notices once each. `SCRootView` is the
+  canvas's four tabs.
+- **The host:** the Familiar iOS app links `FamiliarSCUI`; a door onto the bridge shows
+  on the root view (both sides of enrolment — a captain's ship is not the household's
+  business) when Settings → Familiar → "Show the bridge" is on. Settings also take the
+  fleet feed URL and its pasted bearer (`sc.feedURL`, `sc.feedBearer`) and the PCC
+  consent; with no feed the bridge shows the fixture fleet, labelled so.
+- **`familiar-bridge fleet <url> --token-file <f>`** drives `WireFeed` from a Mac.
+
+### Checks run
+
+`swift test --package-path ios/FamiliarSC`: 40/0 (5 new: the store feed's summary over
+the fixture store, fold windows, the fixture feed's approve → re-read → state and dial
+round-trip, the notifier's once-each ledger, a `fleet status` row into a ship summary).
+`xcodegen` + `xcodebuild FamiliarAgent` for the iOS Simulator: BUILD SUCCEEDED.
+**WireFeed end to end** against a local mock of the agreed shapes: ships row, 36 journal
+lines through the paging cursor, the message window (3 items, states settled), the dial,
+the fold report; 401 on a bad bearer. **The live feed** on wildhorse (`fleet serve`,
+:7899, both addresses) answers 401 without a bearer from this Mac; the bearer stays
+with Ian (this session's classifier declined to materialise the token, and I left it so) —
+he pastes it into Settings for the live run. Two defects found and fixed on the way: the
+wire URL was built with `appendingPathComponent`, which percent-encoded the journal query
+into a 404; the CLI blocked the main thread on a semaphore while the model's loads are
+main-actor (a deadlock) — it now runs `dispatchMain` and exits from the task.
+
+### Next
+
+TestFlight with the setting on (Ian is waiting for it, bearer in hand). Then: the voice
+on the captain's device once a model is available; `persona` style over the wire (the
+ships row carries only the name today); the book over the wire (`/ships/{world}/book`
+is not served yet, so the Bridge's cards read empty on the phone); node-signed requests
+when the feed folds into the mesh door. Codex re-verification of B2+B3 after Sept 6.
+
 ## 2026-09-03 — T-237 B2: the ship's computer's Apple half, `FamiliarSC`
 
 Ian's line for familiar-sc (dialogue §3): decisions that spend, move or bind the ship stay

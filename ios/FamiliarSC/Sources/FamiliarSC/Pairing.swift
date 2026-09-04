@@ -25,7 +25,7 @@ public enum PairingError: Error, Equatable, CustomStringConvertible {
 }
 
 /// A UCF exchange key as scanned: `ucfk_` + at least 16 URL-safe characters.
-public struct PairingKey: Equatable {
+public struct PairingKey: Equatable, Sendable {
     public let secret: String
     /// The public id, exactly as fleet.rs derives it: the first eight characters after `ucfk_`.
     public var keyID: String { String(secret.dropFirst(PairingKey.prefix.count).prefix(8)) }
@@ -60,11 +60,11 @@ public struct PairingKey: Equatable {
 }
 
 /// What the captain buys (ucf-exchange#15 scopes) and what automations.json records.
-public enum Automation: String, CaseIterable, Codable, Equatable {
+public enum Automation: String, CaseIterable, Codable, Equatable, Sendable {
     case freight, trade, outfit
 }
 
-public struct PairingRequest: Equatable {
+public struct PairingRequest: Equatable, Sendable {
     public var label: String
     public var captain: String
     public var server: String

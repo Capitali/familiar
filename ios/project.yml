@@ -28,6 +28,9 @@ settings:
 packages:
   FamiliarMesh:
     path: FamiliarMesh
+  # T-237: the ship's computer — FamiliarSC (store/wire/voice) + FamiliarSCUI (the bridge screens).
+  FamiliarSC:
+    path: FamiliarSC
 targets:
   FamiliarAgent:
     type: application
@@ -40,6 +43,9 @@ targets:
       # The door chime (ADR-0020) — one sound, shared by both shells.
       - Shared/Resources
       - App/Assets.xcassets
+      # The in-app Settings pane: the ship's-computer feature flag and its feed address.
+      - path: App/Settings.bundle
+        buildPhase: resources
       # The Metal Sphere console — the same web bundle the Mac console renders, kept as a
       # folder reference so the page loads from "sphere/" at runtime on every platform.
       - path: MacApp/Resources/sphere
@@ -65,6 +71,10 @@ targets:
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh
+      # The captain's bridge (T-237 B3), hosted behind the `flag.shipsComputer` switch
+      # (Settings → Familiar → Ship's computer) — see App/Sources/ShipsComputerHost.swift.
+      - package: FamiliarSC
+        product: FamiliarSCUI
       # Static library xcframework — link only, never embed. `embed: true` copies it into
       # Frameworks/ as a standalone .a file, which Apple's upload validation rejects outright
       # (error 90171/90432: "only the Swift runtime libraries are permitted" there) — a static
