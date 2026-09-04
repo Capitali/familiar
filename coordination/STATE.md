@@ -5,6 +5,24 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **MACONSTICK'S ROLE (Ian, 2026-09-04, verbatim): "much like Wildhorse is KKII focused, I want
+  MacOnStick to be focused on KK and my manual test activities and watching for bugs and issues i
+  am encountering in addition the other coding activities that need to continue."** Wildhorse =
+  KK II autopilot (whisker, fleet run/serve, the pilots' stores). MacOnStick = KK (Ian's own hull),
+  his manual play, catching the bugs he hits — plus the coding lanes. UCF installed on MacOnStick
+  the same day: united-cat-foods-metal, ucf-exchange (release), UCF-Haul (sim build), UCF-Ops
+  (rebuilt; standalone `~/Applications/UCF Ops.app` launcher), and its OWN local world
+  (LaunchAgent `io.river.ucf-local-marketd`, :7877, own epoch). Owed: KK's key on MacOnStick
+  (only KK II's console key is there) and a bug-watch that reads what Ian is flying.
+
+- **BUILD 104 DID NOT UPLOAD (2026-09-04):** ship.sh built Mac + iOS on MacOnStick but App Store
+  Connect refused the IPA (error 90534 — Xcode 27 beta 27A5237l; no 27 RC exists, Beta 6 would not
+  help). Wildhorse (Xcode 26.5, the ASC key) is the upload machine until the 27 RC ships;
+  FamiliarSC's PCC reference is now behind `#if compiler(>=6.4)` (de6f145) so a 26-SDK build
+  compiles it out. **Build 105 = wildhorse's ship of main ≥ de6f145** — the TestFlight build Ian
+  is waiting for, with Settings → Familiar → "Show the bridge" (T-237 B3).
+
+
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
   codex as coding partner till sept 6th. Pull any work back that's left for codex and
   lets finish that ourselves.").** Pulled back to the claude lane: the T-232 round-7
