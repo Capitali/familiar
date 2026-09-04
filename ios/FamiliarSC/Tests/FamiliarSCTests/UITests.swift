@@ -106,6 +106,20 @@ final class UITests: XCTestCase {
         XCTAssertTrue(Grounding.tokens(in: ctx.truth(floor: BridgeVoice(persona: Persona(name: "Felix", style: nil)).floor(ctx))).contains("foxys-diner"))
     }
 
+    func testCaptainBriefAndSlug() throws {
+        XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker"), "luke-skywhisker")
+        XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker (LOCAL soak)"), "luke-skywhisker-local-soak")
+        let b = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"context":{"kind":"captain","name":"Luke SkyWhisker","computer":"Felix","ships":["a","b"]},"captain":"Luke SkyWhisker","computer":"Felix","ships":[{"ship":"Kibble Klipper II","world_name":"PROD","docked":null,"enRouteTo":"foxys-diner","credits":6451,"fuel":164,"fuelCapacity":600,"last_event":"engaged-drive"},{"ship":"Kibble Klipper","world_name":"PROD","docked":"titania-cold-store","credits":0,"fuel":135,"fuelCapacity":600,"last_event":"distress-hold"}],"book":{"pooled_credits":5738,"debt":141802,"trades_realized":5319,"aboard_at_cost":16820},"open_proposals":[]}"#.utf8))
+        let t = Briefs.captain(b)
+        XCTAssertTrue(t.contains("Captain Luke SkyWhisker; his computer across the fleet is Felix."))
+        XCTAssertTrue(t.contains("Hull Kibble Klipper II (PROD): under way for foxys-diner, ℳ6451, fuel 164/600, last: engaged drive."))
+        XCTAssertTrue(t.contains("Hull Kibble Klipper (PROD): berthed at titania-cold-store, ℳ0, fuel 135/600, last: distress hold."))
+        XCTAssertTrue(t.contains("The fleet's book: ℳ5738 pooled, ℳ141802 debt, ℳ5319 realized on trades, ℳ16820 aboard at cost."))
+        XCTAssertTrue(t.contains("No proposal waits on the captain anywhere in the fleet."))
+        let counted = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"captain":"L","computer":"F","ships":[],"open_proposals":2}"#.utf8))
+        XCTAssertTrue(Briefs.captain(counted).contains("2 proposals wait on the captain across the fleet."))
+    }
+
     func testNotifierDeliversEachNoticeOnce() {
         let defaults = UserDefaults(suiteName: "sc-tests-\(UUID().uuidString)")!
         let n = CaptainNotifier(defaults: defaults)
