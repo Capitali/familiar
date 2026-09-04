@@ -49,7 +49,8 @@ public struct ShipBridgeView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Image(systemName: SC.glyph(for: s.mood)).foregroundStyle(SC.color(for: s.mood))
-                    Text(s.hull.isEmpty ? s.label : s.hull).font(.headline)
+                    Text(s.shipName).font(.headline)
+                    Chip(text: s.worldInstance, tint: SC.dim)
                     Spacer()
                     Chip(text: s.pilotAlive ? "pilot alive" : "NO PILOT", tint: s.pilotAlive ? SC.green : SC.red)
                 }

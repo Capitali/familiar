@@ -127,23 +127,28 @@ public final class BridgeModel {
     }
 
     /// The captain's edits to a paired ship; each re-reads the fleet so the screen shows the
-    /// store's truth. Returns the error text, or nil.
+    /// store's truth. Returns the outcome to show: the host's note, or the error.
+    public struct ActOutcome: Equatable { public var ok: Bool; public var text: String }
+
     @MainActor
-    public func rename(computer: String) async -> String? {
-        guard let world else { return "no ship open" }
-        do { try await acts.rename(world: world, computer: computer); await refreshShips(); persona = try await feed.persona(world: world); return nil } catch { return "\(error)" }
+    public func rename(computer: String) async -> ActOutcome {
+        guard let world else { return ActOutcome(ok: false, text: "no ship open") }
+        do { let n = try await acts.rename(world: world, computer: computer); await refreshShips(); persona = try await feed.persona(world: world)
+             return ActOutcome(ok: true, text: n ?? "Renamed.") } catch { return ActOutcome(ok: false, text: "\(error)") }
     }
 
     @MainActor
-    public func setAutomations(_ automations: [Automation]) async -> String? {
-        guard let world else { return "no ship open" }
-        do { try await acts.setAutomations(world: world, automations: automations); await refreshShips(); dial = try await feed.dial(world: world); return nil } catch { return "\(error)" }
+    public func setAutomations(_ automations: [Automation]) async -> ActOutcome {
+        guard let world else { return ActOutcome(ok: false, text: "no ship open") }
+        do { let n = try await acts.setAutomations(world: world, automations: automations); await refreshShips(); dial = try await feed.dial(world: world)
+             return ActOutcome(ok: true, text: n ?? "Saved.") } catch { return ActOutcome(ok: false, text: "\(error)") }
     }
 
     @MainActor
-    public func setCaptain(_ captain: String) async -> String? {
-        guard let world else { return "no ship open" }
-        do { try await acts.setCaptain(world: world, captain: captain); await refreshShips(); persona = try await feed.persona(world: world); return nil } catch { return "\(error)" }
+    public func setCaptain(_ captain: String) async -> ActOutcome {
+        guard let world else { return ActOutcome(ok: false, text: "no ship open") }
+        do { let n = try await acts.setCaptain(world: world, captain: captain); await refreshShips(); persona = try await feed.persona(world: world)
+             return ActOutcome(ok: true, text: n ?? "Moved.") } catch { return ActOutcome(ok: false, text: "\(error)") }
     }
 
     @MainActor

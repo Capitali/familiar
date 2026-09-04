@@ -15,7 +15,7 @@ public struct ShipSettingsView: View {
     @State private var trade = false
     @State private var outfit = false
     @State private var busy = false
-    @State private var outcome: String?
+    @State private var outcome: BridgeModel.ActOutcome?
     @State private var confirmUnpair = false
 
     public init(model: BridgeModel) { self.model = model }
@@ -46,7 +46,7 @@ public struct ShipSettingsView: View {
                         Toggle(isOn: $freight) { VStack(alignment: .leading) { Text("Freight"); Text("book, fly, collect, refuel, repair").font(.caption).foregroundStyle(.secondary) } }
                         Toggle(isOn: $trade) { VStack(alignment: .leading) { Text("Trade"); Text("buy where cheap, ride, sell where dear").font(.caption).foregroundStyle(.secondary) } }
                         Toggle(isOn: $outfit) { VStack(alignment: .leading) { Text("Outfit"); Text("fittings out of earnings, crew after title").font(.caption).foregroundStyle(.secondary) } }
-                        Text("A scope your key holds. What is on here appears on the Dial; the pilot reads the change on its next fold.").font(.caption).foregroundStyle(.secondary)
+                        Text("A scope your key holds. What is on here appears on the Dial; a grant takes effect when the pilot next starts.").font(.caption).foregroundStyle(.secondary)
                         Button("Save automations") { act { await model.setAutomations(boughtNow) } }
                             .disabled(busy || !automationsChanged)
                     }
@@ -62,12 +62,12 @@ public struct ShipSettingsView: View {
                         Button("Unpair this ship", role: .destructive) { confirmUnpair = true }
                             .confirmationDialog("Unpair \(s.hull.isEmpty ? s.label : s.hull)?", isPresented: $confirmUnpair, titleVisibility: .visible) {
                                 Button("Unpair — stop the pilot, destroy the key", role: .destructive) {
-                                    act { let e = await model.unpair(world: s.world); if e == nil { model.world = nil; dismiss() }; return e }
+                                    act { let e = await model.unpair(world: s.world); if e == nil { model.world = nil; dismiss() }; return BridgeModel.ActOutcome(ok: e == nil, text: e ?? "Unpaired.") }
                                 }
                             } message: { Text("The journal, the delivery record and the computer's persona stay for you. The key is destroyed.") }
                     }
                 }
-                if let o = outcome { Section { Text(o).font(.footnote).foregroundStyle(SC.amber) } }
+                if let o = outcome { Section { Label(o.text, systemImage: o.ok ? "checkmark.circle" : "exclamationmark.triangle").font(.footnote).foregroundStyle(o.ok ? SC.green : SC.amber) } }
             }
             .scrollContentBackground(.hidden)
             .background(SC.bg)
@@ -85,8 +85,8 @@ public struct ShipSettingsView: View {
         freight = a.contains("freight"); trade = a.contains("trade"); outfit = a.contains("outfit")
     }
 
-    func act(_ f: @escaping () async -> String?) {
+    func act(_ f: @escaping () async -> BridgeModel.ActOutcome) {
         busy = true; outcome = nil
-        Task { let e = await f(); outcome = e ?? "Saved."; busy = false }
+        Task { outcome = await f(); busy = false }
     }
 }
