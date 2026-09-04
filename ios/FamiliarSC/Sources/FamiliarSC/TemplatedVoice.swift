@@ -192,17 +192,22 @@ public struct TemplatedVoice {
         return parts.joined(separator: " — ")
     }
 
+    /// The quiet folds, told by REASON, once each: the captain wants "she is saving for the
+    /// hold extension" once, not four hundred times (wildhorse, 2026-09-03). The fold count
+    /// rides along per reason so nothing is lost; the same reason at a different amount is
+    /// one reason.
     func chatterLine(entries: [JournalEntry], count: Int) -> String {
-        let whys = entries.filter { TemplatedVoice.severity($0) == 0 }.compactMap { $0.string("why") }
-        // The same reason at a different amount ("saving for X: ℳ9000 + … > ℳ561") is one reason.
-        var seen: [String] = []
-        var seenShape: Set<String> = []
-        for w in whys {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        var firstWording: [String: String] = [:]
+        for e in entries where TemplatedVoice.severity(e) == 0 {
+            let w = e.string("why") ?? e.event
             let shape = String(w.unicodeScalars.filter { !CharacterSet.decimalDigits.contains($0) })
-            if seenShape.insert(shape).inserted { seen.append(w) }
+            if counts[shape] == nil { order.append(shape); firstWording[shape] = w }
+            counts[shape, default: 0] += 1
         }
-        let reasons = seen.prefix(3).joined(separator: "; ")
-        return "\(count) quiet folds" + (reasons.isEmpty ? "" : ": \(reasons)")
+        let reasons = order.prefix(4).map { "\(firstWording[$0]!) (\(counts[$0]!) fold\(counts[$0]! == 1 ? "" : "s"))" }
+        return "Quiet between the lines: " + reasons.joined(separator: "; ")
     }
 
     // MARK: one fact per event — ids, amounts, ticks verbatim

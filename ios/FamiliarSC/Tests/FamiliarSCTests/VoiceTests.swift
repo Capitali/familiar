@@ -69,7 +69,7 @@ final class VoiceTests: XCTestCase {
     func testChatterIsSummarisedNotListedAndTheWindowIsBounded() {
         let r = TemplatedVoice(persona: persona).report(entries: entries)
         XCTAssertFalse(r.facts.contains { $0.contains("waiting on the crane") && $0.hasPrefix("t") })
-        XCTAssertTrue(r.facts.contains { $0.hasPrefix("7 quiet folds: waiting on the crane; under way; no profitable") }, r.facts.last ?? "")
+        XCTAssertTrue(r.facts.contains { $0.hasPrefix("Quiet between the lines: waiting on the crane (2 folds); under way (1 fold); no profitable") }, r.facts.last ?? "")
         XCTAssertTrue(r.facts.contains { $0.contains("more lines in the journal") })
         // The most consequential lines survive the cap, chronologically.
         let ticks = r.facts.compactMap { f -> Int64? in
