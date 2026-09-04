@@ -55,8 +55,7 @@ struct ShipRow: View {
                 Spacer()
                 Chip(text: ship.moodWord, tint: SC.color(for: ship.mood))
             }
-            Text((ship.hull.isEmpty ? ship.label : ship.hull) + " · " + (ship.server.contains("127.0.0.1") ? "LOCAL" : ship.label))
-                .font(.subheadline).foregroundStyle(SC.ice)
+            Text(subtitle).font(.subheadline).foregroundStyle(SC.ice)
             if !ship.sentence.isEmpty {
                 Text(ship.sentence).font(.footnote).foregroundStyle(SC.ink.opacity(0.85)).lineLimit(3)
             }
@@ -74,6 +73,13 @@ struct ShipRow: View {
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+    }
+
+    /// "hull · label" — once when the captain labelled the ship by its hull name.
+    var subtitle: String {
+        let hull = ship.hull.isEmpty ? ship.label : ship.hull
+        let world = ship.server.contains("127.0.0.1") ? "LOCAL" : ship.label
+        return hull == world ? hull : hull + " · " + world
     }
 
     func stat(_ label: String, _ value: String, suffix: String? = nil, tint: Color? = nil) -> some View {

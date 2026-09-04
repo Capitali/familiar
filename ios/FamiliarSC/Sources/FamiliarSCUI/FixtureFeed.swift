@@ -7,6 +7,9 @@ import FamiliarSC
 public struct FixtureFeed: ShipsFeed, CaptainActs {
     public final class Box: @unchecked Sendable {
         var approvals: [String: [Approval]] = [:]
+        var names: [String: String] = [:]
+        var automations: [String: [String]] = [:]
+        var captains: [String: String] = [:]
         var dials: [String: AutonomyDial] = ["world-fixture-purr": {
             var d = AutonomyDial(); _ = d.set("market.buy", .confirm); _ = d.set("navigation", .advise); return d
         }()]
@@ -56,10 +59,17 @@ public struct FixtureFeed: ShipsFeed, CaptainActs {
 
     public func ships() async throws -> [ShipSummary] {
         let w1 = try await window(world: "world-fixture-purr")
-        return [
+        let (names, autos, caps) = box.sync { (box.names, box.automations, box.captains) }
+        var out: [ShipSummary] = [
             ShipSummary(world: "world-fixture-purr", label: "KK II (fixture)", computer: "Purr", named: true, hull: "🐈‍⬛ Kibble Klipper II", captain: "A. Captain", server: "http://exchange.example", automations: ["freight", "trade", "outfit"], credits: 5000, debt: 21400, fuel: 98, fuelCapacity: 600, wearBps: 1104, docked: "foxys-diner", pilotAlive: true, leaseHoursLeft: 20, reachable: true, lastEvent: "holding", lastAt: 1700002900, mood: w1.contains(where: \.needsTheCaptain) ? .watchful : .steady, openProposals: w1.filter(\.needsTheCaptain).count),
             ShipSummary(world: "world-fixture-old", label: "Old hull (fixture)", computer: "(unnamed — `fleet rename` her)", named: false, hull: "Sardine Sprint", captain: "A. Captain", server: "http://exchange.example", automations: ["freight"], credits: 7132, fuel: 166, fuelCapacity: 600, enRouteTo: "foxys-diner", pilotAlive: false, leaseHoursLeft: 1, reachable: false, lastEvent: "engaged-drive", lastAt: 1700000300, mood: .steady, openProposals: 0),
         ]
+        for i in out.indices {
+            if let n = names[out[i].world] { out[i].computer = n; out[i].named = true }
+            if let a = autos[out[i].world] { out[i].automations = a }
+            if let c = caps[out[i].world] { out[i].captain = c }
+        }
+        return out
     }
     public func persona(world: String) async throws -> Persona? { world == "world-fixture-purr" ? FixtureFeed.purr : nil }
     public func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry] {
@@ -70,8 +80,8 @@ public struct FixtureFeed: ShipsFeed, CaptainActs {
         return MessageWindow.build(journal: j.entries, proposals: proposalsFor(world), approvals: approvalsFor(world), nowTick: j.lastTick)
     }
     public func dial(world: String) async throws -> DialSheet {
-        let d = box.sync { box.dials[world] }
-        return DialSheet(loaded: d.map { .dial($0) } ?? .absent, bought: world == "world-fixture-purr" ? ["freight", "trade", "outfit"] : ["freight"])
+        let (d, a) = box.sync { (box.dials[world], box.automations[world]) }
+        return DialSheet(loaded: d.map { .dial($0) } ?? .absent, bought: a ?? (world == "world-fixture-purr" ? ["freight", "trade", "outfit"] : ["freight"]))
     }
     public func book(world: String) async throws -> ShipBook {
         guard world == "world-fixture-purr" else { return ShipBook(holdings: [], deliveries: []) }
@@ -88,4 +98,7 @@ public struct FixtureFeed: ShipsFeed, CaptainActs {
         throw FeedError.needsHost("the fixture fleet cannot pair; on the host: familiar " + request.fleetPairArguments(keyFile: "<key-file>").joined(separator: " "))
     }
     public func unpair(world: String) async throws { throw FeedError.needsHost("the fixture fleet cannot unpair") }
+    public func rename(world: String, computer: String) async throws { box.sync { box.names[world] = computer } }
+    public func setAutomations(world: String, automations: [Automation]) async throws { box.sync { box.automations[world] = automations.map(\.rawValue) } }
+    public func setCaptain(world: String, captain: String) async throws { box.sync { box.captains[world] = captain } }
 }

@@ -126,6 +126,26 @@ public final class BridgeModel {
         do { try await acts.pair(request, key: key); await refreshShips(); return nil } catch { return "\(error)" }
     }
 
+    /// The captain's edits to a paired ship; each re-reads the fleet so the screen shows the
+    /// store's truth. Returns the error text, or nil.
+    @MainActor
+    public func rename(computer: String) async -> String? {
+        guard let world else { return "no ship open" }
+        do { try await acts.rename(world: world, computer: computer); await refreshShips(); persona = try await feed.persona(world: world); return nil } catch { return "\(error)" }
+    }
+
+    @MainActor
+    public func setAutomations(_ automations: [Automation]) async -> String? {
+        guard let world else { return "no ship open" }
+        do { try await acts.setAutomations(world: world, automations: automations); await refreshShips(); dial = try await feed.dial(world: world); return nil } catch { return "\(error)" }
+    }
+
+    @MainActor
+    public func setCaptain(_ captain: String) async -> String? {
+        guard let world else { return "no ship open" }
+        do { try await acts.setCaptain(world: world, captain: captain); await refreshShips(); persona = try await feed.persona(world: world); return nil } catch { return "\(error)" }
+    }
+
     @MainActor
     public func unpair(world: String) async -> String? {
         do { try await acts.unpair(world: world); await refreshShips(); return nil } catch { return "\(error)" }

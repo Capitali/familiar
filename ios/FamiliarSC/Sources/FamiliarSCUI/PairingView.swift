@@ -22,9 +22,9 @@ public struct PairingView: View {
     @State private var captain = ""
     @State private var server = "https://"
     @State private var freight = true
-    @State private var trade = false
-    @State private var outfit = false
-    @State private var computerName = Persona.rootName
+    @State private var trade = true
+    @State private var outfit = true
+    @State private var computerName = ""
     @State private var scanning = false
     @State private var busy = false
     @State private var outcome: String?
@@ -32,12 +32,24 @@ public struct PairingView: View {
 
     public init(model: BridgeModel, scanner: PairingScanner? = nil) { self.model = model; self.scanner = scanner }
 
+    /// The captain the fleet already flies for (one computer per captain — Ian's ruling): a new
+    /// hull joins that captain's computer unless the captain field is changed on purpose.
+    var fleetCaptain: String? {
+        let names = Set(model.ships.map(\.captain).filter { !$0.isEmpty && !$0.contains("(") })
+        return names.count == 1 ? names.first : model.ships.first?.captain
+    }
+    /// The computer this hull will join, if the captain already has one.
+    var existingComputer: String? {
+        model.ships.first { $0.captain == captain && $0.named }?.computer
+    }
+
     var request: PairingRequest {
         var autos: [Automation] = []
         if freight { autos.append(.freight) }
         if trade { autos.append(.trade) }
         if outfit { autos.append(.outfit) }
-        return PairingRequest(label: label, captain: captain, server: server, automations: autos, computerName: computerName)
+        let typed = computerName.trimmingCharacters(in: .whitespaces)
+        return PairingRequest(label: label, captain: captain, server: server, automations: autos, computerName: typed.isEmpty ? nil : typed)
     }
 
     public var body: some View {
@@ -66,21 +78,31 @@ public struct PairingView: View {
                     TextField("captain", text: $captain)
                     TextField("exchange", text: $server).plainInput(url: true)
                 }
-                Section("Name the computer") {
-                    TextField(Persona.rootName, text: $computerName)
-                    Text("Her own name, distinct from the hull's. You can rename her later.").font(.caption).foregroundStyle(.secondary)
+                Section("The computer") {
+                    if let c = existingComputer {
+                        Label("This ship joins \(c), your computer across the fleet.", systemImage: "cat").foregroundStyle(SC.ice)
+                        TextField("rename \(c) (optional)", text: $computerName)
+                        Text("One computer per captain. A name here renames \(c) for every ship you fly.").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        TextField(Persona.rootName, text: $computerName)
+                        Text("Your first ship births your computer — \(Persona.rootName) unless you name her. One computer per captain; later ships join her.").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section("Automations you've bought") {
                     Toggle(isOn: $freight) { VStack(alignment: .leading) { Text("Freight"); Text("book, fly, collect, refuel, repair").font(.caption).foregroundStyle(.secondary) } }
                     Toggle(isOn: $trade) { VStack(alignment: .leading) { Text("Trade"); Text("buy where cheap, ride, sell where dear").font(.caption).foregroundStyle(.secondary) } }
                     Toggle(isOn: $outfit) { VStack(alignment: .leading) { Text("Outfit"); Text("fittings out of earnings, crew after title").font(.caption).foregroundStyle(.secondary) } }
-                    Text("Everything starts on auto except rescue. Change any of it on the Dial tab.").font(.caption).foregroundStyle(.secondary)
+                    Text("Each is a scope your key already holds; what you leave off is not on the Dial. Everything starts on auto except rescue; change any of it on the Dial tab.").font(.caption).foregroundStyle(.secondary)
                 }
                 if let o = outcome { Section { Text(o).font(.footnote).foregroundStyle(SC.amber) } }
             }
             .scrollContentBackground(.hidden)
             .background(SC.bg)
             .navigationTitle("Pair a ship")
+            .onAppear {
+                if captain.isEmpty, let c = fleetCaptain { captain = c }
+                if server == "https://", let s = model.ships.first(where: { !$0.server.contains("127.0.0.1") })?.server { server = s }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

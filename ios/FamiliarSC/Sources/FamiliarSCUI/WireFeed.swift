@@ -13,6 +13,8 @@ import FamiliarSC
 ///   POST ships/{world}/approve {id, approved} → the Approval line
 ///   PUT  ships/{world}/dial {…}
 ///   POST pair {label, captain, server, key, automations, computer_name?} / POST unpair {world}
+///   POST ships/{world}/rename {name} · PUT ships/{world}/automations {automations} ·
+///   PUT ships/{world}/captain {captain}   (proposed 2026-09-04 for the Ship settings screen)
 /// Proposal lapse is settled client-side exactly as whisker does: lapsed when
 /// tick > expires_tick and no approval.
 public struct WireFeed: ShipsFeed, CaptainActs {
@@ -147,6 +149,15 @@ public struct WireFeed: ShipsFeed, CaptainActs {
                                         "key": .string(key.secret), "automations": .array(request.automations.map { .string($0.rawValue) })]
         if let n = request.computerName { obj["computer_name"] = .string(n) }
         _ = try await call("pair", method: "POST", body: try JSONEncoder().encode(obj))
+    }
+    public func rename(world: String, computer: String) async throws {
+        _ = try await call("ships/\(world)/rename", method: "POST", body: try JSONEncoder().encode(["name": computer]))
+    }
+    public func setAutomations(world: String, automations: [Automation]) async throws {
+        _ = try await call("ships/\(world)/automations", method: "PUT", body: try JSONEncoder().encode(["automations": automations.map(\.rawValue)]))
+    }
+    public func setCaptain(world: String, captain: String) async throws {
+        _ = try await call("ships/\(world)/captain", method: "PUT", body: try JSONEncoder().encode(["captain": captain]))
     }
     public func unpair(world: String) async throws {
         _ = try await call("unpair", method: "POST", body: try JSONEncoder().encode(["world": world]))

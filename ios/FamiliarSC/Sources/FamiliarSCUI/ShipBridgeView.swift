@@ -7,6 +7,7 @@ import FamiliarSC
 public struct ShipBridgeView: View {
     @Bindable var model: BridgeModel
     let world: String
+    @State private var settings = false
 
     public init(model: BridgeModel, world: String) { self.model = model; self.world = world }
 
@@ -34,7 +35,11 @@ public struct ShipBridgeView: View {
                     Task { await model.speakLatest() }
                 } label: { Label("Ask her", systemImage: "waveform") }
             }
+            ToolbarItem(placement: .secondaryAction) {
+                Button { settings = true } label: { Label("Ship settings", systemImage: "gearshape") }
+            }
         }
+        .sheet(isPresented: $settings) { ShipSettingsView(model: model) }
         .task(id: world) { await model.open(world: world) }
         .refreshable { await model.open(world: world) }
     }
