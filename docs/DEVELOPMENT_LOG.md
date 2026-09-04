@@ -6,6 +6,58 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-04 — T-237 B3.3: UCF Familiar — the ship's computer as its own app, direct to the exchange
+
+Ian, three rulings in one afternoon: a standalone iPad/iPhone app "to simply be the ships
+computer and nothing else — a companion app to UCF"; it "should be able to run against the
+prod world that Jeff has established (as well as against our local development instance)";
+and "Apple Intelligence and PCC should be the brains of the UCF-Familiar — that way it could
+stay entirely on the iPad/iphone/mac". With the assumption that the host side "will move to a
+virtual server farm in the cloud so that it can continue as a massively multiplayer universe".
+That answers dialogue Q3: a separate SKU.
+
+- **The target:** `UCFFamiliar` (bundle `io.river.familiar.ucf`, "UCF Familiar", iOS 26,
+  iPhone + iPad), `ios/UCFFamiliar/`: one `App` hosting `SCRootView`, a Connections screen,
+  its own Info.plist (mic, speech, camera, local network; ATS open for dev worlds), an icon.
+  No mesh, no enrolment, no household — `FamiliarSCUI` and nothing else.
+- **Two ways to a fleet** (`Connection`): **direct** — the captain's own `ucfk_` key, kept
+  in the Keychain, against PROD, LOCAL or a custom exchange; and **host** — a familiar host's
+  fleet feed with its bearer (wildhorse today; the server farm later). Several fleets, one
+  active, switched from the bridge's corner. The app is a client of two URLs and nothing
+  about wildhorse or Tailscale is baked in.
+- **`DirectFeed`** (`FamiliarSCUI`): the exchange read straight — `/v1/me`, `/v1/profile`,
+  `/v1/status`, receipts, stations, routes, quotes — into the same `ShipSummary`, journal
+  (the hull's freight ledger and receipts, verbatim), frame and documents the bridge already
+  speaks from. The fuel picture is computed in the app: pumps are the stations that sell
+  fuel, each priced by `/v1/route` from where she stands, the berth's quotes say what her
+  hold would fetch, the pack's 2 ℳ/unit stands in until the exchange publishes its price
+  (ucf-exchange#22). No pilot means no proposals, no dial, no pairing — every host-only act
+  says so in one sentence. Her name in direct mode lives on the device per key
+  (`DevicePersonaStore`). Dev worlds that allow it enrol a new pilot from the app
+  (`POST /v1/enrol`).
+- **Shared:** the QR scanner moved into the package (`QRScannerView`, iOS); `VoicePicker`
+  public; the wire's freight lines render as facts ("t7249: booked — ℳ97 paid [L3083]").
+- `ios/tools/ship-ucf.sh <build>`: archive, export (automatic signing for the new bundle),
+  upload. Needs the App Store Connect app record for `io.river.familiar.ucf` — Ian's act.
+
+### Checks run
+
+Package 49/0 on macOS, including `DirectFeedTests`: the journal from a PROD capture keeps the
+ledger verbatim; the device persona round-trips; and **a LIVE pass against MacOnStick's LOCAL
+world** (`UCF_LOCAL=http://127.0.0.1:7877`): enrolled a pilot, read the hull (600/600 at
+tuna-prime), computed the fuel picture from real routes (paws-truckstop 1 tick away, ℳ6 to
+fill; foxys-diner 32 ticks, 71 fuel; paws-neptune 154 ticks, 380 fuel), named her Felix.
+`xcodebuild UCFFamiliar` for the iOS Simulator: BUILD SUCCEEDED. Not yet run on a device or
+uploaded: the ASC record does not exist. Chair-built and self-reviewed (codex paused).
+
+### Next
+
+Ian creates the App Store Connect record; wildhorse ships build 1 with `ship-ucf.sh`. Then the
+on-device doctrine (B1's "foreground folds" — the Rust doctrines through FamiliarCore, or a
+Swift port) so direct mode can advise from the same rules the pilot uses, and Apple
+Intelligence reasons where the doctrine has slack. B5, the hosted tier, becomes "a Felix per
+captain on the farm".
+
 ## 2026-09-04 — T-237 B3.1: the bridge is Felix — one path, speech that works
 
 Ian, after the first iPad test (verbatim): "The flow of the ships computer interface on

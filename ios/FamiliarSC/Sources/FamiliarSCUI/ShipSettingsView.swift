@@ -98,12 +98,13 @@ public struct ShipSettingsView: View {
 import AVFoundation
 
 /// Pick the voice she speaks with, from what the device has installed; try it aloud.
-struct VoicePicker: View {
-    let speaker: Speaker
+public struct VoicePicker: View {
+    public let speaker: Speaker
+    public init(speaker: Speaker) { self.speaker = speaker }
     @AppStorage(Speaker.chosenVoiceKey) private var chosen = ""
     private let voices = Speaker.candidates()
 
-    var body: some View {
+    public var body: some View {
         Picker("Voice", selection: $chosen) {
             Text("Best installed").tag("")
             ForEach(voices, id: \.identifier) { v in

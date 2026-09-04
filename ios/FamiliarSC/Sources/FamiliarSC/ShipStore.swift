@@ -228,6 +228,10 @@ public struct DeliveryStat: Codable, Equatable, Sendable {
         case good, perishable, booked, paid
         case loadID = "load_id"
     }
+
+    public init(loadID: String, good: String, perishable: Bool, booked: Int64, paid: Int64) {
+        self.loadID = loadID; self.good = good; self.perishable = perishable; self.booked = booked; self.paid = paid
+    }
 }
 
 /// A proposed act waiting on the captain (autonomy.rs `Proposal`, proposals.jsonl).
@@ -266,6 +270,10 @@ public struct JournalEntry: Equatable, Sendable {
     public var tick: Int64?
     public var event: String
     public var fields: [String: JSONValue]
+
+    public init(at: Int64, tick: Int64?, event: String, fields: [String: JSONValue]) {
+        self.at = at; self.tick = tick; self.event = event; self.fields = fields
+    }
 
     public func string(_ key: String) -> String? { fields[key]?.string }
     public func int(_ key: String) -> Int64? { fields[key]?.int }

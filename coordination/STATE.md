@@ -5,6 +5,13 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **UCF FAMILIAR (Ian, 2026-09-04): the ship's computer as its own iPad/iPhone/Mac app** — "simply be the
+  ships computer and nothing else"; runs against Jeff's PROD and our LOCAL; "Apple Intelligence and PCC
+  should be the brains … stay entirely on the iPad/iphone/mac"; the host side "will move to a virtual
+  server farm in the cloud … a massively multiplayer universe". Target `UCFFamiliar` on main, direct
+  mode live-proven on LOCAL. **WAITS ON IAN:** create the App Store Connect app record for bundle
+  `io.river.familiar.ucf` (name "UCF Familiar"); then wildhorse runs `ios/tools/ship-ucf.sh 1`.
+
 - **FELIX FILES ISSUES (Ian, 2026-09-04, verbatim): "If Felix has suggestions for world improvements,
   bug questions, or future features, you should help Felix open issues to the repo to have them
   addressed — be very certain it is clear to the repo users that these are suggestion sourced from the
