@@ -60,13 +60,14 @@ final class UITests: XCTestCase {
         let model = BridgeModel(feed: feed, acts: feed)
         await model.refreshShips()
         await model.open(world: "world-fixture-old")
-        let e1 = await model.rename(computer: "Felix"); XCTAssertNil(e1)
+        let e1 = await model.rename(computer: "Felix"); XCTAssertTrue(e1.ok)
         XCTAssertEqual(model.summary?.computer, "Felix"); XCTAssertTrue(model.summary?.named ?? false)
-        let e2 = await model.setAutomations([.freight, .trade]); XCTAssertNil(e2)
+        let e2 = await model.setAutomations([.freight, .trade]); XCTAssertTrue(e2.ok)
+        XCTAssertEqual(e2.text, "granted; she picks it up on her next start", "a grant is not live until the pilot restarts")
         XCTAssertEqual(Set(model.summary?.automations ?? []), ["freight", "trade"])
         XCTAssertEqual(Set(model.dial?.bought ?? []), ["freight", "trade"], "the dial's bought set follows")
-        let e3 = await model.setCaptain("Ian"); XCTAssertNil(e3)
-        XCTAssertEqual(model.summary?.captain, "Ian")
+        let e3 = await model.setCaptain("Luke SkyWhisker"); XCTAssertTrue(e3.ok)
+        XCTAssertEqual(model.summary?.captain, "Luke SkyWhisker")
     }
 
     func testNotifierDeliversEachNoticeOnce() {
@@ -95,6 +96,10 @@ final class UITests: XCTestCase {
         let s = try XCTUnwrap(WireFeed.summary(from: row, tick: 7532))
         XCTAssertEqual(s.computer, "Purr"); XCTAssertTrue(s.named); XCTAssertTrue(s.pilotAlive)
         XCTAssertEqual(s.leaseHoursLeft, 20); XCTAssertEqual(s.credits, 7132); XCTAssertNil(s.docked)
+        XCTAssertEqual(s.shipName, "Kibble Klipper II", "the hull's name, never the world's")
+        XCTAssertEqual(s.worldInstance, "x", "no world_name served → the exchange host")
+        var local = s; local.server = "http://127.0.0.1:7877"; XCTAssertEqual(local.worldInstance, "LOCAL")
+        var named = s; named.worldName = "PROD"; XCTAssertEqual(named.worldInstance, "PROD")
         let old = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w2","computer":"(unnamed — `fleet rename` her)","hull":"","captain":"","server":"","automations":[]}"#.utf8))
         XCTAssertFalse(try XCTUnwrap(WireFeed.summary(from: old, tick: nil)).named)
         // The live rows carry the name in `persona` (null until named) and no `computer` field.

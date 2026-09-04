@@ -41,7 +41,10 @@ public struct WireFeed: ShipsFeed, CaptainActs {
     func call(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
         let (data, resp) = try await session.data(for: request(path, method: method, body: body))
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else { throw FeedError.refused("HTTP \(code) on \(path)") }
+        guard (200..<300).contains(code) else {
+            let why = (try? JSONDecoder().decode(JSONValue.self, from: data))?["error"]?.string
+            throw FeedError.refused(why.map { "\($0) (HTTP \(code))" } ?? "HTTP \(code) on \(path)")
+        }
         return data
     }
 
@@ -68,7 +71,7 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         // she has not been named); `computer` is the text summary's word for it, if served.
         let personaName = row["persona"].flatMap { $0 == .null ? nil : $0["name"]?.string }
         let computer = personaName ?? row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
-        return ShipSummary(
+        var summary = ShipSummary(
             world: world, label: row["label"]?.string ?? world, computer: computer, named: personaName != nil || !computer.hasPrefix("("),
             hull: row["hull"]?.string ?? "", captain: row["captain"]?.string ?? "", server: row["server"]?.string ?? "",
             automations: row["automations"]?.array?.compactMap(\.string) ?? [],
@@ -81,6 +84,8 @@ public struct WireFeed: ShipsFeed, CaptainActs {
             leasePrincipal: row["leasePrincipal"]?.int, leaseServicePaid: row["leaseServicePaid"]?.int,
             trades: row["trades"].map { TradeBook(row: $0) }
         )
+        summary.worldName = row["world_name"]?.string
+        return summary
     }
 
     public func ships() async throws -> [ShipSummary] {
@@ -150,14 +155,30 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         if let n = request.computerName { obj["computer_name"] = .string(n) }
         _ = try await call("pair", method: "POST", body: try JSONEncoder().encode(obj))
     }
-    public func rename(world: String, computer: String) async throws {
-        _ = try await call("ships/\(world)/rename", method: "POST", body: try JSONEncoder().encode(["name": computer]))
+    /// The host's word on an act: `note`, `output`, or a one-line summary of the reply.
+    static func said(_ data: Data, keys: [String]) -> String? {
+        guard let v = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+        for k in keys { if let s = v[k]?.string, !s.isEmpty { return s } }
+        return nil
     }
-    public func setAutomations(world: String, automations: [Automation]) async throws {
-        _ = try await call("ships/\(world)/automations", method: "PUT", body: try JSONEncoder().encode(["automations": automations.map(\.rawValue)]))
+    public func rename(world: String, computer: String) async throws -> String? {
+        let d = try await call("ships/\(world)/rename", method: "POST", body: try JSONEncoder().encode(["name": computer]))
+        return WireFeed.said(d, keys: ["note", "output"])
     }
-    public func setCaptain(world: String, captain: String) async throws {
-        _ = try await call("ships/\(world)/captain", method: "PUT", body: try JSONEncoder().encode(["captain": captain]))
+    public func setAutomations(world: String, automations: [Automation]) async throws -> String? {
+        let d = try await call("ships/\(world)/automations", method: "PUT", body: try JSONEncoder().encode(["automations": automations.map(\.rawValue)]))
+        return WireFeed.said(d, keys: ["note", "output"]) ?? "granted; she picks it up on her next start"
+    }
+    public func setCaptain(world: String, captain: String) async throws -> String? {
+        let d = try await call("ships/\(world)/captain", method: "PUT", body: try JSONEncoder().encode(["captain": captain]))
+        if let v = try? JSONDecoder().decode(JSONValue.self, from: d) {
+            var parts: [String] = []
+            if let was = v["was"]?.string { parts.append("was \(was)") }
+            if let c = v["computer"]?.string { parts.append("joins \(c)") }
+            if v["retired_old_captain_store"]?.bool == true { parts.append("the old captain record is retired") }
+            return parts.isEmpty ? nil : parts.joined(separator: "; ")
+        }
+        return nil
     }
     public func unpair(world: String) async throws {
         _ = try await call("unpair", method: "POST", body: try JSONEncoder().encode(["world": world]))

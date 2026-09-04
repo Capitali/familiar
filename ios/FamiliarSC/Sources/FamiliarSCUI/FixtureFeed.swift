@@ -98,7 +98,7 @@ public struct FixtureFeed: ShipsFeed, CaptainActs {
         throw FeedError.needsHost("the fixture fleet cannot pair; on the host: familiar " + request.fleetPairArguments(keyFile: "<key-file>").joined(separator: " "))
     }
     public func unpair(world: String) async throws { throw FeedError.needsHost("the fixture fleet cannot unpair") }
-    public func rename(world: String, computer: String) async throws { box.sync { box.names[world] = computer } }
-    public func setAutomations(world: String, automations: [Automation]) async throws { box.sync { box.automations[world] = automations.map(\.rawValue) } }
-    public func setCaptain(world: String, captain: String) async throws { box.sync { box.captains[world] = captain } }
+    public func rename(world: String, computer: String) async throws -> String? { box.sync { box.names[world] = computer }; return nil }
+    public func setAutomations(world: String, automations: [Automation]) async throws -> String? { box.sync { box.automations[world] = automations.map(\.rawValue) }; return "granted; she picks it up on her next start" }
+    public func setCaptain(world: String, captain: String) async throws -> String? { box.sync { box.captains[world] = captain }; return nil }
 }

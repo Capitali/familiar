@@ -38,6 +38,19 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var leaseServicePaid: Int64?
     /// The merchant's book as `fleet status` computes it from receipts ∪ journal (wire only).
     public var trades: TradeBook?
+    /// The WORLD INSTANCE the ship flies in (PROD, LOCAL, TEST…) — the exchange's name for
+    /// itself, never part of the ship's name (Ian, 2026-09-04: "those are instance names of
+    /// the world not ship names"). Served as `world_name` when the host has it; else derived.
+    public var worldName: String?
+
+    /// The world instance to show: served, or LOCAL for a loopback exchange, or the host.
+    public var worldInstance: String {
+        if let w = worldName, !w.isEmpty { return w }
+        if server.contains("127.0.0.1") || server.contains("localhost") { return "LOCAL" }
+        return URL(string: server)?.host ?? server
+    }
+    /// The ship's own name — the hull's, never the world's.
+    public var shipName: String { hull.isEmpty ? label : hull }
 
     public var id: String { world }
 
@@ -164,11 +177,13 @@ public protocol CaptainActs: Sendable {
     func pair(_ request: PairingRequest, key: PairingKey) async throws
     func unpair(world: String) async throws
     /// Name the captain's computer (the one that flies all his ships) — `fleet rename`.
-    func rename(world: String, computer: String) async throws
-    /// Change what the pilot may do for this ship (automations.json); the pilot picks it up.
-    func setAutomations(world: String, automations: [Automation]) async throws
+    /// Returns what the host said about it (nil when it said nothing).
+    func rename(world: String, computer: String) async throws -> String?
+    /// Change what the pilot may do for this ship (automations.json). A grant takes effect at
+    /// the pilot's NEXT START — the returned note says so; the sheet must not imply it is live.
+    func setAutomations(world: String, automations: [Automation]) async throws -> String?
     /// Re-home the ship under another captain record (captain.json's `captain`).
-    func setCaptain(world: String, captain: String) async throws
+    func setCaptain(world: String, captain: String) async throws -> String?
 }
 
 // MARK: - The store feed: ship stores on this machine (the Mac host, or a copied fixture)
@@ -297,19 +312,20 @@ public struct StoreCaptainActs: CaptainActs {
         throw FeedError.needsHost("run `familiar fleet unpair \(world)`")
     }
 
-    public func rename(world: String, computer: String) async throws {
+    public func rename(world: String, computer: String) async throws -> String? {
         throw FeedError.needsHost("run `familiar fleet rename \(world) \"\(computer)\"`")
     }
 
-    public func setAutomations(world: String, automations: [Automation]) async throws {
+    public func setAutomations(world: String, automations: [Automation]) async throws -> String? {
         let d = try dir(world)
         let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
         let tmp = d.appendingPathComponent(".automations.json.tmp")
         try enc.encode(automations.map(\.rawValue)).write(to: tmp)
         _ = try FileManager.default.replaceItemAt(d.appendingPathComponent("automations.json"), withItemAt: tmp)
+        return "granted; she picks it up on her next start"
     }
 
-    public func setCaptain(world: String, captain: String) async throws {
+    public func setCaptain(world: String, captain: String) async throws -> String? {
         let d = try dir(world)
         let url = d.appendingPathComponent("captain.json")
         var obj = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: url))
@@ -318,5 +334,6 @@ public struct StoreCaptainActs: CaptainActs {
         let tmp = d.appendingPathComponent(".captain.json.tmp")
         try enc.encode(obj).write(to: tmp)
         _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        return nil
     }
 }
