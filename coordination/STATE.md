@@ -37,7 +37,11 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   main-actor fix, and the Trades card's estimates line. **BUILD 107 (46ef3b2, wildhorse) SUPERSEDES
   106:** Ship settings sheet on the three new feed routes, pairing that joins the captain's computer,
   hull name + world chip (`world_name` served), estimates line, the cancelled-read banner fix,
-  sellable_at 0 = unknown. Use 107.
+  sellable_at 0 = unknown. **BUILD 108 (2b9eaca, wildhorse) SUPERSEDES 107:** T-237 B3.1 — one-path
+  flow (no tabs/doors/overlays), folded advice, and the speech loop (on-device dictation, grounded
+  conversation, spoken answers) — Ian's iPad is its first live mic test. Use 108. Filed with Jeff the
+  same day at Ian's ask: metal#75, rescue by another hull (fleet fuel transfer / bought fuel) as an
+  alternative to the PAWS tanker — KK is stranded on exactly that.
 
 
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
