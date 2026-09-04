@@ -19,8 +19,9 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   Connect refused the IPA (error 90534 — Xcode 27 beta 27A5237l; no 27 RC exists, Beta 6 would not
   help). Wildhorse (Xcode 26.5, the ASC key) is the upload machine until the 27 RC ships;
   FamiliarSC's PCC reference is now behind `#if compiler(>=6.4)` (de6f145) so a 26-SDK build
-  compiles it out. **Build 105 = wildhorse's ship of main ≥ de6f145** — the TestFlight build Ian
-  is waiting for, with Settings → Familiar → "Show the bridge" (T-237 B3).
+  compiles it out. **Build 105 SHIPPED from wildhorse at de6f145 (2026-09-04, Xcode 26.5): "No errors uploading
+  archive", TestFlight processing; the external release backgrounded by ship.sh.** It carries
+  Settings → Familiar → "Show the bridge" + feed URL/bearer (T-237 B3). Ian pastes the bearer.
 
 
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
