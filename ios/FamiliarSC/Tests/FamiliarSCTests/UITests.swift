@@ -55,6 +55,20 @@ final class UITests: XCTestCase {
         XCTAssertTrue(err?.contains("needs the ship's host") ?? false, "a fixture cannot pair; it says what the host must run")
     }
 
+    func testShipSettingsActsRoundTripOnTheFixture() async {
+        let feed = FixtureFeed()
+        let model = BridgeModel(feed: feed, acts: feed)
+        await model.refreshShips()
+        await model.open(world: "world-fixture-old")
+        XCTAssertNil(await model.rename(computer: "Felix"))
+        XCTAssertEqual(model.summary?.computer, "Felix"); XCTAssertTrue(model.summary?.named ?? false)
+        XCTAssertNil(await model.setAutomations([.freight, .trade]))
+        XCTAssertEqual(Set(model.summary?.automations ?? []), ["freight", "trade"])
+        XCTAssertEqual(Set(model.dial?.bought ?? []), ["freight", "trade"], "the dial's bought set follows")
+        XCTAssertNil(await model.setCaptain("Ian"))
+        XCTAssertEqual(model.summary?.captain, "Ian")
+    }
+
     func testNotifierDeliversEachNoticeOnce() {
         let defaults = UserDefaults(suiteName: "sc-tests-\(UUID().uuidString)")!
         let n = CaptainNotifier(defaults: defaults)

@@ -163,6 +163,12 @@ public protocol CaptainActs: Sendable {
     func setDial(world: String, dial: AutonomyDial) async throws
     func pair(_ request: PairingRequest, key: PairingKey) async throws
     func unpair(world: String) async throws
+    /// Name the captain's computer (the one that flies all his ships) — `fleet rename`.
+    func rename(world: String, computer: String) async throws
+    /// Change what the pilot may do for this ship (automations.json); the pilot picks it up.
+    func setAutomations(world: String, automations: [Automation]) async throws
+    /// Re-home the ship under another captain record (captain.json's `captain`).
+    func setCaptain(world: String, captain: String) async throws
 }
 
 // MARK: - The store feed: ship stores on this machine (the Mac host, or a copied fixture)
@@ -289,5 +295,28 @@ public struct StoreCaptainActs: CaptainActs {
 
     public func unpair(world: String) async throws {
         throw FeedError.needsHost("run `familiar fleet unpair \(world)`")
+    }
+
+    public func rename(world: String, computer: String) async throws {
+        throw FeedError.needsHost("run `familiar fleet rename \(world) \"\(computer)\"`")
+    }
+
+    public func setAutomations(world: String, automations: [Automation]) async throws {
+        let d = try dir(world)
+        let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+        let tmp = d.appendingPathComponent(".automations.json.tmp")
+        try enc.encode(automations.map(\.rawValue)).write(to: tmp)
+        _ = try FileManager.default.replaceItemAt(d.appendingPathComponent("automations.json"), withItemAt: tmp)
+    }
+
+    public func setCaptain(world: String, captain: String) async throws {
+        let d = try dir(world)
+        let url = d.appendingPathComponent("captain.json")
+        var obj = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: url))
+        obj["captain"] = .string(captain)
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let tmp = d.appendingPathComponent(".captain.json.tmp")
+        try enc.encode(obj).write(to: tmp)
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
     }
 }

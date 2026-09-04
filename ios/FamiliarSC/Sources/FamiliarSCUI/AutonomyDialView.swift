@@ -12,12 +12,23 @@ public struct AutonomyDialView: View {
 
     public init(model: BridgeModel) { self.model = model }
 
+    var bought: Set<String> { Set(model.dial?.bought ?? []) }
+
     /// The families whose automation the captain has bought — racing has no grant yet.
     var families: [String] {
-        let bought = Set(model.dial?.bought ?? [])
-        return ControlSurface.families.filter { fam in
+        ControlSurface.families.filter { fam in
             ControlSurface.allCases.contains { $0.family == fam && ($0.automation.map(bought.contains) ?? false) }
         }
+    }
+
+    /// Families a grant exists for that this ship did not buy at pairing — shown, not settable.
+    var unbought: [(family: String, automation: String)] {
+        var out: [(String, String)] = []
+        for fam in ControlSurface.families {
+            guard let a = ControlSurface.allCases.first(where: { $0.family == fam })?.automation, !bought.contains(a) else { continue }
+            out.append((fam, a))
+        }
+        return out
     }
 
     public var body: some View {
@@ -44,6 +55,12 @@ public struct AutonomyDialView: View {
                     ForEach(ControlSurface.allCases.filter { $0.family == fam }, id: \.rawValue) { s in
                         row(key: s.key, label: s.category, subtitle: subtitle(for: s))
                     }
+                }
+            }
+            ForEach(unbought, id: \.family) { u in
+                Section(u.family.capitalized) {
+                    Label("Not bought for this ship (the `\(u.automation)` automation). It is not on the dial until the ship is paired with it.", systemImage: "lock")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
             if families.isEmpty {

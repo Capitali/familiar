@@ -42,6 +42,8 @@ final class PairingTests: XCTestCase {
         let argv = r.fleetPairArguments(keyFile: "/tmp/key")
         XCTAssertEqual(argv, ["fleet", "pair", "--label", "KK II", "--captain", "Ian", "--server", "https://exchange.example", "--key-file", "/tmp/key", "--automations", "freight,trade", "--computer-name", "Purr"])
         XCTAssertFalse(argv.joined(separator: " ").contains("ucfk_"))
+        let joins = PairingRequest(label: "KK", captain: "Ian", server: "https://exchange.example", automations: [.freight], computerName: nil)
+        XCTAssertFalse(joins.fleetPairArguments(keyFile: "/k").contains("--computer-name"), "no name → the hull joins the captain's computer")
         r.server = "exchange.example"
         XCTAssertEqual(r.validate(), .badServer("exchange.example"))
         r.server = "http://127.0.0.1:7877"; r.label = " "
