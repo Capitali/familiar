@@ -52,8 +52,11 @@ enum BackgroundSync {
         // Same node key as the foreground app (shared seed), labelled with the real device name —
         // NOT "background", which would relabel the phone on the roster when a background read lands
         // more recently than a foreground one.
+        // UIDevice is main-actor isolated: read the name there explicitly rather than let an
+        // implicit hop ride inside the guard (an unawaited async expression under Swift 6).
+        let deviceName = await MainActor.run { UIDevice.current.name }
         guard let seed = KeychainStore.load(account: "node.seed"),
-              let node = try? NodeKey(seed: seed, label: UIDevice.current.name),
+              let node = try? NodeKey(seed: seed, label: deviceName),
               let grantData = KeychainStore.load(account: "grant.json"),
               let grant = try? JSONDecoder().decode(Grant.self, from: grantData),
               let enrollData = KeychainStore.load(account: "enroll.info"),
