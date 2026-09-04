@@ -82,5 +82,12 @@ final class UITests: XCTestCase {
         XCTAssertEqual(s.leaseHoursLeft, 20); XCTAssertEqual(s.credits, 7132); XCTAssertNil(s.docked)
         let old = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w2","computer":"(unnamed — `fleet rename` her)","hull":"","captain":"","server":"","automations":[]}"#.utf8))
         XCTAssertFalse(try XCTUnwrap(WireFeed.summary(from: old, tick: nil)).named)
+        // The live rows carry the name in `persona` (null until named) and no `computer` field.
+        let felix = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w3","label":"KK II (PROD)","hull":"","captain":"","server":"","automations":[],"persona":{"persona_version":2,"name":"Felix","style":{}}}"#.utf8))
+        let f = try XCTUnwrap(WireFeed.summary(from: felix, tick: nil))
+        XCTAssertEqual(f.computer, "Felix"); XCTAssertTrue(f.named)
+        let unnamed = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w4","label":"soak","hull":"","captain":"","server":"","automations":[],"persona":null}"#.utf8))
+        let u = try XCTUnwrap(WireFeed.summary(from: unnamed, tick: nil))
+        XCTAssertFalse(u.named); XCTAssertEqual(u.computer, "(unnamed — `fleet rename` her)")
     }
 }
