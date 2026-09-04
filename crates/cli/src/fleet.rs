@@ -369,6 +369,77 @@ pub(crate) fn aboard(ship_dir: &Path) -> (BTreeMap<String, i64>, i64) {
     (units, cost)
 }
 
+/// How the merchant's own estimates have held up: for every position the pilot
+/// opened and later closed, what it expected to make against what the fold actually
+/// paid. The estimate is a mid-price guess with a fixed haircut; this is the only
+/// way to know whether that haircut is the right size on a given world (LOCAL
+/// catnip, 2026-09-04: promised ℳ372, returned −45 when the target's bid fell and
+/// the stuck-position rule cut it). Returns (closed positions, expected, realized).
+pub(crate) fn estimate_calibration(ship_dir: &Path) -> (i64, i64, i64) {
+    let Ok(text) = std::fs::read_to_string(ship_dir.join("journal.jsonl")) else {
+        return (0, 0, 0);
+    };
+    let lines: Vec<Value> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect();
+    fn ev(v: &Value) -> &str {
+        v.get("event").and_then(Value::as_str).unwrap_or("")
+    }
+    let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_i64).unwrap_or(0);
+    let good_of = |v: &Value| {
+        v.get("good")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let (mut closed, mut expected, mut realized) = (0, 0, 0);
+    for (i, op) in lines
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| ev(v) == "position-opened")
+    {
+        let good = good_of(op);
+        let units = num(op, "units");
+        if units <= 0 {
+            continue;
+        }
+        // What it cost: the fill if one was read back, else the quoted ask.
+        let basis_total = lines[i..]
+            .iter()
+            .take(8)
+            .find(|v| {
+                ev(v) == "trade-outcome"
+                    && v.get("side").and_then(Value::as_str) == Some("buy")
+                    && good_of(v) == good
+            })
+            .map(|v| num(v, "total"))
+            .unwrap_or_else(|| num(op, "ask") * units);
+        // What it fetched: the sells of that good after it, up to its own units.
+        let (mut left, mut proceeds) = (units, 0);
+        for sell in lines[i..].iter().filter(|v| {
+            ev(v) == "trade-outcome"
+                && v.get("side").and_then(Value::as_str) == Some("sell")
+                && v.get("outcome").and_then(Value::as_str) == Some("filled")
+                && good_of(v) == good
+        }) {
+            if left <= 0 {
+                break;
+            }
+            let su = num(sell, "units").max(1);
+            let u = su.min(left);
+            proceeds += num(sell, "total") * u / su;
+            left -= u;
+        }
+        if left == 0 {
+            closed += 1;
+            expected += num(op, "est_margin");
+            realized += proceeds - basis_total;
+        }
+    }
+    (closed, expected, realized)
+}
+
 /// The ship's own delivery record, summed: hauls and freight paid.
 pub(crate) fn delivery_totals(ship_dir: &Path) -> (i64, i64) {
     let Ok(text) = std::fs::read_to_string(ship_dir.join("deliveries.jsonl")) else {
@@ -705,6 +776,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 };
                 let (hauls, paid) = delivery_totals(&s.dir);
                 let (aboard_units, aboard_cost) = aboard(&s.dir);
+                let (closed_positions, expected, est_realized) = estimate_calibration(&s.dir);
                 let credits = g("credits").as_i64().unwrap_or(0);
                 let debt = g("debt").as_i64().unwrap_or(0);
                 let e = per_captain.entry(s.captain.captain.clone()).or_default();
@@ -743,7 +815,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                                "inventory_cost": aboard_cost, "inventory": aboard_units,
                                "unmatched_units": book.unmatched_units,
                                "unmatched_proceeds": book.unmatched_proceeds,
-                               "quoted_basis_lots": book.quoted_basis_lots},
+                               "quoted_basis_lots": book.quoted_basis_lots,
+                               "closed_positions": closed_positions,
+                               "expected_margin": expected,
+                               "realized_on_closed": est_realized},
                     "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
                     "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
                     "reachable": me.is_some(),
@@ -802,6 +877,12 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     "    trades: {} filled — realized ℳ{} on ℳ{} sold ({}%) — aboard at cost ℳ{} {}",
                     t["filled"], t["realized"], t["cost_of_sold"], t["margin_pct"], t["inventory_cost"], t["inventory"]
                 );
+                if t["closed_positions"].as_i64().unwrap_or(0) > 0 {
+                    println!(
+                        "      estimates: {} closed position(s) promised ℳ{}, returned ℳ{}",
+                        t["closed_positions"], t["expected_margin"], t["realized_on_closed"]
+                    );
+                }
                 if t["unmatched_units"].as_i64().unwrap_or(0) > 0
                     || t["quoted_basis_lots"].as_i64().unwrap_or(0) > 0
                 {

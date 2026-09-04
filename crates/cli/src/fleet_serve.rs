@@ -25,8 +25,8 @@ use familiar_whisker::autonomy::{self, Approval, Dial, Level, Surface};
 use serde_json::{json, Value};
 
 use super::fleet::{
-    aboard, delivery_totals, journal_fills, last_journal_line, lease_expiry, paired_ships,
-    pid_alive, read_env_value, trade_book, wire_get, Ship,
+    aboard, delivery_totals, estimate_calibration, journal_fills, last_journal_line, lease_expiry,
+    paired_ships, pid_alive, read_env_value, trade_book, wire_get, Ship,
 };
 
 const MAX_REQUEST: usize = 64 * 1024;
@@ -200,6 +200,7 @@ fn ship_row(s: &Ship, now: i64) -> Value {
     };
     let (hauls, paid) = delivery_totals(&s.dir);
     let (aboard_units, aboard_cost) = aboard(&s.dir);
+    let (closed_positions, expected, est_realized) = estimate_calibration(&s.dir);
     let mut fills: Vec<Value> = journal_fills(&s.dir)
         .as_array()
         .cloned()
@@ -246,7 +247,10 @@ fn ship_row(s: &Ship, now: i64) -> Value {
                    "inventory": aboard_units,
                    "unmatched_units": book.unmatched_units,
                    "unmatched_proceeds": book.unmatched_proceeds,
-                   "quoted_basis_lots": book.quoted_basis_lots},
+                   "quoted_basis_lots": book.quoted_basis_lots,
+                   "closed_positions": closed_positions,
+                   "expected_margin": expected,
+                   "realized_on_closed": est_realized},
         "dial": dial.settings,
         "open_proposals": open_proposals,
         // The computer's own persona record (T-236, kernel persona.rs), when she has one.
