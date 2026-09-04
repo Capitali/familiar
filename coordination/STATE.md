@@ -22,6 +22,9 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   compiles it out. **Build 105 SHIPPED from wildhorse at de6f145 (2026-09-04, Xcode 26.5): "No errors uploading
   archive", TestFlight processing; the external release backgrounded by ship.sh.** It carries
   Settings → Familiar → "Show the bridge" + feed URL/bearer (T-237 B3). Ian pastes the bearer.
+  **BUILD 106 (92d4dbd, wildhorse, same day) SUPERSEDES 105 for the first device test:** it
+  carries the persona read (105 shows Felix as unnamed), `?mine=true`, the BackgroundSync
+  main-actor fix, and the Trades card's estimates line. Use 106.
 
 
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
