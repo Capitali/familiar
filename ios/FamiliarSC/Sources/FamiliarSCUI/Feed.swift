@@ -163,6 +163,9 @@ public enum FeedError: Error, Equatable, CustomStringConvertible {
 
 public protocol ShipsFeed: Sendable {
     func ships() async throws -> [ShipSummary]
+    /// What the computer may read about this ship right now (fuel, the brief…) and the one-
+    /// line frame of what the captain is looking at. Empty when the feed has no briefs.
+    func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument])
     func persona(world: String) async throws -> Persona?
     /// The journal from a tick on (nil = all of it), oldest first.
     func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry]
@@ -184,6 +187,10 @@ public protocol CaptainActs: Sendable {
     func setAutomations(world: String, automations: [Automation]) async throws -> String?
     /// Re-home the ship under another captain record (captain.json's `captain`).
     func setCaptain(world: String, captain: String) async throws -> String?
+}
+
+public extension ShipsFeed {
+    func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument]) { (nil, []) }
 }
 
 // MARK: - The store feed: ship stores on this machine (the Mac host, or a copied fixture)

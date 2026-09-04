@@ -42,6 +42,9 @@ public struct ShipSettingsView: View {
                         Button("Rename") { act { await model.rename(computer: computer.trimmingCharacters(in: .whitespaces)) } }
                             .disabled(busy || computer.trimmingCharacters(in: .whitespaces).isEmpty || computer == s.computer)
                     }
+                    Section("Her voice") {
+                        VoicePicker(speaker: model.speaker)
+                    }
                     Section("What the pilot may do") {
                         Toggle(isOn: $freight) { VStack(alignment: .leading) { Text("Freight"); Text("book, fly, collect, refuel, repair").font(.caption).foregroundStyle(.secondary) } }
                         Toggle(isOn: $trade) { VStack(alignment: .leading) { Text("Trade"); Text("buy where cheap, ride, sell where dear").font(.caption).foregroundStyle(.secondary) } }
@@ -88,5 +91,29 @@ public struct ShipSettingsView: View {
     func act(_ f: @escaping () async -> BridgeModel.ActOutcome) {
         busy = true; outcome = nil
         Task { outcome = await f(); busy = false }
+    }
+}
+
+
+import AVFoundation
+
+/// Pick the voice she speaks with, from what the device has installed; try it aloud.
+struct VoicePicker: View {
+    let speaker: Speaker
+    @AppStorage(Speaker.chosenVoiceKey) private var chosen = ""
+    private let voices = Speaker.candidates()
+
+    var body: some View {
+        Picker("Voice", selection: $chosen) {
+            Text("Best installed").tag("")
+            ForEach(voices, id: \.identifier) { v in
+                Text("\(v.name) · \(Speaker.qualityWord(v)) · \(v.language)").tag(v.identifier)
+            }
+        }
+        Button("Try it") { speaker.speak("Captain, this is how I sound. Fuel one hundred thirty-five of six hundred, berthed at titania cold store.") }
+        if !voices.contains(where: { $0.quality == .premium || $0.quality == .enhanced }) {
+            Text("Only compact voices are installed. For a natural one, download a premium or enhanced English voice in Settings → Accessibility → Spoken Content → Voices, then pick it here.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

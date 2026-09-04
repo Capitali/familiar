@@ -28,6 +28,7 @@ public final class BridgeModel {
     public var pendingDialChanges: [DialChange] = []
     /// The captain's conversation with her, for the open ship.
     public var conversation: Conversation?
+    var conversationWorld: String?
     public var turns: [Conversation.Turn] = []
     public var asking = false
     /// Speak her answers aloud (on by default; the captain can mute).
@@ -101,10 +102,13 @@ public final class BridgeModel {
             dial = try await feed.dial(world: world)
             book = try await feed.book(world: world)
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
-            let ctx = BridgeContext(entries: latestWindow(), hull: summary?.hullGlance, openProposals: openProposals)
-            if let c = conversation, c.voice.persona.name == (persona?.name ?? computerName) {
+            let (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
+            let frameLine = frame ?? summary.map { "ship, hull \($0.shipName) (\($0.worldInstance)), captain \($0.captain), computer \(computerName)" }
+            let ctx = BridgeContext(entries: latestWindow(), hull: summary?.hullGlance, openProposals: openProposals, frame: frameLine, documents: docs)
+            if let c = conversation, c.voice.persona.name == (persona?.name ?? computerName), conversationWorld == world {
                 c.context = ctx; c.consent = voiceConsent
             } else {
+                conversationWorld = world
                 conversation = Conversation(voice: BridgeVoice(persona: persona ?? Persona(name: computerName, style: nil)), context: ctx, consent: voiceConsent)
                 turns = []
             }

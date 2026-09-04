@@ -82,6 +82,30 @@ final class UITests: XCTestCase {
         XCTAssertFalse(BridgeModel.describe(URLError(.cannotConnectToHost)).hasPrefix("Error Domain="), "a sentence, not an NSError dump")
     }
 
+    func testFuelBriefRendersWhatSheCanSay() throws {
+        let f = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"fuel":135,"capacity":600,"docked":"titania-cold-store","credits":0,"fill_price_here":930,"stranded":true,"can_reach":[],"pumps":[{"station":"foxys-diner","ticks":66,"fuel_cost":167,"reachable":false,"short_by":65,"fill_price":930,"affordable":false,"here":false}],"saleable_here":[{"good":"bluefin-reserve","units":114,"bid":58,"will_take":0,"worth":0}],"tanker":{"available":true,"pilot_will_call":false,"why":"a PAWS call-out   pins the hull"},"if_stranded":"sell what this berth will take,  ask another captain"}"#.utf8))
+        let text = Briefs.fuel(f)
+        XCTAssertTrue(text.contains("Fuel aboard: 135 of 600. Berthed at titania-cold-store."))
+        XCTAssertTrue(text.contains("She is STRANDED"))
+        XCTAssertTrue(text.contains("Pump foxys-diner: 66 ticks away, burns 167 fuel to reach, NOT reachable — short by 65 fuel; a fill there costs ℳ930 (not affordable)."))
+        XCTAssertTrue(text.contains("This berth will not take the 114 bluefin-reserve aboard (bid 58, takes 0)."))
+        XCTAssertTrue(text.contains("Tanker: available; the pilot will NOT call it on her own. Why: a PAWS call-out pins the hull"))
+        XCTAssertTrue(text.contains("Ways out when stranded: sell what this berth will take, ask another captain."))
+        let b = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"context":{"kind":"ship","hull":"Kibble Klipper","captain":"Luke SkyWhisker","computer":"Felix","world":"w"},"aboard":{"units":{"bluefin-reserve":114},"cost":15960},"dial":{"*":"confirm","freight":"confirm"},"open_proposals":[],"advice":[{"would":"fly to foxys-diner","why":"a tanker is days","since_tick":7717,"times":17}],"recent":[{"tick":7717,"event":"book-corrected","why":"adopted"}]}"#.utf8))
+        XCTAssertEqual(Briefs.frame(fromBrief: b, worldInstance: "PROD"), "ship, hull Kibble Klipper (PROD), captain Luke SkyWhisker, computer Felix")
+        let brief = Briefs.brief(b)
+        XCTAssertTrue(brief.contains("Aboard: 114 bluefin-reserve (cost ℳ15960)."))
+        XCTAssertTrue(brief.contains("Autonomy dial: everything on confirm."))
+        XCTAssertTrue(brief.contains("Standing advice: fly to foxys-diner — a tanker is days (since t7717, said 17 times)."))
+        // The floor answer to "how do I refuel?" comes from the fuel document, not a shrug.
+        let ctx = BridgeContext(entries: [], openProposals: 0, frame: "ship", documents: [ContextDocument(name: "fuel", title: "fuel", text: text)])
+        let conv = Conversation(voice: BridgeVoice(persona: Persona(name: "Felix", style: nil)), context: ctx)
+        let answer = conv.floorAnswer("how do I refuel")
+        XCTAssertTrue(answer.contains("Fuel aboard: 135 of 600"), answer)
+        XCTAssertTrue(answer.contains("Pump foxys-diner"), answer)
+        XCTAssertTrue(Grounding.tokens(in: ctx.truth(floor: BridgeVoice(persona: Persona(name: "Felix", style: nil)).floor(ctx))).contains("foxys-diner"))
+    }
+
     func testNotifierDeliversEachNoticeOnce() {
         let defaults = UserDefaults(suiteName: "sc-tests-\(UUID().uuidString)")!
         let n = CaptainNotifier(defaults: defaults)

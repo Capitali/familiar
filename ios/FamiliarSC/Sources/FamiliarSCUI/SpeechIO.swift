@@ -18,12 +18,30 @@ public final class Speaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Se
 
     public override init() { super.init(); synth.delegate = self }
 
-    static func bestVoice() -> AVSpeechSynthesisVoice? {
-        let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
-        return english.first { $0.quality == .premium } ?? english.first { $0.quality == .enhanced } ?? AVSpeechSynthesisVoice(language: "en-US")
+    /// The captain's chosen voice (UserDefaults `sc.voiceIdentifier`), else the best installed:
+    /// premium, then enhanced, matching the device's language first. Premium voices are a
+    /// download (iOS Settings → Accessibility → Spoken Content → Voices); the compact default is
+    /// the "terrible" one (Ian, 2026-09-04).
+    public static let chosenVoiceKey = "sc.voiceIdentifier"
+
+    public static func candidates() -> [AVSpeechSynthesisVoice] {
+        let lang = Locale.current.language.languageCode?.identifier ?? "en"
+        let all = AVSpeechSynthesisVoice.speechVoices()
+        let mine = all.filter { $0.language.hasPrefix(lang) }
+        let rank: (AVSpeechSynthesisVoice) -> Int = { v in v.quality == .premium ? 0 : v.quality == .enhanced ? 1 : 2 }
+        return (mine.isEmpty ? all : mine).sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.name < $1.name }
     }
 
-    public func speak(_ text: String, rate: Float = AVSpeechUtteranceDefaultSpeechRate) {
+    public static func bestVoice() -> AVSpeechSynthesisVoice? {
+        if let id = UserDefaults.standard.string(forKey: chosenVoiceKey), let v = AVSpeechSynthesisVoice(identifier: id) { return v }
+        return candidates().first ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    public static func qualityWord(_ v: AVSpeechSynthesisVoice) -> String {
+        switch v.quality { case .premium: return "premium"; case .enhanced: return "enhanced"; default: return "compact" }
+    }
+
+    public func speak(_ text: String, rate: Float = AVSpeechUtteranceDefaultSpeechRate * 0.92) {
         stop()
         #if os(iOS) || os(visionOS)
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
@@ -32,6 +50,8 @@ public final class Speaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Se
         let u = AVSpeechUtterance(string: text)
         u.voice = Speaker.bestVoice()
         u.rate = rate
+        u.preUtteranceDelay = 0.15
+        u.pitchMultiplier = 0.98
         speaking = true
         synth.speak(u)
     }
