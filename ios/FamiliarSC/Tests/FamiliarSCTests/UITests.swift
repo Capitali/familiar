@@ -91,7 +91,7 @@ final class UITests: XCTestCase {
         XCTAssertTrue(text.contains("This berth will not take the 114 bluefin-reserve aboard (bid 58, takes 0)."))
         XCTAssertTrue(text.contains("Tanker: available; the pilot will NOT call it on her own. Why: a PAWS call-out pins the hull"))
         XCTAssertTrue(text.contains("Ways out when stranded: sell what this berth will take, ask another captain."))
-        let b = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"context":{"kind":"ship","hull":"Kibble Klipper","captain":"Luke SkyWhisker","computer":"Felix","world":"w"},"aboard":{"units":{"bluefin-reserve":114},"cost":15960},"dial":{"*":"confirm","freight":"confirm"},"open_proposals":[],"advice":[{"would":"fly to foxys-diner","why":"a tanker is days","since_tick":7717,"times":17}],"recent":[{"tick":7717,"event":"book-corrected","why":"adopted"}]}"#.utf8))
+        let b = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"context":{"kind":"ship","hull":"Kibble Klipper","captain":"Luke SkyWhisker","computer":"Felix","world":"w"},"aboard":{"units":{"bluefin-reserve":114},"cost":15960},"dial":{"*":"confirm","freight":"confirm"},"open_proposals":[],"standing_advice":[{"would":"fly to foxys-diner","why":"a tanker is days","since_tick":7717,"times":17}],"recent":[{"tick":7717,"event":"book-corrected","why":"adopted"}]}"#.utf8))
         XCTAssertEqual(Briefs.frame(fromBrief: b, worldInstance: "PROD"), "ship, hull Kibble Klipper (PROD), captain Luke SkyWhisker, computer Felix")
         let brief = Briefs.brief(b)
         XCTAssertTrue(brief.contains("Aboard: 114 bluefin-reserve (cost ℳ15960)."))

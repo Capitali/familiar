@@ -66,7 +66,7 @@ public enum Briefs {
         }
         let open = b["open_proposals"]?.array ?? []
         out.append(open.isEmpty ? "No proposal waiting on the captain." : "Proposals waiting on the captain: " + open.compactMap { $0["would"]?.string ?? $0["describe"]?.string }.joined(separator: "; ") + ".")
-        for a in b["advice"]?.array ?? [] {
+        for a in (b["standing_advice"] ?? b["advice"])?.array ?? [] {
             let would = a["would"]?.string ?? "", why = a["why"]?.string ?? ""
             let since = a["since_tick"]?.int, times = a["times"]?.int ?? 1
             out.append("Standing advice: \(would) — \(why)" + (since.map { " (since t\($0), said \(times) times)" } ?? "") + ".")
