@@ -157,10 +157,13 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
                 continue
             }
             guard !here.isEmpty, let r = try? await client.route(from: here, to: st.id) else { continue }
-            let cost = r.fuel, reachable = cost <= fuel
+            // The pilot's rungs: standard first, economy only when standard cannot reach.
+            let legs = r.legs.compactMap { $0.distanceKm.map { Int64($0) } }
+            let plan = BurnRungs.plan(legsKm: legs, quotedAtReference: r.fuel, hullAccelMilliG: m.effectiveAccelMilliG ?? BurnRungs.referenceAccelMilliG, tank: fuel)
+            let cost = plan.fuel, reachable = plan.reaches
             let fill = (cap - max(0, fuel - cost)) * fuelPricePerUnit
             var o: [String: JSONValue] = ["station": .string(st.id), "here": .bool(false), "ticks": .number(Double(r.ticks)), "fuel_cost": .number(Double(cost)),
-                                          "reachable": .bool(reachable), "fill_price": .number(Double(fill)), "affordable": .bool(fill <= m.credits)]
+                                          "reachable": .bool(reachable), "fill_price": .number(Double(fill)), "affordable": .bool(fill <= m.credits), "burn": .string(plan.burn)]
             if !reachable { o["short_by"] = .number(Double(cost - fuel)) }
             pumps.append(.object(o))
         }
