@@ -11,6 +11,10 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   server farm in the cloud … a massively multiplayer universe". Target `UCFFamiliar` on main, direct
   mode live-proven on LOCAL. **WAITS ON IAN:** create the App Store Connect app record for bundle
   `io.river.familiar.ucf` (name "UCF Familiar"); then wildhorse runs `ios/tools/ship-ucf.sh 1`.
+  **DONE 2026-09-04: Ian created the record; UCF Familiar BUILD 1 UPLOADED from wildhorse** after
+  wildhorse registered the bundle id (65TTGZ6GSY) and minted an App Store profile against the same
+  Apple Distribution cert (8PV78GZUUJ) — the ASC key cannot cloud-sign, so ship-ucf.sh pins manual
+  signing. That profile lives on wildhorse only: UCF Familiar uploads stay there, like the other two.
 
 - **FELIX FILES ISSUES (Ian, 2026-09-04, verbatim): "If Felix has suggestions for world improvements,
   bug questions, or future features, you should help Felix open issues to the repo to have them
