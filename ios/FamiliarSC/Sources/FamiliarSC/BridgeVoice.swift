@@ -120,10 +120,12 @@ public final class BridgeVoice: @unchecked Sendable {
         } else {
             out[.onDevice] = "needs OS 26"
         }
-        if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *) {
-            if !consent.privateCloudCompute {
-                out[.privateCloudCompute] = "consent off"
-            } else {
+        // The captain's consent is the outermost gate: without it nothing else about PCC is
+        // asked, on any OS.
+        if !consent.privateCloudCompute {
+            out[.privateCloudCompute] = "consent off"
+        } else if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *) {
+            do {
                 switch PrivateCloudComputeLanguageModel().availability {
                 case .available: out[.privateCloudCompute] = "available"
                 case .unavailable(.deviceNotEligible): out[.privateCloudCompute] = "device not eligible or no entitlement"
@@ -137,7 +139,7 @@ public final class BridgeVoice: @unchecked Sendable {
         }
         #else
         out[.onDevice] = "no Foundation Models on this platform"
-        out[.privateCloudCompute] = "no Foundation Models on this platform"
+        out[.privateCloudCompute] = consent.privateCloudCompute ? "no Foundation Models on this platform" : "consent off"
         #endif
         return out
     }
