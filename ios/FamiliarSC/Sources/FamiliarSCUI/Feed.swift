@@ -36,17 +36,19 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var sentence: String = ""
     public var leasePrincipal: Int64?
     public var leaseServicePaid: Int64?
+    /// The merchant's book as `fleet status` computes it from receipts ∪ journal (wire only).
+    public var trades: TradeBook?
 
     public var id: String { world }
 
-    public init(world: String, label: String, computer: String, named: Bool, hull: String, captain: String, server: String, automations: [String], credits: Int64? = nil, debt: Int64? = nil, fuel: Int64? = nil, fuelCapacity: Int64? = nil, wearBps: Int64? = nil, docked: String? = nil, enRouteTo: String? = nil, pilotAlive: Bool, leaseHoursLeft: Int64? = nil, reachable: Bool, lastEvent: String? = nil, lastAt: Int64? = nil, mood: BridgeReport.Mood, openProposals: Int, sentence: String = "", leasePrincipal: Int64? = nil, leaseServicePaid: Int64? = nil) {
+    public init(world: String, label: String, computer: String, named: Bool, hull: String, captain: String, server: String, automations: [String], credits: Int64? = nil, debt: Int64? = nil, fuel: Int64? = nil, fuelCapacity: Int64? = nil, wearBps: Int64? = nil, docked: String? = nil, enRouteTo: String? = nil, pilotAlive: Bool, leaseHoursLeft: Int64? = nil, reachable: Bool, lastEvent: String? = nil, lastAt: Int64? = nil, mood: BridgeReport.Mood, openProposals: Int, sentence: String = "", leasePrincipal: Int64? = nil, leaseServicePaid: Int64? = nil, trades: TradeBook? = nil) {
         self.world = world; self.label = label; self.computer = computer; self.named = named; self.hull = hull
         self.captain = captain; self.server = server; self.automations = automations; self.credits = credits
         self.debt = debt; self.fuel = fuel; self.fuelCapacity = fuelCapacity; self.wearBps = wearBps
         self.docked = docked; self.enRouteTo = enRouteTo; self.pilotAlive = pilotAlive
         self.leaseHoursLeft = leaseHoursLeft; self.reachable = reachable; self.lastEvent = lastEvent
         self.lastAt = lastAt; self.mood = mood; self.openProposals = openProposals
-        self.sentence = sentence; self.leasePrincipal = leasePrincipal; self.leaseServicePaid = leaseServicePaid
+        self.sentence = sentence; self.leasePrincipal = leasePrincipal; self.leaseServicePaid = leaseServicePaid; self.trades = trades
     }
 
     /// The canvas's one-word mood tag.
@@ -63,6 +65,40 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var hullGlance: HullGlance {
         HullGlance(shipName: hull.isEmpty ? nil : hull, docked: docked, enRouteTo: enRouteTo, credits: credits ?? 0,
                    debt: debt, fuel: fuel, fuelCapacity: fuelCapacity, wearBps: wearBps, leased: false)
+    }
+}
+
+/// The merchant's book (`fleet status --json` → `trades`, wildhorse 1d4d098): realized P&L by
+/// FIFO cost, with its two honesty marks — units sold with no lot behind them are SET ASIDE,
+/// never counted in `realized`; lots whose basis is the pilot's own quoted ask (not a fill
+/// receipt) make the profit they imply a CEILING.
+public struct TradeBook: Equatable, Sendable {
+    public var filled: Int64 = 0
+    public var rejected: Int64 = 0
+    public var realized: Int64 = 0
+    public var costOfSold: Int64 = 0
+    public var marginPct: Int64 = 0
+    public var inventoryCost: Int64 = 0
+    public var unmatchedUnits: Int64 = 0
+    public var unmatchedProceeds: Int64 = 0
+    public var quotedBasisLots: Int64 = 0
+
+    public init() {}
+
+    public init(row: JSONValue) {
+        filled = row["filled"]?.int ?? 0; rejected = row["rejected"]?.int ?? 0
+        realized = row["realized"]?.int ?? 0; costOfSold = row["cost_of_sold"]?.int ?? 0
+        marginPct = row["margin_pct"]?.int ?? 0; inventoryCost = row["inventory_cost"]?.int ?? 0
+        unmatchedUnits = row["unmatched_units"]?.int ?? 0; unmatchedProceeds = row["unmatched_proceeds"]?.int ?? 0
+        quotedBasisLots = row["quoted_basis_lots"]?.int ?? 0
+    }
+
+    /// The caveat the card shows when the number is not the whole truth; nil when it is.
+    public var caveat: String? {
+        var parts: [String] = []
+        if unmatchedUnits > 0 { parts.append("ℳ\(unmatchedProceeds) from \(unmatchedUnits) unmatched unit\(unmatchedUnits == 1 ? "" : "s") set aside") }
+        if quotedBasisLots > 0 { parts.append("\(quotedBasisLots) lot\(quotedBasisLots == 1 ? "" : "s") at a quoted basis, so the profit is a ceiling") }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ")
     }
 }
 
