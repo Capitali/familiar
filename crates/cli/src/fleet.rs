@@ -569,11 +569,28 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
                     .unwrap_or_else(|| s.captain.server.clone());
                 let me = wire_get(&server, &key, "/v1/me").ok();
-                let fills = match journal_fills(&s.dir) {
-                    Value::Null => wire_get(&server, &key, "/v1/receipts").unwrap_or(Value::Null),
-                    j => j,
-                };
-                let book = trade_book(&fills);
+                // Journal ∪ wire, deduplicated: the journal is the long memory, the
+                // wire's day-window catches a fill the pilot never read back (a
+                // restart inside the fold — the bluefin lot, 2026-09-03).
+                let mut fills: Vec<Value> = journal_fills(&s.dir)
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                if let Ok(Value::Array(wire_rows)) = wire_get(&server, &key, "/v1/receipts") {
+                    let seen: std::collections::HashSet<String> = fills
+                        .iter()
+                        .map(|f| {
+                            format!("{}|{}|{}|{}", f["tick"], f["good"], f["side"], f["units"])
+                        })
+                        .collect();
+                    for r in wire_rows {
+                        let k = format!("{}|{}|{}|{}", r["tick"], r["good"], r["side"], r["units"]);
+                        if !seen.contains(&k) {
+                            fills.push(r);
+                        }
+                    }
+                }
+                let book = trade_book(&Value::Array(fills));
                 let g = |k: &str| {
                     me.as_ref()
                         .and_then(|m| m.get(k).cloned())
