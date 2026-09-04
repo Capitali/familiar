@@ -23,14 +23,34 @@ public struct VoiceConsent: Equatable {
     public init(privateCloudCompute: Bool = false) { self.privateCloudCompute = privateCloudCompute }
 }
 
+/// A document the computer may read to answer — the fuel picture, the ship's brief, a
+/// captain's file. Served by the host, never authored by the model; the grounding check
+/// counts its words as truth.
+public struct ContextDocument: Equatable, Sendable {
+    public var name: String
+    public var title: String
+    public var text: String
+    public init(name: String, title: String, text: String) { self.name = name; self.title = title; self.text = text }
+}
+
 public struct BridgeContext: Sendable {
     public var entries: [JournalEntry]
     public var hull: HullGlance?
     public var openProposals: Int
     public var question: String
+    /// What the captain is looking at — "ship Kibble Klipper (PROD), captain Luke SkyWhisker,
+    /// computer Felix" — the frame every answer is given in (Ian: "context makes all the difference").
+    public var frame: String?
+    public var documents: [ContextDocument]
 
-    public init(entries: [JournalEntry], hull: HullGlance? = nil, openProposals: Int = 0, question: String = "What did you do today?") {
+    public init(entries: [JournalEntry], hull: HullGlance? = nil, openProposals: Int = 0, question: String = "What did you do today?", frame: String? = nil, documents: [ContextDocument] = []) {
         self.entries = entries; self.hull = hull; self.openProposals = openProposals; self.question = question
+        self.frame = frame; self.documents = documents
+    }
+
+    /// Everything the check may count as truth: the floor's words, the hull, the documents.
+    public func truth(floor: BridgeReport) -> String {
+        (floor.facts + [floor.headline, floor.nextAct, frame ?? ""] + documents.map(\.text)).joined(separator: "\n")
     }
 }
 
@@ -189,7 +209,7 @@ public final class BridgeVoice: @unchecked Sendable {
         if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *) {
             let pcc = PrivateCloudComputeLanguageModel()
             guard case .available = pcc.availability else { return .failure(VoiceFailure(why: "unavailable")) }
-            let session = LanguageModelSession(model: pcc, tools: tools(ctx), instructions: instructions())
+            let session = LanguageModelSession(model: pcc, tools: tools(ctx), instructions: instructions(frame: ctx.frame, documents: ctx.documents))
             return await generate(session: session, ctx: ctx, floor: floor)
         }
         return .failure(VoiceFailure(why: "needs OS 27"))
@@ -200,8 +220,14 @@ public final class BridgeVoice: @unchecked Sendable {
 
     // MARK: prompt
 
-    func instructions() -> String {
+    func instructions(frame: String? = nil, documents: [ContextDocument] = []) -> String {
         let s = persona.voice
+        let framing = frame.map { "\nYou are speaking about: \($0). Answer for THAT ship unless the captain names another." } ?? ""
+        let docs = documents.isEmpty ? "" : "\nYou have documents to read with tools before answering what they cover: " + documents.map { "`read_\($0.name)` — \($0.title)" }.joined(separator: "; ") + ". When the captain asks about fuel, refuelling, pumps or being stranded, read the fuel document and answer from it: which pump, how far, what it costs, what is short, and what the ways out are."
+        return baseInstructions(s) + framing + docs
+    }
+
+    func baseInstructions(_ s: Style) -> String {
         let role = persona.role.isEmpty
             ? "You are \(persona.name), the ship's computer aboard a freight hull on the UCF exchange, speaking to your captain."
             : "You are \(persona.name). " + persona.role.replacingOccurrences(of: "{who}", with: "your captain")
@@ -254,7 +280,9 @@ public final class BridgeVoice: @unchecked Sendable {
 
     @available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
     func tools(_ ctx: BridgeContext) -> [any Tool] {
-        [AskStatusTool(ctx: ctx, persona: persona), ExplainDecisionTool(ctx: ctx, persona: persona), ProposeAutonomyTool(voice: self)]
+        var t: [any Tool] = [AskStatusTool(ctx: ctx, persona: persona), ExplainDecisionTool(ctx: ctx, persona: persona), ProposeAutonomyTool(voice: self)]
+        for d in ctx.documents { t.append(ReadDocumentTool(document: d)) }
+        return t
     }
 
     @available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
@@ -332,6 +360,22 @@ struct ExplainDecisionTool: Tool {
     }
 }
 
+/// Reads one host-served document (the fuel picture, the brief…) into the conversation.
+@available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
+struct ReadDocumentTool: Tool {
+    let document: ContextDocument
+    var name: String { "read_\(document.name)" }
+    var description: String { "Read the \(document.title). Use it whenever the captain asks about what it covers." }
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "What the captain wants from it, in a few words.")
+        var about: String
+    }
+
+    func call(arguments: Arguments) async throws -> String { document.text }
+}
+
 @available(macOS 26.0, iOS 26.0, visionOS 26.0, *)
 struct ProposeAutonomyTool: Tool {
     let name = "proposeAutonomy"
@@ -391,12 +435,22 @@ public final class Conversation: @unchecked Sendable {
         self.voice = voice; self.context = context; self.consent = consent
     }
 
-    /// The floor's answer: the journal lines that mention the question's words, told plainly.
+    /// The floor's answer, with no model: the document the question is about, whole (a
+    /// question about refuelling gets the fuel picture), else the journal lines that mention
+    /// the question's words, told plainly.
     public func floorAnswer(_ question: String) -> String {
         let floor = voice.floor(context)
         let words = question.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" }).map(String.init).filter { $0.count > 2 }
-        let facts = floor.facts.filter { f in words.contains { f.lowercased().contains($0) } }
-        if !facts.isEmpty { return facts.prefix(4).joined(separator: "\n") }
+        // "refuel" ⊃ "fuel", "pumps" ⊃ "pump": a word matches a document when either contains the other.
+        func hits(_ a: String, _ b: String) -> Bool { a.contains(b) || b.contains(a) }
+        let scored = context.documents.map { d -> (ContextDocument, Int) in
+            let vocab = (d.name + " " + d.title).lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init).filter { $0.count > 3 }
+            return (d, words.filter { w in vocab.contains { hits(w, $0) } }.count)
+        }
+        if let best = scored.max(by: { $0.1 < $1.1 }), best.1 > 0 { return best.0.text }
+        let lines = floor.facts + context.documents.flatMap { $0.text.split(separator: "\n").map(String.init) }
+        let facts = lines.filter { f in words.contains { w in f.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" }).contains { hits(String($0), w) } } }
+        if !facts.isEmpty { return facts.prefix(6).joined(separator: "\n") }
         return floor.headline + "\n" + floor.facts.prefix(3).joined(separator: "\n") + "\n" + floor.nextAct
     }
 
@@ -408,19 +462,22 @@ public final class Conversation: @unchecked Sendable {
         if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *), case .available = SystemLanguageModel.default.availability {
             let s: LanguageModelSession
             if let existing = session { s = existing } else {
-                s = LanguageModelSession(tools: voice.tools(context), instructions: voice.instructions())
+                s = LanguageModelSession(tools: voice.tools(context), instructions: voice.instructions(frame: context.frame, documents: context.documents))
                 session = s
             }
+            let docList = context.documents.isEmpty ? "" : "\nDocuments you can read: " + context.documents.map { "read_\($0.name) (\($0.title))" }.joined(separator: ", ") + ". Read the one that covers the question before answering."
             let prompt = """
             The captain says: "\(question)"
-            Answer in one to three sentences, in your voice, from these FACTS only (every number, id, tick and station must come from them):
+            \(context.frame.map { "Context: \($0)." } ?? "")
+            Answer in two to four sentences, in your voice, from the FACTS and the documents only (every number, id, tick and station must come from them). Give the answer first, then the one thing the captain can do about it.
+            FACTS:
             \(floor.facts.map { "- " + $0 }.joined(separator: "\n"))
-            Hull now: \(context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? "not on the wire")
-            Mood: \(floor.mood.rawValue). If the facts do not answer, say what you do know and what you do not.
+            Hull now: \(context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? "not on the wire")\(docList)
+            Mood: \(floor.mood.rawValue). If nothing you have answers it, say what you do know and what you do not — never guess.
             """
             do {
                 let reply = try await s.respond(to: prompt).content
-                let allowed = Grounding.tokens(in: (floor.facts + [floor.headline, floor.nextAct, context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? ""]).joined(separator: "\n"))
+                let allowed = Grounding.tokens(in: context.truth(floor: floor) + "\n" + (context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? ""))
                 let said = Grounding.tokens(in: reply).filter { $0.first?.isNumber ?? false || $0.hasPrefix("L") || $0.hasPrefix("t") || $0.hasPrefix("p-") }
                 let invented = said.subtracting(allowed)
                 if invented.isEmpty {

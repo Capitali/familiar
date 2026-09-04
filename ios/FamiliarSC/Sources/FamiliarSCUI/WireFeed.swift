@@ -137,6 +137,21 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         return DialSheet(loaded: loaded, bought: e.bought ?? [])
     }
 
+    /// The frame and the documents from `/ships/{world}/brief` and `/ships/{world}/fuel`.
+    /// A missing route is not a failure: she answers from what she has.
+    public func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument]) {
+        var docs: [ContextDocument] = []
+        var frame: String? = nil
+        if let d = try? await call("ships/\(world)/brief"), let b = try? JSONDecoder().decode(JSONValue.self, from: d) {
+            frame = Briefs.frame(fromBrief: b, worldInstance: worldInstance)
+            docs.append(ContextDocument(name: "brief", title: "ship's brief — what is aboard, the dial, proposals, standing advice, recent events", text: Briefs.brief(b)))
+        }
+        if let d = try? await call("ships/\(world)/fuel"), let f = try? JSONDecoder().decode(JSONValue.self, from: d) {
+            docs.append(ContextDocument(name: "fuel", title: "fuel picture — fuel aboard, every pump with distance, cost and reachability, what this berth would buy, the tanker, the ways out when stranded", text: Briefs.fuel(f)))
+        }
+        return (frame, docs)
+    }
+
     public func book(world: String) async throws -> ShipBook {
         let e = try await envelope("ships/\(world)/book")
         return ShipBook(holdings: e.holdings ?? [], deliveries: e.deliveries ?? [])
