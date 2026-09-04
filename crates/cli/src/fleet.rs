@@ -342,6 +342,44 @@ pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
     book
 }
 
+/// Where a captain's computer lives. Ian's ruling, 2026-09-04: *"One 'ships computer'
+/// per captain that can act across his entire fleet under a name he chooses."* So the
+/// persona is not a property of a hull — it is the captain's, and every ship they pair
+/// answers as it. The record sits beside `worlds/` in a `captains/<slug>/` store; the
+/// ship stores keep `captain.json` (who they fly for) and nothing else about the voice.
+/// A persona written into a ship store before this ruling is still read, as a fallback,
+/// so a store from last week does not lose its name.
+pub(crate) fn captain_store(root: &Path, captain: &str) -> PathBuf {
+    let slug: String = captain
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-').to_string();
+    root.parent()
+        .unwrap_or(root)
+        .join("captains")
+        .join(if slug.is_empty() {
+            "captain".into()
+        } else {
+            slug
+        })
+}
+
+/// The persona a ship answers as: the captain's, else whatever the ship store carries.
+pub(crate) fn persona_for(root: &Path, ship_dir: &Path, captain: &str) -> Option<Value> {
+    let cap = captain_store(root, captain);
+    for dir in [cap.as_path(), ship_dir] {
+        if let Ok(text) = std::fs::read_to_string(dir.join("persona.json")) {
+            if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
 /// What is actually in the hold, from the pilot's own reconciled book
 /// (`holdings.json`, checked against `/v1/me.cargo` every fold): good → units, and
 /// the total at cost. The trade book's leftover lots are a derived guess and drift
@@ -605,12 +643,24 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 style: Some(familiar_kernel::persona::Style::default()),
                 ..familiar_kernel::persona::Persona::default()
             };
-            if let Err(e) = familiar_kernel::persona::write(&ship_dir, &persona) {
-                eprintln!("fleet pair: writing the ship's persona: {e}");
+            // The persona is the CAPTAIN's (Ian, 2026-09-04), so a second ship joins
+            // the computer that already flies for them rather than minting another:
+            // only a captain with no computer yet gets one written here.
+            let persona_dir = captain_store(&root, captain);
+            let _ = std::fs::create_dir_all(&persona_dir);
+            let already = persona_dir
+                .join(familiar_kernel::persona::PERSONA_FILE)
+                .exists();
+            if already && computer_name.is_none() {
+                if let Ok(existing) = familiar_kernel::persona::load(&persona_dir) {
+                    println!("  joining {captain}'s computer, {}", existing.name);
+                }
+            } else if let Err(e) = familiar_kernel::persona::write(&persona_dir, &persona) {
+                eprintln!("fleet pair: writing the captain's persona: {e}");
                 return ExitCode::FAILURE;
             }
             if let Err(e) = familiar_kernel::persona::record_naming(
-                &ship_dir,
+                &persona_dir,
                 &familiar_kernel::persona::NameEvent {
                     at: super::now_secs(),
                     actor: if computer_name.is_some() {
@@ -635,7 +685,12 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 Err(e) => eprintln!("paired {} but the lease failed: {e}", w.id),
             }
             println!("  ship on the exchange: {ship_name} (key {key_id}, {server})");
-            println!("  her computer answers to: {}", persona.name);
+            println!(
+                "  her computer answers to: {}",
+                familiar_kernel::persona::load(&persona_dir)
+                    .map(|p| p.name)
+                    .unwrap_or_else(|_| persona.name.clone())
+            );
             println!("  automations granted: {}", automations.join(", "));
             println!("  store: {}", ship_dir.display());
             println!("  next: `familiar fleet run` keeps a pilot on her; `familiar fleet unpair {}` revokes.", w.id);
@@ -656,7 +711,20 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 eprintln!("fleet rename: {id} is not a paired ship in this store root");
                 return ExitCode::FAILURE;
             }
-            let mut persona = match familiar_kernel::persona::load(&ship_dir) {
+            // The name belongs to the CAPTAIN, not the hull: naming one ship names the
+            // computer that flies all of them (Ian, 2026-09-04). The ship is only how
+            // the captain was identified.
+            let captain: String = std::fs::read_to_string(ship_dir.join("captain.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .and_then(|v| v.get("captain").and_then(Value::as_str).map(String::from))
+                .unwrap_or_default();
+            let persona_dir = captain_store(&root, &captain);
+            if let Err(e) = std::fs::create_dir_all(&persona_dir) {
+                eprintln!("fleet rename: {e}");
+                return ExitCode::FAILURE;
+            }
+            let mut persona = match familiar_kernel::persona::load(&persona_dir) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("fleet rename: {e}");
@@ -671,12 +739,12 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             let was = persona.name.clone();
             persona.name = new_name.to_string();
             persona.persona_version = 2;
-            if let Err(e) = familiar_kernel::persona::write(&ship_dir, &persona) {
+            if let Err(e) = familiar_kernel::persona::write(&persona_dir, &persona) {
                 eprintln!("fleet rename: {e}");
                 return ExitCode::FAILURE;
             }
             if let Err(e) = familiar_kernel::persona::record_naming(
-                &ship_dir,
+                &persona_dir,
                 &familiar_kernel::persona::NameEvent {
                     at: super::now_secs(),
                     actor,
@@ -685,7 +753,24 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ) {
                 eprintln!("fleet rename: the naming trail could not be written: {e}");
             }
-            println!("the computer aboard {id} now answers to \"{new_name}\" (was \"{was}\")");
+            let fleet: Vec<String> = paired_ships(&dir, &root)
+                .into_iter()
+                .filter(|s| s.captain.captain == captain)
+                .map(|s| s.world.label)
+                .collect();
+            println!(
+                "{}'s computer now answers to \"{new_name}\" (was \"{was}\") — aboard {}",
+                if captain.is_empty() {
+                    "the captain"
+                } else {
+                    &captain
+                },
+                if fleet.is_empty() {
+                    id.to_string()
+                } else {
+                    fleet.join(", ")
+                }
+            );
             ExitCode::SUCCESS
         }
 
@@ -791,13 +876,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 // A ship paired before T-236 has no persona file: say so honestly
                 // rather than letting the loader's household default ("the
                 // familiar") answer for a computer that was never named.
-                let computer = if s.dir.join(familiar_kernel::persona::PERSONA_FILE).exists() {
-                    familiar_kernel::persona::load(&s.dir)
-                        .map(|p| p.name)
-                        .unwrap_or_else(|_| "(persona unreadable)".to_string())
-                } else {
-                    "(unnamed — `fleet rename` her)".to_string()
-                };
+                // The captain's computer, the ship's own record as a fallback for a
+                // store named before the per-captain ruling, else honestly unnamed.
+                let computer = persona_for(&root, &s.dir, &s.captain.captain)
+                    .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from))
+                    .unwrap_or_else(|| "(unnamed — `fleet rename` her)".to_string());
                 rows.push(json!({
                     "world": s.world.id, "label": s.world.label, "computer": computer,
                     "hull": s.captain.hull_name, "captain": s.captain.captain,

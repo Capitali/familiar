@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 
 use super::fleet::{
     aboard, delivery_totals, estimate_calibration, journal_fills, last_journal_line, lease_expiry,
-    paired_ships, pid_alive, read_env_value, trade_book, wire_get, Ship,
+    paired_ships, persona_for, pid_alive, read_env_value, trade_book, wire_get, Ship,
 };
 
 const MAX_REQUEST: usize = 64 * 1024;
@@ -188,7 +188,7 @@ fn clock(ship: &Ship, cache: &mut Clocks) -> (i64, i64) {
 }
 
 /// One ship's status row — the same facts `fleet status --json` prints.
-fn ship_row(s: &Ship, now: i64) -> Value {
+fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
     let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
     let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
         .unwrap_or_else(|| s.captain.server.clone());
@@ -253,9 +253,9 @@ fn ship_row(s: &Ship, now: i64) -> Value {
                    "realized_on_closed": est_realized},
         "dial": dial.settings,
         "open_proposals": open_proposals,
-        // The computer's own persona record (T-236, kernel persona.rs), when she has one.
-        "persona": std::fs::read_to_string(s.dir.join("persona.json")).ok()
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null),
+        // The CAPTAIN's computer (T-236 as Ian ruled it, 2026-09-04): one persona
+        // across their whole fleet, with a ship-local record as the fallback.
+        "persona": persona_for(root, &s.dir, &s.captain.captain).unwrap_or(Value::Null),
         "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
         "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
         "reachable": me.is_some(),
@@ -303,7 +303,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 .iter()
                 .map(|s| {
                     let (t, ts) = clock(s, clk);
-                    let mut row = ship_row(s, now);
+                    let mut row = ship_row(s, root, now);
                     row["tick"] = json!(t);
                     row["tick_seconds"] = json!(ts);
                     row
