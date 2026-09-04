@@ -70,6 +70,18 @@ final class UITests: XCTestCase {
         XCTAssertEqual(model.summary?.captain, "Luke SkyWhisker")
     }
 
+    func testCancellationIsNotAnErrorAndErrorsRead() {
+        XCTAssertTrue(BridgeModel.isCancellation(CancellationError()))
+        XCTAssertTrue(BridgeModel.isCancellation(URLError(.cancelled)))
+        XCTAssertTrue(BridgeModel.isCancellation(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
+        XCTAssertFalse(BridgeModel.isCancellation(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(BridgeModel.isCancellation(FeedError.refused("HTTP 401")))
+        XCTAssertEqual(BridgeModel.describe(FeedError.refused("no bearer (HTTP 401)")), "no bearer (HTTP 401)")
+        // A URLSession error carries its own sentence; a bare URLError() in a test does not, so
+        // pin only that the dump form ("Error Domain=… Code=… UserInfo={…}") never appears.
+        XCTAssertFalse(BridgeModel.describe(URLError(.cannotConnectToHost)).hasPrefix("Error Domain="), "a sentence, not an NSError dump")
+    }
+
     func testNotifierDeliversEachNoticeOnce() {
         let defaults = UserDefaults(suiteName: "sc-tests-\(UUID().uuidString)")!
         let n = CaptainNotifier(defaults: defaults)
