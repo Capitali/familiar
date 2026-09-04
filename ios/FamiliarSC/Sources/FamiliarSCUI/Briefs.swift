@@ -83,6 +83,48 @@ public enum Briefs {
         return out.joined(separator: "\n")
     }
 
+    /// The captain's slug as the host keys it: lowercased, spaces to hyphens, parentheses dropped.
+    public static func captainSlug(_ name: String) -> String {
+        let lowered = name.lowercased()
+        var out = ""
+        for ch in lowered {
+            if ch.isLetter || ch.isNumber { out.append(ch) }
+            else if ch == " " || ch == "-" || ch == "_" { if !out.hasSuffix("-") { out.append("-") } }
+        }
+        while out.hasSuffix("-") { out.removeLast() }
+        return out
+    }
+
+    /// The captain's brief: his computer, his hulls, the pooled book, what waits on him.
+    public static func captain(_ b: JSONValue) -> String {
+        var out: [String] = []
+        let name = b["captain"]?.string ?? b["context"]?["name"]?.string ?? "the captain"
+        let computer = b["computer"]?.string ?? b["context"]?["computer"]?.string ?? "her"
+        out.append("Captain \(name); his computer across the fleet is \(computer).")
+        let ships = b["ships"]?.array ?? []
+        for s in ships {
+            let hull = s["ship"]?.string ?? s["hull"]?.string ?? s["label"]?.string ?? "?"
+            let world = s["world_name"]?.string ?? ""
+            var line = "Hull \(hull)" + (world.isEmpty ? "" : " (\(world))")
+            if let d = s["docked"]?.string { line += ": berthed at \(d)" } else if let to = s["enRouteTo"]?.string { line += ": under way for \(to)" } else { line += ": under way" }
+            if let c = s["credits"]?.int { line += ", ℳ\(c)" }
+            if let f = s["fuel"]?.int { line += ", fuel \(f)" + (s["fuelCapacity"]?.int.map { "/\($0)" } ?? "") }
+            if let e = s["last_event"]?.string { line += ", last: \(e.replacingOccurrences(of: "-", with: " "))" }
+            out.append(line + ".")
+        }
+        if let k = b["book"] {
+            var parts: [String] = []
+            if let c = k["pooled_credits"]?.int { parts.append("ℳ\(c) pooled") }
+            if let d = k["debt"]?.int { parts.append("ℳ\(d) debt") }
+            if let r = k["trades_realized"]?.int { parts.append("ℳ\(r) realized on trades") }
+            if let a = k["aboard_at_cost"]?.int { parts.append("ℳ\(a) aboard at cost") }
+            if !parts.isEmpty { out.append("The fleet's book: " + parts.joined(separator: ", ") + ".") }
+        }
+        let open = b["open_proposals"]?.array ?? []
+        out.append(open.isEmpty ? "No proposal waits on the captain anywhere in the fleet." : "Waiting on the captain: " + open.compactMap { $0["would"]?.string ?? $0["describe"]?.string }.joined(separator: "; ") + ".")
+        return out.joined(separator: "\n")
+    }
+
     static func squash(_ s: String) -> String {
         s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }

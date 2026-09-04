@@ -142,12 +142,18 @@ public struct WireFeed: ShipsFeed, CaptainActs {
     public func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument]) {
         var docs: [ContextDocument] = []
         var frame: String? = nil
+        var captainName: String? = nil
         if let d = try? await call("ships/\(world)/brief"), let b = try? JSONDecoder().decode(JSONValue.self, from: d) {
             frame = Briefs.frame(fromBrief: b, worldInstance: worldInstance)
+            captainName = b["context"]?["captain"]?.string
             docs.append(ContextDocument(name: "brief", title: "ship's brief — what is aboard, the dial, proposals, standing advice, recent events", text: Briefs.brief(b)))
         }
         if let d = try? await call("ships/\(world)/fuel"), let f = try? JSONDecoder().decode(JSONValue.self, from: d) {
             docs.append(ContextDocument(name: "fuel", title: "fuel picture — fuel aboard, every pump with distance, cost and reachability, what this berth would buy, the tanker, the ways out when stranded", text: Briefs.fuel(f)))
+        }
+        // The captain's whole fleet, so she can answer about the other hulls and the pooled book.
+        if let captain = captainName, let d = try? await call("captains/\(Briefs.captainSlug(captain))/brief"), let c = try? JSONDecoder().decode(JSONValue.self, from: d) {
+            docs.append(ContextDocument(name: "fleet", title: "the captain's fleet — every hull he flies, where each is, the pooled book, what waits on him", text: Briefs.captain(c)))
         }
         return (frame, docs)
     }
