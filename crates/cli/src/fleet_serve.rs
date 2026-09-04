@@ -5,7 +5,8 @@
 //!
 //! Reads: `GET /ships`, `GET /ships/{world}/journal?since=N`,
 //! `GET /ships/{world}/proposals`, `GET /ships/{world}/dial`, `GET /ships/{world}/book`
-//! (holdings + deliveries). Writes:
+//! (holdings + deliveries), `GET /ships/{world}/fuel` (the fuel conversation's facts),
+//! `GET /ships/{world}/brief` and `GET /brief` (one call for the context on screen). Writes:
 //! `POST /ships/{world}/approve {id, approved}`, `PUT /ships/{world}/dial {…}`,
 //! `PUT /ships/{world}/automations {automations: […]}`, `POST /ships/{world}/rename {name}`,
 //! `PUT /ships/{world}/captain {captain}`,
@@ -32,6 +33,9 @@ use super::fleet::{
 };
 
 const MAX_REQUEST: usize = 64 * 1024;
+
+/// ℳ per unit of fuel (the content pack's `fuelPricePerUnit`; 2 on LOCAL and PROD).
+const FUEL_PRICE_PER_UNIT: i64 = 2;
 
 fn token(dir: &Path) -> std::io::Result<String> {
     let path = dir.join("fleet-serve.token");
@@ -304,6 +308,38 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
         _ => (0, 180),
     };
     match (req.method.as_str(), segs.as_slice()) {
+        ("GET", ["brief"]) => {
+            // The fleet in one call, for a captain looking at the whole list.
+            let mut per_captain: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            for s in &ships {
+                let (t, ts) = clock(s, clk);
+                let open = proposals_with_state(&s.dir, t)
+                    .into_iter()
+                    .filter(|p| p["state"] == "open")
+                    .count();
+                let mut row = ship_row(s, root, now);
+                row["tick"] = json!(t);
+                row["tick_seconds"] = json!(ts);
+                row["open_proposals"] = json!(open);
+                per_captain
+                    .entry(s.captain.captain.clone())
+                    .or_default()
+                    .push(row);
+            }
+            (
+                200,
+                json!({
+                    "context": {"kind": "fleet", "captains": per_captain.keys().collect::<Vec<_>>()},
+                    "captains": per_captain.iter().map(|(c, rows)| json!({
+                        "captain": c,
+                        "computer": rows.first().and_then(|r| r["persona"]["name"].as_str()),
+                        "ships": rows,
+                        "pooled_credits": rows.iter().filter_map(|r| r["credits"].as_i64()).sum::<i64>(),
+                        "open_proposals": rows.iter().filter_map(|r| r["open_proposals"].as_i64()).sum::<i64>(),
+                    })).collect::<Vec<_>>(),
+                }),
+            )
+        }
         ("GET", ["ships"]) => (
             200,
             json!({"ships": ships
@@ -356,6 +392,100 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                          "proposals": proposals_with_state(&s.dir, tick)}),
             )
         }
+        // The context brief: everything about ONE ship, in one call, shaped for a
+        // conversation rather than a dashboard. Ian, 2026-09-04: "the communications
+        // with the familiar need to be context aware to the device being used, the
+        // ship being viewed, or a fleet being used, or even an individual captain or
+        // crew being viewed… context makes all the difference." The client says what
+        // the captain is looking at; this answers in that frame.
+        ("GET", ["ships", id, "brief"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let (aboard_units, aboard_cost) = aboard(&s.dir);
+            let dial = Dial::load(&s.dir);
+            let open: Vec<Value> = proposals_with_state(&s.dir, tick)
+                .into_iter()
+                .filter(|p| p["state"] == "open")
+                .collect();
+            // The advice standing right now, folded: one line per thing she is saying,
+            // with when she first said it and how often — never the same sentence twice.
+            let text = std::fs::read_to_string(s.dir.join("journal.jsonl")).unwrap_or_default();
+            let lines: Vec<Value> = text
+                .lines()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .collect();
+            let mut advice: BTreeMap<String, (i64, i64, Value)> = BTreeMap::new();
+            for v in lines.iter().filter(|v| {
+                matches!(
+                    v.get("event").and_then(Value::as_str),
+                    Some("advice")
+                        | Some("merchant-idle")
+                        | Some("outfit-idle")
+                        | Some("carry-blocked")
+                        | Some("distress-hold")
+                )
+            }) {
+                let what = v
+                    .get("would")
+                    .or_else(|| v.get("why"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if what.is_empty() {
+                    continue;
+                }
+                let t = v.get("tick").and_then(Value::as_i64).unwrap_or(0);
+                let e = advice.entry(what).or_insert((t, 0, v.clone()));
+                e.1 += 1;
+                e.2 = v.clone();
+            }
+            let standing: Vec<Value> = advice
+                .into_iter()
+                .map(|(what, (since, times, last))| {
+                    json!({"what": what, "since_tick": since, "times": times,
+                           "event": last.get("event").cloned().unwrap_or(Value::Null),
+                           "surface": last.get("surface").cloned().unwrap_or(Value::Null)})
+                })
+                .collect();
+            let recent: Vec<Value> = lines
+                .iter()
+                .rev()
+                .filter(|v| {
+                    !matches!(
+                        v.get("event").and_then(Value::as_str),
+                        Some("holding")
+                            | Some("advice")
+                            | Some("merchant-idle")
+                            | Some("outfit-idle")
+                            | Some("distress-hold")
+                            | Some("awaiting-pending-actions")
+                            | Some("awaiting-our-own-fold")
+                    )
+                })
+                .take(12)
+                .cloned()
+                .collect();
+            let mut row = ship_row(s, root, now);
+            row["tick"] = json!(tick);
+            row["tick_seconds"] = json!(tick_seconds);
+            (
+                200,
+                json!({
+                    "context": {"kind": "ship", "world": s.world.id, "hull": s.world.label,
+                                "captain": s.captain.captain,
+                                "computer": persona_for(root, &s.dir, &s.captain.captain)
+                                    .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from))},
+                    "tick": tick, "tick_seconds": tick_seconds,
+                    "ship": row,
+                    "aboard": {"units": aboard_units, "cost": aboard_cost},
+                    "dial": dial.settings,
+                    "open_proposals": open,
+                    "standing_advice": standing,
+                    "recent": recent,
+                }),
+            )
+        }
         ("GET", ["ships", id, "book"]) => {
             let Some(s) = find(id) else {
                 return (404, json!({"error": "no such ship"}));
@@ -375,6 +505,119 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 200,
                 json!({"tick": tick, "tick_seconds": tick_seconds,
                          "holdings": holdings, "deliveries": deliveries}),
+            )
+        }
+        // Everything a conversation about fuel needs, computed rather than recited:
+        // where she can reach, what it would cost, what she would do, and why the
+        // tanker is refused. Ian, 2026-09-04, after talking to Felix on the iPad:
+        // "all it did was read out ships status, nothing particularly useful, no
+        // conversation about refueling which is what I was attempting to have."
+        ("GET", ["ships", id, "fuel"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+            let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
+                .unwrap_or_else(|| s.captain.server.clone());
+            let Ok(me) = wire_get(&server, &key, "/v1/me") else {
+                return (502, json!({"error": "the exchange did not answer"}));
+            };
+            let n = |k: &str| me.get(k).and_then(Value::as_i64).unwrap_or(0);
+            let here = me.get("docked").and_then(Value::as_str).map(String::from);
+            let (fuel, capacity, credits) = (n("fuel"), n("fuelCapacity"), n("credits"));
+            let accel = if n("effectiveAccelMilliG") > 0 {
+                n("effectiveAccelMilliG")
+            } else {
+                familiar_whisker::doctrine::REFERENCE_ACCEL_MILLI_G
+            };
+            let pumps: Vec<String> = match wire_get(&server, &key, "/v1/stations") {
+                Ok(Value::Array(rows)) => rows
+                    .iter()
+                    .filter(|st| {
+                        st.get("sellsFuel")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                    })
+                    .filter_map(|st| st.get("id").and_then(Value::as_str).map(String::from))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let tank_price = (capacity - fuel).max(0) * FUEL_PRICE_PER_UNIT;
+            let mut options: Vec<Value> = Vec::new();
+            if let Some(here) = here.as_deref() {
+                for p in &pumps {
+                    if p == here {
+                        options.push(json!({"station": p, "here": true, "fuel_cost": 0,
+                            "reachable": true, "fill_price": tank_price,
+                            "affordable": credits >= tank_price}));
+                        continue;
+                    }
+                    let Ok(route) =
+                        wire_get(&server, &key, &format!("/v1/route?from={here}&to={p}"))
+                    else {
+                        continue;
+                    };
+                    let quoted = route.get("totalFuel").and_then(Value::as_i64).unwrap_or(0);
+                    let ticks = route.get("totalTicks").and_then(Value::as_i64).unwrap_or(0);
+                    // The quote is for the reference drive; she flies at her own.
+                    let cost = familiar_whisker::doctrine::fuel_at_drive(quoted, accel);
+                    options.push(json!({
+                        "station": p, "here": false, "fuel_cost": cost, "ticks": ticks,
+                        "reachable": familiar_whisker::trade::carry_affordable(cost, fuel),
+                        "short_by": (((cost as f64) * 1.2) as i64 - fuel).max(0),
+                        "fill_price": tank_price, "affordable": credits >= tank_price,
+                    }));
+                }
+            }
+            options.sort_by_key(|o| o["fuel_cost"].as_i64().unwrap_or(i64::MAX));
+            let reachable: Vec<&Value> = options
+                .iter()
+                .filter(|o| o["reachable"].as_bool().unwrap_or(false))
+                .collect();
+            // What she can sell where she stands, for a captain with no credits.
+            let hold: Vec<Value> = me
+                .get("cargo")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let saleable = here.as_deref().and_then(|h| {
+                wire_get(&server, &key, &format!("/v1/stations/{h}/quotes"))
+                    .ok()
+                    .map(|q| {
+                        let board = familiar_whisker::trade::parse_board(&q);
+                        hold.iter()
+                            .filter_map(|c| {
+                                let good = c.get("good")?.as_str()?;
+                                let units = c.get("units")?.as_i64()?;
+                                if units <= 0 {
+                                    return None;
+                                }
+                                let row = board.iter().find(|b| b.good == good)?;
+                                let can = units.min(row.max_sell.max(0));
+                                Some(json!({"good": good, "units": units, "bid": row.bid,
+                                            "will_take": can, "worth": can * row.bid}))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            });
+            (
+                200,
+                json!({
+                    "tick": tick, "tick_seconds": tick_seconds,
+                    "docked": here, "fuel": fuel, "capacity": capacity, "credits": credits,
+                    "accel_milli_g": accel, "fill_price_here": tank_price,
+                    "pumps": options,
+                    "can_reach": reachable.iter().map(|o| o["station"].clone()).collect::<Vec<_>>(),
+                    "stranded": here.is_some() && reachable.is_empty(),
+                    "saleable_here": saleable,
+                    // The tanker, and why the pilot will not call it on a real-time world.
+                    "tanker": {
+                        "available": true,
+                        "pilot_will_call": false,
+                        "why": "a PAWS call-out on this world is days of transit and pins the hull                             where it stands until the tanker arrives (metal#59); the pilot holds                             a distress instead, which a fuelable load or a human can still undo",
+                    },
+                    "if_stranded": "sell what this berth will take for credits, wait for a load whose                                 origin is reachable, ask another captain (metal#75 proposes fuel                                 between hulls), or call the tanker knowingly",
+                }),
             )
         }
         ("GET", ["ships", id, "dial"]) => {
