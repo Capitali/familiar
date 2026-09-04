@@ -393,7 +393,7 @@ public struct ExchangeClient {
     public func me() async throws -> Me { try await fetch("/v1/me", ExchangeWire.me) }
     public func profile() async throws -> Profile { try await fetch("/v1/profile", ExchangeWire.profile) }
     public func loadboard(mine: Bool = false) async throws -> [Load] {
-        try await fetch(mine ? "/v1/loadboard?mine=1" : "/v1/loadboard", ExchangeWire.loads)
+        try await fetch(mine ? "/v1/loadboard?mine=true" : "/v1/loadboard", ExchangeWire.loads)
     }
     public func quotes(station: String) async throws -> StationQuotes {
         try await fetch("/v1/stations/\(station)/quotes", ExchangeWire.quotes)
