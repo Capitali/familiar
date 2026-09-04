@@ -13,6 +13,10 @@ import FamiliarSC
 // reference drive (189 mG) whatever the hull flies, so `modelAgrees` checks at 189; the rung's
 // own fuel uses the hull's drive × bps, where the hull's drive is `effectiveAccelMilliG` read
 // off /v1/me — the one number with wear and fittings already applied. Never derive it.
+//
+// Wear accrues per leg on departure and lowers the drive; a lower drive means less Δv and LESS
+// fuel, so a multi-leg plan priced at the departure drive is conservative on propellant and
+// optimistic on time. Any ETA this model implies for a later leg drifts late for that reason.
 
 public enum BurnRungs {
     public static let referenceAccelMilliG: Int64 = 189

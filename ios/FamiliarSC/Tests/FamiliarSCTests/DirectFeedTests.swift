@@ -39,7 +39,11 @@ final class DirectFeedTests: XCTestCase {
         XCTAssertEqual(BurnRungs.legFuel(distanceKm: day[0], accelMilliG: 94), 106)
         let plan = BurnRungs.plan(legsKm: day, quotedAtReference: 168, hullAccelMilliG: 189, tank: 135)
         XCTAssertEqual(plan, BurnRungs.Plan(burn: "economy", fuel: 112, reaches: true))
-        // A derated hull (178 mG, wear 1094 bps) is priced off ITS drive while the reference check stays at 189.
+        // 178 mG / 1094 bps is KK AFTER that one long economy leg — departShip charges the leg's wear on
+        // the way out, so the drive dropped before leg two. Not a repair; nothing repaired her. A worn
+        // drive means less Δv and so LESS fuel: wear accrued mid-route cannot strand a ship on propellant,
+        // it makes her late. A plan priced at the departure drive is conservative on fuel, optimistic on
+        // time — safe for a pump run, dangerous for a pickup window (wildhorse, 2026-09-04).
         XCTAssertEqual(BurnRungs.routeFuel(legsKm: day, hullAccelMilliG: 178, burnBps: BurnRungs.economyBps), 109)
         XCTAssertTrue(BurnRungs.modelAgrees(legsKm: day, quotedAtReference: 168))
         let full = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 189, tank: 600)
