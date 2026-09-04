@@ -8,16 +8,18 @@ import FamiliarSC
 ///   GET  ships/{world}/journal?since=N  → {tick, tick_seconds, lines: [journal lines], next: N'}
 ///   GET  ships/{world}/proposals        → {tick, tick_seconds, proposals: [Proposal + state, answered_at?]}
 ///   GET  ships/{world}/dial             → {tick, tick_seconds, dial: {…}, bought: […]}
+///   GET  ships/{world}/book             → {tick, tick_seconds, holdings: […], deliveries: […]}
+///   (each ships row also carries `persona`: the store's persona.json verbatim, or null)
 ///   POST ships/{world}/approve {id, approved} → the Approval line
 ///   PUT  ships/{world}/dial {…}
-///   POST ships/pair {…} / POST ships/{world}/unpair
+///   POST pair {label, captain, server, key, automations, computer_name?} / POST unpair {world}
 /// Proposal lapse is settled client-side exactly as whisker does: lapsed when
 /// tick > expires_tick and no approval.
 public struct WireFeed: ShipsFeed, CaptainActs {
     public let base: URL
     public let bearer: String
     public var session: URLSession = .shared
-    public var prefix = "/fleet/"
+    public var prefix = "/"
 
     public init(base: URL, bearer: String) { self.base = base; self.bearer = bearer }
 
@@ -50,6 +52,8 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         var proposals: [JSONValue]?
         var dial: [String: String]?
         var bought: [String]?
+        var holdings: [Holding]?
+        var deliveries: [DeliveryStat]?
     }
 
     func envelope(_ path: String) async throws -> Envelope {
@@ -77,10 +81,12 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         return (e.ships ?? []).compactMap { WireFeed.summary(from: $0, tick: e.tick) }
     }
 
+    /// The ships row's `persona` — the store's persona.json verbatim (decoded with the same
+    /// loud loader as the store), or nil when the computer has not been named.
     public func persona(world: String) async throws -> Persona? {
-        // The wire's ships row carries the name; the style rides with the journal feed later.
-        let s = try await ships().first { $0.world == world }
-        return s.flatMap { $0.named ? Persona(name: $0.computer, style: nil) : nil }
+        let e = try await envelope("ships")
+        guard let row = (e.ships ?? []).first(where: { $0["world"]?.string == world }), let p = row["persona"], p != .null else { return nil }
+        return try Persona.decode(Data(p.description.utf8))
     }
 
     public func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry] {
@@ -119,7 +125,10 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         return DialSheet(loaded: loaded, bought: e.bought ?? [])
     }
 
-    public func book(world: String) async throws -> ShipBook { ShipBook(holdings: [], deliveries: []) }
+    public func book(world: String) async throws -> ShipBook {
+        let e = try await envelope("ships/\(world)/book")
+        return ShipBook(holdings: e.holdings ?? [], deliveries: e.deliveries ?? [])
+    }
 
     public func approve(world: String, proposalID: String, approved: Bool) async throws {
         let body = try JSONEncoder().encode(["id": JSONValue.string(proposalID), "approved": JSONValue.bool(approved)])
@@ -132,7 +141,9 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         var obj: [String: JSONValue] = ["label": .string(request.label), "captain": .string(request.captain), "server": .string(request.server),
                                         "key": .string(key.secret), "automations": .array(request.automations.map { .string($0.rawValue) })]
         if let n = request.computerName { obj["computer_name"] = .string(n) }
-        _ = try await call("ships/pair", method: "POST", body: try JSONEncoder().encode(obj))
+        _ = try await call("pair", method: "POST", body: try JSONEncoder().encode(obj))
     }
-    public func unpair(world: String) async throws { _ = try await call("ships/\(world)/unpair", method: "POST") }
+    public func unpair(world: String) async throws {
+        _ = try await call("unpair", method: "POST", body: try JSONEncoder().encode(["world": world]))
+    }
 }
