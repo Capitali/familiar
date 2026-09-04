@@ -82,6 +82,11 @@ public struct TradeBook: Equatable, Sendable {
     public var unmatchedUnits: Int64 = 0
     public var unmatchedProceeds: Int64 = 0
     public var quotedBasisLots: Int64 = 0
+    /// The merchant's own judgment, measured (wildhorse 110e217): for every position opened
+    /// and later closed, what the buy rule promised against what the folds paid.
+    public var closedPositions: Int64 = 0
+    public var expectedMargin: Int64 = 0
+    public var realizedOnClosed: Int64 = 0
 
     public init() {}
 
@@ -91,6 +96,15 @@ public struct TradeBook: Equatable, Sendable {
         marginPct = row["margin_pct"]?.int ?? 0; inventoryCost = row["inventory_cost"]?.int ?? 0
         unmatchedUnits = row["unmatched_units"]?.int ?? 0; unmatchedProceeds = row["unmatched_proceeds"]?.int ?? 0
         quotedBasisLots = row["quoted_basis_lots"]?.int ?? 0
+        closedPositions = row["closed_positions"]?.int ?? 0
+        expectedMargin = row["expected_margin"]?.int ?? 0
+        realizedOnClosed = row["realized_on_closed"]?.int ?? 0
+    }
+
+    /// "estimates: 2 closed, promised ℳ3,937, returned ℳ5,318" — nil until a position has closed.
+    public var estimatesLine: String? {
+        guard closedPositions > 0 else { return nil }
+        return "estimates: \(closedPositions) closed, promised ℳ\(expectedMargin), returned ℳ\(realizedOnClosed)"
     }
 
     /// The caveat the card shows when the number is not the whole truth; nil when it is.

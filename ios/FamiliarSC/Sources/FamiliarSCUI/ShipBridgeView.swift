@@ -70,6 +70,9 @@ public struct ShipBridgeView: View {
                 card("Freight", SC.money(b.freightPaid), "\(b.hauls) haul\(b.hauls == 1 ? "" : "s")")
                 if let p = s?.leasePrincipal { card("Lease", SC.money(p), "principal left") } else if let d = s?.debt { card("Debt", SC.money(d), "on the wire") } else { card("Lease", "—", "not on the wire") }
             }
+            if let e = s?.trades?.estimatesLine {
+                Text(e).font(.caption2.monospacedDigit()).foregroundStyle(SC.dim)
+            }
             if let c = s?.trades?.caveat {
                 Label(c, systemImage: "info.circle").font(.caption2).foregroundStyle(SC.amber)
             }

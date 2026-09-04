@@ -65,12 +65,13 @@ final class UITests: XCTestCase {
     }
 
     func testTradeBookCaveatsFromTheRow() throws {
-        let row = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w","computer":"Felix","hull":"","captain":"","server":"","automations":[],"trades":{"filled":3,"rejected":1,"realized":5583,"cost_of_sold":0,"margin_pct":0,"inventory_cost":860,"inventory":[],"unmatched_units":116,"unmatched_proceeds":1453,"quoted_basis_lots":1}}"#.utf8))
+        let row = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w","computer":"Felix","hull":"","captain":"","server":"","automations":[],"trades":{"filled":3,"rejected":1,"realized":5583,"cost_of_sold":0,"margin_pct":0,"inventory_cost":860,"inventory":[],"unmatched_units":116,"unmatched_proceeds":1453,"quoted_basis_lots":1,"closed_positions":2,"expected_margin":3937,"realized_on_closed":5318}}"#.utf8))
         let s = try XCTUnwrap(WireFeed.summary(from: row, tick: nil))
         let t = try XCTUnwrap(s.trades)
         XCTAssertEqual(t.realized, 5583); XCTAssertEqual(t.filled, 3); XCTAssertEqual(t.inventoryCost, 860)
         XCTAssertEqual(t.caveat, "ℳ1453 from 116 unmatched units set aside; 1 lot at a quoted basis, so the profit is a ceiling")
-        XCTAssertNil(TradeBook().caveat)
+        XCTAssertEqual(t.estimatesLine, "estimates: 2 closed, promised ℳ3937, returned ℳ5318")
+        XCTAssertNil(TradeBook().caveat); XCTAssertNil(TradeBook().estimatesLine)
         let clean = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w","computer":"Felix","hull":"","captain":"","server":"","automations":[]}"#.utf8))
         XCTAssertNil(try XCTUnwrap(WireFeed.summary(from: clean, tick: nil)).trades, "no trades block on the row means no card")
     }
