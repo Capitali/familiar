@@ -23,6 +23,28 @@ final class DirectFeedTests: XCTestCase {
         XCTAssertNil(DirectFeed(exchange: "", key: "ucfk_x"))
     }
 
+    func testBurnRungsMatchThePilotAndTheFold() throws {
+        // titania-cold-store → foxys-diner as PROD quoted it 2026-09-04: 168 fuel at the reference drive.
+        let route = try ExchangeWire.route(Fixtures.wire("route-titania-foxys"))
+        let legs = route.legs.compactMap { $0.distanceKm.map { Int64($0) } }
+        XCTAssertEqual(legs.count, 2); XCTAssertEqual(route.fuel, 168)
+        XCTAssertTrue(BurnRungs.modelAgrees(legsKm: legs, quotedAtReference: 168), "the shipped constants describe this world")
+        // KK's own drive (wear 1094 bps → 178 mG): standard (162) does not reach on 135, economy does.
+        // The fold charged 112 on the day's geometry; today's legs price economy at 109 — the same
+        // curve, the sky having moved — so the pin is the model's own figure, not a remembered one.
+        let plan = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 178, tank: 135)
+        XCTAssertEqual(plan.burn, "economy"); XCTAssertTrue(plan.reaches)
+        XCTAssertEqual(plan.fuel, BurnRungs.routeFuel(legsKm: legs, hullAccelMilliG: 178, burnBps: BurnRungs.economyBps))
+        XCTAssertEqual(plan.fuel, 109)
+        XCTAssertEqual(BurnRungs.routeFuel(legsKm: legs, hullAccelMilliG: 178, burnBps: BurnRungs.standardBps), 162)
+        let full = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 178, tank: 600)
+        XCTAssertEqual(full.burn, "standard", "a healthy tank flies the throttle it always flew"); XCTAssertTrue(full.reaches)
+        let dry = BurnRungs.plan(legsKm: legs, quotedAtReference: 168, hullAccelMilliG: 178, tank: 20)
+        XCTAssertEqual(dry.burn, "economy"); XCTAssertFalse(dry.reaches)
+        let foreign = BurnRungs.plan(legsKm: legs, quotedAtReference: 1000, hullAccelMilliG: 178, tank: 135)
+        XCTAssertEqual(foreign, BurnRungs.Plan(burn: "standard", fuel: 1000, reaches: false), "a world the model does not describe gets only the quote")
+    }
+
     func testDevicePersonaRoundTrip() throws {
         let store = DevicePersonaStore(defaults: UserDefaults(suiteName: "sc-direct-\(UUID().uuidString)")!)
         XCTAssertNil(store.load(keyID: "abcd1234"))

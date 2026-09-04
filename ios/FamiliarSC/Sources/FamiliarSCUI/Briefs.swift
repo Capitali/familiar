@@ -29,7 +29,7 @@ public enum Briefs {
         for p in pumps {
             let st = p["station"]?.string ?? "?"
             let ticks = p["ticks"]?.int ?? 0, cost = p["fuel_cost"]?.int ?? 0
-            var line = "Pump \(st): \(ticks) ticks away, burns \(cost) fuel to reach"
+            var line = "Pump \(st): \(ticks) ticks away, burns \(cost) fuel to reach" + (p["burn"]?.string.map { $0 == "standard" ? "" : " at \($0) burn" } ?? "")
             if p["here"]?.bool == true { line = "Pump \(st): here" }
             if p["reachable"]?.bool == true { line += ", reachable" } else if let s = p["short_by"]?.int { line += ", NOT reachable — short by \(s) fuel" }
             if let fp = p["fill_price"]?.int { line += "; a fill there costs ℳ\(fp)" + (p["affordable"]?.bool == true ? " (affordable)" : " (not affordable)") }
