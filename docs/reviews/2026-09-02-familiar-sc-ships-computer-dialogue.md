@@ -82,6 +82,46 @@ What Apple Intelligence never does: place an action on the exchange, alter a doc
 constant, override a refusal line. The refusal line is the product ("the familiar can get
 you there safely; winning requires questionable judgment").
 
+## 3.5 The autonomy dial — Ian's ruling on how the computer interacts (2026-09-03)
+
+Ian, verbatim: *"That's how the ships computer should interact in the game. There
+should be a message window giving advice, and the captain can choose to follow or not.
+there should also be the ability to just allow auto a captain authorized command and
+the ship will Proceede as KKII is now. Should have ability to granularity config
+autonomy for each control surface category and family."* — said of the sentence the
+computer would have given him at titania ("don't call the tanker, fly to foxys-diner
+now, 98 fuel, refuel on credit") while his own hull sat pinned by a PAWS call for days.
+
+So every doctrine decision has THREE possible fates, chosen per control surface:
+
+| Level | The computer… | The captain… |
+|---|---|---|
+| **advise** | says what it would do and why, in the message window; does nothing | acts, or not |
+| **confirm** | proposes the act and waits one fold for a yes | approves per act (or lets it lapse) |
+| **auto** | acts and journals, as KK II does today | reads the log |
+
+**Control surfaces, by family and category** (the dial is set per category, with a
+family default):
+
+- **Navigation** — `course` (travel/engage/carry legs), `fuel` (refuel, divert to a
+  pump), `rescue` (the tanker; on PROD its own default is *advise*)
+- **Freight** — `book`, `collect`, `cancel`
+- **Market** — `buy`, `sell`, `carry`
+- **Ship** — `repair`, `refit`, `crew`, `frame`, `lease` (buyout)
+- **Racing** — `plot`, `line` (risk past the safe line), `refusal` (never auto)
+
+The grant model stays: an automation the captain has not bought is absent from the
+dial altogether. What is bought can be set anywhere from advise to auto per category,
+and changed at any time from the client or `familiar fleet autonomy`. The message
+window is the ship journal's advice and proposal lines, voiced by the persona (T-236);
+the same feed drives notifications in the companion app.
+
+Implementation seam: `autonomy.json` in the ship store maps category → level;
+whisker's action gate consults it after the doctrine decides; *confirm* writes a
+proposal with a fold's TTL to `proposals.jsonl` and acts only when an approval line
+appears; *advise* writes the advice and holds. Approval arrives from the client (or
+`familiar fleet approve <ship> <id>`), never from the model.
+
 ## 4. Where the runtime lives (the honest hosting answer)
 
 The exchange folds every 180 s on PROD and a pilot must be there for every fold or it
