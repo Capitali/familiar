@@ -34,7 +34,10 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   Settings → Familiar → "Show the bridge" + feed URL/bearer (T-237 B3). Ian pastes the bearer.
   **BUILD 106 (92d4dbd, wildhorse, same day) SUPERSEDES 105 for the first device test:** it
   carries the persona read (105 shows Felix as unnamed), `?mine=true`, the BackgroundSync
-  main-actor fix, and the Trades card's estimates line. Use 106.
+  main-actor fix, and the Trades card's estimates line. **BUILD 107 (46ef3b2, wildhorse) SUPERSEDES
+  106:** Ship settings sheet on the three new feed routes, pairing that joins the captain's computer,
+  hull name + world chip (`world_name` served), estimates line, the cancelled-read banner fix,
+  sellable_at 0 = unknown. Use 107.
 
 
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
