@@ -1,0 +1,30 @@
+{
+  "goods": [
+    {
+      "ask": 145,
+      "bid": 123,
+      "capacity": 260,
+      "displayName": "Bluefin Reserve, Cellar Sealed",
+      "equilibrium": 130,
+      "good": "bluefin-reserve",
+      "maxBuyUnits": 52,
+      "maxSellUnits": 52,
+      "mid": 134,
+      "stock": 112
+    },
+    {
+      "ask": 24,
+      "bid": 20,
+      "capacity": 160,
+      "displayName": "Gravy Base, Reduction",
+      "equilibrium": 80,
+      "good": "gravy-base",
+      "maxBuyUnits": 32,
+      "maxSellUnits": 32,
+      "mid": 22,
+      "stock": 90
+    }
+  ],
+  "station": "foxys-diner",
+  "tick": 7532
+}

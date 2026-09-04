@@ -1,0 +1,31 @@
+{
+  "activeContract": "L3249",
+  "actor": "REDACTED",
+  "app": "familiar-whisker",
+  "arriveTick": 7543,
+  "credits": 7132,
+  "enRouteTo": "foxys-diner",
+  "holdCapacity": 120,
+  "holdUsed": 0,
+  "keyId": "REDACTED",
+  "memberSince": "2026-08-31T23:55:45Z",
+  "netWorth": 7132,
+  "scopes": [
+    "read",
+    "act"
+  ],
+  "standing": "4 deliveries and 1 trades on file, below opening balance.",
+  "stats": {
+    "contractsAbandoned": 0,
+    "deliveries": 4,
+    "freightEarned": 1320,
+    "goodsBought": 0,
+    "goodsSold": 53,
+    "taxPaid": 113,
+    "tradesFilled": 1,
+    "tradesRejected": 0,
+    "unitsHauled": 55
+  },
+  "tick": 7532,
+  "traderName": "Luke SkyWhisker"
+}

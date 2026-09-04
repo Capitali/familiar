@@ -1,0 +1,155 @@
+[
+  {
+    "body": "Callisto, Jupiter",
+    "displayName": "Cannery Row Fulfilment",
+    "id": "cannery-row",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "hub",
+    "tradesGoods": true
+  },
+  {
+    "body": "Phobos",
+    "displayName": "Clawson's Drift Extraction Annex",
+    "id": "clawson-drift",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "regional",
+    "tradesGoods": true
+  },
+  {
+    "body": "Deimos",
+    "displayName": "Deimos Arbor Lot",
+    "id": "deimos-arbor",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "regional",
+    "tradesGoods": true
+  },
+  {
+    "body": "Enceladus",
+    "displayName": "Enceladus Draw",
+    "id": "enceladus-draw",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Amalthea, Jupiter",
+    "displayName": "Foxy's Diner",
+    "id": "foxys-diner",
+    "role": "diner",
+    "sellsFuel": true,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Ganymede",
+    "displayName": "Ganymede Plate Yards",
+    "id": "ganymede-yards",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "regional",
+    "tradesGoods": true
+  },
+  {
+    "body": "Io",
+    "displayName": "Io Slagworks",
+    "id": "io-slagworks",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Neptune orbit",
+    "displayName": "Paws Deep Range Stop",
+    "id": "paws-neptune",
+    "role": "service",
+    "sellsFuel": true,
+    "stationClass": "frontier",
+    "tradesGoods": false
+  },
+  {
+    "body": "High Earth orbit",
+    "displayName": "Paws Interstellar Truck Stop",
+    "id": "paws-truckstop",
+    "role": "service",
+    "sellsFuel": true,
+    "stationClass": "regional",
+    "tradesGoods": false
+  },
+  {
+    "body": "Ceres, asteroid belt",
+    "displayName": "The Bonded Hold",
+    "id": "the-bonded-hold",
+    "role": "depot",
+    "sellsFuel": false,
+    "stationClass": "regional",
+    "tradesGoods": false
+  },
+  {
+    "body": "Titan",
+    "displayName": "Titan Larder Station",
+    "id": "titan-larder",
+    "role": "distribution",
+    "sellsFuel": false,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Titania",
+    "displayName": "Titania Cold Store",
+    "id": "titania-cold-store",
+    "role": "distribution",
+    "sellsFuel": false,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Mare Tranquillitatis, Luna",
+    "displayName": "Tranquility Press Works",
+    "id": "tranquility",
+    "role": "distribution",
+    "sellsFuel": false,
+    "stationClass": "regional",
+    "tradesGoods": true
+  },
+  {
+    "body": "Triton",
+    "displayName": "Triton Holdfast",
+    "id": "triton-outpost",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Earth orbit",
+    "displayName": "Tuna Prime Exchange",
+    "id": "tuna-prime",
+    "role": "distribution",
+    "sellsFuel": false,
+    "stationClass": "hub",
+    "tradesGoods": true
+  },
+  {
+    "body": "Europa",
+    "displayName": "Velvet Array Provisioning Authority",
+    "id": "velvet-array",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "frontier",
+    "tradesGoods": true
+  },
+  {
+    "body": "Mars",
+    "displayName": "Whisker Hollow Agricultural Concern",
+    "id": "whisker-hollow",
+    "role": "production",
+    "sellsFuel": false,
+    "stationClass": "regional",
+    "tradesGoods": true
+  }
+]

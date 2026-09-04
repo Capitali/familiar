@@ -1,0 +1,334 @@
+{
+  "bodies": [
+    {
+      "angleDegrees": 0,
+      "hasRings": false,
+      "hasStation": false,
+      "id": "sol",
+      "kind": "star",
+      "name": "Sol",
+      "orbitRadiusKm": 0,
+      "periodDays": 0,
+      "radiusKm": 696340,
+      "tint": 16771496
+    },
+    {
+      "angleDegrees": -48.15368652826049,
+      "hasRings": false,
+      "hasStation": false,
+      "id": "mercury",
+      "kind": "planet",
+      "name": "Mercury",
+      "orbitRadiusKm": 57909050,
+      "parentID": "sol",
+      "periodDays": 87.969,
+      "radiusKm": 2439.7,
+      "tint": 10194822
+    },
+    {
+      "angleDegrees": 33.939144908011684,
+      "hasRings": false,
+      "hasStation": false,
+      "id": "venus",
+      "kind": "planet",
+      "name": "Venus",
+      "orbitRadiusKm": 108208000,
+      "parentID": "sol",
+      "periodDays": 224.701,
+      "radiusKm": 6051.8,
+      "tint": 14925965
+    }
+  ],
+  "contentVersion": 28,
+  "driveAccelG": 0.189,
+  "goods": [
+    {
+      "basePrice": 24,
+      "category": "manufactured",
+      "consumedAt": [
+        "cannery-row",
+        "clawson-drift",
+        "enceladus-draw",
+        "ganymede-yards",
+        "io-slagworks",
+        "titania-cold-store",
+        "triton-outpost",
+        "tuna-prime",
+        "velvet-array",
+        "whisker-hollow"
+      ],
+      "decayBps": 4,
+      "displayName": "Grade-2 Biscuit Substrate",
+      "id": "biscuit-substrate",
+      "madeFrom": [
+        "grain",
+        "tinplate"
+      ],
+      "perishability": "Slow to spoil, but it does. Around 11% a day.",
+      "producedAt": [
+        "tranquility"
+      ],
+      "swingBps": 6000,
+      "symbol": "BSB",
+      "usedIn": [],
+      "volatility": "Responsive. The usual trading band."
+    },
+    {
+      "basePrice": 120,
+      "category": "luxury",
+      "consumedAt": [
+        "foxys-diner",
+        "tuna-prime",
+        "velvet-array"
+      ],
+      "decayBps": 8,
+      "displayName": "Bluefin Reserve, Cellar Sealed",
+      "id": "bluefin-reserve",
+      "madeFrom": [
+        "catnip",
+        "fishmeal",
+        "tinplate"
+      ],
+      "perishability": "Slow to spoil, but it does. Around 23% a day.",
+      "producedAt": [
+        "titania-cold-store",
+        "velvet-array"
+      ],
+      "swingBps": 9000,
+      "symbol": "BFR",
+      "usedIn": [
+        "salmon-mousse"
+      ],
+      "volatility": "Volatile. Small stock swings move this price hard, which is where the money and the risk both are."
+    },
+    {
+      "basePrice": 40,
+      "category": "luxury",
+      "consumedAt": [
+        "cannery-row",
+        "velvet-array"
+      ],
+      "decayBps": 6,
+      "displayName": "Catnip Concentrate, Arbor Lot",
+      "id": "catnip",
+      "madeFrom": [],
+      "perishability": "Slow to spoil, but it does. Around 17% a day.",
+      "producedAt": [
+        "deimos-arbor",
+        "triton-outpost",
+        "whisker-hollow"
+      ],
+      "swingBps": 9000,
+      "symbol": "CNP",
+      "usedIn": [
+        "bluefin-reserve",
+        "pate"
+      ],
+      "volatility": "Volatile. Small stock swings move this price hard, which is where the money and the risk both are."
+    }
+  ],
+  "lanes": [
+    {
+      "a": "cannery-row",
+      "b": "velvet-array",
+      "fuelCost": 9,
+      "id": "callisto-europa",
+      "travelTicks": 2
+    },
+    {
+      "a": "cannery-row",
+      "b": "enceladus-draw",
+      "fuelCost": 61,
+      "id": "cannery-row--enceladus-draw",
+      "travelTicks": 28
+    },
+    {
+      "a": "cannery-row",
+      "b": "ganymede-yards",
+      "fuelCost": 9,
+      "id": "cannery-row--ganymede-yards",
+      "travelTicks": 2
+    }
+  ],
+  "params": {
+    "actorHoldCapacity": 120,
+    "autoFreightPriceM": 25000,
+    "carrierHoldoffTicks": 12,
+    "carrierShareBps": 4000,
+    "mortgagePaymentPerDay": 600,
+    "mortgagePrincipal": 25000,
+    "originShareBps": 3500,
+    "pickupTTLTicks": 48,
+    "postingExpiryTicks": 96,
+    "repairCostPerHundredBps": 40,
+    "startingActorCredits": 10000,
+    "taxBps": 200,
+    "tradeCapBps": 2000
+  },
+  "recipes": [
+    {
+      "displayName": "Biscuit Press, Grade-2 Line",
+      "id": "biscuit-press",
+      "inputs": {
+        "grain": 22,
+        "tinplate": 4
+      },
+      "outputs": {
+        "biscuit-substrate": 16
+      },
+      "station": "tranquility",
+      "ticksPerCycle": 8
+    },
+    {
+      "displayName": "Cannery Line 1",
+      "id": "cannery-line",
+      "inputs": {
+        "fishmeal": 22,
+        "grain": 16,
+        "tinplate": 4
+      },
+      "outputs": {
+        "kibble-loaf": 33
+      },
+      "station": "cannery-row",
+      "ticksPerCycle": 12
+    },
+    {
+      "displayName": "Cannery Line 2",
+      "id": "cannery-line-two",
+      "inputs": {
+        "fishmeal": 22,
+        "grain": 16,
+        "tinplate": 4
+      },
+      "outputs": {
+        "kibble-loaf": 33
+      },
+      "station": "cannery-row",
+      "ticksPerCycle": 12
+    }
+  ],
+  "stations": [
+    {
+      "body": "Callisto, Jupiter",
+      "bodyID": "callisto",
+      "consumes": [
+        "biscuit-substrate",
+        "catnip",
+        "fishmeal",
+        "grain",
+        "kibble-loaf",
+        "litter-clay",
+        "pate",
+        "salmon-mousse",
+        "tinplate",
+        "water-ice"
+      ],
+      "displayName": "Cannery Row Fulfilment",
+      "dockFee": 8,
+      "id": "cannery-row",
+      "produces": [
+        "gravy-base",
+        "kibble-loaf",
+        "pate"
+      ],
+      "role": "Main works. The largest facility on the route.",
+      "sellsFuel": false,
+      "spreadBps": 300,
+      "stationClass": "hub",
+      "stocks": [
+        "biscuit-substrate",
+        "catnip",
+        "fishmeal",
+        "grain",
+        "gravy-base",
+        "kibble-loaf",
+        "litter-clay",
+        "pate",
+        "salmon-mousse",
+        "tinplate",
+        "water-ice"
+      ],
+      "symbol": "CAN"
+    },
+    {
+      "body": "Phobos",
+      "bodyID": "phobos",
+      "consumes": [
+        "biscuit-substrate",
+        "kibble-loaf",
+        "litter-clay",
+        "ore",
+        "pate"
+      ],
+      "displayName": "Clawson's Drift Extraction Annex",
+      "dockFee": 6,
+      "id": "clawson-drift",
+      "produces": [
+        "litter-clay",
+        "ore",
+        "tinplate"
+      ],
+      "role": "Producer. Exports what it makes and imports the rest.",
+      "sellsFuel": false,
+      "spreadBps": 500,
+      "stationClass": "regional",
+      "stocks": [
+        "biscuit-substrate",
+        "kibble-loaf",
+        "litter-clay",
+        "ore",
+        "pate",
+        "tinplate"
+      ],
+      "symbol": "CLW"
+    },
+    {
+      "body": "Deimos",
+      "bodyID": "deimos",
+      "consumes": [
+        "kibble-loaf",
+        "litter-clay",
+        "pate"
+      ],
+      "displayName": "Deimos Arbor Lot",
+      "dockFee": 5,
+      "id": "deimos-arbor",
+      "produces": [
+        "catnip",
+        "litter-clay"
+      ],
+      "role": "Producer. Exports what it makes and imports the rest.",
+      "sellsFuel": false,
+      "spreadBps": 500,
+      "stationClass": "regional",
+      "stocks": [
+        "catnip",
+        "grain",
+        "kibble-loaf",
+        "litter-clay",
+        "pate"
+      ],
+      "symbol": "DEI"
+    }
+  ],
+  "tickSeconds": 180,
+  "ticksPerDay": 288,
+  "topics": [
+    {
+      "body": "Your first credits are freight, not arbitrage.\n\nThe berth you wake at is a distribution house: a counter goods are sold TO. Buying there to sell elsewhere is buying retail to sell wholesale, and the arithmetic does not care how far you fly it in between. Pilots have measured this and filed it as a bug. It is not one. It is what a distribution berth is.\n\nThe opening the company intends is the LOAD BOARD. A contract pays for carriage: the freight rate is the margin, the fuel is your cost, and NET on the row already has the deadhead figured in. Fly loads until the account can stand a real position. Then read the market board for goods whose prices disagree ACROSS berths — every credit in trade comes from two counters disagreeing, never from one counter twice.",
+      "id": "your-first-credits",
+      "title": "Your first credits"
+    },
+    {
+      "body": "The freight rate is a commission, not a wage.\n\nWhen the exchange posts a load it prices the cargo at both ends with the same walked quotes you would face at the counter: what the goods cost to buy where they stand, what they fetch where they are wanted, less the fuel and the dock fee to move them. What is left is the GAP, and the gap is the only money in the room. It is split three ways: the carrier's share, the origin's share for parting with stock, and the destination's share taken as a price below its own counter.\n\nYour rate on the board is the carrier's share of that gap, plus your fuel and dock fee back, plus time pay for every tick of the flight. Faster classes carry a larger share of the same gap — PRIORITY pays best because a starving shelf outbids everyone — and the figure is locked when the load posts. Prices moving after that are the market's problem, not your contract's.\n\nThe consequence worth flying by: a wide disagreement between two counters posts a rich load, a thin one posts a thin load, and a lane whose gap cannot cover its own fuel posts nothing at all. The board and the market are the same arithmetic — a load is roughly half the profit of trading the route yourself, with no capital down and the cargo provided.",
+      "id": "what-a-load-pays",
+      "title": "What a load pays"
+    },
+    {
+      "body": "Fly the company's freight and the company fuels the flying.\n\nA COMPANY load is station freight with no desk's name on it —             the board's ordinary work. While the loaders have your hull             alongside for one, at either end, they top the tank. It is not             a favour; it is fleet policy, and it is why a new pilot on             company work cannot strand.\n\nThe other side of the page: the company takes its cut of the             freight at settlement, off the top, before your figure lands             on the contract. Broker freight carries no cut and fills no             tank — the desks pay a rate and expect you fuelled. Which deal             pays better is your arithmetic to run, and it changes with the             length of the leg. Maintenance was never part of this trade:             while the company holds your title, the yard bills nobody. It             is U.C.F.'s iron.",
+      "id": "the-company-deal",
+      "title": "The company deal"
+    }
+  ]
+}

@@ -1,0 +1,569 @@
+{
+  "actor": "REDACTED",
+  "arriveTick": 7543,
+  "bills": [],
+  "bookedLoad": "L3249",
+  "cargo": [
+    {
+      "good": "bluefin-reserve",
+      "units": 0
+    },
+    {
+      "good": "salmon-mousse",
+      "units": 0
+    }
+  ],
+  "claims": [],
+  "coat": "black",
+  "coats": [
+    "black",
+    "ginger",
+    "siamese",
+    "tabby"
+  ],
+  "contract": {
+    "deliverDeadlineTick": 7598,
+    "escrow": 608,
+    "handlingUntilTick": 0,
+    "loadId": "L3249",
+    "payableToBooker": 0,
+    "pickupDeadlineTick": 7486,
+    "status": "inTransit",
+    "unitsInHold": 33
+  },
+  "contracts": [
+    {
+      "deliverDeadlineTick": 7598,
+      "escrow": 608,
+      "handlingUntilTick": 0,
+      "loadId": "L3249",
+      "payableToBooker": 0,
+      "pickupDeadlineTick": 7486,
+      "status": "inTransit",
+      "unitsInHold": 33
+    }
+  ],
+  "credits": 7132,
+  "crew": [],
+  "crewBerths": 4,
+  "crewHireCost": 500,
+  "debt": 21400,
+  "departedTick": 7501,
+  "deskOffers": 4,
+  "dutyReadyTick": 0,
+  "effectiveAccelMilliG": 205,
+  "enRouteTo": "foxys-diner",
+  "fittings": [
+    "drive-tune"
+  ],
+  "frame": "Kibble",
+  "frameId": "kibble",
+  "framePods": 2,
+  "freight": [
+    {
+      "event": "fuelled 569 at foxys-diner for 1138 ℳ",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7245,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "repaired: drive restored under lease, no charge",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7247,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "booked",
+      "freightPaid": 97,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7249,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "course to velvet-array is at the drive; ENGAGE when ready",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7251,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for cannery-row, arrives t7255",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7253,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at cannery-row",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7255,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for velvet-array, arrives t7258",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7255,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at velvet-array",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7258,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "pickedUp",
+      "freightPaid": 97,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7258,
+      "unitsDelivered": 48
+    },
+    {
+      "event": "course to the-bonded-hold is at the drive; ENGAGE when ready",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7258,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "rejected: the crew is in the housing until t7268; the crane finishes before the drive answers",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "refused",
+      "tick": 7260,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for cannery-row, arrives t7270",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7268,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at cannery-row",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7270,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for the-bonded-hold, arrives t7308",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7270,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at the-bonded-hold",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7308,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "rejected: the crew is in the housing until t7318; the crane finishes before the drive answers",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "refused",
+      "tick": 7308,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "rejected: no lane route remains to the-bonded-hold; the filing is returned",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "refused",
+      "tick": 7318,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "delivered",
+      "freightPaid": 83,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7318,
+      "unitsDelivered": 48
+    },
+    {
+      "event": "payment taken",
+      "freightPaid": 83,
+      "goodsPaid": 0,
+      "loadId": "L3083",
+      "outcome": "event",
+      "tick": 7318,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "booked",
+      "freightPaid": 678,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7320,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "course to whisker-hollow is at the drive; ENGAGE when ready",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7322,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for whisker-hollow, arrives t7340",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7324,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at whisker-hollow",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7340,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "pickedUp",
+      "freightPaid": 678,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7340,
+      "unitsDelivered": 7
+    },
+    {
+      "event": "course to velvet-array is at the drive; ENGAGE when ready",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7340,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "rejected: the crew is in the housing until t7344; the crane finishes before the drive answers",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "refused",
+      "tick": 7342,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for tuna-prime, arrives t7362",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7344,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at tuna-prime",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7362,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for foxys-diner, arrives t7389",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7362,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at foxys-diner",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7389,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for cannery-row, arrives t7391",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7389,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at cannery-row",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7391,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for velvet-array, arrives t7393",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7391,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at velvet-array",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7393,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "rejected: the crew is in the housing until t7397; the crane finishes before the drive answers",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "refused",
+      "tick": 7393,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "rejected: no lane route remains to velvet-array; the filing is returned",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "refused",
+      "tick": 7397,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "delivered",
+      "freightPaid": 577,
+      "goodsPaid": 777,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7397,
+      "unitsDelivered": 7
+    },
+    {
+      "event": "payment taken",
+      "freightPaid": 577,
+      "goodsPaid": 0,
+      "loadId": "L3159",
+      "outcome": "event",
+      "tick": 7397,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "course to tuna-prime is at the drive; ENGAGE when ready",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7399,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for cannery-row, arrives t7403",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7401,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at cannery-row",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7403,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for foxys-diner, arrives t7405",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7403,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at foxys-diner",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7405,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for tuna-prime, arrives t7434",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7405,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at tuna-prime",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7434,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "repaired: drive restored under lease, no charge",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7436,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "booked",
+      "freightPaid": 608,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7438,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "course to clawson-drift is at the drive; ENGAGE when ready",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "outcome": "serviced",
+      "tick": 7440,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for clawson-drift, arrives t7469",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7442,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at clawson-drift",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7469,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "pickedUp",
+      "freightPaid": 608,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7469,
+      "unitsDelivered": 33
+    },
+    {
+      "event": "departed for tuna-prime, arrives t7501",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7474,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "the desk is holding 4 charter(s) for you; 21400 ℳ still on the lease",
+      "freightPaid": 1813,
+      "goodsPaid": 0,
+      "outcome": "event",
+      "tick": 7488,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "arrived at tuna-prime",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7501,
+      "unitsDelivered": 0
+    },
+    {
+      "event": "departed for foxys-diner, arrives t7543",
+      "freightPaid": 0,
+      "goodsPaid": 0,
+      "loadId": "L3249",
+      "outcome": "event",
+      "tick": 7501,
+      "unitsDelivered": 0
+    }
+  ],
+  "fuel": 166,
+  "fuelCapacity": 600,
+  "holdCapacity": 120,
+  "holdUsed": 0,
+  "holds": [],
+  "leasePrincipal": 25000,
+  "leaseServicePaid": 1813,
+  "legTicks": 42,
+  "loafUntilTick": 0,
+  "lots": [],
+  "marginAvailable": 10000,
+  "marginDrawn": 0,
+  "marginLimit": 10000,
+  "nextFrame": "Sardine stretch",
+  "nextFrameCost": 18000,
+  "obligations": [],
+  "originStation": "tuna-prime",
+  "plate": "REDACTED",
+  "progress": 0.738,
+  "recoveryCharter": false,
+  "route": [
+    "cannery-row"
+  ],
+  "shipName": "🐈‍⬛ Kibble Klipper II 🐈‍⬛",
+  "standingBps": 1000,
+  "tick": 7532,
+  "titled": false,
+  "wearBps": 1104
+}

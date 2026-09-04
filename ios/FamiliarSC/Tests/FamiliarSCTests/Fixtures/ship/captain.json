@@ -1,0 +1,15 @@
+{
+  "captain": "A. Captain",
+  "key_id": "0123abcd",
+  "server": "http://exchange.example",
+  "automations": [
+    "freight",
+    "trade",
+    "outfit"
+  ],
+  "paired_at": 1700000000,
+  "hull_name": "Fixture Freighter",
+  "pilot_args": [
+    "--allow-paws"
+  ]
+}

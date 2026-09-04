@@ -1,0 +1,5 @@
+{
+  "market.buy": "confirm",
+  "navigation": "advise",
+  "*": "auto"
+}

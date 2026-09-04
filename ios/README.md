@@ -31,6 +31,14 @@ ed25519 trust the mesh uses.
   wire logic: CryptoKit ed25519, membership-cert minting (byte-matched to the
   Rust `CertBody` canonicalization), the `/mesh/observe` client.
   **Unit-tested on macOS** — no device needed.
+- `FamiliarSC/` — the ship's computer's Apple half (T-237 B2): the ship-store reader
+  (persona, captain, the autonomy dial, journal, proposals/approvals, holdings,
+  deliveries), the message-window feed, typed READ-ONLY `/v1` exchange models, the
+  pairing-key parse, the captain-notice policy, and the bridge voice — a deterministic
+  templated report, or Apple Intelligence retelling it (on-device; Private Cloud
+  Compute on OS 27 behind entitlement + consent) checked against the floor before it
+  is shown. Never places an action, never writes a store. `familiar-bridge` is the
+  macOS stand-in for the captain's bridge. **Unit-tested on macOS.**
 - `project.yml` — the [XcodeGen](https://github.com/yonaskolb/XcodeGen) spec.
   The `.xcodeproj` is generated, not hand-maintained (and git-ignored).
 
@@ -64,6 +72,12 @@ lands — the lighthouse is the door that is always home, not the only door.
 ```sh
 # crypto/wire unit tests + Rust conformance (headless, no device):
 cd FamiliarMesh && swift test
+
+# the ship's computer package (T-237 B2): store reader, dial, message window, /v1 wire
+# models, pairing, notices, and the bridge voice's templated floor + grounding check:
+cd FamiliarSC && swift test
+# speak a real ship store's report (macOS stand-in for the captain's bridge):
+swift run familiar-bridge report "$HOME/Library/Application Support/Familiar/worlds/<world-id>" --wire
 
 # generate the Xcode project and build for the simulator (no signing needed).
 # No -sdk flag: the scheme embeds the watch app, and forcing every target onto the

@@ -1,0 +1,37 @@
+{
+  "rows": [
+    {
+      "good": "biscuit-substrate",
+      "mid": 34,
+      "station": "cannery-row",
+      "stock": 48
+    },
+    {
+      "good": "catnip",
+      "mid": 18,
+      "station": "cannery-row",
+      "stock": 530
+    },
+    {
+      "good": "fishmeal",
+      "mid": 12,
+      "station": "cannery-row",
+      "stock": 802
+    },
+    {
+      "good": "grain",
+      "mid": 10,
+      "station": "cannery-row",
+      "stock": 346
+    },
+    {
+      "good": "gravy-base",
+      "mid": 13,
+      "station": "cannery-row",
+      "stock": 1154
+    }
+  ],
+  "unsurveyed": [
+    "triton-outpost"
+  ]
+}
