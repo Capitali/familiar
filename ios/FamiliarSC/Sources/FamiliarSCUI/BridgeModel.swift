@@ -42,10 +42,44 @@ public final class BridgeModel {
     public var summary: ShipSummary? { ships.first { $0.world == world } }
     public var computerName: String { persona?.name ?? summary?.computer ?? "the ship's computer" }
 
+    /// A cancelled read is not an error: a view's `.task` is cancelled whenever SwiftUI
+    /// tears the view down or a pull-to-refresh supersedes it, and the request it was
+    /// awaiting comes back as URLError.cancelled (NSURLErrorDomain -999). The last good
+    /// state stays on screen; nothing is reported (Ian's iPad, 2026-09-04).
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let u = error as? URLError, u.code == .cancelled { return true }
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled
+    }
+
+    /// Error text a captain can read — the platform's sentence, not an NSError dump.
+    static func describe(_ error: Error) -> String {
+        if let f = error as? FeedError { return f.description }
+        if let u = error as? URLError { return u.localizedDescription }
+        return (error as NSError).localizedDescription
+    }
+
+    @MainActor
+    private func report(_ error: Error) {
+        guard !BridgeModel.isCancellation(error) else { return }
+        self.error = BridgeModel.describe(error)
+    }
+
+    /// One fleet read at a time: a second caller awaits the read in flight instead of
+    /// starting another (the root's `.task` and the Ships tab's both refresh on appear).
+    private var refreshInFlight: Task<Void, Never>?
+
     @MainActor
     public func refreshShips() async {
-        loading = true; defer { loading = false }
-        do { ships = try await feed.ships(); error = nil } catch { self.error = "\(error)" }
+        if let t = refreshInFlight { await t.value; return }
+        let t = Task { @MainActor in
+            loading = true; defer { loading = false }
+            do { ships = try await feed.ships(); error = nil } catch { report(error) }
+        }
+        refreshInFlight = t
+        await t.value
+        refreshInFlight = nil
     }
 
     @MainActor
@@ -60,7 +94,7 @@ public final class BridgeModel {
             book = try await feed.book(world: world)
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
             error = nil
-        } catch { self.error = "\(error)" }
+        } catch { report(error) }
     }
 
     public var openProposals: Int { window.filter(\.needsTheCaptain).count }
@@ -108,7 +142,7 @@ public final class BridgeModel {
             try await acts.approve(world: world, proposalID: id, approved: approved)
             window = try await feed.window(world: world)
             error = nil
-        } catch { self.error = "\(error)" }
+        } catch { report(error) }
     }
 
     @MainActor
@@ -118,7 +152,7 @@ public final class BridgeModel {
             try await acts.setDial(world: world, dial: newDial)
             dial = try await feed.dial(world: world)
             error = nil
-        } catch { self.error = "\(error)" }
+        } catch { report(error) }
     }
 
     @MainActor
