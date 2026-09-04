@@ -98,6 +98,165 @@ pub const REFERENCE_ACCEL_MILLI_G: i64 = 189;
 /// engage on the next fold): counted against the pickup window.
 const ENGAGE_OVERHEAD_TICKS: i64 = 4;
 
+// ---------------------------------------------------------------------------
+// The burn rungs
+// ---------------------------------------------------------------------------
+//
+// The exchange prices four rungs and throttles the hull by each (engine
+// `EconomyParams.accelBps`). They are a genuine trade, not a speed knob: time
+// goes as 1/√a and propellant as the ROCKET EQUATION on a delta-v that goes as
+// √a, so hotter is faster, thirstier and harder on the drive, all at once.
+//
+// The rung only reaches the physics on an UNBOOKED voyage. Under a contract the
+// LOAD's own class governs every leg, the deadhead to the pickup included
+// (engine `FreightShips.accelMilliG`), so filing a rung on freight is filing
+// into the wind. Two doors are ours: the run to a pump, and the merchant carry.
+
+/// Half the hull. Slow, and cheap enough to change what "in reach" means.
+pub const BURN_ECONOMY: i64 = 5_000;
+/// The hull as it is. Rides the wire as ABSENT, so a world that never heard of
+/// rungs sees exactly the filing it always saw.
+pub const BURN_STANDARD: i64 = 10_000;
+pub const BURN_EXPRESS: i64 = 20_000;
+pub const BURN_PRIORITY: i64 = 30_000;
+
+/// Slowest first: the order the tank is asked in.
+pub const BURN_RUNGS: [i64; 4] = [BURN_ECONOMY, BURN_STANDARD, BURN_EXPRESS, BURN_PRIORITY];
+
+/// The wire's word for a rung, or None for standard — which is filed by saying
+/// nothing at all.
+pub fn burn_wire_name(bps: i64) -> Option<&'static str> {
+    match bps {
+        BURN_ECONOMY => Some("economy"),
+        BURN_EXPRESS => Some("express"),
+        BURN_PRIORITY => Some("priority"),
+        _ => None,
+    }
+}
+
+/// Exhaust velocity, km/s (engine `FlightModel.exhaustVelocityKmPerSecond`).
+const EXHAUST_KM_S: f64 = 10_000.0;
+/// Propellant-fraction multiplier in fuel units (`fuelScale`).
+const FUEL_SCALE: f64 = 236.0;
+/// Charged on every departure whatever the distance (`fuelDockOverhead`).
+const FUEL_DOCK_OVERHEAD: f64 = 5.0;
+
+/// Mission delta-v for one leg, km/s: `dv = 2√(D·a)`, which at the shipped
+/// drive is `(62/720)·√D` and scales as √(a/aRef) either side of it.
+fn leg_delta_v(distance_km: i64, accel_milli_g: i64) -> f64 {
+    if distance_km <= 0 {
+        return 0.0;
+    }
+    let root = (distance_km as f64).sqrt();
+    let ratio = (accel_milli_g.max(1) as f64 / REFERENCE_ACCEL_MILLI_G as f64).sqrt();
+    62.0 * root / 720.0 * ratio
+}
+
+/// Propellant for one leg at a drive, the engine's own rocket equation
+/// (`FlightModel.fuelUnits`). NOT the √ scaling [`fuel_at_drive`] uses: that is a
+/// straight line through a curve, honest near the reference drive and wrong at
+/// the ends — it reads 119 where the fold charges 112 on the economy run out of
+/// titania, and 238 where the fold charges 261 on the express one. Cheap to be
+/// exact here, and being exact is what lets a downshift be trusted with the last
+/// of a tank.
+pub fn leg_fuel_at_drive(distance_km: i64, accel_milli_g: i64) -> i64 {
+    if distance_km <= 0 {
+        return FUEL_DOCK_OVERHEAD as i64;
+    }
+    let dv = leg_delta_v(distance_km, accel_milli_g);
+    (FUEL_DOCK_OVERHEAD + FUEL_SCALE * (dv / EXHAUST_KM_S).exp_m1()).floor() as i64
+}
+
+/// What a whole route costs at a rung, given the hull's own drive.
+pub fn route_fuel_at_burn(legs_km: &[i64], hull_accel_milli_g: i64, burn_bps: i64) -> i64 {
+    let accel = (hull_accel_milli_g * burn_bps / 10_000).max(1);
+    legs_km.iter().map(|&d| leg_fuel_at_drive(d, accel)).sum()
+}
+
+/// Flight time for a whole route at a rung.
+pub fn route_ticks_at_burn(legs_km: &[i64], hull_accel_milli_g: i64, burn_bps: i64) -> i64 {
+    let accel = (hull_accel_milli_g * burn_bps / 10_000).max(1);
+    flight_ticks(legs_km, accel)
+}
+
+/// A rung chosen for a course, with what it will cost and take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BurnPlan {
+    pub bps: i64,
+    pub fuel: i64,
+    pub ticks: i64,
+}
+
+/// Does the model agree with the exchange about this route?
+///
+/// The constants above are the SHIPPED ones and a world may price its own. So
+/// they are checked, every time, against the figure `/v1/route` already quoted
+/// at the reference drive. Agreement buys the right to reason about rungs at
+/// all; disagreement means the model is describing some other world, and the
+/// only safe move then is no move — never a hotter burn on arithmetic that has
+/// just been shown wrong.
+fn model_agrees(legs_km: &[i64], quoted_at_reference: i64) -> bool {
+    if quoted_at_reference <= 0 || legs_km.is_empty() {
+        return false;
+    }
+    let modelled: i64 = legs_km
+        .iter()
+        .map(|&d| leg_fuel_at_drive(d, REFERENCE_ACCEL_MILLI_G))
+        .sum();
+    let slack = (quoted_at_reference / 20).max(2);
+    (modelled - quoted_at_reference).abs() <= slack
+}
+
+/// The rung to fly a course on, and what it costs.
+///
+/// STANDARD FIRST, always: a healthy tank flies the throttle it always flew, so
+/// nothing about a well-fuelled pilot changes. Only when standard does not reach
+/// does the ladder go DOWN — half throttle is slower by √2 and cheaper by rather
+/// more than that, because propellant follows the rocket equation and the
+/// equation curves.
+///
+/// That downshift is the whole point. KK sat at titania-cold-store for three of
+/// Ian's real days on 135 of 600, its pilot journaling "low fuel, no affordable
+/// pump; holding for a human", while foxy's-diner was 168 away at the throttle
+/// the pilot could name and 112 away at the one it could not (2026-09-04).
+/// Nothing was wrong with the tank. The pilot had one word for "go".
+///
+/// Never upward: a hotter rung is a real cost and no route NEEDS one, so
+/// spending Ian's propellant to arrive early is not a call this rule makes.
+/// Returns None when no rung reaches, which is the honest answer that sends the
+/// tanker.
+pub fn burn_that_reaches(
+    legs_km: &[i64],
+    quoted_at_reference: i64,
+    hull_accel_milli_g: i64,
+    tank: i64,
+    reserve: f64,
+) -> Option<BurnPlan> {
+    let affords = |fuel: i64| (fuel as f64 * reserve) as i64 <= tank;
+
+    if !model_agrees(legs_km, quoted_at_reference) {
+        // Unverified arithmetic buys exactly one thing: the filing the pilot
+        // would have made anyway, priced off the exchange's own quote.
+        return affords(quoted_at_reference).then_some(BurnPlan {
+            bps: BURN_STANDARD,
+            fuel: quoted_at_reference,
+            ticks: 0,
+        });
+    }
+
+    for bps in [BURN_STANDARD, BURN_ECONOMY] {
+        let fuel = route_fuel_at_burn(legs_km, hull_accel_milli_g, bps);
+        if affords(fuel) {
+            return Some(BurnPlan {
+                bps,
+                fuel,
+                ticks: route_ticks_at_burn(legs_km, hull_accel_milli_g, bps),
+            });
+        }
+    }
+    None
+}
+
 /// Flight time for legs of these separations at this drive, the engine's own
 /// arithmetic (`FlightModel.travelTicks`): ticks = ⌈√(D / K)⌉ per leg, K linear in
 /// acceleration. Pinned against PROD: cannery-row → titan-larder, 1,307,724,939 km,
@@ -207,7 +366,7 @@ pub enum Decision {
     /// Call the PAWS tanker — expensive, never terminal.
     CallPaws,
     /// Fly empty to a fuel seller.
-    DivertToPump { pump: String },
+    DivertToPump { pump: String, burn_bps: i64 },
     /// Book this load.
     Book { load_id: String },
     /// File a course (deadhead to origin, or the laden leg to dest).
@@ -447,18 +606,32 @@ pub fn decide(
     // on 306 of 600 that way (2026-09-03). At a pump the plan is priced against a full
     // tank, so going there is never the wrong move when there is no work here.
     if frac(ship.fuel) < LOW_FUEL || (!pumps.is_empty() && !pumps.contains(here)) {
-        let mut best: Option<(i64, &String)> = None;
+        // Each pump is asked at the throttle that REACHES it, not only at the
+        // one the pilot prefers. Standard first, so a healthy tank flies exactly
+        // as it always did; half throttle only when standard falls short, which
+        // is the difference between a run and three days at a dead berth.
+        let mut best: Option<(BurnPlan, &String)> = None;
         for p in pumps {
-            if let Some(cost) = router.fuel_between(here, p) {
-                if (cost as f64 * 1.1) as i64 <= ship.fuel
-                    && best.map(|(c, _)| cost < c).unwrap_or(true)
-                {
-                    best = Some((cost, p));
-                }
+            let Some(cost) = router.fuel_between(here, p) else {
+                continue;
+            };
+            let legs = router.leg_distances_km(here, p).unwrap_or_default();
+            let Some(plan) = burn_that_reaches(&legs, cost, ship.accel_milli_g, ship.fuel, 1.1)
+            else {
+                continue;
+            };
+            // Cheapest arrival wins, and a rung that costs less IS cheaper —
+            // ranking on the reference quote would rank routes by a throttle
+            // nobody is flying.
+            if best.map(|(b, _)| plan.fuel < b.fuel).unwrap_or(true) {
+                best = Some((plan, p));
             }
         }
         return match best {
-            Some((_, pump)) => Decision::DivertToPump { pump: pump.clone() },
+            Some((plan, pump)) => Decision::DivertToPump {
+                pump: pump.clone(),
+                burn_bps: plan.bps,
+            },
             // A pumpless berth with no reachable pump on a healthy tank is not a
             // distress; only a genuinely low tank calls the tanker.
             None if frac(ship.fuel) < LOW_FUEL => Decision::CallPaws,
@@ -475,6 +648,64 @@ pub fn decide(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// KK's real numbers, the fold's own: titania-cold-store to foxy's-diner on
+    /// 2026-09-04, quoted 168 at the reference drive over two legs, with 135 in
+    /// a 600 tank. Standard does not reach and the pilot called it stranded for
+    /// three of Ian's real days. Half throttle reaches with room to spare.
+    ///
+    /// The 106 is not a guess: the ship departed on this rung and the tank went
+    /// 135 to 29 on the first leg, which is 106 to the unit.
+    #[test]
+    fn half_throttle_reaches_the_pump_that_standard_cannot() {
+        let legs = [3_491_917_000_i64, 1_774_626];
+        assert_eq!(leg_fuel_at_drive(legs[0], 94), 106);
+
+        let plan = burn_that_reaches(&legs, 168, REFERENCE_ACCEL_MILLI_G, 135, 1.1)
+            .expect("a rung that reaches");
+        assert_eq!(plan.bps, BURN_ECONOMY);
+        assert_eq!(plan.fuel, 112);
+        // Slower, and by about the √2 the brachistochrone promises: 66 becomes 94.
+        assert_eq!(plan.ticks, 94);
+    }
+
+    /// A tank that can afford the throttle it always flew keeps flying it. This
+    /// is the gate on the whole rule: nothing about a well-fuelled pilot changes.
+    #[test]
+    fn a_healthy_tank_still_flies_standard() {
+        let legs = [3_491_917_000_i64, 1_774_626];
+        let plan = burn_that_reaches(&legs, 168, REFERENCE_ACCEL_MILLI_G, 600, 1.1)
+            .expect("a rung that reaches");
+        assert_eq!(plan.bps, BURN_STANDARD);
+        assert_eq!(plan.ticks, 66);
+    }
+
+    /// A tank that reaches nothing sends the tanker rather than inventing a rung.
+    #[test]
+    fn no_rung_reaches_on_an_empty_tank() {
+        let legs = [3_491_917_000_i64, 1_774_626];
+        assert_eq!(
+            burn_that_reaches(&legs, 168, REFERENCE_ACCEL_MILLI_G, 40, 1.1),
+            None
+        );
+    }
+
+    /// A world whose fuel does not match the shipped constants gets the filing it
+    /// would have got anyway — never a rung reasoned out of arithmetic that has
+    /// just been shown to describe somewhere else.
+    #[test]
+    fn an_unrecognised_fuel_model_refuses_to_reason_about_rungs() {
+        let legs = [3_491_917_000_i64, 1_774_626];
+        let plan = burn_that_reaches(&legs, 900, REFERENCE_ACCEL_MILLI_G, 2_000, 1.1)
+            .expect("the quoted filing still stands");
+        assert_eq!(plan.bps, BURN_STANDARD);
+        assert_eq!(plan.fuel, 900);
+        // And on a tank that cannot afford the quote, no filing at all.
+        assert_eq!(
+            burn_that_reaches(&legs, 900, REFERENCE_ACCEL_MILLI_G, 500, 1.1),
+            None
+        );
+    }
 
     struct FlatRouter(i64);
     impl Router for FlatRouter {
@@ -670,7 +901,8 @@ mod tests {
         assert_eq!(
             d,
             Decision::DivertToPump {
-                pump: "foxys-diner".into()
+                pump: "foxys-diner".into(),
+                burn_bps: BURN_STANDARD
             }
         );
         // Berthed AT a pump, tank full, nothing to do: hold, do not shuttle.
@@ -862,7 +1094,8 @@ mod tests {
         assert_eq!(
             d,
             Decision::DivertToPump {
-                pump: "near-pump".into()
+                pump: "near-pump".into(),
+                burn_bps: BURN_STANDARD
             }
         );
     }
@@ -949,7 +1182,10 @@ mod tests {
             Decision::Refuel,
             Decision::Repair,
             Decision::CallPaws,
-            Decision::DivertToPump { pump: "p".into() },
+            Decision::DivertToPump {
+                pump: "p".into(),
+                burn_bps: BURN_STANDARD,
+            },
             Decision::Book {
                 load_id: "L".into(),
             },

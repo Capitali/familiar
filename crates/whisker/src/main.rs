@@ -1514,7 +1514,17 @@ fn main() -> ExitCode {
             Decision::Refuel => Some(json!({"type": "refuel"})),
             Decision::Repair => Some(json!({"type": "repair"})),
             Decision::CallPaws => Some(json!({"type": "paws"})),
-            Decision::DivertToPump { pump } => Some(json!({"type": "travel", "station": pump})),
+            Decision::DivertToPump { pump, burn_bps } => {
+                // Standard rides the wire as ABSENT (engine: an old client that
+                // never sends a class flies exactly as it always did), so the
+                // filing a well-fuelled pilot makes is byte for byte the one it
+                // made before rungs existed.
+                let mut body = json!({"type": "travel", "station": pump});
+                if let Some(name) = doctrine::burn_wire_name(*burn_bps) {
+                    body["serviceClass"] = json!(name);
+                }
+                Some(body)
+            }
             Decision::Travel { station } if Some(station.as_str()) == ship.docked.as_deref() => {
                 None
             }
