@@ -27,9 +27,10 @@ struct MacConsentSettings: View {
             Text("Off by default. Each toggle opens the same gate the mesh already shows read-only to peers — this window is the one place it's actually writable, because it's you.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            ShipsComputerMacSettings()
         }
         .padding(20)
-        .frame(width: 420)
+        .frame(width: 460)
         .onAppear { gates = MacBoundary.load() }
     }
 

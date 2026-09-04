@@ -119,6 +119,10 @@ targets:
     dependencies:
       - package: FamiliarMesh
         product: FamiliarMesh
+      # T-237 B3: the captain's bridge as a native Mac window (the iPad app cannot run on a
+      # Mac booted under Permissive Security, which MacOnStick is).
+      - package: FamiliarSC
+        product: FamiliarSCUI
   # A watchOS companion — its own covenant node (heart rate + motion → derived observations).
   # Receives the familiar's address from the paired iPhone via WatchConnectivity, but runs
   # independently. Bundle id MUST be prefixed by the companion's (io.river.familiar.ios.*).

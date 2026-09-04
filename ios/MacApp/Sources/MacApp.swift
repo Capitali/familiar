@@ -42,13 +42,34 @@ struct FamiliarMacApp: App {
                     bridge.micTapped()
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+                ShipsComputerMenu()
             }
         }
+
+        // T-237 B3: the captain's bridge, its own window, behind the Settings switch.
+        Window("Ship's computer", id: "ships-computer") {
+            ShipsComputerMacHost()
+        }
+        .defaultSize(width: 860, height: 760)
 
         Settings {
             MacConsentSettings()
                 .environmentObject(bridge)
                 .environmentObject(model)
+        }
+    }
+}
+
+
+/// The menu item that opens the bridge — present only while the switch is on.
+struct ShipsComputerMenu: View {
+    @AppStorage("flag.shipsComputer") private var flag = false
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        if flag {
+            Divider()
+            Button("Ship's computer…") { openWindow(id: "ships-computer") }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
         }
     }
 }
