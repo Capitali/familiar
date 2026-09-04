@@ -24,6 +24,11 @@ public struct MessageItem: Equatable, Sendable {
     public var surface: ControlSurface?
     public var surfaceKey: String
     public var kind: Kind
+    /// How many journal lines this item stands for (the pilot re-says standing advice every
+    /// twenty ticks; the captain wants it once, with how long it has stood).
+    public var repeats: Int = 1
+    /// The tick the pilot first said it.
+    public var sinceTick: Int64 = 0
 
     public var needsTheCaptain: Bool {
         if case .proposal(_, _, _, _, .open) = kind { return true }
@@ -74,6 +79,33 @@ public enum MessageWindow {
             }
         }
         return items
+    }
+
+    /// The feed as a captain reads it: identical advice (same surface, same act) folded to one
+    /// item carrying the count and the tick it was first said; proposals untouched (each is
+    /// its own act). Order is by latest occurrence, newest last, like the journal.
+    public static func collapsed(_ items: [MessageItem]) -> [MessageItem] {
+        var out: [MessageItem] = []
+        var index: [String: Int] = [:]
+        for item in items {
+            guard case .advice(let would, _) = item.kind else { out.append(item); continue }
+            let key = item.surfaceKey + "|" + would
+            if let i = index[key] {
+                var merged = item
+                merged.repeats = out[i].repeats + 1
+                merged.sinceTick = out[i].sinceTick
+                out.remove(at: i)
+                for (k, v) in index where v > i { index[k] = v - 1 }
+                index[key] = out.count
+                out.append(merged)
+            } else {
+                var first = item
+                first.sinceTick = item.tick
+                index[key] = out.count
+                out.append(first)
+            }
+        }
+        return out
     }
 
     /// The approval line the app appends to approvals.jsonl on the captain's tap — the

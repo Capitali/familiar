@@ -60,18 +60,12 @@ struct ShipsComputerHost: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            SCRootView(model: bridge, scanner: PairingScanner { done in AnyView(QRScanSheet(onScan: done)) })
-            Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary) }
-                .padding(.top, 8).padding(.trailing, 12)
-                .accessibilityLabel("Close the bridge")
-        }
-        .overlay(alignment: .bottom) {
-            if ShipsComputerFlag.feedURL == nil {
-                Text("Fixture fleet — set a fleet feed in Settings to see your ships.")
-                    .font(.caption2).padding(6).background(.ultraThinMaterial, in: Capsule()).padding(.bottom, 56)
-            }
-        }
+        SCRootView(
+            model: bridge,
+            scanner: PairingScanner { done in AnyView(QRScanSheet(onScan: done)) },
+            onClose: { dismiss() },
+            fixtureNote: ShipsComputerFlag.feedURL == nil ? "Fixture fleet — set a fleet feed in Settings → Familiar to see your ships." : nil
+        )
         .onChange(of: consentPCC) { _, v in bridge.voiceConsent = VoiceConsent(privateCloudCompute: v) }
         .task {
             // Notices for every ship, each once, through the app's existing notification grant.

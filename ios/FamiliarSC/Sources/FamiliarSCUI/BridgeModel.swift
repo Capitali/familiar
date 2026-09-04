@@ -26,6 +26,14 @@ public final class BridgeModel {
     public var reports: [FoldReport] = []
     public var spoken: SpokenReport?
     public var pendingDialChanges: [DialChange] = []
+    /// The captain's conversation with her, for the open ship.
+    public var conversation: Conversation?
+    public var turns: [Conversation.Turn] = []
+    public var asking = false
+    /// Speak her answers aloud (on by default; the captain can mute).
+    public var speakAnswers = true
+    public let speaker = Speaker()
+    public let dictation = Dictation()
 
     /// One fold-window of the journal, told.
     public struct FoldReport: Identifiable, Equatable {
@@ -93,8 +101,59 @@ public final class BridgeModel {
             dial = try await feed.dial(world: world)
             book = try await feed.book(world: world)
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
+            let ctx = BridgeContext(entries: latestWindow(), hull: summary?.hullGlance, openProposals: openProposals)
+            if let c = conversation, c.voice.persona.name == (persona?.name ?? computerName) {
+                c.context = ctx; c.consent = voiceConsent
+            } else {
+                conversation = Conversation(voice: BridgeVoice(persona: persona ?? Persona(name: computerName, style: nil)), context: ctx, consent: voiceConsent)
+                turns = []
+            }
             error = nil
         } catch { report(error) }
+    }
+
+    /// The journal slice the latest fold report was told from.
+    func latestWindow() -> [JournalEntry] {
+        guard let latest = reports.first else { return journal.suffix(60).map { $0 } }
+        return journal.filter { e in
+            guard let t = e.tick else { return false }
+            return t >= latest.fromTick && t <= latest.toTick
+        }
+    }
+
+    /// Her advice, once per standing line, newest last.
+    public var advice: [MessageItem] {
+        MessageWindow.collapsed(window).filter { if case .advice = $0.kind { return true }; return false }
+    }
+
+    /// What she says now: the last answer, else the latest fold's headline.
+    public var sayingNow: String {
+        if let t = turns.last { return t.answer }
+        if let r = reports.first { return r.report.headline + " " + r.report.nextAct }
+        return "Nothing to report yet."
+    }
+
+    /// Ask her, by voice or by text. Speaks the answer when `speakAnswers` is on.
+    @MainActor
+    public func ask(_ question: String, spoken: Bool) async {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, let c = conversation else { return }
+        asking = true; defer { asking = false }
+        let turn = await c.ask(q)
+        turns.append(turn)
+        if speakAnswers, spoken || turns.count > 0 { speaker.speak(turn.answer) }
+    }
+
+    /// Press to talk: start listening; press again to stop and ask what was said.
+    @MainActor
+    public func toggleListening() async {
+        if dictation.listening {
+            let said = await dictation.stop()
+            await ask(said, spoken: true)
+        } else {
+            speaker.stop()
+            await dictation.start()
+        }
     }
 
     public var openProposals: Int { window.filter(\.needsTheCaptain).count }
