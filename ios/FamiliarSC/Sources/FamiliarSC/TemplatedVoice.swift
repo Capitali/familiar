@@ -64,7 +64,7 @@ public struct TemplatedVoice {
         case "proposed", "proposal-lapsed": return 7
         case "traded", "position-opened", "load-closed", "outfitted", "trade-outcome", "fill": return 6
         case "advice", "carry-blocked", "carry-refused", "engage-refused", "refit-refused", "book-corrected", "retargeted": return 5
-        case "acted", "engaged-drive", "carry-to-market", "unwedged-course", "adopted-held-contract": return 4
+        case "acted", "engaged-drive", "carry-to-market", "unwedged-course", "adopted-held-contract", "freight": return 4
         case "held-at-the-gate", "watch-begins": return 3
         case "holding", "merchant-idle", "outfit-idle", "awaiting-pending-actions", "awaiting-our-own-fold": return 0
         default: return 2   // unknown: shown, neutrally
@@ -271,6 +271,12 @@ public struct TemplatedVoice {
         case "exchange-unreachable":
             let n = e.int("repeats") ?? 1
             return "\(t(e)): exchange unreachable — \(s("why"))" + (n > 1 ? " (×\(n))" : "")
+        case "freight":
+            // The exchange's own ledger line, verbatim, with what it paid when it paid.
+            var line = "\(t(e)): \(s("why"))"
+            if let p = e.int("credits_paid"), p != 0 { line += " — ℳ\(p) paid" }
+            if !s("load").isEmpty && !s("why").contains(s("load")) { line += " [\(s("load"))]" }
+            return line
         case "watch-begins":
             return "\(t(e)): watch began on \(s("exchange")) with \(e["automations"]?.description ?? "[]")"
         case "awaiting-pending-actions":

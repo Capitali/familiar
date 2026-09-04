@@ -88,6 +88,30 @@ targets:
       # rides along through TestFlight. (Standalone-installed watch apps never link.)
       - target: FamiliarWatch
         embed: true
+  # UCF Familiar — the ship's computer as its own app (T-237, Ian 2026-09-04): a companion to
+  # United Cat Foods against Jeff's PROD world or a dev instance, Apple Intelligence on the
+  # device as its brains, a familiar host optional. No mesh, no enrolment, no household.
+  UCFFamiliar:
+    type: application
+    platform: iOS
+    sources:
+      - UCFFamiliar/Sources
+      - UCFFamiliar/Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ucf
+        PRODUCT_NAME: UCF Familiar
+        INFOPLIST_FILE: UCFFamiliar/Support/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: UCFFamiliar/Support/UCFFamiliar.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    dependencies:
+      - package: FamiliarSC
+        product: FamiliarSCUI
   # The macOS peer's console. It ENROLS and reads the worldview over the mesh like any other peer
   # (ADR-0018) — it no longer reads a daemon on the same machine over loopback /local/worldview.
   # A peer among equals: no "host", and holding no group secret it cannot mint, only offer its address.
