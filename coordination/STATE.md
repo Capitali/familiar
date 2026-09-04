@@ -5,6 +5,14 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **FELIX FILES ISSUES (Ian, 2026-09-04, verbatim): "If Felix has suggestions for world improvements,
+  bug questions, or future features, you should help Felix open issues to the repo to have them
+  addressed — be very certain it is clear to the repo users that these are suggestion sourced from the
+  ships computer / familiar / named computer instance."** Convention + ledger: `docs/partners/felix-issues.md`
+  (title prefix `[Felix, ship's computer]`, provenance block first, evidence before opinion, no
+  duplicates — search first; both lanes file through Ian's account). First day: ucf-exchange#22
+  (wildhorse) and #23 (MacOnStick, closed as its duplicate).
+
 - **ONE COMPUTER PER CAPTAIN (Ian, 2026-09-04, verbatim): "One 'ships computer' per captain that can
   act across his entire fleet under a name he chooses. I choose Felix."** Supersedes the per-hull
   reading of T-236 (codex's "different names per ship" bar). Felix = Luke SkyWhisker's computer across
