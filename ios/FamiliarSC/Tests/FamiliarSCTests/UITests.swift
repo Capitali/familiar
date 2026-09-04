@@ -116,6 +116,8 @@ final class UITests: XCTestCase {
         XCTAssertTrue(t.contains("Hull Kibble Klipper (PROD): berthed at titania-cold-store, ℳ0, fuel 135/600, last: distress hold."))
         XCTAssertTrue(t.contains("The fleet's book: ℳ5738 pooled, ℳ141802 debt, ℳ5319 realized on trades, ℳ16820 aboard at cost."))
         XCTAssertTrue(t.contains("No proposal waits on the captain anywhere in the fleet."))
+        let counted = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"captain":"L","computer":"F","ships":[],"open_proposals":2}"#.utf8))
+        XCTAssertTrue(Briefs.captain(counted).contains("2 proposals wait on the captain across the fleet."))
     }
 
     func testNotifierDeliversEachNoticeOnce() {

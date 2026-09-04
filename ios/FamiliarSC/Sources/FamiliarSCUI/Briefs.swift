@@ -120,8 +120,13 @@ public enum Briefs {
             if let a = k["aboard_at_cost"]?.int { parts.append("ℳ\(a) aboard at cost") }
             if !parts.isEmpty { out.append("The fleet's book: " + parts.joined(separator: ", ") + ".") }
         }
-        let open = b["open_proposals"]?.array ?? []
-        out.append(open.isEmpty ? "No proposal waits on the captain anywhere in the fleet." : "Waiting on the captain: " + open.compactMap { $0["would"]?.string ?? $0["describe"]?.string }.joined(separator: "; ") + ".")
+        // Live: a COUNT; older shape: the proposals themselves.
+        if let n = b["open_proposals"]?.int {
+            out.append(n == 0 ? "No proposal waits on the captain anywhere in the fleet." : "\(n) proposal\(n == 1 ? "" : "s") wait on the captain across the fleet.")
+        } else {
+            let open = b["open_proposals"]?.array ?? []
+            out.append(open.isEmpty ? "No proposal waits on the captain anywhere in the fleet." : "Waiting on the captain: " + open.compactMap { $0["would"]?.string ?? $0["describe"]?.string }.joined(separator: "; ") + ".")
+        }
         return out.joined(separator: "\n")
     }
 
