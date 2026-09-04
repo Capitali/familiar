@@ -67,9 +67,12 @@ public enum Briefs {
         let open = b["open_proposals"]?.array ?? []
         out.append(open.isEmpty ? "No proposal waiting on the captain." : "Proposals waiting on the captain: " + open.compactMap { $0["would"]?.string ?? $0["describe"]?.string }.joined(separator: "; ") + ".")
         for a in (b["standing_advice"] ?? b["advice"])?.array ?? [] {
-            let would = a["would"]?.string ?? "", why = a["why"]?.string ?? ""
+            // Live shape: {event, what, surface?, since_tick, times}; older: {would, why}.
+            let what = a["what"]?.string ?? a["would"]?.string ?? ""
+            let why = a["why"]?.string ?? ""
+            let ev = a["event"]?.string.map { $0.replacingOccurrences(of: "-", with: " ") } ?? "advice"
             let since = a["since_tick"]?.int, times = a["times"]?.int ?? 1
-            out.append("Standing advice: \(would) — \(why)" + (since.map { " (since t\($0), said \(times) times)" } ?? "") + ".")
+            out.append("Standing (\(ev)): \(what)" + (why.isEmpty ? "" : " — \(why)") + (since.map { " (since t\($0), said \(times) times)" } ?? "") + ".")
         }
         for r in (b["recent"]?.array ?? []).prefix(8) {
             guard let ev = r["event"]?.string else { continue }
