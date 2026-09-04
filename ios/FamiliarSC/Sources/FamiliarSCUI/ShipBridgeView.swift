@@ -112,7 +112,9 @@ public struct ShipBridgeView: View {
                     GridRow { stat("positions", "\(b.holdings.count)"); stat("inventory at cost", SC.money(b.inventoryAtCost)); Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
                 }
                 ForEach(b.holdings, id: \.good) { h in
-                    Text("\(h.units) \(h.good) at \(h.avgCost), bound for \(h.sellTarget.isEmpty ? "wherever a bid clears" : h.sellTarget); sellable from t\(h.sellableAt)")
+                    // sellable_at 0 = UNKNOWN (wildhorse a9de5e5): a lot adopted from the hold is
+                    // offered, and the exchange's own refusal sets the clock — never "now".
+                    Text("\(h.units) \(h.good) at \(h.avgCost), bound for \(h.sellTarget.isEmpty ? "wherever a bid clears" : h.sellTarget); " + (h.sellableAt > 0 ? "sellable from t\(h.sellableAt)" : "sellable when the exchange says"))
                         .font(.footnote.monospacedDigit()).foregroundStyle(SC.ice)
                 }
                 Text("Deliveries pay a fixed company share; a bought position rides under freight until the exchange's minimum hold passes.")

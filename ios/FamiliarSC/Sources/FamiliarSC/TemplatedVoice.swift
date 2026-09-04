@@ -233,7 +233,8 @@ public struct TemplatedVoice {
         case "trade-outcome":
             return "\(t(e)): \(s("side")) \(i("units")) \(s("good")): \(s("outcome"))"
         case "position-opened":
-            return "\(t(e)): opened \(i("units")) \(s("good")) at ask \(i("ask")), bound for \(s("sell_target")); sellable from t\(i("sellable_at")) — the exchange's minimum hold, so \(sheIs()) riding under freight till then"
+            let clock = (e.int("sellable_at") ?? 0) > 0 ? "sellable from t\(i("sellable_at"))" : "sellable when the exchange says"
+            return "\(t(e)): opened \(i("units")) \(s("good")) at ask \(i("ask")), bound for \(s("sell_target")); \(clock) — the exchange's minimum hold, so \(sheIs()) riding under freight till then"
         case "carry-to-market":
             return "\(t(e)): carrying \(s("good")) to \(s("to")), arrives t\(i("resolves"))"
         case "carry-blocked":
