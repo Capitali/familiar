@@ -5,6 +5,13 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **TO JEFF, 2026-09-04 (Ian's acts, in his name):** the Van pitch is its own issue now —
+  **united-cat-foods-metal#80** "Ship customization: the Named Working Rig, with dekotora as the launch
+  collection" (the Round-3 decision, name-first ladder, ethics rail, prototype order; was only a comment on
+  ucf-exchange#11). **Pricing ruling posted on UCF-Haul#67 and ucf-exchange#15:** "preliminary pricing should
+  be 1 … just so that we can test the entire process" — the co-pilot key + automation shop money path
+  unblocks at price 1; real pricing later. Awaiting Jeff on #80, #63 (racing), #62 (fleets), #75 (rescue).
+
 - **UCF FAMILIAR (Ian, 2026-09-04): the ship's computer as its own iPad/iPhone/Mac app** — "simply be the
   ships computer and nothing else"; runs against Jeff's PROD and our LOCAL; "Apple Intelligence and PCC
   should be the brains … stay entirely on the iPad/iphone/mac"; the host side "will move to a virtual
