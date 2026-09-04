@@ -144,40 +144,44 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
     let _ = stream.flush();
 }
 
-/// The exchange's clock, from the first paired ship that answers, remembered 30 s.
+/// An exchange's clock, remembered 30 s, keyed by the exchange — two ships on two
+/// worlds (KK II on PROD, the soak ship on LOCAL) run on two clocks.
 struct Clock {
     tick: i64,
     tick_seconds: i64,
     at: i64,
 }
 
-fn clock(ships: &[Ship], cache: &mut Option<Clock>) -> (i64, i64) {
+type Clocks = BTreeMap<String, Clock>;
+
+fn clock(ship: &Ship, cache: &mut Clocks) -> (i64, i64) {
     let now = super::now_secs();
-    if let Some(c) = cache {
+    let key = read_env_value(&ship.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+    let server = read_env_value(&ship.dir.join("ucf.env"), "UCF_SERVER")
+        .unwrap_or_else(|| ship.captain.server.clone());
+    if let Some(c) = cache.get(&server) {
         if now - c.at < 30 {
             return (c.tick, c.tick_seconds);
         }
     }
-    for s in ships {
-        let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
-        let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
-            .unwrap_or_else(|| s.captain.server.clone());
-        if let Ok(v) = wire_get(&server, &key, "/v1/status") {
-            let tick = v.get("tick").and_then(Value::as_i64).unwrap_or(0);
-            let tick_seconds = v
-                .get("tickDurationSec")
-                .and_then(Value::as_i64)
-                .unwrap_or(180);
-            *cache = Some(Clock {
+    if let Ok(v) = wire_get(&server, &key, "/v1/status") {
+        let tick = v.get("tick").and_then(Value::as_i64).unwrap_or(0);
+        let tick_seconds = v
+            .get("tickDurationSec")
+            .and_then(Value::as_i64)
+            .unwrap_or(180);
+        cache.insert(
+            server,
+            Clock {
                 tick,
                 tick_seconds,
                 at: now,
-            });
-            return (tick, tick_seconds);
-        }
+            },
+        );
+        return (tick, tick_seconds);
     }
     cache
-        .as_ref()
+        .get(&server)
         .map(|c| (c.tick, c.tick_seconds))
         .unwrap_or((0, 180))
 }
@@ -266,20 +270,33 @@ fn proposals_with_state(ship_dir: &Path, tick: i64) -> Vec<Value> {
         .collect()
 }
 
-fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Option<Clock>) -> (u16, Value) {
+fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u16, Value) {
     if req.bearer.as_deref() != Some(tok) {
         return (401, json!({"error": "bearer"}));
     }
     let ships = paired_ships(dir, root);
-    let (tick, tick_seconds) = clock(&ships, clk);
     let now = super::now_secs();
     let segs: Vec<&str> = req.path.trim_matches('/').split('/').collect();
     let find = |id: &str| ships.iter().find(|s| s.world.id == id);
+    // Per-ship routes carry that ship's clock at the top level; the fleet list
+    // carries each ship's clock on its row.
+    let (tick, tick_seconds) = match segs.as_slice() {
+        ["ships", id, ..] => find(id).map(|s| clock(s, clk)).unwrap_or((0, 180)),
+        _ => (0, 180),
+    };
     match (req.method.as_str(), segs.as_slice()) {
         ("GET", ["ships"]) => (
             200,
-            json!({"tick": tick, "tick_seconds": tick_seconds,
-                   "ships": ships.iter().map(|s| ship_row(s, now)).collect::<Vec<_>>()}),
+            json!({"ships": ships
+                .iter()
+                .map(|s| {
+                    let (t, ts) = clock(s, clk);
+                    let mut row = ship_row(s, now);
+                    row["tick"] = json!(t);
+                    row["tick_seconds"] = json!(ts);
+                    row
+                })
+                .collect::<Vec<_>>()}),
         ),
         ("GET", ["ships", id, "journal"]) => {
             let Some(s) = find(id) else {
@@ -531,7 +548,7 @@ pub(crate) fn serve(dir: &Path, root: &Path, bind: &str) -> ExitCode {
     );
     let dir = dir.to_path_buf();
     let root = root.to_path_buf();
-    let clk = std::sync::Arc::new(std::sync::Mutex::new(None::<Clock>));
+    let clk = std::sync::Arc::new(std::sync::Mutex::new(Clocks::new()));
     for conn in listener.incoming() {
         let Ok(mut stream) = conn else { continue };
         let (dir, root, tok, clk) = (dir.clone(), root.clone(), tok.clone(), clk.clone());
