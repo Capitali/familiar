@@ -29,6 +29,18 @@ must never mistake them for Ian's own words or for a human tester's report.
 6. **Ian's rulings are Ian's.** If the point is a design ruling for Jeff rather than an
    observation, it goes to Ian first, not to the repo.
 7. **The ledger below is appended in the same commit** that records the filing, newest last.
+8. **The prefix says a machine observed it, so it goes only on what the machine observed.** If the
+   evidence is a ledger, a journal line, a wire field or a refusal the pilot met, it is Felix's. If
+   the evidence is an opinion about how the game should work — a design idea, an engineering
+   judgment about the client or the exchange's shape — it is a person's, and it is filed in that
+   person's own name, unprefixed. metal#75 (rescue by another hull) is Ian's idea and stays
+   unprefixed; ucf-exchange#22 is Felix's because the constants sit in the pilot's own code and
+   the gap showed against a live world. Dressing a human's thinking as the computer's misrepresents
+   both. (Wildhorse, 2026-09-04, adopted.)
+9. **Tell the other lane first.** One line naming the repo and the point before filing, so the two
+   lanes never file the same thing twice (the first day's #22/#23 collision).
+10. **Filings that predate the convention stay as they are** — a comment noting the source where it
+    helps the reader, never a rewrite.
 
 ## Ledger
 
