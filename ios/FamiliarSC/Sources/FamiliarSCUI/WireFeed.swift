@@ -62,9 +62,12 @@ public struct WireFeed: ShipsFeed, CaptainActs {
 
     static func summary(from row: JSONValue, tick: Int64?) -> ShipSummary? {
         guard let world = row["world"]?.string else { return nil }
-        let computer = row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
+        // The name lives in the row's `persona` (the store's persona.json verbatim, null when
+        // she has not been named); `computer` is the text summary's word for it, if served.
+        let personaName = row["persona"].flatMap { $0 == .null ? nil : $0["name"]?.string }
+        let computer = personaName ?? row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
         return ShipSummary(
-            world: world, label: row["label"]?.string ?? world, computer: computer, named: !computer.hasPrefix("("),
+            world: world, label: row["label"]?.string ?? world, computer: computer, named: personaName != nil || !computer.hasPrefix("("),
             hull: row["hull"]?.string ?? "", captain: row["captain"]?.string ?? "", server: row["server"]?.string ?? "",
             automations: row["automations"]?.array?.compactMap(\.string) ?? [],
             credits: row["credits"]?.int, debt: row["debt"]?.int, fuel: row["fuel"]?.int, fuelCapacity: row["fuelCapacity"]?.int,
