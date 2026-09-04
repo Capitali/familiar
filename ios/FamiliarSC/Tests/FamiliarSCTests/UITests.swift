@@ -60,12 +60,12 @@ final class UITests: XCTestCase {
         let model = BridgeModel(feed: feed, acts: feed)
         await model.refreshShips()
         await model.open(world: "world-fixture-old")
-        XCTAssertNil(await model.rename(computer: "Felix"))
+        let e1 = await model.rename(computer: "Felix"); XCTAssertNil(e1)
         XCTAssertEqual(model.summary?.computer, "Felix"); XCTAssertTrue(model.summary?.named ?? false)
-        XCTAssertNil(await model.setAutomations([.freight, .trade]))
+        let e2 = await model.setAutomations([.freight, .trade]); XCTAssertNil(e2)
         XCTAssertEqual(Set(model.summary?.automations ?? []), ["freight", "trade"])
         XCTAssertEqual(Set(model.dial?.bought ?? []), ["freight", "trade"], "the dial's bought set follows")
-        XCTAssertNil(await model.setCaptain("Ian"))
+        let e3 = await model.setCaptain("Ian"); XCTAssertNil(e3)
         XCTAssertEqual(model.summary?.captain, "Ian")
     }
 
