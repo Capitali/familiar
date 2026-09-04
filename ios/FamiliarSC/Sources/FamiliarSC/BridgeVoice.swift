@@ -124,18 +124,8 @@ public final class BridgeVoice: @unchecked Sendable {
         // asked, on any OS.
         if !consent.privateCloudCompute {
             out[.privateCloudCompute] = "consent off"
-        } else if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *) {
-            do {
-                switch PrivateCloudComputeLanguageModel().availability {
-                case .available: out[.privateCloudCompute] = "available"
-                case .unavailable(.deviceNotEligible): out[.privateCloudCompute] = "device not eligible or no entitlement"
-                case .unavailable(.systemNotReady): out[.privateCloudCompute] = "system not ready"
-                case .unavailable: out[.privateCloudCompute] = "unavailable"
-                @unknown default: out[.privateCloudCompute] = "unavailable"
-                }
-            }
         } else {
-            out[.privateCloudCompute] = "needs OS 27"
+            out[.privateCloudCompute] = pccAvailability()
         }
         #else
         out[.onDevice] = "no Foundation Models on this platform"
@@ -151,16 +141,10 @@ public final class BridgeVoice: @unchecked Sendable {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, visionOS 26.0, *) {
             var notes: [String] = []
-            if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *), consent.privateCloudCompute {
-                let pcc = PrivateCloudComputeLanguageModel()
-                if case .available = pcc.availability {
-                    let session = LanguageModelSession(model: pcc, tools: tools(ctx), instructions: instructions())
-                    switch await generate(session: session, ctx: ctx, floor: floorReport) {
-                    case .success(let r): return SpokenReport(report: r, lane: .privateCloudCompute, note: nil)
-                    case .failure(let why): notes.append("pcc: \(why)")
-                    }
-                } else {
-                    notes.append("pcc: unavailable")
+            if consent.privateCloudCompute {
+                switch await speakOnPrivateCloudCompute(ctx, floor: floorReport) {
+                case .success(let r): return SpokenReport(report: r, lane: .privateCloudCompute, note: nil)
+                case .failure(let why): notes.append("pcc: \(why)")
                 }
             }
             if case .available = SystemLanguageModel.default.availability {
@@ -176,6 +160,42 @@ public final class BridgeVoice: @unchecked Sendable {
         }
         #endif
         return SpokenReport(report: floorReport, lane: .templated, note: "Foundation Models not on this platform")
+    }
+
+    // MARK: Private Cloud Compute — a 27-SDK type, so the reference lives behind the
+    // toolchain check: Xcode 27 ships Swift 6.4, Xcode 26.x ships 6.3. A 26-SDK build
+    // compiles it out honestly (the same discipline as the app's FAMILIAR_SDK_HAS_PCC),
+    // and reports "needs the 27 SDK" — which is also what lets a 26.x Mac ship the tree.
+
+    static func pccAvailability() -> String {
+        #if canImport(FoundationModels) && compiler(>=6.4)
+        if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *) {
+            switch PrivateCloudComputeLanguageModel().availability {
+            case .available: return "available"
+            case .unavailable(.deviceNotEligible): return "device not eligible or no entitlement"
+            case .unavailable(.systemNotReady): return "system not ready"
+            case .unavailable: return "unavailable"
+            @unknown default: return "unavailable"
+            }
+        }
+        return "needs OS 27"
+        #else
+        return "needs the 27 SDK"
+        #endif
+    }
+
+    func speakOnPrivateCloudCompute(_ ctx: BridgeContext, floor: BridgeReport) async -> Result<BridgeReport, VoiceFailure> {
+        #if canImport(FoundationModels) && compiler(>=6.4)
+        if #available(macOS 27.0, iOS 27.0, visionOS 27.0, *) {
+            let pcc = PrivateCloudComputeLanguageModel()
+            guard case .available = pcc.availability else { return .failure(VoiceFailure(why: "unavailable")) }
+            let session = LanguageModelSession(model: pcc, tools: tools(ctx), instructions: instructions())
+            return await generate(session: session, ctx: ctx, floor: floor)
+        }
+        return .failure(VoiceFailure(why: "needs OS 27"))
+        #else
+        return .failure(VoiceFailure(why: "needs the 27 SDK"))
+        #endif
     }
 
     // MARK: prompt
