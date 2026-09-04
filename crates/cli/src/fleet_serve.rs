@@ -7,6 +7,8 @@
 //! `GET /ships/{world}/proposals`, `GET /ships/{world}/dial`, `GET /ships/{world}/book`
 //! (holdings + deliveries). Writes:
 //! `POST /ships/{world}/approve {id, approved}`, `PUT /ships/{world}/dial {…}`,
+//! `PUT /ships/{world}/automations {automations: […]}`, `POST /ships/{world}/rename {name}`,
+//! `PUT /ships/{world}/captain {captain}`,
 //! `POST /pair {label, captain, server, key, automations, pilot_args?}`,
 //! `POST /unpair {world}`. Every reply carries `tick` and `tick_seconds` from the
 //! exchange so the app settles proposal lapse exactly as whisker does. The bearer is
@@ -412,6 +414,145 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             (
                 200,
                 json!({"tick": tick, "tick_seconds": tick_seconds, "approval": a}),
+            )
+        }
+        ("POST", ["ships", id, "rename"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let Ok(b) = serde_json::from_slice::<Value>(&req.body) else {
+                return (400, json!({"error": "json"}));
+            };
+            let Some(name) = b.get("name").and_then(Value::as_str).map(str::trim) else {
+                return (400, json!({"error": "name"}));
+            };
+            if name.is_empty() || name.chars().count() > 40 {
+                return (400, json!({"error": "a name is 1–40 characters"}));
+            }
+            // The captain's computer, not the hull's: one rename, the whole fleet.
+            let out = std::process::Command::new(
+                std::env::current_exe().unwrap_or_else(|_| "familiar".into()),
+            )
+            .args([
+                "fleet",
+                "rename",
+                id,
+                name,
+                "--data-dir",
+                &dir.to_string_lossy(),
+            ])
+            .output();
+            match out {
+                Ok(o) if o.status.success() => (
+                    200,
+                    json!({"tick": tick, "tick_seconds": tick_seconds, "name": name,
+                           "captain": s.captain.captain,
+                           "output": String::from_utf8_lossy(&o.stdout).trim().to_string()}),
+                ),
+                Ok(o) => (
+                    400,
+                    json!({"error": String::from_utf8_lossy(&o.stderr).trim().to_string()}),
+                ),
+                Err(e) => (500, json!({"error": e.to_string()})),
+            }
+        }
+        ("PUT", ["ships", id, "captain"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let Ok(b) = serde_json::from_slice::<Value>(&req.body) else {
+                return (400, json!({"error": "json"}));
+            };
+            let Some(captain) = b.get("captain").and_then(Value::as_str).map(str::trim) else {
+                return (400, json!({"error": "captain"}));
+            };
+            if captain.is_empty() || captain.chars().count() > 60 {
+                return (400, json!({"error": "a captain is 1–60 characters"}));
+            }
+            let was = s.captain.captain.clone();
+            let Ok(text) = std::fs::read_to_string(s.dir.join("captain.json")) else {
+                return (500, json!({"error": "captain.json"}));
+            };
+            let Ok(mut c) = serde_json::from_str::<Value>(&text) else {
+                return (500, json!({"error": "captain.json is not json"}));
+            };
+            c["captain"] = json!(captain);
+            if let Err(e) = std::fs::write(
+                s.dir.join("captain.json"),
+                serde_json::to_vec_pretty(&c).unwrap_or_default(),
+            ) {
+                return (500, json!({"error": e.to_string()}));
+            }
+            // A captain store nobody flies for, whose name no human ever chose, is
+            // swept up: leaving it would keep a computer nobody commands. One a
+            // human named is kept, however empty — that name was an act.
+            let old_store = super::fleet::captain_store(root, &was);
+            let still_flown = paired_ships(dir, root)
+                .iter()
+                .any(|o| o.captain.captain == was);
+            let human_named = std::fs::read_to_string(old_store.join("persona-names.jsonl"))
+                .map(|t| {
+                    t.lines()
+                        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                        .any(|v| v.get("actor").and_then(Value::as_str) != Some("pairing"))
+                })
+                .unwrap_or(false);
+            let swept = if !still_flown && !human_named && old_store.is_dir() {
+                std::fs::remove_dir_all(&old_store).is_ok()
+            } else {
+                false
+            };
+            let joined = persona_for(root, &s.dir, captain)
+                .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from));
+            (
+                200,
+                json!({"tick": tick, "tick_seconds": tick_seconds, "captain": captain,
+                         "was": was, "computer": joined, "retired_old_captain_store": swept}),
+            )
+        }
+        ("PUT", ["ships", id, "automations"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let Ok(b) = serde_json::from_slice::<Value>(&req.body) else {
+                return (400, json!({"error": "json"}));
+            };
+            let Some(list) = b.get("automations").and_then(Value::as_array) else {
+                return (400, json!({"error": "automations: a list of names"}));
+            };
+            // Only names the pilot knows: an unknown grant would sit in the file
+            // meaning nothing, and the captain would think they had bought something.
+            let mut names = Vec::new();
+            for v in list {
+                let Some(n) = v.as_str() else {
+                    return (400, json!({"error": "automations: names are strings"}));
+                };
+                if familiar_whisker::Automation::parse(n).is_none() {
+                    return (400, json!({"error": format!("unknown automation `{n}`")}));
+                }
+                names.push(n.to_string());
+            }
+            if let Err(e) = std::fs::write(
+                s.dir.join("automations.json"),
+                serde_json::to_vec_pretty(&names).unwrap_or_default(),
+            ) {
+                return (500, json!({"error": e.to_string()}));
+            }
+            // captain.json remembers what was bought, so `fleet status` and a re-pair
+            // agree with the file the pilot reads.
+            if let Ok(text) = std::fs::read_to_string(s.dir.join("captain.json")) {
+                if let Ok(mut c) = serde_json::from_str::<Value>(&text) {
+                    c["automations"] = json!(names);
+                    let _ = std::fs::write(
+                        s.dir.join("captain.json"),
+                        serde_json::to_vec_pretty(&c).unwrap_or_default(),
+                    );
+                }
+            }
+            (
+                200,
+                json!({"tick": tick, "tick_seconds": tick_seconds, "automations": names,
+                         "note": "the pilot reads its grants at start — restart it to grant now"}),
             )
         }
         ("PUT", ["ships", id, "dial"]) => {

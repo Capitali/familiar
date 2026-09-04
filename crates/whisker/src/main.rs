@@ -530,6 +530,7 @@ fn main() -> ExitCode {
             .unwrap_or_default();
     let mut last_outfit_idle = String::new();
     let mut last_pending_note = String::new();
+    let mut last_distress = String::new();
     let mut dial_gate = DialGate {
         dial: Dial::load(&ship_dir),
         last_advice: HashMap::new(),
@@ -1483,18 +1484,24 @@ fn main() -> ExitCode {
         // and surfaced — a new fuelable load or a human can still rescue her, where a
         // filed tanker cannot be recalled.
         if matches!(decision, Decision::CallPaws) && !allow_paws {
-            if last_refusal != "distress" {
+            // Its OWN marker: `last_refusal` is the lease gate's, and that gate clears
+            // it every fold it passes, so sharing it re-journalled the distress on
+            // every loop — KK's journal carried the same hold four times across two
+            // ticks (2026-09-04). Re-said only when the berth or the tank changes.
+            let distress = format!("{:?}|{}", ship.docked, ship.fuel);
+            if last_distress != distress {
                 journal(
                     &ship_dir,
                     json!({"at": now, "tick": tick, "event": "distress-hold",
                            "docked": ship.docked, "fuel": ship.fuel,
                            "why": "low fuel, no affordable pump; PAWS refused (would strand for days on this world) — holding for a fuelable load or a human"}),
                 );
-                last_refusal = "distress".to_string();
+                last_distress = distress;
             }
             std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
             continue;
         }
+        last_distress.clear();
 
         let body = match &decision {
             Decision::Hold { .. } => None,
