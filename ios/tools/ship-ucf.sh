@@ -43,7 +43,14 @@ cat > /tmp/UCFFamiliar-export.plist <<PLIST
 <plist version="1.0"><dict>
   <key>method</key><string>app-store-connect</string>
   <key>teamID</key><string>8GHXL328AR</string>
-  <key>signingStyle</key><string>automatic</string>
+  <!-- Manual signing, as ship.sh learned the hard way: this key cannot do cloud-managed
+       distribution ("Cloud signing permission error"), so we pin the Apple Distribution
+       cert and the App Store profile created for this bundle through the ASC API. -->
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key><dict>
+    <key>io.river.familiar.ucf</key><string>UCF Familiar AppStore io.river.familiar.ucf</string>
+  </dict>
   <key>uploadSymbols</key><true/>
 </dict></plist>
 PLIST
