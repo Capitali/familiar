@@ -1112,7 +1112,7 @@ fn main() -> ExitCode {
                     .map(|r| (r.mid, r.station.clone()))
                     .unwrap_or((0, String::new()))
             };
-            for note in trade::reconcile_hold(&mut holdings, &cargo, &hint, tick, min_hold) {
+            for note in trade::reconcile_hold(&mut holdings, &cargo, &hint, tick) {
                 journal(
                     &ship_dir,
                     json!({"at": now, "tick": tick, "event": "book-corrected", "why": note}),

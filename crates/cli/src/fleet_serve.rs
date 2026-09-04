@@ -240,6 +240,11 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         "lease_expires_at": lease_expiry(&s.dir),
         "lease_expires_in_h": lease_expiry(&s.dir).map(|x| (x - now) / 3600),
         "ship": g("shipName"), "docked": g("docked"), "route": g("route"),
+        // The world's OWN word for itself (PROD / LOCAL / TEST) — an instance name,
+        // never part of a ship's name (Ian, 2026-09-04).
+        "world_name": wire_get(&server, &key, "/v1/status")
+            .ok()
+            .and_then(|v| v.get("worldName").and_then(Value::as_str).map(String::from)),
         "credits": g("credits"), "debt": g("debt"), "fuel": g("fuel"), "fuelCapacity": g("fuelCapacity"),
         "wearBps": g("wearBps"), "fittings": g("fittings"), "titled": g("titled"),
         "holdUsed": g("holdUsed"), "holdCapacity": g("holdCapacity"), "cargo": g("cargo"),

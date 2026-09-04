@@ -241,7 +241,6 @@ pub fn reconcile_hold(
     cargo: &[(String, i64)],
     basis_hint: &dyn Fn(&str) -> (i64, String),
     tick: i64,
-    min_hold: i64,
 ) -> Vec<String> {
     let mut notes = Vec::new();
     let ours = |good: &str| -> i64 {
@@ -280,8 +279,9 @@ pub fn reconcile_hold(
             units,
             avg_cost: basis,
             sell_target: target,
+            // Ours to carry from now; bought at a tick only the exchange knows.
             opened_tick: tick,
-            sellable_at: tick + min_hold,
+            sellable_at: 0,
         });
     }
     notes
@@ -369,15 +369,14 @@ pub fn decide_trade(
         if h.units <= 0 {
             continue;
         }
-        // A lot from before the clock was kept (sellable_at 0) is assumed held from
-        // the day it was opened; the exchange's refusal text corrects either way.
-        let sellable_at = if h.sellable_at > 0 {
-            h.sellable_at
-        } else {
-            h.opened_tick + l.min_hold
-        };
-        if l.tick < sellable_at {
-            waiting = Some(format!("{} sellable at t{}", h.good, sellable_at));
+        // `sellable_at == 0` means the clock is UNKNOWN, not zero: goods we found in
+        // the hold rather than bought (a captain's own cargo, adopted on a fold) were
+        // bought at a tick we never saw. Assuming a fresh day would freeze the
+        // captain's own cargo for a world-day of ours; the exchange is the authority
+        // and says so for free — an early sell is refused with the true tick and no
+        // money moves, and `sellable_at` is set from that refusal. So: try, and learn.
+        if h.sellable_at > 0 && l.tick < h.sellable_at {
+            waiting = Some(format!("{} sellable at t{}", h.good, h.sellable_at));
             continue;
         }
         let Some(q) = board.iter().find(|q| q.good == h.good) else {
@@ -388,7 +387,9 @@ pub fn decide_trade(
             continue;
         }
         let profit_floor = h.avg_cost + bps(h.avg_cost, SELL_MARGIN_BPS);
-        let stuck = l.tick > sellable_at + STUCK_HOLDS * l.min_hold.max(1) || l.need_hold;
+        // Stuck is measured from when the lot came into our care, never from an
+        // unknown clock: a lot adopted this fold is not "carried too long".
+        let stuck = l.tick > h.opened_tick + (STUCK_HOLDS + 1) * l.min_hold.max(1) || l.need_hold;
         if q.bid >= profit_floor {
             return TradeDecision::Sell {
                 good: h.good.clone(),
@@ -642,11 +643,12 @@ mod tests {
     }
 
     #[test]
-    fn a_lot_without_a_clock_is_held_a_day_from_its_opening() {
-        // holdings.json written before the clock existed: sellable_at 0. Not "ancient
-        // and stuck" — a day from opened_tick, like any other buy.
+    fn a_lot_with_an_unknown_clock_is_offered_not_frozen() {
+        // Adopted cargo (sellable_at 0): the exchange knows when it was bought and we
+        // do not, so we offer it — a bid that clears is taken, and an early sell is
+        // refused for free with the true tick, which then sets the clock.
         let hold = vec![held("ore", 56, 10, 11417, 0)];
-        let board = vec![q("ore", 10, 8, 2977)];
+        let board = vec![q("ore", 20, 18, 2977)];
         let d = decide_trade(
             &at("io-slagworks", 11469),
             &board,
@@ -655,10 +657,19 @@ mod tests {
             &pumps(),
             &Reach(true),
         );
-        match d {
-            TradeDecision::Idle { why } => assert!(why.contains("sellable at t11705"), "{why}"),
-            other => panic!("expected Idle, got {other:?}"),
-        }
+        assert!(matches!(d, TradeDecision::Sell { .. }), "{d:?}");
+        // And a lot taken up this fold is not "carried too long": under water, it is
+        // held rather than dumped.
+        let fresh = vec![held("ore", 56, 50, 11460, 0)];
+        let d = decide_trade(
+            &at("io-slagworks", 11469),
+            &board,
+            &[],
+            &fresh,
+            &pumps(),
+            &Reach(true),
+        );
+        assert!(!matches!(d, TradeDecision::Sell { .. }), "{d:?}");
     }
 
     #[test]
@@ -681,9 +692,9 @@ mod tests {
     fn liquidates_a_stuck_position_even_at_a_loss() {
         let hold = vec![held("catnip", 40, 50, 100, 100)];
         let board = vec![q("catnip", 42, 40, 500)];
-        // Two hold-periods past the clock (100 + 2*288 = 676): cut it.
+        // Three hold-periods after it came into our care (100 + 3*288 = 964): cut it.
         let d = decide_trade(
-            &at("foxys-diner", 700),
+            &at("foxys-diner", 1000),
             &board,
             &[],
             &hold,
@@ -932,13 +943,11 @@ mod tests {
                 (99, "far".to_string())
             }
         };
-        let notes = reconcile_hold(&mut book, &cargo, &hint, 11416, 288);
+        let notes = reconcile_hold(&mut book, &cargo, &hint, 11416);
         assert_eq!(book.len(), 2, "{book:?}");
         let clay = book.iter().find(|h| h.good == "litter-clay").unwrap();
-        assert_eq!(
-            (clay.units, clay.avg_cost, clay.sellable_at),
-            (60, 99, 11416 + 288)
-        );
+        // Adopted: ours to carry from now, with the clock left to the exchange.
+        assert_eq!((clay.units, clay.avg_cost, clay.sellable_at), (60, 99, 0));
         assert_eq!(
             clay.sell_target, "far",
             "an adopted lot needs somewhere to go"
@@ -949,9 +958,9 @@ mod tests {
 
         // A partial fill reduces; an empty hold drops.
         let mut book = vec![held("ore", 30, 11, 1, 1)];
-        reconcile_hold(&mut book, &[("ore".into(), 12)], &hint, 5, 288);
+        reconcile_hold(&mut book, &[("ore".into(), 12)], &hint, 5);
         assert_eq!(book[0].units, 12);
-        reconcile_hold(&mut book, &[], &hint, 6, 288);
+        reconcile_hold(&mut book, &[], &hint, 6);
         assert!(book.is_empty());
     }
 
