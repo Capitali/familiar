@@ -33,6 +33,11 @@ pub struct Ship {
     /// `leasePrincipal`): the yard clears wear and bills nobody — upkeep is what
     /// the lease service charge buys. A titled hull pays `wearBps × 40 / 100`.
     pub leased: bool,
+    /// The yard's rate for a titled hull, ℳ per hundred bps of wear
+    /// (`params.repairCostPerHundredBps` on `/v1/reference` — published 2026-09-04
+    /// "which a client has been quoting blind"; 40 on the shipped pack). Zero means
+    /// the world did not say, and our copy of the pack answers.
+    pub repair_per_hundred_bps: i64,
     /// True when a course is filed / legs remain — the engine is flying us.
     pub in_flight: bool,
     pub hold_used: i64,
@@ -352,7 +357,13 @@ pub fn decide(
         let invoice = if ship.leased {
             0
         } else {
-            ship.wear_bps * REPAIR_COST_PER_HUNDRED_BPS / 100
+            // The world's own rate when it publishes one, our copy of the pack when not.
+            let rate = if ship.repair_per_hundred_bps > 0 {
+                ship.repair_per_hundred_bps
+            } else {
+                REPAIR_COST_PER_HUNDRED_BPS
+            };
+            ship.wear_bps * rate / 100
         };
         if invoice <= ship.credits / 4 {
             return Decision::Repair;
@@ -485,6 +496,7 @@ mod tests {
             accel_milli_g: REFERENCE_ACCEL_MILLI_G,
             wear_bps: 0,
             leased: false,
+            repair_per_hundred_bps: 0,
             hold_used: 0,
             hold_capacity: 120,
             fuel,

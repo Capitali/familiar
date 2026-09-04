@@ -181,7 +181,7 @@ fn journal(ship_dir: &Path, entry: Value) {
     println!("{entry}");
 }
 
-fn ship_from(me: &Value) -> Ship {
+fn ship_from(me: &Value, repair_rate: i64) -> Ship {
     let route_len = me
         .get("route")
         .and_then(Value::as_array)
@@ -209,6 +209,7 @@ fn ship_from(me: &Value) -> Ship {
                 .and_then(Value::as_i64)
                 .unwrap_or(0)
                 > 0,
+        repair_per_hundred_bps: repair_rate,
         hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
         hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
@@ -515,6 +516,11 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     // The ship's fixed daily charges: the mortgage payment the pack names, plus the
     // lease service (not on the wire; ~520/day observed on KK II's lease).
+    // The yard's rate, from the world rather than from our copy of the pack.
+    let repair_rate = reference
+        .as_ref()
+        .and_then(|v| v.get("params")?.get("repairCostPerHundredBps")?.as_i64())
+        .unwrap_or(0);
     let mortgage_per_day = reference
         .as_ref()
         .and_then(|v| v.get("params")?.get("mortgagePaymentPerDay")?.as_i64())
@@ -599,7 +605,7 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let ship = ship_from(&me);
+        let ship = ship_from(&me, repair_rate);
         let route_now: Vec<String> = me
             .get("route")
             .and_then(Value::as_array)
