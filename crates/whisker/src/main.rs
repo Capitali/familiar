@@ -945,7 +945,13 @@ fn main() -> ExitCode {
                     .unwrap_or(-1)
             })
             .unwrap_or(-1);
-        let berthed_and_still = ship.docked.is_some() && route_now.is_empty();
+        // ...and "still" is the same judgement `in_flight` already makes, rather
+        // than a second reading of the route array. A hull berthed behind hops it
+        // cannot afford is not flying a voyage the marker belongs to; it is parked
+        // behind a course that will never move, and asking the route alone left
+        // KK II filing for foxy's-diner every fold and never pressing the plate
+        // (cannery-row, 2026-09-05: t8074 and t8089, no engage between them).
+        let berthed_and_still = ship.docked.is_some() && !ship.in_flight;
         if let Some(dest) = awaiting.filter(|_| berthed_and_still && tick >= crane_until) {
             if tick >= pending_until
                 && dial_gate.allow(
