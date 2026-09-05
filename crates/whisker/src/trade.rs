@@ -506,6 +506,24 @@ pub struct Ledger<'a> {
     /// for a better price is cargo spoiling at the same time, and on the luxuries
     /// that is not a rounding error: bluefin sheds 23% of itself a day.
     pub decay_bps: Option<&'a BTreeMap<String, i64>>,
+    /// The credit line this hull may put to work, ALREADY GATED by the captain's
+    /// `market.margin` dial — zero when they have not opened it.
+    ///
+    /// Ian, 2026-09-05: "working capital should be utilized to maximize success;
+    /// that would be proper servitude and following the three laws." Kibble
+    /// Klipper was the case that asked the question: idle at foxy's-diner with
+    /// ℳ411 in hand, ℳ8,574 of untouched line, and a merchant that could not see
+    /// it — every credit it earned went to the overdraft before the purse, so a
+    /// solvent ship sat still for want of money it had.
+    pub borrowable: i64,
+}
+
+impl Ledger<'_> {
+    /// What the merchant can actually put behind a position: cash plus whatever
+    /// of the line the captain has opened. Cash alone when they have not.
+    pub fn working_capital(&self) -> i64 {
+        self.credits.saturating_add(self.borrowable.max(0))
+    }
 }
 
 /// The merchant judgment.
@@ -643,7 +661,7 @@ pub fn decide_trade(
             why: waiting.unwrap_or_else(|| "holding a position; no bid here clears it".into()),
         };
     }
-    if l.need_hold || l.spare_hold <= 0 || l.credits < MIN_CASH_FLOOR {
+    if l.need_hold || l.spare_hold <= 0 || l.working_capital() < MIN_CASH_FLOOR {
         return TradeDecision::Idle {
             why: "no room/cash to open a position".into(),
         };
@@ -698,7 +716,7 @@ pub fn decide_trade(
             continue;
         }
         // Size the position: bounded by cash, spare hold, and the shelf.
-        let by_cash = bps(l.credits, MAX_CASH_BPS) / q.ask.max(1);
+        let by_cash = bps(l.working_capital(), MAX_CASH_BPS) / q.ask.max(1);
         let by_hold = bps(l.spare_hold, MAX_HOLD_BPS).max(0);
         let units = by_cash.min(by_hold).min(q.max_buy);
         if units <= 0 {
@@ -810,6 +828,7 @@ mod tests {
             daily_fixed_cost: 600,
             ticks_per_day: 288,
             decay_bps: None,
+            borrowable: 0,
         }
     }
 
@@ -1019,6 +1038,32 @@ mod tests {
             vec![("bluefin-reserve".to_string(), 6336)]
         );
         assert!(parse_holds(&serde_json::json!({})).is_empty());
+    }
+
+    /// Ian, 2026-09-05: "the automation should include the ability to borrow to
+    /// speculate... working capital should be utilized to maximize success."
+    ///
+    /// Kibble Klipper's own numbers, idle at foxy's-diner: ℳ411 in hand against a
+    /// ℳ2,000 floor, and ℳ8,574 of credit line it could not see. Cash alone keeps
+    /// it parked; the line put to work lets it trade.
+    #[test]
+    fn the_credit_line_is_working_capital_when_the_captain_opens_it() {
+        let mut l = at("foxys-diner", 150);
+        l.credits = 411;
+        let board = vec![q("catnip", 20, 40, 500)];
+        let galaxy = vec![row("catnip", "velvet-array", 90)];
+
+        // Dial closed: the line is zero here, and the ship stays put.
+        l.borrowable = 0;
+        assert_eq!(l.working_capital(), 411);
+        let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
+        assert!(!matches!(d, TradeDecision::Buy { .. }), "{d:?}");
+
+        // Dial open: the same berth, the same board, and a position it can carry.
+        l.borrowable = 8_574;
+        assert_eq!(l.working_capital(), 8_985);
+        let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
+        assert!(matches!(d, TradeDecision::Buy { .. }), "{d:?}");
     }
 
     #[test]

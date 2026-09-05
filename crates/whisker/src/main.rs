@@ -1245,6 +1245,21 @@ fn main() -> ExitCode {
                         },
                     ticks_per_day: min_hold,
                     decay_bps: Some(&decay_bps),
+                    // The line, if the captain has opened it. The engine draws a
+                    // shortfall against `marginCreditLimit` automatically on a
+                    // buy, so this is a facility the ship already has and the
+                    // merchant simply could not see — gated here on the captain's
+                    // own `market.margin` dial rather than assumed.
+                    borrowable: if dial_gate.dial.level(autonomy::Surface::MarketMargin)
+                        == autonomy::Level::Auto
+                    {
+                        me.get("marginAvailable")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(0)
+                            .max(0)
+                    } else {
+                        0
+                    },
                 };
                 let td =
                     trade::decide_trade(&ledger, &board_here, &galaxy, &holdings, &pumps, &wire);

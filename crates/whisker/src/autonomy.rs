@@ -57,6 +57,7 @@ pub enum Surface {
     MarketBuy,
     MarketSell,
     MarketCarry,
+    MarketMargin,
     ShipRepair,
     ShipRefit,
     ShipCrew,
@@ -74,7 +75,10 @@ impl Surface {
                 "navigation"
             }
             Surface::FreightBook | Surface::FreightCollect | Surface::FreightCancel => "freight",
-            Surface::MarketBuy | Surface::MarketSell | Surface::MarketCarry => "market",
+            Surface::MarketBuy
+            | Surface::MarketSell
+            | Surface::MarketCarry
+            | Surface::MarketMargin => "market",
             Surface::ShipRepair
             | Surface::ShipRefit
             | Surface::ShipCrew
@@ -94,6 +98,7 @@ impl Surface {
             Surface::MarketBuy => "buy",
             Surface::MarketSell => "sell",
             Surface::MarketCarry => "carry",
+            Surface::MarketMargin => "margin",
             Surface::ShipRepair => "repair",
             Surface::ShipRefit => "refit",
             Surface::ShipCrew => "crew",
@@ -118,6 +123,7 @@ impl Surface {
             Surface::MarketBuy,
             Surface::MarketSell,
             Surface::MarketCarry,
+            Surface::MarketMargin,
             Surface::ShipRepair,
             Surface::ShipRefit,
             Surface::ShipCrew,
@@ -165,10 +171,22 @@ impl Dial {
             .or_else(|| self.settings.get(s.family()))
             .or_else(|| self.settings.get("*"))
             .copied()
-            .unwrap_or(if s == Surface::NavigationRescue {
-                Level::Advise
-            } else {
-                Level::Auto
+            .unwrap_or(match s {
+                // The tanker on a real-time world: a PAWS call is a multi-day
+                // strand that also pins the hull (Ian's own Kibble Klipper,
+                // 2026-09).
+                Surface::NavigationRescue => Level::Advise,
+                // Trading on the credit line. Ian, 2026-09-05: "the automation
+                // should include the ability to borrow to speculate and that
+                // should be a dial in the bridge autonomy settings. Working
+                // capital should be utilized to maximize success — that would be
+                // proper servitude and following the three laws." So the ability
+                // exists and the captain owns it; an unconfigured captain is
+                // OFFERED the borrow rather than committed to it, the same
+                // reasoning as the tanker. A captain who has set `*` has already
+                // spoken and gets what they asked for.
+                Surface::MarketMargin => Level::Advise,
+                _ => Level::Auto,
             })
     }
     pub fn set(&mut self, key: &str, level: Level) -> Result<(), String> {
