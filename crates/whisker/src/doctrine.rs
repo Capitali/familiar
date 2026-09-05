@@ -179,6 +179,26 @@ pub fn route_ticks_at_burn(legs_km: &[i64], hull_accel_milli_g: i64, burn_bps: i
     flight_ticks(legs_km, accel)
 }
 
+/// What a PAWS call-out would cost, estimated from the shipped pack.
+///
+/// The bill is `fuel + trip`: propellant at the pump price DOUBLED because you are
+/// not at the pump, plus 12 ℳ for every million km the tanker must cross, never
+/// less than 250. The engine's own words for why: "a call from the inner system is
+/// an annoyance, and a call from Neptune is a bill you will remember."
+///
+/// The trip term dominates, and it dominates most exactly when the tanker is the
+/// only option left — KK's rescue from titania was ℳ33,594, of which about ℳ31,700
+/// was the crossing. So this is an ESTIMATE the pilot decides on, never a quote:
+/// none of these numbers is published on `/v1/reference` (asked for in
+/// ucf-exchange#22), so a world that reprices them moves the real bill without
+/// telling us. Being wrong here costs credits, never the ship, and it is consulted
+/// only when nothing cheaper can move her at all.
+pub fn tanker_bill(km_to_nearest_pump: i64, units_wanted: i64, fuel_price: i64) -> i64 {
+    let fuel = units_wanted.max(0) * fuel_price.max(1) * 2;
+    let trip = (km_to_nearest_pump.max(0) / 1_000_000 * 12).max(250);
+    fuel + trip
+}
+
 /// A rung chosen for a course, with what it will cost and take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BurnPlan {
@@ -1102,6 +1122,25 @@ mod tests {
                 station: "a".into()
             }
         );
+    }
+
+    /// The tanker's bill, against the one receipt we have: KK's rescue from
+    /// titania-cold-store, 465 units wanted, ℳ33,594 charged. The crossing is what
+    /// costs — about ℳ31,700 of it — which is why the truck is dearest exactly when
+    /// it is the only thing left.
+    #[test]
+    fn the_tankers_bill_is_mostly_the_crossing() {
+        // ~2.64e9 km out, the tank wanting 465: fuel 465*2*2 = 1860, trip 12/Mkm.
+        let bill = tanker_bill(2_644_000_000, 465, 2);
+        assert_eq!(bill, 1_860 + 31_728);
+        assert!(
+            (bill - 33_594).abs() < 100,
+            "within a rounding of the receipt: {bill} vs 33594"
+        );
+        // Next door, the same tank: an annoyance, not a bill you remember.
+        assert_eq!(tanker_bill(2_000_000, 465, 2), 1_860 + 250);
+        // The floor holds however close you are.
+        assert_eq!(tanker_bill(0, 0, 2), 250);
     }
 
     /// A full tank at a pumpless berth stays put. The shuttle exists to make plans

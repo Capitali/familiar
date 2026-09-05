@@ -69,6 +69,13 @@ const LEASE_SERVICE_PER_DAY_EST: i64 = 520;
 /// ℳ per unit of fuel (the pack's `fuelPricePerUnit`, not on the wire; 2 on LOCAL
 /// and PROD, and what the refuel receipts show). Charged against a trade's margin.
 const FUEL_PRICE_PER_UNIT: i64 = 2;
+/// The PAWS tanker's drive, thousandths of a gravity. Jeff filed
+/// `pawsTankerAccelMilliG=120` on PROD 2026-09-05 (metal#59), which put the truck on
+/// the same brachistochrone as a ship: KK's five-and-a-half-day rescue would now be
+/// about 86 ticks. NOT published on `/v1/reference` — this is a copy of a dial the
+/// wire does not expose, so it is used only to TELL the captain roughly how long a
+/// rescue would take, never to decide anything on its own.
+const PAWS_TANKER_ACCEL_MILLI_G: i64 = 120;
 
 /// A trade filed this cycle: what to look for on the receipt trail once it folds.
 struct PendingTrade {
@@ -1571,15 +1578,44 @@ fn main() -> ExitCode {
             }
         }
 
-        // The PAWS guard. On a real-time world the tanker is a CATASTROPHE, not a
-        // rescue: PROD prices the call-out from raw km at a flat rate, so a tanker to
-        // the outer system is ~2,600 ticks = FIVE AND A HALF DAYS away (metal#59). So
-        // committing to PAWS strands the hull for days and bills it heavily. Unless a
-        // human opts in (`--allow-paws`, for LOCAL where the tanker is instant), a
-        // would-be PAWS call becomes a LOUD distress hold instead: safe, reversible,
-        // and surfaced — a new fuelable load or a human can still rescue her, where a
-        // filed tanker cannot be recalled.
+        // The PAWS guard, REPRICED. It used to rest on time: PROD charged the
+        // call-out from raw km at a flat rate, so a tanker to the outer system was
+        // ~2,600 ticks — five and a half days — and committing to one was a
+        // catastrophe rather than a rescue. Jeff closed that on 2026-09-05 by filing
+        // `pawsTankerAccelMilliG=120` (metal#59): the truck now flies the same
+        // brachistochrone as a ship, and the crossing that cost KK five days would
+        // cost about 86 ticks — four hours.
+        //
+        // So the old reason is simply false now, and a rule that keeps its
+        // conclusion after losing its reason is superstition. What survives is the
+        // BILL, which was never the stated objection: `fuel + trip`, where the trip
+        // is 12 ℳ per million km and dominates. KK's rescue was ℳ33,594 and about
+        // ℳ31,700 of it was the crossing. The tanker is dear precisely when it is
+        // the only thing left, which is the shape the engine intends — "a call from
+        // Neptune is a bill you will remember".
+        //
+        // The hold therefore stays the default while a human has not opted in, but
+        // it now says what it actually costs instead of a stale claim about days.
         if matches!(decision, Decision::CallPaws) && !allow_paws {
+            // What she would actually be signing for, so the hold is a decision the
+            // captain can weigh rather than a refusal he has to take on faith.
+            let (paws_km, paws_ticks) = ship
+                .docked
+                .as_deref()
+                .and_then(|here| {
+                    pumps
+                        .iter()
+                        .filter_map(|p| wire.leg_distances_km(here, p))
+                        .map(|legs| legs.iter().sum::<i64>())
+                        .min()
+                })
+                .map(|km| (km, doctrine::flight_ticks(&[km], PAWS_TANKER_ACCEL_MILLI_G)))
+                .unwrap_or((0, 0));
+            let paws_bill = doctrine::tanker_bill(
+                paws_km,
+                (ship.fuel_capacity - ship.fuel).max(0),
+                FUEL_PRICE_PER_UNIT,
+            );
             // Its OWN marker: `last_refusal` is the lease gate's, and that gate clears
             // it every fold it passes, so sharing it re-journalled the distress on
             // every loop — KK's journal carried the same hold four times across two
@@ -1590,7 +1626,12 @@ fn main() -> ExitCode {
                     &ship_dir,
                     json!({"at": now, "tick": tick, "event": "distress-hold",
                            "docked": ship.docked, "fuel": ship.fuel,
-                           "why": "low fuel, no affordable pump; PAWS refused (would strand for days on this world) — holding for a fuelable load or a human"}),
+                           "bill_estimate": paws_bill,
+                           "why": format!(
+                               "low fuel, no reachable pump at any burn; a tanker would \
+                                come in about {} ticks and bill roughly ℳ{} — holding \
+                                for a fuelable load or a human (--allow-paws to let her call)",
+                               paws_ticks, paws_bill)}),
                 );
                 last_distress = distress;
             }
