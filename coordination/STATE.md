@@ -22,6 +22,10 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   wildhorse registered the bundle id (65TTGZ6GSY) and minted an App Store profile against the same
   Apple Distribution cert (8PV78GZUUJ) — the ASC key cannot cloud-sign, so ship-ucf.sh pins manual
   signing. That profile lives on wildhorse only: UCF Familiar uploads stay there, like the other two.
+  **Build 1 processed (VALID, READY_FOR_BETA_TESTING) but the new app had NO TestFlight group, so it
+  reached nobody. Fixed 2026-09-04 from MacOnStick through the ASC API: internal group "UCF Familiar
+  testers" (9f0e0a9b…, hasAccessToAllBuilds — every future build lands in it), tester ian@river.io.**
+  `ios/tools/tf_release.py` now signs its token with openssl when pyjwt is missing.
 
 - **FELIX FILES ISSUES (Ian, 2026-09-04, verbatim): "If Felix has suggestions for world improvements,
   bug questions, or future features, you should help Felix open issues to the repo to have them
