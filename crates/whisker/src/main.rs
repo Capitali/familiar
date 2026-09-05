@@ -1176,10 +1176,20 @@ fn main() -> ExitCode {
                 } else {
                     galaxy_for_hint
                 };
-                // What the carry leg can leave with: a full tank if this berth pumps
-                // (the freight doctrine tops up here first), else what is in it now.
+                // What the carry leg can leave with: at a pump, as much as the purse
+                // can actually buy, capped by the tank — NOT the tank outright. A
+                // berth that sells fuel to a ship with no money sells it nothing,
+                // and assuming otherwise deadlocks a broke hull at a pump: KK stood
+                // at foxy's-diner on 2026-09-04 with 23 in the tank and 0 in hand,
+                // holding 114 bluefin for enceladus-draw because the merchant
+                // believed it could leave with 600, while the carry it was holding
+                // for needed 154 it had no way to buy. It would not sell the cargo
+                // because it was saving it for a berth it could only reach by
+                // selling the cargo.
                 let fuel_available = if pumps.contains(&here) {
-                    ship.fuel_capacity
+                    ship.fuel
+                        .saturating_add(ship.credits / FUEL_PRICE_PER_UNIT.max(1))
+                        .min(ship.fuel_capacity)
                 } else {
                     ship.fuel
                 };
