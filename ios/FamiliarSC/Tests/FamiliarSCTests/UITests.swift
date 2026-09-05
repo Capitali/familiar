@@ -106,6 +106,20 @@ final class UITests: XCTestCase {
         XCTAssertTrue(Grounding.tokens(in: ctx.truth(floor: BridgeVoice(persona: Persona(name: "Felix", style: nil)).floor(ctx))).contains("foxys-diner"))
     }
 
+    func testTheFloorAnswersForTheHullInViewNotTheWholeFleet() {
+        let brief = ContextDocument(name: "brief", title: "ship's brief — what is aboard, the dial, proposals, standing advice, recent events", text: "Kibble Klipper II is docked at cannery-row. Aboard: nothing.")
+        let fleet = ContextDocument(name: "fleet", title: "the captain's fleet — every hull he flies, where each is, the pooled book, what waits on him", text: "Kibble Klipper: at foxys-diner.\nKibble Klipper II: at cannery-row.")
+        let ctx = BridgeContext(entries: [], openProposals: 0, frame: "ship, hull Kibble Klipper II (PROD)", documents: [brief, fleet])
+        let conv = Conversation(voice: BridgeVoice(persona: Persona(name: "Felix", style: nil)), context: ctx)
+        let here = conv.floorAnswer("where is the ship")
+        XCTAssertTrue(here.contains("cannery-row"), here)
+        XCTAssertFalse(here.contains("foxys-diner"), "the other hull must not answer for this one: \(here)")
+        let all = conv.floorAnswer("where is the rest of the fleet")
+        XCTAssertTrue(all.contains("foxys-diner") && all.contains("cannery-row"), all)
+        let voice = BridgeVoice(persona: Persona(name: "Felix", style: nil))
+        XCTAssertTrue(voice.instructions(frame: ctx.frame, documents: ctx.documents).contains("read_fleet` covers EVERY hull"))
+    }
+
     func testCaptainBriefAndSlug() throws {
         XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker"), "luke-skywhisker")
         XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker (LOCAL soak)"), "luke-skywhisker-local-soak")

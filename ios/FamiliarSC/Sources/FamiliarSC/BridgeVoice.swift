@@ -223,8 +223,11 @@ public final class BridgeVoice: @unchecked Sendable {
     func instructions(frame: String? = nil, documents: [ContextDocument] = []) -> String {
         let s = persona.voice
         let framing = frame.map { "\nYou are speaking about: \($0). Answer for THAT ship unless the captain names another." } ?? ""
+        let fleetNote = documents.contains { $0.name == "fleet" }
+            ? "\n`read_fleet` covers EVERY hull the captain flies; read it only when asked about the fleet or another hull, and never answer for another hull as if it were this one."
+            : ""
         let docs = documents.isEmpty ? "" : "\nYou have documents to read with tools before answering what they cover: " + documents.map { "`read_\($0.name)` — \($0.title)" }.joined(separator: "; ") + ". When the captain asks about fuel, refuelling, pumps or being stranded, read the fuel document and answer from it: which pump, how far, what it costs, what is short, and what the ways out are."
-        return baseInstructions(s) + framing + docs
+        return baseInstructions(s) + framing + docs + fleetNote
     }
 
     func baseInstructions(_ s: Style) -> String {
@@ -443,17 +446,26 @@ public final class Conversation: @unchecked Sendable {
     /// The floor's answer, with no model: the document the question is about, whole (a
     /// question about refuelling gets the fuel picture), else the journal lines that mention
     /// the question's words, told plainly.
+    /// Words that widen a question from the hull in view to the captain's whole fleet.
+    public static let fleetWords: Set<String> = ["fleet", "other", "others", "ships", "hulls", "both", "every", "pooled", "rest", "elsewhere"]
+
     public func floorAnswer(_ question: String) -> String {
         let floor = voice.floor(context)
         let words = question.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" }).map(String.init).filter { $0.count > 2 }
         // "refuel" ⊃ "fuel", "pumps" ⊃ "pump": a word matches a document when either contains the other.
         func hits(_ a: String, _ b: String) -> Bool { a.contains(b) || b.contains(a) }
-        let scored = context.documents.map { d -> (ContextDocument, Int) in
+        // The `fleet` document covers EVERY hull the captain flies. It answers only when the
+        // captain asks about the fleet or another hull; otherwise the ship in view is the
+        // subject, so a "where are we" never comes back as both hulls at once (Ian, 2026-09-05:
+        // Felix's dialog showed across both PROD hulls with no segregation).
+        let asksFleet = words.contains { Conversation.fleetWords.contains($0) }
+        let candidates = context.documents.filter { asksFleet || $0.name != "fleet" }
+        let scored = candidates.map { d -> (ContextDocument, Int) in
             let vocab = (d.name + " " + d.title).lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init).filter { $0.count > 3 }
             return (d, words.filter { w in vocab.contains { hits(w, $0) } }.count)
         }
         if let best = scored.max(by: { $0.1 < $1.1 }), best.1 > 0 { return best.0.text }
-        let lines = floor.facts + context.documents.flatMap { $0.text.split(separator: "\n").map(String.init) }
+        let lines = floor.facts + candidates.flatMap { $0.text.split(separator: "\n").map(String.init) }
         let facts = lines.filter { f in words.contains { w in f.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "-" }).contains { hits(String($0), w) } } }
         if !facts.isEmpty { return facts.prefix(6).joined(separator: "\n") }
         return floor.headline + "\n" + floor.facts.prefix(3).joined(separator: "\n") + "\n" + floor.nextAct
