@@ -207,6 +207,34 @@ fn model_agrees(legs_km: &[i64], quoted_at_reference: i64) -> bool {
     (modelled - quoted_at_reference).abs() <= slack
 }
 
+/// The cheapest pump this tank can still reach, and the rung to fly there on.
+///
+/// Asked at BOTH fuel doors, because they used to disagree: the tanker door ran
+/// first on a bare fraction of the tank and the pump door — which actually looks
+/// at the map — never got to speak. Anything that can still fly to a pump is not
+/// a rescue case.
+pub fn reachable_pump<'a>(
+    here: &str,
+    ship: &Ship,
+    pumps: &'a BTreeSet<String>,
+    router: &dyn Router,
+) -> Option<(BurnPlan, &'a String)> {
+    let mut best: Option<(BurnPlan, &String)> = None;
+    for p in pumps {
+        let Some(cost) = router.fuel_between(here, p) else {
+            continue;
+        };
+        let legs = router.leg_distances_km(here, p).unwrap_or_default();
+        let Some(plan) = burn_that_reaches(&legs, cost, ship.accel_milli_g, ship.fuel, 1.1) else {
+            continue;
+        };
+        if best.map(|(b, _)| plan.fuel < b.fuel).unwrap_or(true) {
+            best = Some((plan, p));
+        }
+    }
+    best
+}
+
 /// The rung to fly a course on, and what it costs.
 ///
 /// STANDARD FIRST, always: a healthy tank flies the throttle it always flew, so
@@ -449,10 +477,23 @@ pub fn decide(
     // unit, journalling "low fuel, no affordable pump" at a pump, with a tanker
     // 54 hours out charging 33,594 for what the counter beside her wanted 1,154 for.
     // A tanker is what you call when no pump is in reach. This one is under the hull.
-    if frac(ship.fuel) < CRITICAL_FUEL
-        && !ship.docked.as_deref().is_some_and(|at| pumps.contains(at))
-    {
-        return Decision::CallPaws;
+    //
+    // The same argument reaches one berth further out. KK II stood at cannery-row
+    // on 2026-09-05 with 18 of 600, 8,812 credits, and foxy's-diner SEVEN fuel and
+    // two ticks away — and called a tanker, because this door runs on a fraction of
+    // the tank and the pump door, the one that actually reads the map, never got to
+    // speak. A hull that can still fly to a pump is not a rescue case; it is a hull
+    // with an errand. So the tanker is what is left when the map has no answer.
+    if frac(ship.fuel) < CRITICAL_FUEL {
+        let at_pump = ship.docked.as_deref().is_some_and(|at| pumps.contains(at));
+        let can_reach = ship
+            .docked
+            .as_deref()
+            .and_then(|here| reachable_pump(here, ship, pumps, router))
+            .is_some();
+        if !at_pump && !can_reach {
+            return Decision::CallPaws;
+        }
     }
 
     if let Some(active) = active {
@@ -621,24 +662,9 @@ pub fn decide(
         // one the pilot prefers. Standard first, so a healthy tank flies exactly
         // as it always did; half throttle only when standard falls short, which
         // is the difference between a run and three days at a dead berth.
-        let mut best: Option<(BurnPlan, &String)> = None;
-        for p in pumps {
-            let Some(cost) = router.fuel_between(here, p) else {
-                continue;
-            };
-            let legs = router.leg_distances_km(here, p).unwrap_or_default();
-            let Some(plan) = burn_that_reaches(&legs, cost, ship.accel_milli_g, ship.fuel, 1.1)
-            else {
-                continue;
-            };
-            // Cheapest arrival wins, and a rung that costs less IS cheaper —
-            // ranking on the reference quote would rank routes by a throttle
-            // nobody is flying.
-            if best.map(|(b, _)| plan.fuel < b.fuel).unwrap_or(true) {
-                best = Some((plan, p));
-            }
-        }
-        return match best {
+        // Cheapest arrival wins, and a rung that costs less IS cheaper — ranking on
+        // the reference quote would rank routes by a throttle nobody is flying.
+        return match reachable_pump(here, ship, pumps, router) {
             Some((plan, pump)) => Decision::DivertToPump {
                 pump: pump.clone(),
                 burn_bps: plan.bps,
@@ -1066,6 +1092,31 @@ mod tests {
                 station: "a".into()
             }
         );
+    }
+
+    /// A pump WITHIN REACH outranks the tanker too — the same argument one berth
+    /// further out. KK II stood at cannery-row on 2026-09-05 with 18 of 600 and
+    /// 8,812 credits, foxy's-diner seven fuel and two ticks away, and called for a
+    /// truck. The tanker door ran on a bare fraction of the tank; the pump door,
+    /// which reads the map, never got to speak.
+    #[test]
+    fn a_pump_within_reach_outranks_the_tanker() {
+        let ship = ship_at("cannery-row", 18);
+        let reach = FlatRouter(7);
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &reach);
+        assert_eq!(
+            d,
+            Decision::DivertToPump {
+                pump: "foxys-diner".into(),
+                burn_bps: BURN_STANDARD
+            }
+        );
+        // With the same tank and NO pump the router can price, the truck is right.
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &NoRouter);
+        assert_eq!(d, Decision::CallPaws);
+        // And a pump priced beyond the tank is no answer either.
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(400));
+        assert_eq!(d, Decision::CallPaws);
     }
 
     /// A pump under the hull outranks the tanker. KK stood at foxy's-diner on 23 of
