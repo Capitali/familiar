@@ -1134,6 +1134,12 @@ fn main() -> ExitCode {
                     .map(|r| (r.mid, r.station.clone()))
                     .unwrap_or((0, String::new()))
             };
+            for note in trade::adopt_exchange_clocks(&mut holdings, &trade::parse_holds(&me)) {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "book-corrected", "why": note}),
+                );
+            }
             for note in trade::reconcile_hold(&mut holdings, &cargo, &hint, tick) {
                 journal(
                     &ship_dir,

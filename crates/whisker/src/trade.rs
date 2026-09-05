@@ -223,6 +223,51 @@ pub fn carry_affordable(cost: i64, fuel: i64) -> bool {
     fuel >= bps(cost, CARRY_RESERVE_BPS)
 }
 
+/// Take the exchange's own word for when each lot may be sold.
+///
+/// `/v1/me.holds` publishes `sellableAtTick` per good, and it is the same clock
+/// the fold enforces — so it outranks anything we inferred. We used to learn this
+/// number only by being refused, which is free but slow, and wrong in between:
+/// Kibble Klipper sat at foxy's-diner on 2026-09-04 journaling "bluefin-reserve
+/// sellable at t8005" with 0 credits and 23 fuel, while the exchange had been
+/// saying t6336 — an hour and a half of a stranded ship declining to sell the one
+/// thing that could have refuelled her, on a clock that had passed long before.
+///
+/// A good absent from `holds` says nothing (the exchange lists what it is
+/// tracking, not what it is not), so an absent good keeps whatever we had.
+pub fn adopt_exchange_clocks(holdings: &mut [Holding], holds: &[(String, i64)]) -> Vec<String> {
+    let mut notes = Vec::new();
+    for h in holdings.iter_mut() {
+        let Some((_, theirs)) = holds.iter().find(|(g, _)| *g == h.good) else {
+            continue;
+        };
+        if *theirs != h.sellable_at {
+            notes.push(format!(
+                "{}: our book said sellable at t{}, the exchange says t{} — theirs",
+                h.good, h.sellable_at, theirs
+            ));
+            h.sellable_at = *theirs;
+        }
+    }
+    notes
+}
+
+/// The hold clocks off `/v1/me.holds`.
+pub fn parse_holds(me: &Value) -> Vec<(String, i64)> {
+    me.get("holds")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| {
+                    let g = r.get("good").and_then(Value::as_str)?;
+                    let t = r.get("sellableAtTick").and_then(Value::as_i64)?;
+                    Some((g.to_string(), t))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// What a lot is worth if we carry it somewhere else: the dearest berth on the
 /// map, net of the fuel to reach it, and how long that takes.
 ///
@@ -943,6 +988,37 @@ mod tests {
         let l = at("foxys-diner", 150);
         // 600 a day over 288 ticks.
         assert!((hurdle_per_tick(&l) - 2.083).abs() < 0.01);
+    }
+
+    /// The exchange's clock outranks ours, in both directions.
+    #[test]
+    fn the_exchanges_hold_clock_beats_our_book() {
+        let mut book = vec![held("bluefin-reserve", 114, 140, 6048, 8005)];
+        let notes = adopt_exchange_clocks(&mut book, &[("bluefin-reserve".to_string(), 6336_i64)]);
+        assert_eq!(book[0].sellable_at, 6336);
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("t8005"), "{}", notes[0]);
+        assert!(notes[0].contains("t6336"), "{}", notes[0]);
+        // Agreeing is silent.
+        assert!(adopt_exchange_clocks(&mut book, &[("bluefin-reserve".into(), 6336)]).is_empty());
+        // A good the exchange is not tracking says nothing, so we keep what we had.
+        assert!(adopt_exchange_clocks(&mut book, &[("ore".into(), 1)]).is_empty());
+        assert_eq!(book[0].sellable_at, 6336);
+    }
+
+    #[test]
+    fn reads_the_hold_clocks_off_the_wire() {
+        let me = serde_json::json!({
+            "holds": [
+                {"good": "bluefin-reserve", "sellableAtTick": 6336},
+                {"good": "catnip"}
+            ]
+        });
+        assert_eq!(
+            parse_holds(&me),
+            vec![("bluefin-reserve".to_string(), 6336)]
+        );
+        assert!(parse_holds(&serde_json::json!({})).is_empty());
     }
 
     #[test]
