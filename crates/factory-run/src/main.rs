@@ -65,16 +65,12 @@ fn order_one() -> WorkOrder {
 }
 
 fn interpreter() -> PathBuf {
-    for p in [
-        "/opt/homebrew/bin/python3.13",
-        "/opt/homebrew/bin/python3",
-        "/usr/bin/python3",
-    ] {
-        if std::path::Path::new(p).exists() {
-            return PathBuf::from(p);
-        }
-    }
-    PathBuf::from("python3")
+    // A real interpreter, resolved outside the jail — /usr/bin/python3 is the
+    // xcrun shim and cannot run inside it (see `bench::find_python`).
+    familiar_factory::bench::find_python().unwrap_or_else(|| {
+        eprintln!("factory: no real python3 (Homebrew or `xcrun --find python3`) — the jail cannot run the /usr/bin shim");
+        std::process::exit(2);
+    })
 }
 
 fn now_secs() -> u64 {

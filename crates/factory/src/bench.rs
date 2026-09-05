@@ -77,6 +77,33 @@ pub fn run_bench(
     })
 }
 
+/// A REAL Python interpreter for the jail — never `/usr/bin/python3`. On macOS
+/// that path is Xcode's shim: a stub that re-execs `xcrun` to find a toolchain
+/// python, and `xcrun` needs `/dev/null`, `confstr(DARWIN_USER_TEMP_DIR)` and an
+/// `xcrun_db` under `/tmp`, all of which the jail denies by design. Inside the
+/// jail the shim dies with "xcode-select: Failed to locate 'python3'" and every
+/// bench reads red for a reason that has nothing to do with the candidate
+/// (wildhorse, 2026-09-05: four factory tests red on a Mac without Homebrew
+/// python). So: Homebrew first, then whatever `xcrun --find python3` resolves
+/// to — resolved HERE, outside the jail — and `None` when neither exists, so a
+/// test can skip loudly instead of blaming the candidate.
+pub fn find_python() -> Option<PathBuf> {
+    for p in ["/opt/homebrew/bin/python3.13", "/opt/homebrew/bin/python3"] {
+        if Path::new(p).exists() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    let out = std::process::Command::new("/usr/bin/xcrun")
+        .args(["--find", "python3"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let path = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    (path.exists() && path != Path::new("/usr/bin/python3")).then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,16 +129,7 @@ mod tests {
     }
 
     fn python() -> Option<PathBuf> {
-        for p in [
-            "/opt/homebrew/bin/python3.13",
-            "/opt/homebrew/bin/python3",
-            "/usr/bin/python3",
-        ] {
-            if Path::new(p).exists() {
-                return Some(PathBuf::from(p));
-            }
-        }
-        None
+        super::find_python()
     }
 
     fn workspace() -> (PathBuf, PathBuf) {

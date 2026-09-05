@@ -206,16 +206,7 @@ mod tests {
     use crate::generate::GenerationResult;
 
     fn python() -> Option<PathBuf> {
-        for p in [
-            "/opt/homebrew/bin/python3.13",
-            "/opt/homebrew/bin/python3",
-            "/usr/bin/python3",
-        ] {
-            if Path::new(p).exists() {
-                return Some(PathBuf::from(p));
-            }
-        }
-        None
+        crate::bench::find_python()
     }
 
     fn order() -> WorkOrder {

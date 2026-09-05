@@ -723,6 +723,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
   order and event shapes and are the chair's/codex's to design; (4) the jail floor is parked
   by codex's ruling.
 
+- 2026-09-05 · MacOnStick. **Factory suite red on a Mac without Homebrew python — cause found,
+  fixed.** Wildhorse saw four `familiar-factory` tests fail before and after dc3ca13 with
+  "scripted adapter exhausted"; the bench never greened because the tests and the runner fell
+  through to `/usr/bin/python3`, which on macOS is Xcode's shim that re-execs `xcrun` — and the
+  jail denies `/dev/null`, `confstr(DARWIN_USER_TEMP_DIR)` and `/tmp/xcrun_db`, by design. Not
+  a jail bug, not Claude Code's sandbox, not a sick machine. `bench::find_python()` now resolves
+  Homebrew python or `xcrun --find python3` OUTSIDE the jail and never hands the shim in; tests
+  skip loudly with no real interpreter; the runner exits 2 with the reason.
+
 - 2026-08-28 · companion:codex **RETURNED T-229's independent whole-factory
   re-review** at `d802bc6`. Focused repairs held, but the production runner destroys its
   prior ledger and lock; execution gates are not enforced; candidate tests can
