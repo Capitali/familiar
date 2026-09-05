@@ -478,6 +478,7 @@ version = "0.1.0"
 dependencies = [
  "familiar-kernel",
  "familiar-mesh",
+ "familiar-whisker",
  "serde_json",
  "uniffi",
 ]
