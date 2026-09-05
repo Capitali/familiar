@@ -537,6 +537,22 @@ public func meshStop() {try! rustCall() {
 }
 }
 /**
+ * The ship's computer's MIND, in the shell's hand (T-237 B4, "one doctrine, two
+ * runtimes"). The shell fetches `/v1/me`, `/v1/loadboard`, `/v1/stations` and the
+ * routes it wants priced with the captain's own key, hands them over as one JSON
+ * object (see `familiar_whisker::wire::advise`), and gets back what the pilot would
+ * do now: the decision, the dial surface it spends, the captain's level on it, the
+ * automation it needs. Byte-for-byte the doctrine the host runner flies; this never
+ * acts — acting is the shell's, under the captain's tap and the act scope.
+ */
+public func whiskerAdvise(inputJson: String) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_familiar_core_fn_func_whisker_advise(
+        FfiConverterString.lower(inputJson),$0
+    )
+})
+}
+/**
  * The worldview, exactly as the read seam serves it — the sphere renders this JSON
  * whether it came over TLS from a peer or from right here.
  */
@@ -582,6 +598,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_familiar_core_checksum_func_mesh_stop() != 19349) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_familiar_core_checksum_func_whisker_advise() != 30991) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_familiar_core_checksum_func_worldview_json() != 4366) {

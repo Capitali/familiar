@@ -287,6 +287,11 @@ void uniffi_familiar_core_fn_func_mesh_stop(RustCallStatus *_Nonnull out_status
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_FN_FUNC_WHISKER_ADVISE
+#define UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_FN_FUNC_WHISKER_ADVISE
+RustBuffer uniffi_familiar_core_fn_func_whisker_advise(RustBuffer input_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_FN_FUNC_WORLDVIEW_JSON
 #define UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_FN_FUNC_WORLDVIEW_JSON
 RustBuffer uniffi_familiar_core_fn_func_worldview_json(RustBuffer data_dir, RustCallStatus *_Nonnull out_status
@@ -611,6 +616,12 @@ uint16_t uniffi_familiar_core_checksum_func_mesh_start(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_CHECKSUM_FUNC_MESH_STOP
 #define UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_CHECKSUM_FUNC_MESH_STOP
 uint16_t uniffi_familiar_core_checksum_func_mesh_stop(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_CHECKSUM_FUNC_WHISKER_ADVISE
+#define UNIFFI_FFIDEF_UNIFFI_FAMILIAR_CORE_CHECKSUM_FUNC_WHISKER_ADVISE
+uint16_t uniffi_familiar_core_checksum_func_whisker_advise(void
     
 );
 #endif
