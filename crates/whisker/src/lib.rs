@@ -25,6 +25,7 @@ pub mod autonomy;
 pub mod chain;
 pub mod doctrine;
 pub mod outfit;
+pub mod store;
 pub mod trade;
 
 /// One purchasable unit of ship automation. The names mirror the co-pilot-key scopes
@@ -71,17 +72,14 @@ impl Automation {
     }
 }
 
-/// The automations this ship holds, read from `automations.json` in the ship store —
-/// a JSON array of scope names. Absent file, empty file, or unknown names all narrow:
-/// what cannot be read grants nothing (unknown names are reported so a typo is loud).
-pub fn granted_automations(ship_dir: &std::path::Path) -> (BTreeSet<Automation>, Vec<String>) {
+/// The automations a ship holds, from the text of `automations.json` — a JSON array
+/// of scope names. Empty or unparseable text and unknown names all narrow: what
+/// cannot be read grants nothing (unknown names are reported so a typo is loud).
+/// The file is the runner's (`store::granted_automations`); this crate owns none.
+pub fn parse_automations(raw: &str) -> (BTreeSet<Automation>, Vec<String>) {
     let mut granted = BTreeSet::new();
     let mut unknown = Vec::new();
-    let raw = match std::fs::read_to_string(ship_dir.join("automations.json")) {
-        Ok(s) => s,
-        Err(_) => return (granted, unknown),
-    };
-    let names: Vec<String> = match serde_json::from_str(&raw) {
+    let names: Vec<String> = match serde_json::from_str(raw) {
         Ok(v) => v,
         Err(_) => return (granted, unknown),
     };
@@ -94,22 +92,4 @@ pub fn granted_automations(ship_dir: &std::path::Path) -> (BTreeSet<Automation>,
         }
     }
     (granted, unknown)
-}
-
-/// Read `KEY=value` out of an env-format file — the same convention the MCP
-/// declaration uses for its key files (mode 0600, never committed, never logged).
-pub fn env_value(path: &std::path::Path, key: &str) -> Option<String> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    for line in raw.lines() {
-        let line = line.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            if k.trim() == key {
-                return Some(v.trim().trim_matches('"').to_string());
-            }
-        }
-    }
-    None
 }

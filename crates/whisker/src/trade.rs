@@ -46,7 +46,6 @@
 //!   `/v1/route` call on the ship's one rate-limited key).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -355,22 +354,17 @@ pub fn hurdle_per_tick(l: &Ledger) -> f64 {
     per_day / ticks
 }
 
-/// Load the speculative book from the ship store (`holdings.json`). Absent or
-/// unreadable is an empty book — a merchant that cannot read its own ledger owns
-/// nothing, which is the safe reading.
-pub fn load_holdings(ship_dir: &Path) -> Vec<Holding> {
-    std::fs::read_to_string(ship_dir.join("holdings.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+/// The speculative book from its stored JSON. Absent or unreadable is an empty
+/// book — a merchant that cannot read its own ledger owns nothing, which is the
+/// safe reading. (The file is the runner's: `store::load_holdings` — T-237 B4.)
+pub fn parse_holdings(text: &str) -> Vec<Holding> {
+    serde_json::from_str(text).unwrap_or_default()
 }
 
-/// Persist the book, dropping any zeroed-out position on the way.
-pub fn save_holdings(ship_dir: &Path, holdings: &[Holding]) {
+/// The book as the store writes it, any zeroed-out position dropped on the way.
+pub fn holdings_json(holdings: &[Holding]) -> Option<Vec<u8>> {
     let live: Vec<&Holding> = holdings.iter().filter(|h| h.units > 0).collect();
-    if let Ok(bytes) = serde_json::to_vec_pretty(&live) {
-        let _ = std::fs::write(ship_dir.join("holdings.json"), bytes);
-    }
+    serde_json::to_vec_pretty(&live).ok()
 }
 
 /// Bring the book to what the hold actually holds. `cargo` is `/v1/me.cargo`, which

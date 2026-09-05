@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use familiar_whisker::autonomy::{self, Approval, Dial, Level, Surface};
+use familiar_whisker::autonomy::{self, Approval, Level, Surface};
 use serde_json::Value;
 
 fn ship_dir_for(dir: &std::path::Path, root: &std::path::Path, id: &str) -> Option<PathBuf> {
@@ -55,7 +55,7 @@ pub fn cmd_autonomy(args: &[String]) -> ExitCode {
         eprintln!("autonomy: no ship store for `{ship}`");
         return ExitCode::FAILURE;
     };
-    let mut dial = Dial::load(&ship_dir);
+    let mut dial = familiar_whisker::store::load_dial(&ship_dir);
     match sub {
         "show" => {
             println!(
@@ -110,7 +110,7 @@ pub fn cmd_autonomy(args: &[String]) -> ExitCode {
                 eprintln!("autonomy set: nothing to set");
                 return ExitCode::FAILURE;
             }
-            match dial.save(&ship_dir) {
+            match familiar_whisker::store::save_dial(&ship_dir, &dial) {
                 Ok(()) => {
                     println!("set {changed} — the pilot reads the dial every fold");
                     ExitCode::SUCCESS
@@ -124,7 +124,7 @@ pub fn cmd_autonomy(args: &[String]) -> ExitCode {
         "advice" => {
             let all = f.contains_key("all");
             let text = std::fs::read_to_string(ship_dir.join("journal.jsonl")).unwrap_or_default();
-            let approvals = autonomy::load_approvals(&ship_dir);
+            let approvals = familiar_whisker::store::load_approvals(&ship_dir);
             let mut shown = 0;
             let lines: Vec<Value> = text
                 .lines()
@@ -185,12 +185,12 @@ pub fn cmd_autonomy(args: &[String]) -> ExitCode {
                 eprintln!("autonomy {sub}: `familiar autonomy {sub} <ship> <proposal-id>`");
                 return ExitCode::FAILURE;
             };
-            let proposals = autonomy::load_proposals(&ship_dir);
+            let proposals = familiar_whisker::store::load_proposals(&ship_dir);
             let Some(p) = proposals.iter().rev().find(|p| p.id == **id) else {
                 eprintln!("autonomy {sub}: no proposal {id} on file");
                 return ExitCode::FAILURE;
             };
-            autonomy::append_approval(
+            familiar_whisker::store::append_approval(
                 &ship_dir,
                 &Approval {
                     id: id.to_string(),

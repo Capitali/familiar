@@ -25,7 +25,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use familiar_whisker::autonomy::{self, Approval, Dial, Level, Surface};
+use familiar_whisker::autonomy::{Approval, Dial, Level, Surface};
 use serde_json::{json, Value};
 
 use super::fleet::{
@@ -228,10 +228,10 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
     }
     let book = trade_book(&Value::Array(fills));
     let last = last_journal_line(&s.dir);
-    let dial = Dial::load(&s.dir);
+    let dial = familiar_whisker::store::load_dial(&s.dir);
     let open_proposals = {
-        let approvals = autonomy::load_approvals(&s.dir);
-        autonomy::load_proposals(&s.dir)
+        let approvals = familiar_whisker::store::load_approvals(&s.dir);
+        familiar_whisker::store::load_proposals(&s.dir)
             .iter()
             .filter(|p| !approvals.iter().any(|a| a.id == p.id))
             .count()
@@ -275,8 +275,8 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
 }
 
 fn proposals_with_state(ship_dir: &Path, tick: i64) -> Vec<Value> {
-    let approvals = autonomy::load_approvals(ship_dir);
-    autonomy::load_proposals(ship_dir)
+    let approvals = familiar_whisker::store::load_approvals(ship_dir);
+    familiar_whisker::store::load_proposals(ship_dir)
         .into_iter()
         .map(|p| {
             let answer = approvals.iter().rev().find(|a| a.id == p.id);
@@ -471,7 +471,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 return (404, json!({"error": "no such ship"}));
             };
             let (aboard_units, aboard_cost) = aboard(&s.dir);
-            let dial = Dial::load(&s.dir);
+            let dial = familiar_whisker::store::load_dial(&s.dir);
             let open: Vec<Value> = proposals_with_state(&s.dir, tick)
                 .into_iter()
                 .filter(|p| p["state"] == "open")
@@ -692,7 +692,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             let Some(s) = find(id) else {
                 return (404, json!({"error": "no such ship"}));
             };
-            let dial = Dial::load(&s.dir);
+            let dial = familiar_whisker::store::load_dial(&s.dir);
             let bought: Value = std::fs::read_to_string(s.dir.join("automations.json"))
                 .ok()
                 .and_then(|t| serde_json::from_str(&t).ok())
@@ -718,7 +718,10 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 return (400, json!({"error": "id"}));
             };
             let approved = b.get("approved").and_then(Value::as_bool).unwrap_or(false);
-            if !autonomy::load_proposals(&s.dir).iter().any(|p| p.id == pid) {
+            if !familiar_whisker::store::load_proposals(&s.dir)
+                .iter()
+                .any(|p| p.id == pid)
+            {
                 return (404, json!({"error": "no such proposal"}));
             }
             let a = Approval {
@@ -726,7 +729,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 approved,
                 at: now,
             };
-            autonomy::append_approval(&s.dir, &a);
+            familiar_whisker::store::append_approval(&s.dir, &a);
             (
                 200,
                 json!({"tick": tick, "tick_seconds": tick_seconds, "approval": a}),
@@ -893,7 +896,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                     return (400, json!({"error": e}));
                 }
             }
-            if let Err(e) = dial.save(&s.dir) {
+            if let Err(e) = familiar_whisker::store::save_dial(&s.dir, &dial) {
                 return (500, json!({"error": e.to_string()}));
             }
             (

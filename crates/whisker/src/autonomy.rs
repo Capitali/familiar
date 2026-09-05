@@ -14,7 +14,6 @@
 //! automation not bought is not on the dial at all.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -149,17 +148,15 @@ pub struct Dial {
 pub const DIAL_FILE: &str = "autonomy.json";
 
 impl Dial {
-    pub fn load(ship_dir: &Path) -> Dial {
-        std::fs::read_to_string(ship_dir.join(DIAL_FILE))
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+    /// The dial from its stored JSON. Unreadable or absent text is the default dial —
+    /// what cannot be read grants nothing beyond the floor. (The file itself is the
+    /// runner's: `store::load_dial`. This crate owns no file — T-237 B4.)
+    pub fn parse(text: &str) -> Dial {
+        serde_json::from_str(text).unwrap_or_default()
     }
-    pub fn save(&self, ship_dir: &Path) -> std::io::Result<()> {
-        std::fs::write(
-            ship_dir.join(DIAL_FILE),
-            serde_json::to_vec_pretty(self).unwrap_or_default(),
-        )
+    /// The dial as the store writes it.
+    pub fn to_json(&self) -> Vec<u8> {
+        serde_json::to_vec_pretty(self).unwrap_or_default()
     }
     /// Most specific setting wins: category, then family, then `*`, then auto. The
     /// one surface with its own floor is the tanker on a real-time world — `rescue`
@@ -295,50 +292,19 @@ pub fn gate(
 /// How long a proposal waits for the captain before it lapses, in ticks.
 pub const PROPOSAL_TTL_TICKS: i64 = 4;
 
-pub fn load_proposals(ship_dir: &Path) -> Vec<Proposal> {
-    std::fs::read_to_string(ship_dir.join("proposals.jsonl"))
-        .map(|t| {
-            t.lines()
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        })
-        .unwrap_or_default()
+/// Proposals from their jsonl text, torn lines skipped. (Files are the runner's:
+/// `store::load_proposals`.)
+pub fn parse_proposals(text: &str) -> Vec<Proposal> {
+    text.lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
 }
 
-pub fn load_approvals(ship_dir: &Path) -> Vec<Approval> {
-    std::fs::read_to_string(ship_dir.join("approvals.jsonl"))
-        .map(|t| {
-            t.lines()
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-pub fn append_proposal(ship_dir: &Path, p: &Proposal) {
-    use std::io::Write;
-    if let Ok(line) = serde_json::to_string(p) {
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ship_dir.join("proposals.jsonl"))
-        {
-            let _ = writeln!(f, "{line}");
-        }
-    }
-}
-
-pub fn append_approval(ship_dir: &Path, a: &Approval) {
-    use std::io::Write;
-    if let Ok(line) = serde_json::to_string(a) {
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(ship_dir.join("approvals.jsonl"))
-        {
-            let _ = writeln!(f, "{line}");
-        }
-    }
+/// Approvals from their jsonl text, torn lines skipped.
+pub fn parse_approvals(text: &str) -> Vec<Approval> {
+    text.lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
 }
 
 #[cfg(test)]

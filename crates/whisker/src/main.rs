@@ -25,7 +25,7 @@ use familiar_whisker::autonomy::{self, Dial, Gate, Surface};
 use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
 use familiar_whisker::outfit::{self, DeliveryStat, OutfitDecision, Purse};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
-use familiar_whisker::{env_value, granted_automations, Automation};
+use familiar_whisker::{store, Automation};
 use familiar_world::lease::{self, SignedLease};
 use serde_json::{json, Value};
 
@@ -313,14 +313,14 @@ impl DialGate {
         describe: &str,
         why: &str,
     ) -> bool {
-        let proposals = autonomy::load_proposals(ship_dir);
-        let approvals = autonomy::load_approvals(ship_dir);
+        let proposals = familiar_whisker::store::load_proposals(ship_dir);
+        let approvals = familiar_whisker::store::load_approvals(ship_dir);
         let mut fresh = None;
         let g = autonomy::gate(
             &self.dial, surface, tick, body, describe, why, &proposals, &approvals, &mut fresh,
         );
         if let Some(p) = &fresh {
-            autonomy::append_proposal(ship_dir, p);
+            familiar_whisker::store::append_proposal(ship_dir, p);
             journal(
                 ship_dir,
                 json!({"at": now, "tick": tick, "event": "proposed",
@@ -443,9 +443,9 @@ fn main() -> ExitCode {
     };
 
     let env_path = ship_dir.join("ucf.env");
-    let server =
-        env_value(&env_path, "UCF_SERVER").unwrap_or_else(|| "http://127.0.0.1:7877".to_string());
-    let Some(key) = env_value(&env_path, "UCF_KEY") else {
+    let server = store::env_value(&env_path, "UCF_SERVER")
+        .unwrap_or_else(|| "http://127.0.0.1:7877".to_string());
+    let Some(key) = store::env_value(&env_path, "UCF_KEY") else {
         eprintln!(
             "whisker: no UCF_KEY in {} — the ship needs its own trading key (0600, \
              never the captain's)",
@@ -461,7 +461,7 @@ fn main() -> ExitCode {
 
     // The pid, for `familiar fleet` to know the pilot is aboard.
     let _ = std::fs::write(ship_dir.join("whisker.pid"), std::process::id().to_string());
-    let (granted, unknown) = granted_automations(&ship_dir);
+    let (granted, unknown) = store::granted_automations(&ship_dir);
     for u in &unknown {
         eprintln!("whisker: automations.json names unknown automation {u:?} — it grants nothing");
     }
@@ -579,11 +579,11 @@ fn main() -> ExitCode {
     let mut last_pending_note = String::new();
     let mut last_distress = String::new();
     let mut dial_gate = DialGate {
-        dial: Dial::load(&ship_dir),
+        dial: familiar_whisker::store::load_dial(&ship_dir),
         last_advice: HashMap::new(),
     };
     let mut holdings: Vec<Holding> = if trades {
-        trade::load_holdings(&ship_dir)
+        familiar_whisker::store::load_holdings(&ship_dir)
     } else {
         Vec::new()
     };
@@ -591,7 +591,7 @@ fn main() -> ExitCode {
     loop {
         let now = now_secs();
         // The captain may turn the dial at any time.
-        dial_gate.dial = Dial::load(&ship_dir);
+        dial_gate.dial = familiar_whisker::store::load_dial(&ship_dir);
 
         // Gate 1: the lease, re-read every cycle so refresh and expiry both bite.
         let signed: Option<SignedLease> = std::fs::read_to_string(ship_dir.join("lease.json"))
@@ -1188,7 +1188,7 @@ fn main() -> ExitCode {
                     json!({"at": now, "tick": tick, "event": "book-corrected", "why": note}),
                 );
             }
-            trade::save_holdings(&ship_dir, &holdings);
+            familiar_whisker::store::save_holdings(&ship_dir, &holdings);
 
             if let Some(here) = ship.docked.clone() {
                 // `holdUsed` counts the merchant's goods only (freight never enters the
@@ -1283,7 +1283,7 @@ fn main() -> ExitCode {
                         }
                     }
                     if !notes.is_empty() {
-                        trade::save_holdings(&ship_dir, &holdings);
+                        familiar_whisker::store::save_holdings(&ship_dir, &holdings);
                         for n in notes {
                             journal(
                                 &ship_dir,
@@ -1451,7 +1451,7 @@ fn main() -> ExitCode {
                                 }
                             }
                             // A sell is not taken off the book until the hold confirms it.
-                            trade::save_holdings(&ship_dir, &holdings);
+                            familiar_whisker::store::save_holdings(&ship_dir, &holdings);
                             let why = match &td {
                                 TradeDecision::Sell { why, .. } => why.clone(),
                                 _ => String::new(),
