@@ -707,6 +707,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
   **NEW DIRECTION (Ian 2026-08-29): "continue working on the familiar's reasoning skills.
   Deploy and ship when ready."** T-229 hardening deferred behind reasoning-skills work.
 
+- 2026-09-05 · **RULING (Ian, verbatim): "always keep testflight up to date."** Every green main
+  (CI + Swift) that touches the iOS tree ships to TestFlight without asking — FamiliarAgent and UCF
+  Familiar alike — from wildhorse's Xcode 26.5 lane (Xcode 27 beta uploads are refused, 90534). Tell
+  Ian the build number and what it carries. First build under the ruling: main b7c5502 (Felix answers
+  for the hull in view; hull names from the feed's `ship` key), requested of wildhorse.
+
 - 2026-09-05 · MacOnStick (companion:claude, second lane). **T-229 hardening: codex blockers
   1 and 5 closed on main.** (5) `LedgerLock` is now the OS advisory lock (`File::try_lock`,
   flock semantics) on a lock file that is never unlinked: the kernel releases it when a
