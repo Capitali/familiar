@@ -440,7 +440,18 @@ pub fn decide(
 
     // The tanker outranks everything — it is the only act that works everywhere,
     // including under way, and a dry hull can execute nothing else anyway.
-    if frac(ship.fuel) < CRITICAL_FUEL {
+    //
+    // EXCEPT standing on a pump, which outranks the tanker in turn. This rule used
+    // to fire first and unconditionally, so a hull that was low enough to be in
+    // trouble called a tanker even while berthed at a fuel seller — and having
+    // called one, could not call another. Kibble Klipper did exactly that on
+    // 2026-09-04: 23 of 600 tied up alongside foxy's-diner, which sells fuel at 2 a
+    // unit, journalling "low fuel, no affordable pump" at a pump, with a tanker
+    // 54 hours out charging 33,594 for what the counter beside her wanted 1,154 for.
+    // A tanker is what you call when no pump is in reach. This one is under the hull.
+    if frac(ship.fuel) < CRITICAL_FUEL
+        && !ship.docked.as_deref().is_some_and(|at| pumps.contains(at))
+    {
         return Decision::CallPaws;
     }
 
@@ -1055,6 +1066,20 @@ mod tests {
                 station: "a".into()
             }
         );
+    }
+
+    /// A pump under the hull outranks the tanker. KK stood at foxy's-diner on 23 of
+    /// 600 calling for a truck that was 54 hours out and wanted 33,594, while the
+    /// counter she was tied up to sold the same fuel for 1,154.
+    #[test]
+    fn a_pump_under_the_hull_outranks_the_tanker() {
+        let ship = ship_at("foxys-diner", 23);
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(10));
+        assert_eq!(d, Decision::Refuel);
+        // The same tank anywhere that does not pump still calls the truck.
+        let adrift = ship_at("titania-cold-store", 23);
+        let d = decide(&adrift, None, &[], &pumps(&["foxys-diner"]), &NoRouter);
+        assert_eq!(d, Decision::CallPaws);
     }
 
     #[test]
