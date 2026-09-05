@@ -96,20 +96,53 @@ fn main() {
     let ws = data_dir.join("factory").join(&order.id);
     let _ = std::fs::create_dir_all(&ws);
 
-    // Fresh ledger per run (a real daemon would resume an existing one).
+    // Resume, never delete (codex whole-factory review, blocker 1): the ledger
+    // is the order's only truth and its lock may be another writer's. An
+    // existing order continues at its next iteration; a terminal one is
+    // refused; only an absent ledger is opened here.
     let ledger_path = ws.join("ledger.jsonl");
-    let _ = std::fs::remove_file(&ledger_path);
-    let _ = std::fs::remove_file(ledger_path.with_extension("lock"));
     let ledger = Ledger::at(&ledger_path);
-    ledger
-        .append(
-            now_secs(),
-            &order.id,
-            EventKind::Opened {
-                order: Box::new(order.clone()),
-            },
-        )
-        .expect("open order");
+    if ledger_path.exists() {
+        match ledger.state() {
+            Ok(state) if state.order.id != order.id => {
+                eprintln!(
+                    "factory: {} holds {}, not {}",
+                    ledger_path.display(),
+                    state.order.id,
+                    order.id
+                );
+                std::process::exit(2);
+            }
+            Ok(state) if state.terminal() => {
+                eprintln!(
+                    "factory: {} is already terminal (commissioned={}, closed={:?}); a new \
+                     run needs a new order id, not this ledger's path",
+                    order.id, state.commissioned, state.closed
+                );
+                std::process::exit(2);
+            }
+            Ok(state) => eprintln!(
+                "factory: resuming {} at iteration {} from {}",
+                order.id,
+                state.iteration + 1,
+                ledger_path.display()
+            ),
+            Err(e) => {
+                eprintln!("factory: the existing ledger will not replay: {e}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        ledger
+            .append(
+                now_secs(),
+                &order.id,
+                EventKind::Opened {
+                    order: Box::new(order.clone()),
+                },
+            )
+            .expect("open order");
+    }
 
     // The reasoner closure: hand the prompt to the familiar's real mind via the
     // consult seam (which respects the daemon's lane). A refusal/rate-limit

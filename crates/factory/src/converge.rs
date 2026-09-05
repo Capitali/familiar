@@ -66,10 +66,28 @@ pub fn converge(
     max_iterations: u32,
     now: u64,
 ) -> std::io::Result<ConvergeReport> {
+    // Resume from the ledger, never from a counter of our own: the replayed
+    // state says which iteration was last counted, so a runner restarted on an
+    // existing order continues at the next one instead of re-numbering from 1
+    // (codex whole-factory review, blocker 1). A terminal order is refused. The
+    // previous failure's feedback is not replayed; the next candidate starts
+    // from the order alone.
+    let state = ledger.state().map_err(std::io::Error::other)?;
+    if state.order.id != order.id {
+        return Err(std::io::Error::other(format!(
+            "ledger holds {}, not {}",
+            state.order.id, order.id
+        )));
+    }
+    if state.terminal() {
+        return Err(std::io::Error::other(
+            "order is terminal; a new run needs a new order id, not this ledger",
+        ));
+    }
     let mut bench_passes = Vec::new();
     let mut feedback: Option<String> = None;
 
-    for iteration in 1..=max_iterations {
+    for iteration in (state.iteration + 1)..=max_iterations {
         let result = adapter.generate(order, feedback.as_deref())?;
 
         // Validate the typed outcome before it can be recorded or run.
@@ -329,6 +347,68 @@ mod tests {
         let state = ledger.state().expect("replay");
         assert_eq!(state.iteration, 2);
         assert!(state.rungs_passed.contains(&OracleRung::Bench));
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn a_restarted_runner_resumes_at_the_next_iteration_and_refuses_a_terminal_order() {
+        if python().is_none() {
+            eprintln!("skipping: no python3");
+            return;
+        }
+        if !std::path::Path::new("/usr/bin/sandbox-exec").exists() {
+            eprintln!("skipping: no /usr/bin/sandbox-exec");
+            return;
+        }
+        let (e, ws) = env("resume");
+        let o = order();
+        let ledger = open_ledger(&ws, &o);
+
+        // First run: one iteration, it fails, the run ends exhausted.
+        let bad = candidate(&format!(
+            "import sys; sys.path.insert(0,{:?})\nimport driver\nassert driver.frame(0)==b'WRONG'\n",
+            ws.join("iter-1/candidate").to_string_lossy()
+        ));
+        let first = converge(&ledger, &o, &Scripted::new(vec![bad]), &e, 1, 1000).expect("run 1");
+        assert_eq!(first.outcome, ConvergeOutcome::Exhausted { iterations: 1 });
+        let events_before = ledger.read().expect("read").len();
+
+        // Second run on the SAME ledger (never deleted, never re-opened): it
+        // continues at iteration 2 — the ledger says where we were.
+        let good = candidate(&format!(
+            "import sys; sys.path.insert(0,{:?})\nimport driver\nassert driver.frame(0)==bytes([0x53,0])\n",
+            ws.join("iter-2/candidate").to_string_lossy()
+        ));
+        let second = converge(&ledger, &o, &Scripted::new(vec![good]), &e, 5, 2000).expect("run 2");
+        assert_eq!(second.outcome, ConvergeOutcome::Converged { iteration: 2 });
+        let events = ledger.read().expect("read");
+        assert!(
+            events.len() > events_before,
+            "the second run appended to the first's truth"
+        );
+        for (i, ev) in events.iter().enumerate() {
+            assert_eq!(ev.seq, i as u64 + 1, "one consecutive history");
+        }
+        let state = ledger.state().expect("replay");
+        assert_eq!(state.iteration, 2);
+
+        // A terminal order is refused outright: no generation, no spawn.
+        ledger
+            .append(
+                3000,
+                &o.id,
+                EventKind::Closed {
+                    reason: "withdrawn".into(),
+                },
+            )
+            .expect("close");
+        let adapter = Scripted::new(vec![candidate("assert True\n")]);
+        let err = converge(&ledger, &o, &adapter, &e, 5, 4000).expect_err("terminal refused");
+        assert!(err.to_string().contains("terminal"), "{err}");
+        assert!(
+            adapter.feedback_seen.borrow().is_empty(),
+            "nothing was generated"
+        );
         let _ = std::fs::remove_dir_all(&ws);
     }
 

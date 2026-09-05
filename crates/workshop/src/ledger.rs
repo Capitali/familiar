@@ -494,107 +494,56 @@ fn apply(state: &mut OrderState, ev: &LedgerEvent) -> Result<(), LedgerError> {
 
 /// A cross-process advisory lock held for the duration of a critical section.
 ///
-/// The lock file's content is the holder's process id. A would-be acquirer
-/// never steals from a **live** holder — no matter how long that holder has
-/// paused (codex Brick-2 review, blocker 6: a time-based steal races a slow
-/// but legitimate writer). It reclaims a lock ONLY when the recorded pid is
-/// dead (`kill -0` fails), and on drop it removes the file only if the file
-/// still records *our* pid, so reclaiming a dead owner's lock never deletes a
-/// live successor's replacement.
+/// It is the operating system's lock (`flock`-style, via `File::try_lock`), not a
+/// pid file: the kernel releases it the instant the holder exits, crashes, or is
+/// killed, so there is no orphan to reclaim and no interval — however short — in
+/// which a live holder is unidentifiable and could be stolen from (codex
+/// whole-factory review, blocker 5). The lock file is never deleted: unlinking a
+/// path other processes may already have open would let two of them hold "the"
+/// lock on different inodes. Its content (the holder's pid) is a diagnostic only.
 struct LedgerLock {
-    path: std::path::PathBuf,
-    pid: u32,
+    _file: std::fs::File,
 }
 
 impl LedgerLock {
     fn acquire(base: &std::path::Path) -> Result<Self, String> {
         let path = base.with_extension("lock");
-        let pid = std::process::id();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|e| format!("ledger lock: {e}"))?;
         for _ in 0..4_000 {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(mut f) => {
-                    use std::io::Write as _;
-                    let _ = write!(f, "{pid}");
-                    let _ = f.flush();
-                    return Ok(LedgerLock { path, pid });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if Self::owner_is_dead(&path) {
-                        // Reclaim only a dead owner's lock. Remove-then-retry;
-                        // the create_new above still arbitrates the race if two
-                        // reclaimers run at once (only one create_new wins).
-                        let _ = std::fs::remove_file(&path);
-                        continue;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(e) => return Err(format!("ledger lock: {e}")),
+            match Self::try_once(&file) {
+                Ok(true) => return Ok(LedgerLock { _file: file }),
+                Ok(false) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                Err(e) => return Err(e),
             }
         }
         Err("ledger lock timeout".to_string())
     }
 
-    /// True only if the lock is safe to reclaim. Two cases:
-    ///   - it records a pid that is no longer running (`kill -0` fails); or
-    ///   - it is UNIDENTIFIABLE (empty/garbled — e.g. a holder crashed between
-    ///     `create_new` and writing its pid) AND has sat untouched past
-    ///     [`LOCK_ORPHAN_SECS`]. This does not reintroduce the flaw codex
-    ///     rejected (stealing from an identifiable, live holder on a timer): an
-    ///     unidentifiable lock has no live-holder claim to protect, and a live
-    ///     holder always records a readable pid that reads as alive.
-    fn owner_is_dead(path: &std::path::Path) -> bool {
-        let content = std::fs::read_to_string(path).unwrap_or_default();
-        match content.trim().parse::<u32>() {
-            Ok(pid) => {
-                // `kill -0 <pid>` exits 0 iff the process exists and is signalable.
-                match std::process::Command::new("/bin/kill")
-                    .arg("-0")
-                    .arg(pid.to_string())
-                    .status()
-                {
-                    Ok(status) => !status.success(),
-                    Err(_) => false,
-                }
+    /// One non-blocking attempt: `Ok(true)` holds it, `Ok(false)` means a live
+    /// holder has it. On success the pid is written for whoever is looking.
+    fn try_once(file: &std::fs::File) -> Result<bool, String> {
+        match file.try_lock() {
+            Ok(()) => {
+                use std::io::{Seek as _, Write as _};
+                let mut f = file;
+                let _ = f.set_len(0);
+                let _ = f.seek(std::io::SeekFrom::Start(0));
+                let _ = write!(f, "{}", std::process::id());
+                let _ = f.flush();
+                Ok(true)
             }
-            Err(_) => Self::orphaned_beyond_threshold(path),
-        }
-    }
-
-    fn orphaned_beyond_threshold(path: &std::path::Path) -> bool {
-        let Ok(meta) = std::fs::metadata(path) else {
-            return false;
-        };
-        let Ok(modified) = meta.modified() else {
-            return false;
-        };
-        modified
-            .elapsed()
-            .map(|age| age.as_secs() >= LOCK_ORPHAN_SECS)
-            .unwrap_or(false)
-    }
-}
-
-/// How long an UNIDENTIFIABLE lock (empty/garbled pid) may sit before it is
-/// treated as an orphan and reclaimed. Long enough that it never races a
-/// healthy holder, which writes its pid within microseconds of creating the
-/// lock.
-const LOCK_ORPHAN_SECS: u64 = 120;
-
-impl Drop for LedgerLock {
-    fn drop(&mut self) {
-        // Remove the lock only if it still records our pid, so a lock we
-        // reclaimed-and-replaced is never deleted out from under a successor.
-        if let Ok(content) = std::fs::read_to_string(&self.path) {
-            if content.trim().parse::<u32>() == Ok(self.pid) {
-                let _ = std::fs::remove_file(&self.path);
-            }
+            Err(std::fs::TryLockError::WouldBlock) => Ok(false),
+            Err(std::fs::TryLockError::Error(e)) => Err(format!("ledger lock: {e}")),
         }
     }
 }
+// No `Drop`: closing the file releases the lock; the path stays for the next holder.
 
 /// The on-disk ledger: one JSON event per line, append-only. Every append
 /// takes a cross-process lock, revalidates the whole file plus the new event
@@ -1185,30 +1134,32 @@ mod tests {
         let lockp = base.with_extension("lock");
         let _ = std::fs::remove_file(&lockp);
 
-        // Hold the lock (records our live pid).
         let held = LedgerLock::acquire(&base).expect("acquire");
-        // A second acquire must NOT steal it — spin briefly and confirm it does
-        // not succeed while we hold it. (owner_is_dead is false for our pid.)
-        assert!(
-            !LedgerLock::owner_is_dead(&lockp),
-            "our own pid reads as alive"
-        );
-        // A FRESH garbled lock is treated as alive (fail safe — no orphan
-        // threshold has passed).
-        std::fs::write(&lockp, "not-a-pid").unwrap();
-        assert!(
-            !LedgerLock::owner_is_dead(&lockp),
-            "a fresh garbled lock must read as alive"
-        );
-        // A dead pid IS reclaimable. Pid 999999 is almost certainly not running.
-        std::fs::write(&lockp, "999999").unwrap();
-        assert!(
-            LedgerLock::owner_is_dead(&lockp),
-            "a dead pid is reclaimable"
+        // A second open of the same path cannot take it while we hold it — not
+        // on a timer, not ever; the kernel arbitrates, not a pid file.
+        let other = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lockp)
+            .unwrap();
+        assert_eq!(LedgerLock::try_once(&other), Ok(false));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(
+            LedgerLock::try_once(&other),
+            Ok(false),
+            "time changes nothing"
         );
 
+        // Whatever the file says means nothing: a holder that died released the
+        // OS lock, and the next acquirer simply takes it.
         drop(held);
-        let _ = std::fs::remove_file(&lockp);
+        std::fs::write(&lockp, "not-a-pid").unwrap();
+        let taken = LedgerLock::acquire(&base).expect("a dead holder's lock is free");
+        assert_eq!(LedgerLock::try_once(&other), Ok(false));
+        drop(taken);
+        assert_eq!(LedgerLock::try_once(&other), Ok(true));
+        assert!(lockp.exists(), "the lock path is never unlinked");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

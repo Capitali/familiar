@@ -707,6 +707,22 @@ now closed; what remains of each is an ACT, listed at the bottom).**
   **NEW DIRECTION (Ian 2026-08-29): "continue working on the familiar's reasoning skills.
   Deploy and ship when ready."** T-229 hardening deferred behind reasoning-skills work.
 
+- 2026-09-05 · MacOnStick (companion:claude, second lane). **T-229 hardening: codex blockers
+  1 and 5 closed on main.** (5) `LedgerLock` is now the OS advisory lock (`File::try_lock`,
+  flock semantics) on a lock file that is never unlinked: the kernel releases it when a
+  holder dies, so there is no orphan to reclaim and no pid-less interval to steal from;
+  the pid in the file is a diagnostic only. (1) `converge` reads the replayed state and
+  continues at `iteration + 1`, refusing a terminal order or a ledger for another order;
+  `familiar-factory-run` opens a ledger only when none exists and never removes the ledger
+  or its lock. Tests: the lock test now proves a second open cannot take a held lock on any
+  timer and that garbage in the file is irrelevant; a converge test runs twice on one ledger
+  (exhausted at 1, converged at 2, one consecutive history) and proves a closed order
+  generates nothing. Still owed before any production autonomous run: (2) execution gates
+  enforced at the effect edge with a gate snapshot, (3) trusted acceptance assertions in the
+  order, (6) broker frame/UUID/lifetime bounds, (7) the evidence schema — those change the
+  order and event shapes and are the chair's/codex's to design; (4) the jail floor is parked
+  by codex's ruling.
+
 - 2026-08-28 · companion:codex **RETURNED T-229's independent whole-factory
   re-review** at `d802bc6`. Focused repairs held, but the production runner destroys its
   prior ledger and lock; execution gates are not enforced; candidate tests can
