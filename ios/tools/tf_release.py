@@ -26,15 +26,28 @@ KEY_PATH = os.path.expanduser(f"~/.appstoreconnect/private_keys/AuthKey_{KEY_ID}
 
 
 def token():
-    import jwt  # pyjwt
-
-    key = open(KEY_PATH).read()
+    """An ES256 JWT for the App Store Connect API. pyjwt when present; otherwise signed with
+    the system's openssl (a DER ECDSA signature converted to the raw r||s form JWTs carry),
+    so a Mac with no Python packages installed can still ask App Store Connect anything."""
     now = int(time.time())
-    return jwt.encode(
-        {"iss": ISSUER, "iat": now, "exp": now + 900, "aud": "appstoreconnect-v1"},
-        key, algorithm="ES256", headers={"kid": KEY_ID},
-    )
-
+    with open(KEY_PATH, "rb") as f:
+        key = f.read()
+    try:
+        import jwt  # pyjwt
+        return jwt.encode(
+            {"iss": ISSUER, "iat": now, "exp": now + 900, "aud": "appstoreconnect-v1"},
+            key, algorithm="ES256", headers={"kid": KEY_ID},
+        )
+    except ImportError:
+        import base64, subprocess
+        b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+        header = b64(json.dumps({"alg": "ES256", "kid": KEY_ID, "typ": "JWT"}).encode())
+        payload = b64(json.dumps({"iss": ISSUER, "iat": now, "exp": now + 900, "aud": "appstoreconnect-v1"}).encode())
+        der = subprocess.run(["openssl", "dgst", "-sha256", "-sign", KEY_PATH],
+                             input=f"{header}.{payload}".encode(), capture_output=True, check=True).stdout
+        i = 2; l = der[i + 1]; r = der[i + 2:i + 2 + l]; i += 2 + l; l = der[i + 1]; s = der[i + 2:i + 2 + l]
+        raw = r[-32:].rjust(32, b"\x00") + s[-32:].rjust(32, b"\x00")
+        return f"{header}.{payload}.{b64(raw)}"
 
 def api(path, method="GET", body=None):
     req = urllib.request.Request(
