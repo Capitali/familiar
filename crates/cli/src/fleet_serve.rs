@@ -422,14 +422,32 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             let all: Vec<&str> = text.lines().collect();
             let start = since.min(all.len());
             let end = (start + limit).min(all.len());
+            // Every line says WHICH HULL SPOKE IT. The route already segregates —
+            // one journal per world — but the lines themselves were anonymous, so a
+            // reader that merges two ships into one transcript has nothing to colour
+            // or head them by, and Felix's dialog reads as one voice talking about
+            // two ships at once (Ian, 2026-09-05, on the familiar bridge).
+            //
+            // `world` is the identity and `hull` is the name to show. `hull` alone
+            // would not do it: the LOCAL soak and the PROD hull are BOTH called
+            // Kibble Klipper II, so a reader keying on the name merges two ships
+            // that are not the same ship at all.
             let lines: Vec<Value> = all[start..end]
                 .iter()
-                .filter_map(|l| serde_json::from_str(l).ok())
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .map(|mut v| {
+                    if let Some(o) = v.as_object_mut() {
+                        o.insert("world".into(), json!(s.world.id));
+                        o.insert("hull".into(), json!(s.world.label));
+                    }
+                    v
+                })
                 .collect();
             (
                 200,
                 json!({"tick": tick, "tick_seconds": tick_seconds, "since": start, "next": end,
-                         "total": all.len(), "lines": lines}),
+                         "total": all.len(), "world": s.world.id, "hull": s.world.label,
+                         "lines": lines}),
             )
         }
         ("GET", ["ships", id, "proposals"]) => {
