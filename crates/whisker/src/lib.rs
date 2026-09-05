@@ -27,6 +27,7 @@ pub mod doctrine;
 pub mod outfit;
 pub mod store;
 pub mod trade;
+pub mod wire;
 
 /// One purchasable unit of ship automation. The names mirror the co-pilot-key scopes
 /// proposed to the exchange (ucf-exchange#15): a paid entitlement on the captain's

@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use familiar_mcp::{http, Url};
 use familiar_mesh::node::NodeIdentity;
 use familiar_whisker::autonomy::{self, Dial, Gate, Surface};
-use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router, Ship};
+use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router};
 use familiar_whisker::outfit::{self, DeliveryStat, OutfitDecision, Purse};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
 use familiar_whisker::{store, Automation};
@@ -188,109 +188,6 @@ fn journal(ship_dir: &Path, entry: Value) {
     println!("{entry}");
 }
 
-fn ship_from(me: &Value, repair_rate: i64) -> Ship {
-    let route_len = me
-        .get("route")
-        .and_then(Value::as_array)
-        .map(|r| r.len())
-        .unwrap_or(0);
-    let docked = me.get("docked").and_then(Value::as_str).map(String::from);
-    // Under way = NOT berthed. PROD reports `route: []` DURING a crossing (the
-    // transit rides arrival ticks, not the route array), so keying flight on a
-    // non-empty route read a flying ship as "adrift between folds" and held on a
-    // wrong reason (KK II, t6094 en route to titania-cold-store, 2026-09-01). A
-    // course merely LAID but not yet engaged shows as `driveAwaiting`, and that
-    // is handled before the doctrine ever sees the ship — so by here, no berth
-    // means she is crossing. The route array stays a belt to those braces.
-    // ...and a berthed hull with hops still on the plan is UNDER WAY only while the
-    // plan can still be flown. The engine re-attempts the next leg each fold and,
-    // when the tank will not cover it, declines in silence (metal#79) — so a hull
-    // that cannot afford its own remaining course sits berthed behind a route that
-    // will never move, and reading that as flight makes the pilot hold rather than
-    // rescue it. KK II did this at cannery-row on 2026-09-05: docked, 18 of 600,
-    // 8,323 credits, a stale course to the-bonded-hold needing about 200, and a
-    // pump two ticks away — journalling "under way, no load" while parked.
-    //
-    // The tank is the tell. Below the critical fraction a remaining course is a
-    // stall, not a crossing, and the fuel doors below should have it. Above it,
-    // nothing changes: a healthy multi-hop route is left alone to fly itself.
-    let fuel_now = me.get("fuel").and_then(Value::as_i64).unwrap_or(0);
-    let tank = me.get("fuelCapacity").and_then(Value::as_i64).unwrap_or(0);
-    let stalled = docked.is_some()
-        && route_len > 0
-        && tank > 0
-        && (fuel_now as f64 / tank as f64) < doctrine::CRITICAL_FUEL;
-    Ship {
-        in_flight: docked.is_none() || (route_len > 0 && !stalled),
-        docked,
-        accel_milli_g: me
-            .get("effectiveAccelMilliG")
-            .and_then(Value::as_i64)
-            .unwrap_or(doctrine::REFERENCE_ACCEL_MILLI_G),
-        wear_bps: me.get("wearBps").and_then(Value::as_i64).unwrap_or(0),
-        leased: !me.get("titled").and_then(Value::as_bool).unwrap_or(true)
-            && me
-                .get("leasePrincipal")
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                > 0,
-        repair_per_hundred_bps: repair_rate,
-        hold_used: me.get("holdUsed").and_then(Value::as_i64).unwrap_or(0),
-        hold_capacity: me.get("holdCapacity").and_then(Value::as_i64).unwrap_or(0),
-        fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
-        fuel_capacity: me.get("fuelCapacity").and_then(Value::as_i64).unwrap_or(1),
-        credits: me.get("credits").and_then(Value::as_i64).unwrap_or(0),
-    }
-}
-
-fn load_row(v: &Value) -> Option<LoadRow> {
-    Some(LoadRow {
-        load_id: v.get("loadId")?.as_str()?.to_string(),
-        good: v
-            .get("good")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        class_bps: match v
-            .get("serviceClass")
-            .and_then(Value::as_str)
-            .unwrap_or("standard")
-        {
-            "economy" => 5_000,
-            "express" => 20_000,
-            "priority" => 30_000,
-            _ => 10_000,
-        },
-        origin: v.get("origin")?.as_str()?.to_string(),
-        dest: v.get("dest")?.as_str()?.to_string(),
-        units: v.get("units").and_then(Value::as_i64).unwrap_or(0),
-        estimated_net: v.get("estimatedNet").and_then(Value::as_i64).unwrap_or(0),
-        deadhead_ticks: v.get("deadheadTicks").and_then(Value::as_i64).unwrap_or(0),
-        haul_ticks: v.get("haulTicks").and_then(Value::as_i64).unwrap_or(0),
-        loading_ticks: v.get("loadingTicks").and_then(Value::as_i64).unwrap_or(8),
-        held_for_other: v
-            .get("heldForOther")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    })
-}
-
-/// The ledger's last word about a load, reduced to what decides. `None` = settled or
-/// lost — either way the caller stops tracking it (with the reason for the journal).
-fn reconcile(me: &Value, load_id: &str) -> Result<Option<ActiveWord>, String> {
-    let events = me
-        .get("freight")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter(|f| f.get("loadId").and_then(Value::as_str) == Some(load_id))
-                .filter_map(|f| f.get("event").and_then(Value::as_str))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    familiar_whisker::doctrine::ledger_word(&events)
-}
-
 /// The captain's dial at the action door. `allow` answers whether THIS act may be
 /// filed now; when it may not, the reason is on the journal — advice the message
 /// window shows, a proposal waiting for a yes, or a lapse.
@@ -367,17 +264,6 @@ impl DialGate {
                 false
             }
         }
-    }
-}
-
-fn surface_of(d: &Decision) -> Surface {
-    match d {
-        Decision::Refuel | Decision::DivertToPump { .. } => Surface::NavigationFuel,
-        Decision::CallPaws => Surface::NavigationRescue,
-        Decision::Travel { .. } | Decision::Hold { .. } => Surface::NavigationCourse,
-        Decision::Repair => Surface::ShipRepair,
-        Decision::Book { .. } => Surface::FreightBook,
-        Decision::Collect { .. } => Surface::FreightCollect,
     }
 }
 
@@ -473,12 +359,8 @@ fn main() -> ExitCode {
 
     // The chart: which stations sell fuel. Read once; a content change is a new world.
     let pumps: BTreeSet<String> = match wire.get("/v1/stations") {
-        Ok(Value::Array(stations)) => stations
-            .iter()
-            .filter(|s| s.get("sellsFuel").and_then(Value::as_bool).unwrap_or(false))
-            .filter_map(|s| s.get("id").and_then(Value::as_str).map(String::from))
-            .collect(),
-        Ok(_) | Err(_) => BTreeSet::new(),
+        Ok(v) => familiar_whisker::wire::pumps_from(&v),
+        Err(_) => BTreeSet::new(),
     };
 
     let mut active: Option<Active> = None;
@@ -646,7 +528,7 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let ship = ship_from(&me, repair_rate);
+        let ship = familiar_whisker::wire::ship_from(&me, repair_rate);
         let route_now: Vec<String> = me
             .get("route")
             .and_then(Value::as_array)
@@ -763,7 +645,7 @@ fn main() -> ExitCode {
                         if let Some(row) = rows
                             .iter()
                             .filter(|r| r.get("mine").and_then(Value::as_bool).unwrap_or(false))
-                            .filter_map(load_row)
+                            .filter_map(familiar_whisker::wire::load_row)
                             .find(|l| l.load_id == lid)
                         {
                             journal(
@@ -771,7 +653,7 @@ fn main() -> ExitCode {
                                 json!({"at": now, "tick": tick,
                                 "event": "adopted-held-contract", "load": lid, "status": status}),
                             );
-                            let word = reconcile(&me, &lid)
+                            let word = familiar_whisker::wire::active_word(&me, &lid)
                                 .ok()
                                 .flatten()
                                 .unwrap_or(ActiveWord::Booked);
@@ -840,7 +722,7 @@ fn main() -> ExitCode {
         // is about the PREVIOUS life of that load id (a re-booked contract still reads
         // "reverted" for a tick), and closing on it books the same load a third time.
         if let Some(a) = active.as_mut().filter(|_| tick >= pending_until) {
-            match reconcile(&me, &a.row.load_id) {
+            match familiar_whisker::wire::active_word(&me, &a.row.load_id) {
                 Ok(Some(word)) => a.word = word,
                 Ok(None) => {}
                 Err(reason) => {
@@ -1007,7 +889,7 @@ fn main() -> ExitCode {
             match wire.get("/v1/loadboard?status=open") {
                 Ok(Value::Array(rows)) => rows
                     .iter()
-                    .filter_map(load_row)
+                    .filter_map(familiar_whisker::wire::load_row)
                     .filter(|l| {
                         lost_at
                             .get(&l.load_id)
@@ -1667,7 +1549,7 @@ fn main() -> ExitCode {
         let body = body.filter(|b| {
             dial_gate.allow(
                 &ship_dir,
-                surface_of(&decision),
+                familiar_whisker::wire::surface_of(&decision),
                 tick,
                 now,
                 b,
@@ -1773,7 +1655,7 @@ mod adoption_tests {
         let adopt = |rows: &[Value], lid: &str| -> Option<LoadRow> {
             rows.iter()
                 .filter(|r| r.get("mine").and_then(Value::as_bool).unwrap_or(false))
-                .filter_map(load_row)
+                .filter_map(familiar_whisker::wire::load_row)
                 .find(|l| l.load_id == lid)
         };
 

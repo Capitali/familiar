@@ -13,6 +13,7 @@
 //!   answer — the human speaks
 //!   mesh_start / mesh_stop — the gossip transport
 //!   invite_payload — mint an invitation (QR/share-link body)
+//!   whisker_advise — the ship pilot's doctrine over wire JSON the shell fetched (T-237 B4)
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -158,4 +159,22 @@ pub fn invite_payload(data_dir: String) -> String {
         "tlspin": familiar_mesh::transport::tls_spki_pin(&dir).unwrap_or_default(),
     })
     .to_string()
+}
+
+/// The ship's computer's MIND, in the shell's hand (T-237 B4, "one doctrine, two
+/// runtimes"). The shell fetches `/v1/me`, `/v1/loadboard`, `/v1/stations` and the
+/// routes it wants priced with the captain's own key, hands them over as one JSON
+/// object (see `familiar_whisker::wire::advise`), and gets back what the pilot would
+/// do now: the decision, the dial surface it spends, the captain's level on it, the
+/// automation it needs. Byte-for-byte the doctrine the host runner flies; this never
+/// acts — acting is the shell's, under the captain's tap and the act scope.
+#[uniffi::export]
+pub fn whisker_advise(input_json: String) -> String {
+    let input: serde_json::Value = match serde_json::from_str(&input_json) {
+        Ok(v) => v,
+        Err(e) => {
+            return serde_json::json!({"error": format!("input is not JSON: {e}")}).to_string()
+        }
+    };
+    familiar_whisker::wire::advise(&input).to_string()
 }
