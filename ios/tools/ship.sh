@@ -20,7 +20,14 @@ python3 - "$BUILD" <<'EOF'
 import re, sys
 n = sys.argv[1]
 p = open("project.yml").read()
-p2 = re.sub(r'CURRENT_PROJECT_VERSION: "\d+"', f'CURRENT_PROJECT_VERSION: "{n}"', p)
+# Bump only THIS app's two spots — the shared base and the Mac target, which always
+# carry the same number. project.yml gained a third when UCF Familiar arrived
+# (its own CURRENT_PROJECT_VERSION, on its own release cadence), and a blanket
+# substitution silently dragged that app's build number along with this one's:
+# shipping FamiliarAgent 110 would have renumbered UCF Familiar 1 -> 110 and broken
+# its next upload. So the old value is what is matched, never "any digits".
+old = re.search(r'^    CURRENT_PROJECT_VERSION: "(\d+)"$', p, re.M).group(1)
+p2 = p.replace(f'CURRENT_PROJECT_VERSION: "{old}"', f'CURRENT_PROJECT_VERSION: "{n}"')
 open("project.yml", "w").write(p2)
 assert p2.count(f'CURRENT_PROJECT_VERSION: "{n}"') == 2, "expected exactly two version spots"
 EOF
