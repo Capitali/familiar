@@ -368,14 +368,19 @@ pub(crate) fn captain_store(root: &Path, captain: &str) -> PathBuf {
 }
 
 /// The persona a ship answers as: the captain's, else whatever the ship store carries.
+/// Read through the kernel's loader, so a file the CLI would refuse as invalid is
+/// refused here too instead of flowing raw onto the feed (review 2026-09-05, F2); a
+/// present-but-broken record surfaces as `{"error": …}` rather than as a silent Null.
 pub(crate) fn persona_for(root: &Path, ship_dir: &Path, captain: &str) -> Option<Value> {
     let cap = captain_store(root, captain);
     for dir in [cap.as_path(), ship_dir] {
-        if let Ok(text) = std::fs::read_to_string(dir.join("persona.json")) {
-            if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                return Some(v);
-            }
+        if !dir.join(familiar_kernel::persona::PERSONA_FILE).exists() {
+            continue;
         }
+        return Some(match familiar_kernel::persona::load(dir) {
+            Ok(p) => serde_json::to_value(&p).unwrap_or(Value::Null),
+            Err(e) => serde_json::json!({ "error": e.to_string() }),
+        });
     }
     None
 }
@@ -651,14 +656,43 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             let already = persona_dir
                 .join(familiar_kernel::persona::PERSONA_FILE)
                 .exists();
-            if already && computer_name.is_none() {
-                if let Ok(existing) = familiar_kernel::persona::load(&persona_dir) {
-                    println!("  joining {captain}'s computer, {}", existing.name);
+            // A name given at pairing RENAMES the captain's existing computer; it does
+            // not replace her (review 2026-09-05, F1: a fresh default record here wiped
+            // a tuned style). Only a captain with no computer yet gets a new record.
+            let persona = match (already, computer_name.as_deref()) {
+                (true, None) => match familiar_kernel::persona::load(&persona_dir) {
+                    Ok(existing) => {
+                        println!("  joining {captain}'s computer, {}", existing.name);
+                        existing
+                    }
+                    Err(e) => {
+                        eprintln!("fleet pair: the captain's persona will not load: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                (true, Some(name)) => {
+                    let mut existing = match familiar_kernel::persona::load(&persona_dir) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("fleet pair: the captain's persona will not load: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    existing.name = name.to_string();
+                    if let Err(e) = familiar_kernel::persona::write(&persona_dir, &existing) {
+                        eprintln!("fleet pair: writing the captain's persona: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                    existing
                 }
-            } else if let Err(e) = familiar_kernel::persona::write(&persona_dir, &persona) {
-                eprintln!("fleet pair: writing the captain's persona: {e}");
-                return ExitCode::FAILURE;
-            }
+                (false, _) => {
+                    if let Err(e) = familiar_kernel::persona::write(&persona_dir, &persona) {
+                        eprintln!("fleet pair: writing the captain's persona: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                    persona
+                }
+            };
             if let Err(e) = familiar_kernel::persona::record_naming(
                 &persona_dir,
                 &familiar_kernel::persona::NameEvent {
@@ -1117,5 +1151,79 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | run | serve");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod captain_store_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("fleet_cap_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(p.join("worlds").join("ship")).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_captain_store_sits_beside_worlds_and_slugs_the_name() {
+        let base = tmp("slug");
+        let root = base.join("worlds");
+        assert_eq!(
+            captain_store(&root, "Luke SkyWhisker"),
+            base.join("captains").join("luke-skywhisker")
+        );
+        assert_eq!(
+            captain_store(&root, "  luke-skywhisker "),
+            captain_store(&root, "Luke SkyWhisker")
+        );
+        assert_eq!(
+            captain_store(&root, ""),
+            base.join("captains").join("captain")
+        );
+    }
+
+    #[test]
+    fn the_captain_persona_wins_over_the_ship_local_record() {
+        let base = tmp("precedence");
+        let root = base.join("worlds");
+        let ship = root.join("ship");
+        let cap = captain_store(&root, "Luke SkyWhisker");
+        std::fs::create_dir_all(&cap).unwrap();
+        let old = familiar_kernel::persona::Persona {
+            name: "Purr".into(),
+            ..Default::default()
+        };
+        familiar_kernel::persona::write(&ship, &old).unwrap();
+        assert_eq!(
+            persona_for(&root, &ship, "Luke SkyWhisker")
+                .and_then(|v| v["name"].as_str().map(String::from)),
+            Some("Purr".into()),
+            "a store named before the ruling keeps its name"
+        );
+        let felix = familiar_kernel::persona::Persona {
+            name: "Felix".into(),
+            ..Default::default()
+        };
+        familiar_kernel::persona::write(&cap, &felix).unwrap();
+        assert_eq!(
+            persona_for(&root, &ship, "Luke SkyWhisker")
+                .and_then(|v| v["name"].as_str().map(String::from)),
+            Some("Felix".into())
+        );
+        assert!(persona_for(&root, &ship, "Nobody Else").is_some_and(|v| v["name"] == "Purr"));
+        assert!(persona_for(&root, &root.join("other"), "Nobody Else").is_none());
+    }
+
+    #[test]
+    fn a_broken_persona_is_an_error_on_the_feed_not_a_raw_value() {
+        let base = tmp("broken");
+        let root = base.join("worlds");
+        let cap = captain_store(&root, "Cap");
+        std::fs::create_dir_all(&cap).unwrap();
+        std::fs::write(cap.join("persona.json"), r#"{"name":"X","not_a_field":1}"#).unwrap();
+        let v = persona_for(&root, &root.join("ship"), "Cap").unwrap();
+        assert!(v.get("error").is_some(), "got {v}");
+        assert!(v.get("name").is_none());
     }
 }
