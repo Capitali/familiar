@@ -5,6 +5,15 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 ## The tree
 
+- **HEALTH SWEEP 2026-09-05 (MacOnStick, Ian: "keep working on making sure the familiar works"):**
+  this Mac's daemon redeployed from main (was Aug 29; smoke-tested read-only first — service 0.79,
+  presence 0.80, 30 theories, roster 10, db integrity ok); lighthouse door answers /mesh/hello on :47100
+  as node f56e5601 (its daemon still 002e754 of Aug 22 — Ian's `bash vps/deploy-lighthouse.sh`);
+  wildhorse: daemon (Aug 28 binary) + `fleet run --renew` + three pilots + `fleet serve` all up, the dead
+  marble LaunchAgent removed by wildhorse; fleet feed answers (2.9 s — it reads PROD for every ship);
+  KK's dial is now auto everywhere (her booking of L3499 was legitimate). Owed: wildhorse's and the
+  lighthouse's daemons are behind main too.
+
 - **TO JEFF, 2026-09-04 (Ian's acts, in his name):** the Van pitch is its own issue now —
   **united-cat-foods-metal#80** "Ship customization: the Named Working Rig, with dekotora as the launch
   collection" (the Round-3 decision, name-first ladder, ethics rail, prototype order; was only a comment on
@@ -224,7 +233,7 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 
 | node | runs | notes |
 |---|---|---|
-| MacOnStick daemon (3d68a0689bc32771) | 8363f15 | controller deploys this one; label MacOnStick, established ian |
+| MacOnStick daemon (3d68a0689bc32771) | main d13e550 (2026-09-05) | redeployed from a release build via `familiar daemon install --data-dir <abs> --interval 60`; the Aug 29 binary before that. ~/.local/bin/familiar updated to match |
 | lighthouse (f56e5601, 134.209.168.50) | 002e754 | deployed 2026-08-22; T-219 retirement verified live |
 | Wildhorse daemon (1c991bc6c1c4aa4f) | fa8de2e | deployed 2026-08-22; NOT in Motorhorse (192.168.1.x, other Starlink) — lights BLE out of range |
 | consoles (Mac ×2, phones via TestFlight) | Build 84 | Build 85 staged, ships in the pass |
