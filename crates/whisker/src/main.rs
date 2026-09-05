@@ -727,8 +727,19 @@ fn main() -> ExitCode {
                     if let Ok(Value::Array(rows)) =
                         wire.get(&format!("/v1/loadboard?status={status}"))
                     {
-                        if let Some(row) =
-                            rows.iter().filter_map(load_row).find(|l| l.load_id == lid)
+                        // ...and it must be OURS. `/v1/loadboard?status=` answers
+                        // for the whole board, not for this hull, so matching on the
+                        // id alone adopts whatever is carrying that number — and an
+                        // id can reach our trail and then be taken by somebody else.
+                        // KK II spent 2026-09-04 flying deadheads for L3446, booked
+                        // by carrier:ucfs-thermal-mass, `mine: false`, estimatedNet
+                        // −19: a 66-tick run to the-bonded-hold on 174 of fuel to
+                        // collect an NPC's salmon-mousse it could never have loaded.
+                        if let Some(row) = rows
+                            .iter()
+                            .filter(|r| r.get("mine").and_then(Value::as_bool).unwrap_or(false))
+                            .filter_map(load_row)
+                            .find(|l| l.load_id == lid)
                         {
                             journal(
                                 &ship_dir,
@@ -1656,5 +1667,46 @@ fn main() -> ExitCode {
         }
 
         std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
+    }
+}
+
+#[cfg(test)]
+mod adoption_tests {
+    use super::*;
+
+    /// A row must say it is OURS before the pilot adopts it as a held contract.
+    ///
+    /// The failure this guards is silent in both directions. Matching on the load
+    /// id alone adopts other people's freight — KK II flew deadheads for L3446,
+    /// booked by carrier:ucfs-thermal-mass, on 2026-09-04. But defaulting the
+    /// missing field the other way would adopt nothing ever, and a pilot that
+    /// quietly stops holding its own contracts looks exactly like a quiet one.
+    /// So the field is pinned here: `/v1/loadboard?status=` carries `mine` on
+    /// every row, checked against PROD the day the filter went in.
+    #[test]
+    fn only_our_own_rows_are_adopted() {
+        let ours = json!({"loadId": "L1", "origin": "a", "dest": "b", "mine": true});
+        let theirs = json!({"loadId": "L2", "origin": "a", "dest": "b", "mine": false,
+                            "bookedBy": "carrier:ucfs-thermal-mass"});
+        let unsaid = json!({"loadId": "L3", "origin": "a", "dest": "b"});
+
+        let adopt = |rows: &[Value], lid: &str| -> Option<LoadRow> {
+            rows.iter()
+                .filter(|r| r.get("mine").and_then(Value::as_bool).unwrap_or(false))
+                .filter_map(load_row)
+                .find(|l| l.load_id == lid)
+        };
+
+        assert!(adopt(&[ours.clone()], "L1").is_some());
+        assert!(
+            adopt(&[theirs.clone()], "L2").is_none(),
+            "another hull's load"
+        );
+        assert!(
+            adopt(&[unsaid], "L3").is_none(),
+            "a row that does not say is not ours"
+        );
+        // The id must still match: ours, but a different contract, is not it.
+        assert!(adopt(&[ours, theirs], "L2").is_none());
     }
 }
