@@ -103,6 +103,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
+- **independent re-verification 2026-09-04 (MacOnStick lane): ACCEPT** — `docs/reviews/2026-09-04-t231-independent-review.md`; two optional notes for codex's pass (a late second success is discarded as evidence; one clock per settle). Runtime proof on Ian's iPad still owed.
 - status: **LANDED on main 2026-09-02 (merge `ad6ece2`), chair-reviewed** — codex was
   paused (Ian's word), so the review is a recorded chair self-review
   (docs/reviews/2026-09-02-t231-candidate-race-chair-review.md): two repairs applied
