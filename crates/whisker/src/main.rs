@@ -1697,9 +1697,9 @@ mod adoption_tests {
                 .find(|l| l.load_id == lid)
         };
 
-        assert!(adopt(&[ours.clone()], "L1").is_some());
+        assert!(adopt(std::slice::from_ref(&ours), "L1").is_some());
         assert!(
-            adopt(&[theirs.clone()], "L2").is_none(),
+            adopt(std::slice::from_ref(&theirs), "L2").is_none(),
             "another hull's load"
         );
         assert!(
