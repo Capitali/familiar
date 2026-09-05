@@ -69,7 +69,13 @@ were read, not run. The chair ran both on wildhorse on 2026-09-04 with Ian watch
   survive. A captain's persona that will not load fails the pair loudly instead of being overwritten.
 - **F2:** `persona_for` reads through `familiar_kernel::persona::load`; a present-but-invalid record
   reaches the feed as `{"error": "<why>"}` (the app shows the hull as unnamed and the settings sheet
-  surfaces the decode error) instead of the raw file.
+  surfaces the decode error) instead of the raw file. **Behaviour change, deliberate:** the old
+  loop continued past a captain record that failed to parse and fell through to the ship's own
+  `persona.json`; the new one stops at the first file that *exists*. A broken captain record is
+  therefore an error on the feed, not a silent fall-back to a different name — under the
+  one-computer-per-captain ruling a silent fall-back would look like the feed working while a
+  different name spoke for the captain. Confirmed with the chair 2026-09-05; if you meet
+  `{"error": …}` on a row, that is the design, not a regression.
 - **N1:** three tests in `fleet.rs` (`captain_store_tests`): the slug and location, captain-over-ship
   precedence with the pre-ruling fallback and captain isolation, and the broken-file error shape.
 The join-on-pair branch itself is still only proven live; it sits inside the command match and wants
