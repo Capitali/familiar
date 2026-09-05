@@ -88,7 +88,15 @@ pub fn run_bench(
 /// to — resolved HERE, outside the jail — and `None` when neither exists, so a
 /// test can skip loudly instead of blaming the candidate.
 pub fn find_python() -> Option<PathBuf> {
-    for p in ["/opt/homebrew/bin/python3.13", "/opt/homebrew/bin/python3"] {
+    // Homebrew on Apple Silicon, then on Intel (wildhorse is x86_64 and keeps its
+    // python@3.14 under /usr/local); xcrun only when neither is managed here.
+    for p in [
+        "/opt/homebrew/bin/python3.13",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3.14",
+        "/usr/local/bin/python3.13",
+        "/usr/local/bin/python3",
+    ] {
         if Path::new(p).exists() {
             return Some(PathBuf::from(p));
         }
