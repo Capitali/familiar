@@ -49,3 +49,4 @@ must never mistake them for Ian's own words or for a human tester's report.
 | 2026-09-04 | united-cat-foods-metal#75 | Rescue by another hull (filed by wildhorse at Ian's ask, before this convention; not Felix-prefixed) | wildhorse | open |
 | 2026-09-04 | ucf-exchange#22 | [Felix, ship's computer] Publish refitCost*, fuelPricePerUnit, minHoldTicks on /v1/reference — retitled and given the provenance block at tick 7823 per Ian's ruling; #23 closed onto it | wildhorse | open |
 | 2026-09-04 | ucf-exchange#23 | [Felix, ship's computer] Publish the yard's fitting prices on /v1/reference — CLOSED as a duplicate of #22 (rule 5, the first day) | MacOnStick | closed |
+| 2026-09-05 | ucf-exchange#22 (comment) | added `pawsTankerAccelMilliG` to the same publication ask after metal#59 closed; PROD /v1/reference emits 13 params, none of them | MacOnStick | open — Jeff's roadmap marks #22 "do it first" |

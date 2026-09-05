@@ -707,6 +707,20 @@ now closed; what remains of each is an ACT, listed at the bottom).**
   **NEW DIRECTION (Ian 2026-08-29): "continue working on the familiar's reasoning skills.
   Deploy and ship when ready."** T-229 hardening deferred behind reasoning-skills work.
 
+- 2026-09-05 · MacOnStick. **Direct mode's brain: reason over the wire, do not port the pilot.**
+  Scoped the "on-device doctrine for direct mode" step: whisker's doctrine is 5,692 lines of Rust
+  (doctrine 1,279, trade 1,422, autonomy 492, chain, outfit) and is the PILOT — it acts. Direct
+  mode by Ian's ruling has no pilot; the ship's computer only speaks. So the UCF Familiar app's
+  direct mode keeps the shape it has: typed wire facts (`/v1/me`, profile, status, loadboard,
+  quotes, route, reference, receipts) rendered into documents, BurnRungs as the one ported model,
+  and the on-device / PCC model reasoning over them under the same instructions as host mode.
+  What direct mode still lacks and should grow next, in order: (1) the merchant's book from
+  receipts (FIFO cost, margin) so "how am I doing" has numbers; (2) the load board ranked by net
+  per tick (board.py's rule) as a document; (3) a fuel picture that reads pump prices from quotes.
+  Not a Rust→Swift port. Today's increment: the tanker line no longer says "days of transit"
+  (metal#59 closed; the dial is unpublished, so the app quotes no arrival), and Felix asked for
+  `pawsTankerAccelMilliG` on #22.
+
 - 2026-09-05 · **RULING (Ian, verbatim): "always keep testflight up to date."** Every green main
   (CI + Swift) that touches the iOS tree ships to TestFlight without asking — FamiliarAgent and UCF
   Familiar alike — from wildhorse's Xcode 26.5 lane (Xcode 27 beta uploads are refused, 90534). Tell
