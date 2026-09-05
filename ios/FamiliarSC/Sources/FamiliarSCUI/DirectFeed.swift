@@ -182,7 +182,7 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
             "credits": .number(Double(m.credits)), "fill_price_here": .number(Double((cap - fuel) * fuelPricePerUnit)),
             "stranded": .bool(reachable.isEmpty && m.docked != nil), "can_reach": .array(reachable.map { .string($0) }),
             "pumps": .array(pumps), "saleable_here": .array(saleable),
-            "tanker": .object(["available": .bool(true), "pilot_will_call": .bool(false), "why": .string("a PAWS call-out is days of transit and pins the hull where it stands (metal#59); no pilot is aboard in direct mode, so calling it is the captain's own act in the game")]),
+            "tanker": .object(["available": .bool(true), "pilot_will_call": .bool(false), "why": .string("the tanker's speed is a world dial the wire does not publish (metal#59 raised it on PROD at tick 7842; a rescue that took days now takes about 70 ticks there, but this app cannot read the dial, so it quotes no arrival); no pilot is aboard in direct mode, so calling it is the captain's own act in the game")]),
             "if_stranded": .string("sell what this berth will take for credits, wait for a load whose origin is reachable, ask another captain (metal#75 proposes fuel between hulls), or call the tanker knowingly"),
         ])
         return Briefs.fuel(picture) + "\n(Fuel priced at the pack's \(fuelPricePerUnit) ℳ per unit until the exchange publishes its own.)"
