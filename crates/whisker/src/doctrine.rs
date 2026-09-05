@@ -428,7 +428,7 @@ const TOP_UP_BELOW: f64 = 0.9;
 /// Below this fraction, an idle ship diverts to a pump before taking work.
 const LOW_FUEL: f64 = 0.4;
 /// Below this fraction, nothing matters but the tanker.
-const CRITICAL_FUEL: f64 = 0.05;
+pub const CRITICAL_FUEL: f64 = 0.05;
 /// How many top board rows get route-priced. A route call per row would be impolite.
 const PRICED_CANDIDATES: usize = 5;
 /// The desk reverts a booking not picked up within this many ticks of it

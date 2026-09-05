@@ -195,8 +195,26 @@ fn ship_from(me: &Value, repair_rate: i64) -> Ship {
     // course merely LAID but not yet engaged shows as `driveAwaiting`, and that
     // is handled before the doctrine ever sees the ship — so by here, no berth
     // means she is crossing. The route array stays a belt to those braces.
+    // ...and a berthed hull with hops still on the plan is UNDER WAY only while the
+    // plan can still be flown. The engine re-attempts the next leg each fold and,
+    // when the tank will not cover it, declines in silence (metal#79) — so a hull
+    // that cannot afford its own remaining course sits berthed behind a route that
+    // will never move, and reading that as flight makes the pilot hold rather than
+    // rescue it. KK II did this at cannery-row on 2026-09-05: docked, 18 of 600,
+    // 8,323 credits, a stale course to the-bonded-hold needing about 200, and a
+    // pump two ticks away — journalling "under way, no load" while parked.
+    //
+    // The tank is the tell. Below the critical fraction a remaining course is a
+    // stall, not a crossing, and the fuel doors below should have it. Above it,
+    // nothing changes: a healthy multi-hop route is left alone to fly itself.
+    let fuel_now = me.get("fuel").and_then(Value::as_i64).unwrap_or(0);
+    let tank = me.get("fuelCapacity").and_then(Value::as_i64).unwrap_or(0);
+    let stalled = docked.is_some()
+        && route_len > 0
+        && tank > 0
+        && (fuel_now as f64 / tank as f64) < doctrine::CRITICAL_FUEL;
     Ship {
-        in_flight: docked.is_none() || route_len > 0,
+        in_flight: docked.is_none() || (route_len > 0 && !stalled),
         docked,
         accel_milli_g: me
             .get("effectiveAccelMilliG")
