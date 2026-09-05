@@ -73,7 +73,7 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         let computer = personaName ?? row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
         var summary = ShipSummary(
             world: world, label: row["label"]?.string ?? world, computer: computer, named: personaName != nil || !computer.hasPrefix("("),
-            hull: row["hull"]?.string ?? "", captain: row["captain"]?.string ?? "", server: row["server"]?.string ?? "",
+            hull: row["hull"]?.string ?? row["ship"]?.string ?? "", captain: row["captain"]?.string ?? "", server: row["server"]?.string ?? "",
             automations: row["automations"]?.array?.compactMap(\.string) ?? [],
             credits: row["credits"]?.int, debt: row["debt"]?.int, fuel: row["fuel"]?.int, fuelCapacity: row["fuelCapacity"]?.int,
             wearBps: row["wearBps"]?.int, docked: row["docked"]?.string, enRouteTo: row["enRouteTo"]?.string,
