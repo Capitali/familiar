@@ -652,12 +652,22 @@ pub fn decide(
     // one THE TANK CAN REACH: the engine refuses an unaffordable route at the fold
     // ("route needs about 217 in the tank and it holds 157"), so filing one is a
     // slow way to stand still. No affordable pump means the tanker, at ANY level.
-    // ...or, berthed where nothing pumps, whatever the tank reads: from a pumpless
-    // berth every plan must also carry the leg to a pump, and a half tank can make the
-    // whole board "unfuelable" — KK II sat 179 folds (5½ hours) at titania-cold-store
-    // on 306 of 600 that way (2026-09-03). At a pump the plan is priced against a full
-    // tank, so going there is never the wrong move when there is no work here.
-    if frac(ship.fuel) < LOW_FUEL || (!pumps.is_empty() && !pumps.contains(here)) {
+    // ...or, berthed where nothing pumps on a tank a pump would actually improve:
+    // from a pumpless berth every plan must also carry the leg to a pump, and a half
+    // tank can make the whole board "unfuelable" — KK II sat 179 folds (5½ hours) at
+    // titania-cold-store on 306 of 600 that way (2026-09-03).
+    //
+    // But only a tank a pump would improve. The clause used to read "whatever the
+    // tank reads", and its own justification — at a pump the plan is priced against
+    // a FULL tank — is exactly why that was wrong at the top of the gauge: at 580 of
+    // 600 the plan is already priced against a full tank, so the trip buys nothing
+    // and costs the berth. KK II did it tonight, collecting at cannery-row and then
+    // shuttling to foxy's-diner on 97% — and foxy's is the corner where the freight
+    // is out of pickup range, so both hulls ended up parked there with nothing to do.
+    // A ship with a full tank and no work has a position problem, not a fuel problem.
+    if frac(ship.fuel) < LOW_FUEL
+        || (!pumps.is_empty() && !pumps.contains(here) && frac(ship.fuel) < TOP_UP_BELOW)
+    {
         // Each pump is asked at the throttle that REACHES it, not only at the
         // one the pilot prefers. Standard first, so a healthy tank flies exactly
         // as it always did; half throttle only when standard falls short, which
@@ -1090,6 +1100,30 @@ mod tests {
             d,
             Decision::Travel {
                 station: "a".into()
+            }
+        );
+    }
+
+    /// A full tank at a pumpless berth stays put. The shuttle exists to make plans
+    /// affordable, and at the top of the gauge they already are — KK II collected at
+    /// cannery-row on 580 of 600 and shuttled to foxy's-diner for nothing, which is
+    /// how both hulls came to be parked in the corner furthest from the freight.
+    #[test]
+    fn a_full_tank_does_not_shuttle_to_a_pump_for_nothing() {
+        let ship = ship_at("cannery-row", 580);
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(7));
+        assert!(
+            matches!(d, Decision::Hold { .. }),
+            "a full tank with no work has a position problem, not a fuel one: {d:?}"
+        );
+        // Half a tank at the same berth still goes — that is the titania case.
+        let half = ship_at("cannery-row", 306);
+        let d = decide(&half, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(7));
+        assert_eq!(
+            d,
+            Decision::DivertToPump {
+                pump: "foxys-diner".into(),
+                burn_bps: BURN_STANDARD
             }
         );
     }
