@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-07 — T-236 brick 1, the Swift half of codex's re-verification: no stale voice, no rebuilt slug
+
+Codex re-verified T-236 brick 1 against Ian's per-captain ruling
+(`docs/reviews/2026-09-07-t236-brick1-codex-reverification.md`, REJECT). The host-side
+findings 1–7 (pairing drops `computer_name`, the legacy-Felix shadowing, persona+trail
+atomicity, the lossy captain slug as identity, the false `--captain` actor, partial
+pairing, errors read as "unnamed") are the wildhorse lane's, with the store migration to
+an opaque `captain_id` sequenced after today's TestFlight uploads. This entry is the
+client half, built now so it is ready when the host row carries the new fields:
+
+- **Finding 8 — a broken persona on the next ship cleared nothing.** `BridgeModel.open`
+  read straight into the published properties; when Bob's captain persona threw (the
+  host correctly refuses to fall through), `world` was already Bob but Alice's persona,
+  conversation, turns, journal and context stayed live — `computerName` still said Alice
+  and `ask` still answered as her. Now every required read lands in locals and is
+  published only after all succeed; on failure `clearVoice()` empties persona,
+  conversation, turns, journal, window, dial, book, reports and the spoken report, keeping
+  only the fleet summary (host-served ship facts) and the visible error. A cancelled read
+  on the SAME ship keeps the last good state as before; a cancelled switch to a different
+  ship clears too. Pinned: Alice opens fine, Bob's persona throws, nothing of Alice is
+  readable or speakable, a later good open is fresh.
+- **Finding 9 — Swift and Rust slugged the LOCAL captain differently.** The client rebuilt
+  `captains/<slug>/brief` from the display name with its own transform ("luke-skywhisker-
+  local-soak" vs the host's "luke-skywhisker--local-soak"), so the LOCAL bridge silently
+  404'd the fleet document. The rule now: the route is the host's word — the ships row's
+  `captain_brief` (a server-built path; `captain_id` beside it is the only thing a client
+  may key on; field names agreed with wildhorse) — and `WireFeed.captainBriefPath` asks for
+  exactly that whenever present. `Briefs.captainSlug` stays as the legacy fallback for a
+  host without the field, now reproducing `captain_store` byte-for-byte (every non-ASCII-
+  alphanumeric → `-`, ends trimmed, empty → `captain`) and pinned against the host's own
+  cases including the LOCAL soak string, `A/B` = `A B`, and non-ASCII.
+- **Finding 1, client half:** the pairing sheet already sends `computer_name`; nothing to
+  change here — the host repair makes the promise true.
+
+Bar: FamiliarSC 53/0 (one skipped, as before); FamiliarMac Release and UCFFamiliar
+simulator builds. Re-offered to codex with the host half when wildhorse lands it.
+
 ## 2026-09-07 — T-237 B4 step 4: the pilot's mind in the captain's hand
 
 The last step of "one doctrine, two runtimes". Steps 1–3 (09-05) lifted the ship-store

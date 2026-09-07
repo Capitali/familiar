@@ -119,15 +119,22 @@ public enum Briefs {
         return lines.joined(separator: "\n")
     }
 
+    /// The host's `captain_store` slug, reproduced EXACTLY (every character that is not
+    /// ASCII alphanumeric becomes `-`, then the ends are trimmed; empty → `captain`).
+    /// LEGACY FALLBACK ONLY: a client must never reproduce a filesystem transform (codex,
+    /// T-236 re-verification finding 9) — the ships row carries `captain_brief`, a
+    /// server-built path, and that is what `WireFeed` asks for whenever it is present.
+    /// This stays for hosts that predate the field, pinned against the host's own cases.
     public static func captainSlug(_ name: String) -> String {
-        let lowered = name.lowercased()
         var out = ""
-        for ch in lowered {
-            if ch.isLetter || ch.isNumber { out.append(ch) }
-            else if ch == " " || ch == "-" || ch == "_" { if !out.hasSuffix("-") { out.append("-") } }
+        for scalar in name.trimmingCharacters(in: .whitespaces).lowercased().unicodeScalars {
+            let ascii = scalar.isASCII
+            let alnum = ascii && ((scalar.value >= 0x30 && scalar.value <= 0x39) || (scalar.value >= 0x61 && scalar.value <= 0x7a))
+            out.append(alnum ? Character(scalar) : "-")
         }
+        while out.hasPrefix("-") { out.removeFirst() }
         while out.hasSuffix("-") { out.removeLast() }
-        return out
+        return out.isEmpty ? "captain" : out
     }
 
     /// The captain's brief: his computer, his hulls, the pooled book, what waits on him.
