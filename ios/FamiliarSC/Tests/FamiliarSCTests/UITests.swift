@@ -134,8 +134,18 @@ final class UITests: XCTestCase {
     }
 
     func testCaptainBriefAndSlug() throws {
+        // The legacy fallback reproduces the HOST's transform exactly (crates/cli/src/fleet.rs
+        // captain_store): every non-ASCII-alphanumeric → "-", ends trimmed, empty → "captain".
         XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker"), "luke-skywhisker")
-        XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker (LOCAL soak)"), "luke-skywhisker-local-soak")
+        XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker (LOCAL soak)"), "luke-skywhisker--local-soak", "the host keeps both dashes; the old Swift slug collapsed them and 404'd the LOCAL brief")
+        XCTAssertEqual(Briefs.captainSlug("A/B"), "a-b"); XCTAssertEqual(Briefs.captainSlug("A B"), "a-b")
+        XCTAssertEqual(Briefs.captainSlug("  ÆrØ_1 "), "r--1", "one dash per non-ASCII-alphanumeric, as the host does")
+        XCTAssertEqual(Briefs.captainSlug("---"), "captain"); XCTAssertEqual(Briefs.captainSlug(""), "captain")
+        // And the client never REBUILDS the route when the host hands it one.
+        let row: JSONValue = .object(["world": .string("w"), "captain": .string("Luke SkyWhisker (LOCAL soak)"), "captain_id": .string("c_9f3"), "captain_brief": .string("/captains/c_9f3/brief")])
+        XCTAssertEqual(WireFeed.captainBriefPath(row: row, captainName: "Luke SkyWhisker (LOCAL soak)"), "captains/c_9f3/brief")
+        XCTAssertEqual(WireFeed.captainBriefPath(row: .object(["world": .string("w")]), captainName: "Luke SkyWhisker (LOCAL soak)"), "captains/luke-skywhisker--local-soak/brief", "a host without the field: the exact legacy route")
+        XCTAssertNil(WireFeed.captainBriefPath(row: nil, captainName: nil))
         let b = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"context":{"kind":"captain","name":"Luke SkyWhisker","computer":"Felix","ships":["a","b"]},"captain":"Luke SkyWhisker","computer":"Felix","ships":[{"ship":"Kibble Klipper II","world_name":"PROD","docked":null,"enRouteTo":"foxys-diner","credits":6451,"fuel":164,"fuelCapacity":600,"last_event":"engaged-drive"},{"ship":"Kibble Klipper","world_name":"PROD","docked":"titania-cold-store","credits":0,"fuel":135,"fuelCapacity":600,"last_event":"distress-hold"}],"book":{"pooled_credits":5738,"debt":141802,"trades_realized":5319,"aboard_at_cost":16820},"open_proposals":[]}"#.utf8))
         let t = Briefs.captain(b)
         XCTAssertTrue(t.contains("Captain Luke SkyWhisker; his computer across the fleet is Felix."))
@@ -186,5 +196,42 @@ final class UITests: XCTestCase {
         let unnamed = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"world":"w4","label":"soak","hull":"","captain":"","server":"","automations":[],"persona":null}"#.utf8))
         let u = try XCTUnwrap(WireFeed.summary(from: unnamed, tick: nil))
         XCTAssertFalse(u.named); XCTAssertEqual(u.computer, "(unnamed — `fleet rename` her)")
+    }
+
+    /// T-236 finding 8: opening a ship whose captain persona is broken must not leave the
+    /// previously opened captain's voice live. Alice (Purr) opens fine; Bob's persona
+    /// throws; after opening Bob nothing of Alice is readable or speakable.
+    struct BrokenPersonaFeed: ShipsFeed {
+        let inner = FixtureFeed()
+        let broken: String
+        func ships() async throws -> [ShipSummary] { try await inner.ships() }
+        func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument]) { try await inner.context(world: world, worldInstance: worldInstance) }
+        func persona(world: String) async throws -> Persona? {
+            if world == broken { throw FeedError.refused("captain persona unreadable: style.mood is not a known mood") }
+            return try await inner.persona(world: world)
+        }
+        func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry] { try await inner.journal(world: world, sinceTick: sinceTick) }
+        func window(world: String) async throws -> [MessageItem] { try await inner.window(world: world) }
+        func dial(world: String) async throws -> DialSheet { try await inner.dial(world: world) }
+        func book(world: String) async throws -> ShipBook { try await inner.book(world: world) }
+    }
+
+    func testABrokenPersonaOnTheNextShipClearsThePreviousCaptainsVoice() async {
+        let feed = BrokenPersonaFeed(broken: "world-fixture-old")
+        let model = BridgeModel(feed: feed, acts: FixtureFeed())
+        await model.refreshShips()
+        await model.open(world: "world-fixture-purr")
+        XCTAssertEqual(model.persona?.name, "Purr"); XCTAssertNotNil(model.conversation); XCTAssertFalse(model.journal.isEmpty)
+        await model.open(world: "world-fixture-old")
+        XCTAssertEqual(model.world, "world-fixture-old")
+        XCTAssertNotNil(model.error, "the host's refusal is shown, not swallowed")
+        XCTAssertNil(model.persona); XCTAssertNil(model.conversation); XCTAssertTrue(model.turns.isEmpty)
+        XCTAssertTrue(model.journal.isEmpty && model.window.isEmpty && model.reports.isEmpty && model.dial == nil && model.book == nil)
+        XCTAssertNotEqual(model.computerName, "Purr", "Alice's name must not speak for Bob's ship")
+        await model.ask("where are we", spoken: false)
+        XCTAssertTrue(model.turns.isEmpty, "nothing to say without a voice — Alice's conversation cannot answer for Bob")
+        // A later good open restores a voice for THAT ship, fresh.
+        await model.open(world: "world-fixture-purr")
+        XCTAssertEqual(model.persona?.name, "Purr"); XCTAssertTrue(model.turns.isEmpty)
     }
 }

@@ -95,12 +95,18 @@ public final class BridgeModel {
     public func open(world: String, foldWindowTicks: Int64 = 96, windows: Int = 6) async {
         self.world = world
         loading = true; defer { loading = false }
+        // Read the whole bridge into locals and publish only once every required read
+        // has succeeded. A broken captain persona on the newly selected ship (the host
+        // refuses to fall through, T-236) must not leave the PREVIOUS captain's name,
+        // conversation, journal or context live under this ship's summary (codex, T-236
+        // re-verification finding 8).
         do {
-            persona = try await feed.persona(world: world)
-            journal = try await feed.journal(world: world, sinceTick: nil)
-            window = try await feed.window(world: world)
-            dial = try await feed.dial(world: world)
-            book = try await feed.book(world: world)
+            let p = try await feed.persona(world: world)
+            let j = try await feed.journal(world: world, sinceTick: nil)
+            let w = try await feed.window(world: world)
+            let d = try await feed.dial(world: world)
+            let b = try await feed.book(world: world)
+            persona = p; journal = j; window = w; dial = d; book = b
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
             let (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
             let frameLine = frame ?? summary.map { "ship, hull \($0.shipName) (\($0.worldInstance)), captain \($0.captain), computer \(computerName)" }
@@ -113,7 +119,19 @@ public final class BridgeModel {
                 turns = []
             }
             error = nil
-        } catch { report(error) }
+        } catch {
+            if !BridgeModel.isCancellation(error) || conversationWorld != world { clearVoice() }
+            report(error)
+        }
+    }
+
+    /// Nothing of a previously opened ship may speak for this one: no persona, no
+    /// conversation, no turns, no journal or window or reports. The fleet summary (ship
+    /// facts the host served) and the visible error remain.
+    @MainActor
+    func clearVoice() {
+        persona = nil; journal = []; window = []; dial = nil; book = nil; reports = []; spoken = nil
+        conversation = nil; conversationWorld = nil; turns = []
     }
 
     /// The journal slice the latest fold report was told from.

@@ -152,10 +152,26 @@ public struct WireFeed: ShipsFeed, CaptainActs {
             docs.append(ContextDocument(name: "fuel", title: "fuel picture — fuel aboard, every pump with distance, cost and reachability, what this berth would buy, the tanker, the ways out when stranded", text: Briefs.fuel(f)))
         }
         // The captain's whole fleet, so she can answer about the other hulls and the pooled book.
-        if let captain = captainName, let d = try? await call("captains/\(Briefs.captainSlug(captain))/brief"), let c = try? JSONDecoder().decode(JSONValue.self, from: d) {
+        // The route is the host's word (`captain_brief` on the ships row), never a slug the
+        // client rebuilt from the display name (T-236 finding 9); the slug is only for hosts
+        // that predate the field.
+        let row = (try? await envelope("ships"))?.ships?.first { $0["world"]?.string == world }
+        if let path = WireFeed.captainBriefPath(row: row, captainName: captainName),
+           let d = try? await call(path), let c = try? JSONDecoder().decode(JSONValue.self, from: d) {
             docs.append(ContextDocument(name: "fleet", title: "the captain's fleet — every hull he flies, where each is, the pooled book, what waits on him", text: Briefs.captain(c)))
         }
         return (frame, docs)
+    }
+
+    /// Where the captain's brief is: the row's server-built `captain_brief` (root-relative,
+    /// as the host writes it), else — for a host without the field — the legacy slug route
+    /// from the brief's captain name, else nothing.
+    static func captainBriefPath(row: JSONValue?, captainName: String?) -> String? {
+        if let p = row?["captain_brief"]?.string, !p.isEmpty {
+            return p.hasPrefix("/") ? String(p.dropFirst()) : p
+        }
+        if let captain = captainName { return "captains/\(Briefs.captainSlug(captain))/brief" }
+        return nil
     }
 
     public func book(world: String) async throws -> ShipBook {
