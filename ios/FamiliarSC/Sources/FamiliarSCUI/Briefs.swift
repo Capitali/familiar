@@ -84,6 +84,41 @@ public enum Briefs {
     }
 
     /// The captain's slug as the host keys it: lowercased, spaces to hyphens, parentheses dropped.
+    /// The pilot's verdict (`whisker_advise` output) as the floor says it: the act, the dial
+    /// surface it spends, the captain's level, the automation it needs. A reading, never an act.
+    public static func pilot(_ v: JSONValue) -> String {
+        let d = v["decision"] ?? .null
+        let act: String
+        switch d["type"]?.string ?? "" {
+        case "hold": act = "hold — \(d["why"]?.string ?? "no reason given")"
+        case "refuel": act = "refuel at this berth's pump"
+        case "repair": act = "repair the drive at this berth"
+        case "call-paws": act = "call the PAWS tanker — no pump in reach"
+        case "divert-to-pump": act = "fly empty to the pump at \(d["pump"]?.string ?? "?")\(d["burn"]?.string.map { " on the \($0) burn" } ?? "")"
+        case "book": act = "book load \(d["load_id"]?.string ?? "?")"
+        case "travel": act = "file a course to \(d["station"]?.string ?? "?")"
+        case "collect": act = "collect the money on \(d["load_id"]?.string ?? "?")"
+        default: act = "no decision"
+        }
+        var lines = ["The pilot would now: \(act)."]
+        if let surface = v["surface"]?.string, let level = v["level"]?.string {
+            let word: String
+            switch level {
+            case "auto": word = "act on her own"
+            case "confirm": word = "ask before acting"
+            default: word = "only advise"
+            }
+            lines.append("Dial surface \(surface): the captain's setting is \(level), so aboard a piloted hull she would \(word).")
+        }
+        if let a = v["automation"]?.string { lines.append("It spends the \(a) automation.") }
+        if let s = v["ship"], let fuel = s["fuel"]?.double, let cap = s["fuel_capacity"]?.double {
+            let where_ = s["docked"]?.string.map { "at \($0)" } ?? (s["in_flight"]?.bool == true ? "under way" : "adrift")
+            lines.append("Read from the wire: \(where_), fuel \(Int(fuel)) of \(Int(cap)), credits \(Int(s["credits"]?.double ?? 0)), wear \(Int(s["wear_bps"]?.double ?? 0)) bps, \(v["board_rows"]?.double.map { "\(Int($0)) loads on the board" } ?? "board unread").")
+        }
+        lines.append("This is the same doctrine that flies the hull from the host; here it only reads. Nothing is filed unless the captain acts.")
+        return lines.joined(separator: "\n")
+    }
+
     public static func captainSlug(_ name: String) -> String {
         let lowered = name.lowercased()
         var out = ""

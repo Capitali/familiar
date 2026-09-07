@@ -97,6 +97,9 @@ targets:
     sources:
       - UCFFamiliar/Sources
       - UCFFamiliar/Assets.xcassets
+      # The embeddable Rust core (tools/build-core.sh): the pilot's doctrine as
+      # whiskerAdvise(inputJson:) — one doctrine, two runtimes (T-237 B4).
+      - path: FamiliarCore/Generated/familiar_core.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ucf
@@ -109,9 +112,14 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "2"
+        # The xcframework's simulator slice is arm64-only (see FamiliarAgent).
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     dependencies:
       - package: FamiliarSC
         product: FamiliarSCUI
+      # Static library — link only, never embed (see FamiliarAgent's note).
+      - framework: FamiliarCore/FamiliarCore.xcframework
+        embed: false
   # The macOS peer's console. It ENROLS and reads the worldview over the mesh like any other peer
   # (ADR-0018) — it no longer reads a daemon on the same machine over loopback /local/worldview.
   # A peer among equals: no "host", and holding no group secret it cannot mint, only offer its address.

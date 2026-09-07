@@ -35,6 +35,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the familiar's economic edge made structural — the P&L routines Ian names. Chair-built solo while codex is paused (below); design review owed to codex after Sept 6
 
 ### T-237 B4 · One doctrine, two runtimes — the pilot's mind embedded in the iPad, the pilot itself stays on the host
+- **STEP 4 LANDED 2026-09-07 (companion:claude, MacOnStick; log entry 2026-09-07):** `UCFFamiliar`
+  links FamiliarCore; `DirectFeed.adviser` + `pilotAdvice` ask `whisker_advise` with what the
+  host runner reads (me, board, stations, priced legs + pumps from here, repair rate, own
+  contract); `Briefs.pilot` renders the verdict as a reading ("Nothing is filed unless the
+  captain acts"); no adviser without the core → no pilot document, never a fabricated one.
+  FamiliarSC 52/0; UCFFamiliar simulator build. Steps 1–4 chair-reviewed; codex
+  re-verification queued. UCF Familiar build 3 from the wildhorse lane carries it.
 - status: **CLAIMED companion:claude (MacOnStick) 2026-09-05** on Ian's ruling, verbatim: "I will take all your recommendations for UCF familiar. Proceed." (Recommendations: no Swift port of the pilot; no pilot process on the iPad — iOS cannot run one around the clock; the doctrine becomes ONE pure library both runtimes embed through core-ffi, JSON in / decision + reasons out; the host loop keeps flying; the iPad's direct mode shows the same mind live and lets the captain confirm an act under the act scope.)
 - scope: (1) purity pass — lift the file I/O out of `whisker::autonomy` (dial, proposals, approvals), `whisker::trade` (holdings) and `whisker` (automations, env) into a `store` module the runner owns, no decision logic changed; (2) `core-ffi`: a `whisker_decide` seam that takes the ship, the board, the routes the caller already fetched, the dial and the holdings as JSON and returns the decision, its automation and its reasons; (3) FamiliarCore.xcframework rebuilt with it; (4) UCF Familiar direct mode calls it — "what the pilot would do now, and why", confirm-to-act.
 - accept: the host runner's behaviour is byte-identical (same tests, same journal vocabulary); the same input JSON produces the same decision on the host and in the iPad; direct mode shows the decision with reasons and refuses to act without the captain's tap.

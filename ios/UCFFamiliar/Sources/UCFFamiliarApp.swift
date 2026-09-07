@@ -70,7 +70,9 @@ struct UCFFamiliarRoot: View {
             let wire = WireFeed(base: url, bearer: bearer)
             m = BridgeModel(feed: wire, acts: wire, voiceConsent: consent)
         case .direct(_, let exchange, _):
-            guard let key = connections.secret(for: c), let direct = DirectFeed(exchange: exchange, key: key) else { return nil }
+            guard let key = connections.secret(for: c), var direct = DirectFeed(exchange: exchange, key: key) else { return nil }
+            // The pilot's mind, in the shell's hand: FamiliarCore's whisker_advise (T-237 B4).
+            direct.adviser = { whiskerAdvise(inputJson: $0) }
             m = BridgeModel(feed: direct, acts: direct, voiceConsent: consent)
         }
         DispatchQueue.main.async { models[c.id] = m }

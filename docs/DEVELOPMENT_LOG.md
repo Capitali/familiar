@@ -6,6 +6,39 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-07 — T-237 B4 step 4: the pilot's mind in the captain's hand
+
+The last step of "one doctrine, two runtimes". Steps 1–3 (09-05) lifted the ship-store
+I/O out of the decision crates, gave `core-ffi` the `whisker_advise` seam (wire JSON in,
+decision + reasons out) and rebuilt `FamiliarCore.xcframework` with it. This step links
+the core into the standalone app and lets direct mode ASK the doctrine — it never acts.
+
+- `ios/project.yml`: `UCFFamiliar` links `FamiliarCore.xcframework` (static, link only,
+  never embed — FamiliarAgent's note) and compiles the generated `familiar_core.swift`;
+  the simulator slice is arm64-only, so x86_64 is excluded there as for FamiliarAgent.
+- `DirectFeed.adviser: (@Sendable (String) -> String)?` — the pilot's mind as a closure
+  the SHELL hands in (`UCFFamiliarApp` sets `whiskerAdvise(inputJson:)`). The package
+  alone has no core and no adviser; then there is no pilot document and the computer
+  says so — never a fabricated one (pinned).
+- `DirectFeed.pilotAdvice(me:)` gathers exactly what the host runner reads before a fold
+  (`/v1/me`, the open board, the stations, the yard's repair rate from `/v1/reference`,
+  the captain's own open contract) and prices what the runner prices — the five best
+  rows' legs from here and every pump from here — then the doctrine judges. Output is a
+  reading; nothing is filed. The `dial` key is not sent, so the verdict carries the
+  doctrine's default surface/level; the captain's own dial lives on the host.
+- `Briefs.pilot` renders the verdict as the floor says it: the act (hold / refuel /
+  repair / call-PAWS / divert-to-pump with pump and burn / book / travel / collect), the
+  dial surface it spends and what the captain's level means aboard a piloted hull, the
+  automation, the wire facts it read, and the standing line "Nothing is filed unless the
+  captain acts." It rides into the context frame as the document named `pilot`.
+
+Found in the shared checkout uncommitted (09-05 session), parked on
+`claude/t237-b4-step4-wip`, rebased over main (build 111 + the T-231 repair), then
+finished here. Bar: FamiliarSC 52/0 (one skipped, as before); `UCFFamiliar` simulator
+build. Chair-reviewed — codex re-verification of B4 (steps 1–4) queued with the rest of
+the post-pause debt. Metal#79 (Ian's ruling pending on the silent stop) may move the
+departure/fuel target; this step only reads the doctrine, so it moves with it.
+
 ## 2026-09-07 — T-231 repair: a corpse "recently touched" is not recently alive
 
 Codex returned from its pause and re-verified T-231 (`docs/reviews/2026-09-07-t231-codex-reverification.md`):
