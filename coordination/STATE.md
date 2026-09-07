@@ -87,6 +87,20 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   The captain's fleet brief (/captains/{slug}/brief, 7e96daa) rides in the next build. Use 109.
 
 
+- **IAN'S RULINGS 2026-09-07 (~14:40 CDT, answering the captains/fleets/hulls proposal
+  and the codex pace; recorded as acted on):** (1) **a captain's own fleet MAY be empty**
+  (his only hull may sail in another captain's fleet — a captain between commands is a
+  state, not an error); (2) **when A's ship sails in B's fleet the hull's earnings SETTLE
+  PER THE ARTICLES** (a share split recorded on the membership edge — the ledger design is
+  unblocked); (3) **the fleet is to be PROPOSED TO JEFF AS ENGINE STATE**, not kept as a
+  familiar-side overlay — a new entity + endpoints on the exchange, so the familiar's
+  captain record / ownership edge must be shaped to mirror what the engine will hold,
+  and the proposal to Jeff is the next act (wildhorse lane drafts, Ian files); (4) **codex
+  re-verification runs shipped code first**: T-231 round 2, then T-237 B4, then T-238
+  brick 1, T-237 B2, B3, T-232 round 7 — one per usage reset, the multi-day pace accepted.
+  Metal#79 was ruled today by BOTH owners on the issue: Ian "keep" (via wildhorse), Jeff
+  "geometry is the truth — overturned; fixes ride engine 1.25.0 behind a zero-default
+  dial + Haul build 25"; the engine is Jeff's, so whisker/the app track his version.
 - **CODEX BACK 2026-09-07 (Ian: "codex is available again so resume reviews with codex
   including the ones we worked without it while it was consumed").** Re-verification
   queue, run from MacOnStick one at a time (three in parallel burned the usage window in

@@ -22,6 +22,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - **B3 IN FLIGHT (2026-09-04):** screens = MacOnStick lane (`FamiliarSCUI`, branch claude/t237-b3-screens: four-tab root, pairing sheet, notifier, Store/Fixture/Wire feeds; iOS host behind Settings → "Ship's computer"); host half = wildhorse (`familiar fleet serve`, 2b8b7f5 + 8310c4c: bearer-protected JSON feed of the ship stores with per-exchange ticks, approve/dial/pair/unpair writes; running on wildhorse :7899, reachable over Tailscale). Design canvas: https://claude.ai/code/artifact/b3d6f1fd-e1bf-4485-b4a1-a444c60001d7 (five phone artboards in the Fam palette). Transport is a pasted bearer for now; node-signed via the mesh door later.
 
 ### T-238 · The supply chain is the map — production-aware P&L planning
+- **IAN'S RULINGS 2026-09-07 on the captains/fleets/hulls proposal (wildhorse's draft):**
+  empty fleet ALLOWED; earnings settle PER ARTICLES on the membership edge; the fleet goes
+  to Jeff as ENGINE STATE (proposal to draft — wildhorse lane — for Ian to file), not a
+  familiar-side overlay. The T-236 `captain_id` record is shaped to mirror the engine's
+  captain when it exists (generated id, display label, `traderName` beside it).
 - status: **CLAIMED companion:claude 2026-09-02 evening for brick 1 ONLY** — the pure
   chain model: NEW FILE `crates/whisker/src/chain.rs` (+ lib.rs module line, + tests),
   deliberately touching nothing else — no main.rs, no trade.rs, no doctrine.rs — so the
