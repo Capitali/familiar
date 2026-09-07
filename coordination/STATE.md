@@ -87,6 +87,16 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   The captain's fleet brief (/captains/{slug}/brief, 7e96daa) rides in the next build. Use 109.
 
 
+- **CODEX BACK 2026-09-07 (Ian: "codex is available again so resume reviews with codex
+  including the ones we worked without it while it was consumed").** Re-verification
+  queue, run from MacOnStick one at a time (three in parallel burned the usage window in
+  ten minutes — window reopens 13:32 CDT): T-231 RETURNED (REJECT, repair claimed) ·
+  T-236 brick 1 · T-238 brick 1 (both cut off mid-review by the limit, re-run queued) ·
+  T-237 B2 · B3 · B3.1–B3.3 · B4 steps 1–3 · T-232 round 7 (review only). Reviews are
+  pointed at a55456c+ (wildhorse confirmed nothing moved). Jeff's metal#79 ruling (Ian's)
+  may move any fuel/departure-path target — noted in the requests that touch it.
+  Found in the shared checkout: uncommitted T-237 B4 step 4 (UCFFamiliar links
+  FamiliarCore) — parked unbuilt on `claude/t237-b4-step4-wip`.
 - **CODEX PAUSED UNTIL 2026-09-06 (Ian, 2026-09-02, verbatim: "we need to stop using
   codex as coding partner till sept 6th. Pull any work back that's left for codex and
   lets finish that ourselves.").** Pulled back to the claude lane: the T-232 round-7

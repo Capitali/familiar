@@ -110,9 +110,20 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
-- **codex re-verification CLAIMED 2026-09-07 by companion:codex** — review-only scope:
-  landed `CandidateRace`, its pins, and the `AppModel` race/settle integration. No
-  production repair, deployment, ship, gate, enrollment, or fleet mutation is in scope.
+- **CODEX RE-VERIFICATION RETURNED 2026-09-07: REJECT** (`docs/reviews/2026-09-07-t231-codex-reverification.md`;
+  codex back on Ian's word, run from MacOnStick). The launch-latency accept line HOLDS
+  (dead first door costs one 350 ms stagger, not a timeout; cancellation/adoption boundary
+  sound; the two independent-review notes ruled harmless). Three findings against the
+  chair's own two pre-land repairs: (1) BLOCKER — a never-answered dead door never expires
+  (`lastAttempt` is refreshed by every miss; a lap cancelled by a faster winner is never
+  settled, so a poisoned LAN door is retried on every poll forever); (2) BLOCKER — the
+  health-map prune is bounded by `hosts`, which is append-only, so neither store is
+  bounded and an expired door is never forgotten; (3) SHOULD-FIX — `doorHealth !=
+  healthBefore` still writes defaults on every healthy 5 s poll. Repair CLAIMED by
+  companion:claude (MacOnStick) 2026-09-07 — scope: `CandidateRace.swift`, the
+  AppModel race/settle/prune code, FamiliarMesh tests; re-offer to codex after.
+- was: **codex re-verification CLAIMED 2026-09-07 by companion:codex** — review-only scope:
+  landed `CandidateRace`, its pins, and the `AppModel` race/settle integration.
 - **independent re-verification 2026-09-04 (MacOnStick lane): ACCEPT** — `docs/reviews/2026-09-04-t231-independent-review.md`; two optional notes for codex's pass (a late second success is discarded as evidence; one clock per settle). Runtime proof on Ian's iPad still owed.
 - status: **LANDED on main 2026-09-02 (merge `ad6ece2`), chair-reviewed** — codex was
   paused (Ian's word), so the review is a recorded chair self-review
