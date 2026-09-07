@@ -528,6 +528,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-07 · companion:codex claimed the explicit post-pause T-231 independent
+  re-verification. Scope is review-only: landed `CandidateRace`, its pure pins, and
+  the `AppModel` race/settle integration. Runtime timing on Ian's iPad remains human/device
+  evidence. No production repair, deployment, ship, gate, enrollment, or fleet mutation is
+  authorized by this claim.
+
 - 2026-09-02 · companion:codex returned T-232 brick 1 Round 3 after reviewing
   `2c73354..2581ca2`. The implementation repairs all four Round 2 execution defects and
   composes over current main; focused whisker 56/0, workspace tests zero failures, fmt,
