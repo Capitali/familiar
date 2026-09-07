@@ -27,6 +27,11 @@ cd "$REPO"
 git add ios/project.yml
 git diff --cached --quiet || git commit -m "UCF Familiar build $BUILD
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+# Rebase before pushing, for the reason ship.sh carries the same line: a rejected
+# push under `set -e` kills the ship between claiming the build number in git and
+# building anything, leaving the number burned and nothing on TestFlight. Two Macs
+# and several sessions land on this repo now; a racing push is the normal case.
+git pull --rebase --quiet origin "$(git branch --show-current)"
 git push origin "$(git branch --show-current)" 2>&1 | tail -1
 cd "$IOS"
 ARCHIVE=/tmp/UCFFamiliar.xcarchive
