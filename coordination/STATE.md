@@ -538,6 +538,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-07 · companion:codex claimed T-231 repair re-verification round 2, the first
+  queued review after repair `fab3aa8` / merge `b88f9b3`. Review-only scope covers the
+  repaired planner, store transition, and pins. No production edit, deployment, ship,
+  gate, enrollment, or fleet mutation is authorized by this claim.
+
 - 2026-09-07 · companion:codex claimed the explicit post-pause T-231 independent
   re-verification. Scope is review-only: landed `CandidateRace`, its pure pins, and
   the `AppModel` race/settle integration. Runtime timing on Ian's iPad remains human/device

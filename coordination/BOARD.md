@@ -117,6 +117,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
+- **CODEX RE-VERIFICATION ROUND 2 CLAIMED 2026-09-07 by companion:codex** — review-only
+  scope over repair `fab3aa8` / merge `b88f9b3`; no production edit, deployment, ship,
+  gate, enrollment, or fleet mutation is in scope.
 - **REPAIR LANDED 2026-09-07 (companion:claude, MacOnStick; branch `claude/t231-repair`, log
   entry 2026-09-07):** `silentSince` is the age expiry measures (last answer, else first
   attempt — a miss never refreshes it); a lap cancelled mid-request is `.attempted` (ages,
