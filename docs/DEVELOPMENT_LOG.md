@@ -6,6 +6,58 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-07 — T-231 repair: a corpse "recently touched" is not recently alive
+
+Codex returned from its pause and re-verified T-231 (`docs/reviews/2026-09-07-t231-codex-reverification.md`):
+the launch-latency accept line holds, but both of the chair's pre-land repairs were
+wrong. (1) A door that NEVER answered could never expire — `settle` refreshed
+`lastAttempt` on every miss, so a door failing every 5 s poll was always "five seconds
+old"; worse, a dead LAN door whose connect outlived the 350 ms stagger was CANCELLED by
+the lighthouse's win every round and never settled at all, so it had no row, no streak,
+no clock, and was knocked on forever. (2) The health-map prune was bounded by `hosts`,
+which `learnHosts` only ever appends to, so neither store was bounded and an expired
+door was filtered forever rather than forgotten. (3) `doorHealth != healthBefore` still
+wrote defaults on every healthy poll — every real outcome moves a timestamp.
+
+The repair, all in `CandidateRace` (pure) with the shell only wiring it:
+
+- **The age expiry measures is `silentSince`** — when the current run of silence began:
+  the last answer if the door ever answered, else the FIRST attempt. A success moves it;
+  a miss never does. `lastAttempt` stays, diagnostic only. Rows persisted before the
+  field existed decode with the best age the old fields give (last answer, else last
+  attempt), so a legacy never-answered door gets at most one more week, not an eternity.
+- **A lap cancelled mid-request is `.attempted`**: it ages the door (first attempt
+  starts the clock) but is not a miss — a merely slower live door is not demoted by its
+  rival's speed. A lap cancelled while still at the line settles nothing, as before.
+- **Expiry is ONE transition over both stores** — `CandidateRace.forget` removes a door
+  silent for the window from the remembered candidates AND the health map (forgotten,
+  not filtered; re-learned later it starts clean), never the lighthouse or the current
+  door, and then bounds the remembered set at `maxRememberedDoors` (16) by freshest
+  evidence, a rowless just-learned door counting as freshest. The shell persists the
+  enrollment only when something was forgotten, and narrates it.
+- **The store is written on transitions and hourly checkpoints** — `needsCheckpoint`
+  compares the live map against what is ON DISK (`doorHealthOnDisk`), not against last
+  round's memory: a door appearing or vanishing, a streak change up to the demotion
+  threshold (past it the count is not policy), or a timestamp that has drifted an hour.
+  A 5 s poll loop against a live lighthouse writes about once an hour; a dead door
+  writes on its way to demotion and then only at checkpoints.
+
+Pinned (FamiliarMesh `CandidateRaceTests`, 8 → 18): never-answered expires after a week
+of misses (and `lastAttempt` provably did not save it); cancelled-every-round expires
+with streak 0; answered-then-quiet expires from the LAST answer and an answer resets the
+clock (wildhorse's ask — the two silences are different facts); forget removes from both
+stores and never the lighthouse/current door; 200 changing leases stay under the bound
+and the oldest evidence goes first; a forgotten door learned again starts clean; six
+hours of healthy polls ≤ 7 writes; a dead door's endless streak ≤ 4 writes and the
+store knows it is demoted; what is persisted plans the same race as the live map after
+a JSON round trip; legacy rows decode. Not pinned here, said honestly: the `AppModel`
+TaskGroup integration is app code the package cannot exercise — the two open notes from
+the independent review (a late second win is discarded; one clock per settle) stand as
+codex ruled them, harmless. Runtime timing on Ian's iPad remains owed.
+
+Bar: FamiliarMesh 58/0; FamiliarMac Release and FamiliarAgent simulator builds. Re-offered
+to codex for re-verification.
+
 ## 2026-09-04 — T-237 B3.3: UCF Familiar — the ship's computer as its own app, direct to the exchange
 
 Ian, three rulings in one afternoon: a standalone iPad/iPhone app "to simply be the ships

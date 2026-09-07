@@ -1608,6 +1608,10 @@ final class AppModel: ObservableObject {
     /// expiry after a dead week (CandidateRace owns the rules; this is only the
     /// memory). Persisted in defaults: a convenience, not a credential.
     private var doorHealth: [String: DoorHealth] = [:]
+    /// What the store holds — the live map is compared against THIS, not against
+    /// last round's memory, so a 5 s poll loop writes on transitions and hourly
+    /// checkpoints, never on every healthy answer (codex, T-231 re-verification).
+    private var doorHealthOnDisk: [String: DoorHealth] = [:]
     private var doorHealthLoaded = false
     private let doorHealthKey = "door.health.v1"
 
@@ -1617,12 +1621,14 @@ final class AppModel: ObservableObject {
         if let data = defaults.data(forKey: doorHealthKey),
            let h = try? JSONDecoder().decode([String: DoorHealth].self, from: data) {
             doorHealth = h
+            doorHealthOnDisk = h
         }
     }
 
     private func saveDoorHealth() {
         if let data = try? JSONEncoder().encode(doorHealth) {
             defaults.set(data, forKey: doorHealthKey)
+            doorHealthOnDisk = doorHealth
         }
     }
 
@@ -1633,13 +1639,15 @@ final class AppModel: ObservableObject {
         let raw: Data
     }
 
-    /// One lap's report, for health bookkeeping and diagnostics. A cancelled lap
-    /// (the race was already won) reports NOTHING — a loser cancelled mid-connect
-    /// must not be booked as a miss, or winning doors would demote their rivals.
+    /// One lap's report, for health bookkeeping and diagnostics. A lap cancelled
+    /// while still at the line (the race was won during its head start) reports
+    /// nothing; a lap cancelled MID-REQUEST reports that it attempted — never a
+    /// miss (a slower live door must not be demoted by its rival's speed), but an
+    /// attempt, so a door that is cancelled every round still ages toward expiry.
     private enum RaceLap {
         case win(RaceWin)
         case loss(host: String, cause: String)
-        case cancelled
+        case cancelled(attempted: String?)
     }
 
     /// Race the doors: every starter waits out its head start, then reads; the
@@ -1648,19 +1656,19 @@ final class AppModel: ObservableObject {
     private func raceWorldview(
         runners: [(host: String, delayMs: Int, session: ObservationClient.Session)],
         fix: (lat: Double, lon: Double)?
-    ) async -> (winner: RaceWin?, attempts: [String], settled: [(String, Bool)]) {
+    ) async -> (winner: RaceWin?, attempts: [String], settled: [(String, DoorOutcome)]) {
         let build = Self.appBuild
         let os = Self.osRelease
         var winner: RaceWin?
         var attempts: [String] = []
-        var settled: [(String, Bool)] = []
+        var settled: [(String, DoorOutcome)] = []
         await withTaskGroup(of: RaceLap.self) { group in
             for runner in runners {
                 group.addTask {
                     if runner.delayMs > 0 {
                         try? await Task.sleep(nanoseconds: UInt64(runner.delayMs) * 1_000_000)
                     }
-                    if Task.isCancelled { return .cancelled }
+                    if Task.isCancelled { return .cancelled(attempted: nil) }
                     do {
                         let (view, raw) = try await WorldviewClient(session: runner.session)
                             .fetchWithRaw(clientVersion: build, osVersion: os,
@@ -1668,7 +1676,7 @@ final class AppModel: ObservableObject {
                         return .win(RaceWin(host: runner.host, view: view, raw: raw))
                     } catch {
                         if Task.isCancelled || (error as NSError).code == NSURLErrorCancelled {
-                            return .cancelled
+                            return .cancelled(attempted: runner.host)
                         }
                         // Compact, legible per-host cause (same vocabulary the
                         // serial walk always surfaced on the Device screen).
@@ -1691,14 +1699,17 @@ final class AppModel: ObservableObject {
                 case .win(let w):
                     if winner == nil {
                         winner = w
-                        settled.append((w.host, true))
+                        settled.append((w.host, .success))
                         group.cancelAll()
                     }
+                    // A second win already queued is not adopted and not settled:
+                    // nothing from a cancelled candidate is ever adopted, and
+                    // arrival order cannot tell "finished before cancel" from "after".
                 case .loss(let host, let cause):
                     attempts.append("\(host)→\(cause)")
-                    settled.append((host, false))
-                case .cancelled:
-                    break
+                    settled.append((host, .failure))
+                case .cancelled(let attempted):
+                    if let host = attempted { settled.append((host, .attempted)) }
                 }
             }
         }
@@ -1893,20 +1904,30 @@ final class AppModel: ObservableObject {
             joinProgress.tries += 1
         }
         let race = await raceWorldview(runners: runners, fix: fix)
-        // Book only real outcomes: a win, and every loss that genuinely failed.
-        // Cancelled laps (the race was already won) settle nothing.
-        let healthBefore = doorHealth
-        for (door, ok) in race.settled {
-            doorHealth = CandidateRace.settle(
-                doorHealth, host: door, outcome: ok ? .success : .failure, now: raceNow)
+        // Book what each lap learned: a win, a genuine miss, or an attempt cut
+        // short by the winner (ages the door, never demotes it). Laps cancelled
+        // at the line settle nothing.
+        for (door, outcome) in race.settled {
+            doorHealth = CandidateRace.settle(doorHealth, host: door, outcome: outcome, now: raceNow)
         }
-        // Forget doors that left the walk entirely — roaming for years must not
-        // grow the health map without bound. The lighthouse and every current
-        // candidate keep their history.
-        doorHealth = doorHealth.filter { candidates.contains($0.key) || $0.key == Self.rendezvousHost }
-        // The read loop runs every few seconds; write the defaults only when a
-        // race actually changed something.
-        if doorHealth != healthBefore { saveDoorHealth() }
+        // Expiry is ONE transition over both stores: a door silent for the window
+        // leaves the remembered candidates and the health map together (forgotten,
+        // not filtered forever — re-learned later, it starts clean), and the
+        // remembered set is bounded. The lighthouse and the current door stay.
+        let forgot = CandidateRace.forget(
+            hosts: hosts, health: doorHealth, lighthouse: Self.rendezvousHost,
+            keep: [host], now: raceNow)
+        doorHealth = forgot.health
+        if !forgot.forgotten.isEmpty {
+            hosts = forgot.hosts
+            saveEnrollment()
+            note("forgot \(forgot.forgotten.count) door\(forgot.forgotten.count == 1 ? "" : "s") silent for a week: \(forgot.forgotten.joined(separator: ", "))")
+        }
+        // The read loop runs every few seconds; the store is written on
+        // transitions and hourly checkpoints, never per healthy poll.
+        if CandidateRace.needsCheckpoint(persisted: doorHealthOnDisk, live: doorHealth) {
+            saveDoorHealth()
+        }
         attempts = race.attempts
         if let win = race.winner {
             host = win.host
