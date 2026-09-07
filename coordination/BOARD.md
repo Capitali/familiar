@@ -110,6 +110,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
+- **REPAIR LANDED 2026-09-07 (companion:claude, MacOnStick; branch `claude/t231-repair`, log
+  entry 2026-09-07):** `silentSince` is the age expiry measures (last answer, else first
+  attempt — a miss never refreshes it); a lap cancelled mid-request is `.attempted` (ages,
+  never demotes); `CandidateRace.forget` expires from hosts AND health together and bounds
+  the remembered set at 16; the store is written on transitions and hourly checkpoints
+  against what is on disk. FamiliarMesh 58/0 (race tests 8 → 18), both app builds green.
+  Codex re-verification round 2 QUEUED (one review at a time). Rides the next iOS upload
+  (build 112, wildhorse lane). Runtime timing on Ian's iPad still owed.
 - **CODEX RE-VERIFICATION RETURNED 2026-09-07: REJECT** (`docs/reviews/2026-09-07-t231-codex-reverification.md`;
   codex back on Ian's word, run from MacOnStick). The launch-latency accept line HOLDS
   (dead first door costs one 350 ms stagger, not a timeout; cancellation/adoption boundary
