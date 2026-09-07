@@ -65,3 +65,58 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist /tmp/UCFFa
 IPA=$(ls "$EXPORT"/*.ipa | head -1)
 xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 echo "✓ UCF Familiar $BUILD uploaded — TestFlight after processing"
+
+# Direct install to the household's own devices, exactly as ship.sh does for the
+# other app. Without this the standalone ship's computer reached a device ONLY via
+# TestFlight, so it was invisible on the iPad while every FamiliarAgent build walked
+# straight on (Ian, 2026-09-07: "don't see it deployed to iPad"). Everything on
+# Apple's side was correct — three VALID builds, in beta testing, iPhone AND iPad in
+# UIDeviceFamily — and the app still was not on the device, because nothing ever put
+# it there. Discover what is actually paired rather than trusting a hardcoded list,
+# and say WHY when an install fails.
+# shellcheck disable=SC2016
+DISCOVERED=$(xcrun devicectl list devices --json-output /tmp/ucf-devices.json >/dev/null 2>&1 \
+  && python3 -c '
+import json
+try:
+    devs = json.load(open("/tmp/ucf-devices.json"))["result"]["devices"]
+except Exception:
+    raise SystemExit
+for d in devs:
+    if d.get("connectionProperties", {}).get("transportType") == "sameMachine":
+        continue
+    print(d.get("hardwareProperties", {}).get("udid", ""))
+' 2>/dev/null || true)
+
+# The archive is App Store-signed, and an App Store profile carries no devices — it
+# installs nowhere. ship.sh has always done a SEPARATE development build for the
+# direct install and archived separately for Apple; this script only ever archived,
+# which is the whole reason the standalone app never reached a device on its own.
+# Automatic signing with the ASC key mints the development profile as needed.
+if ! xcodebuild -project FamiliarAgent.xcodeproj -scheme UCFFamiliar -configuration Release \
+  -destination 'generic/platform=iOS' -allowProvisioningUpdates \
+  -authenticationKeyPath "$ASC_KEY_PATH" \
+  -authenticationKeyID "$ASC_KEY_ID" \
+  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+  -derivedDataPath build/ucf-dev build \
+  > /tmp/ucf-dev-build.log 2>&1; then
+  echo "⚠ the device build failed (/tmp/ucf-dev-build.log) — TestFlight still has $BUILD"
+fi
+UCFAPP=$(ls -d "$IOS/build/ucf-dev/Build/Products/Release-iphoneos/"*.app 2>/dev/null | head -1)
+if [ -z "$DISCOVERED" ]; then
+  echo "⚠ no physical device is paired with this Mac — TestFlight is the only route today."
+  echo "  Pair once per device: connect by USB, tap Trust, enter the passcode."
+fi
+for D in $DISCOVERED; do
+  ok=""; why=""
+  for try in 1 2 3; do
+    if why=$(xcrun devicectl device install app --device "$D" "$UCFAPP" 2>&1); then
+      ok=1; echo "✓ $D installed"; break
+    fi
+    sleep 5
+  done
+  if [ -z "$ok" ]; then
+    echo "⚠ $D not installed — $(printf '%s' "$why" | tail -3 | tr '\n' ' ' | cut -c1-200)"
+    echo "  (TestFlight will still cover it)"
+  fi
+done
