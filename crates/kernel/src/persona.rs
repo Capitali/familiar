@@ -232,14 +232,89 @@ pub struct NameEvent {
 /// Write a persona atomically (tmp + rename): a crash mid-write must never leave a
 /// half-voice for the loader to refuse. Validates first — nothing invalid lands.
 pub fn write(dir: &Path, persona: &Persona) -> io::Result<()> {
+    name(dir, persona, None)
+}
+
+/// The lock every mutation of one persona takes. The OS holds it, so it is released
+/// the instant the holder exits however it exits, and it is never unlinked: removing
+/// a path other processes may already have open lets two of them hold "the" lock on
+/// different inodes.
+const LOCK_FILE: &str = "persona.lock";
+
+fn locked(dir: &Path) -> io::Result<std::fs::File> {
+    std::fs::create_dir_all(dir)?;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(LOCK_FILE))?;
+    // Block rather than fail: these mutations are short, and a pairing that refused
+    // because a status read held the lock would be a worse answer than waiting.
+    f.lock()?;
+    Ok(f)
+}
+
+/// Set this persona, and — when a naming is given — its trail entry, as ONE
+/// serialized mutation.
+///
+/// The two used to be separate calls with separate failure, and `fleet pair` printed
+/// the trail's error and then returned success, so a computer could be renamed with
+/// no record that it ever happened (codex T-236 re-verification, finding 3).
+///
+/// The ordering is deliberate. The persona is written to a UNIQUE temp and flushed,
+/// then the trail is appended and flushed, and only then is the temp renamed into
+/// place. A failure before the rename leaves nothing changed; a failure at the rename
+/// leaves a trail that over-records, which is legible. The other order can leave a
+/// computer wearing a name its own history does not contain, which is not.
+///
+/// The temp name carries pid and a monotonic count because a single shared
+/// `persona.json.tmp` is two writers racing on one path: whichever renames second
+/// wins, and the loser's bytes are what the reader gets.
+pub fn name(dir: &Path, persona: &Persona, event: Option<&NameEvent>) -> io::Result<()> {
+    use std::io::Write as _;
     persona
         .validate()
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let bytes = serde_json::to_vec_pretty(persona)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    let tmp = dir.join(format!("{PERSONA_FILE}.tmp"));
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, dir.join(PERSONA_FILE))
+    let _guard = locked(dir)?;
+
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = dir.join(format!(
+        "{PERSONA_FILE}.{}.{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let mut f = std::fs::File::create(&tmp)?;
+    f.write_all(&bytes)?;
+    f.sync_all()?;
+    drop(f);
+
+    if let Some(ev) = event {
+        let line = serde_json::to_string(ev)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        let appended = (|| -> io::Result<()> {
+            let mut t = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join(NAME_EVENTS_FILE))?;
+            writeln!(t, "{line}")?;
+            t.sync_all()
+        })();
+        if let Err(e) = appended {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    }
+
+    std::fs::rename(&tmp, dir.join(PERSONA_FILE))?;
+    // The rename is only durable once the DIRECTORY entry is. Without this a crash
+    // can leave the old persona in place with the trail already saying otherwise.
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    Ok(())
 }
 
 /// Append one naming act to the trail.
@@ -289,6 +364,108 @@ pub fn load(dir: &Path) -> io::Result<Persona> {
         )
     })?;
     Ok(persona)
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "persona-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The persona and its trail move together. A naming that cannot be recorded is
+    /// not a naming — `fleet pair` used to print that error and return success, so a
+    /// computer could be renamed with no history of it (codex finding 3).
+    #[test]
+    fn a_naming_that_cannot_be_recorded_changes_nothing() {
+        let d = tmpdir("atomic");
+        let p = Persona {
+            name: "Felix".into(),
+            ..Default::default()
+        };
+        let ev = NameEvent {
+            name: "Felix".into(),
+            actor: "Ian".into(),
+            at: 1,
+        };
+        // A DIRECTORY where the trail file must go: the append cannot succeed.
+        std::fs::create_dir_all(d.join(NAME_EVENTS_FILE)).unwrap();
+        assert!(name(&d, &p, Some(&ev)).is_err(), "the trail refused, so the naming must");
+        assert!(
+            !d.join(PERSONA_FILE).exists(),
+            "nothing may be left behind when the trail refuses"
+        );
+        // ...and no temp files survive the failure either.
+        let strays: Vec<_> = std::fs::read_dir(&d)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(strays.is_empty(), "a failed naming left {} temp file(s)", strays.len());
+    }
+
+    /// A naming that succeeds leaves BOTH, and the trail carries it.
+    #[test]
+    fn a_naming_writes_the_persona_and_its_history() {
+        let d = tmpdir("both");
+        let p = Persona {
+            name: "Felix".into(),
+            ..Default::default()
+        };
+        let ev = NameEvent {
+            name: "Felix".into(),
+            actor: "Ian".into(),
+            at: 7,
+        };
+        name(&d, &p, Some(&ev)).unwrap();
+        assert_eq!(load(&d).unwrap().name, "Felix");
+        let trail = namings(&d);
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].name, "Felix");
+        // A plain write records no naming — only an explicit event does.
+        write(&d, &p).unwrap();
+        assert_eq!(namings(&d).len(), 1, "a write is not a naming");
+    }
+
+    /// Two writers on one persona do not race on a shared temp path. The old code
+    /// used `persona.json.tmp` for everyone: whoever renamed second won, and the
+    /// loser's bytes were what the next reader got.
+    #[test]
+    fn concurrent_namings_do_not_race_on_one_temp_path() {
+        let d = tmpdir("race");
+        let names = ["Felix", "Purr", "Sprocket", "Bosun"];
+        std::thread::scope(|s| {
+            for n in names {
+                let d = d.clone();
+                s.spawn(move || {
+                    let p = Persona {
+                        name: n.into(),
+                        ..Default::default()
+                    };
+                    let ev = NameEvent {
+                        name: n.into(),
+                        actor: "test".into(),
+                        at: 1,
+                    };
+                    name(&d, &p, Some(&ev)).unwrap();
+                });
+            }
+        });
+        // Whoever won, the file parses and holds one of the four — never a splice.
+        let got = load(&d).expect("a raced persona must still parse");
+        assert!(names.contains(&got.name.as_str()), "spliced write: {}", got.name);
+        assert_eq!(namings(&d).len(), 4, "every naming is in the trail");
+    }
 }
 
 #[cfg(test)]
