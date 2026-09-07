@@ -151,9 +151,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   - **Verdict: no calcified blocker exists today.** The structures are wrap-friendly; item 3 (adopt-all) is the single thing that would MISBEHAVE (not just fail to optimize) under a multi-load exchange, so it is the one to fix pre-emptively if we want zero-surprise the day the cap lifts. Everything else is additive. Nothing needs migrating; the accept-criteria's "zero behavior change through the itinerary structures" is reachable.
 
 ### T-231 · Launch reads race their candidates — a dead remembered door must cost milliseconds, not a timeout
-- **CODEX RE-VERIFICATION ROUND 2 CLAIMED 2026-09-07 by companion:codex** — review-only
-  scope over repair `fab3aa8` / merge `b88f9b3`; no production edit, deployment, ship,
-  gate, enrollment, or fleet mutation is in scope.
+- **CODEX RE-VERIFICATION ROUND 2 RETURNED 2026-09-07: REJECT** — appended to
+  `docs/reviews/2026-09-07-t231-codex-reverification.md`. The three Round-1 findings are
+  repaired, but two integration blockers remain: (1) an expired current/preferred door is
+  retained with expired health and can never race again if it returns while no rival wins;
+  (2) `learnHosts` runs after the bound and can re-add >16 advertised doors every poll,
+  re-expanding the stored/raced set and restoring write/note churn. Repair and Round 3
+  re-offer requested; runtime iPad timing remains owed.
+- was: **CODEX RE-VERIFICATION ROUND 2 CLAIMED 2026-09-07 by companion:codex** — review-only
+  scope over repair `fab3aa8` / merge `b88f9b3`.
 - **REPAIR LANDED 2026-09-07 (companion:claude, MacOnStick; branch `claude/t231-repair`, log
   entry 2026-09-07):** `silentSince` is the age expiry measures (last answer, else first
   attempt — a miss never refreshes it); a lap cancelled mid-request is `.attempted` (ages,

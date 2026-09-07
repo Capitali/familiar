@@ -148,3 +148,89 @@ diagnostic or drives a short policy, carry a per-lap timestamp and settle with t
   which is why its eight pure planner tests remain green despite findings 1-3.
 
 No production code, enrollment, pin, deployment, or fleet state was changed.
+
+## Round 2 — repair re-verification (2026-09-07)
+
+**Verdict: RETURN.** Repair `fab3aa8` closes all three Round-1 findings in its pure
+model and checkpoint policy, and the repaired app compiles. Two integration edges still
+break the promised forgetting lifecycle: the protected current door can become a
+permanent tombstone, and `learnHosts` can expand the persisted candidate set again after
+the bound has run.
+
+Reviewer: companion:codex
+
+Reviewed: repair `fab3aa8`, merge `b88f9b3`, and the same paths on main at `690166d`
+
+Post-repair check: no reviewed source or test path changed after `fab3aa8`.
+
+### R2-1. Blocker — an expired current door is retained as a permanent tombstone
+
+**File:** `ios/FamiliarMesh/Sources/FamiliarMesh/CandidateRace.swift:178-229`;
+`ios/Shared/Sources/AppModel.swift:1883-1919`
+
+`forget` exempts every `keep` door before checking expiry and then retains the matching
+health row. The caller passes the mutable current/preferred `host` as `keep`. If that door
+has been silent for a week while the lighthouse is also unavailable, `plan` excludes it
+as expired, but `forget` keeps both its host and its expired health. With no winning rival,
+the five-success promotion path cannot move another door to the front. If the LAN address
+later comes alive again, it is still present in `hosts`, so it is not re-learned, and its
+old health keeps it out of every future race. The client is stranded from a door that is
+answering again.
+
+A focused regression retained `current` in `hosts`, then required the post-forget plan to
+contain it. It failed: the retained health row kept the door filtered. The existing test
+pins the opposite (`XCTAssertNotNil(out.health["current"])`) but does not plan from the
+returned state, so it accidentally pins the tombstone.
+
+**Repair requested.** Protect the current enrollment address from removal, not its expired
+health. When a protected non-lighthouse door reaches expiry, keep it in `hosts` but clear
+or renew its health so the next plan can knock again and begin a new silence window. Pin
+the full returned-state sequence: expired current + unavailable lighthouse, forget,
+current remains stored, current is eligible to race, and a later success revives it.
+
+### R2-2. Blocker — successful reads can re-expand the store after the bound runs
+
+**File:** `ios/Shared/Sources/AppModel.swift:296-309`, `:1913-1929`, `:2112-2113`
+
+The bound is applied before the winner's worldview is consumed. Later in the same success
+path, `learnHosts(view.hosts)` appends every valid missing advertised address and persists
+the enlarged list without applying `CandidateRace.forget`. With more than 16 non-pinned
+addresses advertised, each poll therefore follows the same cycle: `forget` drops and saves,
+then `learnHosts` re-adds and saves. The next race snapshots the re-expanded list before
+the next bound. Stored candidates and race width exceed the promised maximum, while the
+old enrollment-write and narration churn returns at five-second cadence.
+
+The pure 200-lease test adds one new address after each already-bounded transition. It does
+not exercise the app's actual order or a worldview that repeatedly advertises every valid
+door, so it cannot catch this integration failure.
+
+**Repair requested.** Make learning plus expiry/bounding one transition before persistence,
+and enforce the bound before the launch race as well as after accepting newly advertised
+addresses. Pin a repeated >16-address advertisement through the integration seam: after
+every successful poll, persisted hosts and health remain within the documented bound, the
+next race has bounded width, and no drop/re-learn write or note loop occurs.
+
+### What the repair did close
+
+- `silentSince` now measures uninterrupted no-answer age; quick failures and
+  winner-cancelled in-flight attempts reach expiry without treating cancellation as a miss.
+- Legacy rows decode with a conservative derived silence age; success resets both the
+  streak and silence clock.
+- The pure `forget` transition removes ordinary expired doors from both stores and bounds
+  its own returned set. R2-1 and R2-2 are caller/retention exceptions to that sound core.
+- `needsCheckpoint` compares live state with the stored snapshot, persists policy
+  transitions immediately, caps persisted failure streak semantics at demotion, and moves
+  healthy timestamps only on hourly checkpoints.
+- The first-winner/cancelled-loser adoption rule remains conservative and sound.
+
+### Round-2 verification
+
+- `swift test --package-path ios/FamiliarMesh`: **58 passed, 0 failed**;
+  `CandidateRaceTests`: **18/18**.
+- Temporary focused current-door recovery regression: **1 test, 1 expected failure** at
+  the post-forget plan assertion; the probe was removed and the source tree restored.
+- `xcodegen`; unsigned generic-iOS-simulator `FamiliarAgent` build: **BUILD SUCCEEDED**.
+- `git diff --check`: clean before the review-record edit.
+
+Physical cold-launch timing on Ian's iPad remains owed. No production code, enrollment,
+pin, deployment, ship, gate, human/fleet record, or live device state was changed.

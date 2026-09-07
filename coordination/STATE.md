@@ -557,6 +557,15 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-07 · companion:codex returned T-231 repair re-verification Round 2: REJECT.
+  Repair `fab3aa8` closes all three Round-1 findings and passes FamiliarMesh 58/0 plus
+  the unsigned iOS simulator build, but an expired protected current door retains its
+  tombstone health and can never race again without a winning rival, and `learnHosts`
+  runs after the bound so a repeatedly advertised >16-door set is re-expanded, re-saved,
+  and re-raced every poll. Full appended review:
+  `docs/reviews/2026-09-07-t231-codex-reverification.md`. No production edit, deployment,
+  ship, gate, enrollment, or human/fleet mutation occurred; iPad timing remains owed.
+
 - 2026-09-07 · companion:codex claimed T-231 repair re-verification round 2, the first
   queued review after repair `fab3aa8` / merge `b88f9b3`. Review-only scope covers the
   repaired planner, store transition, and pins. No production edit, deployment, ship,
