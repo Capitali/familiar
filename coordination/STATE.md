@@ -87,6 +87,11 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   The captain's fleet brief (/captains/{slug}/brief, 7e96daa) rides in the next build. Use 109.
 
 
+- **IAN 2026-09-07 (~14:55 CDT):** asked whether vans/ΔV need development now; answer given:
+  ΔV waits on Jeff's steer (its familiar parts compose on T-237 B4 + T-236 voice), vans has
+  one familiar-side brick — the hull's earned history as a record (the ethics rail's
+  currency). Ian: "Yes" → **T-239 claimed, queued behind T-238 brick 2.** metal#80 (3 days)
+  and #63 (5 days) have no reply from Jeff; a nudge from Ian recommended.
 - **IAN'S RULINGS 2026-09-07 (~14:40 CDT, answering the captains/fleets/hulls proposal
   and the codex pace; recorded as acted on):** (1) **a captain's own fleet MAY be empty**
   (his only hull may sail in another captain's fleet — a captain between commands is a
