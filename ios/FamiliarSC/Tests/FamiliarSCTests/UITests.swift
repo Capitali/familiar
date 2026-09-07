@@ -120,6 +120,19 @@ final class UITests: XCTestCase {
         XCTAssertTrue(voice.instructions(frame: ctx.frame, documents: ctx.documents).contains("read_fleet` covers EVERY hull"))
     }
 
+    func testThePilotsVerdictReadsAsAnAdvisoryNotAnAct() throws {
+        let v = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"decision":{"type":"book","load_id":"L1"},"surface":"freight.book","family":"freight","level":"confirm","automation":"freight","ship":{"docked":"a","in_flight":false,"fuel":600,"fuel_capacity":600,"credits":5000,"wear_bps":0},"board_rows":1}"#.utf8))
+        let text = Briefs.pilot(v)
+        XCTAssertTrue(text.hasPrefix("The pilot would now: book load L1."), text)
+        XCTAssertTrue(text.contains("freight.book") && text.contains("confirm") && text.contains("ask before acting"), text)
+        XCTAssertTrue(text.contains("fuel 600 of 600"), text)
+        XCTAssertTrue(text.contains("Nothing is filed unless the captain acts."), text)
+        let divert = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"decision":{"type":"divert-to-pump","pump":"foxys-diner","burn":"economy"},"surface":"navigation.fuel","level":"auto"}"#.utf8))
+        XCTAssertTrue(Briefs.pilot(divert).contains("fly empty to the pump at foxys-diner on the economy burn"), Briefs.pilot(divert))
+        // Without FamiliarCore there is no adviser and no pilot document — never a fabricated one.
+        XCTAssertNil(DirectFeed(exchange: "http://127.0.0.1:7877", key: "ucfk_0123456789abcdef0123456789abcdef")?.adviser)
+    }
+
     func testCaptainBriefAndSlug() throws {
         XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker"), "luke-skywhisker")
         XCTAssertEqual(Briefs.captainSlug("Luke SkyWhisker (LOCAL soak)"), "luke-skywhisker-local-soak")

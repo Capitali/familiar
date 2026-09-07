@@ -57,6 +57,11 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
     public let client: ExchangeClient
     public let keyID: String
     public var personas = DevicePersonaStore()
+    /// The pilot's MIND, when the app links FamiliarCore (T-237 B4, "one doctrine, two runtimes"):
+    /// `whiskerAdvise(inputJson:)` — the same Rust doctrine the host runner flies, answering from
+    /// the JSON this feed fetched. Nil in a shell without the core (tests, the package alone):
+    /// then there is no pilot document and the computer says so.
+    public var adviser: (@Sendable (String) -> String)?
     /// The pack's fuel price, until the exchange publishes `fuelPricePerUnit` (ucf-exchange#22).
     public var fuelPricePerUnit: Int64 = 2
 
@@ -139,8 +144,45 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         let name = personas.load(keyID: keyID)?.name ?? Persona.rootName
         let frame = "ship, hull \(m.shipName ?? "?") (\(worldInstance ?? KnownExchange.name(for: client.server.absoluteString))), captain \((try? await client.profile())?.traderName ?? "?"), computer \(name) — direct to the exchange, no pilot aboard"
         var docs: [ContextDocument] = []
+        if let pilot = try? await pilotAdvice(me: m) { docs.append(ContextDocument(name: "pilot", title: "the pilot's mind — what the pilot would do right now, the dial surface it spends and the automation it needs; a reading, not an act", text: pilot.text)) }
         if let fuel = try? await fuelPicture(me: m) { docs.append(ContextDocument(name: "fuel", title: "fuel picture — fuel aboard, every pump with distance, cost and reachability, what this berth would buy, the ways out when stranded (computed by the app from the wire)", text: fuel)) }
         return (frame, docs)
+    }
+
+    /// What the pilot would do now, from the doctrine itself. The feed gathers exactly what the host
+    /// runner reads before a fold — `/v1/me`, the open board, the stations, the yard's repair rate,
+    /// the captain's own open contract — and prices, as the runner does, the top candidates' legs
+    /// and the pumps from here; the doctrine judges; nothing is acted. Nil without an adviser.
+    public func pilotAdvice(me m: Me) async throws -> (text: String, verdict: JSONValue)? {
+        guard let adviser else { return nil }
+        let me = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/me"))
+        let board = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/loadboard"))
+        let stations = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/stations"))
+        let mine = (try? JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/loadboard?mine=true"))) ?? .array([])
+        let repair = (try? await client.reference())?.params?["repairCostPerHundredBps"]?.double.map { Int64($0) } ?? 40
+        let here = m.docked ?? m.enRouteTo ?? ""
+        // Price what the runner prices: the five best rows by estimated net (here → origin, origin → dest)
+        // and every pump from here — the doctrine's reachable_pump needs those to judge a divert.
+        var pairs: [(String, String)] = []
+        let rows = (board.array ?? []).filter { $0["heldForOther"]?.bool != true }
+            .sorted { ($0["estimatedNet"]?.double ?? 0) > ($1["estimatedNet"]?.double ?? 0) }.prefix(5)
+        for r in rows { if let o = r["origin"]?.string, let d = r["dest"]?.string { pairs.append((here, o)); pairs.append((o, d)) } }
+        for st in stations.array ?? [] where st["sellsFuel"]?.bool == true { if let id = st["id"]?.string { pairs.append((here, id)) } }
+        var routes: [JSONValue] = []
+        var seen = Set<String>()
+        for (from, to) in pairs where !from.isEmpty && from != to && seen.insert("\(from)→\(to)").inserted {
+            guard let r = try? await client.route(from: from, to: to) else { continue }
+            routes.append(.object(["from": .string(from), "to": .string(to), "fuel": .number(Double(r.fuel)),
+                                   "legs_km": .array(r.legs.compactMap { $0.distanceKm.map { .number(Double($0)) } })]))
+        }
+        let active = (mine.array ?? []).first { ["settled", "delivered", "expired", "cancelled"].contains($0["status"]?.string ?? "") == false }?["loadId"]?.string
+        let input: JSONValue = .object(["me": me, "board": board, "stations": stations, "routes": .array(routes),
+                                        "repair_per_hundred_bps": .number(Double(repair)),
+                                        "active_load_id": active.map { .string($0) } ?? .null])
+        let out = adviser(input.description)
+        guard let data = out.data(using: .utf8), let verdict = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+        if let err = verdict["error"]?.string { return ("The pilot's mind could not read the wire: \(err)", verdict) }
+        return (Briefs.pilot(verdict), verdict)
     }
 
     /// The fuel picture, computed here: pumps are the stations that sell fuel; each is priced by
