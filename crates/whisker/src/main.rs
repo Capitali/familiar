@@ -918,6 +918,7 @@ fn main() -> ExitCode {
             if let Some(here) = ship.docked.clone() {
                 let purse = Purse {
                     credits: ship.credits,
+                    debt: me.get("debt").and_then(Value::as_i64).unwrap_or(0).max(0),
                     daily_fixed_cost: mortgage_per_day
                         + if ship.leased {
                             LEASE_SERVICE_PER_DAY_EST
@@ -976,6 +977,49 @@ fn main() -> ExitCode {
                         }
                     }
                     OutfitDecision::Refit { .. } => {} // advised or proposed
+                    // Paying the balance down rides the SAME dial as a refit: it is
+                    // the ship spending the captain's money on the ship's standing,
+                    // which is what `ship.lease` is for.
+                    OutfitDecision::PayLease { amount }
+                        if dial_gate.allow(
+                            &ship_dir,
+                            Surface::ShipLease,
+                            tick,
+                            now,
+                            &json!({"type": "payLease", "amount": amount}),
+                            &format!("put ℳ{amount} against the balance at {here}"),
+                            "debt before fittings; the title lands the morning it clears",
+                        ) =>
+                    {
+                        seq += 1;
+                        let id = format!("whisker-{}-{}", now_secs(), seq);
+                        match wire.act(json!({"type": "payLease", "amount": amount}), &id) {
+                            Ok(ack) => {
+                                pending_until = ack
+                                    .get("resolvesAtTick")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(tick)
+                                    + 1;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "paid-down",
+                                    "amount": amount, "owed_before": purse.debt,
+                                    "credits": ship.credits, "at_station": here,
+                                    "resolves": pending_until - 1}),
+                                );
+                                std::thread::sleep(Duration::from_secs(
+                                    (tick_secs * 3 / 5).max(floor_secs),
+                                ));
+                                continue;
+                            }
+                            Err(e) => journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
+                                "event": "pay-down-refused", "amount": amount, "why": e}),
+                            ),
+                        }
+                    }
+                    OutfitDecision::PayLease { .. } => {} // advised or proposed
                     OutfitDecision::Idle { why } => {
                         if why != last_outfit_idle {
                             journal(

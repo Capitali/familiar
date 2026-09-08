@@ -79,6 +79,15 @@ pub struct DeliveryStat {
 #[derive(Debug, Clone, Default)]
 pub struct Purse {
     pub credits: i64,
+    /// What the hull still owes. Ian, 2026-09-07: "always prioritize removing debt
+    /// and clearing leases."
+    ///
+    /// The two are ONE act in this world, which is why this is a single field and
+    /// not two: the engine transfers title the moment the balance reaches zero
+    /// (`ShipTitle.settleTitleIfCleared` — "a pilot who never presses the button
+    /// still gets the ceremony, on the morning the last payment lands"). So there is
+    /// no separate lease to clear. There is a debt, and clearing it IS the ceremony.
+    pub debt: i64,
     /// Mortgage payment + lease service per day, as observed or estimated.
     pub daily_fixed_cost: i64,
     /// A full tank's price, kept in hand too.
@@ -90,8 +99,18 @@ pub struct Purse {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutfitDecision {
-    Idle { why: String },
-    Refit { fitting: Fitting, price: i64 },
+    Idle {
+        why: String,
+    },
+    Refit {
+        fitting: Fitting,
+        price: i64,
+    },
+    /// Put credits against the balance. Clearing it transfers the title, so this is
+    /// the act that turns a leased hull into the captain's own.
+    PayLease {
+        amount: i64,
+    },
 }
 
 /// Cash that must remain after any purchase.
@@ -141,6 +160,38 @@ pub fn decay_evidence(stats: &[DeliveryStat]) -> Option<String> {
 
 /// The judgment: the next fitting worth buying that the purse can bear.
 pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
+    // DEBT OUTRANKS EVERY FITTING (Ian, 2026-09-07: "always prioritize removing debt
+    // and clearing leases"). A refit is the most discretionary thing this hull can
+    // buy: it is worth having, it is never worth having FIRST, and money spent on it
+    // is money not spent on the balance that decides whether the ship is the
+    // captain's at all.
+    //
+    // This is not a rule about thrift. Under this world's own arithmetic it is the
+    // higher-returning trade: the balance carries a daily service charge, the title
+    // transfers the moment it clears, and a titled hull stops paying the charge and
+    // repairs for free. The fitting will still be for sale afterwards.
+    if p.debt > 0 {
+        // ...and where there is cash beyond the reserve, PAY it rather than merely
+        // decline to spend it. Refusing the fitting alone would let credits pile up
+        // beside a balance that is charging service every day.
+        //
+        // The reserve still stands: a hull that pays itself down to nothing cannot
+        // fuel, and a stranded hull earns nothing to pay with. Debt first, but never
+        // ahead of the ability to fly.
+        let spare = p.credits - reserve(p);
+        if spare > 0 {
+            return OutfitDecision::PayLease {
+                amount: spare.min(p.debt),
+            };
+        }
+        return OutfitDecision::Idle {
+            why: format!(
+                "ℳ{} still owed and nothing spare over the reserve — the balance comes \
+                 first, and the title lands the morning it clears",
+                p.debt
+            ),
+        };
+    }
     let has = |f: Fitting| p.fittings.iter().any(|x| x == f.wire());
     let keep = reserve(p);
     let mut wanted: Vec<(Fitting, String)> = Vec::new();
@@ -184,11 +235,57 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
 
 #[cfg(test)]
 mod tests {
+
+    /// Ian, 2026-09-07: "always prioritize removing debt and clearing leases."
+    ///
+    /// Kibble Klipper's own case: ℳ121,317 owed, and the outfit doctrine happily
+    /// saving toward a ℳ9,000 drive-tune beside it.
+    #[test]
+    fn debt_outranks_every_fitting() {
+        let mut p = purse(20_000, &[]);
+        p.debt = 121_317;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::PayLease { amount } => {
+                assert_eq!(amount, 20_000 - reserve(&p), "everything over the reserve");
+            }
+            other => panic!("the balance comes first, got {other:?}"),
+        }
+        // Cleared, and the fittings are back on the table.
+        p.debt = 0;
+        assert!(matches!(
+            decide_outfit(&p, &[]),
+            OutfitDecision::Refit { .. }
+        ));
+    }
+
+    /// The reserve still stands. A hull that pays itself down to nothing cannot
+    /// fuel, and a stranded hull earns nothing to pay with.
+    #[test]
+    fn the_balance_never_takes_the_reserve() {
+        let mut p = purse(500, &[]);
+        p.debt = 50_000;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::Idle { why } => assert!(why.contains("50000"), "{why}"),
+            other => panic!("nothing spare over the reserve, got {other:?}"),
+        }
+    }
+
+    /// Never more than is owed, however flush the purse.
+    #[test]
+    fn the_balance_is_never_overpaid() {
+        let mut p = purse(80_000, &[]);
+        p.debt = 300;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::PayLease { amount } => assert_eq!(amount, 300),
+            other => panic!("expected a 300 payment, got {other:?}"),
+        }
+    }
     use super::*;
 
     fn purse(credits: i64, fittings: &[&str]) -> Purse {
         Purse {
             credits,
+            debt: 0,
             daily_fixed_cost: 1_200,
             tank_price: 1_200,
             titled: false,
