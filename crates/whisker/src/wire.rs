@@ -50,6 +50,11 @@ pub fn ship_from(me: &Value, repair_rate: i64) -> Ship {
         && (fuel_now as f64 / tank as f64) < doctrine::CRITICAL_FUEL;
     Ship {
         tick: me.get("tick").and_then(Value::as_i64).unwrap_or(0),
+        paws_inbound_to: me
+            .get("callOut")
+            .filter(|c| c.get("kind").and_then(Value::as_str) == Some("refuel"))
+            .and_then(|c| c.get("to").and_then(Value::as_str))
+            .map(String::from),
         in_flight: docked.is_none() || (route_len > 0 && !stalled),
         docked,
         accel_milli_g: me

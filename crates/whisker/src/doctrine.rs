@@ -23,6 +23,11 @@ use std::collections::BTreeSet;
 pub struct Ship {
     /// The world's clock at this reading, for deadlines stated as absolute ticks.
     pub tick: i64,
+    /// Where a called tanker is heading, if one is in the air (`/v1/me.callOut.to`).
+    /// Since engine 1.26.0 the truck checks the ship is THERE when it arrives — a hull
+    /// that has left gets nothing and the fee stands (metal#85). So a pending call
+    /// is a reason to stay, priced in tens of thousands.
+    pub paws_inbound_to: Option<String>,
     /// Berthed station id, or None under way.
     pub docked: Option<String>,
     /// The drive as the hull actually delivers it, thousandths of a gravity
@@ -203,7 +208,9 @@ pub fn route_ticks_at_burn(legs_km: &[i64], hull_accel_milli_g: i64, burn_bps: i
 ///
 /// The trip term dominates, and it dominates most exactly when the tanker is the
 /// only option left — KK's rescue from titania was ℳ33,594, of which about ℳ31,700
-/// was the crossing. So this is an ESTIMATE the pilot decides on, never a quote:
+/// was the crossing. And since engine 1.26.0 the bill buys fuel ONLY if the ship is
+/// still where the truck was sent when it arrives (metal#85): leave, and the fuel
+/// goes back while the fee stands. So this is an ESTIMATE the pilot decides on, never a quote:
 /// none of these numbers is published on `/v1/reference` (asked for in
 /// ucf-exchange#22), so a world that reprices them moves the real bill without
 /// telling us. Being wrong here costs credits, never the ship, and it is consulted
@@ -534,6 +541,21 @@ pub fn decide(
     // the tank and the pump door, the one that actually reads the map, never got to
     // speak. A hull that can still fly to a pump is not a rescue case; it is a hull
     // with an errand. So the tanker is what is left when the map has no answer.
+    // A TANKER IS COMING: stay where it was sent. Kibble Klipper called PAWS to
+    // titania on 2026-09-04 and flew out from under it; under the world as it then
+    // was the truck refuelled her wherever she stood. Under engine 1.26.0 it checks
+    // — "PAWS reached titania-cold-store and did not find the ship there; the 465 it
+    // carried went back and the fee stands" — so the same manoeuvre now forfeits a
+    // ℳ33,594 bill and delivers nothing. Nothing below is worth that; a ship with a
+    // truck in the air holds for it, however good the pump ladder looks.
+    if let Some(to) = ship.paws_inbound_to.as_deref() {
+        let here_or_bound = ship.docked.as_deref() == Some(to);
+        if here_or_bound {
+            return Decision::Hold {
+                why: format!("a tanker is inbound to {to}; leaving forfeits the call"),
+            };
+        }
+    }
     if frac(ship.fuel) < CRITICAL_FUEL {
         let at_pump = ship.docked.as_deref().is_some_and(|at| pumps.contains(at));
         let can_reach = ship
@@ -842,6 +864,7 @@ mod tests {
     fn ship_at(station: &str, fuel: i64) -> Ship {
         Ship {
             tick: 1_000,
+            paws_inbound_to: None,
             docked: Some(station.into()),
             in_flight: false,
             accel_milli_g: REFERENCE_ACCEL_MILLI_G,
@@ -1078,6 +1101,7 @@ mod tests {
         }
         let ship = Ship {
             tick: 1_000,
+            paws_inbound_to: None,
             docked: Some("cannery-row".into()),
             accel_milli_g: 105,
             wear_bps: 8827,
@@ -1327,6 +1351,25 @@ mod tests {
         // And a pump priced beyond the tank is no answer either.
         let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(400));
         assert_eq!(d, Decision::CallPaws);
+    }
+
+    /// A tanker in the air is a reason to stay. Under engine 1.26.0 the truck checks
+    /// the ship is where it was sent; a hull that left gets nothing and the fee
+    /// stands (metal#85). No pump on the map is worth the ℳ33,594 Kibble Klipper's
+    /// call cost.
+    #[test]
+    fn a_ship_with_a_tanker_inbound_holds_for_it() {
+        let mut ship = ship_at("titania-cold-store", 23);
+        ship.paws_inbound_to = Some("titania-cold-store".into());
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(7));
+        assert!(
+            matches!(d, Decision::Hold { ref why } if why.contains("tanker is inbound")),
+            "{d:?}"
+        );
+        // The call was to somewhere else: nothing here to wait for, so the ladder runs.
+        ship.paws_inbound_to = Some("elsewhere".into());
+        let d = decide(&ship, None, &[], &pumps(&["foxys-diner"]), &FlatRouter(7));
+        assert!(!matches!(d, Decision::Hold { .. }), "{d:?}");
     }
 
     /// A pump under the hull outranks the tanker. KK stood at foxy's-diner on 23 of

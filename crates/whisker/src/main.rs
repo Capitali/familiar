@@ -1689,6 +1689,9 @@ fn main() -> ExitCode {
         //
         // The hold therefore stays the default while a human has not opted in, but
         // it now says what it actually costs instead of a stale claim about days.
+        // And a call, once made, PINS the hull: under engine 1.26.0 the truck checks
+        // the ship is where it was sent, and a hull that left forfeits the fee
+        // (metal#85) — the doctrine holds for an inbound tanker for that reason.
         if matches!(decision, Decision::CallPaws) && !allow_paws {
             // What she would actually be signing for, so the hold is a decision the
             // captain can weigh rather than a refusal he has to take on faith.
