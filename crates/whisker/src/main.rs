@@ -46,6 +46,8 @@ struct Wire {
     /// does not move on that timescale, and the ship has ONE key that the exchange
     /// rate-limits (429s, 2026-09-01). A remembered answer costs nothing.
     routes: RefCell<RouteCache>,
+    /// `/v1/route?hull=me&serviceClass=` answers, keyed (from@class, to).
+    rung_quotes: RefCell<HashMap<(String, String), (i64, Option<(i64, i64)>)>>,
 }
 
 /// One priced route: fuel at the reference drive, and each leg's separation in km.
@@ -169,6 +171,33 @@ impl Wire {
 impl Router for Wire {
     fn fuel_between(&self, from: &str, to: &str) -> Option<i64> {
         self.route(from, to).map(|r| r.fuel)
+    }
+    fn quote_at_burn(&self, from: &str, to: &str, burn_bps: i64) -> Option<(i64, i64)> {
+        if from == to {
+            return Some((0, 0));
+        }
+        let class = doctrine::burn_wire_name(burn_bps).unwrap_or("standard");
+        let key = (format!("{from}@{class}"), to.to_string());
+        let now = now_secs();
+        if let Some((at, r)) = self.rung_quotes.borrow().get(&key) {
+            if now - at < ROUTE_CACHE_SECS {
+                return *r;
+            }
+        }
+        let r = (|| {
+            let v = self
+                .get(&format!(
+                    "/v1/route?from={from}&to={to}&hull=me&serviceClass={class}"
+                ))
+                .ok()?;
+            let h = v.get("forHull")?;
+            Some((
+                h.get("totalFuel")?.as_i64()?,
+                h.get("totalTicks")?.as_i64()?,
+            ))
+        })();
+        self.rung_quotes.borrow_mut().insert(key, (now, r));
+        r
     }
     fn leg_distances_km(&self, from: &str, to: &str) -> Option<Vec<i64>> {
         self.route(from, to).map(|r| r.leg_km)
@@ -343,6 +372,7 @@ fn main() -> ExitCode {
         base: server.trim_end_matches('/').to_string(),
         key,
         routes: RefCell::new(HashMap::new()),
+        rung_quotes: RefCell::new(HashMap::new()),
     };
 
     // The pid, for `familiar fleet` to know the pilot is aboard.
@@ -442,6 +472,11 @@ fn main() -> ExitCode {
     .collect();
     // ...and what the world charges for fuel, which the merchant charges a carry at.
     let fuel_price: i64 = param("fuelPricePerUnit").unwrap_or(FUEL_PRICE_PER_UNIT);
+    // The tanker's drive, now published (2026-09-07). The constant stays only as
+    // the fallback for a world that does not say.
+    let paws_accel: i64 = param("pawsTankerAccelMilliG")
+        .filter(|a| *a > 0)
+        .unwrap_or(PAWS_TANKER_ACCEL_MILLI_G);
     // How fast each good rots, bps per day: the merchant charges it against any
     // plan to carry a lot somewhere dearer, because the lot arrives smaller.
     let decay_bps: BTreeMap<String, i64> = reference
@@ -1569,7 +1604,7 @@ fn main() -> ExitCode {
                         .map(|legs| legs.iter().sum::<i64>())
                         .min()
                 })
-                .map(|km| (km, doctrine::flight_ticks(&[km], PAWS_TANKER_ACCEL_MILLI_G)))
+                .map(|km| (km, doctrine::flight_ticks(&[km], paws_accel)))
                 .unwrap_or((0, 0));
             let paws_bill = doctrine::tanker_bill(
                 paws_km,

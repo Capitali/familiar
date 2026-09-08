@@ -88,6 +88,14 @@ pub trait Router {
     fn leg_distances_km(&self, _from: &str, _to: &str) -> Option<Vec<i64>> {
         None
     }
+    /// What THIS hull would burn and take on the route at a rung, as the exchange
+    /// prices it (`/v1/route?hull=me&serviceClass=…`, ucf-exchange#18, shipped
+    /// 2026-09-07). `None` = the world does not answer for hulls; the caller falls
+    /// back to modelling it. When it answers, its word wins: it is the same
+    /// arithmetic the fold will charge, at the drive the hull actually has today.
+    fn quote_at_burn(&self, _from: &str, _to: &str, _burn_bps: i64) -> Option<(i64, i64)> {
+        None
+    }
 }
 
 /// km per tick² at the reference drive (engine `FlightModel.referenceK`).
@@ -244,9 +252,24 @@ pub fn reachable_pump<'a>(
         let Some(cost) = router.fuel_between(here, p) else {
             continue;
         };
-        let legs = router.leg_distances_km(here, p).unwrap_or_default();
-        let Some(plan) = burn_that_reaches(&legs, cost, ship.accel_milli_g, ship.fuel, 1.1) else {
-            continue;
+        // Ask the world first. Standard, then economy — the same ladder, never up —
+        // but priced by the exchange for this hull rather than modelled from a
+        // reference quote. The model stays as the fallback for a world that does
+        // not answer for hulls, which is every world before 2026-09-07.
+        let asked = [BURN_STANDARD, BURN_ECONOMY].into_iter().find_map(|bps| {
+            let (fuel, ticks) = router.quote_at_burn(here, p, bps)?;
+            ((fuel as f64 * 1.1) as i64 <= ship.fuel).then_some(BurnPlan { bps, fuel, ticks })
+        });
+        let plan = match asked {
+            Some(plan) => plan,
+            None if router.quote_at_burn(here, p, BURN_STANDARD).is_some() => continue,
+            None => {
+                let legs = router.leg_distances_km(here, p).unwrap_or_default();
+                match burn_that_reaches(&legs, cost, ship.accel_milli_g, ship.fuel, 1.1) {
+                    Some(plan) => plan,
+                    None => continue,
+                }
+            }
         };
         if best.map(|(b, _)| plan.fuel < b.fuel).unwrap_or(true) {
             best = Some((plan, p));
@@ -1165,6 +1188,44 @@ mod tests {
                 burn_bps: BURN_STANDARD
             }
         );
+    }
+
+    /// When the world prices the rung for THIS hull, its word wins over the model.
+    /// A router that only answers the reference quote still gets the model.
+    #[test]
+    fn the_exchanges_rung_quote_beats_the_model() {
+        struct Asks;
+        impl Router for Asks {
+            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(168) // the reference quote the model would rescale
+            }
+            fn leg_distances_km(&self, _: &str, _: &str) -> Option<Vec<i64>> {
+                Some(vec![3_491_917_000, 1_774_626])
+            }
+            fn quote_at_burn(&self, _: &str, _: &str, bps: i64) -> Option<(i64, i64)> {
+                // The exchange's own figures for a 188 mG hull, 2026-09-08.
+                match bps {
+                    BURN_STANDARD => Some((171, 67)),
+                    BURN_ECONOMY => Some((114, 95)),
+                    _ => None,
+                }
+            }
+        }
+        let ship = ship_at("titania-cold-store", 135);
+        let ps = pumps(&["foxys-diner"]);
+        let (plan, pump) =
+            reachable_pump("titania-cold-store", &ship, &ps, &Asks).expect("economy reaches");
+        assert_eq!(pump.as_str(), "foxys-diner");
+        assert_eq!(plan.bps, BURN_ECONOMY);
+        assert_eq!(
+            (plan.fuel, plan.ticks),
+            (114, 95),
+            "the world's number, not the model's 112/94"
+        );
+        // And when the world says NOTHING reaches, the model is not consulted to
+        // disagree with it.
+        let dry = ship_at("titania-cold-store", 60);
+        assert!(reachable_pump("titania-cold-store", &dry, &ps, &Asks).is_none());
     }
 
     /// A pump WITHIN REACH outranks the tanker too — the same argument one berth
