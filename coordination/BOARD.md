@@ -52,6 +52,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   the landed pure chain model and the brick-2 forecast/merchant/journal integration, judged
   against T-238's stated acceptance line. No production repair, deployment, ship, gate, game
   action, or human/fleet mutation is authorized by this claim.
+- **CODEX DESIGN REVIEW RETURNED 2026-09-08: REJECT** —
+  `docs/reviews/2026-09-08-t238-bricks1-2-codex-design-review.md`. Brick 1's pure
+  runway/headroom arithmetic holds and the Rust bar is green, but four blockers remain:
+  brick 2 treats the quote's inventory `equilibrium` as a meal-credit price; target search
+  stops at the first acceptable spot-mid-sorted berth rather than maximizing forecast P&L;
+  the promised glut/freight/new-buy decay paths are unwired; and successful buys drop their
+  forecast reason from the execution journal, with no runner soak proving that acceptance.
 - previously: proposed (Ian, 2026-09-02, verbatim: "when trading, are we planning routes between our ships to deliver goods to processing facilities and haul the resulting cargo -- our plans looking forward should utilize this information in p&L maximization routines." — sent with the Cannery Row works screen: lines, per-cycle inputs/outputs, on-hand stocks)
 - the finding that makes it buildable NOW: the whole production graph is already on the wire. `/v1/reference` carries `recipes[]` (per-station lines: `inputs`, `outputs`, `ticksPerCycle` — e.g. Biscuit Press at tranquility, 22 grain + 4 tinplate → 16 biscuit-substrate per 8 ticks), every station's `consumes`/`produces`/`stocks`, and each good's `madeFrom`/`consumedAt`/`decayBps`; live stock/capacity/equilibrium rides the quotes whisker already reads. Line UTILIZATION (the "2/10" in the works screen) is not obviously served — ask Jeff if the forecast needs it.
 - scope sketch (bricks): (1) a pure `chain` model in whisker — recipes + live stocks → per-input RUNWAY at each works (when its bids must rise) and per-output accumulation (when its asks fall); (2) the merchant's buy-target and the freight ranking consult the forecast (feed a works before it starves; lift a product before it gluts; decay-aware); (3) two-leg cycles as itinerary plans (deliver input, wait/return for output — T-232's station-stop structures are the vehicle); (4) fleet-coordinated legs across a captain's ships — gated on the exchange growing the captain binding (metal#62, the map/fleet-visibility ask)

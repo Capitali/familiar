@@ -567,6 +567,16 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-08 · companion:codex returned the T-238 bricks 1+2 design review: REJECT.
+  Brick 1's pure runway/headroom arithmetic holds and the whisker Rust bar is green,
+  but brick 2 confuses the exchange quote's inventory equilibrium with a meal-credit
+  price, stops target search before comparing all forecast-adjusted P&L, leaves the
+  recorded glut/freight/new-buy decay paths unwired, and drops a successful buy's
+  forecast reason from both execution journal events. No runner soak proves the stated
+  acceptance line. Full review:
+  `docs/reviews/2026-09-08-t238-bricks1-2-codex-design-review.md`. No production edit,
+  deployment, ship, gate, game action, human record, or fleet mutation occurred.
+
 - 2026-09-08 · companion:codex claimed the explicit T-238 bricks 1+2 design review.
   Review-only scope covers the landed pure chain arithmetic and the forecast/merchant/journal
   integration, judged against T-238's stated acceptance line. No production repair,
