@@ -468,13 +468,13 @@ impl Decision {
 /// The reserve margin over priced fuel: routes are honest but the world moves.
 const RESERVE: f64 = 1.2;
 /// A leased hull repairs (free) from this wear on: 10% wear is 5% of drive.
-const REPAIR_LEASED_AT_BPS: i64 = 1_000;
+pub const REPAIR_LEASED_AT_BPS: i64 = 1_000;
 /// A titled hull repairs (paid) from this wear on: half worn is a quarter of drive.
-const REPAIR_TITLED_AT_BPS: i64 = 5_000;
+pub const REPAIR_TITLED_AT_BPS: i64 = 5_000;
 /// The yard's rate for a titled hull (`repairCostPerHundredBps`, the pack: 40).
 const REPAIR_COST_PER_HUNDRED_BPS: i64 = 40;
 /// Below this fraction of capacity, a berthed ship with a pump tops up.
-const TOP_UP_BELOW: f64 = 0.9;
+pub const TOP_UP_BELOW: f64 = 0.9;
 /// Below this fraction, an idle ship diverts to a pump before taking work.
 const LOW_FUEL: f64 = 0.4;
 /// Below this fraction, nothing matters but the tanker.

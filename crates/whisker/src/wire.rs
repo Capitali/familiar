@@ -174,11 +174,25 @@ pub fn decision_json(d: &Decision) -> Value {
 /// exactly as it does when the wire cannot say.
 pub struct TableRouter {
     routes: BTreeMap<(String, String), (i64, Vec<i64>)>,
+    /// The WORLD's own price for this hull at a rung — `rungs.{standard,economy}:
+    /// {fuel, ticks}` on a route row, from `/v1/route?hull=me&serviceClass=`. The
+    /// host has asked the exchange this since 2026-09-08 and treats the answer as
+    /// authoritative; a seam that could not carry it let the iPad keep modelling,
+    /// and at the reachability boundary the two runtimes disagreed on the same
+    /// facts — host CallPaws, iPad DivertToPump (codex T-237 B4 re-verification,
+    /// finding 1). Every world fact that can move a decision rides the seam.
+    rungs: BTreeMap<(String, String, i64), (i64, i64)>,
 }
+
+/// Bumped whenever the shape of `advise`'s input or output changes. A shell that
+/// was built against one seam and is handed another must be able to tell, rather
+/// than quietly reading a field that is no longer there (finding 1's skew guard).
+pub const SEAM_VERSION: i64 = 2;
 
 impl TableRouter {
     pub fn from_json(routes: &Value) -> Self {
         let mut table = BTreeMap::new();
+        let mut rungs = BTreeMap::new();
         if let Some(rows) = routes.as_array() {
             for r in rows {
                 let (Some(from), Some(to)) = (
@@ -194,9 +208,31 @@ impl TableRouter {
                     .map(|a| a.iter().filter_map(Value::as_i64).collect())
                     .unwrap_or_default();
                 table.insert((from.to_string(), to.to_string()), (fuel, legs));
+                if let Some(rs) = r.get("rungs").and_then(Value::as_object) {
+                    for (name, bps) in [
+                        ("standard", doctrine::BURN_STANDARD),
+                        ("economy", doctrine::BURN_ECONOMY),
+                        ("express", doctrine::BURN_EXPRESS),
+                        ("priority", doctrine::BURN_PRIORITY),
+                    ] {
+                        if let (Some(f), Some(t)) = (
+                            rs.get(name)
+                                .and_then(|q| q.get("fuel"))
+                                .and_then(Value::as_i64),
+                            rs.get(name)
+                                .and_then(|q| q.get("ticks"))
+                                .and_then(Value::as_i64),
+                        ) {
+                            rungs.insert((from.to_string(), to.to_string(), bps), (f, t));
+                        }
+                    }
+                }
             }
         }
-        TableRouter { routes: table }
+        TableRouter {
+            routes: table,
+            rungs,
+        }
     }
 }
 
@@ -217,6 +253,14 @@ impl Router for TableRouter {
             .get(&(from.to_string(), to.to_string()))
             .map(|(_, l)| l.clone())
     }
+    fn quote_at_burn(&self, from: &str, to: &str, burn_bps: i64) -> Option<(i64, i64)> {
+        if from == to {
+            return Some((0, 0));
+        }
+        self.rungs
+            .get(&(from.to_string(), to.to_string(), burn_bps))
+            .copied()
+    }
 }
 
 /// The seam. `input` is one JSON object:
@@ -231,6 +275,93 @@ impl Router for TableRouter {
 /// that surface (advise / confirm / auto), the automation it needs, and the hull as
 /// the doctrine read it — so the caller can show the pilot's mind and, under the act
 /// scope, put the same act on the wire the host runner would. It never acts.
+/// WHY — a stable code and the bounded numbers that chose the branch, for every
+/// decision and not only Hold. Recomputed from the same inputs `decide` read, so it
+/// cannot disagree with the decision it explains; the prose stays in the shell,
+/// which renders these facts rather than inventing a rationale (codex T-237 B4
+/// re-verification, finding 4).
+pub fn explain(
+    d: &Decision,
+    ship: &Ship,
+    active: Option<&Active>,
+    board: &[LoadRow],
+    pumps: &BTreeSet<String>,
+    router: &dyn Router,
+) -> Value {
+    let here = ship.docked.clone().unwrap_or_default();
+    match d {
+        Decision::Hold { why } => json!({"code": "hold", "why": why}),
+        Decision::Refuel => json!({
+            "code": "refuel.at-pump",
+            "fuel": ship.fuel, "fuel_capacity": ship.fuel_capacity,
+            "below_fraction": doctrine::TOP_UP_BELOW,
+        }),
+        Decision::Repair => json!({
+            "code": if ship.leased { "repair.free-under-lease" } else { "repair.worn" },
+            "wear_bps": ship.wear_bps,
+            "threshold_bps": if ship.leased {
+                doctrine::REPAIR_LEASED_AT_BPS
+            } else {
+                doctrine::REPAIR_TITLED_AT_BPS
+            },
+            "invoice": if ship.leased { 0 } else {
+                ship.wear_bps * ship.repair_per_hundred_bps.max(1) / 100
+            },
+        }),
+        Decision::CallPaws => {
+            let nearest = pumps
+                .iter()
+                .filter_map(|p| router.fuel_between(&here, p).map(|f| (f, p.clone())))
+                .min();
+            json!({
+                "code": "rescue.no-pump-in-reach",
+                "fuel": ship.fuel, "fuel_capacity": ship.fuel_capacity,
+                "critical_fraction": doctrine::CRITICAL_FUEL,
+                "nearest_pump": nearest.as_ref().map(|(_, p)| p.clone()),
+                "nearest_pump_fuel_at_reference": nearest.map(|(f, _)| f),
+            })
+        }
+        Decision::DivertToPump { pump, burn_bps } => {
+            let quoted = router.quote_at_burn(&here, pump, *burn_bps);
+            json!({
+                "code": if quoted.is_some() { "fuel.pump-in-reach.world-priced" }
+                        else { "fuel.pump-in-reach.modelled" },
+                "pump": pump, "burn": doctrine::burn_wire_name(*burn_bps).unwrap_or("standard"),
+                "burn_bps": burn_bps,
+                "fuel_needed": quoted.map(|(f, _)| f),
+                "ticks": quoted.map(|(_, t)| t),
+                "tank": ship.fuel, "reserve": 1.1,
+            })
+        }
+        Decision::Book { load_id } => {
+            let l = board.iter().find(|l| &l.load_id == load_id);
+            json!({
+                "code": "freight.best-net-per-tick",
+                "load_id": load_id,
+                "estimated_net": l.map(|l| l.estimated_net),
+                "deadhead_ticks": l.map(|l| l.deadhead_ticks),
+                "haul_ticks": l.map(|l| l.haul_ticks),
+                "deliver_deadline_tick": l.map(|l| l.deliver_deadline_tick),
+                "tick": ship.tick,
+                "candidates": board.len(),
+            })
+        }
+        Decision::Travel { station } => json!({
+            "code": match active.map(|a| a.word) {
+                Some(ActiveWord::PickedUp) => "freight.laden-leg",
+                Some(ActiveWord::Booked) => "freight.deadhead-to-origin",
+                _ => "course.filed",
+            },
+            "station": station,
+            "load_id": active.map(|a| a.row.load_id.clone()),
+        }),
+        Decision::Collect { load_id } => json!({
+            "code": "freight.delivered-collect",
+            "load_id": load_id,
+        }),
+    }
+}
+
 pub fn advise(input: &Value) -> Value {
     let me = input.get("me").cloned().unwrap_or(Value::Null);
     let repair_rate = input
@@ -245,13 +376,34 @@ pub fn advise(input: &Value) -> Value {
         .unwrap_or_default();
     let pumps = pumps_from(input.get("stations").unwrap_or(&Value::Null));
     let router = TableRouter::from_json(input.get("routes").unwrap_or(&Value::Null));
+    // The captain's live contract rides as ITS OWN object — `active: {row, word}`
+    // — because the open board does not contain it. A hull in transit was being
+    // reduced to `active_load_id`, looked up on a board of open rows, not found,
+    // and read as freight-idle: the iPad would hold or shop for a new load where
+    // the host said travel or collect (codex T-237 B4 re-verification, finding
+    // 2). `active_load_id` still works for a caller that also put the row on the
+    // board, and `word` falls back to /v1/me.freight when the object omits it.
     let active = input
-        .get("active_load_id")
-        .and_then(Value::as_str)
-        .and_then(|lid| {
-            let row = board.iter().find(|l| l.load_id == lid)?.clone();
-            let word = active_word(&me, lid).ok().flatten()?;
+        .get("active")
+        .and_then(|a| {
+            let row = load_row(a.get("row")?)?;
+            let word = match a.get("word").and_then(Value::as_str) {
+                Some("delivered") => ActiveWord::Delivered,
+                Some("pickedUp") | Some("picked-up") | Some("in-transit") => ActiveWord::PickedUp,
+                Some("booked") => ActiveWord::Booked,
+                _ => active_word(&me, &row.load_id).ok().flatten()?,
+            };
             Some(Active { row, word })
+        })
+        .or_else(|| {
+            input
+                .get("active_load_id")
+                .and_then(Value::as_str)
+                .and_then(|lid| {
+                    let row = board.iter().find(|l| l.load_id == lid)?.clone();
+                    let word = active_word(&me, lid).ok().flatten()?;
+                    Some(Active { row, word })
+                })
         });
     let dial = input
         .get("dial")
@@ -259,8 +411,12 @@ pub fn advise(input: &Value) -> Value {
         .unwrap_or_default();
     let decision = doctrine::decide(&ship, active.as_ref(), &board, &pumps, &router);
     let surface = surface_of(&decision);
+    let reasons = explain(&decision, &ship, active.as_ref(), &board, &pumps, &router);
     json!({
+        "seam_version": SEAM_VERSION,
+        "doctrine_build": env!("CARGO_PKG_VERSION"),
         "decision": decision_json(&decision),
+        "reasons": reasons,
         "surface": surface.key(),
         "family": surface.family(),
         "level": dial.level(surface).name(),
@@ -337,5 +493,122 @@ mod tests {
             })["type"],
             "book"
         );
+    }
+}
+
+#[cfg(test)]
+mod seam_parity_tests {
+    use super::*;
+
+    /// The exact facts codex probed (T-237 B4 re-verification, finding 1): a 188 mG
+    /// hull at titania-cold-store on 123 of fuel, foxy's-diner the pump, the route
+    /// quoted 168 at reference over legs [3491917000, 1774626], and the exchange
+    /// pricing THIS hull at standard (171, 67) and economy (114, 95).
+    fn probe(with_rungs: bool) -> Value {
+        let mut route = json!({
+            "from": "titania-cold-store", "to": "foxys-diner",
+            "fuel": 168, "legs_km": [3_491_917_000_i64, 1_774_626]
+        });
+        if with_rungs {
+            route["rungs"] = json!({
+                "standard": {"fuel": 171, "ticks": 67},
+                "economy":  {"fuel": 114, "ticks": 95}
+            });
+        }
+        json!({
+            "me": {"docked": "titania-cold-store", "fuel": 123, "fuelCapacity": 600,
+                   "credits": 0, "effectiveAccelMilliG": 188, "wearBps": 0,
+                   "titled": false, "leasePrincipal": 25000, "holdCapacity": 160,
+                   "holdUsed": 0, "route": [], "tick": 8000},
+            "board": [],
+            "stations": [{"id": "foxys-diner", "sellsFuel": true}],
+            "routes": [route],
+        })
+    }
+
+    /// With the world's rung prices in the seam, the iPad reaches the HOST's
+    /// verdict: economy needs 114 × 1.1 = 125 and the tank holds 123, so no pump
+    /// is in reach and the tanker is right. Without them the seam models 112,
+    /// rounds its reserve to 123, and diverts — the same facts, a different
+    /// decision, at a safety boundary. That is the disagreement B4 exists to
+    /// forbid, and the seam now carries the fact that decides it.
+    #[test]
+    fn the_seam_reaches_the_hosts_verdict_at_the_reachability_boundary() {
+        let out = advise(&probe(true));
+        assert_eq!(out["decision"]["type"], "call-paws", "{out}");
+        assert_eq!(out["reasons"]["code"], "rescue.no-pump-in-reach");
+        assert_eq!(out["seam_version"], SEAM_VERSION);
+        assert!(out["doctrine_build"]
+            .as_str()
+            .is_some_and(|b| !b.is_empty()));
+
+        // And the thing the rungs changed, pinned so nobody removes them "because
+        // the model agrees": without them the seam models its way to a divert.
+        let modelled = advise(&probe(false));
+        assert_eq!(modelled["decision"]["type"], "divert-to-pump", "{modelled}");
+        assert_eq!(modelled["reasons"]["code"], "fuel.pump-in-reach.modelled");
+    }
+
+    /// A hull with a live contract that is NOT on the open board — which is every
+    /// hull in transit — is still under that contract (finding 2). Reduced to an
+    /// id and looked up on open rows, it read as freight-idle.
+    #[test]
+    fn the_active_load_rides_as_its_own_object() {
+        let row = json!({"loadId": "L3249", "origin": "a", "dest": "b", "good": "catnip",
+                         "units": 25, "estimatedNet": 400, "deadheadTicks": 0,
+                         "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard"});
+        let input = json!({
+            "me": {"docked": "a", "fuel": 500, "fuelCapacity": 600, "credits": 5000,
+                   "effectiveAccelMilliG": 189, "wearBps": 0, "titled": false,
+                   "leasePrincipal": 25000, "holdCapacity": 160, "holdUsed": 25,
+                   "route": [], "tick": 100, "freight": []},
+            "board": [],                       // open board: the contract is not here
+            "stations": [{"id": "a", "sellsFuel": true}],
+            "routes": [{"from": "a", "to": "b", "fuel": 10, "legs_km": [1_000_000]}],
+            "active": {"row": row, "word": "pickedUp"},
+        });
+        let out = advise(&input);
+        assert_eq!(out["decision"]["type"], "travel", "{out}");
+        assert_eq!(out["decision"]["station"], "b");
+        assert_eq!(out["reasons"]["code"], "freight.laden-leg");
+        assert_eq!(out["reasons"]["load_id"], "L3249");
+    }
+
+    /// Every actionable decision explains itself with a code and the numbers that
+    /// chose it — not only Hold (finding 4).
+    #[test]
+    fn actionable_decisions_carry_reasons() {
+        // Repair: leased, worn past the free-repair line.
+        let repair = advise(&json!({
+            "me": {"docked": "a", "fuel": 590, "fuelCapacity": 600, "credits": 100,
+                   "effectiveAccelMilliG": 189, "wearBps": 5000, "titled": false,
+                   "leasePrincipal": 25000, "holdCapacity": 160, "holdUsed": 0,
+                   "route": [], "tick": 1},
+            "board": [], "stations": [{"id": "a", "sellsFuel": true}], "routes": []
+        }));
+        assert_eq!(repair["decision"]["type"], "repair", "{repair}");
+        assert_eq!(repair["reasons"]["code"], "repair.free-under-lease");
+        assert_eq!(repair["reasons"]["wear_bps"], 5000);
+        assert_eq!(repair["reasons"]["invoice"], 0);
+
+        // Book: one good load in reach, priced against its deadline.
+        let book = advise(&json!({
+            "me": {"docked": "a", "fuel": 600, "fuelCapacity": 600, "credits": 5000,
+                   "effectiveAccelMilliG": 189, "wearBps": 0, "titled": false,
+                   "leasePrincipal": 25000, "holdCapacity": 160, "holdUsed": 0,
+                   "route": [], "tick": 1000},
+            "board": [{"loadId": "L1", "origin": "a", "dest": "b", "good": "catnip",
+                       "units": 25, "estimatedNet": 900, "deadheadTicks": 0,
+                       "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard",
+                       "deliverDeadlineTick": 1100}],
+            "stations": [{"id": "a", "sellsFuel": true}],
+            // The plan must reach a pump AFTER delivery too, so the way home is priced.
+            "routes": [{"from": "a", "to": "b", "fuel": 10, "legs_km": [1_000_000]},
+                       {"from": "b", "to": "a", "fuel": 10, "legs_km": [1_000_000]}]
+        }));
+        assert_eq!(book["decision"]["type"], "book", "{book}");
+        assert_eq!(book["reasons"]["code"], "freight.best-net-per-tick");
+        assert_eq!(book["reasons"]["estimated_net"], 900);
+        assert_eq!(book["reasons"]["deliver_deadline_tick"], 1100);
     }
 }
