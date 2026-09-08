@@ -567,6 +567,17 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-08 · companion:codex returned the queued T-237 B2 re-verification: REJECT.
+  The original store/wire/pairing/message seams and deterministic floor remain green,
+  but token-only grounding admits a bought→sold semantic inversion and conversation
+  drops station checks; Swift rejects Rust's current `market.margin` surface and loses
+  durable `captain_id`; and current payment/trade-refusal events are absent from the
+  captain notice/voice policy. FamiliarSC: 55 passed, 0 failed, 2 live skipped; core
+  product warnings-as-errors passed. Full review:
+  `docs/reviews/2026-09-08-t237-b2-codex-reverification.md`. No production edit, key or
+  network use, approval/dial write, deploy, ship, gate, game action, or human/fleet
+  mutation occurred.
+
 - 2026-09-08 · companion:codex claimed the queued T-237 B2 re-verification.
   Review-only scope covers the landed `FamiliarSC` package's store reader, typed wire,
   pairing, message window, notices, and bridge-voice contract on current main. Production

@@ -23,6 +23,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   against B2's recorded acceptance line and subsequent compatible repairs on current main.
   No production repair, key use, live network call, approval/dial write, deployment, ship,
   gate, game action, or human/fleet mutation is authorized by this claim.
+- **B2 CODEX RE-VERIFICATION RETURNED 2026-09-08: REJECT** —
+  `docs/reviews/2026-09-08-t237-b2-codex-reverification.md`. Four blockers remain:
+  token-only grounding admits semantic inversion and conversation drops station checks;
+  Swift rejects Rust's `market.margin` dial surface; its captain reader silently drops
+  durable `captain_id`; and current payment/trade refusal journal events are absent from
+  the notice/voice contract. The core product build and 55 non-live tests pass; two live
+  tests remain skipped.
 - **B0 (added 2026-09-03, Ian's ruling, dialogue §3.5): the AUTONOMY DIAL** — per control-surface category (navigation: course/fuel/rescue; freight: book/collect/cancel; market: buy/sell/carry; ship: repair/refit/crew/frame/lease; racing: plot/line/refusal), three levels advise / confirm / auto; `autonomy.json` in the ship store, whisker's gate consults it after the doctrine decides; advice + proposals become the message window the persona voices; approval only from the captain (client or `familiar fleet approve`). KK II today = everything bought set to auto. **B0 LANDED 795b11f (2026-09-03):** `crates/whisker/src/autonomy.rs` (Dial, Surface, gate, proposals/approvals; 4 pinned tests), the gate at every action door in the runner, `familiar autonomy show|set|advice|approve|deny`. Live test: LOCAL soak ship's `market.buy` set to confirm — **PROVEN 2026-09-04: proposed (t30817) → approved through `fleet serve` POST approve (t30818) → the pilot filed the buy → filled t30820, 38 catnip for 828 ℳ.**
 - **B3 IN FLIGHT (2026-09-04):** screens = MacOnStick lane (`FamiliarSCUI`, branch claude/t237-b3-screens: four-tab root, pairing sheet, notifier, Store/Fixture/Wire feeds; iOS host behind Settings → "Ship's computer"); host half = wildhorse (`familiar fleet serve`, 2b8b7f5 + 8310c4c: bearer-protected JSON feed of the ship stores with per-exchange ticks, approve/dial/pair/unpair writes; running on wildhorse :7899, reachable over Tailscale). Design canvas: https://claude.ai/code/artifact/b3d6f1fd-e1bf-4485-b4a1-a444c60001d7 (five phone artboards in the Fam palette). Transport is a pasted bearer for now; node-signed via the mesh door later.
 
