@@ -111,7 +111,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: UCFFamiliar/Support/UCFFamiliar.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         # The xcframework's simulator slice is arm64-only (see FamiliarAgent).
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     dependencies:
