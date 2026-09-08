@@ -25,7 +25,7 @@ use familiar_whisker::autonomy::{self, Dial, Gate, Surface};
 use familiar_whisker::doctrine::{self, Active, ActiveWord, Decision, LoadRow, Router};
 use familiar_whisker::outfit::{self, DeliveryStat, OutfitDecision, Purse};
 use familiar_whisker::trade::{self, Holding, Ledger, TradeDecision};
-use familiar_whisker::{store, Automation};
+use familiar_whisker::{chain, store, Automation};
 use familiar_world::lease::{self, SignedLease};
 use serde_json::{json, Value};
 
@@ -476,6 +476,48 @@ fn main() -> ExitCode {
     let fuel_price: i64 = param("fuelPricePerUnit").unwrap_or(FUEL_PRICE_PER_UNIT);
     // The tanker's drive, now published (2026-09-07). The constant stays only as
     // the fallback for a world that does not say.
+    // T-238 brick 2: the production graph, and the shape of every shelf. Recipes
+    // are on /v1/reference; capacity and equilibrium per (station, good) are on each
+    // station's quotes and are static, so they are swept ONCE here and merged with
+    // live stock from the galaxy every fold. /v1/galaxy/prices carries neither.
+    let recipes = reference
+        .as_ref()
+        .map(chain::parse_recipes)
+        .unwrap_or_default();
+    let shelf_shape: BTreeMap<(String, String), (i64, i64)> = if recipes.is_empty() {
+        BTreeMap::new()
+    } else {
+        reference
+            .as_ref()
+            .and_then(|v| v.get("stations").and_then(Value::as_array))
+            .map(|stations| {
+                stations
+                    .iter()
+                    .filter_map(|st| st.get("id").and_then(Value::as_str))
+                    .filter_map(|id| {
+                        let v = wire.get(&format!("/v1/stations/{id}/quotes")).ok()?;
+                        Some((id.to_string(), v))
+                    })
+                    .flat_map(|(id, v)| {
+                        v.get("goods")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter_map(move |g| {
+                                Some((
+                                    (id.clone(), g.get("good")?.as_str()?.to_string()),
+                                    (
+                                        g.get("capacity").and_then(Value::as_i64).unwrap_or(0),
+                                        g.get("equilibrium").and_then(Value::as_i64).unwrap_or(0),
+                                    ),
+                                ))
+                            })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let paws_accel: i64 = param("pawsTankerAccelMilliG")
         .filter(|a| *a > 0)
         .unwrap_or(PAWS_TANKER_ACCEL_MILLI_G);
@@ -1232,7 +1274,40 @@ fn main() -> ExitCode {
                 } else {
                     ship.fuel
                 };
+                // The forecast for this fold: live stock onto the swept shelf shape,
+                // through the recipes, keeping only what starves inside the horizon.
+                let forecast = {
+                    let shelves: Vec<chain::Shelf> = galaxy
+                        .iter()
+                        .filter_map(|r| {
+                            let (capacity, equilibrium) =
+                                *shelf_shape.get(&(r.station.clone(), r.good.clone()))?;
+                            Some(chain::Shelf {
+                                station: r.station.clone(),
+                                good: r.good.clone(),
+                                stock: r.stock,
+                                capacity,
+                                equilibrium,
+                            })
+                        })
+                        .collect();
+                    let flows = chain::flows(&recipes, &shelves);
+                    let horizon = min_hold.max(1) + 96;
+                    let mut fc = trade::Forecast::default();
+                    for f in chain::starving(&flows, horizon) {
+                        if let (Some(h), Some(sh)) = (f.horizon_ticks, f.shelf.as_ref()) {
+                            fc.hungry
+                                .insert((f.station.clone(), f.good.clone()), (h, sh.equilibrium));
+                        }
+                    }
+                    fc
+                };
                 let ledger = Ledger {
+                    forecast: if recipes.is_empty() {
+                        None
+                    } else {
+                        Some(&forecast)
+                    },
                     here: &here,
                     tick,
                     credits: ship.credits,
@@ -1325,6 +1400,7 @@ fn main() -> ExitCode {
                         units,
                         sell_target,
                         est_margin,
+                        why,
                     } if freight_allows_buy => {
                         let takes = wire
                             .get(&format!("/v1/stations/{sell_target}/quotes"))
@@ -1351,6 +1427,7 @@ fn main() -> ExitCode {
                                 units: capped,
                                 sell_target,
                                 est_margin: est_margin * capped / units.max(1),
+                                why,
                             }
                         }
                     }
@@ -1386,9 +1463,10 @@ fn main() -> ExitCode {
                         TradeDecision::Buy {
                             sell_target,
                             est_margin,
+                            why,
                             ..
                         } => {
-                            format!("for {sell_target}, est. margin ℳ{est_margin}")
+                            format!("for {sell_target}, est. margin ℳ{est_margin} — {why}")
                         }
                         _ => String::new(),
                     };

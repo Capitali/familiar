@@ -445,6 +445,9 @@ pub enum TradeDecision {
         units: i64,
         sell_target: String,
         est_margin: i64,
+        /// The ground the buy stands on — spot, or the forecast that justified a
+        /// run a spot trader would not have made. Journaled, so the book says why.
+        why: String,
     },
 }
 
@@ -500,6 +503,9 @@ pub struct Ledger<'a> {
     /// for a better price is cargo spoiling at the same time, and on the luxuries
     /// that is not a rounding error: bluefin sheds 23% of itself a day.
     pub decay_bps: Option<&'a BTreeMap<String, i64>>,
+    /// The chain's forecast for this fold, or None on a world with no recipes on
+    /// the wire — in which case the merchant is exactly the spot trader it was.
+    pub forecast: Option<&'a Forecast>,
     /// The credit line this hull may put to work, ALREADY GATED by the captain's
     /// `market.margin` dial — zero when they have not opened it.
     ///
@@ -512,7 +518,37 @@ pub struct Ledger<'a> {
     pub borrowable: i64,
 }
 
+/// What the supply chain says a counter is ABOUT to do (T-238 brick 2). Built each
+/// fold from `chain::flows` — the recipes on the wire against live shelves — and
+/// consulted when the merchant scores a target: a works whose input shelf runs dry
+/// inside the carry horizon will be bidding UP for that good by the time we arrive,
+/// so the spot mid understates what the run is worth. Ian, 2026-09-02: "when
+/// trading, are we planning routes between our ships to deliver goods to processing
+/// facilities… our plans looking forward."
+#[derive(Debug, Default, Clone)]
+pub struct Forecast {
+    /// (station, good) → (ticks until its input shelf is empty, that shelf's
+    /// equilibrium price). Only Eats flows, only those already inside the horizon
+    /// the caller built the forecast with.
+    pub hungry: BTreeMap<(String, String), (i64, i64)>,
+}
+
+impl Forecast {
+    pub fn starving_at(&self, station: &str, good: &str) -> Option<(i64, i64)> {
+        self.hungry
+            .get(&(station.to_string(), good.to_string()))
+            .copied()
+    }
+}
+
 impl Ledger<'_> {
+    /// How far ahead a buy made now can look: the hold clock (nothing sells before
+    /// it) plus one posting window. A shelf that runs dry inside this is a shelf
+    /// that will be bidding up while we are still allowed to arrive and sell.
+    pub fn carry_horizon(&self) -> i64 {
+        self.min_hold.max(1) + 96
+    }
+
     /// What the merchant can actually put behind a position: cash plus whatever
     /// of the line the captain has opened. Cash alone when they have not.
     pub fn working_capital(&self) -> i64 {
@@ -680,11 +716,38 @@ pub fn decide_trade(
             .filter(|r| r.good == q.good && r.station != here && r.mid > 0)
             .collect();
         candidates.sort_by_key(|r| std::cmp::Reverse(r.mid));
-        let mut best_target: Option<(i64, &str, i64)> = None; // (mid, station, fuel)
+        let mut best_target: Option<(i64, &str, i64, String)> = None; // (expected, station, fuel, why)
         for row in candidates {
-            let est_proceeds = row.mid - bps(row.mid, SELL_HAIRCUT_BPS);
+            let spot = row.mid - bps(row.mid, SELL_HAIRCUT_BPS);
+            // The forecast's word on this counter. A works whose input shelf runs dry
+            // before we could arrive and sell will be bidding toward its equilibrium
+            // by then, so expect nearer that than the mid — capped at double the
+            // spot, because a forecast is a reading of a rate and not a promise, and
+            // it must never manufacture a trade out of nothing. A full shelf, or a
+            // world with no recipes, leaves the spot trader exactly as it was.
+            let (est_proceeds, why) = match l
+                .forecast
+                .and_then(|f| f.starving_at(&row.station, &q.good))
+                .filter(|(h, _)| *h <= l.carry_horizon())
+            {
+                Some((h, eq)) => {
+                    let lifted = (eq - bps(eq, SELL_HAIRCUT_BPS)).min(spot * 2).max(spot);
+                    (
+                        lifted,
+                        format!(
+                            "forecast: {} eats {} and its shelf runs dry in {h} ticks — bid \
+                             heads to equilibrium {eq} (spot mid {})",
+                            row.station, q.good, row.mid
+                        ),
+                    )
+                }
+                None => (
+                    spot,
+                    format!("spot: mid {} at {} less the haircut", row.mid, row.station),
+                ),
+            };
             if est_proceeds - q.ask < bps(q.ask, BUY_MARGIN_BPS).max(1) {
-                break; // sorted: nothing below this mid clears either
+                continue; // a forecast can lift a lower mid past a higher one, so no break
             }
             let Some(cost) = router.fuel_between(here, &row.station) else {
                 continue; // unreachable / unpriceable — not an arbitrage
@@ -696,15 +759,15 @@ pub fn decide_trade(
                 unfuelable += 1;
                 continue; // a buyer we cannot fly to is ballast
             }
-            best_target = Some((row.mid, &row.station, cost));
+            best_target = Some((est_proceeds, &row.station, cost, why));
             break;
         }
-        let Some((target_mid, target, carry_fuel)) = best_target else {
+        let Some((expected_unit, target, carry_fuel, why)) = best_target else {
             continue;
         };
         // Conservative per-unit economics: pay the real ask; expect the target mid less
         // the haircut.
-        let est_proceeds = target_mid - bps(target_mid, SELL_HAIRCUT_BPS);
+        let est_proceeds = expected_unit;
         let per_unit_margin = est_proceeds - q.ask;
         if per_unit_margin <= 0 || per_unit_margin < bps(q.ask, BUY_MARGIN_BPS) {
             continue;
@@ -733,6 +796,7 @@ pub fn decide_trade(
                     units,
                     sell_target: target.to_string(),
                     est_margin: total_margin,
+                    why: why.clone(),
                 },
             ));
         }
@@ -822,8 +886,63 @@ mod tests {
             daily_fixed_cost: 600,
             ticks_per_day: 288,
             decay_bps: None,
+            forecast: None,
             borrowable: 0,
         }
+    }
+
+    /// T-238 brick 2's accept line: the merchant makes a forecast-justified buy a
+    /// spot-arb trader would not, and says why. Catnip asks 25 here; the best mid
+    /// anywhere is 30 at works-b, which after the 18% haircut is 24.6 — under the
+    /// ask, no spot trade. But works-b EATS catnip and its shelf runs dry in 20
+    /// ticks, equilibrium 60: the bid is heading up, and the run is worth making.
+    #[test]
+    fn a_forecast_justifies_a_buy_the_spot_would_not() {
+        let board = vec![q("catnip", 25, 20, 500)];
+        let galaxy = vec![row("catnip", "works-b", 30)];
+        let mut l = at("here", 150);
+        let mut fc = Forecast::default();
+        fc.hungry
+            .insert(("works-b".into(), "catnip".into()), (20, 60));
+
+        let spot = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
+        assert!(
+            !matches!(spot, TradeDecision::Buy { .. }),
+            "no forecast, no trade: {spot:?}"
+        );
+
+        l.forecast = Some(&fc);
+        match decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true)) {
+            TradeDecision::Buy {
+                sell_target,
+                why,
+                est_margin,
+                ..
+            } => {
+                assert_eq!(sell_target, "works-b");
+                assert!(
+                    why.contains("forecast") && why.contains("runs dry in 20"),
+                    "{why}"
+                );
+                assert!(est_margin > 0);
+            }
+            other => panic!("the forecast should have carried it: {other:?}"),
+        }
+    }
+
+    /// A shelf that runs dry AFTER the carry horizon is no forecast at all: we could
+    /// not arrive and sell inside the window it describes.
+    #[test]
+    fn a_shelf_beyond_the_horizon_is_no_forecast() {
+        let board = vec![q("catnip", 25, 20, 500)];
+        let galaxy = vec![row("catnip", "works-b", 30)];
+        let mut l = at("here", 150);
+        let mut fc = Forecast::default();
+        fc.hungry
+            .insert(("works-b".into(), "catnip".into()), (5_000, 60));
+        l.forecast = Some(&fc);
+        let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
+        assert!(!matches!(d, TradeDecision::Buy { .. }), "{d:?}");
     }
 
     #[test]
@@ -1129,6 +1248,7 @@ mod tests {
                 sell_target,
                 units,
                 est_margin,
+                ..
             } => {
                 assert_eq!(good, "catnip");
                 assert_eq!(sell_target, "whisker-hollow");
