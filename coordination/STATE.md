@@ -87,6 +87,15 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   The captain's fleet brief (/captains/{slug}/brief, 7e96daa) rides in the next build. Use 109.
 
 
+- **IAN'S RULING 2026-09-07 (~15:20 CDT) on the ship's computer name in direct mode — verbatim:**
+  "we should ask Jeff for a 'ships computer name' namespace that is a child of the captains
+  data set and follows the captain from ship, to station, to raceway, to every aspect of the
+  universe, under the name given to it by the captain who initiated it." So the name becomes
+  the WORLD's fact under the captain's record on Jeff's exchange (not a host cache, not a
+  per-device string); the familiar's `captain_id` record mirrors it; every client — host
+  bridge, direct mode, racing — reads it from the wire. Until Jeff serves it, the per-key
+  device name stays as the interim. Draft ask: `docs/partners/2026-09-07-ships-computer-name-namespace.md`
+  (Ian files; folds into the captain-record/fleets proposal wildhorse is drafting).
 - **IAN 2026-09-07 (~14:55 CDT):** asked whether vans/ΔV need development now; answer given:
   ΔV waits on Jeff's steer (its familiar parts compose on T-237 B4 + T-236 voice), vans has
   one familiar-side brick — the hull's earned history as a record (the ethics rail's

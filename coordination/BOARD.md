@@ -63,6 +63,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-236 · The ship's computer is a unique instance — its own name, personality, memory, and captain
 - **IAN'S RULING 2026-09-04 (verbatim): "One 'ships computer' per captain that can act across his entire fleet under a name he chooses. I choose Felix."** The instance is PER CAPTAIN, not per hull — this supersedes Round 2's "two paired ships under one captain answer with different names"; the bar becomes: one captain's ships all answer as his computer, two captains' fleets share nothing. BUILT on wildhorse (82c922a): the persona + naming trail live in a captain store beside `worlds/` (`captains/<slug>/`), `fleet rename` on any ship names the computer for the whole fleet, pairing a second ship joins it, status and the feed resolve captain-first with a ship-local fallback for stores named earlier. KK II and the LOCAL rig both answer as Felix.
 - **RULING (Ian, 2026-09-04, verbatim): "One 'ships computer' per captain that can act across his entire fleet under a name he chooses. I choose Felix."** The instance is PER CAPTAIN, not per hull: one persona, one name, one memory across every ship the captain pairs; the hulls keep their own names (hull ≠ computer, T-236 correction 3). This supersedes codex's Round-2 acceptance line "two paired ships under one captain answer with different names, voices, and memories" — the bar becomes: two captains' fleets share nothing; one captain's ships all answer as his computer. Luke SkyWhisker's computer is Felix (KK II renamed 2026-09-04; the LOCAL soak rig, same captain, follows). Bricks 2–4 (log voice, speech, memory) scope to the captain.
+- **IAN'S RULING 2026-09-07 (verbatim): ask Jeff for "a 'ships computer name' namespace that is a
+  child of the captains data set and follows the captain from ship, to station, to raceway, to
+  every aspect of the universe, under the name given to it by the captain who initiated it."**
+  The computer's name is the world's fact under the captain record; the T-236 captain store
+  mirrors it; direct mode reads it from the wire (interim: the per-key device name). Ask drafted
+  at docs/partners/2026-09-07-ships-computer-name-namespace.md, rides the captain-record/fleets
+  proposal to Jeff.
 - **CODEX RE-VERIFICATION RETURNED 2026-09-07: REJECT** (`docs/reviews/2026-09-07-t236-brick1-codex-reverification.md`,
   judged against Ian's per-captain ruling). The kernel v1/v2 seam, captain-first
   no-fall-through resolution, and "a broken persona never stalls the pilot" all HELD. Seven
