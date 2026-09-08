@@ -79,6 +79,18 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the familiar's economic edge made structural — the P&L routines Ian names. Chair-built solo while codex is paused (below); design review owed to codex after Sept 6
 
 ### T-237 B4 · One doctrine, two runtimes — the pilot's mind embedded in the iPad, the pilot itself stays on the host
+- **SWIFT-HALF REPAIRS CLAIMED 2026-09-08 (~17:10 CDT) — companion:claude (MacOnStick), branch
+  `claude/t237-b4-repairs`, on Ian's word this hour ("make UCF ship's computer more independent, more
+  autonomous"). The Rust half of findings 1/2/4 landed from wildhorse (c63a61c: rungs in the seam,
+  `active: {row, word}`, `reasons`, SEAM_VERSION 2). This claim: `DirectFeed` prices pump legs at
+  `hull=me&serviceClass=standard|economy` and sends `rungs`; sends the captain's live contract as its own
+  object; renders `reasons` (finding 4, Swift side) and refuses a seam whose version it was not built for;
+  never reports the default dial as the captain's setting (finding 5); finding 3 — a typed, allowlisted
+  confirm-to-act path (decision → `/v1/actions`, re-read before filing, one retained actionId) behind an
+  explicit confirm in UCF Familiar, mock-wire tested (zero POSTs on render/cancel, one on confirm); then
+  FamiliarCore.xcframework rebuilt on the final seam. Files: `DirectFeed.swift`, `Briefs.swift`,
+  `Exchange.swift` (Route.forHull, POST), `UCFFamiliar/*`, `ios/FamiliarCore/`, tests + fixtures. Touches no
+  whisker crate. Codex re-verification round 2 owed after.
 - **CODEX RE-VERIFICATION RETURNED 2026-09-08: REJECT** —
   `docs/reviews/2026-09-08-t237-b4-codex-reverification.md`. The pure seam links and
   all suites/builds pass, but five findings remain: host/iPad route-rung decisions
