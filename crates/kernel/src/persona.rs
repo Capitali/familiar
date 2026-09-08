@@ -400,7 +400,10 @@ mod naming_tests {
         };
         // A DIRECTORY where the trail file must go: the append cannot succeed.
         std::fs::create_dir_all(d.join(NAME_EVENTS_FILE)).unwrap();
-        assert!(name(&d, &p, Some(&ev)).is_err(), "the trail refused, so the naming must");
+        assert!(
+            name(&d, &p, Some(&ev)).is_err(),
+            "the trail refused, so the naming must"
+        );
         assert!(
             !d.join(PERSONA_FILE).exists(),
             "nothing may be left behind when the trail refuses"
@@ -411,7 +414,11 @@ mod naming_tests {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
             .collect();
-        assert!(strays.is_empty(), "a failed naming left {} temp file(s)", strays.len());
+        assert!(
+            strays.is_empty(),
+            "a failed naming left {} temp file(s)",
+            strays.len()
+        );
     }
 
     /// A naming that succeeds leaves BOTH, and the trail carries it.
@@ -463,7 +470,11 @@ mod naming_tests {
         });
         // Whoever won, the file parses and holds one of the four — never a splice.
         let got = load(&d).expect("a raced persona must still parse");
-        assert!(names.contains(&got.name.as_str()), "spliced write: {}", got.name);
+        assert!(
+            names.contains(&got.name.as_str()),
+            "spliced write: {}",
+            got.name
+        );
         assert_eq!(namings(&d).len(), 4, "every naming is in the trail");
     }
 }
