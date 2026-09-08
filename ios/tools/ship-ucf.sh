@@ -31,7 +31,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 # push under `set -e` kills the ship between claiming the build number in git and
 # building anything, leaving the number burned and nothing on TestFlight. Two Macs
 # and several sessions land on this repo now; a racing push is the normal case.
-git pull --rebase --quiet origin "$(git branch --show-current)"
+git pull --rebase --autostash --quiet origin "$(git branch --show-current)"
 git push origin "$(git branch --show-current)" 2>&1 | tail -1
 cd "$IOS"
 ARCHIVE=/tmp/UCFFamiliar.xcarchive

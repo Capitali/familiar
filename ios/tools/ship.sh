@@ -52,7 +52,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 # claimed in git and nothing on TestFlight — which is exactly what happened twice
 # on 2026-09-05 while the other Mac was landing its own commits. Concurrent work
 # on this repo is the normal condition now, not the exception.
-git pull --rebase --quiet origin "$(git branch --show-current)"
+git pull --rebase --autostash --quiet origin "$(git branch --show-current)"
 git push origin "$(git branch --show-current)" 2>&1 | tail -1
 echo "✓ committed + pushed"
 
