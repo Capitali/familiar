@@ -6,6 +6,42 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-07 — Direct mode on the iPad: "states no pilot" — a gather that fails is said, and the frame says where the mind is
+
+Ian, UCF Familiar build 3 on the iPad against PROD, verbatim: "connect to prod, sees ship,
+but states no pilot, and calls itself purr instead of recognizing existing config and name
+and status." Wildhorse ruled its side out (the `wire::advise` seam answers a thin input) and
+pointed at `DirectFeed.context`'s `try? await pilotAdvice(me:)`.
+
+Reproduced from MacOnStick with KK's key (never printed): the whole direct-mode gather —
+`/v1/me`, the board (250 rows), the stations, the open contract, `/v1/reference`, five
+route pricings — completes in about a second, all five asked legs priced, and the real
+doctrine on the captured 118 KB input returns a sound verdict ("hold — under way, no
+load"; KK is en route to foxys-diner, 313/600, hold 141). So the fault is not one endpoint.
+What the iPad saw was (a) the frame's own words — it said "no pilot aboard" BY DESIGN,
+meaning no pilot process — and (b) a gather that can fail silently on a phone's network
+(each call is a full round trip; a cancelled view swallowed the whole document).
+
+- The frame now says where the mind is: "the pilot's mind answers from this device; no
+  pilot process aboard" (or "no pilot's mind in this shell" for a bare package).
+- `DirectFeed.pilotDocument` — the pilot document is NEVER absent: the reading, or "this
+  shell carries no pilot's mind", or "the pilot's mind could not be asked: <which call,
+  which code>". Same for the fuel picture. A legitimate "nothing to advise" and a broken
+  read no longer look the same (the silent-departure lesson, metal#79).
+- Legs are priced concurrently (a task group), and when the exchange would not price some
+  the reading says "priced N of M legs" so "no pump in reach" is honest. A verdict the
+  shell cannot parse is quoted, not dropped.
+- A live reproduction test (`DirectPilotLiveTests`, skipped unless `UCF_SERVER`/`UCF_KEY`)
+  captures the adviser's input for the Rust doctrine to replay.
+
+"Calls itself Purr" is not a defect of this brick: direct mode has no host and so no captain
+store; the device keeps its own per-key persona (`DevicePersonaStore`) and Felix lives on
+wildhorse. Whether direct mode should learn the captain's real computer name from the host
+feed when reachable, remember a typed name per key, or get a field from Jeff is Ian's
+call — put to him 2026-09-07.
+
+Bar: FamiliarSC 55/0 (two live tests skipped); UCFFamiliar simulator build.
+
 ## 2026-09-07 — T-236 brick 1, the Swift half of codex's re-verification: no stale voice, no rebuilt slug
 
 Codex re-verified T-236 brick 1 against Ian's per-captain ruling

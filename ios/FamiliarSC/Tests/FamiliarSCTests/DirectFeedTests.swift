@@ -84,3 +84,47 @@ final class DirectFeedTests: XCTestCase {
         print("LIVE direct mode on \(world): \(s.hull) · \(s.sentence)\n\(fuel.text)")
     }
 }
+
+/// Live reproduction of Ian's 2026-09-07 iPad report ("sees ship, but states no pilot"):
+/// run the direct-mode gather against a real exchange with a real key and a stub adviser
+/// that records the input it was handed. Skipped unless UCF_SERVER + UCF_KEY are set.
+final class DirectPilotDocumentTests: XCTestCase {
+    /// Ian's iPad, 2026-09-07: "states no pilot". A failed gather must be SAID in the
+    /// document, a shell without the core must say so, and a reading is a reading.
+    func testThePilotDocumentIsNeverAbsent() {
+        let ok = DirectFeed.pilotDocument(.success("The pilot would now: hold — under way, no load."))
+        XCTAssertEqual(ok.name, "pilot"); XCTAssertTrue(ok.text.hasPrefix("The pilot would now:"))
+        let bare = DirectFeed.pilotDocument(.success(nil))
+        XCTAssertTrue(bare.text.contains("no pilot's mind"), bare.text)
+        let failed = DirectFeed.pilotDocument(.failure(ExchangeError.http(404, "/v1/route?from=a&to=b")))
+        XCTAssertTrue(failed.text.hasPrefix("The pilot's mind could not be asked:"), failed.text)
+        XCTAssertTrue(failed.text.contains("404") && failed.text.contains("/v1/route"), "the captain learns WHICH call failed: \(failed.text)")
+        let cancelled = DirectFeed.pilotDocument(.failure(ExchangeError.transport("cancelled")))
+        XCTAssertTrue(cancelled.text.contains("cancelled"), cancelled.text)
+    }
+}
+
+final class DirectPilotLiveTests: XCTestCase {
+    func testLiveGatherReachesTheAdviser() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let server = env["UCF_SERVER"], let key = env["UCF_KEY"], !key.isEmpty else {
+            throw XCTSkip("set UCF_SERVER and UCF_KEY to run the live gather")
+        }
+        var feed = try XCTUnwrap(DirectFeed(exchange: server, key: key))
+        let capture = env["UCF_CAPTURE"] ?? "/tmp/direct-gather.json"
+        feed.adviser = { input in
+            try? input.write(toFile: capture, atomically: true, encoding: .utf8)
+            return #"{"decision":{"type":"hold","why":"stub"},"surface":"navigation.course","family":"navigation","level":"advise","automation":null,"ship":{"fuel":1,"fuel_capacity":600}}"#
+        }
+        let t0 = Date()
+        let me = try await feed.client.me()
+        do {
+            let out = try await feed.pilotAdvice(me: me)
+            print("GATHER: \(String(format: "%.1f", Date().timeIntervalSince(t0)))s → \(out == nil ? "NIL (no document)" : "document: " + out!.text.prefix(120))")
+        } catch {
+            print("GATHER THREW after \(String(format: "%.1f", Date().timeIntervalSince(t0)))s: \(error)")
+        }
+        let ctx = try await feed.context(world: "live", worldInstance: "PROD")
+        print("CONTEXT docs: \(ctx.documents.map(\.name)) frame: \(ctx.frame ?? "-")")
+    }
+}

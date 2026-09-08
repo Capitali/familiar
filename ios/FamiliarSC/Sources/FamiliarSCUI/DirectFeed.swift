@@ -139,13 +139,42 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         return ShipBook(holdings: [], deliveries: deliveries)
     }
 
+    /// The pilot document for what the gather returned: the doctrine's reading, or the
+    /// plain fact that there is no mind in this shell, or the reason it could not be asked.
+    /// Never absent — a missing document would read the same as "nothing to advise".
+    static func pilotDocument(_ asked: Result<String?, Error>) -> ContextDocument {
+        let title = "the pilot's mind — what the pilot would do right now, the dial surface it spends and the automation it needs; a reading, not an act"
+        switch asked {
+        case .success(let text?): return ContextDocument(name: "pilot", title: title, text: text)
+        case .success(nil): return ContextDocument(name: "pilot", title: title, text: "This shell carries no pilot's mind (FamiliarCore is not linked), so the doctrine cannot be asked here.")
+        case .failure(let error): return ContextDocument(name: "pilot", title: title, text: "The pilot's mind could not be asked: \(DirectFeed.describe(error)).")
+        }
+    }
+
+    /// Error text a captain can read.
+    static func describe(_ error: Error) -> String {
+        if let e = error as? ExchangeError { return "\(e)" }
+        if let f = error as? FeedError { return f.description }
+        return (error as NSError).localizedDescription
+    }
+
     public func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument]) {
         let m = try await client.me()
         let name = personas.load(keyID: keyID)?.name ?? Persona.rootName
-        let frame = "ship, hull \(m.shipName ?? "?") (\(worldInstance ?? KnownExchange.name(for: client.server.absoluteString))), captain \((try? await client.profile())?.traderName ?? "?"), computer \(name) — direct to the exchange, no pilot aboard"
+        // The frame says where the mind is: in direct mode the pilot PROCESS is on the host (or
+        // nowhere), while the pilot's MIND — the same doctrine — answers from this device when
+        // the shell links the core. "No pilot aboard" read as a fault on Ian's iPad (2026-09-07).
+        let mind = adviser == nil ? "no pilot's mind in this shell" : "the pilot's mind answers from this device; no pilot process aboard"
+        let frame = "ship, hull \(m.shipName ?? "?") (\(worldInstance ?? KnownExchange.name(for: client.server.absoluteString))), captain \((try? await client.profile())?.traderName ?? "?"), computer \(name) — direct to the exchange; \(mind)"
         var docs: [ContextDocument] = []
-        if let pilot = try? await pilotAdvice(me: m) { docs.append(ContextDocument(name: "pilot", title: "the pilot's mind — what the pilot would do right now, the dial surface it spends and the automation it needs; a reading, not an act", text: pilot.text)) }
-        if let fuel = try? await fuelPicture(me: m) { docs.append(ContextDocument(name: "fuel", title: "fuel picture — fuel aboard, every pump with distance, cost and reachability, what this berth would buy, the ways out when stranded (computed by the app from the wire)", text: fuel)) }
+        // A gather that fails is SAID, never dropped: a legitimate "nothing to advise" and a
+        // broken read must not look the same (the silent-departure lesson, metal#79).
+        let asked: Result<String?, Error>
+        do { asked = .success(try await pilotAdvice(me: m)?.text) } catch { asked = .failure(error) }
+        docs.append(DirectFeed.pilotDocument(asked))
+        let fuelTitle = "fuel picture — fuel aboard, every pump with distance, cost and reachability, what this berth would buy, the ways out when stranded (computed by the app from the wire)"
+        do { docs.append(ContextDocument(name: "fuel", title: fuelTitle, text: try await fuelPicture(me: m))) }
+        catch { docs.append(ContextDocument(name: "fuel", title: fuelTitle, text: "The fuel picture could not be read: \(DirectFeed.describe(error)).")) }
         return (frame, docs)
     }
 
@@ -168,21 +197,35 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
             .sorted { ($0["estimatedNet"]?.double ?? 0) > ($1["estimatedNet"]?.double ?? 0) }.prefix(5)
         for r in rows { if let o = r["origin"]?.string, let d = r["dest"]?.string { pairs.append((here, o)); pairs.append((o, d)) } }
         for st in stations.array ?? [] where st["sellsFuel"]?.bool == true { if let id = st["id"]?.string { pairs.append((here, id)) } }
-        var routes: [JSONValue] = []
         var seen = Set<String>()
-        for (from, to) in pairs where !from.isEmpty && from != to && seen.insert("\(from)→\(to)").inserted {
-            guard let r = try? await client.route(from: from, to: to) else { continue }
-            routes.append(.object(["from": .string(from), "to": .string(to), "fuel": .number(Double(r.fuel)),
-                                   "legs_km": .array(r.legs.compactMap { $0.distanceKm.map { .number(Double($0)) } })]))
+        let legs = pairs.filter { (from, to) in !from.isEmpty && from != to && seen.insert("\(from)→\(to)").inserted }
+        // Price the legs concurrently (a phone's network pays each round trip in full; the
+        // serial walk took seconds and a cancelled view swallowed it whole). A leg the
+        // exchange cannot price is left out and COUNTED, so "no pump in reach" is honest.
+        let priced: [JSONValue] = await withTaskGroup(of: JSONValue?.self) { group in
+            for (from, to) in legs {
+                group.addTask { [client] in
+                    guard let r = try? await client.route(from: from, to: to) else { return nil }
+                    return .object(["from": .string(from), "to": .string(to), "fuel": .number(Double(r.fuel)),
+                                    "legs_km": .array(r.legs.compactMap { $0.distanceKm.map { .number(Double($0)) } })])
+                }
+            }
+            var out: [JSONValue] = []
+            for await r in group { if let r { out.append(r) } }
+            return out
         }
+        let routes = priced.sorted { ($0["from"]?.string ?? "") + ($0["to"]?.string ?? "") < ($1["from"]?.string ?? "") + ($1["to"]?.string ?? "") }
         let active = (mine.array ?? []).first { ["settled", "delivered", "expired", "cancelled"].contains($0["status"]?.string ?? "") == false }?["loadId"]?.string
         let input: JSONValue = .object(["me": me, "board": board, "stations": stations, "routes": .array(routes),
                                         "repair_per_hundred_bps": .number(Double(repair)),
                                         "active_load_id": active.map { .string($0) } ?? .null])
         let out = adviser(input.description)
-        guard let data = out.data(using: .utf8), let verdict = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+        guard let data = out.data(using: .utf8), let verdict = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+            return ("The pilot's mind answered in words the shell could not read: \(out.prefix(200))", .null)
+        }
         if let err = verdict["error"]?.string { return ("The pilot's mind could not read the wire: \(err)", verdict) }
-        return (Briefs.pilot(verdict), verdict)
+        let pricing = routes.count == legs.count ? "" : "\nPriced \(routes.count) of \(legs.count) legs — the exchange would not price the rest, so a pump or a load it needed may read as out of reach."
+        return (Briefs.pilot(verdict) + pricing, verdict)
     }
 
     /// The fuel picture, computed here: pumps are the stations that sell fuel; each is priced by
