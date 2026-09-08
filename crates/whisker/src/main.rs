@@ -47,7 +47,7 @@ struct Wire {
     /// rate-limits (429s, 2026-09-01). A remembered answer costs nothing.
     routes: RefCell<RouteCache>,
     /// `/v1/route?hull=me&serviceClass=` answers, keyed (from@class, to).
-    rung_quotes: RefCell<HashMap<(String, String), (i64, Option<(i64, i64)>)>>,
+    rung_quotes: RefCell<RungQuoteCache>,
 }
 
 /// One priced route: fuel at the reference drive, and each leg's separation in km.
@@ -59,6 +59,8 @@ struct PricedRoute {
 
 /// (from, to) → (asked-at, the route or unpriceable).
 type RouteCache = HashMap<(String, String), (i64, Option<PricedRoute>)>;
+/// `/v1/route?hull=me&serviceClass=` answers by (from@class, to): when asked, and (fuel, ticks).
+type RungQuoteCache = HashMap<(String, String), (i64, Option<(i64, i64)>)>;
 
 /// A load that reverted or lapsed on us stays off our board this long: whatever
 /// undid it is not fixed by booking it again the same fold.
