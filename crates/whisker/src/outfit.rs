@@ -23,6 +23,8 @@
 //! - **Crew after title.** On a leased hull the yard repairs wear for nothing, so
 //!   an engineer's job is already done for free; wages are a recurring cost.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Days of fixed charges kept in hand after any purchase.
@@ -53,9 +55,21 @@ impl Fitting {
             Fitting::HoldExtension => "hold-extension",
         }
     }
-    /// The pack's price (`refitCost*` in params.json — not on the wire; LOCAL and
-    /// PROD ship the same pack). A refused refit is journaled with the true figure.
-    pub fn price(self) -> i64 {
+    /// The param name the world publishes this fitting's price under.
+    pub fn price_param(self) -> &'static str {
+        match self {
+            Fitting::Refrigeration => "refitCostRefrigeration",
+            Fitting::DriveTune => "refitCostDriveTune",
+            Fitting::HoldExtension => "refitCostHoldExtension",
+        }
+    }
+    /// The shipped pack's price, used only when the world does not publish one.
+    ///
+    /// These used to be the ONLY source, copied out of params.json — "a client keeps
+    /// a private copy of the pack and is silently wrong the day a dial or a crossing
+    /// moves it" (ucf-exchange#22, which asked for them and got them on 2026-09-07).
+    /// They are a fallback now, and the world's own figure wins.
+    pub fn shipped_price(self) -> i64 {
         match self {
             Fitting::Refrigeration => 4_500,
             Fitting::DriveTune => 9_000,
@@ -95,6 +109,20 @@ pub struct Purse {
     pub titled: bool,
     /// `/v1/me.fittings`, wire names.
     pub fittings: Vec<String>,
+    /// What the WORLD says each fitting costs, by param name. Empty falls back to
+    /// the shipped pack — see [`Fitting::shipped_price`].
+    pub refit_prices: BTreeMap<String, i64>,
+}
+
+impl Purse {
+    /// The world's price for a fitting, or the shipped pack's when it publishes none.
+    pub fn price_of(&self, f: Fitting) -> i64 {
+        self.refit_prices
+            .get(f.price_param())
+            .copied()
+            .filter(|p| *p > 0)
+            .unwrap_or_else(|| f.shipped_price())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,7 +246,7 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
             },
         };
     };
-    let price = fitting.price();
+    let price = p.price_of(fitting);
     if p.credits - price < keep {
         return OutfitDecision::Idle {
             why: format!(
@@ -235,6 +263,24 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
 
 #[cfg(test)]
 mod tests {
+
+    /// The WORLD prices the yard, not our copy of the pack. ucf-exchange#22 asked
+    /// for these and Jeff published them on 2026-09-07; a client carrying private
+    /// copies is silently wrong the day a dial moves.
+    #[test]
+    fn the_worlds_price_beats_the_shipped_one() {
+        let mut p = purse(50_000, &[]);
+        assert_eq!(
+            p.price_of(Fitting::DriveTune),
+            9_000,
+            "the shipped fallback"
+        );
+        p.refit_prices.insert("refitCostDriveTune".into(), 12_500);
+        assert_eq!(p.price_of(Fitting::DriveTune), 12_500, "the world wins");
+        // A published zero is not a price; the pack still answers.
+        p.refit_prices.insert("refitCostDriveTune".into(), 0);
+        assert_eq!(p.price_of(Fitting::DriveTune), 9_000);
+    }
 
     /// Ian, 2026-09-07: "always prioritize removing debt and clearing leases."
     ///
@@ -286,6 +332,7 @@ mod tests {
         Purse {
             credits,
             debt: 0,
+            refit_prices: BTreeMap::new(),
             daily_fixed_cost: 1_200,
             tank_price: 1_200,
             titled: false,

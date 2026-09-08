@@ -405,10 +405,43 @@ fn main() -> ExitCode {
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
     let reference = wire.get("/v1/reference").ok();
-    let min_hold: i64 = reference
+    let param = |k: &str| -> Option<i64> {
+        reference
+            .as_ref()?
+            .get("params")?
+            .get(k)
+            .and_then(Value::as_i64)
+    };
+    // The world's day, and the world's minimum hold. TWO NUMBERS, and we had been
+    // using one for both.
+    //
+    // `minHoldTicks` was not on the wire, so the pilot inferred it from `ticksPerDay`
+    // — "a guess about a rule, not a reading of it", as ucf-exchange#22 put it. Jeff
+    // published it on 2026-09-07 and the guess was wrong by TWELVE TIMES: the hold is
+    // 24 ticks, not 288. Every bought lot was treated as frozen for a world-day when
+    // it could be sold in about an hour, and the merchant's "stuck position" clock ran
+    // on the same inflated figure.
+    //
+    // Adopting the exchange's own per-good clock hid this rather than fixing it: it
+    // corrected each lot on arrival and reported a suspiciously constant "264 ticks
+    // freed" every time. 288 − 24 = 264. The constant was the guess, showing itself.
+    let ticks_per_day: i64 = reference
         .as_ref()
         .and_then(|v| v.get("ticksPerDay").and_then(Value::as_i64))
         .unwrap_or(288);
+    let min_hold: i64 = param("minHoldTicks").unwrap_or(ticks_per_day);
+    // The yard's own prices, published on 2026-09-07 (ucf-exchange#22). Absent
+    // leaves the shipped pack's figures in place.
+    let refit_prices: BTreeMap<String, i64> = [
+        "refitCostRefrigeration",
+        "refitCostDriveTune",
+        "refitCostHoldExtension",
+    ]
+    .into_iter()
+    .filter_map(|k| param(k).map(|v| (k.to_string(), v)))
+    .collect();
+    // ...and what the world charges for fuel, which the merchant charges a carry at.
+    let fuel_price: i64 = param("fuelPricePerUnit").unwrap_or(FUEL_PRICE_PER_UNIT);
     // How fast each good rots, bps per day: the merchant charges it against any
     // plan to carry a lot somewhere dearer, because the lot arrives smaller.
     let decay_bps: BTreeMap<String, i64> = reference
@@ -919,6 +952,7 @@ fn main() -> ExitCode {
                 let purse = Purse {
                     credits: ship.credits,
                     debt: me.get("debt").and_then(Value::as_i64).unwrap_or(0).max(0),
+                    refit_prices: refit_prices.clone(),
                     daily_fixed_cost: mortgage_per_day
                         + if ship.leased {
                             LEASE_SERVICE_PER_DAY_EST
@@ -1168,7 +1202,7 @@ fn main() -> ExitCode {
                     spare_hold,
                     need_hold,
                     fuel_available,
-                    fuel_price: FUEL_PRICE_PER_UNIT,
+                    fuel_price,
                     min_hold,
                     daily_fixed_cost: mortgage_per_day
                         + if ship.leased {
@@ -1176,7 +1210,7 @@ fn main() -> ExitCode {
                         } else {
                             0
                         },
-                    ticks_per_day: min_hold,
+                    ticks_per_day,
                     decay_bps: Some(&decay_bps),
                     // The line, if the captain has opened it. The engine draws a
                     // shortfall against `marginCreditLimit` automatically on a
