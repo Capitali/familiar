@@ -94,8 +94,9 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   the WORLD's fact under the captain's record on Jeff's exchange (not a host cache, not a
   per-device string); the familiar's `captain_id` record mirrors it; every client — host
   bridge, direct mode, racing — reads it from the wire. Until Jeff serves it, the per-key
-  device name stays as the interim. Draft ask: `docs/partners/2026-09-07-ships-computer-name-namespace.md`
-  (Ian files; folds into the captain-record/fleets proposal wildhorse is drafting).
+  device name stays as the interim (NOT the design — no more building on it). **FILED as
+  metal#86 by wildhorse in Ian's name** (captain id + computer name + fleet, computer-name
+  field asked first); familiar-side shape note: `docs/partners/2026-09-07-ships-computer-name-namespace.md`.
 - **IAN 2026-09-07 (~14:55 CDT):** asked whether vans/ΔV need development now; answer given:
   ΔV waits on Jeff's steer (its familiar parts compose on T-237 B4 + T-236 voice), vans has
   one familiar-side brick — the hull's earned history as a record (the ethics rail's

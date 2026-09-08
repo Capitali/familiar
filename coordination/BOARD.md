@@ -67,9 +67,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   child of the captains data set and follows the captain from ship, to station, to raceway, to
   every aspect of the universe, under the name given to it by the captain who initiated it."**
   The computer's name is the world's fact under the captain record; the T-236 captain store
-  mirrors it; direct mode reads it from the wire (interim: the per-key device name). Ask drafted
-  at docs/partners/2026-09-07-ships-computer-name-namespace.md, rides the captain-record/fleets
-  proposal to Jeff.
+  mirrors it; direct mode reads it from the wire (interim: the per-key device name, not the
+  design). **FILED as metal#86** (wildhorse, Ian's name); shape note
+  docs/partners/2026-09-07-ships-computer-name-namespace.md.
 - **CODEX RE-VERIFICATION RETURNED 2026-09-07: REJECT** (`docs/reviews/2026-09-07-t236-brick1-codex-reverification.md`,
   judged against Ian's per-captain ruling). The kernel v1/v2 seam, captain-first
   no-fall-through resolution, and "a broken persona never stalls the pilot" all HELD. Seven

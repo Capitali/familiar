@@ -39,6 +39,12 @@ public enum KnownExchange {
 
 /// The captain's own persona in direct mode lives on the device (no host store): one name and
 /// style per exchange key, defaulting to Purr until the captain names her.
+/// INTERIM, not the design (Ian's ruling 2026-09-07, filed as united-cat-foods-metal#86): the
+/// ship's computer's name is the captain's, and it belongs on the captain's record in the
+/// WORLD — a child namespace that follows the captain to every hull, station and raceway.
+/// Until Jeff serves that field, direct mode keeps a per-key name the captain types here;
+/// when the wire carries it, this store becomes at most a cache of the world's fact.
+/// Do not build more on it.
 public struct DevicePersonaStore {
     public let defaults: UserDefaults
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }

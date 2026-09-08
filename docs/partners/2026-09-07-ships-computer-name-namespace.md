@@ -1,8 +1,14 @@
 # Draft ask to Jeff — a ship's computer name, as a child of the captain's record
 
-Status: DRAFT for Ian's word (2026-09-07). Files in Ian's name on united-cat-foods-metal, or
-folds into the captain-record / fleets proposal the wildhorse lane is drafting (same record).
-Codex-review before filing per the house method, when its window reopens.
+Status: **FILED 2026-09-07 as united-cat-foods-metal#86** ("The captain as a record: an id, a
+computer name, and a fleet ships can join"), in Ian's name by the wildhorse lane, with a
+follow-up comment asking for the computer-name field first (one string; the direct client is
+blocked on it today). This note is the familiar-side shape we adapt to — NOT a second issue.
+Ian's ruling to wildhorse, verbatim: *"So Felix is what the captain calls the familiar, his
+ships computer, it's his name so any place the captain could be interacting with the ship, its
+computer, the captain is going to want to see the name they've chosen. In this case I chose
+Felix."* … *"I think option three. Have a name field for the computer associated to the
+captains record."*
 
 Ian's direction, verbatim: *"ask Jeff for a 'ships computer name' namespace that is a child
 of the captains data set and follows the captain from ship, to station, to raceway, to every
