@@ -26,6 +26,11 @@ public final class BridgeModel {
     public var reports: [FoldReport] = []
     public var spoken: SpokenReport?
     public var pendingDialChanges: [DialChange] = []
+    /// Direct mode: what the pilot's mind would file now, held for the captain's confirm
+    /// (T-237 B4 finding 3). Nil through a host — there the pilot files and proposes itself.
+    public var pilotProposal: PilotProposal?
+    /// What the last confirm said — the exchange's clock, or the refusal.
+    public var pilotOutcome: String?
     /// The captain's conversation with her, for the open ship.
     public var conversation: Conversation?
     var conversationWorld: String?
@@ -111,6 +116,11 @@ public final class BridgeModel {
             let (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
             let frameLine = frame ?? summary.map { "ship, hull \($0.shipName) (\($0.worldInstance)), captain \($0.captain), computer \(computerName)" }
             let ctx = BridgeContext(entries: latestWindow(), hull: summary?.hullGlance, openProposals: openProposals, frame: frameLine, documents: docs)
+            // The act the mind would file, if any. A proposal already shown for the SAME act keeps
+            // its actionId across a refresh: a transport failure after the exchange accepted it,
+            // then a pull-to-refresh and a second tap, must retry the id and not file twice.
+            let fresh = try? await acts.pilotProposal(world: world)
+            if let old = pilotProposal, let new = fresh, old.act == new.act { pilotProposal = old } else { pilotProposal = fresh }
             if let c = conversation, c.voice.persona.name == (persona?.name ?? computerName), conversationWorld == world {
                 c.context = ctx; c.consent = voiceConsent
             } else {
@@ -131,6 +141,7 @@ public final class BridgeModel {
     @MainActor
     func clearVoice() {
         persona = nil; journal = []; window = []; dial = nil; book = nil; reports = []; spoken = nil
+        pilotProposal = nil; pilotOutcome = nil
         conversation = nil; conversationWorld = nil; turns = []
     }
 
@@ -265,6 +276,31 @@ public final class BridgeModel {
         do { let n = try await acts.setCaptain(world: world, captain: captain); await refreshShips(); persona = try await feed.persona(world: world)
              return ActOutcome(ok: true, text: n ?? "Moved.") } catch { return ActOutcome(ok: false, text: "\(error)") }
     }
+
+    /// The captain confirms the pilot's proposed act. On success the proposal is spent and the
+    /// bridge re-reads; on a refusal (the mind moved) the bridge re-reads and shows the new
+    /// mind; on any other failure the proposal STAYS, actionId and all, so a retry is a retry.
+    @MainActor
+    public func confirmPilotAct() async -> ActOutcome {
+        guard let world, let p = pilotProposal else { return ActOutcome(ok: false, text: "nothing to confirm") }
+        do {
+            let said = try await acts.confirm(p, world: world)
+            pilotProposal = nil; pilotOutcome = said
+            await open(world: world)
+            return ActOutcome(ok: true, text: said)
+        } catch let e as FeedError {
+            pilotOutcome = e.description
+            if case .refused = e { pilotProposal = nil; await open(world: world) }
+            return ActOutcome(ok: false, text: e.description)
+        } catch {
+            pilotOutcome = "\(error)"
+            return ActOutcome(ok: false, text: "\(error)")
+        }
+    }
+
+    /// "Not now": the proposal is dropped, its actionId with it. The next read mints a new one.
+    @MainActor
+    public func dismissPilotAct() { pilotProposal = nil; pilotOutcome = nil }
 
     @MainActor
     public func unpair(world: String) async -> String? {

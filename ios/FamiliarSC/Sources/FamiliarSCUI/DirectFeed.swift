@@ -45,7 +45,7 @@ public enum KnownExchange {
 /// Until Jeff serves that field, direct mode keeps a per-key name the captain types here;
 /// when the wire carries it, this store becomes at most a cache of the world's fact.
 /// Do not build more on it.
-public struct DevicePersonaStore {
+public struct DevicePersonaStore: @unchecked Sendable {  // UserDefaults is thread-safe; the compiler does not know it
     public let defaults: UserDefaults
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     func key(_ keyID: String) -> String { "sc.direct.persona." + keyID }
@@ -60,7 +60,7 @@ public struct DevicePersonaStore {
 }
 
 public struct DirectFeed: ShipsFeed, CaptainActs {
-    public let client: ExchangeClient
+    public var client: ExchangeClient
     public let keyID: String
     public var personas = DevicePersonaStore()
     /// The pilot's MIND, when the app links FamiliarCore (T-237 B4, "one doctrine, two runtimes"):
@@ -70,6 +70,42 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
     public var adviser: (@Sendable (String) -> String)?
     /// The pack's fuel price, until the exchange publishes `fuelPricePerUnit` (ucf-exchange#22).
     public var fuelPricePerUnit: Int64 = 2
+
+    /// The seam this shell was built for. `whisker_advise` stamps its answer with
+    /// `seam_version`; a mismatch means the core linked into this build and the shell's
+    /// reading of it are not the same generation, and the verdict is refused rather than
+    /// read past — the skew guard codex asked for in place of a manual promise (T-237 B4
+    /// re-verification, finding 1). Bump together with `whisker::wire::SEAM_VERSION`.
+    public static let seamVersion: Int64 = 2
+
+    /// One gather of the pilot's mind: the reading, the raw verdict, the act it maps to when
+    /// it maps to one, and the exact input the doctrine was handed (tests pin its shape).
+    public struct Advice: Sendable {
+        public var text: String
+        public var verdict: JSONValue
+        public var proposal: PilotProposal?
+        public var input: JSONValue
+        public var tick: Int64?
+        /// Legs the exchange would not price / hull rungs it would not answer, for the reading.
+        public var unpriced: Int
+        public var unquotedRungs: Int
+    }
+
+    /// The last gather, kept a moment so the context read and the proposal read of one
+    /// screen-open do not price every leg twice, and so both see ONE actionId. Keyed on the
+    /// world's tick; a confirm always asks fresh.
+    final class AdviceMemo: @unchecked Sendable {
+        private let lock = NSLock()
+        private var held: (tick: Int64?, at: Date, advice: Advice)?
+        func take(tick: Int64?) -> Advice? {
+            lock.lock(); defer { lock.unlock() }
+            guard let h = held, h.tick == tick, Date().timeIntervalSince(h.at) < 30 else { return nil }
+            return h.advice
+        }
+        func keep(_ a: Advice) { lock.lock(); held = (a.tick, Date(), a); lock.unlock() }
+        func drop() { lock.lock(); held = nil; lock.unlock() }
+    }
+    let memo = AdviceMemo()
 
     public init?(exchange: String, key: String) {
         guard let c = ExchangeClient(server: exchange, key: key) else { return nil }
@@ -184,54 +220,104 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         return (frame, docs)
     }
 
-    /// What the pilot would do now, from the doctrine itself. The feed gathers exactly what the host
-    /// runner reads before a fold — `/v1/me`, the open board, the stations, the yard's repair rate,
-    /// the captain's own open contract — and prices, as the runner does, the top candidates' legs
-    /// and the pumps from here; the doctrine judges; nothing is acted. Nil without an adviser.
+    /// What the pilot would do now, from the doctrine itself — the reading and the verdict.
     public func pilotAdvice(me m: Me) async throws -> (text: String, verdict: JSONValue)? {
+        try await advice(me: m).map { ($0.text, $0.verdict) }
+    }
+
+    /// The pilot's mind asked over what the host runner reads before a fold — `/v1/me`, the
+    /// open board, the stations, the yard's repair rate, the captain's own contract as ITS OWN
+    /// object (the open board never carries it; finding 2) — with the legs priced as the
+    /// runner prices them and, on every leg to a pump, the exchange's price for THIS hull at
+    /// the standard and economy rungs (`rungs`), which the doctrine treats as authoritative
+    /// over its model (finding 1). No dial is sent: none exists on this device (finding 5).
+    /// The doctrine judges; nothing is acted. Nil without an adviser.
+    public func advice(me m: Me, fresh: Bool = false) async throws -> Advice? {
         guard let adviser else { return nil }
+        if !fresh, let held = memo.take(tick: m.tick) { return held }
         let me = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/me"))
         let board = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/loadboard"))
         let stations = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/stations"))
         let mine = (try? JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/loadboard?mine=true"))) ?? .array([])
         let repair = (try? await client.reference())?.params?["repairCostPerHundredBps"]?.double.map { Int64($0) } ?? 40
         let here = m.docked ?? m.enRouteTo ?? ""
+        let pumps = Set((stations.array ?? []).filter { $0["sellsFuel"]?.bool == true }.compactMap { $0["id"]?.string })
         // Price what the runner prices: the five best rows by estimated net (here → origin, origin → dest)
         // and every pump from here — the doctrine's reachable_pump needs those to judge a divert.
         var pairs: [(String, String)] = []
         let rows = (board.array ?? []).filter { $0["heldForOther"]?.bool != true }
             .sorted { ($0["estimatedNet"]?.double ?? 0) > ($1["estimatedNet"]?.double ?? 0) }.prefix(5)
         for r in rows { if let o = r["origin"]?.string, let d = r["dest"]?.string { pairs.append((here, o)); pairs.append((o, d)) } }
-        for st in stations.array ?? [] where st["sellsFuel"]?.bool == true { if let id = st["id"]?.string { pairs.append((here, id)) } }
+        for p in pumps.sorted() { pairs.append((here, p)) }
         var seen = Set<String>()
         let legs = pairs.filter { (from, to) in !from.isEmpty && from != to && seen.insert("\(from)→\(to)").inserted }
         // Price the legs concurrently (a phone's network pays each round trip in full; the
         // serial walk took seconds and a cancelled view swallowed it whole). A leg the
-        // exchange cannot price is left out and COUNTED, so "no pump in reach" is honest.
-        let priced: [JSONValue] = await withTaskGroup(of: JSONValue?.self) { group in
+        // exchange cannot price is left out and COUNTED, so "no pump in reach" is honest;
+        // a hull rung it will not answer is counted too, and that pump is then modelled
+        // from the reference quote exactly as the host does when the world will not say.
+        let priced: [(row: JSONValue, unquoted: Int)] = await withTaskGroup(of: (JSONValue, Int)?.self) { group in
             for (from, to) in legs {
                 group.addTask { [client] in
                     guard let r = try? await client.route(from: from, to: to) else { return nil }
-                    return .object(["from": .string(from), "to": .string(to), "fuel": .number(Double(r.fuel)),
-                                    "legs_km": .array(r.legs.compactMap { $0.distanceKm.map { .number(Double($0)) } })])
+                    var row: [String: JSONValue] = ["from": .string(from), "to": .string(to), "fuel": .number(Double(r.fuel)),
+                                                    "legs_km": .array(r.legs.compactMap { $0.distanceKm.map { .number(Double($0)) } })]
+                    var unquoted = 0
+                    if pumps.contains(to) {
+                        var rungs: [String: JSONValue] = [:]
+                        for name in ["standard", "economy"] {
+                            if let h = (try? await client.route(from: from, to: to, forHullAt: name))?.forHull {
+                                rungs[name] = .object(["fuel": .number(Double(h.totalFuel)), "ticks": .number(Double(h.totalTicks))])
+                            } else { unquoted += 1 }
+                        }
+                        if !rungs.isEmpty { row["rungs"] = .object(rungs) }
+                    }
+                    return (.object(row), unquoted)
                 }
             }
-            var out: [JSONValue] = []
+            var out: [(JSONValue, Int)] = []
             for await r in group { if let r { out.append(r) } }
             return out
         }
-        let routes = priced.sorted { ($0["from"]?.string ?? "") + ($0["to"]?.string ?? "") < ($1["from"]?.string ?? "") + ($1["to"]?.string ?? "") }
-        let active = (mine.array ?? []).first { ["settled", "delivered", "expired", "cancelled"].contains($0["status"]?.string ?? "") == false }?["loadId"]?.string
-        let input: JSONValue = .object(["me": me, "board": board, "stations": stations, "routes": .array(routes),
-                                        "repair_per_hundred_bps": .number(Double(repair)),
-                                        "active_load_id": active.map { .string($0) } ?? .null])
-        let out = adviser(input.description)
-        guard let data = out.data(using: .utf8), let verdict = try? JSONDecoder().decode(JSONValue.self, from: data) else {
-            return ("The pilot's mind answered in words the shell could not read: \(out.prefix(200))", .null)
+        let routes = priced.map(\.row).sorted { ($0["from"]?.string ?? "") + ($0["to"]?.string ?? "") < ($1["from"]?.string ?? "") + ($1["to"]?.string ?? "") }
+        let unquotedRungs = priced.reduce(0) { $0 + $1.unquoted }
+        // The captain's live contract: the row the ledger still holds open, ranked the way the
+        // host tracks it (a hull in transit first, then one booked and waiting, then one
+        // delivered whose money waits). The seam reads the ledger word from /v1/me.freight
+        // itself, so a row the ledger has settled or lost is dropped there, as on the host.
+        let live = (mine.array ?? []).filter { !["settled", "expired", "cancelled", "lost"].contains($0["status"]?.string ?? "") }
+        func rank(_ r: JSONValue) -> Int {
+            switch r["status"]?.string { case "inTransit", "pickedUp": return 0; case "booked", "assigned", "awaitingPickup": return 1; case "delivered": return 2; default: return 3 }
         }
-        if let err = verdict["error"]?.string { return ("The pilot's mind could not read the wire: \(err)", verdict) }
-        let pricing = routes.count == legs.count ? "" : "\nPriced \(routes.count) of \(legs.count) legs — the exchange would not price the rest, so a pump or a load it needed may read as out of reach."
-        return (Briefs.pilot(verdict) + pricing, verdict)
+        let active = live.min { (rank($0), $0["loadId"]?.string ?? "") < (rank($1), $1["loadId"]?.string ?? "") }
+        var input: [String: JSONValue] = ["me": me, "board": board, "stations": stations, "routes": .array(routes),
+                                          "repair_per_hundred_bps": .number(Double(repair))]
+        if let active { input["active"] = .object(["row": active]) }
+        let inputValue = JSONValue.object(input)
+        let out = adviser(inputValue.description)
+        var advice = Advice(text: "", verdict: .null, proposal: nil, input: inputValue, tick: m.tick, unpriced: legs.count - routes.count, unquotedRungs: unquotedRungs)
+        guard let data = out.data(using: .utf8), let verdict = try? JSONDecoder().decode(JSONValue.self, from: data) else {
+            advice.text = "The pilot's mind answered in words the shell could not read: \(out.prefix(200))"
+            memo.keep(advice); return advice
+        }
+        advice.verdict = verdict
+        if let err = verdict["error"]?.string { advice.text = "The pilot's mind could not read the wire: \(err)"; memo.keep(advice); return advice }
+        guard verdict["seam_version"]?.int == DirectFeed.seamVersion else {
+            let got = verdict["seam_version"]?.int.map { "seam \($0)" } ?? "an unstamped seam"
+            advice.text = "The pilot's mind speaks \(got) and this shell was built for seam \(DirectFeed.seamVersion): the app and the core inside it are not the same generation. Nothing is read from this verdict, and nothing can be filed from it; update the app."
+            memo.keep(advice); return advice
+        }
+        var notes: [String] = []
+        if advice.unpriced > 0 { notes.append("Priced \(routes.count) of \(legs.count) legs — the exchange would not price the rest, so a pump or a load it needed may read as out of reach.") }
+        if unquotedRungs > 0 { notes.append("The exchange did not price this hull at \(unquotedRungs) pump rung\(unquotedRungs == 1 ? "" : "s"); those pumps are judged from the reference quote, as the host does when the world will not say.") }
+        advice.text = ([Briefs.pilot(verdict, governed: false)] + notes).joined(separator: "\n")
+        if let act = ExchangeAct.from(decision: verdict["decision"] ?? .null, docked: verdict["ship"]?["docked"]?.string) {
+            advice.proposal = PilotProposal(actionId: "ucff-" + UUID().uuidString.lowercased(), act: act,
+                                            reasons: Briefs.reasons(verdict["reasons"] ?? .null),
+                                            surface: verdict["surface"]?.string, tick: m.tick)
+        }
+        memo.keep(advice)
+        return advice
     }
 
     /// The fuel picture, computed here: pumps are the stations that sell fuel; each is priced by
@@ -279,7 +365,29 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         return Briefs.fuel(picture) + "\n(Fuel priced at the pack's \(fuelPricePerUnit) ℳ per unit until the exchange publishes its own.)"
     }
 
-    // MARK: acts — no host, so only what the device itself holds
+    // MARK: acts — no host, so only what the device itself holds, and the one act the captain confirms
+
+    public func pilotProposal(world: String) async throws -> PilotProposal? {
+        try await advice(me: try await client.me())?.proposal
+    }
+
+    /// The captain's tap. The world moved while the captain read, so the mind is asked again,
+    /// FRESH, and the act is filed only if it would still make the same act — the same act,
+    /// not the same words. The proposal's own actionId goes on the wire: a retry after a
+    /// transport failure carries the same id, never a second intent. Nothing else in this
+    /// feed can reach `file`.
+    public func confirm(_ p: PilotProposal, world: String) async throws -> String {
+        guard adviser != nil else { throw FeedError.unavailable("this shell carries no pilot's mind, so there is nothing to confirm") }
+        let now = try await advice(me: try await client.me(), fresh: true)
+        guard let live = now?.proposal, live.act == p.act else {
+            memo.drop()
+            let would = now?.proposal?.act.sentence ?? ("hold" + (now?.verdict["decision"]?["why"]?.string.map { " — \($0)" } ?? ""))
+            throw FeedError.refused("the pilot's mind has moved since you read it — it would now \(would). Read it again before confirming; nothing was filed.")
+        }
+        let ack = try await client.file(p.act.body, actionId: p.actionId)
+        memo.drop()
+        return "Filed: \(p.act.sentence) (\(ack.actionId))" + (ack.resolvesAtTick.map { " — the fold answers at t\($0)" } ?? "") + ". The outcome lands on the ledger, not here."
+    }
 
     public func approve(world: String, proposalID: String, approved: Bool) async throws { throw FeedError.needsHost("proposals come from a pilot, and there is no pilot in direct mode") }
     public func setDial(world: String, dial: AutonomyDial) async throws { throw FeedError.needsHost("the dial governs a pilot, and there is no pilot in direct mode") }

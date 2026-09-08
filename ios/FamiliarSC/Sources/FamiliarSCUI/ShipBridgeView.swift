@@ -19,6 +19,11 @@ public struct ShipBridgeView: View {
                 Section { Label(e, systemImage: "exclamationmark.triangle").foregroundStyle(SC.red).font(.footnote).listRowBackground(Color.clear) }
             }
             Section { felixCard.listRowBackground(SC.panel).listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) }
+            if let p = model.pilotProposal {
+                Section("The pilot would now") { PilotActRow(proposal: p, model: model) }
+            } else if let said = model.pilotOutcome {
+                Section { Text(said).font(.footnote).foregroundStyle(SC.ice).listRowBackground(SC.panel) }
+            }
             let waiting = model.window.filter(\.needsTheCaptain).reversed()
             if !waiting.isEmpty {
                 Section("Waiting on you") { ForEach(Array(waiting), id: \.at) { item in ProposalRow(item: item, model: model) } }
@@ -139,6 +144,44 @@ public struct ShipBridgeView: View {
             Text(value).font(.body.monospacedDigit().weight(.medium)).foregroundStyle(SC.ink)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Direct mode: the act the pilot's mind would file, held for the captain. Confirm files it
+/// in the captain's name from this device (the mind is asked again first); Not now drops it.
+/// Both taps ≥44pt. Nothing on this row is reachable by the voice.
+struct PilotActRow: View {
+    let proposal: PilotProposal
+    @Bindable var model: BridgeModel
+    @State private var busy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if let s = proposal.surface { Chip(text: s, tint: SC.ice) }
+                Spacer()
+                if let t = proposal.tick { Text("t\(t)").font(.caption2.monospacedDigit()).foregroundStyle(SC.dim) }
+            }
+            Text(proposal.act.sentence).font(.body.weight(.medium)).foregroundStyle(SC.ink)
+            if !proposal.reasons.isEmpty { Text("Because " + proposal.reasons + ".").font(.footnote).foregroundStyle(.secondary) }
+            HStack(spacing: 10) {
+                Button { confirm() } label: { Label("Confirm and file", systemImage: "checkmark").frame(maxWidth: .infinity, minHeight: 44) }
+                    .buttonStyle(.borderedProminent).tint(SC.green)
+                Button { model.dismissPilotAct() } label: { Label("Not now", systemImage: "xmark").frame(maxWidth: .infinity, minHeight: 44) }
+                    .buttonStyle(.bordered).tint(SC.red)
+            }
+            .disabled(busy)
+            if let said = model.pilotOutcome { Text(said).font(.caption).foregroundStyle(SC.amber) }
+            Text("Filed in your name from this device as \(proposal.actionId). The mind is asked again before it files; if it has moved, nothing is filed.")
+                .font(.caption2).foregroundStyle(SC.dim)
+        }
+        .padding(.vertical, 4)
+        .listRowBackground(SC.panel)
+    }
+
+    func confirm() {
+        busy = true
+        Task { _ = await model.confirmPilotAct(); busy = false }
     }
 }
 

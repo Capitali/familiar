@@ -187,6 +187,96 @@ public protocol CaptainActs: Sendable {
     func setAutomations(world: String, automations: [Automation]) async throws -> String?
     /// Re-home the ship under another captain record (captain.json's `captain`).
     func setCaptain(world: String, captain: String) async throws -> String?
+    /// Direct mode: what the pilot's mind would file now, held out for the captain to confirm.
+    /// Nil wherever a pilot files for itself (a host) or the shell carries no mind.
+    func pilotProposal(world: String) async throws -> PilotProposal?
+    /// File a proposal the captain confirmed. The world is read again first and the act is
+    /// filed only if the mind would still make it; the proposal's own actionId goes on the
+    /// wire. Returns what the exchange said.
+    func confirm(_ proposal: PilotProposal, world: String) async throws -> String
+}
+
+public extension CaptainActs {
+    func pilotProposal(world: String) async throws -> PilotProposal? { nil }
+    func confirm(_ proposal: PilotProposal, world: String) async throws -> String {
+        throw FeedError.unavailable("this feed does not file acts; through a host the pilot files its own and the captain approves them")
+    }
+}
+
+/// A typed act the doctrine's decision maps to on the exchange's `/v1/actions` — THE
+/// ALLOWLIST (T-237 B4 re-verification, finding 3). A decision that is not here cannot be
+/// filed from a direct-mode device whatever the verdict says, and the bodies are the host
+/// runner's own (`crates/whisker/src/main.rs`, the `body` match), so a captain's tap files
+/// exactly what the pilot would have filed.
+public enum ExchangeAct: Equatable, Sendable {
+    case refuel
+    case repair
+    case callPaws
+    case travel(station: String, serviceClass: String?)
+    case book(loadId: String)
+    case collect(loadId: String)
+
+    /// The wire body without its actionId — the caller owns that.
+    public var body: [String: JSONValue] {
+        switch self {
+        case .refuel: return ["type": .string("refuel")]
+        case .repair: return ["type": .string("repair")]
+        case .callPaws: return ["type": .string("paws")]
+        case .travel(let station, let serviceClass):
+            var b: [String: JSONValue] = ["type": .string("travel"), "station": .string(station)]
+            if let serviceClass { b["serviceClass"] = .string(serviceClass) }
+            return b
+        case .book(let loadId): return ["type": .string("book"), "loadId": .string(loadId)]
+        case .collect(let loadId): return ["type": .string("collect"), "loadId": .string(loadId)]
+        }
+    }
+
+    public var sentence: String {
+        switch self {
+        case .refuel: return "refuel at this berth's pump"
+        case .repair: return "repair the drive at this berth"
+        case .callPaws: return "call the PAWS tanker"
+        case .travel(let station, let serviceClass): return "file a course to \(station)" + (serviceClass.map { " on the \($0) burn" } ?? "")
+        case .book(let loadId): return "book load \(loadId)"
+        case .collect(let loadId): return "collect the money on \(loadId)"
+        }
+    }
+
+    /// The seam's `decision` → the act, or nil for what is not an act: a hold, a course to
+    /// the berth she is already at (the host files nothing for that either), anything unknown.
+    /// Standard burn rides the wire ABSENT, exactly as the host sends it: `burn` is null then.
+    public static func from(decision d: JSONValue, docked: String?) -> ExchangeAct? {
+        switch d["type"]?.string {
+        case "refuel": return .refuel
+        case "repair": return .repair
+        case "call-paws": return .callPaws
+        case "divert-to-pump":
+            guard let pump = d["pump"]?.string else { return nil }
+            return .travel(station: pump, serviceClass: d["burn"]?.string)
+        case "travel":
+            guard let station = d["station"]?.string, station != docked else { return nil }
+            return .travel(station: station, serviceClass: nil)
+        case "book": return d["load_id"]?.string.map { .book(loadId: $0) }
+        case "collect": return d["load_id"]?.string.map { .collect(loadId: $0) }
+        default: return nil
+        }
+    }
+}
+
+/// What the pilot's mind would file now, held out for the captain: the act, why, and ONE
+/// actionId minted when it was shown and kept until it is filed or dropped — retry the id,
+/// never the intent (the owner's rule, ucf-exchange#14).
+public struct PilotProposal: Equatable, Sendable, Identifiable {
+    public var id: String { actionId }
+    public let actionId: String
+    public let act: ExchangeAct
+    /// The doctrine's reasons, said in words (`Briefs.reasons`).
+    public let reasons: String
+    public let surface: String?
+    public let tick: Int64?
+    public init(actionId: String, act: ExchangeAct, reasons: String, surface: String?, tick: Int64?) {
+        self.actionId = actionId; self.act = act; self.reasons = reasons; self.surface = surface; self.tick = tick
+    }
 }
 
 public extension ShipsFeed {

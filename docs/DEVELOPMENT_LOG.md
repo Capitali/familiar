@@ -6,6 +6,69 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-08 — T-237 B4, the Swift half of codex's re-verification: the iPad reads every fact the host reads, and the captain can file what the mind would
+
+Codex re-verified B4 steps 1–4 (`docs/reviews/2026-09-08-t237-b4-codex-reverification.md`,
+REJECT, five findings). Wildhorse landed the Rust half the same morning (`c63a61c`: the seam
+carries `routes[].rungs`, `active: {row, word}`, `reasons` for every decision, `SEAM_VERSION 2`;
+`c9419b9`: a tanker in the air is a reason to stay). This is the shell's half, on Ian's word this
+hour: "make UCF ship's computer more independent, more autonomous."
+
+- **Finding 1 — the gather carries the world's price for THIS hull.** `ExchangeClient.route(from:to:forHullAt:)`
+  asks `/v1/route?…&hull=me&serviceClass=` and `Route.forHull` (`HullQuote`) decodes the
+  exchange's block. `DirectFeed.advice` prices every leg to a pump at standard and economy and
+  sends them as `rungs`, which the doctrine treats as authoritative; a rung the world will not
+  answer is COUNTED and said ("the exchange did not price this hull at N pump rungs"), and that
+  pump is modelled from the reference quote exactly as the host does when the wire will not say.
+  The skew guard: `DirectFeed.seamVersion` (2) is checked against the verdict's `seam_version`;
+  a mismatch is refused in words and offers no act. `FamiliarCore.xcframework` rebuilt from the
+  crates at this tree (both slices, iOS 26.0 floor verified by build-core.sh).
+- **Finding 2 — the captain's contract rides as its own object.** The mine board's live row
+  (in transit first, then booked, then delivered-uncollected) goes as `active: {row}`; the seam
+  reads the ledger word from `/v1/me.freight` itself, so a settled or lost row drops there as on
+  the host. `active_load_id` is retired from the gather.
+- **Finding 3 — confirm-to-act.** `ExchangeAct` is THE ALLOWLIST (refuel, repair, paws,
+  travel[+serviceClass], book, collect — bodies byte-for-byte the host runner's `body` match;
+  a hold or a course to the berth she is at maps to nothing; anything else maps to nothing).
+  `PilotProposal` carries the act, the reasons and ONE actionId minted when it is shown
+  (`ucff-<uuid>`) and kept until filed or dropped. `CaptainActs.pilotProposal(world:)` /
+  `confirm(_:world:)` (defaults: nil / unavailable — a host's pilot files its own).
+  `DirectFeed.confirm` asks the mind again FRESH and files only if it would still make the
+  SAME act, else refuses in words ("it would now hold — …"); `ExchangeClient.file` is the one
+  POST in the package. `BridgeModel.confirmPilotAct` re-reads on success, re-reads on a refusal
+  by the mind, and KEEPS the proposal (id and all) on any other failure so a retry retries the
+  id; a refresh keeps the id when the act is unchanged. `PilotActRow` on the bridge: Confirm and
+  file / Not now, both ≥44pt, with the id shown. The voice cannot reach any of it.
+- **Finding 4 — reasons in words, facts the doctrine's.** `Briefs.reasons` renders every reason
+  code from its own numbers (an unknown code is said as its facts, never dressed up);
+  `Briefs.pilot` says "Because …" for every actionable verdict and names the doctrine build.
+- **Finding 5 — no dial is claimed.** Direct mode sends no dial and `Briefs.pilot(governed: false)`
+  says "No dial governs this device: nothing is filed unless the captain confirms it here" in
+  place of "the captain's setting is auto".
+- `ExchangeClient` and `DevicePersonaStore` are Sendable (the Swift 6 warning debt codex noted
+  on B2 is paid for these two).
+
+Checks: `swift test` (FamiliarSC) **64 passed, 0 failed, 2 live skipped** — nine new in
+`DirectPilotTests` over a mock exchange (`URLProtocol`): the gather's shape (rungs on pump legs
+only, the active row, no dial, no id-only field, the adviser handed the same bytes); an
+unpriced hull counted; render + speak + cancel = ZERO POSTs; one confirm = exactly ONE POST
+`{actionId, type, station, serviceClass}` under the shown id and a retry reuses it; a moved mind
+refuses with zero POSTs and the model re-reads; a 409 from the door is said and the proposal
+survives for a retry; seam 3 refused; the allowlist row by row; every reason code. Live: the
+gather ran against LOCAL (fixture-capture pilot, 0.1 s, five legs, 0 rungs — that world predates
+the hull quotes, see below). `tools/build-core.sh` exit 0. `xcodegen` + `xcodebuild … -scheme
+UCFFamiliar -sdk iphonesimulator`: **BUILD SUCCEEDED**. No Rust changed.
+
+Next / honest limits: (1) the artifact-parity test codex asked for (host adapter vs the
+checked-in FFI over one JSON) is pinned on the Rust side (`wire::seam_parity_tests`) and by
+the Swift gather-shape test; a Swift test that links the xcframework itself needs an app test
+target — not built tonight. (2) The per-hull fixtures are shaped from the exchange's encoder at
+`5f28c45e` with codex's probe numbers, not captured from PROD (no PROD key on this Mac's
+command line). (3) **MacOnStick's LOCAL world is behind Jeff's head** (contentVersion 28, no
+`forHull`): rebuild it from `ucf-exchange` main so direct mode can be soaked against the
+current contract. (4) UCF Familiar build 5 from wildhorse carries this to Ian's iPad; the first
+real confirm should be a cheap one (a collect, or a course) on LOCAL first.
+
 ## 2026-09-07 — Direct mode on the iPad: "states no pilot" — a gather that fails is said, and the frame says where the mind is
 
 Ian, UCF Familiar build 3 on the iPad against PROD, verbatim: "connect to prod, sees ship,

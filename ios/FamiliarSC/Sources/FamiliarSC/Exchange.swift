@@ -6,11 +6,12 @@ import Foundation
 // adds keys between content versions and a client that refused a new key would read the
 // whole market as empty that day.
 //
-// There is deliberately NO method that POSTs an action: Apple Intelligence never places an
-// action on the exchange, and neither does the captain's app in B2 — the pilot files acts,
-// the captain approves them through the ship store. `ActionAck` is typed only so the SC
-// runtime can share this model; it is a CLOCK (resolvesAtTick), never a verdict — outcomes
-// come from /v1/receipts (trades) and /v1/me.freight (freight).
+// ONE method POSTs an action, `file(_:actionId:)`, and only the captain's confirmed act
+// reaches it (T-237 B4 finding 3, direct mode's confirm-to-act path): Apple Intelligence
+// never places an action on the exchange, and no read path can. Through a host the pilot
+// files acts and the captain approves them in the ship store. `ActionAck` is a CLOCK
+// (resolvesAtTick), never a verdict — outcomes come from /v1/receipts (trades) and
+// /v1/me.freight (freight).
 
 public struct ExchangeStatus: Codable, Equatable {
     public var tick: Int64
@@ -217,6 +218,19 @@ public struct RouteLeg: Codable, Equatable {
     public var note: String?
 }
 
+/// The exchange's price for THIS hull at one service class — `/v1/route?…&hull=me&serviceClass=`
+/// (ucf-exchange `RouteHandler.HullQuote`, 5f28c45e). The world's own figure for a rung,
+/// wear and fittings applied, which the doctrine treats as authoritative over its model
+/// (T-237 B4 re-verification, finding 1). Absent from every plan that did not ask.
+public struct HullQuote: Codable, Equatable {
+    public var actor: String?
+    public var accelMilliG: Int64?
+    public var serviceClass: String?
+    public var serviceAccelMilliG: Int64?
+    public var totalTicks: Int64
+    public var totalFuel: Int64
+}
+
 /// `/v1/route?from=&to=` — tonight's geometry, priced.
 public struct Route: Codable, Equatable {
     public var from: String
@@ -224,6 +238,7 @@ public struct Route: Codable, Equatable {
     public var summary: String?
     public var driveAccelG: Double?
     public var legs: [RouteLeg]
+    public var forHull: HullQuote?
 
     public var fuel: Int64 { legs.reduce(0) { $0 + ($1.fuel ?? 0) } }
     public var ticks: Int64 { legs.reduce(0) { $0 + ($1.ticks ?? 0) } }
@@ -314,6 +329,9 @@ public struct ActionAck: Codable, Equatable {
     public var actionId: String
     public var receivedSeq: Int64?
     public var resolvesAtTick: Int64?
+    /// The credential that filed it — how a captain's client tells its own filings from a
+    /// co-pilot's (additive on the wire, 2026-09-07).
+    public var filedBy: String?
 }
 
 /// Pure decoders — what the tests pin, what the client calls.
@@ -336,6 +354,8 @@ public enum ExchangeError: Error, Equatable, CustomStringConvertible {
     case http(Int, String)
     case transport(String)
     case decode(String, String)
+    /// The exchange refused an act at the door (a 4xx on `/v1/actions`), with its own words.
+    case refused(Int, String)
 
     public var description: String {
         switch self {
@@ -343,13 +363,15 @@ public enum ExchangeError: Error, Equatable, CustomStringConvertible {
         case .http(let code, let path): return "HTTP \(code) on \(path)"
         case .transport(let why): return why
         case .decode(let path, let why): return "\(path): \(why)"
+        case .refused(let code, let why): return "the exchange refused it (\(code)): \(why)"
         }
     }
 }
 
-/// A key's read-only wire to one exchange. Bearer auth and the app header exactly as the
-/// Rust side sends them (fleet.rs `wire_get`), app name `familiar-sc`.
-public struct ExchangeClient {
+/// A key's wire to one exchange: every read, and the ONE write a captain's confirmed act
+/// makes. Bearer auth and the app header exactly as the Rust side sends them (fleet.rs
+/// `wire_get`), app name `familiar-sc`.
+public struct ExchangeClient: Sendable {
     public let server: URL
     let key: String
     public var app: String = "familiar-sc"
@@ -404,5 +426,37 @@ public struct ExchangeClient {
     public func route(from: String, to: String) async throws -> Route {
         try await fetch("/v1/route?from=\(from)&to=\(to)", ExchangeWire.route)
     }
+    /// The same geometry priced for the hull this key flies at one service class — the
+    /// `forHull` block the doctrine's `quote_at_burn` reads. `me` is the only hull a key may
+    /// ask about (the exchange refuses any other).
+    public func route(from: String, to: String, forHullAt serviceClass: String) async throws -> Route {
+        try await fetch("/v1/route?from=\(from)&to=\(to)&hull=me&serviceClass=\(serviceClass)", ExchangeWire.route)
+    }
     public func reference() async throws -> Reference { try await fetch("/v1/reference", ExchangeWire.reference) }
+
+    /// `POST /v1/actions` — the captain's confirmed act, and nothing else, comes through here.
+    /// `actionId` is the idempotency handle and the contract is RETRY THE ID, NEVER THE
+    /// INTENT (the owner's words, ucf-exchange#14): a re-sent act carries the SAME id, or a
+    /// transient failure after the exchange accepted it becomes a double filing. The caller
+    /// minted the id when it showed the act, and keeps it until the act is confirmed or
+    /// dropped. The exchange answers 202 with a clock; the outcome comes back on the ledger.
+    public func file(_ body: [String: JSONValue], actionId: String) async throws -> ActionAck {
+        var full = body
+        full["actionId"] = .string(actionId)
+        var r = request("/v1/actions")
+        r.httpMethod = "POST"
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = Data(JSONValue.object(full).description.utf8)
+        let data: Data
+        let resp: URLResponse
+        do { (data, resp) = try await session.data(for: r) } catch {
+            throw ExchangeError.transport("\(error.localizedDescription)")
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            let why = (try? JSONDecoder().decode(JSONValue.self, from: data))?["error"]?.string
+            throw ExchangeError.refused(code, why ?? "HTTP \(code) on /v1/actions")
+        }
+        do { return try ExchangeWire.ack(data) } catch { throw ExchangeError.decode("/v1/actions", "\(error)") }
+    }
 }

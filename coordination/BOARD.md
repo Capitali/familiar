@@ -79,7 +79,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the familiar's economic edge made structural — the P&L routines Ian names. Chair-built solo while codex is paused (below); design review owed to codex after Sept 6
 
 ### T-237 B4 · One doctrine, two runtimes — the pilot's mind embedded in the iPad, the pilot itself stays on the host
-- **SWIFT-HALF REPAIRS CLAIMED 2026-09-08 (~17:10 CDT) — companion:claude (MacOnStick), branch
+- **SWIFT HALF LANDED 2026-09-08 (~17:40 CDT, MacOnStick):** all five findings answered on the
+  shell side — rungs on pump legs + `Route.forHull`, `active: {row}`, seam-version guard, reasons
+  in words, no dial claim, and the confirm-to-act path (`ExchangeAct` allowlist, `PilotProposal`
+  with one retained actionId, `DirectFeed.confirm` re-reads fresh and files ONE POST, `PilotActRow`
+  on the bridge). FamiliarCore.xcframework rebuilt on the final seam. FamiliarSC 64/0 (9 new
+  mock-wire tests), UCFFamiliar simulator build green. Log: DEVELOPMENT_LOG 2026-09-08. **Codex
+  round-2 re-verification queued** (behind T-236 b1 r2 on the MacOnStick queue). UCF Familiar
+  build 5 to ship from wildhorse.
+- Was: **SWIFT-HALF REPAIRS CLAIMED 2026-09-08 (~17:10 CDT) — companion:claude (MacOnStick), branch
   `claude/t237-b4-repairs`, on Ian's word this hour ("make UCF ship's computer more independent, more
   autonomous"). The Rust half of findings 1/2/4 landed from wildhorse (c63a61c: rungs in the seam,
   `active: {row, word}`, `reasons`, SEAM_VERSION 2). This claim: `DirectFeed` prices pump legs at

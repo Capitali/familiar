@@ -86,7 +86,10 @@ public enum Briefs {
     /// The captain's slug as the host keys it: lowercased, spaces to hyphens, parentheses dropped.
     /// The pilot's verdict (`whisker_advise` output) as the floor says it: the act, the dial
     /// surface it spends, the captain's level, the automation it needs. A reading, never an act.
-    public static func pilot(_ v: JSONValue) -> String {
+    /// `governed` = a dial governs this reading (a host's pilot obeys it); direct mode passes
+    /// false — no dial exists on the device and the seam's default level is NOT the captain's
+    /// setting (codex T-237 B4 re-verification, finding 5), so nothing is claimed about one.
+    public static func pilot(_ v: JSONValue, governed: Bool = true) -> String {
         let d = v["decision"] ?? .null
         let act: String
         switch d["type"]?.string ?? "" {
@@ -101,22 +104,64 @@ public enum Briefs {
         default: act = "no decision"
         }
         var lines = ["The pilot would now: \(act)."]
-        if let surface = v["surface"]?.string, let level = v["level"]?.string {
-            let word: String
-            switch level {
-            case "auto": word = "act on her own"
-            case "confirm": word = "ask before acting"
-            default: word = "only advise"
+        let why = reasons(v["reasons"] ?? .null)
+        if !why.isEmpty, d["type"]?.string != "hold" { lines.append("Because \(why).") }
+        if let surface = v["surface"]?.string {
+            if governed, let level = v["level"]?.string {
+                let word: String
+                switch level {
+                case "auto": word = "act on her own"
+                case "confirm": word = "ask before acting"
+                default: word = "only advise"
+                }
+                lines.append("Dial surface \(surface): the captain's setting is \(level), so aboard a piloted hull she would \(word).")
+            } else {
+                lines.append("Dial surface \(surface). No dial governs this device: nothing is filed unless the captain confirms it here.")
             }
-            lines.append("Dial surface \(surface): the captain's setting is \(level), so aboard a piloted hull she would \(word).")
         }
         if let a = v["automation"]?.string { lines.append("It spends the \(a) automation.") }
         if let s = v["ship"], let fuel = s["fuel"]?.double, let cap = s["fuel_capacity"]?.double {
             let where_ = s["docked"]?.string.map { "at \($0)" } ?? (s["in_flight"]?.bool == true ? "under way" : "adrift")
             lines.append("Read from the wire: \(where_), fuel \(Int(fuel)) of \(Int(cap)), credits \(Int(s["credits"]?.double ?? 0)), wear \(Int(s["wear_bps"]?.double ?? 0)) bps, \(v["board_rows"]?.double.map { "\(Int($0)) loads on the board" } ?? "board unread").")
         }
-        lines.append("This is the same doctrine that flies the hull from the host; here it only reads. Nothing is filed unless the captain acts.")
+        if let build = v["doctrine_build"]?.string, let seam = v["seam_version"]?.int { lines.append("Doctrine build \(build), seam \(seam).") }
+        lines.append(governed
+            ? "This is the same doctrine that flies the hull from the host; here it only reads. Nothing is filed unless the captain acts."
+            : "This is the same doctrine that flies a hull from a host; here it reads, and files only what the captain confirms.")
         return lines.joined(separator: "\n")
+    }
+
+    /// The seam's `reasons` — a stable code and the bounded numbers that chose the branch —
+    /// said in words. The prose is the shell's; every fact is the doctrine's, and an unknown
+    /// code is said as its facts rather than dressed in a rationale the shell invented
+    /// (codex T-237 B4 re-verification, finding 4).
+    public static func reasons(_ r: JSONValue) -> String {
+        guard let code = r["code"]?.string else { return "" }
+        func n(_ k: String) -> String { r[k]?.int.map { String($0) } ?? r[k]?.double.map { String($0) } ?? "?" }
+        func s(_ k: String) -> String { r[k]?.string ?? "?" }
+        func pct(_ k: String) -> String { r[k]?.double.map { "\(Int(($0 * 100).rounded()))%" } ?? "?" }
+        switch code {
+        case "hold": return r["why"]?.string ?? "holding"
+        case "refuel.at-pump": return "fuel \(n("fuel")) of \(n("fuel_capacity")) is under the \(pct("below_fraction")) top-up line and she is at a pump"
+        case "repair.free-under-lease": return "wear \(n("wear_bps")) bps is past the \(n("threshold_bps")) bps line and the lease pays the yard"
+        case "repair.worn": return "wear \(n("wear_bps")) bps is past the \(n("threshold_bps")) bps line; the yard's invoice is ℳ\(n("invoice"))"
+        case "rescue.no-pump-in-reach":
+            return "fuel \(n("fuel")) of \(n("fuel_capacity")) is under the critical \(pct("critical_fraction")) and no pump is in reach"
+                + (r["nearest_pump"]?.string.map { " — the nearest, \($0), needs \(n("nearest_pump_fuel_at_reference")) at the reference drive" } ?? "")
+        case "fuel.pump-in-reach.world-priced":
+            return "the exchange prices this hull to \(s("pump")) on the \(s("burn")) burn at \(n("fuel_needed")) fuel over \(n("ticks")) ticks; the tank holds \(n("tank")) against a reserve of \(n("reserve"))"
+        case "fuel.pump-in-reach.modelled":
+            return "\(s("pump")) is in reach on the \(s("burn")) burn by the shipped model — the exchange did not price this hull; the tank holds \(n("tank")) against a reserve of \(n("reserve"))"
+        case "freight.best-net-per-tick":
+            return "load \(s("load_id")) nets ℳ\(n("estimated_net")) over \(n("deadhead_ticks")) deadhead + \(n("haul_ticks")) haul ticks, due t\(n("deliver_deadline_tick")) at t\(n("tick")), the best of \(n("candidates")) on the board"
+        case "freight.laden-leg": return "load \(s("load_id")) is aboard, bound for \(s("station"))"
+        case "freight.deadhead-to-origin": return "load \(s("load_id")) waits at \(s("station")) to be collected"
+        case "course.filed": return "a course to \(s("station"))"
+        case "freight.delivered-collect": return "load \(s("load_id")) is delivered and its money is waiting"
+        default:
+            let facts = (r.object ?? [:]).filter { $0.key != "code" }.keys.sorted().map { "\($0)=\(r[$0]?.description ?? "")" }
+            return code + (facts.isEmpty ? "" : " (" + facts.joined(separator: ", ") + ")")
+        }
     }
 
     /// The host's `captain_store` slug, reproduced EXACTLY (every character that is not
