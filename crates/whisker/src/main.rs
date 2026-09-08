@@ -433,6 +433,8 @@ fn main() -> ExitCode {
     let mut last_merchant_idle = String::new();
     // A filed trade whose fold has not been read back from the receipt trail yet.
     let mut pending_trade: Option<PendingTrade> = None;
+    // The chain's last word, so the forecast is journaled on change rather than every fold.
+    let mut last_forecast: Vec<String> = Vec::new();
     // The world's day, in ticks: the exchange's minimum hold on bought goods is a
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
@@ -1302,6 +1304,22 @@ fn main() -> ExitCode {
                     }
                     fc
                 };
+                // Say what the chain sees, once per change — the soak's evidence that
+                // the merchant is reading the map and not only the counter.
+                let hungry_now: Vec<String> = forecast
+                    .hungry
+                    .iter()
+                    .map(|((st, g), (h, eq))| format!("{st}:{g} dry in {h}t → {eq}"))
+                    .collect();
+                if hungry_now != last_forecast {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "forecast",
+                               "horizon_ticks": min_hold.max(1) + 96,
+                               "starving": hungry_now}),
+                    );
+                    last_forecast = hungry_now;
+                }
                 let ledger = Ledger {
                     forecast: if recipes.is_empty() {
                         None

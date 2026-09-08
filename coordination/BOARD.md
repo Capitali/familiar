@@ -40,6 +40,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   deliberately touching nothing else — no main.rs, no trade.rs, no doctrine.rs — so the
   live lane's hot files stay theirs. Brick 2 (the merchant consults the forecast) is a
   separate, coordinated claim. Chair-built and self-reviewed while codex is paused.
+- **BRICK 2 CLAIMED AND LANDED — wildhorse, 2026-09-08 (751d1eb + follow-up).** `trade::Forecast`
+  built each fold from `chain::flows` over live galaxy stock merged with a ONE-TIME sweep of
+  every station's `capacity`/`equilibrium` (`/v1/galaxy/prices` carries neither). A target
+  whose input shelf runs dry inside the carry horizon (hold clock + one posting window) is
+  scored toward its equilibrium, capped at double the spot margin; the buy's `why` says so
+  and rides into `position-opened`. A `forecast` journal line fires on change. Pinned: the
+  accept-line case (spot 24.6 < ask 25, forecast lifts to a Buy, why names the shelf) and
+  the beyond-horizon negative. Codex design review owed on bricks 1+2.
 - previously: proposed (Ian, 2026-09-02, verbatim: "when trading, are we planning routes between our ships to deliver goods to processing facilities and haul the resulting cargo -- our plans looking forward should utilize this information in p&L maximization routines." — sent with the Cannery Row works screen: lines, per-cycle inputs/outputs, on-hand stocks)
 - the finding that makes it buildable NOW: the whole production graph is already on the wire. `/v1/reference` carries `recipes[]` (per-station lines: `inputs`, `outputs`, `ticksPerCycle` — e.g. Biscuit Press at tranquility, 22 grain + 4 tinplate → 16 biscuit-substrate per 8 ticks), every station's `consumes`/`produces`/`stocks`, and each good's `madeFrom`/`consumedAt`/`decayBps`; live stock/capacity/equilibrium rides the quotes whisker already reads. Line UTILIZATION (the "2/10" in the works screen) is not obviously served — ask Jeff if the forecast needs it.
 - scope sketch (bricks): (1) a pure `chain` model in whisker — recipes + live stocks → per-input RUNWAY at each works (when its bids must rise) and per-output accumulation (when its asks fall); (2) the merchant's buy-target and the freight ranking consult the forecast (feed a works before it starves; lift a product before it gluts; decay-aware); (3) two-leg cycles as itinerary plans (deliver input, wait/return for output — T-232's station-stop structures are the vehicle); (4) fleet-coordinated legs across a captain's ships — gated on the exchange growing the captain binding (metal#62, the map/fleet-visibility ask)
