@@ -29,6 +29,22 @@ use serde_json::{json, Value};
 /// Who the ship flies for, written at pairing (`captain.json` in the ship store).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Captain {
+    /// The captain's IDENTITY: generated once, meaningless, and the only thing
+    /// anything keys on — the store directory, the persona, the money.
+    ///
+    /// It is deliberately not derived from the name, the key or the world hash.
+    /// The slug it replaces was a lossy transform of the display name: every
+    /// non-alphanumeric became `-`, so "A/B" and "A B" both landed on
+    /// `captains/a-b` and the captain brief summed two people's credits, debt and
+    /// realized P&L into one pile (codex T-236 re-verification, finding 4). An id
+    /// that means nothing cannot collide, and a captain who renames himself does
+    /// not move his money.
+    ///
+    /// Empty on a record written before this existed; [`ensure_captain_id`] fills
+    /// it in and is the only thing that ever writes it.
+    #[serde(default)]
+    pub captain_id: String,
+    /// The captain's DISPLAY NAME. A label, never an identifier.
     pub captain: String,
     /// The key's public id (`keyId`, the first 8 hex of the secret) — never the secret.
     pub key_id: String,
@@ -349,6 +365,76 @@ pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
 /// ship stores keep `captain.json` (who they fly for) and nothing else about the voice.
 /// A persona written into a ship store before this ruling is still read, as a fallback,
 /// so a store from last week does not lose its name.
+/// Where one captain's computer lives, by IDENTITY.
+///
+/// The id is the whole key. [`captain_slug`] survives only to find a store written
+/// before ids existed, and nothing new is ever placed by it.
+pub(crate) fn captain_store_by_id(root: &Path, captain_id: &str) -> PathBuf {
+    root.parent()
+        .unwrap_or(root)
+        .join("captains")
+        .join(if captain_id.trim().is_empty() {
+            "captain"
+        } else {
+            captain_id.trim()
+        })
+}
+
+/// The captain's store, preferring identity and falling back to the legacy slug for
+/// a record that has not been migrated yet.
+pub(crate) fn captain_store_for(root: &Path, rec: &Captain) -> PathBuf {
+    if !rec.captain_id.trim().is_empty() {
+        return captain_store_by_id(root, &rec.captain_id);
+    }
+    captain_store(root, &rec.captain)
+}
+
+/// Give this captain an identity, once, and bring their computer with them.
+///
+/// `siblings` is every paired ship, and it is why this takes the whole fleet rather
+/// than one record: **two hulls can share a captain.** Ian's own two PROD ships are
+/// both "Luke SkyWhisker". Migrating them one at a time would mint two ids, move the
+/// store under the first, and hand the second an empty directory — which is finding
+/// 2's shadowing bug wearing a new hat. So an unmigrated record first adopts the id
+/// of any sibling already carrying one for the same display name; only a captain
+/// nobody has migrated yet gets a fresh id.
+///
+/// Read-old, write-new, and idempotent: a pilot that starts mid-migration finds a
+/// store it understands either way.
+pub(crate) fn ensure_captain_id(root: &Path, rec: &mut Captain, siblings: &[Captain]) -> String {
+    if !rec.captain_id.trim().is_empty() {
+        return rec.captain_id.clone();
+    }
+    let adopted = siblings
+        .iter()
+        .find(|s| s.captain == rec.captain && !s.captain_id.trim().is_empty())
+        .map(|s| s.captain_id.trim().to_string());
+
+    let id = adopted.unwrap_or_else(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("cpt-{nanos:x}-{:x}", std::process::id())
+    });
+
+    // Bring an existing computer with them, once. `rename` is atomic within the
+    // store and leaves nothing half-copied; if it fails the legacy path still
+    // resolves through `captain_store_for`, so the captain keeps their Felix.
+    let from = captain_store(root, &rec.captain);
+    let to = captain_store_by_id(root, &id);
+    if from.exists() && !to.exists() {
+        if let Some(parent) = to.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::rename(&from, &to);
+    }
+    rec.captain_id = id.clone();
+    id
+}
+
+/// The pre-identity store path. Kept ONLY to find what an unmigrated deployment
+/// already wrote; it is lossy and nothing new is keyed by it. See [`Captain::captain_id`].
 pub(crate) fn captain_store(root: &Path, captain: &str) -> PathBuf {
     let slug: String = captain
         .trim()
@@ -371,8 +457,8 @@ pub(crate) fn captain_store(root: &Path, captain: &str) -> PathBuf {
 /// Read through the kernel's loader, so a file the CLI would refuse as invalid is
 /// refused here too instead of flowing raw onto the feed (review 2026-09-05, F2); a
 /// present-but-broken record surfaces as `{"error": …}` rather than as a silent Null.
-pub(crate) fn persona_for(root: &Path, ship_dir: &Path, captain: &str) -> Option<Value> {
-    let cap = captain_store(root, captain);
+pub(crate) fn persona_for(root: &Path, ship_dir: &Path, rec: &Captain) -> Option<Value> {
+    let cap = captain_store_for(root, rec);
     for dir in [cap.as_path(), ship_dir] {
         if !dir.join(familiar_kernel::persona::PERSONA_FILE).exists() {
             continue;
@@ -584,6 +670,87 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
+            // THE COMPUTER IS SETTLED BEFORE THE SHIP IS COMMISSIONED (codex T-236
+            // re-verification, finding 6). Every failure below used to happen after
+            // the world, the key and captain.json were already on disk, so a pair
+            // that could not name the computer left an ACTIVE world behind for the
+            // supervisor to find and fly.
+            //
+            // Identity first: siblings decide it, because two hulls can share a
+            // captain and a second pairing must join the computer that already flies
+            // for them rather than mint a rival.
+            let siblings: Vec<Captain> = paired_ships(&dir, &root)
+                .into_iter()
+                .map(|s| s.captain)
+                .collect();
+            let computer_name = f.get("computer-name").cloned();
+            let mut pending = Captain {
+                captain_id: String::new(),
+                captain: captain.clone(),
+                key_id: String::new(),
+                server: server.clone(),
+                automations: automations.clone(),
+                paired_at: super::now_secs(),
+                hull_name: ship_name.clone(),
+                pilot_args: f
+                    .get("pilot-args")
+                    .map(|s| s.split_whitespace().map(String::from).collect())
+                    .unwrap_or_default(),
+            };
+            let captain_id = ensure_captain_id(&root, &mut pending, &siblings);
+            let persona_dir = captain_store_by_id(&root, &captain_id);
+
+            // What this captain's computer already IS, wherever it was written. A
+            // captain whose only record is the pre-ruling ship-local persona keeps
+            // that computer: reading the captain store alone saw nothing, wrote a
+            // fresh Purr, and shadowed a Felix that was right there (finding 2).
+            let existing = familiar_kernel::persona::load(&persona_dir)
+                .ok()
+                .filter(|_| {
+                    persona_dir
+                        .join(familiar_kernel::persona::PERSONA_FILE)
+                        .exists()
+                })
+                .or_else(|| {
+                    siblings
+                        .iter()
+                        .find(|c| c.captain == *captain)
+                        .and_then(|_| {
+                            paired_ships(&dir, &root)
+                                .iter()
+                                .find(|s| s.captain.captain == *captain)
+                                .and_then(|s| familiar_kernel::persona::load(&s.dir).ok())
+                                .filter(|p| p.name != familiar_kernel::persona::DEFAULT_NAME)
+                        })
+                });
+
+            let persona = match (existing, computer_name.as_deref()) {
+                // Named at pairing: RENAME the captain's computer, never replace it —
+                // a fresh default record here wiped a tuned style (review 2026-09-05).
+                (Some(mut have), Some(name)) => {
+                    have.name = name.to_string();
+                    have
+                }
+                (Some(have), None) => {
+                    println!("  joining {captain}'s computer, {}", have.name);
+                    have
+                }
+                // Only a captain with no computer anywhere gets one written here,
+                // defaulting to the root name — written exactly, never generated around.
+                (None, given) => familiar_kernel::persona::Persona {
+                    persona_version: 2,
+                    name: given
+                        .map(String::from)
+                        .unwrap_or_else(|| familiar_kernel::persona::ROOT_NAME.to_string()),
+                    style: Some(familiar_kernel::persona::Style::default()),
+                    ..familiar_kernel::persona::Persona::default()
+                },
+            };
+            if let Err(e) = persona.validate() {
+                eprintln!("fleet pair: that computer will not do: {e}");
+                return ExitCode::FAILURE;
+            }
+
             let (w, ship_dir) = match instance::commission(
                 &dir,
                 &root,
@@ -620,82 +787,20 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .take(8)
                 .collect::<String>();
             let record = Captain {
-                captain: captain.clone(),
                 key_id: key_id.clone(),
-                server: server.clone(),
-                automations: automations.clone(),
-                paired_at: super::now_secs(),
-                hull_name: ship_name.clone(),
-                pilot_args: f
-                    .get("pilot-args")
-                    .map(|s| s.split_whitespace().map(String::from).collect())
-                    .unwrap_or_default(),
+                ..pending.clone()
             };
             let _ = std::fs::write(
                 ship_dir.join("captain.json"),
                 serde_json::to_vec_pretty(&record).unwrap_or_default(),
             );
-            // The ship's COMPUTER is born here, explicitly (T-236 brick 1): its
-            // own persona in its own store, defaulting to the root name Purr —
-            // written exactly, never generated around. A name given at pairing is
-            // the captain's act; the default is the lineage's.
-            let computer_name = f.get("computer-name").cloned();
-            let persona = familiar_kernel::persona::Persona {
-                persona_version: 2,
-                name: computer_name
-                    .clone()
-                    .unwrap_or_else(|| familiar_kernel::persona::ROOT_NAME.to_string()),
-                style: Some(familiar_kernel::persona::Style::default()),
-                ..familiar_kernel::persona::Persona::default()
-            };
-            // The persona is the CAPTAIN's (Ian, 2026-09-04), so a second ship joins
-            // the computer that already flies for them rather than minting another:
-            // only a captain with no computer yet gets one written here.
-            let persona_dir = captain_store(&root, captain);
-            let _ = std::fs::create_dir_all(&persona_dir);
-            let already = persona_dir
-                .join(familiar_kernel::persona::PERSONA_FILE)
-                .exists();
-            // A name given at pairing RENAMES the captain's existing computer; it does
-            // not replace her (review 2026-09-05, F1: a fresh default record here wiped
-            // a tuned style). Only a captain with no computer yet gets a new record.
-            let persona = match (already, computer_name.as_deref()) {
-                (true, None) => match familiar_kernel::persona::load(&persona_dir) {
-                    Ok(existing) => {
-                        println!("  joining {captain}'s computer, {}", existing.name);
-                        existing
-                    }
-                    Err(e) => {
-                        eprintln!("fleet pair: the captain's persona will not load: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                },
-                (true, Some(name)) => {
-                    let mut existing = match familiar_kernel::persona::load(&persona_dir) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            eprintln!("fleet pair: the captain's persona will not load: {e}");
-                            return ExitCode::FAILURE;
-                        }
-                    };
-                    existing.name = name.to_string();
-                    if let Err(e) = familiar_kernel::persona::write(&persona_dir, &existing) {
-                        eprintln!("fleet pair: writing the captain's persona: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                    existing
-                }
-                (false, _) => {
-                    if let Err(e) = familiar_kernel::persona::write(&persona_dir, &persona) {
-                        eprintln!("fleet pair: writing the captain's persona: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                    persona
-                }
-            };
-            if let Err(e) = familiar_kernel::persona::record_naming(
+            // The computer, and its history, as ONE mutation (finding 3). The trail
+            // used to be a second call whose failure was printed and then reported as
+            // success, so a computer could be renamed with no record of it.
+            if let Err(e) = familiar_kernel::persona::name(
                 &persona_dir,
-                &familiar_kernel::persona::NameEvent {
+                &persona,
+                Some(&familiar_kernel::persona::NameEvent {
                     at: super::now_secs(),
                     actor: if computer_name.is_some() {
                         captain.to_string()
@@ -703,9 +808,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                         "pairing".to_string()
                     },
                     name: persona.name.clone(),
-                },
+                }),
             ) {
-                eprintln!("fleet pair: the naming trail could not be written: {e}");
+                eprintln!("fleet pair: writing the captain's computer: {e}");
+                return ExitCode::FAILURE;
             }
             let ttl: i64 = f
                 .get("ttl-hours")
@@ -748,12 +854,40 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             // The name belongs to the CAPTAIN, not the hull: naming one ship names the
             // computer that flies all of them (Ian, 2026-09-04). The ship is only how
             // the captain was identified.
-            let captain: String = std::fs::read_to_string(ship_dir.join("captain.json"))
+            let mut rec: Captain = match std::fs::read_to_string(ship_dir.join("captain.json"))
                 .ok()
-                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                .and_then(|v| v.get("captain").and_then(Value::as_str).map(String::from))
-                .unwrap_or_default();
-            let persona_dir = captain_store(&root, &captain);
+                .and_then(|t| serde_json::from_str(&t).ok())
+            {
+                Some(c) => c,
+                None => {
+                    eprintln!("fleet rename: {id}'s captain.json will not read");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let captain = rec.captain.clone();
+            // `--captain` LABELS THE ACT; it does not choose whose computer this is.
+            // Passing someone else's name used to rename this ship's captain while
+            // recording the other name in the trail — a forged provenance nobody
+            // would catch by reading it (codex T-236 re-verification, finding 5).
+            if let Some(given) = f.get("captain") {
+                if given != &captain {
+                    eprintln!(
+                        "fleet rename: {id} is {captain}'s ship, not {given}'s. \
+                         --captain records WHO IS NAMING, and it has to be them."
+                    );
+                    return ExitCode::FAILURE;
+                }
+            }
+            let siblings: Vec<Captain> = paired_ships(&dir, &root)
+                .into_iter()
+                .map(|s| s.captain)
+                .collect();
+            let captain_id = ensure_captain_id(&root, &mut rec, &siblings);
+            let _ = std::fs::write(
+                ship_dir.join("captain.json"),
+                serde_json::to_vec_pretty(&rec).unwrap_or_default(),
+            );
+            let persona_dir = captain_store_by_id(&root, &captain_id);
             if let Err(e) = std::fs::create_dir_all(&persona_dir) {
                 eprintln!("fleet rename: {e}");
                 return ExitCode::FAILURE;
@@ -912,9 +1046,23 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 // familiar") answer for a computer that was never named.
                 // The captain's computer, the ship's own record as a fallback for a
                 // store named before the per-captain ruling, else honestly unnamed.
-                let computer = persona_for(&root, &s.dir, &s.captain.captain)
-                    .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from))
-                    .unwrap_or_else(|| "(unnamed — `fleet rename` her)".to_string());
+                // A BROKEN persona is not an unnamed one, and must not read as one
+                // (codex T-236 re-verification, finding 7). `persona_for` reports a
+                // file the kernel refuses as {"error": …}; taking only `name` from
+                // that turned a captain whose computer will not load into a captain
+                // who never named theirs, and the advice — rename her — is exactly
+                // the wrong thing to do to a file that already has a name in it.
+                let computer = match persona_for(&root, &s.dir, &s.captain) {
+                    Some(p) => match (
+                        p.get("name").and_then(Value::as_str),
+                        p.get("error").and_then(Value::as_str),
+                    ) {
+                        (Some(n), _) => n.to_string(),
+                        (None, Some(e)) => format!("(will not load: {e})"),
+                        _ => "(unnamed — `fleet rename` her)".to_string(),
+                    },
+                    None => "(unnamed — `fleet rename` her)".to_string(),
+                };
                 rows.push(json!({
                     "world": s.world.id, "label": s.world.label, "computer": computer,
                     "hull": s.captain.hull_name, "captain": s.captain.captain,
@@ -1165,6 +1313,19 @@ mod captain_store_tests {
         p
     }
 
+    fn rec(name: &str, id: &str) -> Captain {
+        Captain {
+            captain_id: id.into(),
+            captain: name.into(),
+            key_id: "k".into(),
+            server: "s".into(),
+            automations: vec![],
+            paired_at: 0,
+            hull_name: String::new(),
+            pilot_args: vec![],
+        }
+    }
+
     #[test]
     fn the_captain_store_sits_beside_worlds_and_slugs_the_name() {
         let base = tmp("slug");
@@ -1183,6 +1344,104 @@ mod captain_store_tests {
         );
     }
 
+    /// A persona that will not load is not a persona that was never named, and the
+    /// difference matters: the advice for "unnamed" is `fleet rename`, which would
+    /// write over a file that already has a name in it (codex finding 7).
+    #[test]
+    fn a_broken_persona_says_so_rather_than_reading_as_unnamed() {
+        let base = tmp("broken");
+        let root = base.join("worlds");
+        let ship = root.join("ship");
+        std::fs::create_dir_all(&ship).unwrap();
+        std::fs::write(
+            ship.join(familiar_kernel::persona::PERSONA_FILE),
+            "{ not json",
+        )
+        .unwrap();
+        let v = persona_for(&root, &ship, &rec("Cap", "")).expect("a present file is reported");
+        assert!(v.get("name").is_none(), "a broken file has no name to give");
+        assert!(
+            v.get("error").and_then(Value::as_str).is_some(),
+            "it must carry the reason instead: {v}"
+        );
+    }
+
+    /// Two hulls, one captain — the case that would have lost Felix.
+    ///
+    /// Ian's own PROD ships are both "Luke SkyWhisker". Migrating them one at a time
+    /// would mint two ids, move the computer under the first, and hand the second an
+    /// empty store: finding 2's shadowing bug in a new hat. The second hull must
+    /// ADOPT the first's identity.
+    #[test]
+    fn a_second_hull_adopts_its_captains_existing_identity() {
+        let base = tmp("adopt");
+        let root = base.join("worlds");
+        let mut first = rec("Luke SkyWhisker", "");
+        let id = ensure_captain_id(&root, &mut first, &[]);
+        assert!(!id.is_empty());
+        assert_eq!(first.captain_id, id);
+
+        let mut second = rec("Luke SkyWhisker", "");
+        let got = ensure_captain_id(&root, &mut second, std::slice::from_ref(&first));
+        assert_eq!(got, id, "the same captain is the same captain");
+
+        // A DIFFERENT captain never adopts.
+        let mut other = rec("Big Tuna", "");
+        let theirs = ensure_captain_id(&root, &mut other, &[first.clone(), second.clone()]);
+        assert_ne!(theirs, id);
+    }
+
+    /// The migration carries the computer across, once, and is idempotent.
+    #[test]
+    fn migrating_brings_the_captains_computer_with_them() {
+        let base = tmp("carry");
+        let root = base.join("worlds");
+        let legacy = captain_store(&root, "Luke SkyWhisker");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let felix = familiar_kernel::persona::Persona {
+            name: "Felix".into(),
+            ..Default::default()
+        };
+        familiar_kernel::persona::write(&legacy, &felix).unwrap();
+
+        let mut r = rec("Luke SkyWhisker", "");
+        let id = ensure_captain_id(&root, &mut r, &[]);
+        let moved = captain_store_by_id(&root, &id);
+        assert_eq!(
+            familiar_kernel::persona::load(&moved).unwrap().name,
+            "Felix",
+            "the captain keeps the computer they already had"
+        );
+        assert!(!legacy.exists(), "and it is not left in two places");
+
+        // Running it again changes nothing and mints nothing.
+        let again = ensure_captain_id(&root, &mut r, &[]);
+        assert_eq!(again, id);
+    }
+
+    /// The id is what resolves the store; the display name is only a label. Two
+    /// captains whose names slug identically ("A/B" and "A B" both became `a-b`,
+    /// and the brief summed their money) now keep separate stores.
+    #[test]
+    fn names_that_slug_alike_no_longer_share_a_store() {
+        let base = tmp("collide");
+        let root = base.join("worlds");
+        assert_eq!(
+            captain_store(&root, "A/B"),
+            captain_store(&root, "A B"),
+            "the legacy transform really did collide"
+        );
+        let mut one = rec("A/B", "");
+        let mut two = rec("A B", "");
+        let a = ensure_captain_id(&root, &mut one, &[]);
+        let b = ensure_captain_id(&root, &mut two, std::slice::from_ref(&one));
+        assert_ne!(a, b, "different captains, different stores");
+        assert_ne!(
+            captain_store_for(&root, &one),
+            captain_store_for(&root, &two)
+        );
+    }
+
     #[test]
     fn the_captain_persona_wins_over_the_ship_local_record() {
         let base = tmp("precedence");
@@ -1196,7 +1455,7 @@ mod captain_store_tests {
         };
         familiar_kernel::persona::write(&ship, &old).unwrap();
         assert_eq!(
-            persona_for(&root, &ship, "Luke SkyWhisker")
+            persona_for(&root, &ship, &rec("Luke SkyWhisker", ""))
                 .and_then(|v| v["name"].as_str().map(String::from)),
             Some("Purr".into()),
             "a store named before the ruling keeps its name"
@@ -1207,12 +1466,14 @@ mod captain_store_tests {
         };
         familiar_kernel::persona::write(&cap, &felix).unwrap();
         assert_eq!(
-            persona_for(&root, &ship, "Luke SkyWhisker")
+            persona_for(&root, &ship, &rec("Luke SkyWhisker", ""))
                 .and_then(|v| v["name"].as_str().map(String::from)),
             Some("Felix".into())
         );
-        assert!(persona_for(&root, &ship, "Nobody Else").is_some_and(|v| v["name"] == "Purr"));
-        assert!(persona_for(&root, &root.join("other"), "Nobody Else").is_none());
+        assert!(
+            persona_for(&root, &ship, &rec("Nobody Else", "")).is_some_and(|v| v["name"] == "Purr")
+        );
+        assert!(persona_for(&root, &root.join("other"), &rec("Nobody Else", "")).is_none());
     }
 
     #[test]
@@ -1222,7 +1483,7 @@ mod captain_store_tests {
         let cap = captain_store(&root, "Cap");
         std::fs::create_dir_all(&cap).unwrap();
         std::fs::write(cap.join("persona.json"), r#"{"name":"X","not_a_field":1}"#).unwrap();
-        let v = persona_for(&root, &root.join("ship"), "Cap").unwrap();
+        let v = persona_for(&root, &root.join("ship"), &rec("Cap", "")).unwrap();
         assert!(v.get("error").is_some(), "got {v}");
         assert!(v.get("name").is_none());
     }

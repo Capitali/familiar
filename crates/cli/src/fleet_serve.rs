@@ -238,6 +238,17 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
     };
     json!({
         "world": s.world.id, "label": s.world.label, "captain": s.captain.captain,
+        // Identity, and the route built HERE. A client that assembles a brief path
+        // from a display name is reproducing a filesystem transform it cannot see,
+        // which is how the LOCAL bridge came to 404 on a captain that exists
+        // (codex T-236 re-verification, finding 9). `captain` stays a label.
+        "captain_id": s.captain.captain_id,
+        "captain_brief": format!("/captains/{}/brief", if s.captain.captain_id.trim().is_empty() {
+            super::fleet::captain_store(root, &s.captain.captain)
+                .file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()
+        } else {
+            s.captain.captain_id.clone()
+        }),
         "key_id": s.captain.key_id, "server": server,
         "automations": std::fs::read_to_string(s.dir.join("automations.json")).ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(Value::Null),
@@ -267,7 +278,7 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         "open_proposals": open_proposals,
         // The CAPTAIN's computer (T-236 as Ian ruled it, 2026-09-04): one persona
         // across their whole fleet, with a ship-local record as the fallback.
-        "persona": persona_for(root, &s.dir, &s.captain.captain).unwrap_or(Value::Null),
+        "persona": persona_for(root, &s.dir, &s.captain).unwrap_or(Value::Null),
         "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
         "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
         "reachable": me.is_some(),
@@ -333,7 +344,14 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                     "context": {"kind": "fleet", "captains": per_captain.keys().collect::<Vec<_>>()},
                     "captains": per_captain.iter().map(|(c, rows)| json!({
                         "captain": c,
-                        "computer": rows.first().and_then(|r| r["persona"]["name"].as_str()),
+                        // Name, or the reason there is none — never silence, which
+                        // reads as "unnamed" and invites a rename over a file that
+                        // already has a name in it (finding 7).
+                        "computer": rows.first().and_then(|r| r["persona"]["name"].as_str())
+                            .map(String::from)
+                            .or_else(|| rows.first()
+                                .and_then(|r| r["persona"]["error"].as_str())
+                                .map(|e| format!("(will not load: {e})"))),
                         "ships": rows,
                         "pooled_credits": rows.iter().filter_map(|r| r["credits"].as_i64()).sum::<i64>(),
                         "open_proposals": rows.iter().filter_map(|r| r["open_proposals"].as_i64()).sum::<i64>(),
@@ -345,9 +363,17 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
         // hulls and their one book. The same `context` shape as a ship's brief, so a
         // client can put a captain on screen and the conversation follows.
         ("GET", ["captains", slug, "brief"]) => {
+            // Match on IDENTITY first — that is what `captain_brief` hands out. The
+            // legacy slug still resolves so a client built before ids, or a store
+            // that has not been migrated yet, keeps working; it is a fallback, never
+            // the key. Two captains whose names slug alike used to land here as one
+            // captain, and this route summed their money (finding 4).
             let mine: Vec<&Ship> = ships
                 .iter()
                 .filter(|s| {
+                    if !s.captain.captain_id.trim().is_empty() {
+                        return s.captain.captain_id == *slug;
+                    }
                     super::fleet::captain_store(root, &s.captain.captain)
                         .file_name()
                         .map(|f| f.to_string_lossy() == *slug)
@@ -358,8 +384,16 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 return (404, json!({"error": "no captain by that name flies here"}));
             };
             let captain = first.captain.captain.clone();
-            let computer = persona_for(root, &first.dir, &captain)
-                .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from));
+            let computer = persona_for(root, &first.dir, &first.captain).and_then(|p| {
+                p.get("name")
+                    .and_then(Value::as_str)
+                    .map(String::from)
+                    .or_else(|| {
+                        p.get("error")
+                            .and_then(Value::as_str)
+                            .map(|e| format!("(will not load: {e})"))
+                    })
+            });
             let mut rows = Vec::new();
             let (mut credits, mut debt, mut realized, mut aboard_cost, mut open) = (0, 0, 0, 0, 0);
             for s in &mine {
@@ -542,7 +576,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 json!({
                     "context": {"kind": "ship", "world": s.world.id, "hull": s.world.label,
                                 "captain": s.captain.captain,
-                                "computer": persona_for(root, &s.dir, &s.captain.captain)
+                                "computer": persona_for(root, &s.dir, &s.captain)
                                     .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from))},
                     "tick": tick, "tick_seconds": tick_seconds,
                     "ship": row,
@@ -821,7 +855,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             } else {
                 false
             };
-            let joined = persona_for(root, &s.dir, captain)
+            let joined = persona_for(root, &s.dir, &s.captain)
                 .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from));
             (
                 200,
@@ -956,6 +990,13 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             ]);
             if let Some(pa) = get("pilot_args") {
                 cmd.args(["--pilot-args", &pa]);
+            }
+            // The name the captain typed. This route never forwarded it, so a captain
+            // naming their computer Felix on a first pairing over the wire got Purr and
+            // no error — the CLI supports it and only the feed did not (codex T-236
+            // re-verification, finding 1).
+            if let Some(name) = get("computer_name").or_else(|| get("computer-name")) {
+                cmd.args(["--computer-name", &name]);
             }
             let out = cmd.output();
             let _ = std::fs::remove_file(&tmp);
