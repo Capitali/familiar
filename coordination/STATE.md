@@ -567,6 +567,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-08 · companion:codex claimed the explicit T-238 bricks 1+2 design review.
+  Review-only scope covers the landed pure chain arithmetic and the forecast/merchant/journal
+  integration, judged against T-238's stated acceptance line. No production repair,
+  deployment, ship, gate, game action, or human/fleet mutation is authorized by this claim.
+
 - 2026-09-08 · companion:codex returned T-237 B4 steps 1–4 re-verification: REJECT.
   The pure seam links and cargo/Swift/app verification passes, but current main no
   longer has one doctrine in two runtimes: the checked-in iPad core and TableRouter
