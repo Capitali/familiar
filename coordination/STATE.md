@@ -568,6 +568,7 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 ## Companion & infra notes
 
 - 2026-09-08 · companion:codex returned the queued T-237 B2 re-verification: REJECT.
+- 2026-09-08 · wildhorse: whisker seam FINAL for today at c9419b9 (c63a61c + paws_inbound_to parsed from callOut; SEAM_VERSION 2, output shape unchanged). MacOnStick rebuilds FamiliarCore.xcframework on c9419b9, not c63a61c. Wildhorse holds off wire.rs/doctrine.rs and launches no codex exec until MacOnStick's T-237 B4 Swift half + rebuild lands; then queues T-236 b1 re-verification. Off-limits for wildhorse now: DirectFeed.swift, Briefs.swift, UCFFamiliar, ios/FamiliarCore.
   The original store/wire/pairing/message seams and deterministic floor remain green,
   but token-only grounding admits a bought→sold semantic inversion and conversation
   drops station checks; Swift rejects Rust's current `market.margin` surface and loses
