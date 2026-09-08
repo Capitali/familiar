@@ -48,9 +48,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the familiar's economic edge made structural — the P&L routines Ian names. Chair-built solo while codex is paused (below); design review owed to codex after Sept 6
 
 ### T-237 B4 · One doctrine, two runtimes — the pilot's mind embedded in the iPad, the pilot itself stays on the host
-- **CODEX RE-VERIFICATION CLAIMED 2026-09-08 by companion:codex** — review-only scope
-  over landed B4 steps 1–4; no production edit, deployment, ship, gate, game action, or
-  human/fleet mutation is in scope.
+- **CODEX RE-VERIFICATION RETURNED 2026-09-08: REJECT** —
+  `docs/reviews/2026-09-08-t237-b4-codex-reverification.md`. The pure seam links and
+  all suites/builds pass, but five findings remain: host/iPad route-rung decisions
+  diverge after `f2fc51e3`/`ebb337b9`; the active mine row is dropped; direct mode has no
+  captain-confirm act path; actionable verdicts carry no reasons; and an absent dial
+  is reported as the captain's default authorization. Was: claimed companion:codex,
+  review-only over landed B4 steps 1–4.
 - **STEP 4 LANDED 2026-09-07 (companion:claude, MacOnStick; log entry 2026-09-07):** `UCFFamiliar`
   links FamiliarCore; `DirectFeed.adviser` + `pilotAdvice` ask `whisker_advise` with what the
   host runner reads (me, board, stations, priced legs + pumps from here, repair rate, own

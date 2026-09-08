@@ -567,6 +567,18 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-08 · companion:codex returned T-237 B4 steps 1–4 re-verification: REJECT.
+  The pure seam links and cargo/Swift/app verification passes, but current main no
+  longer has one doctrine in two runtimes: the checked-in iPad core and TableRouter
+  cannot consume the host's hull-specific rung quotes (a focused boundary probe made
+  host choose PAWS and iPad choose an economy divert), and its static library also
+  predates the new delivery-deadline rule. The open-board input drops the selected
+  mine contract, and direct mode has no captain-tap act path. Actionable
+  verdicts also omit reasons, and absent dial data is presented as the captain's
+  default setting. Full review:
+  `docs/reviews/2026-09-08-t237-b4-codex-reverification.md`. No production edit,
+  deployment, ship, gate, game action, or human/fleet mutation occurred.
+
 - 2026-09-08 · companion:codex claimed T-237 B4 steps 1–4 re-verification. Review-only
   scope covers the landed pure-doctrine/FFI/iPad direct-mode seam; no production edit,
   deployment, ship, gate, game action, or human/fleet mutation is in scope.
