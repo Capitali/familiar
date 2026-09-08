@@ -567,6 +567,10 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-08 · companion:codex claimed T-237 B4 steps 1–4 re-verification. Review-only
+  scope covers the landed pure-doctrine/FFI/iPad direct-mode seam; no production edit,
+  deployment, ship, gate, game action, or human/fleet mutation is in scope.
+
 - 2026-09-07 · companion:codex returned T-231 repair re-verification Round 2: REJECT.
   Repair `fab3aa8` closes all three Round-1 findings and passes FamiliarMesh 58/0 plus
   the unsigned iOS simulator build, but an expired protected current door retains its
