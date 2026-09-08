@@ -567,6 +567,12 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Companion & infra notes
 
+- 2026-09-08 · companion:codex claimed the queued T-237 B2 re-verification.
+  Review-only scope covers the landed `FamiliarSC` package's store reader, typed wire,
+  pairing, message window, notices, and bridge-voice contract on current main. Production
+  repair, real keys or network calls, approval/dial writes, deployment, shipping, gates,
+  game actions, and human/fleet mutation are excluded.
+
 - 2026-09-08 · companion:codex returned the T-238 bricks 1+2 design review: REJECT.
   Brick 1's pure runway/headroom arithmetic holds and the whisker Rust bar is green,
   but brick 2 confuses the exchange quote's inventory equilibrium with a meal-credit
