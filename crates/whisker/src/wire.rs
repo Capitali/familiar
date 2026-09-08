@@ -49,6 +49,7 @@ pub fn ship_from(me: &Value, repair_rate: i64) -> Ship {
         && tank > 0
         && (fuel_now as f64 / tank as f64) < doctrine::CRITICAL_FUEL;
     Ship {
+        tick: me.get("tick").and_then(Value::as_i64).unwrap_or(0),
         in_flight: docked.is_none() || (route_len > 0 && !stalled),
         docked,
         accel_milli_g: me
@@ -97,6 +98,11 @@ pub fn load_row(v: &Value) -> Option<LoadRow> {
         deadhead_ticks: v.get("deadheadTicks").and_then(Value::as_i64).unwrap_or(0),
         haul_ticks: v.get("haulTicks").and_then(Value::as_i64).unwrap_or(0),
         loading_ticks: v.get("loadingTicks").and_then(Value::as_i64).unwrap_or(8),
+        deliver_deadline_tick: v
+            .get("deliverDeadlineTick")
+            .or_else(|| v.get("deliverByTick"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
         held_for_other: v
             .get("heldForOther")
             .and_then(Value::as_bool)

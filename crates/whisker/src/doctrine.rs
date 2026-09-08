@@ -21,6 +21,8 @@ use std::collections::BTreeSet;
 /// Our hull as the last fold showed it (a subset of `/v1/me`).
 #[derive(Debug, Clone, Default)]
 pub struct Ship {
+    /// The world's clock at this reading, for deadlines stated as absolute ticks.
+    pub tick: i64,
     /// Berthed station id, or None under way.
     pub docked: Option<String>,
     /// The drive as the hull actually delivers it, thousandths of a gravity
@@ -65,6 +67,11 @@ pub struct LoadRow {
     pub deadhead_ticks: i64,
     pub haul_ticks: i64,
     pub loading_ticks: i64,
+    /// The tick the contract must be DELIVERED by, absolute; 0 = the board did
+    /// not say. Past it the fold force-settles wherever the hull is: only what fits
+    /// the destination's shelf lands, the rest is vented unpaid, and the clean-
+    /// delivery bonuses are forfeit.
+    pub deliver_deadline_tick: i64,
     pub held_for_other: bool,
 }
 
@@ -667,6 +674,28 @@ pub fn decide(
         if dead_ticks + ENGAGE_OVERHEAD_TICKS + l.loading_ticks.max(8) > PICKUP_TTL_TICKS {
             continue;
         }
+        // ...and the whole plan must LAND before the delivery deadline, which is
+        // the second clock every contract carries and the one this guard never
+        // read. Past it the fold force-settles the load wherever the hull is:
+        // only what fits the destination's shelf lands, the rest is vented
+        // unpaid, and the clean-delivery bonuses are forfeit. A load that cannot
+        // be delivered in time is not a load; it is a way to lose cargo slowly.
+        // (Ian, 2026-09-08, on the "timer on my cargo" warning.)
+        if l.deliver_deadline_tick > 0 {
+            let haul_ticks = router
+                .leg_distances_km(&l.origin, &l.dest)
+                .map(|d| flight_ticks(&d, accel))
+                .unwrap_or(l.haul_ticks);
+            let lands_at = ship.tick
+                + dead_ticks
+                + ENGAGE_OVERHEAD_TICKS
+                + l.loading_ticks.max(8)
+                + haul_ticks
+                + ENGAGE_OVERHEAD_TICKS;
+            if lands_at > l.deliver_deadline_tick {
+                continue;
+            }
+        }
         // The plan must reach a pump AFTER the delivery too: a hull that arrives at
         // a pumpless destination with an empty tank has no move left but the
         // tanker (LOCAL, titan-larder, 2026-09-02: fuel 94, no pump in reach, a
@@ -812,6 +841,7 @@ mod tests {
 
     fn ship_at(station: &str, fuel: i64) -> Ship {
         Ship {
+            tick: 1_000,
             docked: Some(station.into()),
             in_flight: false,
             accel_milli_g: REFERENCE_ACCEL_MILLI_G,
@@ -838,6 +868,7 @@ mod tests {
             deadhead_ticks: ticks.0,
             haul_ticks: ticks.1,
             loading_ticks: 8,
+            deliver_deadline_tick: 0,
             held_for_other: false,
         }
     }
@@ -1046,6 +1077,7 @@ mod tests {
             }
         }
         let ship = Ship {
+            tick: 1_000,
             docked: Some("cannery-row".into()),
             accel_milli_g: 105,
             wear_bps: 8827,
@@ -1065,6 +1097,7 @@ mod tests {
             deadhead_ticks: 19,
             haul_ticks: 30,
             loading_ticks: 8,
+            deliver_deadline_tick: 0,
             held_for_other: false,
         };
         let far = Chart(1_307_724_939);
@@ -1118,6 +1151,7 @@ mod tests {
                 deadhead_ticks: 19,
                 haul_ticks: 19,
                 loading_ticks: 8,
+                deliver_deadline_tick: 0,
                 held_for_other: false,
             },
             word: ActiveWord::Booked,
@@ -1226,6 +1260,48 @@ mod tests {
         // disagree with it.
         let dry = ship_at("titania-cold-store", 60);
         assert!(reachable_pump("titania-cold-store", &dry, &ps, &Asks).is_none());
+    }
+
+    /// A load that cannot be delivered by its deadline is not booked. The pickup
+    /// window was guarded; the delivery clock — the one that force-settles the
+    /// hold and vents what does not fit — was never read.
+    #[test]
+    fn a_load_that_cannot_land_in_time_is_not_booked() {
+        let ship = ship_at("a", 600); // tick 1_000
+        let mut l = load("L1", "a", "b", 900, (0, 40));
+        // Lands at 1000 + 0 + 4 + 8 + 40 + 4 = 1056. A deadline of 1050 is missed.
+        l.deliver_deadline_tick = 1_050;
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&l),
+            &pumps(&["a"]),
+            &FlatRouter(10),
+        );
+        assert!(
+            !matches!(d, Decision::Book { .. }),
+            "cannot land by 1050: {d:?}"
+        );
+        // The same load with room to spare is taken.
+        l.deliver_deadline_tick = 1_100;
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&l),
+            &pumps(&["a"]),
+            &FlatRouter(10),
+        );
+        assert!(matches!(d, Decision::Book { .. }), "lands by 1100: {d:?}");
+        // A board that does not say (0) is not a board that forbids.
+        l.deliver_deadline_tick = 0;
+        let d = decide(
+            &ship,
+            None,
+            std::slice::from_ref(&l),
+            &pumps(&["a"]),
+            &FlatRouter(10),
+        );
+        assert!(matches!(d, Decision::Book { .. }));
     }
 
     /// A pump WITHIN REACH outranks the tanker too — the same argument one berth
