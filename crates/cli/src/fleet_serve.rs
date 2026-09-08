@@ -381,6 +381,27 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 })
                 .collect();
             let Some(first) = mine.first() else {
+                // A slug that WOULD have matched before the migration is not a
+                // stranger — it is a stale path, and saying so beats "no captain by
+                // that name" to whoever is holding an old client. It is deliberately
+                // not honoured: a slug is ambiguous by construction, and answering
+                // it for a migrated captain would re-open the pooling this fixed.
+                let stale = ships.iter().find(|s| {
+                    !s.captain.captain_id.trim().is_empty()
+                        && super::fleet::captain_store(root, &s.captain.captain)
+                            .file_name()
+                            .map(|f| f.to_string_lossy() == *slug)
+                            .unwrap_or(false)
+                });
+                if let Some(s) = stale {
+                    return (
+                        410,
+                        json!({"error": "that is a name, not an identity — captains moved to ids",
+                               "captain": s.captain.captain,
+                               "captain_id": s.captain.captain_id,
+                               "captain_brief": format!("/captains/{}/brief", s.captain.captain_id)}),
+                    );
+                }
                 return (404, json!({"error": "no captain by that name flies here"}));
             };
             let captain = first.captain.captain.clone();

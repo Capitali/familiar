@@ -970,6 +970,44 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         }
 
         // ── status: every ship, booked per captain ─────────────────────────────
+        // Give every paired captain their identity, once, deliberately.
+        //
+        // `pair` and `rename` mint an id on the way past, but an existing fleet is
+        // touched by neither — so without this the migration would only ever reach a
+        // captain who happened to pair another ship. Kept as its OWN command rather
+        // than folded into `status`: a read that silently rewrites the store is a
+        // read nobody can trust, and this rewrites captain.json and moves a
+        // directory.
+        "adopt-ids" => {
+            let mut ships = paired_ships(&dir, &root);
+            if ships.is_empty() {
+                println!("fleet: no paired ships");
+                return ExitCode::SUCCESS;
+            }
+            // Siblings accumulate as we go, so the second hull of a shared captain
+            // adopts the first's id rather than minting a rival.
+            let mut seen: Vec<Captain> = Vec::new();
+            let mut moved = 0;
+            for s in &mut ships {
+                let had = s.captain.captain_id.clone();
+                let id = ensure_captain_id(&root, &mut s.captain, &seen);
+                if had.trim().is_empty() {
+                    if let Ok(bytes) = serde_json::to_vec_pretty(&s.captain) {
+                        if let Err(e) = std::fs::write(s.dir.join("captain.json"), bytes) {
+                            eprintln!("fleet adopt-ids: {} — {e}", s.world.label);
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                    moved += 1;
+                    println!("  {} — {} is now {id}", s.world.label, s.captain.captain);
+                } else {
+                    println!("  {} — {} already {id}", s.world.label, s.captain.captain);
+                }
+                seen.push(s.captain.clone());
+            }
+            println!("fleet: {moved} record(s) given an identity");
+            ExitCode::SUCCESS
+        }
         "status" => {
             let ships = paired_ships(&dir, &root);
             if ships.is_empty() {
