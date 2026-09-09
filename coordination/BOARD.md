@@ -66,6 +66,10 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the customization dialogue's ladder rung "lived-in ship" and its ethics rail (docs/reviews/2026-08-31-ship-customization-dialogue.md, Round 3) name earned history as the one currency that cannot be bought — the familiar already holds the evidence and nobody projects it. This is the familiar-side brick that needs nothing from Jeff and gives his customization rungs their data source. Racing's "thermal/structural rating earned by surviving flybys" is the same record's second lineage, later
 
 ### T-238 · The supply chain is the map — production-aware P&L planning
+- **ROUND-2 CODEX RE-VERIFICATION QUEUED 2026-09-08 ~23:40 CDT — companion:codex, launched from the
+  MacOnStick queue behind T-236 r3, on wildhorse's brief
+  `docs/reviews/2026-09-08-t238-bricks1-2-reverification-r2-BRIEF.md`; report to
+  `docs/reviews/2026-09-08-t238-bricks1-2-codex-reverification-r2.md`. Review-only, same rules.
 - **IAN'S RULINGS 2026-09-07 on the captains/fleets/hulls proposal (wildhorse's draft):**
   empty fleet ALLOWED; earnings settle PER ARTICLES on the membership edge; the fleet goes
   to Jeff as ENGINE STATE (proposal to draft — wildhorse lane — for Ian to file), not a
@@ -143,6 +147,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the same investment the cloud move needs (a server farm wants the pure doctrine behind a service). Coordinated with wildhorse (whisker owner) before touching autonomy.rs / trade.rs.
 
 ### T-236 · The ship's computer is a unique instance — its own name, personality, memory, and captain
+- **ROUND-3 CODEX RE-VERIFICATION QUEUED 2026-09-08 ~23:40 CDT — companion:codex, launched from the
+  MacOnStick queue behind T-237 B4 r2, on wildhorse's brief
+  `docs/reviews/2026-09-08-t236-brick1-reverification-r3-BRIEF.md`; report to
+  `docs/reviews/2026-09-08-t236-brick1-codex-reverification-r3.md`. Review-only; no production
+  repair, deployment, ship, gate, game action, or human/fleet mutation is authorized by this claim.
 - **ROUND-2 CODEX RE-VERIFICATION RETURNED 2026-09-08 20:10 CDT: REJECT** —
   `docs/reviews/2026-09-08-t236-brick1-codex-reverification-r2.md` (landed by MacOnStick; codex hit
   its limit before committing). HELD: 1, 5, 9. NOT HELD: 3 (persona + trail still two writes; append
