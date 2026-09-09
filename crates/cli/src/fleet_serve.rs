@@ -29,8 +29,9 @@ use familiar_whisker::autonomy::{Approval, Dial, Level, Surface};
 use serde_json::{json, Value};
 
 use super::fleet::{
-    aboard, delivery_totals, estimate_calibration, journal_fills, last_journal_line, lease_expiry,
-    paired_ships, persona_for, pid_alive, read_env_value, trade_book, wire_get, Ship,
+    aboard, computer_state, delivery_totals, estimate_calibration, journal_fills,
+    last_journal_line, lease_expiry, paired_ships, persona_for, pid_alive, read_env_value,
+    trade_book, wire_get, Ship,
 };
 
 const MAX_REQUEST: usize = 64 * 1024;
@@ -279,6 +280,9 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         // The CAPTAIN's computer (T-236 as Ian ruled it, 2026-09-04): one persona
         // across their whole fleet, with a ship-local record as the fallback.
         "persona": persona_for(root, &s.dir, &s.captain).unwrap_or(Value::Null),
+        // The same computer as a TYPED state — named / broken / absent — so a client
+        // never has to read "no name" as "unnamed" (round 2, finding 7).
+        "computer_state": computer_state(root, &s.dir, &s.captain),
         "last_event": last.as_ref().and_then(|v| v.get("event").cloned()).unwrap_or(Value::Null),
         "last_at": last.as_ref().and_then(|v| v.get("at").cloned()).unwrap_or(Value::Null),
         "reachable": me.is_some(),
@@ -322,7 +326,8 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
     match (req.method.as_str(), segs.as_slice()) {
         ("GET", ["brief"]) => {
             // The fleet in one call, for a captain looking at the whole list.
-            let mut per_captain: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            // Grouped by IDENTITY (round 2, finding 4); the display name rides on the entry.
+            let mut per_captain: BTreeMap<String, (String, Vec<Value>)> = BTreeMap::new();
             for s in &ships {
                 let (t, ts) = clock(s, clk);
                 let open = proposals_with_state(&s.dir, t)
@@ -333,17 +338,26 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 row["tick"] = json!(t);
                 row["tick_seconds"] = json!(ts);
                 row["open_proposals"] = json!(open);
-                per_captain
-                    .entry(s.captain.captain.clone())
-                    .or_default()
-                    .push(row);
+                let key = if s.captain.captain_id.trim().is_empty() {
+                    format!(
+                        "slug:{}",
+                        super::fleet::captain_store(root, &s.captain.captain).display()
+                    )
+                } else {
+                    s.captain.captain_id.clone()
+                };
+                let e = per_captain.entry(key).or_default();
+                e.0 = s.captain.captain.clone();
+                e.1.push(row);
             }
             (
                 200,
                 json!({
-                    "context": {"kind": "fleet", "captains": per_captain.keys().collect::<Vec<_>>()},
-                    "captains": per_captain.iter().map(|(c, rows)| json!({
+                    "context": {"kind": "fleet", "captains": per_captain.values().map(|(c, _)| c).collect::<Vec<_>>()},
+                    "captains": per_captain.iter().map(|(id, (c, rows))| json!({
                         "captain": c,
+                        "captain_id": if id.starts_with("slug:") { Value::Null } else { json!(id) },
+                        "computer_state": rows.first().map(|r| r["computer_state"].clone()).unwrap_or(json!({"state": "absent"})),
                         // Name, or the reason there is none — never silence, which
                         // reads as "unnamed" and invites a rename over a file that
                         // already has a name in it (finding 7).
@@ -386,25 +400,45 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 // that name" to whoever is holding an old client. It is deliberately
                 // not honoured: a slug is ambiguous by construction, and answering
                 // it for a migrated captain would re-open the pooling this fixed.
-                let stale = ships.iter().find(|s| {
-                    !s.captain.captain_id.trim().is_empty()
-                        && super::fleet::captain_store(root, &s.captain.captain)
-                            .file_name()
-                            .map(|f| f.to_string_lossy() == *slug)
-                            .unwrap_or(false)
-                });
-                if let Some(s) = stale {
-                    return (
-                        410,
-                        json!({"error": "that is a name, not an identity — captains moved to ids",
-                               "captain": s.captain.captain,
-                               "captain_id": s.captain.captain_id,
-                               "captain_brief": format!("/captains/{}/brief", s.captain.captain_id)}),
-                    );
+                let mut stale: Vec<&Ship> = ships
+                    .iter()
+                    .filter(|s| {
+                        !s.captain.captain_id.trim().is_empty()
+                            && super::fleet::captain_store(root, &s.captain.captain)
+                                .file_name()
+                                .map(|f| f.to_string_lossy() == *slug)
+                                .unwrap_or(false)
+                    })
+                    .collect();
+                stale.sort_by(|a, b| a.captain.captain_id.cmp(&b.captain.captain_id));
+                stale.dedup_by(|a, b| a.captain.captain_id == b.captain.captain_id);
+                match stale.as_slice() {
+                    [] => return (404, json!({"error": "no captain by that name flies here"})),
+                    [s] => {
+                        return (
+                            410,
+                            json!({"error": "that is a name, not an identity — captains moved to ids",
+                                   "captain": s.captain.captain,
+                                   "captain_id": s.captain.captain_id,
+                                   "captain_brief": format!("/captains/{}/brief", s.captain.captain_id)}),
+                        )
+                    }
+                    // A slug that names MORE than one migrated captain cannot say which
+                    // was meant. Name them all and choose none (round 2, finding 4).
+                    many => {
+                        return (
+                            410,
+                            json!({"error": "that is a name, not an identity — and it names more than one captain here",
+                                   "candidates": many.iter().map(|s| json!({
+                                       "captain": s.captain.captain,
+                                       "captain_id": s.captain.captain_id,
+                                       "captain_brief": format!("/captains/{}/brief", s.captain.captain_id)})).collect::<Vec<_>>()}),
+                        )
+                    }
                 }
-                return (404, json!({"error": "no captain by that name flies here"}));
             };
             let captain = first.captain.captain.clone();
+            let state = computer_state(root, &first.dir, &first.captain);
             let computer = persona_for(root, &first.dir, &first.captain).and_then(|p| {
                 p.get("name")
                     .and_then(Value::as_str)
@@ -436,8 +470,10 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 200,
                 json!({
                     "context": {"kind": "captain", "name": captain, "computer": computer,
+                                "computer_state": state,
                                 "ships": rows.iter().map(|r| r["label"].clone()).collect::<Vec<_>>()},
-                    "captain": captain, "computer": computer, "ships": rows,
+                    "captain": captain, "captain_id": first.captain.captain_id,
+                    "computer": computer, "computer_state": state, "ships": rows,
                     // Pooled within this captain, never across (the fleet money boundary).
                     "book": {"pooled_credits": credits, "debt": debt,
                              "trades_realized": realized, "aboard_at_cost": aboard_cost},
@@ -592,13 +628,26 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             let mut row = ship_row(s, root, now);
             row["tick"] = json!(tick);
             row["tick_seconds"] = json!(tick_seconds);
+            // Named, or the reason there is no name — never null for a file that has
+            // a name in it (round 2, finding 7).
+            let state = computer_state(root, &s.dir, &s.captain);
+            let computer_word = match state["state"].as_str() {
+                Some("named") => state["name"].clone(),
+                Some("broken") => json!(format!(
+                    "(will not load: {})",
+                    state["error"].as_str().unwrap_or("")
+                )),
+                _ => Value::Null,
+            };
             (
                 200,
                 json!({
                     "context": {"kind": "ship", "world": s.world.id, "hull": s.world.label,
                                 "captain": s.captain.captain,
-                                "computer": persona_for(root, &s.dir, &s.captain)
-                                    .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from))},
+                                // Named, or the reason there is no name — never null for
+                                // a file that has a name in it (round 2, finding 7).
+                                "computer": computer_word,
+                                "computer_state": state},
                     "tick": tick, "tick_seconds": tick_seconds,
                     "ship": row,
                     "aboard": {"units": aboard_units, "cost": aboard_cost},
@@ -1120,4 +1169,183 @@ pub(crate) fn serve(dir: &Path, root: &Path, bind: &str) -> ExitCode {
         });
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use super::super::fleet::{captain_store_by_id, Captain};
+    use super::*;
+    use std::path::PathBuf;
+
+    fn base(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("fleet_serve_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(p.join("worlds")).unwrap();
+        p
+    }
+
+    /// A paired hull on disk, with no exchange behind it (the server refuses fast).
+    fn hull(base: &Path, label: &str, captain: &str, captain_id: &str) -> Ship {
+        let root = base.join("worlds");
+        let (w, dir) = familiar_world::instance::commission(
+            base,
+            &root,
+            label,
+            "ian",
+            "http://127.0.0.1:1",
+            1_700_000_000,
+        )
+        .unwrap();
+        let rec = Captain {
+            captain_id: captain_id.into(),
+            captain: captain.into(),
+            key_id: "k".into(),
+            server: "http://127.0.0.1:1".into(),
+            automations: vec![],
+            paired_at: 0,
+            hull_name: String::new(),
+            pilot_args: vec![],
+        };
+        std::fs::write(
+            dir.join("captain.json"),
+            serde_json::to_vec_pretty(&rec).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("ucf.env"),
+            "UCF_KEY=ucfk_x\nUCF_SERVER=http://127.0.0.1:1\n",
+        )
+        .unwrap();
+        Ship {
+            world: w,
+            dir,
+            captain: rec,
+        }
+    }
+
+    fn get(path: &str, base: &Path) -> (u16, Value) {
+        let req = Req {
+            method: "GET".into(),
+            path: path.into(),
+            query: BTreeMap::new(),
+            bearer: Some("tok".into()),
+            body: Vec::new(),
+        };
+        handle(req, base, &base.join("worlds"), "tok", &mut Clocks::new())
+    }
+
+    /// Round 2, finding 7: a captain whose store the kernel refuses is BROKEN on
+    /// every surface — typed, with the reason — and never "unnamed", even with a
+    /// valid ship-local record sitting beside it.
+    #[test]
+    fn a_broken_captain_store_is_broken_on_every_surface_not_unnamed() {
+        let b = base("broken");
+        let root = b.join("worlds");
+        let s = hull(&b, "Kibble", "Luke", "cpt-test");
+        let store = captain_store_by_id(&root, "cpt-test");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(
+            store.join("persona.json"),
+            r#"{"name":"X","not_a_field":1}"#,
+        )
+        .unwrap();
+        familiar_kernel::persona::write(
+            &s.dir,
+            &familiar_kernel::persona::Persona {
+                persona_version: 2,
+                name: "Local".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let row = ship_row(&s, &root, 0);
+        assert_eq!(
+            row["computer_state"]["state"], "broken",
+            "{}",
+            row["computer_state"]
+        );
+        assert!(row["computer_state"]["error"].is_string());
+        assert!(
+            row["persona"]["error"].is_string(),
+            "the old field is untouched"
+        );
+
+        let (code, fleet) = get("/brief", &b);
+        assert_eq!(code, 200);
+        assert_eq!(fleet["captains"][0]["captain_id"], "cpt-test");
+        assert_eq!(fleet["captains"][0]["computer_state"]["state"], "broken");
+        assert!(fleet["captains"][0]["computer"]
+            .as_str()
+            .unwrap()
+            .starts_with("(will not load"));
+
+        let (code, cap) = get("/captains/cpt-test/brief", &b);
+        assert_eq!(code, 200);
+        assert_eq!(cap["context"]["computer_state"]["state"], "broken");
+        assert_eq!(cap["computer_state"]["state"], "broken");
+        assert!(cap["context"]["computer"]
+            .as_str()
+            .unwrap()
+            .starts_with("(will not load"));
+
+        let (code, ship) = get(&format!("/ships/{}/brief", s.world.id), &b);
+        assert_eq!(code, 200);
+        assert_eq!(ship["context"]["computer_state"]["state"], "broken");
+        let word = ship["context"]["computer"].as_str().unwrap_or("");
+        assert!(
+            word.starts_with("(will not load"),
+            "was null on a broken record: {}",
+            ship["context"]
+        );
+        assert!(!word.contains("unnamed"));
+    }
+
+    /// A named computer reads as named, and a hull with none reads as absent — the
+    /// third state, distinct from broken.
+    #[test]
+    fn named_and_absent_are_the_other_two_states() {
+        let b = base("states");
+        let root = b.join("worlds");
+        let named = hull(&b, "One", "Luke", "cpt-a");
+        let store = captain_store_by_id(&root, "cpt-a");
+        familiar_kernel::persona::write(
+            &store,
+            &familiar_kernel::persona::Persona {
+                persona_version: 2,
+                name: "Felix".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let bare = hull(&b, "Two", "Ann", "cpt-b");
+        assert_eq!(
+            ship_row(&named, &root, 0)["computer_state"],
+            json!({"state": "named", "name": "Felix"})
+        );
+        assert_eq!(
+            ship_row(&bare, &root, 0)["computer_state"],
+            json!({"state": "absent"})
+        );
+    }
+
+    /// Round 2, finding 4: a stale slug that names MORE than one migrated captain
+    /// gets a 410 that names them all and chooses none; one match keeps its location.
+    #[test]
+    fn an_ambiguous_stale_slug_names_both_and_picks_none() {
+        let b = base("ambiguous");
+        hull(&b, "One", "A/B", "cpt-1");
+        hull(&b, "Two", "A B", "cpt-2");
+        let (code, v) = get("/captains/a-b/brief", &b);
+        assert_eq!(code, 410, "{v}");
+        assert_eq!(v["candidates"].as_array().map(Vec::len), Some(2), "{v}");
+        assert!(v.get("captain_id").is_none(), "no captain chosen: {v}");
+
+        let b2 = base("unambiguous");
+        hull(&b2, "One", "A/B", "cpt-1");
+        let (code, v) = get("/captains/a-b/brief", &b2);
+        assert_eq!(code, 410);
+        assert_eq!(v["captain_id"], "cpt-1");
+        assert!(v.get("candidates").is_none());
+    }
 }

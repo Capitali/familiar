@@ -369,6 +369,10 @@ pub(crate) fn trade_book(receipts: &Value) -> TradeBook {
 ///
 /// The id is the whole key. [`captain_slug`] survives only to find a store written
 /// before ids existed, and nothing new is ever placed by it.
+/// One captain's pooled book on `fleet status`: display name, then credits, debt,
+/// hauls, freight paid, realized trade P&L, inventory at cost.
+type CaptainBook = (String, i64, i64, i64, i64, i64, i64);
+
 pub(crate) fn captain_store_by_id(root: &Path, captain_id: &str) -> PathBuf {
     root.parent()
         .unwrap_or(root)
@@ -389,48 +393,239 @@ pub(crate) fn captain_store_for(root: &Path, rec: &Captain) -> PathBuf {
     captain_store(root, &rec.captain)
 }
 
+/// The one lock every identity assignment and store move takes: `captains/.migrate.lock`
+/// beside the stores. Held by the OS, released however the holder exits, never unlinked.
+fn migration_lock(root: &Path) -> Result<std::fs::File, String> {
+    let captains = root.parent().unwrap_or(root).join("captains");
+    std::fs::create_dir_all(&captains).map_err(|e| format!("captains store: {e}"))?;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(captains.join(".migrate.lock"))
+        .map_err(|e| format!("migration lock: {e}"))?;
+    f.lock().map_err(|e| format!("migration lock: {e}"))?;
+    Ok(f)
+}
+
+/// Where a captain's computer lives today. Typed, so a caller migrates the WHOLE
+/// record from the right place instead of reading one directory and defaulting
+/// (codex T-236 round 2, finding 2: a rename on a legacy hull loaded only the new,
+/// empty id store and printed `was "the familiar"` over a tuned persona).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Origin {
+    /// Already under the captain's identity.
+    IdStore(PathBuf),
+    /// The pre-identity slug store, whole (persona + trail), not yet moved.
+    LegacyStore(PathBuf),
+    /// A ship's own record, from before the per-captain ruling.
+    ShipLocal(PathBuf),
+    /// Never named anywhere.
+    None,
+}
+
+/// Resolve the origin for `rec`, looking at every same-captain hull in `ship_dirs`.
+/// Two ship-local records that DISAGREE are refused rather than the first taken:
+/// picking one silently is how a captain ends up with two voices.
+pub(crate) fn computer_origin(
+    root: &Path,
+    rec: &Captain,
+    ship_dirs: &[PathBuf],
+) -> Result<Origin, String> {
+    let file = familiar_kernel::persona::PERSONA_FILE;
+    if !rec.captain_id.trim().is_empty() {
+        let id_store = captain_store_by_id(root, &rec.captain_id);
+        if id_store.join(file).exists() {
+            return Ok(Origin::IdStore(id_store));
+        }
+    }
+    let legacy = captain_store(root, &rec.captain);
+    if legacy.join(file).exists() {
+        return Ok(Origin::LegacyStore(legacy));
+    }
+    let mut locals: Vec<(&PathBuf, Vec<u8>)> = Vec::new();
+    for d in ship_dirs {
+        if let Ok(bytes) = std::fs::read(d.join(file)) {
+            locals.push((d, bytes));
+        }
+    }
+    let Some((first, first_bytes)) = locals.first() else {
+        return Ok(Origin::None);
+    };
+    if let Some((other, _)) = locals.iter().find(|(_, b)| b != first_bytes) {
+        return Err(format!(
+            "{} has two computers on record that disagree — {} and {} — refusing to pick one; \
+             `fleet rename` the hull that is wrong first",
+            rec.captain,
+            first.display(),
+            other.display()
+        ));
+    }
+    Ok(Origin::ShipLocal((*first).clone()))
+}
+
+/// Bring a ship-local computer into the captain's id store WHOLE: persona bytes and
+/// naming trail, byte-equivalent. Under the persona lock the kernel uses, so a
+/// concurrent naming cannot interleave. Idempotent: a store that already carries a
+/// persona is left alone.
+pub(crate) fn migrate_computer(
+    root: &Path,
+    captain_id: &str,
+    origin: &Origin,
+) -> Result<(), String> {
+    let Origin::ShipLocal(from) = origin else {
+        return Ok(()); // an id store needs nothing; a legacy store moved with the identity
+    };
+    let to = captain_store_by_id(root, captain_id);
+    let file = familiar_kernel::persona::PERSONA_FILE;
+    let trail = familiar_kernel::persona::NAME_EVENTS_FILE;
+    std::fs::create_dir_all(&to).map_err(|e| format!("{}: {e}", to.display()))?;
+    if to.join(file).exists() {
+        return Ok(());
+    }
+    let put = |name: &str| -> std::io::Result<()> {
+        let src = from.join(name);
+        if !src.exists() {
+            return Ok(());
+        }
+        let tmp = to.join(format!("{name}.{}.migrate", std::process::id()));
+        std::fs::copy(&src, &tmp)?;
+        std::fs::File::open(&tmp)?.sync_all()?;
+        std::fs::rename(&tmp, to.join(name))
+    };
+    put(trail).and_then(|_| put(file)).map_err(|e| {
+        let _ = std::fs::remove_file(to.join(trail));
+        let _ = std::fs::remove_file(to.join(file));
+        format!(
+            "migrating {}'s computer from {}: {e}",
+            captain_id,
+            from.display()
+        )
+    })?;
+    std::fs::File::open(&to)
+        .and_then(|d| d.sync_all())
+        .map_err(|e| format!("{}: {e}", to.display()))
+}
+
+/// Every same-captain hull that has no identity yet takes this one, so one captain
+/// resolves one store from every hull — never the migrated copy from the new hull
+/// and the ship-local copy from the old (finding 2). Returns how many were updated.
+pub(crate) fn adopt_siblings(
+    dir: &Path,
+    root: &Path,
+    captain: &str,
+    captain_id: &str,
+) -> Result<usize, String> {
+    let mut n = 0;
+    for mut s in paired_ships(dir, root) {
+        if s.captain.captain != captain || !s.captain.captain_id.trim().is_empty() {
+            continue;
+        }
+        s.captain.captain_id = captain_id.to_string();
+        let bytes = serde_json::to_vec_pretty(&s.captain).map_err(|e| e.to_string())?;
+        std::fs::write(s.dir.join("captain.json"), bytes)
+            .map_err(|e| format!("{}: captain.json: {e}", s.world.label))?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 /// Give this captain an identity, once, and bring their computer with them.
 ///
-/// `siblings` is every paired ship, and it is why this takes the whole fleet rather
-/// than one record: **two hulls can share a captain.** Ian's own two PROD ships are
-/// both "Luke SkyWhisker". Migrating them one at a time would mint two ids, move the
-/// store under the first, and hand the second an empty directory — which is finding
-/// 2's shadowing bug wearing a new hat. So an unmigrated record first adopts the id
-/// of any sibling already carrying one for the same display name; only a captain
-/// nobody has migrated yet gets a fresh id.
+/// `siblings` is every paired ship's record — ALL of them, not the ones visited so
+/// far — and it is why this takes the whole fleet rather than one record: **two hulls
+/// can share a captain.** Ian's own two PROD ships are both "Luke SkyWhisker".
+/// Migrating them one at a time minted two ids, moved the store under the first, and
+/// handed the second an empty directory — finding 2's shadowing bug wearing a new
+/// hat. So an unmigrated record first adopts the id any sibling already carries for
+/// the same display name; only a captain nobody has migrated yet gets a fresh id; a
+/// captain who somehow has TWO ids gets a refusal, not a third.
 ///
-/// Read-old, write-new, and idempotent: a pilot that starts mid-migration finds a
-/// store it understands either way.
-pub(crate) fn ensure_captain_id(root: &Path, rec: &mut Captain, siblings: &[Captain]) -> String {
+/// Under the fleet's migration lock, returning every failure (round 2, finding 4):
+/// the store is moved successfully before the identity is installed, a legacy slug
+/// collision is refused rather than one directory moved for two captains, and a
+/// second run after an interruption finds a state it understands.
+pub(crate) fn ensure_captain_id(
+    root: &Path,
+    rec: &mut Captain,
+    siblings: &[Captain],
+) -> Result<String, String> {
+    let _lock = migration_lock(root)?;
     if !rec.captain_id.trim().is_empty() {
-        return rec.captain_id.clone();
+        return Ok(rec.captain_id.trim().to_string());
     }
-    let adopted = siblings
+    let mut ids: Vec<String> = siblings
         .iter()
-        .find(|s| s.captain == rec.captain && !s.captain_id.trim().is_empty())
-        .map(|s| s.captain_id.trim().to_string());
-
-    let id = adopted.unwrap_or_else(|| {
+        .filter(|s| s.captain == rec.captain && !s.captain_id.trim().is_empty())
+        .map(|s| s.captain_id.trim().to_string())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    if ids.len() > 1 {
+        return Err(format!(
+            "{} already carries {} identities ({}) — refusing to add a third; reconcile them first",
+            rec.captain,
+            ids.len(),
+            ids.join(", ")
+        ));
+    }
+    let from = captain_store(root, &rec.captain);
+    if let Some(other) = siblings.iter().find(|s| {
+        s.captain != rec.captain
+            && s.captain_id.trim().is_empty()
+            && captain_store(root, &s.captain) == from
+    }) {
+        return Err(format!(
+            "the legacy stores of {} and {} collide at {} — name one of them before migrating",
+            rec.captain,
+            other.captain,
+            from.display()
+        ));
+    }
+    let id = ids.pop().unwrap_or_else(|| {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         format!("cpt-{nanos:x}-{:x}", std::process::id())
     });
-
-    // Bring an existing computer with them, once. `rename` is atomic within the
-    // store and leaves nothing half-copied; if it fails the legacy path still
-    // resolves through `captain_store_for`, so the captain keeps their Felix.
-    let from = captain_store(root, &rec.captain);
     let to = captain_store_by_id(root, &id);
-    if from.exists() && !to.exists() {
-        if let Some(parent) = to.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    let file = familiar_kernel::persona::PERSONA_FILE;
+    if from.exists() {
+        if !to.exists() {
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
+            std::fs::rename(&from, &to)
+                .map_err(|e| format!("moving {} to {}: {e}", from.display(), to.display()))?;
+        } else if !to.join(file).exists() {
+            // An interrupted earlier run left the id store empty: finish the move.
+            std::fs::remove_dir_all(&to).map_err(|e| format!("{}: {e}", to.display()))?;
+            std::fs::rename(&from, &to)
+                .map_err(|e| format!("moving {} to {}: {e}", from.display(), to.display()))?;
         }
-        let _ = std::fs::rename(&from, &to);
     }
     rec.captain_id = id.clone();
-    id
+    Ok(id)
+}
+
+/// The computer's state as a typed record — named, broken (with the kernel's
+/// reason), or absent — so no surface has to infer "broken" from a missing name and
+/// tell the captain to rename a file that already has a name in it (finding 7).
+pub(crate) fn computer_state(root: &Path, ship_dir: &Path, rec: &Captain) -> Value {
+    match persona_for(root, ship_dir, rec) {
+        Some(p) => match (
+            p.get("name").and_then(Value::as_str),
+            p.get("error").and_then(Value::as_str),
+        ) {
+            (Some(n), _) => json!({"state": "named", "name": n}),
+            (None, Some(e)) => json!({"state": "broken", "error": e}),
+            _ => json!({"state": "absent"}),
+        },
+        None => json!({"state": "absent"}),
+    }
 }
 
 /// The pre-identity store path. Kept ONLY to find what an unmigrated deployment
@@ -697,32 +892,45 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     .map(|s| s.split_whitespace().map(String::from).collect())
                     .unwrap_or_default(),
             };
-            let captain_id = ensure_captain_id(&root, &mut pending, &siblings);
+            let captain_id = match ensure_captain_id(&root, &mut pending, &siblings) {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("fleet pair: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
             let persona_dir = captain_store_by_id(&root, &captain_id);
 
-            // What this captain's computer already IS, wherever it was written. A
+            // What this captain's computer already IS, wherever it was written — as a
+            // typed origin, migrated WHOLE (persona and trail) into the id store, with
+            // every same-captain hull pointed at it, before anything else happens. A
             // captain whose only record is the pre-ruling ship-local persona keeps
-            // that computer: reading the captain store alone saw nothing, wrote a
-            // fresh Purr, and shadowed a Felix that was right there (finding 2).
-            let existing = familiar_kernel::persona::load(&persona_dir)
-                .ok()
-                .filter(|_| {
-                    persona_dir
-                        .join(familiar_kernel::persona::PERSONA_FILE)
-                        .exists()
-                })
-                .or_else(|| {
-                    siblings
-                        .iter()
-                        .find(|c| c.captain == *captain)
-                        .and_then(|_| {
-                            paired_ships(&dir, &root)
-                                .iter()
-                                .find(|s| s.captain.captain == *captain)
-                                .and_then(|s| familiar_kernel::persona::load(&s.dir).ok())
-                                .filter(|p| p.name != familiar_kernel::persona::DEFAULT_NAME)
-                        })
-                });
+            // that computer, tuned Purr included; two ship-local records that
+            // disagree are refused, not raced (finding 2).
+            let same_captain_dirs: Vec<PathBuf> = paired_ships(&dir, &root)
+                .into_iter()
+                .filter(|s| s.captain.captain == *captain)
+                .map(|s| s.dir)
+                .collect();
+            let origin = match computer_origin(&root, &pending, &same_captain_dirs) {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("fleet pair: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = migrate_computer(&root, &captain_id, &origin) {
+                eprintln!("fleet pair: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = adopt_siblings(&dir, &root, captain, &captain_id) {
+                eprintln!("fleet pair: {e}");
+                return ExitCode::FAILURE;
+            }
+            let existing = match origin {
+                Origin::None => None,
+                _ => familiar_kernel::persona::load(&persona_dir).ok(),
+            };
 
             let persona = match (existing, computer_name.as_deref()) {
                 // Named at pairing: RENAME the captain's computer, never replace it —
@@ -882,13 +1090,46 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .into_iter()
                 .map(|s| s.captain)
                 .collect();
-            let captain_id = ensure_captain_id(&root, &mut rec, &siblings);
-            let _ = std::fs::write(
+            let captain_id = match ensure_captain_id(&root, &mut rec, &siblings) {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("fleet rename: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = std::fs::write(
                 ship_dir.join("captain.json"),
                 serde_json::to_vec_pretty(&rec).unwrap_or_default(),
-            );
+            ) {
+                eprintln!("fleet rename: captain.json: {e}");
+                return ExitCode::FAILURE;
+            }
             let persona_dir = captain_store_by_id(&root, &captain_id);
             if let Err(e) = std::fs::create_dir_all(&persona_dir) {
+                eprintln!("fleet rename: {e}");
+                return ExitCode::FAILURE;
+            }
+            // The computer to rename is wherever it lives TODAY — a legacy hull's
+            // ship-local record is migrated whole first, so the rename never lands
+            // on an empty id store and prints `was "the familiar"` over a tuned
+            // persona (round 2, finding 2).
+            let same_captain_dirs: Vec<PathBuf> = paired_ships(&dir, &root)
+                .into_iter()
+                .filter(|s| s.captain.captain == captain)
+                .map(|s| s.dir)
+                .collect();
+            let origin = match computer_origin(&root, &rec, &same_captain_dirs) {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("fleet rename: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = migrate_computer(&root, &captain_id, &origin) {
+                eprintln!("fleet rename: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = adopt_siblings(&dir, &root, &captain, &captain_id) {
                 eprintln!("fleet rename: {e}");
                 return ExitCode::FAILURE;
             }
@@ -987,26 +1228,45 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 println!("fleet: no paired ships");
                 return ExitCode::SUCCESS;
             }
-            // Siblings accumulate as we go, so the second hull of a shared captain
-            // adopts the first's id rather than minting a rival.
-            let mut seen: Vec<Captain> = Vec::new();
+            // Every record is inspected before any is assigned (round 2, finding 4):
+            // an unmigrated hull listed before an already-migrated sibling used to
+            // mint a rival id because only the records visited so far were siblings.
             let mut moved = 0;
-            for s in &mut ships {
-                let had = s.captain.captain_id.clone();
-                let id = ensure_captain_id(&root, &mut s.captain, &seen);
+            let mut i = 0;
+            while i < ships.len() {
+                let all: Vec<Captain> = ships.iter().map(|s| s.captain.clone()).collect();
+                let had = ships[i].captain.captain_id.clone();
+                let id = match ensure_captain_id(&root, &mut ships[i].captain, &all) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        eprintln!("fleet adopt-ids: {} — {e}", ships[i].world.label);
+                        return ExitCode::FAILURE;
+                    }
+                };
                 if had.trim().is_empty() {
-                    if let Ok(bytes) = serde_json::to_vec_pretty(&s.captain) {
+                    let name = ships[i].captain.captain.clone();
+                    // This hull and every same-captain sibling without an id, in one go.
+                    for s in ships.iter_mut().filter(|s| {
+                        s.captain.captain == name && s.captain.captain_id.trim().is_empty()
+                    }) {
+                        s.captain.captain_id = id.clone();
+                    }
+                    for s in ships.iter().filter(|s| s.captain.captain == name) {
+                        let bytes = serde_json::to_vec_pretty(&s.captain).unwrap_or_default();
                         if let Err(e) = std::fs::write(s.dir.join("captain.json"), bytes) {
                             eprintln!("fleet adopt-ids: {} — {e}", s.world.label);
                             return ExitCode::FAILURE;
                         }
+                        moved += 1;
+                        println!("  {} — {} is now {id}", s.world.label, s.captain.captain);
                     }
-                    moved += 1;
-                    println!("  {} — {} is now {id}", s.world.label, s.captain.captain);
                 } else {
-                    println!("  {} — {} already {id}", s.world.label, s.captain.captain);
+                    println!(
+                        "  {} — {} already {id}",
+                        ships[i].world.label, ships[i].captain.captain
+                    );
                 }
-                seen.push(s.captain.clone());
+                i += 1;
             }
             println!("fleet: {moved} record(s) given an identity");
             ExitCode::SUCCESS
@@ -1021,7 +1281,9 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             let now = super::now_secs();
             let mut rows: Vec<Value> = Vec::new();
             // credits, debt, hauls, freight paid, realized trade P&L, inventory at cost
-            let mut per_captain: BTreeMap<String, (i64, i64, i64, i64, i64, i64)> = BTreeMap::new();
+            // Keyed by IDENTITY, never by the display name (round 2, finding 4): two
+            // captains whose names slug alike are two captains with two books.
+            let mut per_captain: BTreeMap<String, CaptainBook> = BTreeMap::new();
             for s in &ships {
                 let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
                 let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
@@ -1073,13 +1335,22 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 let (closed_positions, expected, est_realized) = estimate_calibration(&s.dir);
                 let credits = g("credits").as_i64().unwrap_or(0);
                 let debt = g("debt").as_i64().unwrap_or(0);
-                let e = per_captain.entry(s.captain.captain.clone()).or_default();
-                e.0 += credits;
-                e.1 += debt;
-                e.2 += hauls;
-                e.3 += paid;
-                e.4 += book.realized;
-                e.5 += aboard_cost;
+                let key = if s.captain.captain_id.trim().is_empty() {
+                    format!(
+                        "slug:{}",
+                        captain_store(&root, &s.captain.captain).display()
+                    )
+                } else {
+                    s.captain.captain_id.clone()
+                };
+                let e = per_captain.entry(key).or_default();
+                e.0 = s.captain.captain.clone();
+                e.1 += credits;
+                e.2 += debt;
+                e.3 += hauls;
+                e.4 += paid;
+                e.5 += book.realized;
+                e.6 += aboard_cost;
                 let last = last_journal_line(&s.dir);
                 let expiry = lease_expiry(&s.dir);
                 // A ship paired before T-236 has no persona file: say so honestly
@@ -1133,9 +1404,9 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             if json_out {
                 println!(
                     "{}",
-                    json!({"ships": rows, "captains": per_captain.iter().map(|(c, (cr, d, h, p, rz, inv))| json!({
-                        "captain": c, "pooled_credits": cr, "debt": d, "hauls": h, "freight_paid": p,
-                        "trade_realized": rz, "inventory_cost": inv})).collect::<Vec<_>>()})
+                    json!({"ships": rows, "captains": per_captain.iter().map(|(id, (c, cr, d, h, p, rz, inv))| json!({
+                        "captain_id": id, "captain": c, "pooled_credits": cr, "debt": d, "hauls": h,
+                        "freight_paid": p, "trade_realized": rz, "inventory_cost": inv})).collect::<Vec<_>>()})
                 );
                 return ExitCode::SUCCESS;
             }
@@ -1203,7 +1474,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 );
             }
             println!("— per captain (pooled within a captain, never across) —");
-            for (c, (cr, d, h, p, rz, inv)) in &per_captain {
+            for (c, cr, d, h, p, rz, inv) in per_captain.values() {
                 println!(
                     "  {c}: ℳ{cr} pooled, debt {d}, {h} hauls, ℳ{p} freight paid, trades realized ℳ{rz}, ℳ{inv} aboard at cost"
                 );
@@ -1418,17 +1689,18 @@ mod captain_store_tests {
         let base = tmp("adopt");
         let root = base.join("worlds");
         let mut first = rec("Luke SkyWhisker", "");
-        let id = ensure_captain_id(&root, &mut first, &[]);
+        let id = ensure_captain_id(&root, &mut first, &[]).unwrap();
         assert!(!id.is_empty());
         assert_eq!(first.captain_id, id);
 
         let mut second = rec("Luke SkyWhisker", "");
-        let got = ensure_captain_id(&root, &mut second, std::slice::from_ref(&first));
+        let got = ensure_captain_id(&root, &mut second, std::slice::from_ref(&first)).unwrap();
         assert_eq!(got, id, "the same captain is the same captain");
 
         // A DIFFERENT captain never adopts.
         let mut other = rec("Big Tuna", "");
-        let theirs = ensure_captain_id(&root, &mut other, &[first.clone(), second.clone()]);
+        let theirs =
+            ensure_captain_id(&root, &mut other, &[first.clone(), second.clone()]).unwrap();
         assert_ne!(theirs, id);
     }
 
@@ -1446,7 +1718,7 @@ mod captain_store_tests {
         familiar_kernel::persona::write(&legacy, &felix).unwrap();
 
         let mut r = rec("Luke SkyWhisker", "");
-        let id = ensure_captain_id(&root, &mut r, &[]);
+        let id = ensure_captain_id(&root, &mut r, &[]).unwrap();
         let moved = captain_store_by_id(&root, &id);
         assert_eq!(
             familiar_kernel::persona::load(&moved).unwrap().name,
@@ -1456,7 +1728,7 @@ mod captain_store_tests {
         assert!(!legacy.exists(), "and it is not left in two places");
 
         // Running it again changes nothing and mints nothing.
-        let again = ensure_captain_id(&root, &mut r, &[]);
+        let again = ensure_captain_id(&root, &mut r, &[]).unwrap();
         assert_eq!(again, id);
     }
 
@@ -1474,8 +1746,8 @@ mod captain_store_tests {
         );
         let mut one = rec("A/B", "");
         let mut two = rec("A B", "");
-        let a = ensure_captain_id(&root, &mut one, &[]);
-        let b = ensure_captain_id(&root, &mut two, std::slice::from_ref(&one));
+        let a = ensure_captain_id(&root, &mut one, &[]).unwrap();
+        let b = ensure_captain_id(&root, &mut two, std::slice::from_ref(&one)).unwrap();
         assert_ne!(a, b, "different captains, different stores");
         assert_ne!(
             captain_store_for(&root, &one),
@@ -1573,12 +1845,23 @@ mod captain_store_tests {
         key: &str,
         name: Option<&str>,
     ) -> Vec<String> {
+        pair_args_for(base, server, "A. Captain", label, key, name)
+    }
+
+    fn pair_args_for(
+        base: &Path,
+        server: &str,
+        captain: &str,
+        label: &str,
+        key: &str,
+        name: Option<&str>,
+    ) -> Vec<String> {
         let mut v: Vec<String> = [
             "pair",
             "--label",
             label,
             "--captain",
-            "A. Captain",
+            captain,
             "--server",
             server,
             "--key",
@@ -1715,6 +1998,298 @@ mod captain_store_tests {
         assert_eq!(
             familiar_kernel::persona::load(&store).unwrap().name,
             "Felix"
+        );
+    }
+
+    /// Turn a paired hull back into a pre-identity one: no captain_id, no id store,
+    /// and its computer written ship-local with a trail — the deployment shape every
+    /// hull had before T-236's identity landed.
+    fn make_legacy(base: &Path, ship: &Ship, computer: &str, trail_actor: &str) {
+        let root = base.join("worlds");
+        let _ = std::fs::remove_dir_all(captain_store_by_id(&root, &ship.captain.captain_id));
+        let mut rec = ship.captain.clone();
+        rec.captain_id = String::new();
+        std::fs::write(
+            ship.dir.join("captain.json"),
+            serde_json::to_vec_pretty(&rec).unwrap(),
+        )
+        .unwrap();
+        let p = familiar_kernel::persona::Persona {
+            persona_version: 2,
+            name: computer.into(),
+            style: Some(familiar_kernel::persona::Style::default()),
+            ..Default::default()
+        };
+        familiar_kernel::persona::name(
+            &ship.dir,
+            &p,
+            Some(&familiar_kernel::persona::NameEvent {
+                at: 7,
+                actor: trail_actor.into(),
+                name: computer.into(),
+            }),
+        )
+        .unwrap();
+    }
+
+    /// Round 2, finding 2: a second pairing for a captain whose only computer is a
+    /// hull's ship-local record brings that computer WHOLE — a tuned Purr included,
+    /// trail included — into the id store, and points the old hull at it too. One
+    /// captain, one voice, from either hull.
+    #[test]
+    fn a_second_pairing_migrates_the_whole_ship_local_computer_and_its_sibling() {
+        let base = tmp("migrate_whole");
+        let server = stub_exchange(2);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "old",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let old = paired_ships(&base, &root).remove(0);
+        make_legacy(&base, &old, "Purr", "tuned-by-the-captain");
+
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "new",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let ships = paired_ships(&base, &root);
+        assert_eq!(ships.len(), 2);
+        let ids: std::collections::BTreeSet<&str> = ships
+            .iter()
+            .map(|s| s.captain.captain_id.as_str())
+            .collect();
+        assert_eq!(
+            ids.len(),
+            1,
+            "one captain, one identity, on both hulls: {ids:?}"
+        );
+        let id = ids.into_iter().next().unwrap();
+        assert!(!id.is_empty());
+        let store = captain_store_by_id(&root, id);
+        assert_eq!(
+            familiar_kernel::persona::load(&store).unwrap().name,
+            "Purr",
+            "the tuned Purr is retained"
+        );
+        let trail = familiar_kernel::persona::namings(&store);
+        assert!(
+            trail.iter().any(|e| e.actor == "tuned-by-the-captain"),
+            "the trail came whole: {trail:?}"
+        );
+        for s in &ships {
+            let v = persona_for(&root, &s.dir, &s.captain).unwrap();
+            assert_eq!(v["name"], "Purr", "{}", s.world.label);
+        }
+    }
+
+    /// Two ship-local records that disagree are refused, not raced.
+    #[test]
+    fn disagreeing_ship_local_computers_refuse_a_pairing() {
+        let base = tmp("disagree");
+        let server = stub_exchange(3);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let ships = paired_ships(&base, &root);
+        make_legacy(&base, &ships[0], "Felix", "a");
+        make_legacy(&base, &ships[1], "Mittens", "b");
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "three",
+                "ucfk_cccccccccccccccccccc",
+                None
+            )),
+            ExitCode::FAILURE
+        );
+        assert_eq!(
+            paired_ships(&base, &root).len(),
+            2,
+            "nothing was commissioned"
+        );
+    }
+
+    /// A rename on a legacy hull renames the computer it HAS, migrated whole first —
+    /// never an empty id store's default.
+    #[test]
+    fn a_rename_on_a_legacy_hull_keeps_the_tuned_computer() {
+        let base = tmp("rename_legacy");
+        let server = stub_exchange(1);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "hull",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let ship = paired_ships(&base, &root).remove(0);
+        make_legacy(&base, &ship, "Purr", "tuned-by-the-captain");
+        let rc = cmd_fleet(&[
+            "rename".into(),
+            ship.world.id.clone(),
+            "Mittens".into(),
+            "--data-dir".into(),
+            base.to_string_lossy().into_owned(),
+            "--store-root".into(),
+            root.to_string_lossy().into_owned(),
+        ]);
+        assert_eq!(rc, ExitCode::SUCCESS);
+        let after = paired_ships(&base, &root).remove(0);
+        assert!(!after.captain.captain_id.is_empty());
+        let store = captain_store_by_id(&root, &after.captain.captain_id);
+        assert_eq!(
+            familiar_kernel::persona::load(&store).unwrap().name,
+            "Mittens"
+        );
+        let trail = familiar_kernel::persona::namings(&store);
+        assert_eq!(
+            trail.len(),
+            2,
+            "the migrated naming and the rename: {trail:?}"
+        );
+        assert_eq!(trail[0].name, "Purr");
+        assert_eq!(trail[1].name, "Mittens");
+    }
+
+    /// Round 2, finding 4: an unmigrated hull listed BEFORE its already-migrated
+    /// sibling adopts the sibling's id — adopt-ids inspects every record first.
+    #[test]
+    fn adopt_ids_hands_one_captain_one_id_whichever_hull_is_first() {
+        let base = tmp("adopt_order");
+        let server = stub_exchange(2);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "first",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "second",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let ships = paired_ships(&base, &root);
+        let kept = ships[1].captain.captain_id.clone();
+        let mut rec = ships[0].captain.clone();
+        rec.captain_id = String::new();
+        std::fs::write(
+            ships[0].dir.join("captain.json"),
+            serde_json::to_vec_pretty(&rec).unwrap(),
+        )
+        .unwrap();
+        let rc = cmd_fleet(&[
+            "adopt-ids".into(),
+            "--data-dir".into(),
+            base.to_string_lossy().into_owned(),
+            "--store-root".into(),
+            root.to_string_lossy().into_owned(),
+        ]);
+        assert_eq!(rc, ExitCode::SUCCESS);
+        let after = paired_ships(&base, &root);
+        assert!(
+            after.iter().all(|s| s.captain.captain_id == kept),
+            "{:?}",
+            after
+                .iter()
+                .map(|s| &s.captain.captain_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Two captains whose names slug alike, both unmigrated, are a collision the
+    /// migration refuses rather than moving one directory for two people.
+    #[test]
+    fn adopt_ids_refuses_colliding_legacy_slugs() {
+        let base = tmp("adopt_collide");
+        let server = stub_exchange(2);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "A/B",
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "A B",
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        for s in paired_ships(&base, &root) {
+            let mut rec = s.captain.clone();
+            rec.captain_id = String::new();
+            std::fs::write(
+                s.dir.join("captain.json"),
+                serde_json::to_vec_pretty(&rec).unwrap(),
+            )
+            .unwrap();
+        }
+        let rc = cmd_fleet(&[
+            "adopt-ids".into(),
+            "--data-dir".into(),
+            base.to_string_lossy().into_owned(),
+            "--store-root".into(),
+            root.to_string_lossy().into_owned(),
+        ]);
+        assert_eq!(
+            rc,
+            ExitCode::FAILURE,
+            "a slug shared by two captains is refused"
         );
     }
 }
