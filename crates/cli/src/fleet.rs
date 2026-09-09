@@ -601,8 +601,20 @@ pub(crate) fn ensure_captain_id(
             std::fs::rename(&from, &to)
                 .map_err(|e| format!("moving {} to {}: {e}", from.display(), to.display()))?;
         } else if !to.join(file).exists() {
-            // An interrupted earlier run left the id store empty: finish the move.
-            std::fs::remove_dir_all(&to).map_err(|e| format!("{}: {e}", to.display()))?;
+            // An interrupted earlier run left the id store without a persona: finish
+            // the move — but only over an EMPTY directory. A trail is a history, and
+            // we do not forget names.
+            let empty = std::fs::read_dir(&to)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(false);
+            if !empty {
+                return Err(format!(
+                    "{} holds records but no persona, and {} also exists — refusing to move over it",
+                    to.display(),
+                    from.display()
+                ));
+            }
+            std::fs::remove_dir(&to).map_err(|e| format!("{}: {e}", to.display()))?;
             std::fs::rename(&from, &to)
                 .map_err(|e| format!("moving {} to {}: {e}", from.display(), to.display()))?;
         }
@@ -626,6 +638,138 @@ pub(crate) fn computer_state(root: &Path, ship_dir: &Path, rec: &Captain) -> Val
         },
         None => json!({"state": "absent"}),
     }
+}
+
+/// One line of the fleet's names ledger: who has worn what name, and when it changed.
+///
+/// Ian, 2026-09-08 (verbatim): "Two captains cannot have the same name, two ships cannot
+/// have the same name. Two ships computers cannot have the same name. Names are unique.
+/// We remember names. Names are important to the familiar. Lineage is important. We do
+/// not forget names." The ledger is append-only and fleet-wide (`captains/names.jsonl`,
+/// beside the stores); the per-computer trail is the computer's own history, this is the
+/// household's. Nothing here is ever removed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct NameEntry {
+    pub at: i64,
+    /// `captain` | `hull` | `computer`
+    pub kind: String,
+    pub name: String,
+    /// Who wears it: a `captain_id` for captains and computers, a world id for hulls.
+    pub holder: String,
+    /// `paired` | `named` | `renamed` | `reassigned` | `unpaired`
+    pub act: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub from: String,
+    pub by: String,
+}
+
+fn names_ledger(root: &Path) -> PathBuf {
+    root.parent()
+        .unwrap_or(root)
+        .join("captains")
+        .join("names.jsonl")
+}
+
+/// Every name the fleet has ever recorded, oldest first.
+pub(crate) fn names(root: &Path) -> Vec<NameEntry> {
+    std::fs::read_to_string(names_ledger(root))
+        .map(|t| {
+            t.lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Remember a name. Appended and synced under the fleet's migration lock, so two
+/// namings cannot interleave a line. A failure to remember is a failure: the act
+/// that could not be recorded is not reported as done.
+pub(crate) fn record_name(root: &Path, entry: &NameEntry) -> Result<(), String> {
+    use std::io::Write as _;
+    let _lock = migration_lock(root)?;
+    let path = names_ledger(root);
+    let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    writeln!(f, "{line}").map_err(|e| format!("{}: {e}", path.display()))?;
+    f.sync_all().map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn fold_name(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+/// May this captain's computer wear `name`? Unique across the fleet, case-folded,
+/// against every OTHER captain's computer — the one it wears now, and every one the
+/// ledger says it ever wore (a name is a lineage, not a label). A captain may return
+/// to a name they themselves wore before.
+pub(crate) fn computer_name_free(
+    dir: &Path,
+    root: &Path,
+    name: &str,
+    captain: &str,
+    captain_id: &str,
+) -> Result<(), String> {
+    let want = fold_name(name);
+    // The household's root name is the UNNAMED state — status already says so — not a
+    // name anyone chose. Uniqueness is for names given.
+    if want == fold_name(familiar_kernel::persona::ROOT_NAME) {
+        return Ok(());
+    }
+    for e in names(root) {
+        if e.kind == "computer" && fold_name(&e.name) == want && e.holder != captain_id {
+            return Err(format!(
+                "\"{name}\" is {}'s computer's name (since {}); two ships' computers cannot have \
+                 the same name",
+                e.holder, e.at
+            ));
+        }
+    }
+    for s in paired_ships(dir, root) {
+        // Same identity, or the same captain by name (a hull from before identity
+        // landed is still theirs): their own computer is not a rival.
+        if s.captain.captain_id == captain_id || s.captain.captain == captain {
+            continue;
+        }
+        if let Some(p) = persona_for(root, &s.dir, &s.captain) {
+            if p.get("name").and_then(Value::as_str).map(fold_name) == Some(want.clone()) {
+                return Err(format!(
+                    "\"{name}\" is {}'s computer's name; two ships' computers cannot have the same name",
+                    s.captain.captain
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// May a hull named `hull_name` be paired under `key_id`? Two ships cannot have the
+/// same name: a second paired hull wearing a name the fleet already flies, on a
+/// different key, is refused — the world may have made the mistake, the familiar
+/// will not hold it.
+pub(crate) fn hull_name_free(
+    dir: &Path,
+    root: &Path,
+    hull_name: &str,
+    key_id: &str,
+) -> Result<(), String> {
+    if hull_name.trim().is_empty() {
+        return Ok(());
+    }
+    let want = fold_name(hull_name);
+    for s in paired_ships(dir, root) {
+        if fold_name(&s.captain.hull_name) == want && s.captain.key_id != key_id {
+            return Err(format!(
+                "a ship named \"{hull_name}\" is already paired ({}, key {}); two ships cannot \
+                 have the same name",
+                s.world.label, s.captain.key_id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The pre-identity store path. Kept ONLY to find what an unmigrated deployment
@@ -865,6 +1009,16 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
+            let key_id = key
+                .trim_start_matches("ucfk_")
+                .chars()
+                .take(8)
+                .collect::<String>();
+            // Two ships cannot have the same name (Ian, 2026-09-08).
+            if let Err(e) = hull_name_free(&dir, &root, &ship_name, &key_id) {
+                eprintln!("fleet pair: {e}");
+                return ExitCode::FAILURE;
+            }
             // THE COMPUTER IS SETTLED BEFORE THE SHIP IS COMMISSIONED (codex T-236
             // re-verification, finding 6). Every failure below used to happen after
             // the world, the key and captain.json were already on disk, so a pair
@@ -958,6 +1112,12 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 eprintln!("fleet pair: that computer will not do: {e}");
                 return ExitCode::FAILURE;
             }
+            // Two ships' computers cannot have the same name (Ian, 2026-09-08): a name
+            // given here must be free across every OTHER captain, now and ever.
+            if let Err(e) = computer_name_free(&dir, &root, &persona.name, captain, &captain_id) {
+                eprintln!("fleet pair: {e}");
+                return ExitCode::FAILURE;
+            }
 
             // The computer, and its history, as ONE recoverable mutation (finding 3) —
             // and BEFORE the ship is commissioned (round 2, finding 6): a naming that
@@ -977,6 +1137,38 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ) {
                 eprintln!("fleet pair: writing the captain's computer: {e}");
                 return ExitCode::FAILURE;
+            }
+            // Remembered in the fleet's ledger: the captain, and the computer's name
+            // under them. Lineage is important; we do not forget names.
+            let by = if computer_name.is_some() {
+                captain.to_string()
+            } else {
+                "pairing".to_string()
+            };
+            for entry in [
+                NameEntry {
+                    at: super::now_secs(),
+                    kind: "captain".into(),
+                    name: captain.to_string(),
+                    holder: captain_id.clone(),
+                    act: "paired".into(),
+                    from: String::new(),
+                    by: by.clone(),
+                },
+                NameEntry {
+                    at: super::now_secs(),
+                    kind: "computer".into(),
+                    name: persona.name.clone(),
+                    holder: captain_id.clone(),
+                    act: "named".into(),
+                    from: String::new(),
+                    by,
+                },
+            ] {
+                if let Err(e) = record_name(&root, &entry) {
+                    eprintln!("fleet pair: the names ledger could not be written: {e}");
+                    return ExitCode::FAILURE;
+                }
             }
             let (w, ship_dir) = match instance::commission(
                 &dir,
@@ -1008,15 +1200,24 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 ship_dir.join("automations.json"),
                 serde_json::to_vec_pretty(&automations).unwrap_or_default(),
             );
-            let key_id = key
-                .trim_start_matches("ucfk_")
-                .chars()
-                .take(8)
-                .collect::<String>();
             let record = Captain {
                 key_id: key_id.clone(),
                 ..pending.clone()
             };
+            if let Err(e) = record_name(
+                &root,
+                &NameEntry {
+                    at: super::now_secs(),
+                    kind: "hull".into(),
+                    name: ship_name.clone(),
+                    holder: w.id.clone(),
+                    act: "paired".into(),
+                    from: String::new(),
+                    by: captain.to_string(),
+                },
+            ) {
+                eprintln!("fleet pair: the names ledger could not be written: {e}");
+            }
             let _ = std::fs::write(
                 ship_dir.join("captain.json"),
                 serde_json::to_vec_pretty(&record).unwrap_or_default(),
@@ -1145,7 +1346,13 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .cloned()
                 .or_else(|| familiar_kernel::identity::current(&dir))
                 .unwrap_or_else(|| "captain".to_string());
+            let actor_for_ledger = actor.clone();
             let was = persona.name.clone();
+            // Two ships' computers cannot have the same name (Ian, 2026-09-08).
+            if let Err(e) = computer_name_free(&dir, &root, new_name, &captain, &captain_id) {
+                eprintln!("fleet rename: {e}");
+                return ExitCode::FAILURE;
+            }
             persona.name = new_name.to_string();
             persona.persona_version = 2;
             // The computer and its history, as ONE recoverable mutation — the same
@@ -1163,6 +1370,21 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 }),
             ) {
                 eprintln!("fleet rename: the computer could not be renamed: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = record_name(
+                &root,
+                &NameEntry {
+                    at: super::now_secs(),
+                    kind: "computer".into(),
+                    name: new_name.to_string(),
+                    holder: captain_id.clone(),
+                    act: "renamed".into(),
+                    from: was.clone(),
+                    by: actor_for_ledger.clone(),
+                },
+            ) {
+                eprintln!("fleet rename: the names ledger could not be written: {e}");
                 return ExitCode::FAILURE;
             }
             let fleet: Vec<String> = paired_ships(&dir, &root)
@@ -1222,6 +1444,30 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         // than folded into `status`: a read that silently rewrites the store is a
         // read nobody can trust, and this rewrites captain.json and moves a
         // directory.
+        // ── names: everything the fleet has ever called anyone ─────────────────
+        "names" => {
+            let all = names(&root);
+            if all.is_empty() {
+                println!("fleet: no names on record yet");
+                return ExitCode::SUCCESS;
+            }
+            if f.contains_key("json") {
+                println!("{}", serde_json::to_string_pretty(&all).unwrap_or_default());
+                return ExitCode::SUCCESS;
+            }
+            for e in &all {
+                let from = if e.from.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (was \"{}\")", e.from)
+                };
+                println!(
+                    "  {} {:<8} {:<9} \"{}\"{from} — {} — by {}",
+                    e.at, e.kind, e.act, e.name, e.holder, e.by
+                );
+            }
+            ExitCode::SUCCESS
+        }
         "adopt-ids" => {
             let mut ships = paired_ships(&dir, &root);
             if ships.is_empty() {
@@ -1608,7 +1854,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | run | serve");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | names | adopt-ids | rename | run | serve");
             ExitCode::FAILURE
         }
     }
@@ -1809,7 +2055,7 @@ mod captain_store_tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
-            for _ in 0..requests {
+            for n in 0..requests {
                 let Ok((mut conn, _)) = listener.accept() else {
                     return;
                 };
@@ -1825,7 +2071,9 @@ mod captain_store_tests {
                         break;
                     }
                 }
-                let body = br#"{"shipName":"Probe","actor":"key:test"}"#;
+                // A distinct hull name per pairing: two ships cannot have the same name.
+                let body = format!(r#"{{"shipName":"Probe {n}","actor":"key:test"}}"#);
+                let body = body.as_bytes();
                 let _ = write!(
                     conn,
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -2291,5 +2539,159 @@ mod captain_store_tests {
             ExitCode::FAILURE,
             "a slug shared by two captains is refused"
         );
+    }
+
+    /// Ian, 2026-09-08: two ships' computers cannot have the same name. A second
+    /// captain naming theirs after the first's is refused — now, and after the first
+    /// captain has moved on from it (a name is a lineage).
+    #[test]
+    fn two_computers_cannot_share_a_name_now_or_ever() {
+        let base = tmp("unique_computer");
+        let server = stub_exchange(3);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "kk",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Ann",
+                "tuna",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                Some("felix")
+            )),
+            ExitCode::FAILURE,
+            "Felix is Luke's computer's name, whatever the case"
+        );
+        let root = base.join("worlds");
+        assert_eq!(
+            paired_ships(&base, &root).len(),
+            1,
+            "nothing was commissioned"
+        );
+        // Luke renames to Mittens; Felix is still Luke's lineage, so Ann still may not.
+        let luke = paired_ships(&base, &root).remove(0);
+        let rename = |world: &str, name: &str| {
+            cmd_fleet(&[
+                "rename".into(),
+                world.into(),
+                name.into(),
+                "--data-dir".into(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".into(),
+                root.to_string_lossy().into_owned(),
+            ])
+        };
+        assert_eq!(rename(&luke.world.id, "Mittens"), ExitCode::SUCCESS);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Ann",
+                "tuna",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let ann = paired_ships(&base, &root)
+            .into_iter()
+            .find(|s| s.captain.captain == "Ann")
+            .unwrap();
+        assert_eq!(
+            rename(&ann.world.id, "Felix"),
+            ExitCode::FAILURE,
+            "a name once worn stays with its lineage"
+        );
+        // Luke may go back to his own former name.
+        assert_eq!(rename(&luke.world.id, "Felix"), ExitCode::SUCCESS);
+        // And the ledger remembers all of it, oldest first.
+        let ledger = names(&root);
+        let computers: Vec<(String, String, String)> = ledger
+            .iter()
+            .filter(|e| e.kind == "computer")
+            .map(|e| (e.act.clone(), e.name.clone(), e.from.clone()))
+            .collect();
+        assert_eq!(
+            computers,
+            vec![
+                ("named".into(), "Felix".into(), String::new()),
+                ("renamed".into(), "Mittens".into(), "Felix".into()),
+                ("named".into(), "Purr".into(), String::new()),
+                ("renamed".into(), "Felix".into(), "Mittens".into()),
+            ],
+            "{ledger:?}"
+        );
+        assert!(ledger
+            .iter()
+            .any(|e| e.kind == "hull" && e.name == "Probe 0"));
+        assert!(ledger
+            .iter()
+            .any(|e| e.kind == "captain" && e.name == "Luke"));
+        assert_eq!(
+            cmd_fleet(&[
+                "names".into(),
+                "--data-dir".into(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".into(),
+                root.to_string_lossy().into_owned()
+            ]),
+            ExitCode::SUCCESS
+        );
+    }
+
+    /// Two ships cannot have the same name: a second hull the exchange calls what a
+    /// paired hull is already called, on another key, is refused.
+    #[test]
+    fn two_hulls_cannot_share_a_name() {
+        let base = tmp("unique_hull");
+        // Every answer names the ship the same.
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..2 {
+                let Ok((mut conn, _)) = listener.accept() else {
+                    return;
+                };
+                let mut buf = [0u8; 4096];
+                let _ = conn.read(&mut buf);
+                let body = br#"{"shipName":"Kibble Klipper","actor":"key:test"}"#;
+                let _ = write!(conn, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = conn.write_all(body);
+            }
+        });
+        let server = format!("http://{addr}");
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Ann",
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::FAILURE
+        );
+        assert_eq!(paired_ships(&base, &base.join("worlds")).len(), 1);
     }
 }

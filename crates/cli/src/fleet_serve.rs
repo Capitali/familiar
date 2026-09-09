@@ -906,31 +906,35 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             ) {
                 return (500, json!({"error": e.to_string()}));
             }
-            // A captain store nobody flies for, whose name no human ever chose, is
-            // swept up: leaving it would keep a computer nobody commands. One a
-            // human named is kept, however empty — that name was an act.
+            // The old captain's store is KEPT, however empty and whoever named it: a
+            // persona and its trail are a history, and we do not forget names (Ian,
+            // 2026-09-08). It used to be swept when nobody flew for them any more.
             let old_store = super::fleet::captain_store(root, &was);
-            let still_flown = paired_ships(dir, root)
-                .iter()
-                .any(|o| o.captain.captain == was);
-            let human_named = std::fs::read_to_string(old_store.join("persona-names.jsonl"))
-                .map(|t| {
-                    t.lines()
-                        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-                        .any(|v| v.get("actor").and_then(Value::as_str) != Some("pairing"))
-                })
-                .unwrap_or(false);
-            let swept = if !still_flown && !human_named && old_store.is_dir() {
-                std::fs::remove_dir_all(&old_store).is_ok()
-            } else {
-                false
-            };
+            let swept = false;
+            if let Err(e) = super::fleet::record_name(
+                root,
+                &super::fleet::NameEntry {
+                    at: now,
+                    kind: "captain".into(),
+                    name: captain.to_string(),
+                    holder: s.captain.captain_id.clone(),
+                    act: "reassigned".into(),
+                    from: was.clone(),
+                    by: "feed".into(),
+                },
+            ) {
+                return (
+                    500,
+                    json!({"error": format!("the names ledger could not be written: {e}")}),
+                );
+            }
             let joined = persona_for(root, &s.dir, &s.captain)
                 .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from));
             (
                 200,
                 json!({"tick": tick, "tick_seconds": tick_seconds, "captain": captain,
-                         "was": was, "computer": joined, "retired_old_captain_store": swept}),
+                         "was": was, "computer": joined, "retired_old_captain_store": swept,
+                         "old_captain_store": if old_store.is_dir() { "kept" } else { "none" }}),
             )
         }
         ("PUT", ["ships", id, "automations"]) => {

@@ -479,6 +479,21 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Standing directions from Ian (recorded, binding)
 
+- **NAMES ARE UNIQUE AND NEVER FORGOTTEN (2026-09-08, verbatim: "Two captains cannot have
+  the same name, two ships cannot have the same name. Two ships computers cannot have the
+  same name. Names are unique. We remember names. Names are important to the familiar.
+  Lineage is important. We do not forget names.").** Given after the wall-byline finding
+  (ucf-exchange#37). Concretely, on the familiar's side from this day: uniqueness is
+  fleet-wide and case-folded, per kind — a captain name IS the captain (same name = same
+  captain, sibling adoption; never a second); a computer name given by a human is refused if
+  any OTHER captain's computer wears it now or ever wore it (a name is a lineage — the
+  household's root name `Purr` is the UNNAMED state and exempt); a second hull the exchange
+  calls what a paired hull is already called, on another key, is refused. Lineage: every
+  pairing, naming, renaming, reassignment goes to the fleet-wide, append-only names ledger
+  (`captains/names.jsonl`; `fleet names` prints it) beside each computer's own trail; a rename
+  records from → to, by whom, when. NOTHING that wore a name is deleted — the feed's
+  captain-reassignment sweep of an orphaned store is gone; stores are kept. Engine side:
+  the same rule for captains and hulls posted to metal#86 in Ian's name.
 - **ONE AUTHORITY FOR EVERY CLIENT: THE USER'S AUTHORIZATION (2026-08-24, verbatim: "The
   clients are authorized by the user, so thats the authority that they both should follow.
   This should be enfored platform appropriately").** Given as the ruling on T-228's Q2, and
