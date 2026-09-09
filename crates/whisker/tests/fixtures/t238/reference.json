@@ -1,0 +1,18 @@
+{
+  "goods": [
+    {"id": "brine", "symbol": "BRN", "displayName": "Brine", "category": "staples",
+     "basePrice": 30, "swingBps": 9000, "decayBps": 0},
+    {"id": "fishmeal", "symbol": "FSH", "displayName": "Fishmeal", "category": "manufactured",
+     "basePrice": 80, "swingBps": 6000, "decayBps": 0}
+  ],
+  "stations": [
+    {"id": "salt-flat", "symbol": "SLT", "displayName": "Salt Flat", "stationClass": "regional",
+     "spreadBps": 500, "produces": ["brine"], "consumes": [], "role": "producer"},
+    {"id": "works-b", "symbol": "WKB", "displayName": "Works B", "stationClass": "regional",
+     "spreadBps": 500, "produces": ["fishmeal"], "consumes": ["brine"], "role": "works"}
+  ],
+  "recipes": [
+    {"id": "brine-to-fishmeal", "displayName": "Render brine", "station": "works-b",
+     "inputs": {"brine": 400}, "outputs": {"fishmeal": 10}, "ticksPerCycle": 30}
+  ]
+}

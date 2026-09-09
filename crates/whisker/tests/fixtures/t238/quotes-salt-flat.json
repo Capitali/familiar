@@ -1,0 +1,4 @@
+{"station": "salt-flat", "goods": [
+  {"good": "brine", "displayName": "Brine", "mid": 21, "ask": 24, "bid": 19,
+   "stock": 900, "capacity": 1200, "equilibrium": 600, "maxBuyUnits": 200, "maxSellUnits": 200}
+]}

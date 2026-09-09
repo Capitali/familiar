@@ -332,3 +332,205 @@ mod tests {
         assert_eq!(lifts[0].horizon_ticks, Some(5));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Money is not stock. The exchange quotes `stock`, `capacity` and `equilibrium`
+// in the same INVENTORY unit and derives every price from them; a forecast that
+// reads the equilibrium count as a meal-credit price manufactures trades out of
+// incompatible units (codex T-238 design review, finding 1). So the two live in
+// distinct types, and the only way from one to the other is the exchange's own
+// formula, ported below from `UCFEngine/Economy/Pricing.swift` integer for
+// integer.
+// ---------------------------------------------------------------------------
+
+/// Meal credits: a price or a sum of money. Never a count of anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct Credits(pub i64);
+
+/// Units on a shelf or in a hold. Never a price.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct Units(pub i64);
+
+/// The price register the exchange publishes on `/v1/reference`: each good's
+/// `basePrice` and `swingBps`, and each priced berth's `spreadBps`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Pricing {
+    /// good → (basePrice ℳ, swingBps)
+    pub goods: BTreeMap<String, (i64, i64)>,
+    /// station → spreadBps (absent for a berth the caller has not earned)
+    pub spread: BTreeMap<String, i64>,
+}
+
+pub fn parse_pricing(reference: &Value) -> Pricing {
+    let goods = reference
+        .get("goods")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|g| {
+                    Some((
+                        g.get("id")?.as_str()?.to_string(),
+                        (
+                            g.get("basePrice").and_then(Value::as_i64)?,
+                            g.get("swingBps").and_then(Value::as_i64).unwrap_or(0),
+                        ),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let spread = reference
+        .get("stations")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|st| {
+                    Some((
+                        st.get("id")?.as_str()?.to_string(),
+                        st.get("spreadBps").and_then(Value::as_i64)?,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Pricing { goods, spread }
+}
+
+/// The exchange's clamp rails on the price multiplier (`Pricing.swift`).
+pub const CLAMP_FLOOR_BPS: i64 = 2_000;
+pub const CLAMP_CEILING_BPS: i64 = 20_000;
+/// A neutral event modifier. Events scale this and we cannot see them from here,
+/// so every projection below is "absent events" — and says so.
+pub const NEUTRAL_MODIFIER_BPS: i64 = 10_000;
+
+/// `MarketPricing.imbalanceBps`, verbatim: −10000..=+10000, positive when the
+/// shelf is short of its equilibrium. `equilibrium <= 0` pins the price at base.
+pub fn imbalance_bps(stock: Units, equilibrium: Units) -> i64 {
+    if equilibrium.0 <= 0 {
+        return 0;
+    }
+    let hi = stock.0.max(equilibrium.0);
+    let lo = stock.0.min(equilibrium.0);
+    if hi <= 0 {
+        return 10_000;
+    }
+    let magnitude = (hi - lo) * 10_000 / hi;
+    if stock.0 < equilibrium.0 {
+        magnitude
+    } else {
+        -magnitude
+    }
+}
+
+/// `MarketPricing.midPrice` with a neutral modifier: the mid in ℳ for a shelf
+/// holding `stock` against `equilibrium`, for a good of `base` and `swing_bps`.
+pub fn mid_price(base: Credits, stock: Units, equilibrium: Units, swing_bps: i64) -> Credits {
+    let imbalance = imbalance_bps(stock, equilibrium);
+    let swung = 10_000 + swing_bps * imbalance / 10_000;
+    let modified = swung * NEUTRAL_MODIFIER_BPS / 10_000;
+    let clamped = modified.clamp(CLAMP_FLOOR_BPS, CLAMP_CEILING_BPS);
+    Credits((base.0 * clamped / 10_000).max(1))
+}
+
+/// `MarketPricing.sellUnitPrice`: what the station pays per unit. Rounds down.
+pub fn sell_unit_price(mid: Credits, spread_bps: i64) -> Credits {
+    Credits((mid.0 * (10_000 - spread_bps) / 10_000).max(0))
+}
+
+/// `MarketPricing.buyUnitPrice`: what the station charges per unit. Rounds up.
+pub fn buy_unit_price(mid: Credits, spread_bps: i64) -> Credits {
+    Credits(((mid.0 * (10_000 + spread_bps) + 9_999) / 10_000).max(1))
+}
+
+impl Flow {
+    /// The shelf `ticks` from now, at full lines: an eaten shelf drains to
+    /// empty, a made shelf fills to capacity, and neither goes past. None
+    /// without a live shelf.
+    pub fn stock_at(&self, ticks: i64) -> Option<Units> {
+        let s = self.shelf.as_ref()?;
+        let moved = self.rate_per_kilotick.max(0) * ticks.max(0) / 1000;
+        Some(Units(match self.kind {
+            FlowKind::Eats => (s.stock - moved).max(0),
+            FlowKind::Makes => (s.stock + moved).min(s.capacity.max(s.stock)),
+        }))
+    }
+}
+
+#[cfg(test)]
+mod pricing_tests {
+    use super::*;
+
+    /// The numbers the exchange's own formula gives, so a reviewer can check
+    /// them by hand: base 30, swing 9000, equilibrium 600.
+    #[test]
+    fn the_mid_is_the_exchange_formula_and_not_the_equilibrium_count() {
+        let eq = Units(600);
+        // 500 on a 600 shelf: imbalance 1666 → ×1.1499 → 34. Nowhere near 600.
+        assert_eq!(imbalance_bps(Units(500), eq), 1_666);
+        assert_eq!(mid_price(Credits(30), Units(500), eq, 9_000), Credits(34));
+        // Empty shelf: imbalance saturates at 10000 → ×1.9 → 57.
+        assert_eq!(imbalance_bps(Units(0), eq), 10_000);
+        assert_eq!(mid_price(Credits(30), Units(0), eq, 9_000), Credits(57));
+        // Glut: 900 on a 600 shelf → −3333 → ×0.7 → 21.
+        assert_eq!(imbalance_bps(Units(900), eq), -3_333);
+        assert_eq!(mid_price(Credits(30), Units(900), eq, 9_000), Credits(21));
+        // No equilibrium pins the price at base whatever the stock does.
+        assert_eq!(
+            mid_price(Credits(30), Units(0), Units(0), 9_000),
+            Credits(30)
+        );
+        // The rails: swing 20000 on an empty shelf would be ×3, clamped to ×2.
+        assert_eq!(mid_price(Credits(30), Units(0), eq, 20_000), Credits(60));
+        // Spread: the house rounds toward itself both ways.
+        assert_eq!(sell_unit_price(Credits(34), 500), Credits(32));
+        assert_eq!(buy_unit_price(Credits(34), 500), Credits(36));
+    }
+
+    #[test]
+    fn a_shelf_projects_along_its_flow_and_stops_at_the_rails() {
+        let shelf = Shelf {
+            station: "works".into(),
+            good: "brine".into(),
+            stock: 500,
+            capacity: 1_000,
+            equilibrium: 600,
+        };
+        let eats = Flow {
+            station: "works".into(),
+            good: "brine".into(),
+            kind: FlowKind::Eats,
+            rate_per_kilotick: 13_333,
+            shelf: Some(shelf.clone()),
+            horizon_ticks: Some(37),
+        };
+        assert_eq!(eats.stock_at(0), Some(Units(500)));
+        assert_eq!(
+            eats.stock_at(24),
+            Some(Units(181)),
+            "13,333 a kilotick for 24 ticks is 319"
+        );
+        assert_eq!(
+            eats.stock_at(1_000),
+            Some(Units(0)),
+            "an eaten shelf stops at empty"
+        );
+        let makes = Flow {
+            kind: FlowKind::Makes,
+            ..eats.clone()
+        };
+        assert_eq!(makes.stock_at(24), Some(Units(819)));
+        assert_eq!(
+            makes.stock_at(1_000),
+            Some(Units(1_000)),
+            "a made shelf stops at capacity"
+        );
+        assert_eq!(
+            Flow {
+                shelf: None,
+                ..eats
+            }
+            .stock_at(24),
+            None
+        );
+    }
+}

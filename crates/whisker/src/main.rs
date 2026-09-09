@@ -486,6 +486,12 @@ fn main() -> ExitCode {
         .as_ref()
         .map(chain::parse_recipes)
         .unwrap_or_default();
+    // ...and the price register the forecast prices shelves with: never the
+    // equilibrium COUNT as a price (codex T-238 finding 1).
+    let pricing = reference
+        .as_ref()
+        .map(chain::parse_pricing)
+        .unwrap_or_default();
     let shelf_shape: BTreeMap<(String, String), (i64, i64)> = if recipes.is_empty() {
         BTreeMap::new()
     } else {
@@ -527,17 +533,7 @@ fn main() -> ExitCode {
     // plan to carry a lot somewhere dearer, because the lot arrives smaller.
     let decay_bps: BTreeMap<String, i64> = reference
         .as_ref()
-        .and_then(|v| v.get("goods").and_then(Value::as_array))
-        .map(|goods| {
-            goods
-                .iter()
-                .filter_map(|g| {
-                    let id = g.get("id").and_then(Value::as_str)?;
-                    let d = g.get("decayBps").and_then(Value::as_i64).unwrap_or(0);
-                    (d > 0).then(|| (id.to_string(), d))
-                })
-                .collect()
-        })
+        .map(chain::parse_decay)
         .unwrap_or_default();
     // The pack's goods that rot in transit (decayBps > 0): what refrigeration is for.
     let perishable: BTreeSet<String> = reference
@@ -1293,23 +1289,24 @@ fn main() -> ExitCode {
                             })
                         })
                         .collect();
-                    let flows = chain::flows(&recipes, &shelves);
                     let horizon = min_hold.max(1) + 96;
-                    let mut fc = trade::Forecast::default();
-                    for f in chain::starving(&flows, horizon) {
-                        if let (Some(h), Some(sh)) = (f.horizon_ticks, f.shelf.as_ref()) {
-                            fc.hungry
-                                .insert((f.station.clone(), f.good.clone()), (h, sh.equilibrium));
-                        }
-                    }
-                    fc
+                    trade::Forecast::build(&recipes, &shelves, &pricing, horizon)
                 };
                 // Say what the chain sees, once per change — the soak's evidence that
                 // the merchant is reading the map and not only the counter.
                 let hungry_now: Vec<String> = forecast
-                    .hungry
+                    .starving()
                     .iter()
-                    .map(|((st, g), (h, eq))| format!("{st}:{g} dry in {h}t → {eq}"))
+                    .map(|f| {
+                        let h = f.horizon_ticks.unwrap_or(0);
+                        match forecast.project(&f.station, &f.good, h) {
+                            Some(p) => format!(
+                                "{}:{} dry in {h}t, mid {}→{}",
+                                f.station, f.good, p.mid_now.0, p.mid_then.0
+                            ),
+                            None => format!("{}:{} dry in {h}t", f.station, f.good),
+                        }
+                    })
                     .collect();
                 if hungry_now != last_forecast {
                     journal(
@@ -1524,29 +1521,36 @@ fn main() -> ExitCode {
                                 if let TradeDecision::Buy {
                                     sell_target,
                                     est_margin,
+                                    why,
                                     ..
                                 } = &td
                                 {
-                                    holdings.push(Holding {
+                                    let opened = Holding {
                                         good: good.clone(),
                                         units,
                                         avg_cost: ask,
                                         sell_target: sell_target.clone(),
                                         opened_tick: resolves - 1,
                                         sellable_at: resolves - 1 + min_hold,
-                                    });
+                                    };
                                     journal(
                                         &ship_dir,
-                                        json!({"at": now, "tick": tick, "event": "position-opened",
-                                        "good": good, "units": units, "ask": ask, "sell_target": sell_target,
-                                        "est_margin": est_margin, "sellable_at": resolves - 1 + min_hold}),
+                                        trade::position_opened(
+                                            now,
+                                            tick,
+                                            &opened,
+                                            *est_margin,
+                                            why,
+                                        ),
                                     );
+                                    holdings.push(opened);
                                 }
                             }
                             // A sell is not taken off the book until the hold confirms it.
                             familiar_whisker::store::save_holdings(&ship_dir, &holdings);
                             let why = match &td {
-                                TradeDecision::Sell { why, .. } => why.clone(),
+                                TradeDecision::Sell { why, .. }
+                                | TradeDecision::Buy { why, .. } => trade::bounded_why(why),
                                 _ => String::new(),
                             };
                             journal(

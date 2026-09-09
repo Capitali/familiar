@@ -1,0 +1,4 @@
+{"station": "works-b", "goods": [
+  {"good": "brine", "displayName": "Brine", "mid": 34, "ask": 36, "bid": 32,
+   "stock": 500, "capacity": 1200, "equilibrium": 600, "maxBuyUnits": 100, "maxSellUnits": 100}
+]}

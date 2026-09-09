@@ -50,6 +50,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::chain::{self, Credits, FlowKind, Units};
+
 use crate::doctrine::Router;
 
 /// Fuel reserve on a carry leg: the same 20% margin the freight doctrine keeps on a
@@ -320,16 +322,20 @@ pub fn best_forward(
 /// daily decay. Rounded DOWN, because a merchant who rounds spoilage up is lying
 /// to himself about his own hold.
 pub fn surviving(h: &Holding, ticks: i64, l: &Ledger) -> i64 {
-    let decay = l
-        .decay_bps
-        .and_then(|d| d.get(&h.good).copied())
-        .unwrap_or(0);
+    surviving_units(&h.good, h.units, ticks, l)
+}
+
+/// The same arithmetic for a lot not yet bought: the units a NEW position would
+/// still have on arrival. A forecast buy is judged on what lands, not on what is
+/// loaded (codex finding 3).
+pub fn surviving_units(good: &str, units: i64, ticks: i64, l: &Ledger) -> i64 {
+    let decay = l.decay_bps.and_then(|d| d.get(good).copied()).unwrap_or(0);
     if decay <= 0 || ticks <= 0 {
-        return h.units;
+        return units;
     }
     let days = ticks as f64 / l.ticks_per_day.max(1) as f64;
     let kept = (1.0 - decay as f64 / 10_000.0).max(0.0).powf(days);
-    ((h.units as f64) * kept).floor() as i64
+    ((units as f64) * kept).floor() as i64
 }
 
 /// A lot's best realization away from here.
@@ -466,6 +472,11 @@ const MIN_TOTAL_MARGIN: i64 = 150;
 const MAX_CASH_BPS: i64 = 2500;
 /// Never fill more than this fraction of the (spare) hold (50%) with one bet.
 const MAX_HOLD_BPS: i64 = 5000;
+/// Route questions per good per fold: the ship's one rate-limited key.
+const ROUTE_QUESTIONS_PER_GOOD: i64 = 4;
+/// How runs rank: net first; then a run that lifts a glut here; then a
+/// pump-adjacent buyer; then the station name, so equal runs tie deterministically.
+type RunKey = (i64, bool, bool, std::cmp::Reverse<String>);
 /// A position still unsold this many hold-periods after its clock is liquidated at
 /// the next bid: bounded risk beats stuck risk.
 const STUCK_HOLDS: i64 = 2;
@@ -518,27 +529,118 @@ pub struct Ledger<'a> {
     pub borrowable: i64,
 }
 
-/// What the supply chain says a counter is ABOUT to do (T-238 brick 2). Built each
-/// fold from `chain::flows` — the recipes on the wire against live shelves — and
-/// consulted when the merchant scores a target: a works whose input shelf runs dry
-/// inside the carry horizon will be bidding UP for that good by the time we arrive,
-/// so the spot mid understates what the run is worth. Ian, 2026-09-02: "when
-/// trading, are we planning routes between our ships to deliver goods to processing
-/// facilities… our plans looking forward."
+/// What the supply chain says a counter is ABOUT to do (T-238 brick 2). Built
+/// each fold from `chain::flows` — the recipes on the wire against live shelves —
+/// and the exchange's price register, and consulted when the merchant scores a
+/// target: a works whose input shelf is draining will be bidding UP for that good
+/// by the time we arrive, so the spot mid understates what the run is worth; a
+/// works whose output shelf is filling will be bidding DOWN, and the spot
+/// overstates it. Ian, 2026-09-02: "when trading, are we planning routes between
+/// our ships to deliver goods to processing facilities… our plans looking
+/// forward."
+///
+/// The projection is in the exchange's own units all the way: stock (units) along
+/// the flow, then the exchange's mid formula (ℳ), then the haircut. It never reads
+/// an inventory number as money (codex finding 1), and it says "absent events"
+/// because the event modifier is not visible from here.
 #[derive(Debug, Default, Clone)]
 pub struct Forecast {
-    /// (station, good) → (ticks until its input shelf is empty, that shelf's
-    /// equilibrium price). Only Eats flows, only those already inside the horizon
-    /// the caller built the forecast with.
-    pub hungry: BTreeMap<(String, String), (i64, i64)>,
+    /// Every station×good flow the recipes describe, with its live shelf folded in
+    /// where the caller had one. Only flows WITH a shelf can be priced.
+    pub flows: Vec<chain::Flow>,
+    pub pricing: chain::Pricing,
+    /// The window the caller planned with: what starves or gluts inside it.
+    pub horizon_ticks: i64,
+}
+
+/// One priced projection: the shelf now and at arrival, and the mid each implies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Projection {
+    pub kind: FlowKind,
+    pub stock_now: Units,
+    pub stock_then: Units,
+    pub mid_now: Credits,
+    pub mid_then: Credits,
+    /// Ticks until the shelf is empty (Eats) or full (Makes), at full lines.
+    pub horizon_ticks: Option<i64>,
 }
 
 impl Forecast {
-    pub fn starving_at(&self, station: &str, good: &str) -> Option<(i64, i64)> {
-        self.hungry
-            .get(&(station.to_string(), good.to_string()))
-            .copied()
+    pub fn build(
+        recipes: &[chain::Recipe],
+        shelves: &[chain::Shelf],
+        pricing: &chain::Pricing,
+        horizon_ticks: i64,
+    ) -> Forecast {
+        Forecast {
+            flows: chain::flows(recipes, shelves),
+            pricing: pricing.clone(),
+            horizon_ticks,
+        }
     }
+
+    pub fn flow_at(&self, station: &str, good: &str, kind: FlowKind) -> Option<&chain::Flow> {
+        self.flows
+            .iter()
+            .find(|f| f.station == station && f.good == good && f.kind == kind)
+    }
+
+    /// Inputs whose shelf runs dry inside the horizon, most urgent first.
+    pub fn starving(&self) -> Vec<&chain::Flow> {
+        chain::starving(&self.flows, self.horizon_ticks)
+    }
+
+    /// Outputs whose shelf fills inside the horizon, most urgent first.
+    pub fn glutting(&self) -> Vec<&chain::Flow> {
+        chain::glutting(&self.flows, self.horizon_ticks)
+    }
+
+    /// The mid at `station` for `good`, now and `ticks_ahead` from now, from the
+    /// shelf's flow and the exchange's formula. Where a berth both eats and makes
+    /// a good the eating flow speaks (it is the one that moves the bid). None
+    /// without a shelf, a flow, or a base price for the good.
+    pub fn project(&self, station: &str, good: &str, ticks_ahead: i64) -> Option<Projection> {
+        let flow = self
+            .flow_at(station, good, FlowKind::Eats)
+            .or_else(|| self.flow_at(station, good, FlowKind::Makes))?;
+        let shelf = flow.shelf.as_ref()?;
+        let &(base, swing) = self.pricing.goods.get(good)?;
+        let eq = Units(shelf.equilibrium);
+        let stock_now = Units(shelf.stock);
+        let stock_then = flow.stock_at(ticks_ahead)?;
+        Some(Projection {
+            kind: flow.kind,
+            stock_now,
+            stock_then,
+            mid_now: chain::mid_price(Credits(base), stock_now, eq, swing),
+            mid_then: chain::mid_price(Credits(base), stock_then, eq, swing),
+            horizon_ticks: flow.horizon_ticks,
+        })
+    }
+}
+
+/// The longest reason the journal will carry. A reason is for a reader, not a
+/// dump; what would not fit is not the reason.
+pub const WHY_MAX_CHARS: usize = 240;
+
+pub fn bounded_why(why: &str) -> String {
+    if why.chars().count() <= WHY_MAX_CHARS {
+        return why.to_string();
+    }
+    let mut out: String = why.chars().take(WHY_MAX_CHARS - 1).collect();
+    out.push('…');
+    out
+}
+
+/// The `position-opened` journal event, built in one place so the runner and the
+/// soak write the same record — and so the reason the merchant gave for spending
+/// is the reason the journal shows (codex finding 4).
+pub fn position_opened(now: i64, tick: i64, h: &Holding, est_margin: i64, why: &str) -> Value {
+    serde_json::json!({
+        "at": now, "tick": tick, "event": "position-opened",
+        "good": h.good, "units": h.units, "ask": h.avg_cost, "sell_target": h.sell_target,
+        "est_margin": est_margin, "sellable_at": h.sellable_at, "why": bounded_why(why),
+    })
 }
 
 impl Ledger<'_> {
@@ -698,7 +800,7 @@ pub fn decide_trade(
     }
 
     // The best good sold here, by estimated total margin to its best reachable buyer.
-    let mut best: Option<(i64, TradeDecision)> = None;
+    let mut best: Option<(RunKey, TradeDecision)> = None;
     let mut priced = 0; // candidate buyers the router could price
     let mut unfuelable = 0; // ...of which the tank could not reach
     let mut too_small = 0; // ...runs whose total margin did not clear fuel + floor
@@ -707,98 +809,145 @@ pub fn decide_trade(
         if q.stock <= 0 || q.ask <= 0 || q.max_buy <= 0 {
             continue;
         }
-        // Where does this good fetch the most? Candidates best-paying first; the
-        // router is asked only until one is reachable AND fuelable, and only for
-        // candidates whose mid could clear the margin at all — every question costs a
-        // route call on the wire.
+        // Where does this good fetch the most, ONCE WE GET THERE? Every reachable,
+        // fuelable buyer inside the route budget is valued at its forecast-adjusted
+        // net — units that survive the carry, at the mid the shelf will show on
+        // arrival, less the fuel — and the best net wins. Spot order only decides
+        // which berths the router is asked about first: the budget is a rate limit
+        // on the ship's one key, not a stopping rule (codex finding 2).
         let mut candidates: Vec<&MarketRow> = galaxy
             .iter()
             .filter(|r| r.good == q.good && r.station != here && r.mid > 0)
             .collect();
-        candidates.sort_by_key(|r| std::cmp::Reverse(r.mid));
-        let mut best_target: Option<(i64, &str, i64, String)> = None; // (expected, station, fuel, why)
+        candidates.sort_by(|a, b| b.mid.cmp(&a.mid).then_with(|| a.station.cmp(&b.station)));
+        // Lifting this good off a shelf that is about to fill keeps the line here
+        // running (a full shelf stalls it, and starves every buyer downstream). It
+        // adds no money to the run — it breaks ties between equal runs.
+        let lifts_glut = l
+            .forecast
+            .and_then(|f| f.flow_at(here, &q.good, FlowKind::Makes))
+            .filter(|f| {
+                f.horizon_ticks
+                    .is_some_and(|h| h <= l.forecast.map_or(0, |f| f.horizon_ticks))
+            })
+            .and_then(|f| f.horizon_ticks);
+        // (net, lifts a glut, pump-adjacent, station) → the decision
+        let mut best_run: Option<(RunKey, TradeDecision)> = None;
+        let mut asked = 0;
         for row in candidates {
-            let spot = row.mid - bps(row.mid, SELL_HAIRCUT_BPS);
-            // The forecast's word on this counter. A works whose input shelf runs dry
-            // before we could arrive and sell will be bidding toward its equilibrium
-            // by then, so expect nearer that than the mid — capped at double the
-            // spot, because a forecast is a reading of a rate and not a promise, and
-            // it must never manufacture a trade out of nothing. A full shelf, or a
-            // world with no recipes, leaves the spot trader exactly as it was.
-            let (est_proceeds, why) = match l
-                .forecast
-                .and_then(|f| f.starving_at(&row.station, &q.good))
-                .filter(|(h, _)| *h <= l.carry_horizon())
-            {
-                Some((h, eq)) => {
-                    let lifted = (eq - bps(eq, SELL_HAIRCUT_BPS)).min(spot * 2).max(spot);
-                    (
-                        lifted,
-                        format!(
-                            "forecast: {} eats {} and its shelf runs dry in {h} ticks — bid \
-                             heads to equilibrium {eq} (spot mid {})",
-                            row.station, q.good, row.mid
-                        ),
-                    )
-                }
-                None => (
-                    spot,
-                    format!("spot: mid {} at {} less the haircut", row.mid, row.station),
-                ),
-            };
-            if est_proceeds - q.ask < bps(q.ask, BUY_MARGIN_BPS).max(1) {
-                continue; // a forecast can lift a lower mid past a higher one, so no break
+            if asked >= ROUTE_QUESTIONS_PER_GOOD {
+                break;
             }
+            let spot = row.mid - bps(row.mid, SELL_HAIRCUT_BPS);
+            // Cheap screen before a route question. A berth the forecast has no
+            // word on must clear the hurdle on its spot; one it does have a word on
+            // may be lifted to at most double its spot (a reading of a rate, not a
+            // promise), so it is asked about even when the spot alone would not pay.
+            let has_word = l
+                .forecast
+                .is_some_and(|f| f.project(&row.station, &q.good, 0).is_some());
+            let ceiling = if has_word { spot * 2 } else { spot };
+            if ceiling - q.ask < bps(q.ask, BUY_MARGIN_BPS).max(1) {
+                continue;
+            }
+            asked += 1; // a question is a question, answered or not
             let Some(cost) = router.fuel_between(here, &row.station) else {
                 continue; // unreachable / unpriceable — not an arbitrage
             };
+            priced += 1;
             // ...plus the leg from that market to a pump, or the run ends there.
             let cost = cost + crate::doctrine::onward_to_pump(&row.station, pumps, router);
-            priced += 1;
             if !carry_affordable(cost, l.fuel_available) {
                 unfuelable += 1;
                 continue; // a buyer we cannot fly to is ballast
             }
-            best_target = Some((est_proceeds, &row.station, cost, why));
-            break;
+            // When we could sell there: the flight, and never before the hold clock.
+            let flight = router
+                .leg_distances_km(here, &row.station)
+                .map(|legs| {
+                    crate::doctrine::flight_ticks(&legs, crate::doctrine::REFERENCE_ACCEL_MILLI_G)
+                })
+                .unwrap_or(l.min_hold.max(1))
+                .max(1);
+            let sell_ticks = flight.max(l.min_hold.max(1));
+            let (unit_value, why) =
+                match l
+                    .forecast
+                    .and_then(|f| f.project(&row.station, &q.good, sell_ticks))
+                {
+                    Some(p) => {
+                        let then = p.mid_then.0 - bps(p.mid_then.0, SELL_HAIRCUT_BPS);
+                        let verb = match p.kind {
+                            FlowKind::Eats => "eats",
+                            FlowKind::Makes => "makes",
+                        };
+                        (
+                            then.min(spot * 2),
+                            format!(
+                            "forecast: {} {verb} {} — shelf {}→{} by t+{sell_ticks}, mid {}→{} \
+                             (spot mid {}, absent events)",
+                            row.station, q.good, p.stock_now.0, p.stock_then.0, p.mid_now.0,
+                            p.mid_then.0, row.mid
+                        ),
+                        )
+                    }
+                    None => (
+                        spot,
+                        format!("spot: mid {} at {} less the haircut", row.mid, row.station),
+                    ),
+                };
+            let per_unit_margin = unit_value - q.ask;
+            if per_unit_margin <= 0 || per_unit_margin < bps(q.ask, BUY_MARGIN_BPS) {
+                continue;
+            }
+            // Size the position: bounded by cash, spare hold, and the shelf.
+            let by_cash = bps(l.working_capital(), MAX_CASH_BPS) / q.ask.max(1);
+            let by_hold = bps(l.spare_hold, MAX_HOLD_BPS).max(0);
+            let units = by_cash.min(by_hold).min(q.max_buy);
+            if units <= 0 {
+                continue;
+            }
+            // The run, whole: what LANDS at the forecast value, less what we paid for
+            // what we loaded, less the carry's fuel even when a haul ends up paying
+            // for the miles — the litter-clay lesson. Spoilage is charged here, on
+            // the new position, not only on lots already held.
+            let landing = surviving_units(&q.good, units, sell_ticks, l);
+            let net = unit_value * landing - q.ask * units - cost * l.fuel_price.max(0);
+            if net < MIN_TOTAL_MARGIN {
+                too_small += 1;
+                continue;
+            }
+            let why = match lifts_glut {
+                Some(h) => format!(
+                    "{why}; lifts {here}'s {} before its shelf fills in {h}t",
+                    q.good
+                ),
+                None => why,
+            };
+            let key = (
+                net,
+                lifts_glut.is_some(),
+                pumps.contains(&row.station),
+                std::cmp::Reverse(row.station.clone()),
+            );
+            if best_run.as_ref().is_none_or(|(k, _)| key > *k) {
+                best_run = Some((
+                    key,
+                    TradeDecision::Buy {
+                        good: q.good.clone(),
+                        units,
+                        sell_target: row.station.clone(),
+                        est_margin: net,
+                        why: bounded_why(&why),
+                    },
+                ));
+            }
         }
-        let Some((expected_unit, target, carry_fuel, why)) = best_target else {
+        let Some((key, decision)) = best_run else {
             continue;
         };
-        // Conservative per-unit economics: pay the real ask; expect the target mid less
-        // the haircut.
-        let est_proceeds = expected_unit;
-        let per_unit_margin = est_proceeds - q.ask;
-        if per_unit_margin <= 0 || per_unit_margin < bps(q.ask, BUY_MARGIN_BPS) {
-            continue;
-        }
-        // Size the position: bounded by cash, spare hold, and the shelf.
-        let by_cash = bps(l.working_capital(), MAX_CASH_BPS) / q.ask.max(1);
-        let by_hold = bps(l.spare_hold, MAX_HOLD_BPS).max(0);
-        let units = by_cash.min(by_hold).min(q.max_buy);
-        if units <= 0 {
-            continue;
-        }
-        // The run, whole: the carry's fuel is the trade's cost even when a haul ends
-        // up paying for the miles — the litter-clay lesson.
-        let total_margin = per_unit_margin * units - carry_fuel * l.fuel_price.max(0);
-        if total_margin < MIN_TOTAL_MARGIN {
-            too_small += 1;
-            continue;
-        }
-        // Prefer a pump-adjacent buyer, all else equal, so the run refuels itself.
-        let score = total_margin + if pumps.contains(target) { 1 } else { 0 };
-        if best.as_ref().map(|(m, _)| score > *m).unwrap_or(true) {
-            best = Some((
-                score,
-                TradeDecision::Buy {
-                    good: q.good.clone(),
-                    units,
-                    sell_target: target.to_string(),
-                    est_margin: total_margin,
-                    why: why.clone(),
-                },
-            ));
+        if best.as_ref().is_none_or(|(k, _)| key > *k) {
+            best = Some((key, decision));
         }
     }
 
@@ -891,19 +1040,53 @@ mod tests {
         }
     }
 
+    /// A forecast for the tests: `station` EATS `good` at `rate` units per
+    /// kilotick from a shelf of `stock` against `eq`, priced at `base`/`swing`.
+    fn eating(
+        station: &str,
+        good: &str,
+        stock: i64,
+        eq: i64,
+        rate: i64,
+        base: i64,
+        swing: i64,
+    ) -> Forecast {
+        let shelf = chain::Shelf {
+            station: station.into(),
+            good: good.into(),
+            stock,
+            capacity: eq * 2,
+            equilibrium: eq,
+        };
+        let mut fc = Forecast {
+            flows: vec![chain::Flow {
+                station: station.into(),
+                good: good.into(),
+                kind: FlowKind::Eats,
+                rate_per_kilotick: rate,
+                shelf: Some(shelf),
+                horizon_ticks: (rate > 0).then(|| stock * 1000 / rate),
+            }],
+            pricing: chain::Pricing::default(),
+            horizon_ticks: 288 + 96,
+        };
+        fc.pricing.goods.insert(good.into(), (base, swing));
+        fc
+    }
+
     /// T-238 brick 2's accept line: the merchant makes a forecast-justified buy a
-    /// spot-arb trader would not, and says why. Catnip asks 25 here; the best mid
-    /// anywhere is 30 at works-b, which after the 18% haircut is 24.6 — under the
-    /// ask, no spot trade. But works-b EATS catnip and its shelf runs dry in 20
-    /// ticks, equilibrium 60: the bid is heading up, and the run is worth making.
+    /// spot-arb trader would not, and says why — in the exchange's own units.
+    /// Brine asks 24 here. works-b's mid is 34 (base 30, swing 9000, 500 on a
+    /// 600 shelf): 28 after the haircut, under the 20% hurdle — no spot trade. But
+    /// works-b EATS 13,333 brine a kilotick: by the hold clock (288 ticks) the
+    /// shelf is EMPTY, the mid is 57, and the run is worth making. The
+    /// equilibrium is 600 and the price never goes near it.
     #[test]
     fn a_forecast_justifies_a_buy_the_spot_would_not() {
-        let board = vec![q("catnip", 25, 20, 500)];
-        let galaxy = vec![row("catnip", "works-b", 30)];
+        let board = vec![q("brine", 24, 20, 500)];
+        let galaxy = vec![row("brine", "works-b", 34)];
         let mut l = at("here", 150);
-        let mut fc = Forecast::default();
-        fc.hungry
-            .insert(("works-b".into(), "catnip".into()), (20, 60));
+        let fc = eating("works-b", "brine", 500, 600, 13_333, 30, 9_000);
 
         let spot = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
         assert!(
@@ -917,32 +1100,138 @@ mod tests {
                 sell_target,
                 why,
                 est_margin,
+                units,
                 ..
             } => {
                 assert_eq!(sell_target, "works-b");
                 assert!(
-                    why.contains("forecast") && why.contains("runs dry in 20"),
+                    why.contains("forecast") && why.contains("mid 34→57"),
                     "{why}"
                 );
-                assert!(est_margin > 0);
+                assert!(why.contains("absent events"), "{why}");
+                // 57 less the haircut; 60 units (half the hold) at 24; 50 fuel at 2.
+                assert_eq!(units, 60);
+                let unit = 57 - bps(57, SELL_HAIRCUT_BPS);
+                assert_eq!(est_margin, unit * 60 - 24 * 60 - 50 * 2);
             }
             other => panic!("the forecast should have carried it: {other:?}"),
         }
     }
 
-    /// A shelf that runs dry AFTER the carry horizon is no forecast at all: we could
-    /// not arrive and sell inside the window it describes.
+    /// A shelf that drains slowly moves the price only as far as it drains by the
+    /// time we could sell: a starvation 50,000 ticks out is no forecast at all.
     #[test]
     fn a_shelf_beyond_the_horizon_is_no_forecast() {
-        let board = vec![q("catnip", 25, 20, 500)];
-        let galaxy = vec![row("catnip", "works-b", 30)];
+        let board = vec![q("brine", 24, 20, 500)];
+        let galaxy = vec![row("brine", "works-b", 34)];
         let mut l = at("here", 150);
-        let mut fc = Forecast::default();
-        fc.hungry
-            .insert(("works-b".into(), "catnip".into()), (5_000, 60));
+        let fc = eating("works-b", "brine", 500, 600, 10, 30, 9_000);
         l.forecast = Some(&fc);
         let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
         assert!(!matches!(d, TradeDecision::Buy { .. }), "{d:?}");
+    }
+
+    /// Finding 2: the best FORECAST net wins, not the best spot mid. `higher-spot`
+    /// pays 40 today and always will; `starving-works` pays 35 today and 60 when
+    /// we arrive. The old scan took the first spot-sorted survivor and never
+    /// compared them.
+    #[test]
+    fn a_lower_spot_with_the_higher_forecast_wins_the_target() {
+        let board = vec![q("catnip", 25, 20, 500)];
+        let galaxy = vec![
+            row("catnip", "higher-spot", 40),
+            row("catnip", "starving-works", 35),
+        ];
+        let mut l = at("here", 150);
+        let fc = eating("starving-works", "catnip", 600, 600, 20_000, 35, 9_000);
+        l.forecast = Some(&fc);
+        let chart = Chart {
+            priced: vec![("higher-spot", 50), ("starving-works", 50)],
+            asked: Default::default(),
+        };
+        match decide_trade(&l, &board, &galaxy, &[], &pumps(), &chart) {
+            TradeDecision::Buy {
+                sell_target, why, ..
+            } => {
+                assert_eq!(sell_target, "starving-works", "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            chart.asked.borrow().as_slice(),
+            ["higher-spot", "starving-works"],
+            "both were priced, dearest spot first, inside the route budget"
+        );
+    }
+
+    /// Finding 3: decay is charged on the NEW position. The same brine run, but
+    /// brine loses 90% a day and the hold clock is a day: six units land, and the
+    /// forecast that made the run attractive cannot pay for what rotted.
+    #[test]
+    fn enough_decay_turns_a_forecast_buy_idle() {
+        let board = vec![q("brine", 24, 20, 500)];
+        let galaxy = vec![row("brine", "works-b", 34)];
+        let mut l = at("here", 150);
+        let fc = eating("works-b", "brine", 500, 600, 13_333, 30, 9_000);
+        let mut decay = BTreeMap::new();
+        decay.insert("brine".to_string(), 9_000);
+        l.forecast = Some(&fc);
+        l.decay_bps = Some(&decay);
+        let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
+        assert!(matches!(d, TradeDecision::Idle { .. }), "{d:?}");
+    }
+
+    /// Finding 3: a glut here changes the preferred lift. Two goods with identical
+    /// economics; `here` MAKES tuna and its shelf fills inside the horizon. Tuna
+    /// is lifted first, and the reason says why.
+    #[test]
+    fn a_glut_here_breaks_the_tie_toward_lifting_it() {
+        let board = vec![q("bream", 20, 15, 500), q("tuna", 20, 15, 500)];
+        let galaxy = vec![row("bream", "far", 40), row("tuna", "far", 40)];
+        let mut l = at("here", 150);
+        let mut fc = Forecast {
+            horizon_ticks: 384,
+            ..Default::default()
+        };
+        fc.flows.push(chain::Flow {
+            station: "here".into(),
+            good: "tuna".into(),
+            kind: FlowKind::Makes,
+            rate_per_kilotick: 10_000,
+            shelf: Some(chain::Shelf {
+                station: "here".into(),
+                good: "tuna".into(),
+                stock: 900,
+                capacity: 1_000,
+                equilibrium: 600,
+            }),
+            horizon_ticks: Some(10),
+        });
+        l.forecast = Some(&fc);
+        match decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true)) {
+            TradeDecision::Buy { good, why, .. } => {
+                assert_eq!(good, "tuna");
+                assert!(why.contains("before its shelf fills in 10t"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Without the glut, the tie falls to the alphabet — bream — deterministically.
+        l.forecast = None;
+        match decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true)) {
+            TradeDecision::Buy { good, .. } => assert_eq!(good, "bream"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_reason_is_bounded_and_the_opened_event_carries_it() {
+        let long = "x".repeat(1_000);
+        assert_eq!(bounded_why(&long).chars().count(), WHY_MAX_CHARS);
+        let h = held("brine", 60, 23, 100, 388);
+        let ev = position_opened(1, 100, &h, 1_280, "forecast: works-b eats brine");
+        assert_eq!(ev["event"], "position-opened");
+        assert_eq!(ev["why"], "forecast: works-b eats brine");
+        assert_eq!(ev["units"], 60);
     }
 
     #[test]
@@ -1361,17 +1650,25 @@ mod tests {
         }
     }
 
+    /// Every buyer inside the route budget is priced and the best NET wins — not
+    /// the first that answered (codex T-238 finding 2). The budget still binds:
+    /// five buyers on the board, four questions, the fifth is never asked.
     #[test]
-    fn takes_the_best_reachable_buyer_and_asks_the_router_lazily() {
+    fn prices_every_buyer_inside_the_route_budget_and_takes_the_best_net() {
         let board = vec![q("catnip", 30, 28, 500)];
-        // Three buyers by mid: 90 (off the chart), 70 (priced), 60 (priced).
         let galaxy = vec![
             row("catnip", "far-side", 90),
             row("catnip", "whisker-hollow", 70),
             row("catnip", "foxys-diner", 60),
+            row("catnip", "titania", 55),
+            row("catnip", "enceladus", 50),
         ];
         let chart = Chart {
-            priced: vec![("whisker-hollow", 40), ("foxys-diner", 20)],
+            priced: vec![
+                ("whisker-hollow", 40),
+                ("foxys-diner", 20),
+                ("enceladus", 1),
+            ],
             asked: Default::default(),
         };
         let d = decide_trade(&at("here", 100), &board, &galaxy, &[], &pumps(), &chart);
@@ -1379,10 +1676,15 @@ mod tests {
             TradeDecision::Buy { sell_target, .. } => assert_eq!(sell_target, "whisker-hollow"),
             other => panic!("expected Buy, got {other:?}"),
         }
-        // Asked in pay order and stopped at the first that answered: never the third.
         assert_eq!(
             *chart.asked.borrow(),
-            vec!["far-side".to_string(), "whisker-hollow".to_string()]
+            vec![
+                "far-side".to_string(),
+                "whisker-hollow".to_string(),
+                "foxys-diner".to_string(),
+                "titania".to_string()
+            ],
+            "asked in pay order, all four inside the budget, never the fifth"
         );
     }
 
