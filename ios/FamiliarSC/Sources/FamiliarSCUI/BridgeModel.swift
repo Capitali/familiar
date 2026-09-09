@@ -98,6 +98,12 @@ public final class BridgeModel {
 
     @MainActor
     public func open(world: String, foldWindowTicks: Int64 = 96, windows: Int = 6) async {
+        // Switching ships: nothing of the previous captain may be readable or speakable under
+        // the new world for even the length of a read. The voice is cleared BEFORE the world
+        // is published and the reads begin; a failed open then has nothing to expose, and
+        // `ask` is gated on the conversation's world besides (codex T-236 r2, finding 8).
+        // A refresh of the SAME ship keeps its voice while the reads run.
+        if self.world != world { await MainActor.run { clearVoice() } }
         self.world = world
         loading = true; defer { loading = false }
         // Read the whole bridge into locals and publish only once every required read
@@ -170,7 +176,9 @@ public final class BridgeModel {
     @MainActor
     public func ask(_ question: String, spoken: Bool) async {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty, let c = conversation else { return }
+        // The final invariant: only a conversation that belongs to the open world may answer,
+        // and not while that world is still being read.
+        guard !q.isEmpty, let c = conversation, conversationWorld == world, !loading else { return }
         asking = true; defer { asking = false }
         let turn = await c.ask(q)
         turns.append(turn)
@@ -285,12 +293,13 @@ public final class BridgeModel {
         guard let world, let p = pilotProposal else { return ActOutcome(ok: false, text: "nothing to confirm") }
         do {
             let said = try await acts.confirm(p, world: world)
-            pilotProposal = nil; pilotOutcome = said
+            pilotProposal = nil
             await open(world: world)
+            pilotOutcome = said   // after the re-read, which may clear a stale outcome
             return ActOutcome(ok: true, text: said)
         } catch let e as FeedError {
-            pilotOutcome = e.description
             if case .refused = e { pilotProposal = nil; await open(world: world) }
+            pilotOutcome = e.description
             return ActOutcome(ok: false, text: e.description)
         } catch {
             pilotOutcome = "\(error)"

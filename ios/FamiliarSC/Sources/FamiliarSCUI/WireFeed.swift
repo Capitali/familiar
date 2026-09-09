@@ -70,9 +70,19 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         // The name lives in the row's `persona` (the store's persona.json verbatim, null when
         // she has not been named); `computer` is the text summary's word for it, if served.
         let personaName = row["persona"].flatMap { $0 == .null ? nil : $0["name"]?.string }
-        let computer = personaName ?? row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
+        // The host says `persona.error` when the store's persona will not load (T-236 r2,
+        // finding 7): that is BROKEN, said as such — never "unnamed".
+        let personaError = row["persona"].flatMap { $0 == .null ? nil : $0["error"]?.string }
+        let state: ShipSummary.PersonaState
+        if let e = personaError { state = .broken(e) } else if let n = personaName { state = .named(n) } else { state = .absent }
+        let computer: String
+        switch state {
+        case .named(let n): computer = n
+        case .broken(let e): computer = "(persona broken — \(e))"
+        case .absent: computer = row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
+        }
         var summary = ShipSummary(
-            world: world, label: row["label"]?.string ?? world, computer: computer, named: personaName != nil || !computer.hasPrefix("("),
+            world: world, label: row["label"]?.string ?? world, computer: computer, named: personaName != nil || (personaError == nil && !computer.hasPrefix("(")),
             hull: row["hull"]?.string ?? row["ship"]?.string ?? "", captain: row["captain"]?.string ?? "", server: row["server"]?.string ?? "",
             automations: row["automations"]?.array?.compactMap(\.string) ?? [],
             credits: row["credits"]?.int, debt: row["debt"]?.int, fuel: row["fuel"]?.int, fuelCapacity: row["fuelCapacity"]?.int,
@@ -85,6 +95,7 @@ public struct WireFeed: ShipsFeed, CaptainActs {
             trades: row["trades"].map { TradeBook(row: $0) }
         )
         summary.captainID = row["captain_id"]?.string ?? ""
+        summary.personaState = state
         summary.worldName = row["world_name"]?.string
         return summary
     }

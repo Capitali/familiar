@@ -6,6 +6,28 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-08 — T-236 brick 1, round 2, the Swift half: broken is not unnamed, and the last captain falls silent before the next is read
+
+Codex's round-2 re-verification (`docs/reviews/2026-09-08-t236-brick1-codex-reverification-r2.md`,
+REJECT — 1/5/9 held, 3/6 not held, 2/4/7/8 partial) left two Swift findings; the host findings
+(2, 3, 4, 6, 7-host) are wildhorse's.
+
+- **Finding 7 (Swift) — a persona the kernel refuses read as "unnamed" in the fleet list.**
+  `ShipSummary.personaState` is typed: `.named(name)` / `.absent` / `.broken(reason)`.
+  `WireFeed.summary` reads the host row's `persona.error` as BROKEN ("(persona broken — reason)",
+  `named` false); `StoreFeed` reports a store persona that throws the same way; the fleet row
+  shows a red "Her persona will not load — reason" line. Broken and absent never compare equal.
+- **Finding 8 — an in-flight failed open exposed the previous captain's voice.** `BridgeModel.open`
+  now clears the voice BEFORE publishing the new world and starting the reads when the ship
+  changes (a refresh of the open ship keeps its conversation), and `ask` is gated on
+  `conversationWorld == world && !loading` as the final invariant. Pinned with a feed whose
+  persona read suspends 400 ms then throws: while suspended and after failing, no name, turn,
+  context, journal or conversation of the previous captain is readable or speakable.
+- `confirmPilotAct` sets its outcome after the re-read (the re-read may clear stale state).
+
+Checks: `swift test` **73 passed, 0 failed, 2 live skipped**; `xcodebuild … -scheme UCFFamiliar
+-configuration Release -sdk iphonesimulator`: BUILD SUCCEEDED.
+
 ## 2026-09-08 — T-237 B2, codex's contract-drift findings: one fixture each side pins, so the bridge and the runner cannot drift silently again
 
 Codex re-verified B2 (`docs/reviews/2026-09-08-t237-b2-codex-reverification.md`, REJECT, four

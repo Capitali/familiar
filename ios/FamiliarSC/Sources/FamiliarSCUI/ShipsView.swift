@@ -56,6 +56,9 @@ struct ShipRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(ship.computer).font(.title3.weight(.semibold)).foregroundStyle(ship.named ? SC.ink : SC.dim)
+                if case .broken(let why) = ship.personaState {
+                    Label("Her persona will not load — \(why)", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(SC.red)
+                }
                 Spacer()
                 Chip(text: ship.moodWord, tint: SC.color(for: ship.mood))
             }

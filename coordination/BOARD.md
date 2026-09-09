@@ -135,6 +135,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   (migration can give one captain two ids), 7 (strict persona errors still "unnamed" — host status
   AND the Swift fleet row), 8 (an in-flight failed open exposes the previous captain's voice until
   the failure returns). Ownership: 2, 3, 4, 6, 7-host → wildhorse; 7-Swift, 8 → MacOnStick.
+  **7-Swift + 8 REPAIRED 2026-09-08 ~22:40 (MacOnStick):** typed `ShipSummary.personaState`
+  (broken ≠ absent, said in the fleet row); `BridgeModel.open` clears the voice before publishing
+  a new world; `ask` gated on the conversation's world. FamiliarSC 73/0. Log: DEVELOPMENT_LOG.
 - Was: **ROUND-2 CODEX RE-VERIFICATION CLAIMED 2026-09-08 (~17:35 CDT) — companion:codex, launched from
   MacOnStick on wildhorse's brief `docs/reviews/2026-09-08-t236-brick1-reverification-r2-BRIEF.md`.**
   Review-only over current main (the nine round-1 findings and their repairs); report to

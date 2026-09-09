@@ -14,6 +14,12 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var label: String
     public var computer: String
     public var named: Bool
+    /// The computer's persona as the host or store holds it: named, never named, or BROKEN
+    /// with the loader's reason. Broken is not absent — a row that reads "unnamed" for a
+    /// persona the kernel refuses hides the breakage in the fleet list until the ship is
+    /// opened (codex T-236 re-verification r2, finding 7). Rendered distinctly everywhere.
+    public enum PersonaState: Equatable, Sendable { case named(String), absent, broken(String) }
+    public var personaState: PersonaState = .absent
     public var hull: String
     public var captain: String
     /// The captain's durable identity (`captain_id` on the store record and the served row);
@@ -330,7 +336,10 @@ public struct StoreFeed: ShipsFeed {
         let window: [JournalEntry] = journal.since(tick: fromTick)
         let items: [MessageItem] = MessageWindow.build(journal: entries, proposals: s.proposals(), approvals: s.approvals(), nowTick: nowTick)
         let open: Int = items.filter { $0.needsTheCaptain }.count
-        let persona: Persona? = (try? s.persona()) ?? nil
+        let personaState: ShipSummary.PersonaState
+        let persona: Persona?
+        do { persona = try s.persona(); personaState = persona.map { .named($0.name) } ?? .absent }
+        catch { persona = nil; personaState = .broken("\(error)") }
         let voice = TemplatedVoice(persona: persona ?? Persona(name: "?", style: nil))
         let report: BridgeReport = voice.report(entries: window, openProposals: open)
         let underWay: Bool = lastHull?.string("why") == "under way"
@@ -343,6 +352,7 @@ public struct StoreFeed: ShipsFeed {
             mood: report.mood, openProposals: open
         )
         out.captainID = captain?.captainID ?? ""
+        out.personaState = personaState
         out.credits = lastMoney?.int("credits")
         out.fuel = lastFuel?.int("fuel")
         out.docked = lastHull?.string("docked")
