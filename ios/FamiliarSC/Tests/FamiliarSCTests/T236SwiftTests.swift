@@ -25,6 +25,22 @@ final class T236SwiftTests: XCTestCase {
         XCTAssertNotEqual(broken.personaState, absent.personaState)
     }
 
+    /// The host's typed `computer_state` (additive, 2026-09-08) is preferred over the persona read.
+    func testTheHostsTypedComputerStateIsPreferred() throws {
+        func row(_ extra: String) throws -> ShipSummary {
+            let text = #"{"world":"w","label":"KK II","hull":"","captain":"Luke","server":"","automations":[],"persona":{"name":"Felix"},"# + extra + "}"
+            return try XCTUnwrap(WireFeed.summary(from: try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)), tick: nil))
+        }
+        let broken = try row(#""computer_state":{"state":"broken","error":"style.mood is not a known mood"}"#)
+        XCTAssertEqual(broken.personaState, .broken("style.mood is not a known mood")); XCTAssertFalse(broken.named)
+        let named = try row(#""computer_state":{"state":"named","name":"Sprocket"}"#)
+        XCTAssertEqual(named.personaState, .named("Sprocket")); XCTAssertEqual(named.computer, "Sprocket"); XCTAssertTrue(named.named)
+        let absent = try row(#""computer_state":{"state":"absent"}"#)
+        XCTAssertEqual(absent.personaState, .absent); XCTAssertFalse(absent.named)
+        let legacy = try row(#""world_name":"LOCAL""#)
+        XCTAssertEqual(legacy.personaState, .named("Felix"), "a host without the field is read as before")
+    }
+
     /// Alice (Purr) is open. Bob's persona read SUSPENDS, then fails. While it is suspended
     /// and after it fails, nothing of Alice is readable or speakable under Bob's world.
     struct SlowBrokenFeed: ShipsFeed {

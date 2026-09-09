@@ -73,8 +73,18 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         // The host says `persona.error` when the store's persona will not load (T-236 r2,
         // finding 7): that is BROKEN, said as such — never "unnamed".
         let personaError = row["persona"].flatMap { $0 == .null ? nil : $0["error"]?.string }
+        // The host's typed word comes first (`computer_state`, T-236 r2 finding 7-host, additive);
+        // a host that predates it is read from `persona` / `persona.error` exactly as before.
         let state: ShipSummary.PersonaState
-        if let e = personaError { state = .broken(e) } else if let n = personaName { state = .named(n) } else { state = .absent }
+        switch row["computer_state"]?["state"]?.string {
+        case "named": state = .named(row["computer_state"]?["name"]?.string ?? personaName ?? "?")
+        case "broken": state = .broken(row["computer_state"]?["error"]?.string ?? personaError ?? "the host did not say why")
+        case "absent": state = .absent
+        default:
+            // An older row names her only in the text summary's `computer` word.
+            let word = row["computer"]?.string.flatMap { $0.hasPrefix("(") ? nil : $0 }
+            if let e = personaError { state = .broken(e) } else if let n = personaName ?? word { state = .named(n) } else { state = .absent }
+        }
         let computer: String
         switch state {
         case .named(let n): computer = n
@@ -82,7 +92,7 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         case .absent: computer = row["computer"]?.string ?? "(unnamed — `fleet rename` her)"
         }
         var summary = ShipSummary(
-            world: world, label: row["label"]?.string ?? world, computer: computer, named: personaName != nil || (personaError == nil && !computer.hasPrefix("(")),
+            world: world, label: row["label"]?.string ?? world, computer: computer, named: { if case .named = state { return true } else { return false } }(),
             hull: row["hull"]?.string ?? row["ship"]?.string ?? "", captain: row["captain"]?.string ?? "", server: row["server"]?.string ?? "",
             automations: row["automations"]?.array?.compactMap(\.string) ?? [],
             credits: row["credits"]?.int, debt: row["debt"]?.int, fuel: row["fuel"]?.int, fuelCapacity: row["fuelCapacity"]?.int,
