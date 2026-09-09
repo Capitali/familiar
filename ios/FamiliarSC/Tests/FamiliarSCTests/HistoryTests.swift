@@ -65,6 +65,16 @@ final class HistoryTests: XCTestCase {
         XCTAssertEqual(out.text, "\"Felix\" is Luke SkyWhisker's computer's name; two ships' computers cannot have the same name (HTTP 400)")
     }
 
+    /// The host's captain brief carries her ledger rows (`names`), verbatim and in order; a brief
+    /// without the field remembers nothing.
+    func testTheWireFeedReadsHerNamesOffTheCaptainBrief() throws {
+        let brief = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"captain":"Luke SkyWhisker","captain_id":"cpt-1","names":[{"at":1700001000,"kind":"hull","name":"Kibble Klipper II","holder":"world-1","act":"paired","by":"ian"},{"at":1700003000,"kind":"computer","name":"Felix","holder":"cpt-1","act":"renamed","from":"Purr","by":"ian"},{"kind":"captain"}]}"#.utf8))
+        let names = WireFeed.names(fromBrief: brief)
+        XCTAssertEqual(names.map(\.name), ["Kibble Klipper II", "Felix"], "verbatim, in the host's order; a row without a name is dropped")
+        XCTAssertEqual(names[1], NameLine(kind: "computer", name: "Felix", holder: "cpt-1", act: "renamed", from: "Purr", by: "ian", at: 1700003000))
+        XCTAssertTrue(WireFeed.names(fromBrief: .object(["captain": .string("x")])).isEmpty)
+    }
+
     struct RefusingActs: CaptainActs {
         func approve(world: String, proposalID: String, approved: Bool) async throws {}
         func setDial(world: String, dial: AutonomyDial) async throws {}

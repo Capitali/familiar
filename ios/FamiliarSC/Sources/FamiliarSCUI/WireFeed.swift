@@ -185,6 +185,21 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         return (frame, docs)
     }
 
+    /// The names the captain and her hulls have worn — the host's ledger rows on the captain
+    /// brief (`names: [rows]`, oldest first, hers and nobody else's; 0dc731e). A host without
+    /// the field, or a captain without a brief, remembers nothing here.
+    public func names(world: String) async throws -> [NameLine] {
+        let row = (try? await envelope("ships"))?.ships?.first { $0["world"]?.string == world }
+        guard let path = WireFeed.captainBriefPath(row: row, captainName: row?["captain"]?.string),
+              let d = try? await call(path), let c = try? JSONDecoder().decode(JSONValue.self, from: d) else { return [] }
+        return WireFeed.names(fromBrief: c)
+    }
+
+    /// The ledger rows off a captain brief, verbatim, in the host's order.
+    static func names(fromBrief c: JSONValue) -> [NameLine] {
+        (c["names"]?.array ?? []).compactMap { NameLine(ledger: $0) }
+    }
+
     /// Where the captain's brief is: the row's server-built `captain_brief` (root-relative,
     /// as the host writes it), else — for a host without the field — the legacy slug route
     /// from the brief's captain name, else nothing.
