@@ -994,6 +994,9 @@ fn main() -> ExitCode {
             continue;
         }
 
+        // The fold's forecast, kept for the freight doctrine below: the chain's
+        // word on each load rides the board as `chain_pressure` (T-238 finding 3).
+        let mut fold_forecast: Option<trade::Forecast> = None;
         // The board, only when the judgment could use it.
         let board: Vec<LoadRow> = if active.is_none() && !ship.in_flight {
             match wire.get("/v1/loadboard?status=open") {
@@ -1292,6 +1295,7 @@ fn main() -> ExitCode {
                     let horizon = min_hold.max(1) + 96;
                     trade::Forecast::build(&recipes, &shelves, &pricing, horizon)
                 };
+                fold_forecast = Some(forecast.clone());
                 // Say what the chain sees, once per change — the soak's evidence that
                 // the merchant is reading the map and not only the counter.
                 // Journal on CHANGE — of which shelves are starving and what the
@@ -1665,6 +1669,19 @@ fn main() -> ExitCode {
             }
         }
 
+        // The chain's word on every load, from this fold's forecast — a tie-break the
+        // doctrine applies between near-equal rates, and a fact the seam carries so
+        // the iPad's core can weigh the same board the same way.
+        let board: Vec<LoadRow> = board
+            .into_iter()
+            .map(|mut l| {
+                l.chain_pressure = fold_forecast
+                    .as_ref()
+                    .map(|f| f.pressure_on(&l.origin, &l.dest, &l.good))
+                    .unwrap_or(0);
+                l
+            })
+            .collect();
         let decision = doctrine::decide(&ship, active.as_ref(), &board, &pumps, &wire);
 
         // Gate 2: the automation this decision spends must be granted (pay-per-feature).
