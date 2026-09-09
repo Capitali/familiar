@@ -196,6 +196,20 @@ fn clock(ship: &Ship, cache: &mut Clocks) -> (i64, i64) {
 }
 
 /// One ship's status row — the same facts `fleet status --json` prints.
+/// The ledger rows that are one captain's: their captain and computer names, and the
+/// hull names of the ships they fly.
+fn names_for(root: &Path, captain_id: &str, mine: &[&Ship]) -> Vec<Value> {
+    super::fleet::names(root)
+        .into_iter()
+        .filter(|e| match e.kind.as_str() {
+            "captain" | "computer" => !captain_id.is_empty() && e.holder == captain_id,
+            "hull" => mine.iter().any(|s| s.world.id == e.holder),
+            _ => false,
+        })
+        .map(|e| serde_json::to_value(e).unwrap_or(Value::Null))
+        .collect()
+}
+
 fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
     let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
     let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
@@ -376,6 +390,12 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
         // A captain's own frame: who they are, whose computer flies for them, their
         // hulls and their one book. The same `context` shape as a ship's brief, so a
         // client can put a captain on screen and the conversation follows.
+        // Everything the fleet has ever called anyone, oldest first (Ian, 2026-09-08:
+        // "We remember names… We do not forget names.").
+        ("GET", ["names"]) => (
+            200,
+            json!({"names": super::fleet::names(root), "tick": tick, "tick_seconds": tick_seconds}),
+        ),
         ("GET", ["captains", slug, "brief"]) => {
             // Match on IDENTITY first — that is what `captain_brief` hands out. The
             // legacy slug still resolves so a client built before ids, or a store
@@ -474,6 +494,10 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                                 "ships": rows.iter().map(|r| r["label"].clone()).collect::<Vec<_>>()},
                     "captain": captain, "captain_id": first.captain.captain_id,
                     "computer": computer, "computer_state": state, "ships": rows,
+                    // Her story: every name this captain and their computer have worn,
+                    // and every hull they fly, from the fleet's ledger — oldest first.
+                    // Names are unique and we do not forget them (Ian, 2026-09-08).
+                    "names": names_for(root, &first.captain.captain_id, &mine),
                     // Pooled within this captain, never across (the fleet money boundary).
                     "book": {"pooled_credits": credits, "debt": debt,
                              "trades_realized": realized, "aboard_at_cost": aboard_cost},
@@ -1303,6 +1327,62 @@ mod surface_tests {
             ship["context"]
         );
         assert!(!word.contains("unnamed"));
+    }
+
+    /// Her story rides the captain brief: her own captain and computer rows and the
+    /// hulls she flies, and nobody else's; the whole ledger sits at GET /names.
+    #[test]
+    fn a_captains_names_ride_her_brief_and_the_whole_ledger_has_a_route() {
+        let b = base("names");
+        let root = b.join("worlds");
+        let luke = hull(&b, "Kibble", "Luke", "cpt-luke");
+        let _ann = hull(&b, "Tuna", "Ann", "cpt-ann");
+        let at = 1_700_000_000;
+        for (kind, name, holder, act, from) in [
+            ("captain", "Luke", "cpt-luke", "paired", ""),
+            ("computer", "Felix", "cpt-luke", "named", ""),
+            (
+                "hull",
+                "Kibble Klipper",
+                luke.world.id.as_str(),
+                "paired",
+                "",
+            ),
+            ("captain", "Ann", "cpt-ann", "paired", ""),
+            ("computer", "Mittens", "cpt-ann", "named", ""),
+            ("computer", "Mrs. Norris", "cpt-luke", "renamed", "Felix"),
+        ] {
+            super::super::fleet::record_name(
+                &root,
+                &super::super::fleet::NameEntry {
+                    at,
+                    kind: kind.into(),
+                    name: name.into(),
+                    holder: holder.into(),
+                    act: act.into(),
+                    from: from.into(),
+                    by: "test".into(),
+                },
+            )
+            .unwrap();
+        }
+        let (code, cap) = get("/captains/cpt-luke/brief", &b);
+        assert_eq!(code, 200);
+        let names: Vec<&str> = cap["names"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            ["Luke", "Felix", "Kibble Klipper", "Mrs. Norris"],
+            "hers, oldest first, nobody else's"
+        );
+        assert_eq!(cap["names"][3]["from"], "Felix", "lineage rides too");
+        let (code, all) = get("/names", &b);
+        assert_eq!(code, 200);
+        assert_eq!(all["names"].as_array().map(Vec::len), Some(6));
     }
 
     /// A named computer reads as named, and a hull with none reads as absent — the
