@@ -69,7 +69,16 @@ public struct ShipHistory: Equatable, Sendable {
         for e in journal.sorted(by: { ($0.tick ?? 0, $0.at) < ($1.tick ?? 0, $1.at) }) { builder.take(e) }
         builder.take(book: book)
         var h = builder.finish()
-        let lineage = names.sorted { $0.at < $1.at }.map { n -> Mark in
+        // The same name written again for the same holder and act (a migration re-wrote the
+        // trail on 2026-09-08) is one mark with a count, not a stutter.
+        var folded: [(line: NameLine, again: Int)] = []
+        for n in names.sorted(by: { $0.at < $1.at }) {
+            if let last = folded.last, last.line.kind == n.kind, last.line.name == n.name, last.line.act == n.act, last.line.holder == n.holder {
+                folded[folded.count - 1].again += 1
+            } else { folded.append((n, 0)) }
+        }
+        let lineage = folded.map { f -> Mark in
+            let n = f.line
             let who = n.kind == "computer" ? "the computer" : n.kind == "hull" ? "the hull" : "the captain"
             var text: String
             switch n.act {
@@ -79,9 +88,11 @@ public struct ShipHistory: Equatable, Sendable {
             case "unpaired": text = "\(who) \(n.name) was unpaired"
             default: text = "\(who) was named \(n.name)" + (n.from.isEmpty ? "" : ", was \(n.from)")
             }
-            if !n.by.isEmpty && n.by != "pairing" { text += " (by \(n.by))" }
+            // `pairing` and `backfill` are how the record was made, not who acted.
+            if !n.by.isEmpty && !["pairing", "backfill"].contains(n.by) { text += " (by \(n.by))" }
             text += " on " + ShipHistory.day(n.at)
-            return Mark(kind: .name, key: "\(n.kind):\(n.name):\(n.at)", text: text, count: 1, firstTick: 0, lastTick: 0, ticks: [])
+            if f.again > 0 { text += " (written \(f.again + 1) times)" }
+            return Mark(kind: .name, key: "\(n.kind):\(n.name):\(n.at)", text: text, count: f.again + 1, firstTick: 0, lastTick: 0, ticks: [])
         }
         h.marks = lineage + h.marks
         return h

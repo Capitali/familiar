@@ -47,13 +47,17 @@ final class HistoryTests: XCTestCase {
             try ledger(#"{"at":1700001000,"kind":"hull","name":"Kibble Klipper II","holder":"world-1","act":"paired","by":"ian"}"#),
         ]
         XCTAssertNil(NameLine(ledger: .object(["act": .string("named")])), "a row without a name is no line")
-        let h = ShipHistory.from(journal: Fixtures.journal().entries, book: ShipBook(holdings: [], deliveries: []), names: names + rows)
+        let again = try ledger(#"{"at":1700003100,"kind":"computer","name":"Felix","holder":"cpt-1","act":"renamed","from":"Purr","by":"ian"}"#)
+        let backfilled = try ledger(#"{"at":1700000500,"kind":"captain","name":"Luke","holder":"cpt-1","act":"paired","by":"backfill"}"#)
+        let h = ShipHistory.from(journal: Fixtures.journal().entries, book: ShipBook(holdings: [], deliveries: []), names: names + rows + [again, backfilled])
         XCTAssertEqual(h.marks(of: .name).map(\.text), [
+            "the captain was Luke from the pairing on 2023-11-14",
             "the computer was Purr from the pairing on 2023-11-14",
             "the hull was Kibble Klipper II from the pairing (by ian) on 2023-11-14",
-            "the computer became Felix, was Purr (by ian) on 2023-11-14",
+            "the computer became Felix, was Purr (by ian) on 2023-11-14 (written 2 times)",
         ])
-        XCTAssertTrue(h.story.hasPrefix("Names: the computer was Purr from the pairing on 2023-11-14; "), h.story)
+        XCTAssertEqual(h.marks(of: .name).last?.count, 2, "a re-written trail is one mark, counted")
+        XCTAssertTrue(h.story.hasPrefix("Names: the captain was Luke from the pairing on 2023-11-14; the computer was Purr from the pairing on 2023-11-14; "), h.story)
         // The store feed remembers its trail.
         let remembered = try await StoreFeed(worlds: Fixtures.root).names(world: "ship")
         XCTAssertEqual(remembered.map(\.name), ["Purr"])
