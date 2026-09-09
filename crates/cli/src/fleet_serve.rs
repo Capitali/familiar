@@ -1498,7 +1498,7 @@ mod surface_tests {
             two.dir.join("journal.jsonl"),
             format!(
                 "{{\"at\":{},\"tick\":1,\"event\":\"holding\",\"credits\":500}}\n",
-                now - 7000
+                now - 7200 /* same instant as hull one's first reading: the pooled start must not depend on an hour boundary */
             ),
         )
         .unwrap();
