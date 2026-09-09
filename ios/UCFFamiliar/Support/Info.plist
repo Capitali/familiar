@@ -18,7 +18,13 @@
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
 	<key>NSAppTransportSecurity</key>
-	<dict><key>NSAllowsArbitraryLoads</key><true/><key>NSAllowsLocalNetworking</key><true/></dict>
+	<dict>
+		<!-- NSAllowsArbitraryLoads alone: iOS ignores it whenever a narrower key such as
+		     NSAllowsLocalNetworking is also present, and local networking does not cover a
+		     Tailscale address — the fleet feed at http://100.x was refused on the iPad
+		     (Ian, 2026-09-09). Same shape as FamiliarAgent's plist. -->
+		<key>NSAllowsArbitraryLoads</key><true/>
+	</dict>
 	<key>NSMicrophoneUsageDescription</key><string>So you can talk to your ship's computer. Speech is transcribed on this device and never leaves it.</string>
 	<key>NSSpeechRecognitionUsageDescription</key><string>Your ship's computer listens on this device; nothing is sent to a server.</string>
 	<key>NSCameraUsageDescription</key><string>To scan an exchange key or a fleet feed as a QR code.</string>
