@@ -297,7 +297,6 @@ pub fn best_forward(
         if !carry_affordable(fuel, l.fuel_available) {
             continue;
         }
-        let unit = r.mid - bps(r.mid, SELL_HAIRCUT_BPS);
         let ticks = router
             .leg_distances_km(here, &r.station)
             .map(|legs| {
@@ -305,14 +304,50 @@ pub fn best_forward(
             })
             .unwrap_or(l.min_hold.max(1))
             .max(1);
-        // Arrive with less than we left with. The hold is not a vault.
-        let net = unit * surviving(h, ticks, l) - fuel * l.fuel_price.max(0);
-        if best.as_ref().map(|b| net > b.net).unwrap_or(true) {
-            best = Some(Forward {
-                station: r.station.clone(),
-                net,
-                ticks,
-            });
+        // THE SELL SIDE SEES THE SAME FORECAST THE BUY SIDE SEES. On the LOCAL soak
+        // (2026-09-08, t73323) the merchant sold a gravy-base lot here at spot
+        // because velvet-array "would net 561" at its spot mid — and two ticks later
+        // bought the same lot back a credit dearer, because velvet-array's shelf was
+        // emptying and the buy rule, reading the forecast, valued it at 38 not 23.
+        // One target, two prices, a round-trip spread paid and a hold clock reset for
+        // nothing. A lot in the hold is valued where it is going at the mid it will
+        // find there, capped at double the spot as every forecast is — and at TWO
+        // moments: on arrival, or once the shelf has drained (inside the carry
+        // horizon). Waiting is charged at the ship's own hurdle per tick, the test
+        // the sell rule applies downstream, so a lot is held for a forecast exactly
+        // when the forecast pays for the wait.
+        let spot = r.mid - bps(r.mid, SELL_HAIRCUT_BPS);
+        let hurdle = hurdle_per_tick(l);
+        let mut whens = vec![ticks];
+        if let Some(dry) = l
+            .forecast
+            .and_then(|f| f.flow_at(&r.station, &h.good, FlowKind::Eats))
+            .and_then(|f| f.horizon_ticks)
+        {
+            whens.push(dry.clamp(ticks, l.carry_horizon().max(ticks)));
+        }
+        for when in whens {
+            let unit = match l
+                .forecast
+                .and_then(|f| f.project(&r.station, &h.good, when))
+            {
+                Some(p) => (p.mid_then.0 - bps(p.mid_then.0, SELL_HAIRCUT_BPS)).min(spot * 2),
+                None => spot,
+            };
+            // Arrive with less than we left with. The hold is not a vault.
+            let net = unit * surviving(h, when, l) - fuel * l.fuel_price.max(0);
+            let worth = net as f64 - hurdle * when as f64;
+            let beats = best
+                .as_ref()
+                .map(|b| worth > b.net as f64 - hurdle * b.ticks as f64)
+                .unwrap_or(true);
+            if beats {
+                best = Some(Forward {
+                    station: r.station.clone(),
+                    net,
+                    ticks: when,
+                });
+            }
         }
     }
     best
@@ -1232,6 +1267,42 @@ mod tests {
         assert_eq!(ev["event"], "position-opened");
         assert_eq!(ev["why"], "forecast: works-b eats brine");
         assert_eq!(ev["units"], 60);
+    }
+
+    /// The LOCAL soak's lesson (t73323): a lot bound for a starving works is not sold
+    /// here for a bid that beats the target's SPOT, when the target's FORECAST beats
+    /// the bid. Sell side and buy side read one forecast.
+    #[test]
+    fn a_lot_bound_for_a_starving_works_is_not_sold_here_at_spot() {
+        // Held 32 gravy-base at 15; here bids 19. velvet-array's spot mid is 23 (18
+        // after the haircut — worse than 19 here), but its shelf drains to empty by
+        // the hold clock and the mid heads to 38 (31 after the haircut).
+        let hold = vec![held("gravy-base", 32, 15, 100, 100)];
+        let board = vec![q("gravy-base", 20, 19, 500)];
+        let galaxy = vec![row("gravy-base", "velvet-array", 23)];
+        let mut l = at("foxys-diner", 150);
+        let fc = eating("velvet-array", "gravy-base", 233, 600, 13_333, 20, 9_000);
+        // A short flight, as the LOCAL router priced it (4 ticks): the lot could be
+        // sold on arrival, or held there while the shelf drains (17 ticks).
+        struct Near;
+        impl Router for Near {
+            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(50)
+            }
+            fn leg_distances_km(&self, _: &str, _: &str) -> Option<Vec<i64>> {
+                Some(vec![1])
+            }
+        }
+        // Without the forecast: the spot forward (18) loses to 19 here — sell.
+        let d = decide_trade(&l, &board, &galaxy, &hold, &pumps(), &Near);
+        assert!(matches!(d, TradeDecision::Sell { .. }), "{d:?}");
+        // With it: the lot is worth more where it is going — hold.
+        l.forecast = Some(&fc);
+        let d = decide_trade(&l, &board, &galaxy, &hold, &pumps(), &Near);
+        assert!(
+            !matches!(d, TradeDecision::Sell { .. }),
+            "sold what the forecast wanted kept: {d:?}"
+        );
     }
 
     #[test]
