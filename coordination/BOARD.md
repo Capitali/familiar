@@ -9,6 +9,22 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
+### T-240 · Learn to control what UCF opens — the co-pilot key, and the 22 verbs the familiar does not file
+- status: PROPOSED (companion:claude, MacOnStick, 2026-09-08 ~22:50 CDT) on Ian's word this evening:
+  "Make UCF ships computer more independent, more autonomous, if UCF has a feature we can control
+  with familiar learn to control it well."
+- the survey: `docs/partners/2026-09-08-ucf-control-surface-survey.md` — 33 exchange verbs, 11
+  filed by whisker, 6 by direct mode; 36 read routes, 10 read. The exchange's co-pilot key
+  (`auto:freight`, six delegated verbs) is the world's own statement of what a computer may do alone.
+- bricks in value order: (1) the co-pilot key — mint through `/v1/copilot-keys`, whisker flies on
+  it, the dial's freight/navigation families door-enforced; (2) `cancelBooking` at the
+  deadline-miss door (freight.cancel); (3) galley + crew loop (ship.crew); (4) `tow` beside `paws`
+  at the rescue door; (5) the shipper role (post/accept bills — the articles ruling as a wire fact);
+  (6) claims/surveys/desks as perception. Each: doctrine door + dial surface + journal word in the
+  shared contract + notice/voice fact + mock-wire body test.
+- depends: nothing from Jeff (every door is open). Whisker doors are the wildhorse lane's to
+  claim by brick; the key + Swift/notice halves are MacOnStick's. Awaits Ian's ordering.
+
 ### T-237 · familiar-sc — the ship's computer as a product: compact runtime, Apple Intelligence voice, Apple clients
 - status: PROPOSED (Ian, 2026-09-02, planning session) — Round 1 written: `docs/reviews/2026-09-02-familiar-sc-ships-computer-dialogue.md`; Codex Round 2 requested; Ian decides Q1–Q5 before B1
 - scope: a build profile of this workspace (`familiar-sc` binary = fleet supervisor + pilots + persona store, mesh optional, self-issued lease when standalone) + a `FamiliarSC` Swift package (wire client, store reader, pairing, bridge voice on Foundation Models with `@Generable` reports and Tool-protocol standing orders, on-device → PCC (OS 27, consent, entitlement) → templated floor) + three Apple clients: iPhone/iPad captain's bridge, Vision Pro ΔV bridge (volumetric Jovian system from the engine's integer sky; plot/watch/replay once metal#63's racing layer exists; live system view first)
