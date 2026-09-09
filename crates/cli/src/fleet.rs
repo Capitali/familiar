@@ -1274,10 +1274,15 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
             // Two ships' computers cannot have the same name (Ian, 2026-09-08): a name
-            // given here must be free across every OTHER captain, now and ever.
-            if let Err(e) = computer_name_free(&dir, &root, &persona.name, captain, &captain_id) {
-                eprintln!("fleet pair: {e}");
-                return ExitCode::FAILURE;
+            // GIVEN here must be free across every other captain, now and ever. Joining
+            // the captain's own computer is not a naming, and is never checked — a
+            // second hull for Luke was refused on 2026-09-09 because the LOCAL twin's
+            // captain also wears Felix, which is the grandfathered pair, not a naming.
+            if let Some(given) = computer_name.as_deref() {
+                if let Err(e) = computer_name_free(&dir, &root, given, captain, &captain_id) {
+                    eprintln!("fleet pair: {e}");
+                    return ExitCode::FAILURE;
+                }
             }
 
             // The computer, and its history, as ONE recoverable mutation (finding 3) —
@@ -3064,6 +3069,67 @@ mod captain_store_tests {
         assert!(names(&root)
             .iter()
             .any(|e| e.act == "chose" && e.by == "familiar"));
+    }
+
+    /// Joining a captain's own computer is not a naming: a second hull for Luke pairs
+    /// even though another captain (the LOCAL twin) wears the same computer name —
+    /// only a name GIVEN at pairing is checked for uniqueness.
+    #[test]
+    fn a_second_hull_joins_its_captains_computer_whatever_other_captains_wear() {
+        let base = tmp("join_not_naming");
+        let server = stub_exchange(4);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        // Another captain wears Felix too (a grandfathered twin, written straight to the ledger).
+        let root = base.join("worlds");
+        record_name(
+            &root,
+            &NameEntry {
+                at: 1,
+                kind: "computer".into(),
+                name: "Felix".into(),
+                holder: "cpt-twin".into(),
+                act: "named".into(),
+                from: String::new(),
+                by: "ian".into(),
+                pronouns: String::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS,
+            "joining Luke's own Felix is not a naming"
+        );
+        assert_eq!(paired_ships(&base, &root).len(), 2);
+        // But a NAME given that another captain wears is still refused.
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Ann",
+                "three",
+                "ucfk_cccccccccccccccccccc",
+                Some("Felix")
+            )),
+            ExitCode::FAILURE
+        );
     }
 
     /// Two ships cannot have the same name: a second hull the exchange calls what a
