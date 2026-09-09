@@ -1547,6 +1547,43 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         // than folded into `status`: a read that silently rewrites the store is a
         // read nobody can trust, and this rewrites captain.json and moves a
         // directory.
+        // ── economy: the captain's money over time, from the journals ──────────
+        "economy" => {
+            let ships = paired_ships(&dir, &root);
+            let since = super::now_secs()
+                - super::economy::window_seconds(f.get("window").map(String::as_str));
+            let mut by_captain: BTreeMap<String, (String, Vec<super::economy::History>)> =
+                BTreeMap::new();
+            for s in &ships {
+                let key = if s.captain.captain_id.trim().is_empty() {
+                    s.captain.captain.clone()
+                } else {
+                    s.captain.captain_id.clone()
+                };
+                let e = by_captain.entry(key).or_default();
+                e.0 = s.captain.captain.clone();
+                e.1.push(super::economy::for_ship(&s.dir, since));
+            }
+            if f.contains_key("json") {
+                let out: Vec<Value> = by_captain
+                    .iter()
+                    .map(|(id, (name, hulls))| {
+                        json!({
+                    "captain_id": id, "captain": name,
+                    "pooled": super::economy::to_json(&super::economy::pool(hulls, since), false)})
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+                return ExitCode::SUCCESS;
+            }
+            for (name, hulls) in by_captain.values() {
+                println!("{name}:");
+                for line in super::economy::analysis(&super::economy::pool(hulls, since)) {
+                    println!("  {line}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
         // ── names: everything the fleet has ever called anyone ─────────────────
         "names" => {
             if f.contains_key("backfill") {
@@ -1968,7 +2005,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | names | adopt-ids | rename | run | serve");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | names | adopt-ids | rename | run | serve");
             ExitCode::FAILURE
         }
     }

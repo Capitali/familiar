@@ -396,6 +396,44 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             200,
             json!({"names": super::fleet::names(root), "tick": tick, "tick_seconds": tick_seconds}),
         ),
+        // The captain's money over time: readings, attributed flows, a summary and
+        // the host's analysis, pooled across every hull they fly (T-241, Ian
+        // 2026-09-09). `?window=24h|7d|30d`, a week by default.
+        ("GET", ["captains", slug, "economy"]) => {
+            let mine: Vec<&Ship> = ships
+                .iter()
+                .filter(|s| {
+                    !s.captain.captain_id.trim().is_empty() && s.captain.captain_id == *slug
+                })
+                .collect();
+            let Some(first) = mine.first() else {
+                return (
+                    404,
+                    json!({"error": "no captain by that identity flies here"}),
+                );
+            };
+            let since =
+                now - super::economy::window_seconds(req.query.get("window").map(String::as_str));
+            let per_hull: Vec<super::economy::History> = mine
+                .iter()
+                .map(|s| super::economy::for_ship(&s.dir, since))
+                .collect();
+            let pooled = super::economy::pool(&per_hull, since);
+            (
+                200,
+                json!({
+                    "captain": first.captain.captain, "captain_id": first.captain.captain_id,
+                    "since": since, "now": now,
+                    "hulls": mine.iter().zip(&per_hull).map(|(s, h)| {
+                        let mut v = super::economy::to_json(h, true);
+                        v["world"] = json!(s.world.id);
+                        v["label"] = json!(s.world.label);
+                        v
+                    }).collect::<Vec<_>>(),
+                    "pooled": super::economy::to_json(&pooled, true),
+                }),
+            )
+        }
         ("GET", ["captains", slug, "brief"]) => {
             // Match on IDENTITY first — that is what `captain_brief` hands out. The
             // legacy slug still resolves so a client built before ids, or a store
@@ -486,6 +524,16 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                     .count() as i64;
                 rows.push(row);
             }
+            // The week's money in summary, pooled — the trend lines live at
+            // /captains/{id}/economy (T-241).
+            let economy_week = {
+                let since = now - super::economy::window_seconds(None);
+                let per_hull: Vec<super::economy::History> = mine
+                    .iter()
+                    .map(|s| super::economy::for_ship(&s.dir, since))
+                    .collect();
+                super::economy::to_json(&super::economy::pool(&per_hull, since), false)
+            };
             (
                 200,
                 json!({
@@ -498,6 +546,9 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                     // and every hull they fly, from the fleet's ledger — oldest first.
                     // Names are unique and we do not forget them (Ian, 2026-09-08).
                     "names": names_for(root, &first.captain.captain_id, &mine),
+                    // The week's money in summary, pooled — the trend lines live at
+                    // /captains/{id}/economy (T-241).
+                    "economy": economy_week,
                     // Pooled within this captain, never across (the fleet money boundary).
                     "book": {"pooled_credits": credits, "debt": debt,
                              "trades_realized": realized, "aboard_at_cost": aboard_cost},
@@ -1252,10 +1303,21 @@ mod surface_tests {
     }
 
     fn get(path: &str, base: &Path) -> (u16, Value) {
+        // Split the query the way read_request does, so a test path can carry one.
+        let (path, query) = match path.split_once('?') {
+            Some((p, q)) => (
+                p.to_string(),
+                q.split('&')
+                    .filter_map(|kv| kv.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect::<BTreeMap<String, String>>(),
+            ),
+            None => (path.to_string(), BTreeMap::new()),
+        };
         let req = Req {
             method: "GET".into(),
-            path: path.into(),
-            query: BTreeMap::new(),
+            path,
+            query,
             bearer: Some("tok".into()),
             body: Vec::new(),
         };
@@ -1383,6 +1445,52 @@ mod surface_tests {
         let (code, all) = get("/names", &b);
         assert_eq!(code, 200);
         assert_eq!(all["names"].as_array().map(Vec::len), Some(6));
+    }
+
+    /// T-241: a captain's economy rides its own route, pooled across her hulls, and
+    /// her brief carries the week in summary.
+    #[test]
+    fn a_captains_economy_has_a_route_and_a_summary_on_her_brief() {
+        let b = base("economy");
+        let one = hull(&b, "One", "Luke", "cpt-luke");
+        let two = hull(&b, "Two", "Luke", "cpt-luke");
+        let now = super::super::now_secs();
+        std::fs::write(
+            one.dir.join("journal.jsonl"),
+            format!(
+                "{{\"at\":{},\"tick\":1,\"event\":\"holding\",\"credits\":1000}}\n{{\"at\":{},\"tick\":2,\"event\":\"load-closed\",\"credits\":1300,\"load\":\"L1\"}}\n",
+                now - 7200,
+                now - 3600
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            two.dir.join("journal.jsonl"),
+            format!(
+                "{{\"at\":{},\"tick\":1,\"event\":\"holding\",\"credits\":500}}\n",
+                now - 7000
+            ),
+        )
+        .unwrap();
+        let (code, v) = get("/captains/cpt-luke/economy?window=24h", &b);
+        assert_eq!(code, 200, "{v}");
+        assert_eq!(v["pooled"]["flows"]["freight"], 300);
+        assert_eq!(v["pooled"]["summary"]["credits_now"], 1800);
+        assert_eq!(v["hulls"].as_array().map(Vec::len), Some(2));
+        assert!(
+            v["pooled"]["analysis"][0]
+                .as_str()
+                .unwrap()
+                .starts_with("+ℳ300"),
+            "{v}"
+        );
+        let (code, cap) = get("/captains/cpt-luke/brief", &b);
+        assert_eq!(code, 200);
+        assert_eq!(cap["economy"]["flows"]["freight"], 300);
+        assert!(
+            cap["economy"].get("points").is_none(),
+            "the brief carries the summary only"
+        );
     }
 
     /// A named computer reads as named, and a hull with none reads as absent — the

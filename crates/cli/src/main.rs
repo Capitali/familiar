@@ -5,6 +5,7 @@
 
 mod autonomy_cmd;
 mod daemon;
+mod economy;
 mod fleet;
 mod fleet_serve;
 

@@ -9,6 +9,13 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Proposed
 
+### T-241 · Economic history and profit analysis, by captain — trend lines on the UCF Familiar views
+- **proposed (Ian, 2026-09-09, verbatim): "Familiar UCF views should include economic history/trend lines and analysis of profit in summary form for overview by captain."**
+- status: **HOST HALF LANDED (wildhorse, 2026-09-09)** — `crates/cli/src/economy.rs`: from each hull's journal, every `credits` reading is a point and every delta between two readings is exact money, booked to the last act that could have moved it (fill → trade bought/sold, load-closed → freight, Refuel/DivertToPump → fuel, Repair → repair, outfitted → outfit, paid-down → debt, else "other"); readings thinned to one per hour; pooled per captain across hulls (purses summed per hour with carry-forward, flows summed); summary = start → now, delta, least-squares trend ℳ/day, best and worst single move with cause; `analysis` = the host's sentences. Wire: **`GET /captains/{id}/economy?window=24h|7d|30d`** (per-hull + pooled, with points) and **`economy`** (pooled summary + analysis, no points) on the captain brief. CLI: `familiar fleet economy [--window 7d] [--json]`. Pinned (attribution, window seeding, thinning, pooling, route + brief).
+- **iPad half — MacOnStick (FamiliarSC/UCFFamiliar):** a captain-overview screen drawing `pooled.points` as a trend line (Swift Charts), the flows as a stacked bar or waterfall (earned vs spent by cause), and the `analysis` sentences as the summary; per-hull lines toggleable; window picker 24h/7d/30d. Read `economy` off the brief for the summary card without a second call.
+- depends: T-236 (captain_id keys the route), T-238 (the journal's `why` on fills is what "analysis" will cite next).
+- notes: the trend is a straight line through what happened — say so on screen. Debt is not journaled per fold; it rides `/v1/me` on the row, so "net worth" is out of scope until the pilot journals debt (small follow-up).
+
 ### T-240 · Learn to control what UCF opens — the co-pilot key, and the 22 verbs the familiar does not file
 - status: PROPOSED (companion:claude, MacOnStick, 2026-09-08 ~22:50 CDT) on Ian's word this evening:
   "Make UCF ships computer more independent, more autonomous, if UCF has a feature we can control
