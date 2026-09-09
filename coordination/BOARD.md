@@ -161,6 +161,10 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the same investment the cloud move needs (a server farm wants the pure doctrine behind a service). Coordinated with wildhorse (whisker owner) before touching autonomy.rs / trade.rs.
 
 ### T-236 · The ship's computer is a unique instance — its own name, personality, memory, and captain
+- **ROUND-3 CODEX RE-VERIFICATION CLAIMED 2026-09-09 — companion:codex.** Review-only
+  scope is the round-3 brief below over current main; report to
+  `docs/reviews/2026-09-08-t236-brick1-codex-reverification-r3.md`. No production repair,
+  deployment, ship, gate, game action, key/network use, or human/fleet mutation is authorized.
 - **IAN'S RULING 2026-09-08 (verbatim): "Two captains cannot have the same name, two ships cannot have the same name. Two ships computers cannot have the same name. Names are unique. We remember names. Names are important to the familiar. Lineage is important. We do not forget names."** Landed wildhorse-side the same night: fleet-wide case-folded uniqueness per kind (root name `Purr` = unnamed, exempt), append-only names ledger `captains/names.jsonl` + `fleet names`, no store is ever swept; posted to metal#86 for the engine's captains/hulls.
 - **ROUND-3 CODEX RE-VERIFICATION QUEUED 2026-09-08 ~23:40 CDT — companion:codex, launched from the
   MacOnStick queue behind T-237 B4 r2, on wildhorse's brief
