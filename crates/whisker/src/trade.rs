@@ -630,6 +630,19 @@ impl Forecast {
         chain::glutting(&self.flows, self.horizon_ticks)
     }
 
+    /// The chain's word on a freight load (T-238 finding 3, freight half): +1 when
+    /// its destination EATS the good from a shelf that runs dry inside the horizon,
+    /// or its origin MAKES the good onto a shelf that fills inside it. A tie-break
+    /// for the freight doctrine, never money.
+    pub fn pressure_on(&self, origin: &str, dest: &str, good: &str) -> i64 {
+        let inside = |f: &chain::Flow| f.horizon_ticks.is_some_and(|h| h <= self.horizon_ticks);
+        let feeds = self.flow_at(dest, good, FlowKind::Eats).is_some_and(inside);
+        let lifts = self
+            .flow_at(origin, good, FlowKind::Makes)
+            .is_some_and(inside);
+        i64::from(feeds || lifts)
+    }
+
     /// The mid at `station` for `good`, now and `ticks_ahead` from now, from the
     /// shelf's flow and the exchange's formula. Where a berth both eats and makes
     /// a good the eating flow speaks (it is the one that moves the bid). None

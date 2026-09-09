@@ -112,6 +112,10 @@ pub fn load_row(v: &Value) -> Option<LoadRow> {
             .get("heldForOther")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // The chain's word, when the caller has one (the host's forecast); absent
+        // is no word. Optional on the seam so an older or chain-less client's rows
+        // still parse, and its advice differs from the host's only on a near-tie.
+        chain_pressure: v.get("chain_pressure").and_then(Value::as_i64).unwrap_or(0),
     })
 }
 
@@ -340,8 +344,18 @@ pub fn explain(
         }
         Decision::Book { load_id } => {
             let l = board.iter().find(|l| &l.load_id == load_id);
+            let rate = |l: &LoadRow| l.estimated_net as f64 / l.pilot_ticks().max(1) as f64;
+            // The chain's word decided when the booked load carries it AND another
+            // bookable row paid a better rate — that row lost only to the tie-break.
+            let chain_decided = l.is_some_and(|b| {
+                b.chain_pressure > 0
+                    && board
+                        .iter()
+                        .any(|o| o.load_id != b.load_id && !o.held_for_other && rate(o) > rate(b))
+            });
             json!({
-                "code": "freight.best-net-per-tick",
+                "code": if chain_decided { "freight.chain-preferred" } else { "freight.best-net-per-tick" },
+                "chain_pressure": l.map(|l| l.chain_pressure),
                 "load_id": load_id,
                 "estimated_net": l.map(|l| l.estimated_net),
                 "deadhead_ticks": l.map(|l| l.deadhead_ticks),
@@ -615,5 +629,46 @@ mod seam_parity_tests {
         assert_eq!(book["reasons"]["code"], "freight.best-net-per-tick");
         assert_eq!(book["reasons"]["estimated_net"], 900);
         assert_eq!(book["reasons"]["deliver_deadline_tick"], 1100);
+    }
+
+    /// The chain's word rides the seam as `chain_pressure` on a board row (T-238
+    /// finding 3, freight half): a near-tie goes to the load that feeds a starving
+    /// works and the reasons say so; a row without the field is a row with no word,
+    /// so a client that cannot model the chain still parses and still books.
+    #[test]
+    fn chain_pressure_rides_the_seam_and_breaks_only_near_ties() {
+        let me = json!({"docked": "a", "fuel": 600, "fuelCapacity": 600, "credits": 5000,
+                        "effectiveAccelMilliG": 189, "wearBps": 0, "titled": false,
+                        "leasePrincipal": 25000, "holdCapacity": 160, "holdUsed": 0,
+                        "route": [], "tick": 1000});
+        let routes = json!([{"from": "a", "to": "b", "fuel": 10, "legs_km": [1_000_000]},
+                            {"from": "b", "to": "a", "fuel": 10, "legs_km": [1_000_000]}]);
+        let row = |id: &str, net: i64, pressure: Option<i64>| {
+            let mut r = json!({"loadId": id, "origin": "a", "dest": "b", "good": "catnip",
+                               "units": 25, "estimatedNet": net, "deadheadTicks": 0,
+                               "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard"});
+            if let Some(p) = pressure {
+                r["chain_pressure"] = json!(p);
+            }
+            r
+        };
+        let advise_with = |board: Value| {
+            advise(&json!({"me": me, "board": board,
+                           "stations": [{"id": "a", "sellsFuel": true}, {"id": "b", "sellsFuel": true}],
+                           "routes": routes}))
+        };
+        // Near-tie, the chain's word on the lesser: it books, and says why.
+        let out = advise_with(json!([row("L1", 900, None), row("L2", 873, Some(1))]));
+        assert_eq!(out["decision"]["load_id"], "L2", "{out}");
+        assert_eq!(out["reasons"]["code"], "freight.chain-preferred");
+        assert_eq!(out["reasons"]["chain_pressure"], 1);
+        // Materially worse: money wins.
+        let out = advise_with(json!([row("L1", 900, None), row("L3", 810, Some(1))]));
+        assert_eq!(out["decision"]["load_id"], "L1", "{out}");
+        assert_eq!(out["reasons"]["code"], "freight.best-net-per-tick");
+        // No word anywhere (a chain-less client): the best rate, as before.
+        let out = advise_with(json!([row("L1", 900, None), row("L2", 873, None)]));
+        assert_eq!(out["decision"]["load_id"], "L1", "{out}");
+        assert_eq!(out["reasons"]["code"], "freight.best-net-per-tick");
     }
 }

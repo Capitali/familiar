@@ -78,6 +78,13 @@ pub struct LoadRow {
     /// delivery bonuses are forfeit.
     pub deliver_deadline_tick: i64,
     pub held_for_other: bool,
+    /// The supply chain's word on this load (T-238 finding 3, freight half): +1 when
+    /// it feeds a works whose input shelf is draining, or lifts an output shelf that
+    /// is filling, inside the carry horizon; 0 when the chain has no word — or when
+    /// the caller has no chain model (the seam's rows carry it optionally). It is a
+    /// TIE-BREAK, never money: it decides between loads whose net per tick is within
+    /// a few percent, and lifts no load that pays materially less.
+    pub chain_pressure: i64,
 }
 
 impl LoadRow {
@@ -488,6 +495,8 @@ const LOW_FUEL: f64 = 0.4;
 pub const CRITICAL_FUEL: f64 = 0.05;
 /// How many top board rows get route-priced. A route call per row would be impolite.
 const PRICED_CANDIDATES: usize = 5;
+/// How close two loads' net-per-tick must be for the chain's word to choose between them.
+pub const CHAIN_TIE_BPS: i64 = 500;
 /// The desk reverts a booking not picked up within this many ticks of it
 /// (`pickupTTLTicks` on `/v1/reference`; 48 on LOCAL and PROD, a revert penalty
 /// with it). The board's `deadheadTicks` is not OUR deadhead — L2166 on LOCAL
@@ -665,11 +674,27 @@ pub fn decide(
         .filter(|l| !l.held_for_other && l.units <= ship.hold_capacity - ship.hold_used)
         .filter(|l| l.pilot_ticks() > 0 && l.estimated_net > 0)
         .collect();
+    let rate = |l: &LoadRow| l.estimated_net as f64 / l.pilot_ticks() as f64;
     ranked.sort_by(|a, b| {
-        let ra = a.estimated_net as f64 / a.pilot_ticks() as f64;
-        let rb = b.estimated_net as f64 / b.pilot_ticks() as f64;
-        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+        rate(b)
+            .partial_cmp(&rate(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.load_id.cmp(&b.load_id))
     });
+    // The chain's word breaks near-ties: among loads within CHAIN_TIE_BPS of the best
+    // rate, one that feeds a starving works or lifts a glutting shelf goes first —
+    // stable, so rate order holds within each group. It lifts nothing that pays
+    // materially less (T-238 finding 3, freight half).
+    if let Some(best) = ranked.first().map(|l| rate(l)) {
+        let floor = best * (10_000 - CHAIN_TIE_BPS) as f64 / 10_000.0;
+        ranked.sort_by_key(|l| {
+            if l.chain_pressure > 0 && rate(l) >= floor {
+                0
+            } else {
+                1
+            }
+        });
+    }
     for l in ranked.into_iter().take(PRICED_CANDIDATES) {
         let (Some(dead), Some(haul)) = (
             router.fuel_between(here, &l.origin),
@@ -893,6 +918,7 @@ mod tests {
             loading_ticks: 8,
             deliver_deadline_tick: 0,
             held_for_other: false,
+            chain_pressure: 0,
         }
     }
 
@@ -1001,6 +1027,48 @@ mod tests {
         );
         assert!(
             ledger_word(&["booked", "picked up", "delivered", "settled: payment taken"]).is_err()
+        );
+    }
+
+    /// T-238 finding 3, the freight half: the chain's word breaks a near-tie toward
+    /// the load that feeds a starving works — and lifts no load that pays materially
+    /// less. Same fixture as the fuel-reserve booking below.
+    #[test]
+    fn the_chain_breaks_a_near_tie_and_never_buys_a_worse_load() {
+        let ship = ship_at("a", 600);
+        let pumps = pumps(&["a", "b"]);
+        let router = FlatRouter(10);
+        // Two loads a to b, equal legs; L2 pays 3% less and feeds a starving works.
+        let mut starving = load("L2", "a", "b", 873, (0, 10));
+        starving.chain_pressure = 1;
+        let board = vec![load("L1", "a", "b", 900, (0, 10)), starving];
+        assert_eq!(
+            decide(&ship, None, &board, &pumps, &router),
+            Decision::Book {
+                load_id: "L2".into()
+            },
+            "within the tie band, the chain's word decides"
+        );
+        // Ten percent worse is not a tie: money wins, whatever the chain says.
+        let mut worse = load("L3", "a", "b", 810, (0, 10));
+        worse.chain_pressure = 1;
+        let board = vec![load("L1", "a", "b", 900, (0, 10)), worse];
+        assert_eq!(
+            decide(&ship, None, &board, &pumps, &router),
+            Decision::Book {
+                load_id: "L1".into()
+            }
+        );
+        // No word from the chain: the best rate books, deterministically by id on a tie.
+        let board = vec![
+            load("L1", "a", "b", 900, (0, 10)),
+            load("L0", "a", "b", 900, (0, 10)),
+        ];
+        assert_eq!(
+            decide(&ship, None, &board, &pumps, &router),
+            Decision::Book {
+                load_id: "L0".into()
+            }
         );
     }
 
@@ -1123,6 +1191,7 @@ mod tests {
             loading_ticks: 8,
             deliver_deadline_tick: 0,
             held_for_other: false,
+            chain_pressure: 0,
         };
         let far = Chart(1_307_724_939);
         let d = decide(
@@ -1177,6 +1246,7 @@ mod tests {
                 loading_ticks: 8,
                 deliver_deadline_tick: 0,
                 held_for_other: false,
+                chain_pressure: 0,
             },
             word: ActiveWord::Booked,
         };
