@@ -1294,28 +1294,37 @@ fn main() -> ExitCode {
                 };
                 // Say what the chain sees, once per change — the soak's evidence that
                 // the merchant is reading the map and not only the counter.
-                let hungry_now: Vec<String> = forecast
+                // Journal on CHANGE — of which shelves are starving and what the
+                // mid heads to, not of the countdown, which moves every fold and
+                // wrote a line per fold on the LOCAL soak (10 s ticks, 2026-09-08).
+                let (hungry_now, hungry_key): (Vec<String>, Vec<String>) = forecast
                     .starving()
                     .iter()
                     .map(|f| {
                         let h = f.horizon_ticks.unwrap_or(0);
                         match forecast.project(&f.station, &f.good, h) {
-                            Some(p) => format!(
-                                "{}:{} dry in {h}t, mid {}→{}",
-                                f.station, f.good, p.mid_now.0, p.mid_then.0
+                            Some(p) => (
+                                format!(
+                                    "{}:{} dry in {h}t, mid {}→{}",
+                                    f.station, f.good, p.mid_now.0, p.mid_then.0
+                                ),
+                                format!("{}:{} → {}", f.station, f.good, p.mid_then.0),
                             ),
-                            None => format!("{}:{} dry in {h}t", f.station, f.good),
+                            None => (
+                                format!("{}:{} dry in {h}t", f.station, f.good),
+                                format!("{}:{}", f.station, f.good),
+                            ),
                         }
                     })
-                    .collect();
-                if hungry_now != last_forecast {
+                    .unzip();
+                if hungry_key != last_forecast {
                     journal(
                         &ship_dir,
                         json!({"at": now, "tick": tick, "event": "forecast",
                                "horizon_ticks": min_hold.max(1) + 96,
                                "starving": hungry_now}),
                     );
-                    last_forecast = hungry_now;
+                    last_forecast = hungry_key;
                 }
                 let ledger = Ledger {
                     forecast: if recipes.is_empty() {
