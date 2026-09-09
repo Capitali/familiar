@@ -751,6 +751,25 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
 
+            // The computer, and its history, as ONE recoverable mutation (finding 3) —
+            // and BEFORE the ship is commissioned (round 2, finding 6): a naming that
+            // fails here leaves no world, no key, no captain record, and no event.
+            if let Err(e) = familiar_kernel::persona::name(
+                &persona_dir,
+                &persona,
+                Some(&familiar_kernel::persona::NameEvent {
+                    at: super::now_secs(),
+                    actor: if computer_name.is_some() {
+                        captain.to_string()
+                    } else {
+                        "pairing".to_string()
+                    },
+                    name: persona.name.clone(),
+                }),
+            ) {
+                eprintln!("fleet pair: writing the captain's computer: {e}");
+                return ExitCode::FAILURE;
+            }
             let (w, ship_dir) = match instance::commission(
                 &dir,
                 &root,
@@ -794,25 +813,6 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 ship_dir.join("captain.json"),
                 serde_json::to_vec_pretty(&record).unwrap_or_default(),
             );
-            // The computer, and its history, as ONE mutation (finding 3). The trail
-            // used to be a second call whose failure was printed and then reported as
-            // success, so a computer could be renamed with no record of it.
-            if let Err(e) = familiar_kernel::persona::name(
-                &persona_dir,
-                &persona,
-                Some(&familiar_kernel::persona::NameEvent {
-                    at: super::now_secs(),
-                    actor: if computer_name.is_some() {
-                        captain.to_string()
-                    } else {
-                        "pairing".to_string()
-                    },
-                    name: persona.name.clone(),
-                }),
-            ) {
-                eprintln!("fleet pair: writing the captain's computer: {e}");
-                return ExitCode::FAILURE;
-            }
             let ttl: i64 = f
                 .get("ttl-hours")
                 .and_then(|s| s.parse().ok())
@@ -907,19 +907,22 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             let was = persona.name.clone();
             persona.name = new_name.to_string();
             persona.persona_version = 2;
-            if let Err(e) = familiar_kernel::persona::write(&persona_dir, &persona) {
-                eprintln!("fleet rename: {e}");
-                return ExitCode::FAILURE;
-            }
-            if let Err(e) = familiar_kernel::persona::record_naming(
+            // The computer and its history, as ONE recoverable mutation — the same
+            // helper pairing uses. Rename used to write the persona, release the
+            // lock, append the trail unlocked, print the trail's error, and exit 0
+            // (codex T-236 round 2, finding 3): a computer wearing a name its own
+            // history did not contain.
+            if let Err(e) = familiar_kernel::persona::name(
                 &persona_dir,
-                &familiar_kernel::persona::NameEvent {
+                &persona,
+                Some(&familiar_kernel::persona::NameEvent {
                     at: super::now_secs(),
                     actor,
                     name: new_name.to_string(),
-                },
+                }),
             ) {
-                eprintln!("fleet rename: the naming trail could not be written: {e}");
+                eprintln!("fleet rename: the computer could not be renamed: {e}");
+                return ExitCode::FAILURE;
             }
             let fleet: Vec<String> = paired_ships(&dir, &root)
                 .into_iter()
@@ -1524,5 +1527,194 @@ mod captain_store_tests {
         let v = persona_for(&root, &root.join("ship"), &rec("Cap", "")).unwrap();
         assert!(v.get("error").is_some(), "got {v}");
         assert!(v.get("name").is_none());
+    }
+
+    /// A one-shot exchange on the loopback: answers `/v1/me` with a ship name for
+    /// as many pairings as the test makes, so `fleet pair` can be driven end to end
+    /// with no network and no key that means anything.
+    fn stub_exchange(requests: usize) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..requests {
+                let Ok((mut conn, _)) = listener.accept() else {
+                    return;
+                };
+                let mut buf = [0u8; 4096];
+                let mut got = Vec::new();
+                loop {
+                    let n = conn.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&buf[..n]);
+                    if got.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let body = br#"{"shipName":"Probe","actor":"key:test"}"#;
+                let _ = write!(
+                    conn,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = conn.write_all(body);
+                let _ = conn.flush();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn pair_args(
+        base: &Path,
+        server: &str,
+        label: &str,
+        key: &str,
+        name: Option<&str>,
+    ) -> Vec<String> {
+        let mut v: Vec<String> = [
+            "pair",
+            "--label",
+            label,
+            "--captain",
+            "A. Captain",
+            "--server",
+            server,
+            "--key",
+            key,
+            "--commissioner",
+            "ian",
+            "--ttl-hours",
+            "1",
+            "--data-dir",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        v.push(base.to_string_lossy().into_owned());
+        v.push("--store-root".into());
+        v.push(base.join("worlds").to_string_lossy().into_owned());
+        if let Some(n) = name {
+            v.push("--computer-name".into());
+            v.push(n.into());
+        }
+        v
+    }
+
+    /// Round 2, finding 3, at the CLI: a rename whose trail cannot be written FAILS,
+    /// and the computer keeps the name its history last recorded. It used to print
+    /// the trail's error, print the success sentence, and exit 0 with persona.json
+    /// saying one name and the last complete event another.
+    #[test]
+    fn a_rename_whose_trail_cannot_be_written_fails_and_changes_nothing() {
+        let base = tmp("rename_trail");
+        let server = stub_exchange(1);
+        let ok = cmd_fleet(&pair_args(
+            &base,
+            &server,
+            "probe",
+            "ucfk_aaaaaaaaaaaaaaaaaaaa",
+            Some("Felix"),
+        ));
+        assert_eq!(ok, ExitCode::SUCCESS);
+        let root = base.join("worlds");
+        let ships = paired_ships(&base, &root);
+        assert_eq!(ships.len(), 1);
+        let store = captain_store_by_id(&root, &ships[0].captain.captain_id);
+        assert_eq!(
+            familiar_kernel::persona::load(&store).unwrap().name,
+            "Felix"
+        );
+        assert_eq!(familiar_kernel::persona::namings(&store).len(), 1);
+
+        // The trail becomes unwritable.
+        let trail = store.join(familiar_kernel::persona::NAME_EVENTS_FILE);
+        std::fs::remove_file(&trail).unwrap();
+        std::fs::create_dir(&trail).unwrap();
+        let world_id = ships[0].world.id.clone();
+        let rc = cmd_fleet(&[
+            "rename".to_string(),
+            world_id,
+            "Sprocket".to_string(),
+            "--data-dir".to_string(),
+            base.to_string_lossy().into_owned(),
+            "--store-root".to_string(),
+            base.join("worlds").to_string_lossy().into_owned(),
+        ]);
+        assert_eq!(
+            rc,
+            ExitCode::FAILURE,
+            "an unrecorded naming is a failure, not a success"
+        );
+        assert_eq!(
+            familiar_kernel::persona::load(&store).unwrap().name,
+            "Felix",
+            "the persona must not wear a name its history does not contain"
+        );
+        assert!(trail.is_dir(), "the failed append created nothing");
+    }
+
+    /// Round 2, finding 6, at the CLI: a second pairing for a captain whose
+    /// computer already exists, injected to fail at the naming (the trail is a
+    /// directory), leaves NO new world, no key file, no captain record, and no
+    /// event. It used to fail after commissioning, with a live world on disk for
+    /// the supervisor to find and fly.
+    #[test]
+    fn a_pairing_whose_naming_fails_commissions_nothing() {
+        let base = tmp("pair_naming");
+        let server = stub_exchange(2);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "first",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let before = paired_ships(&base, &root);
+        assert_eq!(before.len(), 1);
+        let store = captain_store_by_id(&root, &before[0].captain.captain_id);
+        let trail = store.join(familiar_kernel::persona::NAME_EVENTS_FILE);
+        std::fs::remove_file(&trail).unwrap();
+        std::fs::create_dir(&trail).unwrap();
+        let worlds_before: std::collections::BTreeSet<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+
+        let rc = cmd_fleet(&pair_args(
+            &base,
+            &server,
+            "second",
+            "ucfk_bbbbbbbbbbbbbbbbbbbb",
+            None,
+        ));
+        assert_eq!(rc, ExitCode::FAILURE);
+        let after = paired_ships(&base, &root);
+        assert_eq!(after.len(), 1, "no new active world");
+        assert_eq!(
+            instance::load(&base).unwrap().len(),
+            1,
+            "no new registry entry"
+        );
+        let worlds_after: std::collections::BTreeSet<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            worlds_after, worlds_before,
+            "no new directory under the store"
+        );
+        assert!(trail.is_dir(), "no event was written");
+        assert_eq!(
+            familiar_kernel::persona::load(&store).unwrap().name,
+            "Felix"
+        );
     }
 }

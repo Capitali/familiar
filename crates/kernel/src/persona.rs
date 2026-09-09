@@ -256,17 +256,27 @@ fn locked(dir: &Path) -> io::Result<std::fs::File> {
 }
 
 /// Set this persona, and — when a naming is given — its trail entry, as ONE
-/// serialized mutation.
+/// serialized, recoverable mutation.
 ///
 /// The two used to be separate calls with separate failure, and `fleet pair` printed
 /// the trail's error and then returned success, so a computer could be renamed with
-/// no record that it ever happened (codex T-236 re-verification, finding 3).
+/// no record that it ever happened (codex T-236 re-verification, finding 3). Round 2
+/// found the helper itself short of all-or-nothing: the trail was appended before the
+/// persona was renamed into place, so a rename failure over-recorded, and the
+/// directory sync's error was discarded.
 ///
-/// The ordering is deliberate. The persona is written to a UNIQUE temp and flushed,
-/// then the trail is appended and flushed, and only then is the temp renamed into
-/// place. A failure before the rename leaves nothing changed; a failure at the rename
-/// leaves a trail that over-records, which is legible. The other order can leave a
-/// computer wearing a name its own history does not contain, which is not.
+/// The protocol, under the persona's lock:
+///   1. remember the prior pair — the persona bytes (or their absence) and the trail's
+///      length (or its absence);
+///   2. write the new persona to a UNIQUE temp and sync it;
+///   3. append the naming and sync the trail;
+///   4. rename the temp into place;
+///   5. sync the containing directory, which is what makes 4 durable.
+/// Any failure at 3, 4 or 5 restores the prior pair before it is reported: the trail
+/// is truncated to its prior length (or removed if it did not exist), the prior
+/// persona is put back (or removed if it did not exist), and the temp is unlinked.
+/// A reported success therefore means a synced persona, a synced trail, and a synced
+/// directory; a reported failure means the pair is as it was.
 ///
 /// The temp name carries pid and a monotonic count because a single shared
 /// `persona.json.tmp` is two writers racing on one path: whichever renames second
@@ -278,55 +288,124 @@ pub fn name(dir: &Path, persona: &Persona, event: Option<&NameEvent>) -> io::Res
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let bytes = serde_json::to_vec_pretty(persona)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let line = event
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     let _guard = locked(dir)?;
 
+    // 1. The prior pair.
+    let persona_path = dir.join(PERSONA_FILE);
+    let trail_path = dir.join(NAME_EVENTS_FILE);
+    let prior_persona: Option<Vec<u8>> = match std::fs::read(&persona_path) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let prior_trail_len: Option<u64> = match std::fs::metadata(&trail_path) {
+        Ok(m) if m.is_file() => Some(m.len()),
+        Ok(_) => None, // not a file: the append will say so, and there is nothing to restore
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let restore = |failed: io::Error| -> io::Error {
+        let mut undo: Vec<String> = Vec::new();
+        match prior_trail_len {
+            Some(len) => {
+                if let Err(e) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&trail_path)
+                    .and_then(|t| t.set_len(len).and_then(|_| t.sync_all()))
+                {
+                    undo.push(format!("trail not restored: {e}"));
+                }
+            }
+            None => {
+                if trail_path.is_file() {
+                    if let Err(e) = std::fs::remove_file(&trail_path) {
+                        undo.push(format!("trail not removed: {e}"));
+                    }
+                }
+            }
+        }
+        match &prior_persona {
+            Some(prior) => {
+                let back = dir.join(format!("{PERSONA_FILE}.{}.restore", std::process::id()));
+                let put = std::fs::write(&back, prior)
+                    .and_then(|_| std::fs::rename(&back, &persona_path));
+                if let Err(e) = put {
+                    let _ = std::fs::remove_file(&back);
+                    undo.push(format!("persona not restored: {e}"));
+                }
+            }
+            None => {
+                if persona_path.is_file() {
+                    if let Err(e) = std::fs::remove_file(&persona_path) {
+                        undo.push(format!("persona not removed: {e}"));
+                    }
+                }
+            }
+        }
+        if undo.is_empty() {
+            failed
+        } else {
+            io::Error::new(
+                failed.kind(),
+                format!(
+                    "{failed}; and the prior pair could not be restored ({})",
+                    undo.join("; ")
+                ),
+            )
+        }
+    };
+
+    // 2. The new persona, to a unique temp, synced.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let tmp = dir.join(format!(
         "{PERSONA_FILE}.{}.{}.tmp",
         std::process::id(),
         SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(&bytes)?;
-    f.sync_all()?;
-    drop(f);
+    let written = (|| -> io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
 
-    if let Some(ev) = event {
-        let line = serde_json::to_string(ev)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    // 3. The naming, appended and synced.
+    if let Some(line) = &line {
         let appended = (|| -> io::Result<()> {
             let mut t = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(dir.join(NAME_EVENTS_FILE))?;
+                .open(&trail_path)?;
             writeln!(t, "{line}")?;
             t.sync_all()
         })();
         if let Err(e) = appended {
             let _ = std::fs::remove_file(&tmp);
-            return Err(e);
+            return Err(restore(e));
         }
     }
 
-    std::fs::rename(&tmp, dir.join(PERSONA_FILE))?;
-    // The rename is only durable once the DIRECTORY entry is. Without this a crash
-    // can leave the old persona in place with the trail already saying otherwise.
-    if let Ok(d) = std::fs::File::open(dir) {
-        let _ = d.sync_all();
+    // 4. Into place.
+    if let Err(e) = std::fs::rename(&tmp, &persona_path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(restore(e));
+    }
+
+    // 5. The directory entry, which is what makes 4 durable. Its failure is a
+    // failure: without it a crash can leave the old persona in place with the trail
+    // already saying otherwise.
+    let synced = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    if let Err(e) = synced {
+        return Err(restore(e));
     }
     Ok(())
-}
-
-/// Append one naming act to the trail.
-pub fn record_naming(dir: &Path, event: &NameEvent) -> io::Result<()> {
-    use std::io::Write as _;
-    let line = serde_json::to_string(event)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join(NAME_EVENTS_FILE))?;
-    writeln!(f, "{line}")
 }
 
 /// The naming trail, oldest first. Absent = never named beyond its default.
@@ -369,6 +448,14 @@ pub fn load(dir: &Path) -> io::Result<Persona> {
 #[cfg(test)]
 mod naming_tests {
     use super::*;
+
+    fn ev(name: &str) -> NameEvent {
+        NameEvent {
+            at: 1,
+            actor: "test".into(),
+            name: name.into(),
+        }
+    }
 
     fn tmpdir(tag: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!(
@@ -422,6 +509,63 @@ mod naming_tests {
     }
 
     /// A naming that succeeds leaves BOTH, and the trail carries it.
+    /// Round 2's gap: the trail was appended BEFORE the persona was renamed into
+    /// place, so a rename failure left a naming the persona never wore. Now a
+    /// failure at the rename restores the trail byte for byte and leaves no temp.
+    #[test]
+    fn a_naming_whose_persona_cannot_land_records_nothing() {
+        let dir = std::env::temp_dir().join(format!("persona_land_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut p = Persona::default();
+        p.name = "Felix".into();
+        name(&dir, &p, Some(&ev("Felix"))).unwrap();
+        let trail_before = std::fs::read(dir.join(NAME_EVENTS_FILE)).unwrap();
+        let persona_before = std::fs::read(dir.join(PERSONA_FILE)).unwrap();
+
+        // A directory where the persona must land: the rename cannot succeed.
+        std::fs::remove_file(dir.join(PERSONA_FILE)).unwrap();
+        std::fs::create_dir(dir.join(PERSONA_FILE)).unwrap();
+        p.name = "Sprocket".into();
+        let err = name(&dir, &p, Some(&ev("Sprocket"))).unwrap_err();
+        assert!(!err.to_string().contains("could not be restored"), "{err}");
+        assert_eq!(
+            std::fs::read(dir.join(NAME_EVENTS_FILE)).unwrap(),
+            trail_before,
+            "the trail must not carry a naming the persona never wore"
+        );
+        assert_eq!(namings(&dir).len(), 1);
+        assert!(
+            !std::fs::read_dir(&dir)
+                .unwrap()
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".tmp")),
+            "no temp left behind"
+        );
+
+        // Put the file back: the prior persona is restorable from the trail's
+        // point of view, and a later naming lands cleanly.
+        std::fs::remove_dir(dir.join(PERSONA_FILE)).unwrap();
+        std::fs::write(dir.join(PERSONA_FILE), &persona_before).unwrap();
+        name(&dir, &p, Some(&ev("Sprocket"))).unwrap();
+        assert_eq!(load(&dir).unwrap().name, "Sprocket");
+        assert_eq!(namings(&dir).len(), 2);
+    }
+
+    /// The same failure on a computer that has never been named: the trail must not
+    /// exist afterwards, rather than exist with one orphan line.
+    #[test]
+    fn a_first_naming_that_cannot_land_leaves_no_trail() {
+        let dir = std::env::temp_dir().join(format!("persona_first_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(PERSONA_FILE)).unwrap(); // the landing spot is a dir
+        let mut p = Persona::default();
+        p.name = "Felix".into();
+        assert!(name(&dir, &p, Some(&ev("Felix"))).is_err());
+        assert!(!dir.join(NAME_EVENTS_FILE).exists(), "no orphan trail");
+        assert!(namings(&dir).is_empty());
+    }
+
     #[test]
     fn a_naming_writes_the_persona_and_its_history() {
         let d = tmpdir("both");
@@ -482,6 +626,14 @@ mod naming_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ev(name: &str) -> NameEvent {
+        NameEvent {
+            at: 1,
+            actor: "test".into(),
+            name: name.into(),
+        }
+    }
 
     fn tmp(name: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir().join(format!("persona_{name}_{}", std::process::id()));
@@ -546,23 +698,19 @@ mod tests {
     fn renaming_one_ship_changes_no_byte_in_another() {
         let a = tmp("ship_a");
         let b = tmp("ship_b");
-        for (d, name) in [(&a, "Purr"), (&b, "Purr")] {
-            write(
+        for (d, who) in [(&a, "Purr"), (&b, "Purr")] {
+            name(
                 d,
                 &Persona {
                     persona_version: 2,
-                    name: name.to_string(),
+                    name: who.to_string(),
                     ..Persona::default()
                 },
-            )
-            .unwrap();
-            record_naming(
-                d,
-                &NameEvent {
+                Some(&NameEvent {
                     at: 100,
                     actor: "pairing".into(),
-                    name: name.to_string(),
-                },
+                    name: who.to_string(),
+                }),
             )
             .unwrap();
         }
@@ -571,14 +719,14 @@ mod tests {
         // The captain renames A.
         let mut pa = load(&a).unwrap();
         pa.name = "Mrs. Norris".into();
-        write(&a, &pa).unwrap();
-        record_naming(
+        name(
             &a,
-            &NameEvent {
+            &pa,
+            Some(&NameEvent {
                 at: 200,
                 actor: "jeff".into(),
                 name: "Mrs. Norris".into(),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(load(&a).unwrap().name, "Mrs. Norris");
