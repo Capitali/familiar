@@ -478,6 +478,11 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Standing directions from Ian (recorded, binding)
 
+- **NO CODEX WORK UNTIL FRIDAY 2026-09-11 (2026-09-09, verbatim: "Hold off on codex work
+  until Friday again.").** No codex exec launches from either Mac before Friday — the
+  reset-aware queue included, whatever the plan limit does. Chair self-reviews in the log
+  meanwhile (the Sept 2–6 pattern); the four queued items (T-236 r3, T-238 r2, T-237 B4 r3,
+  B2 r2) keep their briefs and claims. "Again": codex runs are a Friday thing when Ian says.
 - **NAMES ARE UNIQUE AND NEVER FORGOTTEN (2026-09-08, verbatim: "Two captains cannot have
   the same name, two ships cannot have the same name. Two ships computers cannot have the
   same name. Names are unique. We remember names. Names are important to the familiar.
