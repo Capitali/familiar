@@ -108,6 +108,14 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the familiar's economic edge made structural — the P&L routines Ian names. Chair-built solo while codex is paused (below); design review owed to codex after Sept 6
 
 ### T-237 B4 · One doctrine, two runtimes — the pilot's mind embedded in the iPad, the pilot itself stays on the host
+- **CODEX ROUND 2 RETURNED 2026-09-09 01:12 CDT: REJECT, one blocker left** —
+  `docs/reviews/2026-09-08-t237-b4-codex-reverification-r2.md`. Round-1 findings 1–5 and the
+  artifact all REPAIRED (the checked-in xcframework itself returns call-paws / seam 2 on the
+  boundary probe). Remaining: the `/v1/loadboard?mine=true` read fails OPEN (`try?` → `[]`), so
+  a 500/timeout/decode on that one endpoint reads as freight-idle and could file a book while
+  `/v1/me.freight` says the hull is under contract. Repair (MacOnStick, in flight): the mine
+  read is required and throwing; a ledger-open load with no mine row fails CLOSED (the fact is
+  shown, no proposal); pinned through render and confirm with zero POSTs.
 - **SWIFT HALF LANDED 2026-09-08 (~17:40 CDT, MacOnStick):** all five findings answered on the
   shell side — rungs on pump legs + `Route.forHull`, `active: {row}`, seam-version guard, reasons
   in words, no dial claim, and the confirm-to-act path (`ExchangeAct` allowlist, `PilotProposal`
