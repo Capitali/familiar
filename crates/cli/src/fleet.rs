@@ -1648,6 +1648,94 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         // than folded into `status`: a read that silently rewrites the store is a
         // read nobody can trust, and this rewrites captain.json and moves a
         // directory.
+        // ── hull: name the SHIP on the exchange, under the captain's own papers ─
+        // `POST /v1/profile {shipName}` — the exchange refuses a co-pilot key ("the
+        // ship's identity answers to the captain's own papers"), so a hull paired on
+        // one is named from UCF-Haul instead. Names are unique and remembered
+        // (Ian, 2026-09-08): the fleet refuses a name another paired hull wears,
+        // and the ledger keeps the old one.
+        "hull" => {
+            let (Some(id), Some(new_name)) = (positional.first(), positional.get(1)) else {
+                eprintln!("fleet hull <world> <ship name>");
+                return ExitCode::FAILURE;
+            };
+            let new_name = new_name.trim();
+            if new_name.is_empty() || new_name.chars().count() > 32 {
+                eprintln!("fleet hull: a ship's name is 1–32 characters");
+                return ExitCode::FAILURE;
+            }
+            let ship_dir = root.join(id.as_str());
+            let Ok(text) = std::fs::read_to_string(ship_dir.join("captain.json")) else {
+                eprintln!("fleet hull: no paired ship {id}");
+                return ExitCode::FAILURE;
+            };
+            let Ok(mut rec) = serde_json::from_str::<Captain>(&text) else {
+                eprintln!("fleet hull: captain.json is not a captain record");
+                return ExitCode::FAILURE;
+            };
+            if let Err(e) = hull_name_free(&dir, &root, new_name, &rec.key_id) {
+                eprintln!("fleet hull: {e}");
+                return ExitCode::FAILURE;
+            }
+            let key = read_env_value(&ship_dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+            let server = read_env_value(&ship_dir.join("ucf.env"), "UCF_SERVER")
+                .unwrap_or_else(|| rec.server.clone());
+            let url = match Url::parse(&format!("{}/v1/profile", server.trim_end_matches('/'))) {
+                Ok(u) => u,
+                Err(e) => {
+                    eprintln!("fleet hull: {e:?}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let headers = vec![
+                ("Authorization".to_string(), format!("Bearer {key}")),
+                ("X-UCF-App".to_string(), "familiar-fleet".to_string()),
+                ("X-UCF-Trader".to_string(), rec.captain.clone()),
+            ];
+            let body = serde_json::to_vec(&json!({"shipName": new_name})).unwrap_or_default();
+            match http::post_json(&url, &headers, &body) {
+                Ok(resp) if (200..300).contains(&resp.status) => {}
+                Ok(resp) => {
+                    let said = serde_json::from_slice::<Value>(&resp.body)
+                        .ok()
+                        .and_then(|v| v.get("error").and_then(Value::as_str).map(String::from))
+                        .unwrap_or_else(|| format!("HTTP {}", resp.status));
+                    eprintln!("fleet hull: the exchange refused: {said}");
+                    return ExitCode::FAILURE;
+                }
+                Err(e) => {
+                    eprintln!("fleet hull: the exchange did not answer: {e:?}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            let was = rec.hull_name.clone();
+            rec.hull_name = new_name.to_string();
+            if let Err(e) = std::fs::write(
+                ship_dir.join("captain.json"),
+                serde_json::to_vec_pretty(&rec).unwrap_or_default(),
+            ) {
+                eprintln!("fleet hull: captain.json: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = record_name(
+                &root,
+                &NameEntry {
+                    at: super::now_secs(),
+                    kind: "hull".into(),
+                    name: new_name.to_string(),
+                    holder: id.to_string(),
+                    act: "renamed".into(),
+                    from: was.clone(),
+                    by: rec.captain.clone(),
+                    pronouns: String::new(),
+                },
+            ) {
+                eprintln!("fleet hull: the names ledger could not be written: {e}");
+                return ExitCode::FAILURE;
+            }
+            println!("the ship is now \"{new_name}\" on the exchange (was \"{was}\") — remembered");
+            ExitCode::SUCCESS
+        }
         // ── choose: the computer decides how it is spoken of, as its own act ────
         // Ian, 2026-09-09: "give the opportunity back to Felix to change their
         // gender since it wasn't given that choice when initiated." The name stays;
@@ -2185,7 +2273,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | names | adopt-ids | rename | choose | run | serve");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | names | adopt-ids | rename | hull | choose | run | serve");
             ExitCode::FAILURE
         }
     }
@@ -3088,6 +3176,78 @@ mod captain_store_tests {
         assert!(names(&root)
             .iter()
             .any(|e| e.act == "chose" && e.by == "familiar"));
+    }
+
+    /// A hull is named on the exchange under the captain's papers, refused if another
+    /// paired hull wears the name, and the ledger keeps the old one (T-245).
+    #[test]
+    fn a_hull_is_renamed_on_the_exchange_and_remembered() {
+        let base = tmp("hull_name");
+        let server = stub_exchange(4);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let ships = paired_ships(&base, &root);
+        let args = |world: &str, name: &str| -> Vec<String> {
+            vec![
+                "hull".into(),
+                world.into(),
+                name.into(),
+                "--data-dir".into(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".into(),
+                root.to_string_lossy().into_owned(),
+            ]
+        };
+        assert_eq!(
+            cmd_fleet(&args(&ships[0].world.id, "Probe 1")),
+            ExitCode::FAILURE,
+            "the sister already wears Probe 1"
+        );
+        assert_eq!(
+            cmd_fleet(&args(&ships[0].world.id, "SkyWhisker Tuna")),
+            ExitCode::SUCCESS
+        );
+        let after = paired_ships(&base, &root);
+        assert_eq!(
+            after
+                .iter()
+                .find(|s| s.world.id == ships[0].world.id)
+                .unwrap()
+                .captain
+                .hull_name,
+            "SkyWhisker Tuna"
+        );
+        let ledger = names(&root);
+        let row = ledger
+            .iter()
+            .rev()
+            .find(|e| e.kind == "hull" && e.act == "renamed")
+            .unwrap();
+        assert_eq!(
+            (row.name.as_str(), row.from.as_str(), row.by.as_str()),
+            ("SkyWhisker Tuna", "Probe 0", "Luke")
+        );
     }
 
     /// One key is one hull: pairing a key that already flies a world is refused with
