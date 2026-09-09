@@ -589,6 +589,12 @@ pub struct Forecast {
     pub pricing: chain::Pricing,
     /// The window the caller planned with: what starves or gluts inside it.
     pub horizon_ticks: i64,
+    /// What the captain's OTHER hulls already have bound for a shelf: (station,
+    /// good) → units aboard sister ships whose sell target is that station. A
+    /// fleet that works together does not send two ships to fill one starving
+    /// works; the second sees the first's cargo as stock already on its way (Ian,
+    /// 2026-09-09: "All three should be working together to maximize profit").
+    pub inbound: BTreeMap<(String, String), i64>,
 }
 
 /// One priced projection: the shelf now and at arrival, and the mid each implies.
@@ -614,6 +620,7 @@ impl Forecast {
             flows: chain::flows(recipes, shelves),
             pricing: pricing.clone(),
             horizon_ticks,
+            inbound: BTreeMap::new(),
         }
     }
 
@@ -658,7 +665,15 @@ impl Forecast {
         let &(base, swing) = self.pricing.goods.get(good)?;
         let eq = Units(shelf.equilibrium);
         let stock_now = Units(shelf.stock);
-        let stock_then = flow.stock_at(ticks_ahead)?;
+        // The fleet's own cargo lands on the shelf before ours does: count it in.
+        let fleet = self
+            .inbound
+            .get(&(station.to_string(), good.to_string()))
+            .copied()
+            .unwrap_or(0);
+        let stock_then = Units(
+            (flow.stock_at(ticks_ahead)?.0 + fleet).min(shelf.capacity.max(shelf.stock + fleet)),
+        );
         Some(Projection {
             kind: flow.kind,
             stock_now,
@@ -1136,6 +1151,7 @@ mod tests {
             }],
             pricing: chain::Pricing::default(),
             horizon_ticks: 288 + 96,
+            inbound: BTreeMap::new(),
         };
         fc.pricing.goods.insert(good.into(), (base, swing));
         fc
@@ -1201,6 +1217,35 @@ mod tests {
         l.forecast = Some(&fc);
         let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
         assert!(!matches!(d, TradeDecision::Buy { .. }), "{d:?}");
+    }
+
+    /// The fleet works together: works-b is starving and the run pays — unless a
+    /// sister ship already has 500 brine bound for works-b, in which case the shelf
+    /// will not be empty when we arrive, the mid barely moves, and this ship stays
+    /// out of its sister's trade (Ian, 2026-09-09).
+    #[test]
+    fn a_sister_ships_inbound_cargo_keeps_the_second_ship_out_of_the_same_run() {
+        let board = vec![q("brine", 24, 20, 500)];
+        let galaxy = vec![row("brine", "works-b", 34)];
+        let mut l = at("here", 150);
+        let alone = eating("works-b", "brine", 500, 600, 13_333, 30, 9_000);
+        let mut with_sister = alone.clone();
+        with_sister
+            .inbound
+            .insert(("works-b".into(), "brine".into()), 500);
+        l.forecast = Some(&alone);
+        assert!(matches!(
+            decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true)),
+            TradeDecision::Buy { .. }
+        ));
+        l.forecast = Some(&with_sister);
+        let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
+        assert!(
+            !matches!(d, TradeDecision::Buy { .. }),
+            "the sister's cargo fills it: {d:?}"
+        );
+        let p = with_sister.project("works-b", "brine", 288).unwrap();
+        assert!(p.stock_then.0 >= 500, "{p:?}");
     }
 
     /// Finding 2: the best FORECAST net wins, not the best spot mid. `higher-spot`

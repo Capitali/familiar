@@ -222,6 +222,51 @@ fn hold_bound_buys(ship_dir: &Path, since: i64) -> i64 {
         .unwrap_or(0)
 }
 
+/// The captain's OTHER hulls' cargo, by the shelf it is bound for: every sister
+/// ship (same captain, same exchange, beside this store) and every lot in her
+/// holdings with a sell target. A fleet that works together does not send two
+/// ships to fill one starving works (Ian, 2026-09-09).
+fn fleet_inbound(ship_dir: &Path) -> BTreeMap<(String, String), i64> {
+    let mut out = BTreeMap::new();
+    let mine: Value = std::fs::read_to_string(ship_dir.join("captain.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Null);
+    let (Some(captain), Some(server)) = (
+        mine.get("captain").and_then(Value::as_str),
+        mine.get("server").and_then(Value::as_str),
+    ) else {
+        return out;
+    };
+    let Some(root) = ship_dir.parent() else {
+        return out;
+    };
+    let Ok(dirs) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for d in dirs.flatten().map(|e| e.path()) {
+        if d == ship_dir || !d.join("ucf.env").exists() {
+            continue;
+        }
+        let theirs: Value = std::fs::read_to_string(d.join("captain.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(Value::Null);
+        if theirs.get("captain").and_then(Value::as_str) != Some(captain)
+            || theirs.get("server").and_then(Value::as_str) != Some(server)
+        {
+            continue;
+        }
+        for h in familiar_whisker::store::load_holdings(&d) {
+            if h.units > 0 && !h.sell_target.is_empty() {
+                *out.entry((h.sell_target.clone(), h.good.clone()))
+                    .or_insert(0) += h.units;
+            }
+        }
+    }
+    out
+}
+
 fn journal(ship_dir: &Path, entry: Value) {
     use std::io::Write;
     let line = format!("{entry}\n");
@@ -1374,6 +1419,9 @@ fn main() -> ExitCode {
                     let horizon = min_hold.max(1) + 96;
                     trade::Forecast::build(&recipes, &shelves, &pricing, horizon)
                 };
+                // What the captain's other hulls already have bound for each shelf.
+                let mut forecast = forecast;
+                forecast.inbound = fleet_inbound(&ship_dir);
                 fold_forecast = Some(forecast.clone());
                 // Say what the chain sees, once per change — the soak's evidence that
                 // the merchant is reading the map and not only the counter.
