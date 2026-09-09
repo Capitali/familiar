@@ -6,6 +6,37 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-09 — T-237 B2 finding 1: the truth boundary binds a statement's verb to its source, not only its numbers
+
+Codex (B2 re-verification, finding 1): `Grounding.check` compared token provenance — numbers,
+ids, slugs, a mood order — so "bought 40 ore at ask 15 at foxys-diner" became "sold …" and
+passed, and the conversation lane filtered stations out of what it checked, so an invented
+station could not trip it. The floor was the truth boundary in name only.
+
+- **Claims.** `Grounding.claims(in:)` reads two axes off a statement: SIDE (buy/sell words)
+  and OUTCOME (done — filled, paid, delivered, engaged, fitted, collected, settled, approved,
+  booked, bought, sold, opened — vs refused, rejected, denied, blocked, lapsed, unpaid,
+  failed); a negation within two words before the verb flips it; a statement carrying both
+  signs of an axis (a comparison) claims neither.
+- **Binding.** `Grounding.bind(_:to:)` finds the source facts a statement shares STRONG
+  identifiers with (a load, a tick, a proposal id, a station), else weak ones (bare numbers —
+  "40" is in half the journal), else the whole floor; every axis the statement claims must
+  carry the same sign there ("inverted side … its source says the opposite"), an axis the
+  source never speaks of is "unsupported", and a statement whose every bound source was
+  refused may not drop the refusal ("dropped the refusal"). The prose stays free; the verb
+  is checked against the record it cites.
+- **Both lanes.** The report lane binds every spoken fact, headline and next-act line
+  (`Grounding.check`); the conversation lane (`Grounding.checkReply`) keeps stations in the
+  invented-token check and binds the reply sentence by sentence against the floor's facts
+  and the documents' lines. A failed reply falls to the floor's own words with the reason.
+
+Checks: `swift test` **86 passed, 0 failed, 2 live skipped** — `GroundingTests` pins buy→sell,
+approved→denied, the dropped refusal, an invented station in conversation, unbound claims
+against a floor that supports or contradicts them, and the report lane line by line; the
+existing invention/softening pins unchanged. Honest limit: this is a verb-and-polarity
+check over prose, not a typed-claim renderer (codex's first-choice repair); it closes the
+four named holes and any new axis is one table row. Codex round 2 on B2 owed.
+
 ## 2026-09-08 — T-239: the lived-in ship — a hull's earned history as a record the familiar keeps
 
 Ian's "Yes" (2026-09-07) to the one familiar-side brick of the customization dialogue: the

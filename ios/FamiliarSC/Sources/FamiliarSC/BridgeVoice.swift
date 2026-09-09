@@ -85,12 +85,97 @@ public enum Grounding {
         return out
     }
 
+    // MARK: predicate and polarity — a statement is true only if its verb agrees with its source
+
+    /// The axes a statement can flip while keeping every number: which SIDE of a trade, and
+    /// whether the thing was DONE or refused. Token provenance alone let "bought 40 ore at
+    /// ask 15 at foxys-diner" become "sold …" and "buy catnip refused at the door" become
+    /// "bought catnip" (codex T-237 B2 re-verification, finding 1). Each word carries its
+    /// axis and sign; a negation within two words before it flips the sign.
+    /// The OUTCOME axis: done (+) or refused (−). The SIDE axis (buy/sell) is `sideWords`.
+    static let outcomeWords: [String: Bool] = [
+        "filled": true, "paid": true, "delivered": true, "engaged": true, "fitted": true, "collected": true,
+        "settled": true, "approved": true, "booked": true, "bought": true, "sold": true, "opened": true,
+        "refused": false, "rejected": false, "denied": false, "blocked": false, "lapsed": false, "unpaid": false, "failed": false,
+    ]
+    static let sideWords: [String: Bool] = ["bought": true, "buy": true, "buys": true, "buying": true, "purchased": true,
+                                            "sold": false, "sell": false, "sells": false, "selling": false]
+    static let negations: Set<String> = ["not", "no", "never", "without", "nor", "isn't", "wasn't", "didn't", "hasn't", "un"]
+
+    /// The claims a statement makes: `axis → sign`, negation applied. A statement that says
+    /// both signs of one axis (a comparison) claims neither on it.
+    static func claims(in text: String) -> [String: Bool] {
+        let words = text.lowercased().split(whereSeparator: { !$0.isLetter && $0 != "'" }).map(String.init)
+        var found: [String: Set<Bool>] = [:]
+        for (i, w) in words.enumerated() {
+            let negated = words[max(0, i - 2)..<i].contains { negations.contains($0) }
+            if let side = sideWords[w] { found["side", default: []].insert(negated ? !side : side) }
+            if let done = outcomeWords[w] { found["outcome", default: []].insert(negated ? !done : done) }
+        }
+        return found.compactMapValues { $0.count == 1 ? $0.first : nil }
+    }
+
+    /// Identifiers a statement is ABOUT — what binds it to a source fact. Strong ones (a load,
+    /// a tick, a proposal, a station) bind alone; bare numbers bind only when there is nothing
+    /// stronger, because "40" is in half the journal.
+    static func identifiers(in text: String) -> (strong: Set<String>, weak: Set<String>) {
+        let all = tokens(in: text)
+        let strong = all.filter { $0.hasPrefix("L") || $0.hasPrefix("t") || $0.hasPrefix("p-") || $0.contains("-") }
+        let weak = all.filter { $0.first?.isNumber ?? false }
+        return (strong, weak)
+    }
+
+    /// Bind one spoken statement to the source facts it shares identifiers with and require
+    /// the same side and outcome there; a statement with no shared identifier must still find
+    /// its claims somewhere in the source. `nil` when it holds; else what went wrong.
+    public static func bind(_ statement: String, to facts: [String]) -> String? {
+        let said = claims(in: statement)
+        if said.isEmpty { return nil }
+        let ids = identifiers(in: statement)
+        var sources = ids.strong.isEmpty ? [] : facts.filter { f in !identifiers(in: f).strong.isDisjoint(with: ids.strong) }
+        if sources.isEmpty, !ids.weak.isEmpty { sources = facts.filter { f in !identifiers(in: f).weak.isDisjoint(with: ids.weak) } }
+        let pool = sources.isEmpty ? facts : sources
+        var truth: [String: Set<Bool>] = [:]
+        for f in pool { for (axis, sign) in claims(in: f) { truth[axis, default: []].insert(sign) } }
+        for (axis, sign) in said {
+            guard let t = truth[axis] else {
+                return sources.isEmpty ? "unsupported \(axis): \"\(statement)\"" : "unsupported \(axis): \"\(statement)\" — its source says nothing about that"
+            }
+            if !t.contains(sign) { return "inverted \(axis): \"\(statement)\" — its source says the opposite" }
+        }
+        // A source that says REFUSED (or denied, lapsed…) is not told without that word: a
+        // dropped qualifier is the same lie as an inverted one.
+        if !sources.isEmpty, said["outcome"] == nil, sources.allSatisfy({ claims(in: $0)["outcome"] == false }) {
+            return "dropped the refusal: \"\(statement)\" — its source was refused"
+        }
+        return nil
+    }
+
+    /// A free-prose reply, sentence by sentence, against the truth it may cite: no invented
+    /// number, id, tick or STATION (stations were filtered out of the conversation check
+    /// until 2026-09-09 — an invented station could not trip it), and every sentence bound
+    /// to its source's side and outcome.
+    public static func checkReply(_ reply: String, truth: String, facts: [String]) -> String? {
+        let allowed = tokens(in: truth)
+        let invented = tokens(in: reply).subtracting(allowed).sorted()
+        if !invented.isEmpty { return "invented: \(invented.joined(separator: ", "))" }
+        let sourceLines = facts + truth.split(separator: "\n").map(String.init)
+        for sentence in reply.split(whereSeparator: { ".!?\n".contains($0) }).map({ $0.trimmingCharacters(in: .whitespaces) }) where !sentence.isEmpty {
+            if let why = bind(sentence, to: sourceLines) { return why }
+        }
+        return nil
+    }
+
     /// `nil` when the spoken report says nothing the floor did not; else what it invented.
     public static func check(spoken: BridgeReport, floor: BridgeReport) -> String? {
         let allowed = tokens(in: (floor.facts + [floor.headline, floor.nextAct]).joined(separator: "\n"))
         let said = tokens(in: (spoken.facts + [spoken.headline, spoken.nextAct]).joined(separator: "\n"))
         let invented = said.subtracting(allowed).sorted()
         if !invented.isEmpty { return "invented: \(invented.joined(separator: ", "))" }
+        let sources = floor.facts + [floor.headline, floor.nextAct]
+        for line in spoken.facts + [spoken.headline, spoken.nextAct] {
+            if let why = bind(line, to: sources) { return why }
+        }
         // Mood is severity, not cadence: the voice may not cheer up a distress.
         let order: [BridgeReport.Mood] = [.pleased, .steady, .watchful, .concerned]
         if let f = order.firstIndex(of: floor.mood), let s = order.firstIndex(of: spoken.mood), s < f {
@@ -494,13 +579,11 @@ public final class Conversation: @unchecked Sendable {
             """
             do {
                 let reply = try await s.respond(to: prompt).content
-                let allowed = Grounding.tokens(in: context.truth(floor: floor) + "\n" + (context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? ""))
-                let said = Grounding.tokens(in: reply).filter { $0.first?.isNumber ?? false || $0.hasPrefix("L") || $0.hasPrefix("t") || $0.hasPrefix("p-") }
-                let invented = said.subtracting(allowed)
-                if invented.isEmpty {
-                    return record(Turn(question: question, answer: reply, lane: .onDevice, note: nil))
+                let truth = context.truth(floor: floor) + "\n" + (context.hull.map { TemplatedVoice(persona: voice.persona).hullLine($0) } ?? "")
+                if let why = Grounding.checkReply(reply, truth: truth, facts: floor.facts) {
+                    return record(Turn(question: question, answer: floorText, lane: .templated, note: "her answer was not the journal's (\(why)); the journal's own words instead"))
                 }
-                return record(Turn(question: question, answer: floorText, lane: .templated, note: "her answer named \(invented.sorted().joined(separator: ", ")), which the journal does not; the journal's own words instead"))
+                return record(Turn(question: question, answer: reply, lane: .onDevice, note: nil))
             } catch {
                 session = nil
                 return record(Turn(question: question, answer: floorText, lane: .templated, note: "\(error)"))

@@ -39,8 +39,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   dial + a shared surfaces contract both suites pin; `captain_id` through the Swift Captain and
   ShipSummary (`captainIdentity` for joins); `paid-down` / `pay-down-refused` / `trade-refused` /
   `forecast` / `refit-refused` / `engage-refused` through notices + voice + a shared journal-events
-  contract both suites pin. Log: DEVELOPMENT_LOG 2026-09-08 (B2). **Finding 1 (grounding checks
-  provenance, not truth) is OPEN — next brick, MacOnStick.** Codex round 2 owed after.
+  contract both suites pin. Log: DEVELOPMENT_LOG 2026-09-08 (B2). **Finding 1 REPAIRED 2026-09-09 ~00:55 (MacOnStick):** `Grounding.bind` — side and outcome bound to
+  the source fact by strong identifiers, negation-aware; stations kept in the conversation check.
+  FamiliarSC 86/0. Log: DEVELOPMENT_LOG 2026-09-09. Codex round 2 on B2 owed (all four findings now repaired).
 - Was: **B2 CODEX RE-VERIFICATION CLAIMED 2026-09-08 — companion:codex.** Review-only
   scope covers the landed `FamiliarSC` package's store/wire/pairing/message/voice contract
   against B2's recorded acceptance line and subsequent compatible repairs on current main.
