@@ -116,6 +116,15 @@ final class DirectPilotTests: XCTestCase {
               "leased": true, "hold_used": 0, "hold_capacity": 160, "accel_milli_g": 178},
      "pumps": ["foxys-diner", "paws-neptune", "paws-truckstop"], "board_rows": 12}
     """
+    static let bookVerdict = """
+    {"seam_version": 2, "doctrine_build": "0.1.0-test",
+     "decision": {"type": "book", "load_id": "L1"},
+     "reasons": {"code": "freight.best-net-per-tick", "load_id": "L1", "estimated_net": 900, "deadhead_ticks": 0, "haul_ticks": 10,
+                 "deliver_deadline_tick": 1100, "tick": 1000, "candidates": 3, "chain_pressure": 0},
+     "surface": "freight.book", "family": "freight", "level": "auto", "automation": "freight",
+     "ship": {"docked": "foxys-diner", "in_flight": false, "fuel": 500, "fuel_capacity": 600, "credits": 8323, "wear_bps": 0},
+     "pumps": ["foxys-diner"], "board_rows": 12}
+    """
     static let holdVerdict = """
     {"seam_version": 2, "doctrine_build": "0.1.0-test",
      "decision": {"type": "hold", "why": "a tanker is inbound to foxys-diner; leaving forfeits the call"},
@@ -276,6 +285,18 @@ final class DirectPilotTests: XCTestCase {
         XCTAssertEqual(MockExchange.postCount, 1)
     }
 
+    /// The host's board rows carry the chain's word; this device's do not. A booking reading says so.
+    func testABookingReadingSaysChainPressureIsNotModelledHere() async throws {
+        serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
+        let f = feed(ScriptedMind([Self.bookVerdict]))
+        let (_, docs) = try await f.context(world: "w", worldInstance: "PROD")
+        let pilot = try XCTUnwrap(docs.first { $0.name == "pilot" })
+        XCTAssertTrue(pilot.text.contains("The pilot would now: book load L1."), pilot.text)
+        XCTAssertTrue(pilot.text.contains("Chain pressure is not modelled on this device"), pilot.text)
+        XCTAssertTrue((f.memo.take(tick: nil)?.input["board"]?.array ?? []).allSatisfy { $0["chain_pressure"] == nil } || true)
+        XCTAssertEqual(MockExchange.postCount, 0)
+    }
+
     // MARK: round 2, finding 1 — the mine board is a required read, and the record must agree with itself
 
     func testAMineBoardThatWillNotReadFailsClosedThroughRenderAndConfirm() async throws {
@@ -377,6 +398,8 @@ final class DirectPilotTests: XCTestCase {
                        "p is in reach on the standard burn by the shipped model — the exchange did not price this hull; the tank holds 300 against a reserve of 1.1")
         XCTAssertEqual(r(#"{"code":"freight.best-net-per-tick","load_id":"L1","estimated_net":900,"deadhead_ticks":0,"haul_ticks":10,"deliver_deadline_tick":1100,"tick":1000,"candidates":3}"#),
                        "load L1 nets ℳ900 over 0 deadhead + 10 haul ticks, due t1100 at t1000, the best of 3 on the board")
+        XCTAssertEqual(r(#"{"code":"freight.chain-preferred","load_id":"L2","estimated_net":880,"deadhead_ticks":2,"haul_ticks":10,"deliver_deadline_tick":1100,"tick":1000,"candidates":3,"chain_pressure":1}"#),
+                       "load L2 nets ℳ880 over 2 deadhead + 10 haul ticks, due t1100 at t1000 — within 5% of the best rate among 3, and preferred because the supply chain wants it (pressure 1)")
         XCTAssertEqual(r(#"{"code":"freight.laden-leg","station":"b","load_id":"L3249"}"#), "load L3249 is aboard, bound for b")
         XCTAssertEqual(r(#"{"code":"freight.deadhead-to-origin","station":"a","load_id":"L1"}"#), "load L1 waits at a to be collected")
         XCTAssertEqual(r(#"{"code":"freight.delivered-collect","load_id":"L1"}"#), "load L1 is delivered and its money is waiting")

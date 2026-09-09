@@ -119,7 +119,7 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
 - **CODEX 2026-09-08 (MacOnStick queue, one review per usage reset):** T-237 B2 r1 RETURNED REJECT
   (4 findings; 2–4 repaired bf0bb9c, 1 = grounding open) · T-237 B4 r1 RETURNED REJECT (5 findings;
   Rust half c63a61c/c9419b9 wildhorse, Swift half 749c4d9 + hoist bf0bb9c MacOnStick) · T-236 b1 r2
-  RETURNED REJECT 20:10 (1/5/9 held; 3/6 not held; 2/4/7/8 partial — see BOARD) · T-237 B4 r2 RETURNED 01:12 CDT 09-09 (REJECT, one blocker: mine-board read fails open — MacOnStick repairing) · T-236 r3 + T-238 r2 QUEUED, the limit hit again at 01:14, next reset 5:59 AM CDT (`/tmp/codex-runs/queue.sh`, reset-aware). Wildhorse has no codex
+  RETURNED REJECT 20:10 (1/5/9 held; 3/6 not held; 2/4/7/8 partial — see BOARD) · T-237 B4 r2 RETURNED 01:12 CDT 09-09 (REJECT, one blocker: mine-board read fails open — MacOnStick repairing) · T-236 r3 ran at 05:59 and hit the PLAN limit at 06:17 (~188k tokens, no report): **codex parked until Sep 14th 11:15 PM CDT** unless Ian buys credits; the queue sleeps with T-236 r3 → T-238 r2 → B4 r3 → B2 r2. Until then: chair self-reviews in the log, codex owed after (`/tmp/codex-runs/queue.sh`, reset-aware). Wildhorse has no codex
   binary; every launch is MacOnStick's. MacOnStick's LOCAL world rebuilt on ucf-exchange 5f28c45
   (per-hull route quotes now served) 22:27 CDT.
 - **CODEX BACK 2026-09-07 (Ian: "codex is available again so resume reviews with codex

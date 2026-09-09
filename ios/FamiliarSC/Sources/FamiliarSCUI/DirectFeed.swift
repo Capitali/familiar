@@ -334,6 +334,10 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         var notes: [String] = []
         if advice.unpriced > 0 { notes.append("Priced \(routes.count) of \(legs.count) legs — the exchange would not price the rest, so a pump or a load it needed may read as out of reach.") }
         if unquotedRungs > 0 { notes.append("The exchange did not price this hull at \(unquotedRungs) pump rung\(unquotedRungs == 1 ? "" : "s"); those pumps are judged from the reference quote, as the host does when the world will not say.") }
+        // T-238's freight half: the host's rows carry the chain's word (`chain_pressure`) and the
+        // doctrine breaks near-ties with it; this device sends none (absent = 0), so on a near-tie
+        // the host may prefer a load this reading does not — an honest, stated limit.
+        if verdict["decision"]?["type"]?.string == "book" { notes.append("Chain pressure is not modelled on this device: the host, which has the supply-chain forecast, may prefer a near-equal load that feeds a works.") }
         advice.text = ([Briefs.pilot(verdict, governed: false)] + notes).joined(separator: "\n")
         if let act = ExchangeAct.from(decision: verdict["decision"] ?? .null, docked: verdict["ship"]?["docked"]?.string) {
             advice.proposal = PilotProposal(actionId: "ucff-" + UUID().uuidString.lowercased(), act: act,

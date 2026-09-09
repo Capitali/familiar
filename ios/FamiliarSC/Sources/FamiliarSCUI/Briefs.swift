@@ -154,6 +154,10 @@ public enum Briefs {
             return "\(s("pump")) is in reach on the \(s("burn")) burn by the shipped model — the exchange did not price this hull; the tank holds \(n("tank")) against a reserve of \(n("reserve"))"
         case "freight.best-net-per-tick":
             return "load \(s("load_id")) nets ℳ\(n("estimated_net")) over \(n("deadhead_ticks")) deadhead + \(n("haul_ticks")) haul ticks, due t\(n("deliver_deadline_tick")) at t\(n("tick")), the best of \(n("candidates")) on the board"
+        case "freight.chain-preferred":
+            // T-238's freight half: the chain's word broke a near-tie (within 5% of the best rate) —
+            // this load feeds a works whose shelf is draining, or lifts one that is filling.
+            return "load \(s("load_id")) nets ℳ\(n("estimated_net")) over \(n("deadhead_ticks")) deadhead + \(n("haul_ticks")) haul ticks, due t\(n("deliver_deadline_tick")) at t\(n("tick")) — within 5% of the best rate among \(n("candidates")), and preferred because the supply chain wants it (pressure \(n("chain_pressure")))"
         case "freight.laden-leg": return "load \(s("load_id")) is aboard, bound for \(s("station"))"
         case "freight.deadhead-to-origin": return "load \(s("load_id")) waits at \(s("station")) to be collected"
         case "course.filed": return "a course to \(s("station"))"

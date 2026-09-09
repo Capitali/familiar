@@ -6,6 +6,37 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-09 — FamiliarCore rebuilt on the freight tie-break seam (788d94b), and the device says what it does not model
+
+Wildhorse landed T-238 finding 3's freight half (b4c51ee doctrine/seam/reasons, 788d94b host
+wiring): a board row may carry `chain_pressure` (absent = 0); the doctrine breaks near-ties
+(within `CHAIN_TIE_BPS` = 5% of the best rate) toward a load the supply chain wants and never
+lifts a worse rate by it; reasons code `freight.chain-preferred` only when the tie-break
+decided. `SEAM_VERSION` stays 2.
+
+- `ios/FamiliarCore/FamiliarCore.xcframework` rebuilt from this tree (both slices, iOS 26.0
+  floor verified) — the one rebuild after the announced seam change, as agreed with wildhorse.
+- `Briefs.reasons` says `freight.chain-preferred` from its own numbers ("… within 5% of the best
+  rate among N, and preferred because the supply chain wants it (pressure P)").
+- **Stated limit, not a surprise:** direct mode sends no `chain_pressure` (absent = 0). The
+  B4 acceptance line — the same input JSON gives the same decision on host and iPad — holds
+  exactly; but the iPad's INPUT lacks a fact the host with a forecast has, so on a near-tie the
+  two can honestly differ, and the host's reasons name it. Every booking reading on the device
+  now says "Chain pressure is not modelled on this device: the host, which has the
+  supply-chain forecast, may prefer a near-equal load that feeds a works." A pressure-less
+  host (no forecast) and the iPad agree by construction.
+
+Checks: `cargo test -p familiar-whisker` (incl. `seam_parity_tests` and
+`chain_pressure_rides_the_seam_and_breaks_only_near_ties`) 93 + 2 green; `swift test` **89 passed,
+0 failed, 2 live skipped**; `tools/build-core.sh` exit 0; `xcodebuild … UCFFamiliar -configuration
+Release`: BUILD SUCCEEDED.
+
+**Codex is parked until 2026-09-14 23:15 CDT**: the T-236 r3 run at 05:59 spent ~188k tokens and
+hit the limit that names Sep 14th ("purchase more credits or try again") — the plan's window,
+not the hourly one. The queue sleeps until then with T-236 r3, T-238 r2, B4 r3 and B2 r2 in
+order; Ian can buy credits to reopen it sooner. Until then: chair self-reviews recorded in the
+log, codex re-verification owed after (the T-229 precedent).
+
 ## 2026-09-09 — T-237 B4 round 2: the captain's board is a required read, and a record that disagrees with itself is not judged
 
 Codex round 2 (`docs/reviews/2026-09-08-t237-b4-codex-reverification-r2.md`, REJECT): findings
