@@ -456,3 +456,56 @@ mod tests {
         );
     }
 }
+
+/// The dial's vocabulary is a CONTRACT with the Swift bridge (`ios/FamiliarSC/.../Autonomy.swift`),
+/// and it drifted once: `market.margin` was added here and the app read a valid host file as
+/// malformed (codex T-237 B2 re-verification, finding 2). One fixture now names every surface
+/// and its unconfigured default; both suites pin it, so a surface added on either side fails
+/// the other until both carry it.
+#[cfg(test)]
+mod contract_pins {
+    use super::*;
+
+    const CONTRACT: &str = include_str!(
+        "../../../ios/FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/autonomy-surfaces.json"
+    );
+
+    #[test]
+    fn every_surface_and_its_default_match_the_shared_contract() {
+        let c: serde_json::Value = serde_json::from_str(CONTRACT).expect("contract parses");
+        let surfaces = c["surfaces"].as_object().expect("surfaces object");
+        let dial = Dial::default();
+        for &s in Surface::all() {
+            let key = s.key();
+            let want = surfaces
+                .get(&key)
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("surface {key} is not in the shared contract"));
+            assert_eq!(dial.level(s).name(), want, "default level for {key}");
+        }
+        assert_eq!(
+            surfaces.len(),
+            Surface::all().len(),
+            "the contract names a surface Rust lacks"
+        );
+        let families: Vec<&str> = c["families"]
+            .as_array()
+            .expect("families")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        for f in &families {
+            assert!(
+                Surface::all().iter().any(|s| s.family() == *f),
+                "contract family {f} has no surface"
+            );
+        }
+        for &s in Surface::all() {
+            assert!(
+                families.contains(&s.family()),
+                "family {} missing from the contract",
+                s.family()
+            );
+        }
+    }
+}

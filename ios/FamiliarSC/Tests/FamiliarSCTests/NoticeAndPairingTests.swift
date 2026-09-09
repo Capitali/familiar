@@ -4,7 +4,9 @@ import XCTest
 final class NoticeTests: XCTestCase {
     func testOnlyWhatDeservesTheCaptainsAttention() {
         let n = NoticePolicy.notices(for: Fixtures.journal().entries)
-        XCTAssertEqual(n.map(\.kind), [.money, .money, .money, .distress, .distress, .distress, .advice, .needsTheCaptain, .needsTheCaptain, .needsTheCaptain, .hull, .distress, .distress])
+        // Every refusal at the door reaches the captain — refit and engage refusals were
+        // silent until 2026-09-08 (codex T-237 B2 re-verification, finding 4).
+        XCTAssertEqual(n.map(\.kind), [.money, .money, .money, .distress, .distress, .distress, .advice, .needsTheCaptain, .needsTheCaptain, .needsTheCaptain, .hull, .distress, .distress, .distress, .distress])
         XCTAssertEqual(n.filter { $0.title == "Exchange unreachable" }.count, 1, "a run of unreachable lines is one notice")
         XCTAssertFalse(n.contains { $0.title.contains("holding") || $0.body.contains("waiting on the crane") })
         XCTAssertFalse(n.contains { $0.title == "Drive engaged" }, "a leg engaged is routine, not a notification")
@@ -12,8 +14,10 @@ final class NoticeTests: XCTestCase {
         XCTAssertEqual(n[1].title, "Bought 40 ore")
         XCTAssertEqual(n[2].body, "40 ore at ask 15, bound for io-slagworks; sellable from t411")
         XCTAssertEqual(n[7].title, "Your word, please")
-        XCTAssertEqual(n[11].title, "Carry refused")
-        XCTAssertEqual(n[12].kind, .distress)
+        XCTAssertEqual(n[11].title, "Refit refused"); XCTAssertEqual(n[11].body, "hold-extension — ℳ1200 in hand under reserve")
+        XCTAssertEqual(n[12].title, "Engage refused"); XCTAssertEqual(n[12].body, "crane says: until t222")
+        XCTAssertEqual(n[13].title, "Carry refused")
+        XCTAssertEqual(n[14].kind, .distress)
         XCTAssertEqual(n[7].body, "book L3 — best rate on the board (until t205)")
     }
 

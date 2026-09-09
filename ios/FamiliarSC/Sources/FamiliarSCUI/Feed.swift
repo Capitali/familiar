@@ -16,6 +16,10 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var named: Bool
     public var hull: String
     public var captain: String
+    /// The captain's durable identity (`captain_id` on the store record and the served row);
+    /// empty for a legacy record the host has not migrated. Every captain-scoped join keys
+    /// on `captainIdentity`, never on the display name.
+    public var captainID: String = ""
     public var server: String
     public var automations: [String]
     public var credits: Int64?
@@ -32,6 +36,10 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var lastAt: Int64?
     public var mood: BridgeReport.Mood
     public var openProposals: Int
+    /// What two ships must share to be one captain's: the id when the record has one, else the
+    /// label marked as such — so a legacy record still groups, and two captains who happen to
+    /// share a display name never do once either has an id.
+    public var captainIdentity: String { captainID.isEmpty ? "label:" + captain : "id:" + captainID }
     /// One sentence in her voice — the latest fold's headline.
     public var sentence: String = ""
     public var leasePrincipal: Int64?
@@ -334,6 +342,7 @@ public struct StoreFeed: ShipsFeed {
             pilotAlive: s.pilotPID() != nil, reachable: false,
             mood: report.mood, openProposals: open
         )
+        out.captainID = captain?.captainID ?? ""
         out.credits = lastMoney?.int("credits")
         out.fuel = lastFuel?.int("fuel")
         out.docked = lastHull?.string("docked")

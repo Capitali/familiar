@@ -158,6 +158,11 @@ public struct NameEvent: Codable, Equatable, Sendable {
 /// eight characters after `ucfk_` — never the secret, which lives in ucf.env (0600) and is
 /// not read by this package.
 public struct Captain: Codable, Equatable, Sendable {
+    /// The captain's IDENTITY (fleet.rs `captain_id`): generated once, meaningless, the only
+    /// thing anything keys on. Empty ONLY on a record written before it existed — the host's
+    /// `ensure_captain_id` fills it in. A display name is a label and may collide or change;
+    /// this does neither (codex T-237 B2 re-verification, finding 3).
+    public var captainID: String = ""
     public var captain: String
     public var keyID: String
     public var server: String
@@ -168,6 +173,7 @@ public struct Captain: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case captain, server, automations
+        case captainID = "captain_id"
         case keyID = "key_id"
         case pairedAt = "paired_at"
         case hullName = "hull_name"
@@ -176,6 +182,7 @@ public struct Captain: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        captainID = try c.decodeIfPresent(String.self, forKey: .captainID) ?? ""
         captain = try c.decode(String.self, forKey: .captain)
         keyID = try c.decode(String.self, forKey: .keyID)
         server = try c.decode(String.self, forKey: .server)

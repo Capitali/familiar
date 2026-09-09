@@ -6,6 +6,46 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-08 — T-237 B2, codex's contract-drift findings: one fixture each side pins, so the bridge and the runner cannot drift silently again
+
+Codex re-verified B2 (`docs/reviews/2026-09-08-t237-b2-codex-reverification.md`, REJECT, four
+findings). Findings 2–4 are contract drift between `crates/whisker` and `ios/FamiliarSC`; this
+brick repairs them and, more to the point, makes each contract ONE file both suites pin.
+Finding 1 (grounding checks token provenance, not truth) is a design brick of its own — next.
+
+- **Finding 2 — `market.margin`.** `ControlSurface.marketMargin` (advise by default, like the
+  tanker: an unconfigured captain is OFFERED the borrow), `unconfiguredDefault` mirrors
+  `Dial::level`'s `unwrap_or` arm, the dial screen names it. The contract:
+  `Tests/FamiliarSCTests/Fixtures/contract/autonomy-surfaces.json` — every surface and its
+  default; `autonomy.rs::contract_pins` (Rust) and `ContractDriftTests` (Swift) both pin it,
+  so a surface added on either side fails the other until both carry it. A host file with
+  `{"market.margin":"confirm"}` now decodes, shows and sets.
+- **Finding 3 — `captain_id`.** `Captain.captainID` (`captain_id`, empty only for a record the
+  host has not migrated) rides the store record into `ShipSummary.captainID` from both feeds
+  (store: captain.json; wire: the `/ships` row); `ShipSummary.captainIdentity` is what any
+  captain-scoped join keys on — `id:<id>` when the record has one, `label:<name>` for a legacy
+  record — so two captains who share a display name are two once either has an id, a rename
+  moves nothing, and legacy records still group. Pinned: modern, legacy, colliding-label, rename.
+- **Finding 4 — money and refusals.** `paid-down` (money), `pay-down-refused` and
+  `trade-refused` (distress, ranked with `refused-at-the-door`), `forecast` (told, rank 3),
+  and the two refusals the fixture already carried silently (`refit-refused`, `engage-refused`)
+  all reach the captain through `NoticePolicy` and render as facts in `TemplatedVoice`. The
+  explicit safe rule for a word the bridge has never met: `-refused` is distress and outranks
+  routine; anything else unknown is told neutrally and is never a notice. The contract:
+  `Fixtures/contract/journal-events.json` — every `"event"` literal in the runner;
+  `main.rs::journal_vocabulary_pin` scans its own source against it, `ContractDriftTests`
+  checks every listed word has a deliberate rank (chatter or a tier, never the unknown
+  fallback) and a fact renderer.
+- Also: the routes sort and the active-row pick in `DirectFeed.advice` had their keys hoisted
+  out of the closures — wildhorse's Xcode 26.5 Release archive of build 5 failed on "unable to
+  type-check this expression in reasonable time" at the sort (a debug build passes what
+  Release rejects). Release builds of the package and of UCFFamiliar now pass here.
+
+Checks: `cargo fmt --all -- --check` 0; `cargo clippy -p familiar-whisker --all-targets -- -D warnings` 0;
+`cargo test -p familiar-whisker` 84 + 2 (the two pins) green; `swift test` **71 passed, 0 failed,
+2 live skipped**; `swift build -c release` (FamiliarSC) green; `xcodebuild … -scheme UCFFamiliar
+-configuration Release -sdk iphonesimulator`: BUILD SUCCEEDED. Wildhorse re-runs `ship-ucf.sh 5` on this.
+
 ## 2026-09-08 — T-237 B4, the Swift half of codex's re-verification: the iPad reads every fact the host reads, and the captain can file what the mind would
 
 Codex re-verified B4 steps 1–4 (`docs/reviews/2026-09-08-t237-b4-codex-reverification.md`,

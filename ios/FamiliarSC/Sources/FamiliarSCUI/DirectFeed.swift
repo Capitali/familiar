@@ -279,7 +279,11 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
             for await r in group { if let r { out.append(r) } }
             return out
         }
-        let routes = priced.map(\.row).sorted { ($0["from"]?.string ?? "") + ($0["to"]?.string ?? "") < ($1["from"]?.string ?? "") + ($1["to"]?.string ?? "") }
+        // Keys hoisted out of the closures: four optional chains with ?? and + inside one
+        // sort closure is the type-checker's classic blow-up under -O (Xcode 26.5 Release
+        // archive on wildhorse, 2026-09-08 — a debug build passes what Release rejects).
+        func routeKey(_ r: JSONValue) -> String { (r["from"]?.string ?? "") + "→" + (r["to"]?.string ?? "") }
+        let routes = priced.map(\.row).sorted { routeKey($0) < routeKey($1) }
         let unquotedRungs = priced.reduce(0) { $0 + $1.unquoted }
         // The captain's live contract: the row the ledger still holds open, ranked the way the
         // host tracks it (a hull in transit first, then one booked and waiting, then one
@@ -289,7 +293,8 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         func rank(_ r: JSONValue) -> Int {
             switch r["status"]?.string { case "inTransit", "pickedUp": return 0; case "booked", "assigned", "awaitingPickup": return 1; case "delivered": return 2; default: return 3 }
         }
-        let active = live.min { (rank($0), $0["loadId"]?.string ?? "") < (rank($1), $1["loadId"]?.string ?? "") }
+        func activeKey(_ r: JSONValue) -> String { "\(rank(r)):" + (r["loadId"]?.string ?? "") }
+        let active = live.min { activeKey($0) < activeKey($1) }
         var input: [String: JSONValue] = ["me": me, "board": board, "stations": stations, "routes": .array(routes),
                                           "repair_per_hundred_bps": .number(Double(repair))]
         if let active { input["active"] = .object(["row": active]) }

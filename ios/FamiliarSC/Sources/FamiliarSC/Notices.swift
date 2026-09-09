@@ -48,6 +48,16 @@ public enum NoticePolicy {
                 add(.money, "Load \(e.string("load") ?? "") closed", "\(e.string("why") ?? "") — ℳ\(e.int("credits") ?? 0)")
             case "outfitted":
                 add(.hull, "Fitted \(e.string("fitting") ?? "")", "ℳ\(e.int("price") ?? 0) at \(e.string("at_station") ?? "the yard"), \(t)")
+            case "paid-down":
+                add(.money, "Paid down ℳ\(e.int("amount") ?? 0) on the lease", "owed ℳ\(e.int("owed_before") ?? 0) before; ℳ\(e.int("credits") ?? 0) in hand, \(t)")
+            case "pay-down-refused":
+                add(.distress, "Lease payment refused", "ℳ\(e.int("amount") ?? 0) — \(e.string("why") ?? "")")
+            case "trade-refused":
+                add(.distress, "Trade refused at the door", "\(e.string("side") ?? "") \(e.string("good") ?? "") — \(e.string("why") ?? "")")
+            case "refit-refused":
+                add(.distress, "Refit refused", "\(e.string("fitting") ?? "the fitting") — \(e.string("why") ?? "")")
+            case "engage-refused":
+                add(.distress, "Engage refused", e.string("why") ?? "")
             case "distress-hold":
                 add(.distress, "Distress hold", e.string("why") ?? "holding for the captain")
             case "refused-at-the-door":
@@ -60,6 +70,14 @@ public enum NoticePolicy {
                 if !unreachableRun { add(.distress, "Exchange unreachable", e.string("why") ?? "") }
                 unreachableRun = true
             default:
+                // An event this policy has never met. The safe rule is explicit: anything the
+                // runner names as a refusal is distress (the captain must hear that an act
+                // failed at the door); anything else unknown is NOT a notice — a buzz for a
+                // word nobody classified is how notices get muted. The voice still says it,
+                // neutrally, and the contract test makes the unknown short-lived.
+                if e.event.hasSuffix("-refused") {
+                    add(.distress, "\(e.event.replacingOccurrences(of: "-", with: " ").capitalized)", e.string("why") ?? "")
+                }
                 continue
             }
         }

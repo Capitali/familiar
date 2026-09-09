@@ -47,7 +47,7 @@ final class AutonomyTests: XCTestCase {
         XCTAssertEqual(AutonomyLevel.parse("ask"), .confirm)
         XCTAssertEqual(AutonomyLevel.parse("autonomous"), .auto)
         XCTAssertNil(AutonomyLevel.parse("yes"))
-        XCTAssertEqual(ControlSurface.allCases.count, 17)
+        XCTAssertEqual(ControlSurface.allCases.count, 18)
         XCTAssertEqual(ControlSurface.parse(" racing.refusal "), .racingRefusal)
         XCTAssertEqual(ControlSurface.marketCarry.family, "market")
         XCTAssertEqual(ControlSurface.marketCarry.category, "carry")

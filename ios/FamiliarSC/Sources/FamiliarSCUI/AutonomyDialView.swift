@@ -90,6 +90,7 @@ public struct AutonomyDialView: View {
         case .marketBuy: return "open a position"
         case .marketSell: return "sell a position"
         case .marketCarry: return "carry a position to market"
+        case .marketMargin: return "borrow on the credit line to speculate — advise unless you say otherwise"
         case .shipRepair: return "yard repair"
         case .shipRefit: return "buy a fitting"
         case .shipCrew: return "hire after title"

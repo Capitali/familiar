@@ -60,22 +60,29 @@ public struct TemplatedVoice {
     static func severity(_ e: JournalEntry) -> Int {
         switch e.event {
         case "distress-hold": return 9
-        case "refused-at-the-door", "exchange-unreachable": return 8
+        case "refused-at-the-door", "exchange-unreachable", "trade-refused", "pay-down-refused": return 8
         case "proposed", "proposal-lapsed": return 7
-        case "traded", "position-opened", "load-closed", "outfitted", "trade-outcome", "fill": return 6
+        case "traded", "position-opened", "load-closed", "outfitted", "trade-outcome", "fill", "paid-down": return 6
         case "advice", "carry-blocked", "carry-refused", "engage-refused", "refit-refused", "book-corrected", "retargeted": return 5
         case "acted", "engaged-drive", "carry-to-market", "unwedged-course", "adopted-held-contract", "freight": return 4
-        case "held-at-the-gate", "watch-begins": return 3
+        case "held-at-the-gate", "watch-begins", "forecast": return 3
         case "holding", "merchant-idle", "outfit-idle", "awaiting-pending-actions", "awaiting-our-own-fold": return 0
-        default: return 2   // unknown: shown, neutrally
+        // Unknown: shown, neutrally — except that a word the runner ends in "-refused" is a
+        // refusal at the door whatever else it is, and outranks routine (the safe rule for a
+        // future event; the contract test keeps "future" short).
+        default: return e.event.hasSuffix("-refused") ? 8 : 2
         }
     }
 
     static func isDanger(_ e: JournalEntry) -> Bool {
         ["distress-hold", "refused-at-the-door", "exchange-unreachable", "carry-blocked", "carry-refused",
-         "engage-refused", "refit-refused", "held-at-the-gate"].contains(e.event)
+         "engage-refused", "refit-refused", "held-at-the-gate", "trade-refused", "pay-down-refused"].contains(e.event)
+            || e.event.hasSuffix("-refused")
             || (e.event == "trade-outcome" && (e.string("outcome") ?? "").hasPrefix("rejected"))
     }
+
+    /// The runner's chatter — folded into a count, never told one by one.
+    static let chatter: Set<String> = ["holding", "merchant-idle", "outfit-idle", "awaiting-pending-actions", "awaiting-our-own-fold"]
 
     // MARK: the report
 
@@ -247,6 +254,15 @@ public struct TemplatedVoice {
             return "\(t(e)): fitted \(s("fitting")) for ℳ\(i("price")) at \(s("at_station")) (reserve ℳ\(i("reserve"))) — ℳ\(i("credits"))"
         case "outfit-idle":
             return "\(t(e)): no refit — \(s("why"))"
+        case "paid-down":
+            return "\(t(e)): paid ℳ\(i("amount")) down on the lease at \(s("at_station")) (owed ℳ\(i("owed_before")) before) — ℳ\(i("credits"))"
+        case "pay-down-refused":
+            return "\(t(e)): lease payment of ℳ\(i("amount")) refused — \(s("why"))"
+        case "trade-refused":
+            return "\(t(e)): \(s("side")) \(s("good")) refused at the door — \(s("why"))"
+        case "forecast":
+            let starving = e["starving"]?.array?.compactMap { $0.string ?? $0.description } ?? []
+            return "\(t(e)): forecast over \(i("horizon_ticks")) ticks — " + (starving.isEmpty ? "no shelf runs dry" : "running dry: " + starving.joined(separator: ", "))
         case "refit-refused":
             return "\(t(e)): refit \(s("fitting")) refused — \(s("why"))"
         case "engaged-drive":

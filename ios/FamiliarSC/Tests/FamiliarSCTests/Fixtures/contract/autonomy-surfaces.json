@@ -1,0 +1,30 @@
+{
+  "_": "The autonomy dial's control surfaces and each one's UNCONFIGURED default level \u2014 the one contract crates/whisker/src/autonomy.rs and ios/FamiliarSC/Sources/FamiliarSC/Autonomy.swift both pin (codex T-237 B2 re-verification, finding 2). Add a surface here first; both suites then fail until both sides carry it.",
+  "families": [
+    "navigation",
+    "freight",
+    "market",
+    "ship",
+    "racing"
+  ],
+  "surfaces": {
+    "freight.book": "auto",
+    "freight.cancel": "auto",
+    "freight.collect": "auto",
+    "market.buy": "auto",
+    "market.carry": "auto",
+    "market.margin": "advise",
+    "market.sell": "auto",
+    "navigation.course": "auto",
+    "navigation.fuel": "auto",
+    "navigation.rescue": "advise",
+    "racing.line": "auto",
+    "racing.plot": "auto",
+    "racing.refusal": "auto",
+    "ship.crew": "auto",
+    "ship.frame": "auto",
+    "ship.lease": "auto",
+    "ship.refit": "auto",
+    "ship.repair": "auto"
+  }
+}

@@ -1886,3 +1886,57 @@ mod adoption_tests {
         assert!(adopt(&[ours, theirs], "L2").is_none());
     }
 }
+
+/// Every `"event"` this runner writes is a word the Swift bridge must classify — for the
+/// captain's notices and for what the voice tells first. The vocabulary drifted once
+/// (`paid-down`, `pay-down-refused`, `trade-refused` were invisible or mis-ranked on the
+/// bridge — codex T-237 B2 re-verification, finding 4). This pins the runner's own literals
+/// against the shared fixture the Swift suite pins, so a new word fails both sides until
+/// both carry it.
+#[cfg(test)]
+mod journal_vocabulary_pin {
+    const CONTRACT: &str = include_str!(
+        "../../../ios/FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/journal-events.json"
+    );
+
+    fn events_in_source() -> std::collections::BTreeSet<String> {
+        let src = include_str!("main.rs");
+        let mut out = std::collections::BTreeSet::new();
+        let mut rest = src;
+        while let Some(i) = rest.find("\"event\":") {
+            let after = &rest[i + "\"event\":".len()..];
+            let after = after.trim_start();
+            if let Some(stripped) = after.strip_prefix('"') {
+                if let Some(end) = stripped.find('"') {
+                    let word = &stripped[..end];
+                    if !word.is_empty() && word.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+                    {
+                        out.insert(word.to_string());
+                    }
+                }
+            }
+            rest = after;
+        }
+        out
+    }
+
+    #[test]
+    fn the_runners_journal_words_are_the_shared_contract() {
+        let c: serde_json::Value = serde_json::from_str(CONTRACT).expect("contract parses");
+        let listed: std::collections::BTreeSet<String> = c["events"]
+            .as_array()
+            .expect("events array")
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        let written = events_in_source();
+        assert!(
+            !written.is_empty(),
+            "the scan found no events — the literal shape changed"
+        );
+        assert_eq!(
+            written, listed,
+            "journal vocabulary drift: add the new word to Fixtures/contract/journal-events.json AND classify it in Notices.swift / TemplatedVoice.swift"
+        );
+    }
+}

@@ -31,6 +31,11 @@ public enum ControlSurface: String, CaseIterable, Equatable, Sendable {
     case marketBuy = "market.buy"
     case marketSell = "market.sell"
     case marketCarry = "market.carry"
+    /// Trading on the credit line (Ian, 2026-09-05: borrowing to speculate is a dial the
+    /// captain owns). Advise by default, like the tanker: an unconfigured captain is
+    /// OFFERED the borrow. Missing here until 2026-09-08 — a valid host file carrying it
+    /// read as malformed (codex T-237 B2 re-verification, finding 2).
+    case marketMargin = "market.margin"
     case shipRepair = "ship.repair"
     case shipRefit = "ship.refit"
     case shipCrew = "ship.crew"
@@ -48,6 +53,14 @@ public enum ControlSurface: String, CaseIterable, Equatable, Sendable {
 
     public static func parse(_ s: String) -> ControlSurface? {
         ControlSurface(rawValue: s.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// The level an unconfigured captain gets — `Dial::level`'s `unwrap_or` arm.
+    public var unconfiguredDefault: AutonomyLevel {
+        switch self {
+        case .navigationRescue, .marketMargin: return .advise
+        default: return .auto
+        }
     }
 
     /// Which automation grant a surface belongs to — a surface whose automation the captain
@@ -69,13 +82,15 @@ public struct AutonomyDial: Equatable, Sendable {
     public init(settings: [String: AutonomyLevel] = [:]) { self.settings = settings }
 
     /// Most specific wins: category, then family, then `*`, then the default — auto for
-    /// everything bought, except the tanker: `navigation.rescue` is ADVISE on its own,
-    /// because a PAWS call is a multi-day strand that pins the hull.
+    /// everything bought, except the two the captain must be asked about first: the tanker
+    /// (`navigation.rescue`, a PAWS call is a multi-day strand that pins the hull) and the
+    /// credit line (`market.margin`). The defaults are pinned against
+    /// `Fixtures/contract/autonomy-surfaces.json`, which the Rust side pins too.
     public func level(for s: ControlSurface) -> AutonomyLevel {
         if let l = settings[s.key] { return l }
         if let l = settings[s.family] { return l }
         if let l = settings["*"] { return l }
-        return s == .navigationRescue ? .advise : .auto
+        return s.unconfiguredDefault
     }
 
     /// Mirrors `Dial::set`: `*`, a family, or a surface; anything else is refused.

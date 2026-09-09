@@ -84,6 +84,7 @@ public struct WireFeed: ShipsFeed, CaptainActs {
             leasePrincipal: row["leasePrincipal"]?.int, leaseServicePaid: row["leaseServicePaid"]?.int,
             trades: row["trades"].map { TradeBook(row: $0) }
         )
+        summary.captainID = row["captain_id"]?.string ?? ""
         summary.worldName = row["world_name"]?.string
         return summary
     }
