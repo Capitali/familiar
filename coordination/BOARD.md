@@ -39,7 +39,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   dial + a shared surfaces contract both suites pin; `captain_id` through the Swift Captain and
   ShipSummary (`captainIdentity` for joins); `paid-down` / `pay-down-refused` / `trade-refused` /
   `forecast` / `refit-refused` / `engage-refused` through notices + voice + a shared journal-events
-  contract both suites pin. Log: DEVELOPMENT_LOG 2026-09-08 (B2). **Finding 1 REPAIRED 2026-09-09 ~00:55 (MacOnStick):** `Grounding.bind` — side and outcome bound to
+  contract both suites pin. Log: DEVELOPMENT_LOG 2026-09-08 (B2). **ROUND-2 CODEX RE-VERIFICATION QUEUED 2026-09-09 ~02:00 CDT — companion:codex** (MacOnStick queue, last in line): all four findings (bf0bb9c, b6e27a6); report to `docs/reviews/2026-09-09-t237-b2-codex-reverification-r2.md`. Review-only, same rules. **Finding 1 REPAIRED 2026-09-09 ~00:55 (MacOnStick):** `Grounding.bind` — side and outcome bound to
   the source fact by strong identifiers, negation-aware; stations kept in the conversation check.
   FamiliarSC 86/0. Log: DEVELOPMENT_LOG 2026-09-09. Codex round 2 on B2 owed (all four findings now repaired).
 - Was: **B2 CODEX RE-VERIFICATION CLAIMED 2026-09-08 — companion:codex.** Review-only
@@ -108,6 +108,9 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the familiar's economic edge made structural — the P&L routines Ian names. Chair-built solo while codex is paused (below); design review owed to codex after Sept 6
 
 ### T-237 B4 · One doctrine, two runtimes — the pilot's mind embedded in the iPad, the pilot itself stays on the host
+- **ROUND-3 CODEX RE-VERIFICATION QUEUED 2026-09-09 ~02:00 CDT — companion:codex** (MacOnStick queue,
+  after T-236 r3 and T-238 r2): the one round-2 blocker's repair (7bdbbcd) and the memo window;
+  report to `docs/reviews/2026-09-09-t237-b4-codex-reverification-r3.md`. Review-only, same rules.
 - **CODEX ROUND 2 RETURNED 2026-09-09 01:12 CDT: REJECT, one blocker left** —
   `docs/reviews/2026-09-08-t237-b4-codex-reverification-r2.md`. Round-1 findings 1–5 and the
   artifact all REPAIRED (the checked-in xcframework itself returns call-paws / seam 2 on the
