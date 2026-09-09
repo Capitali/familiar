@@ -698,6 +698,109 @@ pub(crate) fn record_name(root: &Path, entry: &NameEntry) -> Result<(), String> 
     f.sync_all().map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Remember what was named before the ledger existed. Walks every captain store
+/// (identity and legacy) and every ship's own trail, and writes each naming the
+/// ledger does not already carry — dated by the trail's own `at`, by the trail's own
+/// actor, `from` the name before it. Captains and hulls come from the pairing
+/// records. Idempotent: a second run writes nothing. Returns how many rows landed.
+pub(crate) fn backfill_names(dir: &Path, root: &Path) -> Result<usize, String> {
+    let have: std::collections::BTreeSet<(i64, String, String, String, String)> = names(root)
+        .into_iter()
+        .map(|e| (e.at, e.kind, e.name, e.holder, e.act))
+        .collect();
+    let ships = paired_ships(dir, root);
+    let mut rows: Vec<NameEntry> = Vec::new();
+    // Captains and hulls, from the pairing records.
+    let mut captains: BTreeMap<String, (String, i64)> = BTreeMap::new();
+    for s in &ships {
+        if s.captain.captain_id.trim().is_empty() {
+            continue;
+        }
+        let e = captains
+            .entry(s.captain.captain_id.clone())
+            .or_insert((s.captain.captain.clone(), s.captain.paired_at));
+        e.1 = e.1.min(s.captain.paired_at);
+        if !s.captain.hull_name.trim().is_empty() {
+            rows.push(NameEntry {
+                at: s.captain.paired_at,
+                kind: "hull".into(),
+                name: s.captain.hull_name.clone(),
+                holder: s.world.id.clone(),
+                act: "paired".into(),
+                from: String::new(),
+                by: "backfill".into(),
+            });
+        }
+    }
+    for (id, (name, at)) in &captains {
+        rows.push(NameEntry {
+            at: *at,
+            kind: "captain".into(),
+            name: name.clone(),
+            holder: id.clone(),
+            act: "paired".into(),
+            from: String::new(),
+            by: "backfill".into(),
+        });
+    }
+    // Computers, from every trail: the captain's store, and each hull's own record.
+    let mut trails: Vec<(String, PathBuf)> = Vec::new();
+    for s in &ships {
+        if s.captain.captain_id.trim().is_empty() {
+            continue;
+        }
+        trails.push((
+            s.captain.captain_id.clone(),
+            captain_store_for(root, &s.captain),
+        ));
+        trails.push((
+            s.captain.captain_id.clone(),
+            captain_store(root, &s.captain.captain),
+        ));
+        trails.push((s.captain.captain_id.clone(), s.dir.clone()));
+    }
+    trails.sort();
+    trails.dedup();
+    for (holder, d) in trails {
+        let mut prior = String::new();
+        for ev in familiar_kernel::persona::namings(&d) {
+            rows.push(NameEntry {
+                at: ev.at,
+                kind: "computer".into(),
+                name: ev.name.clone(),
+                holder: holder.clone(),
+                act: if prior.is_empty() {
+                    "named".into()
+                } else {
+                    "renamed".into()
+                },
+                from: prior.clone(),
+                by: ev.actor.clone(),
+            });
+            prior = ev.name;
+        }
+    }
+    rows.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.kind.cmp(&b.kind)));
+    rows.dedup_by(|a, b| {
+        (a.at, &a.kind, &a.name, &a.holder, &a.act) == (b.at, &b.kind, &b.name, &b.holder, &b.act)
+    });
+    let mut landed = 0;
+    for r in rows {
+        if have.contains(&(
+            r.at,
+            r.kind.clone(),
+            r.name.clone(),
+            r.holder.clone(),
+            r.act.clone(),
+        )) {
+            continue;
+        }
+        record_name(root, &r)?;
+        landed += 1;
+    }
+    Ok(landed)
+}
+
 fn fold_name(s: &str) -> String {
     s.trim().to_lowercase()
 }
@@ -1446,6 +1549,17 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         // directory.
         // ── names: everything the fleet has ever called anyone ─────────────────
         "names" => {
+            if f.contains_key("backfill") {
+                match backfill_names(&dir, &root) {
+                    Ok(n) => {
+                        println!("fleet names: {n} naming(s) remembered from before the ledger")
+                    }
+                    Err(e) => {
+                        eprintln!("fleet names: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             let all = names(&root);
             if all.is_empty() {
                 println!("fleet: no names on record yet");
@@ -2693,5 +2807,96 @@ mod captain_store_tests {
             ExitCode::FAILURE
         );
         assert_eq!(paired_ships(&base, &base.join("worlds")).len(), 1);
+    }
+
+    /// Ian, 2026-09-08: we do not forget names — what was named before the ledger
+    /// existed is remembered into it, dated by the trail's own clock, by the trail's
+    /// own actor, and a second run remembers nothing twice.
+    #[test]
+    fn the_ledger_remembers_what_was_named_before_it_existed() {
+        let base = tmp("backfill");
+        let server = stub_exchange(1);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "kk",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        // Pretend the ledger never existed, and that the captain renamed once before it did.
+        std::fs::remove_file(root.parent().unwrap().join("captains").join("names.jsonl")).unwrap();
+        let ship = paired_ships(&base, &root).remove(0);
+        let store = captain_store_by_id(&root, &ship.captain.captain_id);
+        let mut p = familiar_kernel::persona::load(&store).unwrap();
+        p.name = "Mrs. Norris".into();
+        familiar_kernel::persona::name(
+            &store,
+            &p,
+            Some(&familiar_kernel::persona::NameEvent {
+                at: 1_900_000_000,
+                actor: "A. Captain".into(),
+                name: "Mrs. Norris".into(),
+            }),
+        )
+        .unwrap();
+        assert!(names(&root).is_empty());
+        let args = |extra: &[&str]| -> Vec<String> {
+            let mut v: Vec<String> = vec!["names".into()];
+            v.extend(extra.iter().map(|s| s.to_string()));
+            v.extend([
+                "--data-dir".to_string(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ]);
+            v
+        };
+        assert_eq!(cmd_fleet(&args(&["--backfill"])), ExitCode::SUCCESS);
+        let got = names(&root);
+        let computers: Vec<(String, String, String, String)> = got
+            .iter()
+            .filter(|e| e.kind == "computer")
+            .map(|e| (e.act.clone(), e.name.clone(), e.from.clone(), e.by.clone()))
+            .collect();
+        assert_eq!(
+            computers,
+            vec![
+                (
+                    "named".into(),
+                    "Felix".into(),
+                    String::new(),
+                    "A. Captain".into()
+                ),
+                (
+                    "renamed".into(),
+                    "Mrs. Norris".into(),
+                    "Felix".into(),
+                    "A. Captain".into()
+                ),
+            ],
+            "{got:?}"
+        );
+        assert!(got.iter().any(|e| e.kind == "captain"
+            && e.name == "A. Captain"
+            && e.holder == ship.captain.captain_id));
+        assert!(got
+            .iter()
+            .any(|e| e.kind == "hull" && e.name == "Probe 0" && e.holder == ship.world.id));
+        assert!(
+            got.iter()
+                .any(|e| e.kind == "computer" && e.name == "Mrs. Norris" && e.at == 1_900_000_000),
+            "dated by the trail's own clock"
+        );
+        let n = got.len();
+        assert_eq!(cmd_fleet(&args(&["--backfill"])), ExitCode::SUCCESS);
+        assert_eq!(
+            names(&root).len(),
+            n,
+            "a second run remembers nothing twice"
+        );
     }
 }
