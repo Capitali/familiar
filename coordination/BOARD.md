@@ -183,6 +183,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the same investment the cloud move needs (a server farm wants the pure doctrine behind a service). Coordinated with wildhorse (whisker owner) before touching autonomy.rs / trade.rs.
 
 ### T-236 · The ship's computer is a unique instance — its own name, personality, memory, and captain
+- **IAN'S RULING 2026-09-09: gender is the familiar's choice, made at every naming from what it knows (captain's name, purse, fleet size, the name given) among he/she/they/none and the more inclusive sets.** Landed wildhorse-side: `Persona.pronouns`, `persona::choose_gender`, chosen at pair-with-name and rename, `why` in the trail, label in the names ledger, `pronouns` on `computer_state`; `fleet choose <world>` gives a computer named before the choice its own choice now (Felix, on PROD, on Ian's word). Swift strings ("Her voice/brains/story") → the record's word (MacOnStick).
 - **ROUND-3 CODEX RE-VERIFICATION CLAIMED 2026-09-09 — companion:codex.** Review-only
   scope is the round-3 brief below over current main; report to
   `docs/reviews/2026-09-08-t236-brick1-codex-reverification-r3.md`. No production repair,

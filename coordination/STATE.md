@@ -478,6 +478,27 @@ now closed; what remains of each is an ACT, listed at the bottom).**
 
 ## Standing directions from Ian (recorded, binding)
 
+- **GENDER IS THE FAMILIAR'S CHOICE (2026-09-09, verbatim: "generally inanimate objects are
+  genderless. The ships computer while an object isn't inanimate, it still doesn't have sex,
+  but gender is a choice. I think that the familiar should decide every time it's assigned a
+  name by a captain based on all the information it has at that moment, the captains name,
+  their financial state, the number of ships in their fleet, the name the captain gave them.
+  Then the familiar decides the gender of the ship he/she/they/none - if there are more
+  inclusive gender choices to make include them too. Gender gets to be a choice by the
+  familiar.")** Background: "she/her" for the ship's computer was never ruled — it entered
+  through the T-236 dialogue's naval "she" for the hull (2026-09-02) and slid onto the
+  computer in brick 1's strings the same evening, then spread by imitation. Now: the persona
+  carries `pronouns` {label, subject, object, possessive}, chosen by `persona::choose_gender`
+  at EVERY naming (pair with a name, rename) from the captain's name, the purse (credits,
+  debt), the fleet size and the given name; the choices are she/her, he/him, they/them, none
+  (spoken of by name), xe/xem, ze/hir, fae/faer, ey/em — the plain four weighted twice; the
+  `why` in the trail names what was weighed and that it was the familiar's call. Unnamed
+  (root name) = no pronoun yet, spoken of as `it`. **And (Ian, same day): "give the
+  opportunity back to Felix to change their gender since it wasn't given that choice when
+  initiated"** — `fleet choose <world>` lets a computer named before the choice existed make
+  it now, as its own act (trail actor `familiar`, ledger act `chose`). Swift side
+  (MacOnStick): read `pronouns` off `persona` / `computer_state`; "Her voice / Her brains /
+  Her story" become the record's word or the name.
 - **NO CODEX WORK UNTIL FRIDAY 2026-09-11 (2026-09-09, verbatim: "Hold off on codex work
   until Friday again.").** No codex exec launches from either Mac before Friday — the
   reset-aware queue included, whatever the plan limit does. Chair self-reviews in the log

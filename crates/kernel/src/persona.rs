@@ -149,6 +149,124 @@ pub struct Persona {
     /// contract must be heard about, not half-honoured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<Style>,
+    /// How the computer is spoken of. THE FAMILIAR'S OWN CHOICE, made fresh at every
+    /// naming from what it knows at that moment (Ian, 2026-09-09: "gender is a
+    /// choice… Gender gets to be a choice by the familiar"). Absent until a captain
+    /// has named it: an unnamed computer is spoken of as `it`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pronouns: Option<Pronouns>,
+}
+
+/// A pronoun set. `none` means the computer is spoken of by name, never by pronoun.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pronouns {
+    /// The label a captain sees: "she/her", "they/them", "none"…
+    pub label: String,
+    pub subject: String,
+    pub object: String,
+    pub possessive: String,
+}
+
+impl Pronouns {
+    fn set(label: &str, subject: &str, object: &str, possessive: &str) -> Pronouns {
+        Pronouns {
+            label: label.into(),
+            subject: subject.into(),
+            object: object.into(),
+            possessive: possessive.into(),
+        }
+    }
+
+    /// Spoken of by name only.
+    pub fn none() -> Pronouns {
+        Pronouns::set("none", "", "", "")
+    }
+
+    /// The choices the familiar makes among. Ian, 2026-09-09: "he/she/they/none — if
+    /// there are more inclusive gender choices to make include them too."
+    pub fn choices() -> Vec<Pronouns> {
+        vec![
+            Pronouns::set("she/her", "she", "her", "her"),
+            Pronouns::set("he/him", "he", "him", "his"),
+            Pronouns::set("they/them", "they", "them", "their"),
+            Pronouns::none(),
+            Pronouns::set("xe/xem", "xe", "xem", "xyr"),
+            Pronouns::set("ze/hir", "ze", "hir", "hir"),
+            Pronouns::set("fae/faer", "fae", "faer", "faer"),
+            Pronouns::set("ey/em", "ey", "em", "eir"),
+        ]
+    }
+
+    /// The subject word, or the name when the computer goes by name alone.
+    pub fn subject_or<'a>(&'a self, name: &'a str) -> &'a str {
+        if self.subject.is_empty() {
+            name
+        } else {
+            &self.subject
+        }
+    }
+
+    pub fn object_or<'a>(&'a self, name: &'a str) -> &'a str {
+        if self.object.is_empty() {
+            name
+        } else {
+            &self.object
+        }
+    }
+}
+
+/// Everything the familiar knows at the moment a captain names its computer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NamingContext {
+    pub captain: String,
+    pub name: String,
+    pub credits: i64,
+    pub debt: i64,
+    pub fleet_size: i64,
+    pub at: i64,
+}
+
+/// The familiar chooses. Deterministic in the context — the same captain naming the
+/// same computer in the same state chooses the same way, so a replay agrees — and
+/// spread across every choice, the four plain ones twice as often as the rest.
+/// The `why` names what was weighed, and says plainly that it was the familiar's
+/// choice: this is a decision from the facts, not a reading of the name.
+pub fn choose_gender(ctx: &NamingContext) -> (Pronouns, String) {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in format!(
+        "{}|{}|{}|{}|{}",
+        ctx.captain.trim().to_lowercase(),
+        ctx.name.trim().to_lowercase(),
+        ctx.credits / 1_000,
+        ctx.debt / 1_000,
+        ctx.fleet_size
+    )
+    .bytes()
+    {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    // FNV's low bits cycle over near-identical strings; finish with a real mix
+    // (murmur3's fmix64) so the twelve slots are all reachable.
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    h ^= h >> 33;
+    let choices = Pronouns::choices();
+    // Weights: she, he, they, none twice; the four others once — 12 slots.
+    let slots: [usize; 12] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7];
+    let pick = choices[slots[(h % 12) as usize]].clone();
+    let why = format!(
+        "the familiar's choice at naming: \"{}\", named by {}, a fleet of {}, ℳ{} in hand, ℳ{} owed — goes by {}",
+        ctx.name.trim(),
+        ctx.captain.trim(),
+        ctx.fleet_size.max(1),
+        ctx.credits,
+        ctx.debt,
+        pick.label
+    );
+    (pick, why)
 }
 
 fn one() -> u32 {
@@ -170,6 +288,7 @@ impl Default for Persona {
             register: String::new(),
             world: String::new(),
             style: None,
+            pronouns: None,
         }
     }
 }
@@ -227,6 +346,12 @@ pub struct NameEvent {
     /// The human act behind the name ("pairing", or the captain's label).
     pub actor: String,
     pub name: String,
+    /// What the familiar chose to go by at this naming, and why. Absent on events
+    /// from before the choice existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pronouns: Option<Pronouns>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub why: String,
 }
 
 /// Write a persona atomically (tmp + rename): a crash mid-write must never leave a
@@ -451,11 +576,95 @@ pub fn load(dir: &Path) -> io::Result<Persona> {
 mod naming_tests {
     use super::*;
 
+    /// Ian, 2026-09-09: gender is the familiar's choice, made at every naming from
+    /// what it knows. The same facts choose the same way (a replay agrees); the
+    /// facts changing can change the choice; every choice is reachable; the why
+    /// says what was weighed and that it was the familiar's call.
+    #[test]
+    fn the_familiar_chooses_from_the_facts_at_naming() {
+        let ctx = NamingContext {
+            captain: "Luke SkyWhisker".into(),
+            name: "Felix".into(),
+            credits: 4_030,
+            debt: 14_561,
+            fleet_size: 2,
+            at: 1,
+        };
+        let (a, why) = choose_gender(&ctx);
+        let (b, _) = choose_gender(&ctx);
+        assert_eq!(a, b, "the same facts, the same choice");
+        assert!(why.contains("the familiar's choice"), "{why}");
+        assert!(
+            why.contains("Felix") && why.contains("Luke SkyWhisker") && why.contains("fleet of 2"),
+            "{why}"
+        );
+        assert!(why.ends_with(&format!("goes by {}", a.label)), "{why}");
+        // Every choice is reachable, and the choice is a real one.
+        let mut seen = std::collections::BTreeSet::new();
+        for i in 0..400 {
+            let c = NamingContext {
+                name: format!("name-{i}"),
+                credits: i * 1_000,
+                ..ctx.clone()
+            };
+            seen.insert(choose_gender(&c).0.label);
+        }
+        assert_eq!(seen.len(), Pronouns::choices().len(), "{seen:?}");
+        // Spoken of by name when the choice is none.
+        let none = Pronouns::none();
+        assert_eq!(none.subject_or("Felix"), "Felix");
+        assert_eq!(Pronouns::choices()[0].subject_or("Felix"), "she");
+    }
+
+    /// The choice rides the persona and the trail, and an old record without one
+    /// still loads — spoken of as `it` until the next naming.
+    #[test]
+    fn pronouns_ride_the_persona_and_the_trail() {
+        let dir = std::env::temp_dir().join(format!("persona_pron_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (pron, why) = choose_gender(&NamingContext {
+            captain: "Ann".into(),
+            name: "Mittens".into(),
+            ..Default::default()
+        });
+        let p = Persona {
+            persona_version: 2,
+            name: "Mittens".into(),
+            pronouns: Some(pron.clone()),
+            ..Persona::default()
+        };
+        name(
+            &dir,
+            &p,
+            Some(&NameEvent {
+                at: 5,
+                actor: "Ann".into(),
+                name: "Mittens".into(),
+                pronouns: Some(pron.clone()),
+                why: why.clone(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap().pronouns, Some(pron.clone()));
+        let trail = namings(&dir);
+        assert_eq!(trail[0].pronouns, Some(pron));
+        assert_eq!(trail[0].why, why);
+        std::fs::write(
+            dir.join(PERSONA_FILE),
+            r#"{"persona_version":2,"name":"Old"}"#,
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap().pronouns, None);
+    }
+
     fn ev(name: &str) -> NameEvent {
         NameEvent {
             at: 1,
             actor: "test".into(),
             name: name.into(),
+            pronouns: None,
+            why: String::new(),
         }
     }
 
@@ -486,6 +695,8 @@ mod naming_tests {
             name: "Felix".into(),
             actor: "Ian".into(),
             at: 1,
+            pronouns: None,
+            why: String::new(),
         };
         // A DIRECTORY where the trail file must go: the append cannot succeed.
         std::fs::create_dir_all(d.join(NAME_EVENTS_FILE)).unwrap();
@@ -583,6 +794,8 @@ mod naming_tests {
             name: "Felix".into(),
             actor: "Ian".into(),
             at: 7,
+            pronouns: None,
+            why: String::new(),
         };
         name(&d, &p, Some(&ev)).unwrap();
         assert_eq!(load(&d).unwrap().name, "Felix");
@@ -613,6 +826,8 @@ mod naming_tests {
                         name: n.into(),
                         actor: "test".into(),
                         at: 1,
+                        pronouns: None,
+                        why: String::new(),
                     };
                     name(&d, &p, Some(&ev)).unwrap();
                 });
@@ -708,6 +923,8 @@ mod tests {
                     at: 100,
                     actor: "pairing".into(),
                     name: who.to_string(),
+                    pronouns: None,
+                    why: String::new(),
                 }),
             )
             .unwrap();
@@ -724,6 +941,8 @@ mod tests {
                 at: 200,
                 actor: "jeff".into(),
                 name: "Mrs. Norris".into(),
+                pronouns: None,
+                why: String::new(),
             }),
         )
         .unwrap();

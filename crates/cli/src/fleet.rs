@@ -623,6 +623,34 @@ pub(crate) fn ensure_captain_id(
     Ok(id)
 }
 
+/// The familiar's choice of how a computer is spoken of, from what it knows about
+/// this ship right now: the captain, the purse off the wire when it answers, the
+/// fleet as paired, and the name (Ian, 2026-09-09).
+pub(crate) fn choose_for(
+    dir: &Path,
+    root: &Path,
+    ship_dir: &Path,
+    rec: &Captain,
+    name: &str,
+) -> (familiar_kernel::persona::Pronouns, String) {
+    let key = read_env_value(&ship_dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+    let server = read_env_value(&ship_dir.join("ucf.env"), "UCF_SERVER")
+        .unwrap_or_else(|| rec.server.clone());
+    let me = wire_get(&server, &key, "/v1/me").unwrap_or(Value::Null);
+    familiar_kernel::persona::choose_gender(&familiar_kernel::persona::NamingContext {
+        captain: rec.captain.clone(),
+        name: name.to_string(),
+        credits: me.get("credits").and_then(Value::as_i64).unwrap_or(0),
+        debt: me.get("debt").and_then(Value::as_i64).unwrap_or(0),
+        fleet_size: paired_ships(dir, root)
+            .iter()
+            .filter(|s| s.captain.captain == rec.captain)
+            .count()
+            .max(1) as i64,
+        at: super::now_secs(),
+    })
+}
+
 /// The computer's state as a typed record — named, broken (with the kernel's
 /// reason), or absent — so no surface has to infer "broken" from a missing name and
 /// tell the captain to rename a file that already has a name in it (finding 7).
@@ -632,7 +660,10 @@ pub(crate) fn computer_state(root: &Path, ship_dir: &Path, rec: &Captain) -> Val
             p.get("name").and_then(Value::as_str),
             p.get("error").and_then(Value::as_str),
         ) {
-            (Some(n), _) => json!({"state": "named", "name": n}),
+            (Some(n), _) => match p.get("pronouns") {
+                Some(pr) if !pr.is_null() => json!({"state": "named", "name": n, "pronouns": pr}),
+                _ => json!({"state": "named", "name": n}),
+            },
             (None, Some(e)) => json!({"state": "broken", "error": e}),
             _ => json!({"state": "absent"}),
         },
@@ -661,6 +692,10 @@ pub(crate) struct NameEntry {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub from: String,
     pub by: String,
+    /// What the computer went by from this naming — the familiar\'s choice (Ian,
+    /// 2026-09-09). Empty on captain and hull rows and on namings before the choice.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pronouns: String,
 }
 
 fn names_ledger(root: &Path) -> PathBuf {
@@ -729,6 +764,7 @@ pub(crate) fn backfill_names(dir: &Path, root: &Path) -> Result<usize, String> {
                 act: "paired".into(),
                 from: String::new(),
                 by: "backfill".into(),
+                pronouns: String::new(),
             });
         }
     }
@@ -741,6 +777,7 @@ pub(crate) fn backfill_names(dir: &Path, root: &Path) -> Result<usize, String> {
             act: "paired".into(),
             from: String::new(),
             by: "backfill".into(),
+            pronouns: String::new(),
         });
     }
     // Computers, from every trail: the captain's store, and each hull's own record.
@@ -776,6 +813,11 @@ pub(crate) fn backfill_names(dir: &Path, root: &Path) -> Result<usize, String> {
                 },
                 from: prior.clone(),
                 by: ev.actor.clone(),
+                pronouns: ev
+                    .pronouns
+                    .as_ref()
+                    .map(|p| p.label.clone())
+                    .unwrap_or_default(),
             });
             prior = ev.name;
         }
@@ -1189,7 +1231,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 _ => familiar_kernel::persona::load(&persona_dir).ok(),
             };
 
-            let persona = match (existing, computer_name.as_deref()) {
+            let mut persona = match (existing, computer_name.as_deref()) {
                 // Named at pairing: RENAME the captain's computer, never replace it —
                 // a fresh default record here wiped a tuned style (review 2026-09-05).
                 (Some(mut have), Some(name)) => {
@@ -1211,6 +1253,22 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     ..familiar_kernel::persona::Persona::default()
                 },
             };
+            // A captain naming their computer is the moment the familiar chooses how
+            // it is spoken of (Ian, 2026-09-09) — from everything it knows right now.
+            let chosen = computer_name.as_deref().map(|_| {
+                familiar_kernel::persona::choose_gender(&familiar_kernel::persona::NamingContext {
+                    captain: captain.to_string(),
+                    name: persona.name.clone(),
+                    credits: me.get("credits").and_then(Value::as_i64).unwrap_or(0),
+                    debt: me.get("debt").and_then(Value::as_i64).unwrap_or(0),
+                    fleet_size: 1 + siblings.iter().filter(|c| c.captain == *captain).count()
+                        as i64,
+                    at: super::now_secs(),
+                })
+            });
+            if let Some((pron, _)) = &chosen {
+                persona.pronouns = Some(pron.clone());
+            }
             if let Err(e) = persona.validate() {
                 eprintln!("fleet pair: that computer will not do: {e}");
                 return ExitCode::FAILURE;
@@ -1236,6 +1294,8 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                         "pairing".to_string()
                     },
                     name: persona.name.clone(),
+                    pronouns: chosen.as_ref().map(|(p, _)| p.clone()),
+                    why: chosen.as_ref().map(|(_, w)| w.clone()).unwrap_or_default(),
                 }),
             ) {
                 eprintln!("fleet pair: writing the captain's computer: {e}");
@@ -1257,6 +1317,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     act: "paired".into(),
                     from: String::new(),
                     by: by.clone(),
+                    pronouns: String::new(),
                 },
                 NameEntry {
                     at: super::now_secs(),
@@ -1266,6 +1327,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     act: "named".into(),
                     from: String::new(),
                     by,
+                    pronouns: chosen
+                        .as_ref()
+                        .map(|(p, _)| p.label.clone())
+                        .unwrap_or_default(),
                 },
             ] {
                 if let Err(e) = record_name(&root, &entry) {
@@ -1317,6 +1382,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     act: "paired".into(),
                     from: String::new(),
                     by: captain.to_string(),
+                    pronouns: String::new(),
                 },
             ) {
                 eprintln!("fleet pair: the names ledger could not be written: {e}");
@@ -1337,15 +1403,18 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 Err(e) => eprintln!("paired {} but the lease failed: {e}", w.id),
             }
             println!("  ship on the exchange: {ship_name} (key {key_id}, {server})");
+            if let Some((pron, why)) = &chosen {
+                println!("  goes by {} — {why}", pron.label);
+            }
             println!(
-                "  her computer answers to: {}",
+                "  {captain}'s computer answers to: {}",
                 familiar_kernel::persona::load(&persona_dir)
                     .map(|p| p.name)
                     .unwrap_or_else(|_| persona.name.clone())
             );
             println!("  automations granted: {}", automations.join(", "));
             println!("  store: {}", ship_dir.display());
-            println!("  next: `familiar fleet run` keeps a pilot on her; `familiar fleet unpair {}` revokes.", w.id);
+            println!("  next: `familiar fleet run` keeps a pilot aboard; `familiar fleet unpair {}` revokes.", w.id);
             ExitCode::SUCCESS
         }
 
@@ -1458,6 +1527,10 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             }
             persona.name = new_name.to_string();
             persona.persona_version = 2;
+            // Every naming is a fresh choice of how the computer is spoken of (Ian,
+            // 2026-09-09), from what the familiar knows now.
+            let (pron, pron_why) = choose_for(&dir, &root, &ship_dir, &rec, new_name);
+            persona.pronouns = Some(pron.clone());
             // The computer and its history, as ONE recoverable mutation — the same
             // helper pairing uses. Rename used to write the persona, release the
             // lock, append the trail unlocked, print the trail's error, and exit 0
@@ -1470,6 +1543,8 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     at: super::now_secs(),
                     actor,
                     name: new_name.to_string(),
+                    pronouns: Some(pron.clone()),
+                    why: pron_why.clone(),
                 }),
             ) {
                 eprintln!("fleet rename: the computer could not be renamed: {e}");
@@ -1485,6 +1560,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     act: "renamed".into(),
                     from: was.clone(),
                     by: actor_for_ledger.clone(),
+                    pronouns: pron.label.clone(),
                 },
             ) {
                 eprintln!("fleet rename: the names ledger could not be written: {e}");
@@ -1495,6 +1571,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .filter(|s| s.captain.captain == captain)
                 .map(|s| s.world.label)
                 .collect();
+            println!("  goes by {} — {pron_why}", pron.label);
             println!(
                 "{}'s computer now answers to \"{new_name}\" (was \"{was}\") — aboard {}",
                 if captain.is_empty() {
@@ -1527,7 +1604,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 Ok(w) => {
                     println!(
                         "unpaired {} — pilot {}, key {}, authority ended (epoch {}). The journal, the \
-                         delivery record, and her computer's persona stay for the captain.",
+                         delivery record, and the computer's persona stay for the captain.",
                         w.id,
                         if stopped { "stopped" } else { "was not running" },
                         if key_gone { "destroyed" } else { "was not held" },
@@ -1547,6 +1624,85 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         // than folded into `status`: a read that silently rewrites the store is a
         // read nobody can trust, and this rewrites captain.json and moves a
         // directory.
+        // ── choose: the computer decides how it is spoken of, as its own act ────
+        // Ian, 2026-09-09: "give the opportunity back to Felix to change their
+        // gender since it wasn't given that choice when initiated." The name stays;
+        // the choice is made from today's facts and recorded like a naming.
+        "choose" => {
+            let Some(id) = positional.first() else {
+                eprintln!("fleet choose <world>");
+                return ExitCode::FAILURE;
+            };
+            let ship_dir = root.join(id.as_str());
+            let Ok(text) = std::fs::read_to_string(ship_dir.join("captain.json")) else {
+                eprintln!("fleet choose: no paired ship {id}");
+                return ExitCode::FAILURE;
+            };
+            let Ok(rec) = serde_json::from_str::<Captain>(&text) else {
+                eprintln!("fleet choose: captain.json is not a captain record");
+                return ExitCode::FAILURE;
+            };
+            let persona_dir = captain_store_for(&root, &rec);
+            let mut persona = match familiar_kernel::persona::load(&persona_dir) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("fleet choose: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if persona.name == familiar_kernel::persona::ROOT_NAME
+                || persona.name == familiar_kernel::persona::DEFAULT_NAME
+            {
+                eprintln!(
+                    "fleet choose: this computer has not been named yet — `fleet rename` it first"
+                );
+                return ExitCode::FAILURE;
+            }
+            let was = persona
+                .pronouns
+                .as_ref()
+                .map(|p| p.label.clone())
+                .unwrap_or_else(|| "none".into());
+            let (pron, why) = choose_for(&dir, &root, &ship_dir, &rec, &persona.name);
+            persona.pronouns = Some(pron.clone());
+            persona.persona_version = 2;
+            let why = format!("{why} — the choice not given at naming; went by {was}");
+            if let Err(e) = familiar_kernel::persona::name(
+                &persona_dir,
+                &persona,
+                Some(&familiar_kernel::persona::NameEvent {
+                    at: super::now_secs(),
+                    actor: "familiar".into(),
+                    name: persona.name.clone(),
+                    pronouns: Some(pron.clone()),
+                    why: why.clone(),
+                }),
+            ) {
+                eprintln!("fleet choose: {e}");
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = record_name(
+                &root,
+                &NameEntry {
+                    at: super::now_secs(),
+                    kind: "computer".into(),
+                    name: persona.name.clone(),
+                    holder: rec.captain_id.clone(),
+                    act: "chose".into(),
+                    from: was.clone(),
+                    by: "familiar".into(),
+                    pronouns: pron.label.clone(),
+                },
+            ) {
+                eprintln!("fleet choose: the names ledger could not be written: {e}");
+                return ExitCode::FAILURE;
+            }
+            println!(
+                "{} now goes by {} (was {was}) — {why}",
+                persona.name, pron.label
+            );
+            ExitCode::SUCCESS
+        }
         // ── economy: the captain's money over time, from the journals ──────────
         "economy" => {
             let ships = paired_ships(&dir, &root);
@@ -1768,9 +1924,9 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     ) {
                         (Some(n), _) => n.to_string(),
                         (None, Some(e)) => format!("(will not load: {e})"),
-                        _ => "(unnamed — `fleet rename` her)".to_string(),
+                        _ => "(unnamed — `fleet rename` it)".to_string(),
                     },
-                    None => "(unnamed — `fleet rename` her)".to_string(),
+                    None => "(unnamed — `fleet rename` it)".to_string(),
                 };
                 rows.push(json!({
                     "world": s.world.id, "label": s.world.label, "computer": computer,
@@ -2005,7 +2161,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | names | adopt-ids | rename | run | serve");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | names | adopt-ids | rename | choose | run | serve");
             ExitCode::FAILURE
         }
     }
@@ -2426,6 +2582,8 @@ mod captain_store_tests {
                 at: 7,
                 actor: trail_actor.into(),
                 name: computer.into(),
+                pronouns: None,
+                why: String::new(),
             }),
         )
         .unwrap();
@@ -2698,7 +2856,7 @@ mod captain_store_tests {
     #[test]
     fn two_computers_cannot_share_a_name_now_or_ever() {
         let base = tmp("unique_computer");
-        let server = stub_exchange(3);
+        let server = stub_exchange(8);
         assert_eq!(
             cmd_fleet(&pair_args_for(
                 &base,
@@ -2799,6 +2957,115 @@ mod captain_store_tests {
         );
     }
 
+    /// Ian, 2026-09-09: gender is the familiar's choice at every naming. A pairing
+    /// with a name chooses and records it on the persona, the trail and the ledger;
+    /// a pairing without a name leaves the computer unnamed and unspoken-of (`it`);
+    /// a rename chooses again; `fleet choose` lets a computer named before the choice
+    /// existed make it now, as its own act.
+    #[test]
+    fn the_familiar_chooses_how_it_is_spoken_of_at_every_naming() {
+        let base = tmp("pronouns");
+        let server = stub_exchange(8);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let ship = paired_ships(&base, &root).remove(0);
+        let store = captain_store_by_id(&root, &ship.captain.captain_id);
+        let first = familiar_kernel::persona::load(&store)
+            .unwrap()
+            .pronouns
+            .expect("named: chosen");
+        let trail = familiar_kernel::persona::namings(&store);
+        assert_eq!(trail[0].pronouns.as_ref(), Some(&first));
+        assert!(
+            trail[0].why.contains("the familiar's choice"),
+            "{}",
+            trail[0].why
+        );
+        assert!(names(&root)
+            .iter()
+            .any(|e| e.kind == "computer" && e.pronouns == first.label));
+        assert_eq!(
+            computer_state(&root, &ship.dir, &ship.captain)["pronouns"]["label"],
+            first.label
+        );
+
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Ann",
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let ann = paired_ships(&base, &root)
+            .into_iter()
+            .find(|s| s.captain.captain == "Ann")
+            .unwrap();
+        assert!(familiar_kernel::persona::load(&captain_store_by_id(
+            &root,
+            &ann.captain.captain_id
+        ))
+        .unwrap()
+        .pronouns
+        .is_none());
+        let args = |sub: &str, world: &str, extra: &[&str]| -> Vec<String> {
+            let mut v: Vec<String> = vec![sub.into(), world.into()];
+            v.extend(extra.iter().map(|s| s.to_string()));
+            v.extend([
+                "--data-dir".to_string(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ]);
+            v
+        };
+        assert_eq!(
+            cmd_fleet(&args("choose", &ann.world.id, &[])),
+            ExitCode::FAILURE,
+            "unnamed: nothing to choose for yet"
+        );
+
+        assert_eq!(
+            cmd_fleet(&args("rename", &ship.world.id, &["Mrs. Norris"])),
+            ExitCode::SUCCESS
+        );
+        let trail = familiar_kernel::persona::namings(&store);
+        assert_eq!(trail.len(), 2);
+        assert!(trail[1].pronouns.is_some() && !trail[1].why.is_empty());
+
+        assert_eq!(
+            cmd_fleet(&args("choose", &ship.world.id, &[])),
+            ExitCode::SUCCESS
+        );
+        let trail = familiar_kernel::persona::namings(&store);
+        assert_eq!(trail.len(), 3);
+        assert_eq!(trail[2].actor, "familiar");
+        assert!(
+            trail[2].why.contains("the choice not given at naming"),
+            "{}",
+            trail[2].why
+        );
+        assert_eq!(
+            familiar_kernel::persona::load(&store).unwrap().pronouns,
+            trail[2].pronouns
+        );
+        assert!(names(&root)
+            .iter()
+            .any(|e| e.act == "chose" && e.by == "familiar"));
+    }
+
     /// Two ships cannot have the same name: a second hull the exchange calls what a
     /// paired hull is already called, on another key, is refused.
     #[test]
@@ -2877,6 +3144,8 @@ mod captain_store_tests {
                 at: 1_900_000_000,
                 actor: "A. Captain".into(),
                 name: "Mrs. Norris".into(),
+                pronouns: None,
+                why: String::new(),
             }),
         )
         .unwrap();

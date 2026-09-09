@@ -1890,7 +1890,7 @@ fn main() -> ExitCode {
                            "why": format!(
                                "low fuel, no reachable pump at any burn; a tanker would \
                                 come in about {} ticks and bill roughly ℳ{} — holding \
-                                for a fuelable load or a human (--allow-paws to let her call)",
+                                for a fuelable load or a human (--allow-paws to let the pilot call)",
                                paws_ticks, paws_bill)}),
                 );
                 last_distress = distress;

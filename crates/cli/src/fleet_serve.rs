@@ -996,6 +996,7 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                     act: "reassigned".into(),
                     from: was.clone(),
                     by: "feed".into(),
+                    pronouns: String::new(),
                 },
             ) {
                 return (
@@ -1424,6 +1425,7 @@ mod surface_tests {
                     act: act.into(),
                     from: from.into(),
                     by: "test".into(),
+                    pronouns: String::new(),
                 },
             )
             .unwrap();
