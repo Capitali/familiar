@@ -6,6 +6,35 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-08 — T-239: the lived-in ship — a hull's earned history as a record the familiar keeps
+
+Ian's "Yes" (2026-09-07) to the one familiar-side brick of the customization dialogue: the
+ethics rail's currency, earned history, which the familiar already holds the evidence for and
+nobody projected. `ios/FamiliarSC/Sources/FamiliarSCUI/History.swift` — pure: journal + book in,
+`ShipHistory` out.
+
+- **Marks**, each citing the journal ticks it is made of: routes flown (station pairs from the
+  last known berth to each `engaged-drive` / `unwedged-course` / `carry-to-market` destination,
+  counted, first/last tick), deliveries (the book's `deliveries`, cited by the ledger's
+  `load-closed … settled` ticks, freight paid, goods), repairs (`acted` Repair), refits
+  (`outfitted`), rescues (`acted` CallPaws), distress survived (a `distress-hold` closed by the
+  next act that moves her; an open one says "not yet survived"), escort work (`escort-booked` /
+  `convoy-completed` / `escorted` when the journal ever carries them — none today).
+- **The story** (`ShipHistory.story`) is plain sentences with every number and tick from the
+  marks, and it ends "Nothing here can be bought or edited; it is what she did." It rides the
+  bridge context as the `history` document, so Felix can tell it grounded.
+- **The bridge**: "Her story" (`HistoryView`) beside Autonomy and Log — sections per kind, the
+  ticks under each mark, no act on the screen. There is no initializer that takes marks and no
+  mutating API: a purchase has nothing to call. Nothing served, nothing written, no wire POST.
+
+Checks: `swift test` **77 passed, 0 failed, 2 live skipped** — the fixture store's story pinned
+mark by mark (three routes, two deliveries ℳ444 at t120, the drive-tune refit, the open distress
+at t250), a synthesized journal for survived distress / rescue / repair / escort counts, the empty
+record, and the document on the bridge context; `xcodebuild … UCFFamiliar -configuration Release`:
+BUILD SUCCEEDED. Next: a host-side `/ships/{w}/history` (fleet_serve) only if the app wants it
+served rather than computed; the racing lineage ("thermal rating earned by surviving flybys")
+is the same record's second kind, later.
+
 ## 2026-09-08 — T-236 brick 1, round 2, the Swift half: broken is not unnamed, and the last captain falls silent before the next is read
 
 Codex's round-2 re-verification (`docs/reviews/2026-09-08-t236-brick1-codex-reverification-r2.md`,

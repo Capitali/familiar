@@ -40,6 +40,7 @@ public struct ShipBridgeView: View {
             Section {
                 NavigationLink { AutonomyDialView(model: model) } label: { Label("Autonomy", systemImage: "dial.medium") }
                 NavigationLink { LogView(model: model) } label: { Label("Log", systemImage: "book") }
+                NavigationLink { HistoryView(model: model) } label: { Label("Her story", systemImage: "seal") }
             }
             .listRowBackground(SC.panel)
         }
@@ -201,6 +202,40 @@ struct AdviceLine: View {
             .padding(.vertical, 2)
             .listRowBackground(SC.panel)
         }
+    }
+}
+
+/// Her story — the hull's earned history (T-239). Read-only by construction: there is no
+/// act on this screen, and no act anywhere that changes a mark.
+struct HistoryView: View {
+    @Bindable var model: BridgeModel
+    var body: some View {
+        List {
+            if let h = model.history, !h.marks.isEmpty {
+                ForEach(ShipHistory.Mark.Kind.allCases, id: \.rawValue) { kind in
+                    let ms = h.marks(of: kind)
+                    if !ms.isEmpty {
+                        Section(kind.rawValue.capitalized + (kind == .distress ? " survived" : "")) {
+                            ForEach(ms) { m in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(m.text).font(.body).foregroundStyle(SC.ink)
+                                    Text(m.ticks.map { "t\($0)" }.joined(separator: " · ")).font(.caption2.monospacedDigit()).foregroundStyle(SC.dim)
+                                }
+                                .listRowBackground(SC.panel)
+                            }
+                        }
+                    }
+                }
+                if let f = h.firstTick, let l = h.lastTick {
+                    Section { Text("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what she did.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
+                }
+            } else {
+                Section { Text("No history yet. The record begins with her first leg.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(SC.bg)
+        .navigationTitle("Her story")
     }
 }
 

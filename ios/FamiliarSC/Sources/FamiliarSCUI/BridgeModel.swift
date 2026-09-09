@@ -23,6 +23,9 @@ public final class BridgeModel {
     public var window: [MessageItem] = []
     public var dial: DialSheet?
     public var book: ShipBook?
+    /// The hull's earned history (T-239): routes flown, deliveries, repairs, refits, distress
+    /// survived — computed here from the journal and the book, never served, never editable.
+    public var history: ShipHistory?
     public var reports: [FoldReport] = []
     public var spoken: SpokenReport?
     public var pendingDialChanges: [DialChange] = []
@@ -118,8 +121,11 @@ public final class BridgeModel {
             let d = try await feed.dial(world: world)
             let b = try await feed.book(world: world)
             persona = p; journal = j; window = w; dial = d; book = b
+            history = ShipHistory.from(journal: j, book: b)
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
-            let (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
+            var (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
+            // Her story rides the context frame so the voice can tell it — grounded on the marks.
+            if let h = history { docs.append(ContextDocument(name: "history", title: "the ship's story — her earned history: routes flown, deliveries, repairs and refits, distress survived, each with the journal ticks it came from; nothing here can be bought or edited", text: h.story)) }
             let frameLine = frame ?? summary.map { "ship, hull \($0.shipName) (\($0.worldInstance)), captain \($0.captain), computer \(computerName)" }
             let ctx = BridgeContext(entries: latestWindow(), hull: summary?.hullGlance, openProposals: openProposals, frame: frameLine, documents: docs)
             // The act the mind would file, if any. A proposal already shown for the SAME act keeps
@@ -146,7 +152,7 @@ public final class BridgeModel {
     /// facts the host served) and the visible error remain.
     @MainActor
     func clearVoice() {
-        persona = nil; journal = []; window = []; dial = nil; book = nil; reports = []; spoken = nil
+        persona = nil; journal = []; window = []; dial = nil; book = nil; reports = []; spoken = nil; history = nil
         pilotProposal = nil; pilotOutcome = nil
         conversation = nil; conversationWorld = nil; turns = []
     }
