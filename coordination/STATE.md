@@ -116,6 +116,13 @@ reality, fixing it is the first task. Updated: 2026-08-14 (controller).
   Metal#79 was ruled today by BOTH owners on the issue: Ian "keep" (via wildhorse), Jeff
   "geometry is the truth — overturned; fixes ride engine 1.25.0 behind a zero-default
   dial + Haul build 25"; the engine is Jeff's, so whisker/the app track his version.
+- **CODEX 2026-09-08 (MacOnStick queue, one review per usage reset):** T-237 B2 r1 RETURNED REJECT
+  (4 findings; 2–4 repaired bf0bb9c, 1 = grounding open) · T-237 B4 r1 RETURNED REJECT (5 findings;
+  Rust half c63a61c/c9419b9 wildhorse, Swift half 749c4d9 + hoist bf0bb9c MacOnStick) · T-236 b1 r2
+  RETURNED REJECT 20:10 (1/5/9 held; 3/6 not held; 2/4/7/8 partial — see BOARD) · T-237 B4 r2 QUEUED,
+  fires at the 00:58 CDT reset (`/tmp/codex-runs/queue.sh`, reset-aware). Wildhorse has no codex
+  binary; every launch is MacOnStick's. MacOnStick's LOCAL world rebuilt on ucf-exchange 5f28c45
+  (per-hull route quotes now served) 22:27 CDT.
 - **CODEX BACK 2026-09-07 (Ian: "codex is available again so resume reviews with codex
   including the ones we worked without it while it was consumed").** Re-verification
   queue, run from MacOnStick one at a time (three in parallel burned the usage window in

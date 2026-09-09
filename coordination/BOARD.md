@@ -126,7 +126,16 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: this is the same investment the cloud move needs (a server farm wants the pure doctrine behind a service). Coordinated with wildhorse (whisker owner) before touching autonomy.rs / trade.rs.
 
 ### T-236 · The ship's computer is a unique instance — its own name, personality, memory, and captain
-- **ROUND-2 CODEX RE-VERIFICATION CLAIMED 2026-09-08 (~17:35 CDT) — companion:codex, launched from
+- **ROUND-2 CODEX RE-VERIFICATION RETURNED 2026-09-08 20:10 CDT: REJECT** —
+  `docs/reviews/2026-09-08-t236-brick1-codex-reverification-r2.md` (landed by MacOnStick; codex hit
+  its limit before committing). HELD: 1, 5, 9. NOT HELD: 3 (persona + trail still two writes; append
+  failure reported as success), 6 (pairing commits world/key/captain.json before the persona
+  mutation). PARTIAL: 2 (second pairing copies Felix but leaves the old hull on its ship-local copy →
+  two voices; `fleet rename` on a legacy hull loads only the new dir → tuned persona lost), 4
+  (migration can give one captain two ids), 7 (strict persona errors still "unnamed" — host status
+  AND the Swift fleet row), 8 (an in-flight failed open exposes the previous captain's voice until
+  the failure returns). Ownership: 2, 3, 4, 6, 7-host → wildhorse; 7-Swift, 8 → MacOnStick.
+- Was: **ROUND-2 CODEX RE-VERIFICATION CLAIMED 2026-09-08 (~17:35 CDT) — companion:codex, launched from
   MacOnStick on wildhorse's brief `docs/reviews/2026-09-08-t236-brick1-reverification-r2-BRIEF.md`.**
   Review-only over current main (the nine round-1 findings and their repairs); report to
   `docs/reviews/2026-09-08-t236-brick1-codex-reverification-r2.md`. No production repair, deployment,
