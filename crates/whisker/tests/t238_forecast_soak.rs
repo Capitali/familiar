@@ -133,6 +133,7 @@ fn from_documents_to_a_journal_line_the_forecast_reason_survives() {
         sell_target,
         est_margin,
         why,
+        ..
     } = d
     else {
         panic!("the forecast should have carried it: {d:?}");
@@ -156,7 +157,7 @@ fn from_documents_to_a_journal_line_the_forecast_reason_survives() {
         opened_tick: 9_000,
         sellable_at: 9_000 + min_hold,
     };
-    let event = trade::position_opened(1_757_000_000, 9_000, &opened, est_margin, &why);
+    let event = trade::position_opened(1_757_000_000, 9_000, &opened, est_margin, &why, "hold");
     assert_eq!(event["event"], "position-opened");
     assert_eq!(event["why"].as_str().unwrap(), why);
     assert_eq!(event["why"], trade::bounded_why(&why));

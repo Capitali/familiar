@@ -112,6 +112,22 @@ pub struct Purse {
     /// What the WORLD says each fitting costs, by param name. Empty falls back to
     /// the shipped pack — see [`Fitting::shipped_price`].
     pub refit_prices: BTreeMap<String, i64>,
+    /// The next rung of the frame ladder, as `/v1/me` names and prices it
+    /// (`nextFrame`, `nextFrameCost`); None on the last rung or off the wire.
+    pub frame_next: Option<(String, i64)>,
+    pub frame_pods: i64,
+    /// Buys the merchant sized by the HOLD (not cash, not the shelf) inside the
+    /// evidence window — the ship's own record that a bigger hold would have
+    /// carried more. Read from `position-opened` lines' `bound`.
+    pub hold_bound_buys: i64,
+    /// The crew facts the wire publishes: berths and the hire price…
+    pub crew_berths: i64,
+    pub crew_hire_cost: i64,
+    pub crew_aboard: i64,
+    /// …and whether the reference prices what a hand DOES (`crewWagePerDay` and
+    /// a relief bps). Without those numbers a hire is a guess dressed as a
+    /// decision, and this doctrine does not guess.
+    pub crew_priced: bool,
 }
 
 impl Purse {
@@ -139,7 +155,18 @@ pub enum OutfitDecision {
     PayLease {
         amount: i64,
     },
+    /// §4.4's frame ladder: the next rung, bought outright, when the ship holds
+    /// title, the hold has been the binding constraint, and the purse can bear
+    /// it above the reserve. Rides the captain's `ship.frame` dial.
+    ExpandFrame {
+        frame: String,
+        cost: i64,
+        why: String,
+    },
 }
+
+/// How many hold-bound buys in the window make the case for a bigger hold.
+pub const HOLD_BOUND_EVIDENCE: i64 = 5;
 
 /// Cash that must remain after any purchase.
 pub fn reserve(p: &Purse) -> i64 {
@@ -238,13 +265,7 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
         wanted.push((Fitting::HoldExtension, "+40 hold".into()));
     }
     let Some((fitting, _why)) = wanted.first().cloned() else {
-        return OutfitDecision::Idle {
-            why: if p.titled {
-                "fitted out; crew hiring is the next rung (engine first)".into()
-            } else {
-                "fitted out; crew waits for title (repairs are free on the lease)".into()
-            },
-        };
+        return next_rung(p);
     };
     let price = p.price_of(fitting);
     if p.credits - price < keep {
@@ -259,6 +280,73 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
         };
     }
     OutfitDecision::Refit { fitting, price }
+}
+
+/// Past the fittings: the frame ladder, then crew — each only on the ship's own
+/// evidence and the world's own prices, and each said plainly when it waits.
+fn next_rung(p: &Purse) -> OutfitDecision {
+    let keep = reserve(p);
+    if let Some((frame, cost)) = &p.frame_next {
+        if !p.titled {
+            return OutfitDecision::Idle {
+                why: format!(
+                    "fitted out; the {frame} frame (ℳ{cost}) waits for title — the yard will \
+                     not cut a hull the company still holds"
+                ),
+            };
+        }
+        if p.hold_bound_buys < HOLD_BOUND_EVIDENCE {
+            return OutfitDecision::Idle {
+                why: format!(
+                    "fitted out; the {frame} frame (ℳ{cost}) waits for evidence the hold binds \
+                     ({} of {HOLD_BOUND_EVIDENCE} hold-bound buys in the window)",
+                    p.hold_bound_buys
+                ),
+            };
+        }
+        if p.credits - cost < keep {
+            return OutfitDecision::Idle {
+                why: format!(
+                    "saving for the {frame} frame: ℳ{cost} + reserve ℳ{keep} > ℳ{} in hand",
+                    p.credits
+                ),
+            };
+        }
+        return OutfitDecision::ExpandFrame {
+            frame: frame.clone(),
+            cost: *cost,
+            why: format!(
+                "the hold bound {} buys in the window; {frame} adds pods at ℳ{cost} with \
+                 ℳ{} to spare over the reserve",
+                p.hold_bound_buys,
+                p.credits - cost - keep
+            ),
+        };
+    }
+    if p.crew_berths > 0 && p.crew_aboard < p.crew_berths {
+        if !p.crew_priced {
+            return OutfitDecision::Idle {
+                why: format!(
+                    "fitted out; {} of {} berths empty at ℳ{} a hire — waiting for the reference \
+                     to price a wage and what a hand relieves before hiring anyone",
+                    p.crew_berths - p.crew_aboard,
+                    p.crew_berths,
+                    p.crew_hire_cost
+                ),
+            };
+        }
+        return OutfitDecision::Idle {
+            why: "fitted out; crew hiring is the next rung (engine first) — doctrine pending"
+                .into(),
+        };
+    }
+    OutfitDecision::Idle {
+        why: if p.titled {
+            "fitted out; last rung of the frame ladder, every berth filled".into()
+        } else {
+            "fitted out; crew waits for title, and so does the frame ladder".into()
+        },
+    }
 }
 
 #[cfg(test)]
@@ -337,6 +425,68 @@ mod tests {
             tank_price: 1_200,
             titled: false,
             fittings: fittings.iter().map(|s| s.to_string()).collect(),
+            frame_next: None,
+            frame_pods: 0,
+            hold_bound_buys: 0,
+            crew_berths: 0,
+            crew_hire_cost: 0,
+            crew_aboard: 0,
+            crew_priced: false,
+        }
+    }
+
+    /// The frame ladder (T-242): the next rung is proposed only with title, with
+    /// the hold proven binding, and with the purse able to bear it — and each
+    /// wait is said plainly.
+    #[test]
+    fn the_frame_rung_needs_title_evidence_and_the_reserve() {
+        let all = ["refrigeration", "drive-tune", "hold-extension"];
+        let mut p = purse(40_000, &all);
+        p.frame_next = Some(("Sardine stretch".into(), 18_000));
+        p.frame_pods = 2;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::Idle { why } => assert!(why.contains("waits for title"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        p.titled = true;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::Idle { why } => assert!(why.contains("waits for evidence"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        p.hold_bound_buys = HOLD_BOUND_EVIDENCE;
+        p.credits = 19_000; // reserve is 3 × 1,200 + 1,200
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::Idle { why } => {
+                assert!(why.starts_with("saving for the Sardine stretch"), "{why}")
+            }
+            other => panic!("{other:?}"),
+        }
+        p.credits = 40_000;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::ExpandFrame { frame, cost, why } => {
+                assert_eq!(frame, "Sardine stretch");
+                assert_eq!(cost, 18_000);
+                assert!(why.contains("bound 5 buys"), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Crew is never hired on a guess: with berths priced but no wage or relief
+    /// on the reference, the doctrine says what it is waiting for and does nothing.
+    #[test]
+    fn crew_waits_for_priced_economics() {
+        let all = ["refrigeration", "drive-tune", "hold-extension"];
+        let mut p = purse(40_000, &all);
+        p.titled = true;
+        p.crew_berths = 4;
+        p.crew_hire_cost = 500;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::Idle { why } => {
+                assert!(why.contains("4 of 4 berths empty at ℳ500"), "{why}");
+                assert!(why.contains("price a wage"), "{why}");
+            }
+            other => panic!("{other:?}"),
         }
     }
     fn stat(good: &str, perishable: bool, booked: i64, paid: i64) -> DeliveryStat {

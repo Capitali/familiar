@@ -206,6 +206,22 @@ impl Router for Wire {
     }
 }
 
+/// Buys the merchant sized by the HOLD since `since` (unix seconds), from the
+/// ship's own `position-opened` lines — the evidence the frame ladder reads
+/// (T-242). Counted, never inferred.
+fn hold_bound_buys(ship_dir: &Path, since: i64) -> i64 {
+    std::fs::read_to_string(ship_dir.join("journal.jsonl"))
+        .map(|t| {
+            t.lines()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .filter(|v| v.get("event").and_then(Value::as_str) == Some("position-opened"))
+                .filter(|v| v.get("at").and_then(Value::as_i64).unwrap_or(0) >= since)
+                .filter(|v| v.get("bound").and_then(Value::as_str) == Some("hold"))
+                .count() as i64
+        })
+        .unwrap_or(0)
+}
+
 fn journal(ship_dir: &Path, entry: Value) {
     use std::io::Write;
     let line = format!("{entry}\n");
@@ -1050,6 +1066,26 @@ fn main() -> ExitCode {
                                 .collect()
                         })
                         .unwrap_or_default(),
+                    // The frame ladder and the crew, as the wire publishes them
+                    // (T-242). What a hand DOES is priced only when the reference
+                    // says so; the doctrine hires nobody on a guess.
+                    frame_next: me
+                        .get("nextFrame")
+                        .and_then(Value::as_str)
+                        .zip(me.get("nextFrameCost").and_then(Value::as_i64))
+                        .filter(|(_, c)| *c > 0)
+                        .map(|(n, c)| (n.to_string(), c)),
+                    frame_pods: me.get("framePods").and_then(Value::as_i64).unwrap_or(0),
+                    hold_bound_buys: hold_bound_buys(&ship_dir, now - 7 * 86_400),
+                    crew_berths: me.get("crewBerths").and_then(Value::as_i64).unwrap_or(0),
+                    crew_hire_cost: me.get("crewHireCost").and_then(Value::as_i64).unwrap_or(0),
+                    crew_aboard: me
+                        .get("crew")
+                        .and_then(Value::as_array)
+                        .map(|a| a.len() as i64)
+                        .unwrap_or(0),
+                    crew_priced: param("crewWagePerDay").is_some_and(|w| w > 0)
+                        && param("crewEngineWearReliefBps").is_some_and(|r| r > 0),
                 };
                 match outfit::decide_outfit(&purse, &deliveries) {
                     OutfitDecision::Refit { fitting, price }
@@ -1091,6 +1127,49 @@ fn main() -> ExitCode {
                         }
                     }
                     OutfitDecision::Refit { .. } => {} // advised or proposed
+                    // §4.4's frame ladder, on the captain's `ship.frame` dial: the
+                    // next rung, bought outright, when title is held, the hold has
+                    // proven binding, and the purse bears it above the reserve.
+                    OutfitDecision::ExpandFrame { frame, cost, why }
+                        if dial_gate.allow(
+                            &ship_dir,
+                            Surface::ShipFrame,
+                            tick,
+                            now,
+                            &json!({"type": "expandFrame", "financed": false}),
+                            &format!("expand the frame to {frame} for ℳ{cost} at {here}"),
+                            &why,
+                        ) =>
+                    {
+                        seq += 1;
+                        let id = format!("whisker-{}-{}", now_secs(), seq);
+                        match wire.act(json!({"type": "expandFrame", "financed": false}), &id) {
+                            Ok(ack) => {
+                                pending_until = ack
+                                    .get("resolvesAtTick")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(tick)
+                                    + 1;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "frame-expanded",
+                                    "frame": frame, "cost": cost, "at_station": here,
+                                    "credits": ship.credits, "reserve": outfit::reserve(&purse),
+                                    "why": why, "resolves": pending_until - 1}),
+                                );
+                                std::thread::sleep(Duration::from_secs(
+                                    (tick_secs * 3 / 5).max(floor_secs),
+                                ));
+                                continue;
+                            }
+                            Err(e) => journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
+                                "event": "frame-refused", "frame": frame, "cost": cost, "why": e}),
+                            ),
+                        }
+                    }
+                    OutfitDecision::ExpandFrame { .. } => {} // advised or proposed
                     // Paying the balance down rides the SAME dial as a refit: it is
                     // the ship spending the captain's money on the ship's standing,
                     // which is what `ship.lease` is for.
@@ -1429,6 +1508,7 @@ fn main() -> ExitCode {
                         sell_target,
                         est_margin,
                         why,
+                        bound,
                     } if freight_allows_buy => {
                         let takes = wire
                             .get(&format!("/v1/stations/{sell_target}/quotes"))
@@ -1456,6 +1536,7 @@ fn main() -> ExitCode {
                                 sell_target,
                                 est_margin: est_margin * capped / units.max(1),
                                 why,
+                                bound,
                             }
                         }
                     }
@@ -1535,6 +1616,7 @@ fn main() -> ExitCode {
                                     sell_target,
                                     est_margin,
                                     why,
+                                    bound,
                                     ..
                                 } = &td
                                 {
@@ -1554,6 +1636,7 @@ fn main() -> ExitCode {
                                             &opened,
                                             *est_margin,
                                             why,
+                                            bound,
                                         ),
                                     );
                                     holdings.push(opened);

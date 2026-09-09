@@ -489,6 +489,9 @@ pub enum TradeDecision {
         /// The ground the buy stands on — spot, or the forecast that justified a
         /// run a spot trader would not have made. Journaled, so the book says why.
         why: String,
+        /// What sized the position: `hold`, `cash` or `shelf` — the ship's own
+        /// evidence for the frame ladder (T-242).
+        bound: String,
     },
 }
 
@@ -683,11 +686,19 @@ pub fn bounded_why(why: &str) -> String {
 /// The `position-opened` journal event, built in one place so the runner and the
 /// soak write the same record — and so the reason the merchant gave for spending
 /// is the reason the journal shows (codex finding 4).
-pub fn position_opened(now: i64, tick: i64, h: &Holding, est_margin: i64, why: &str) -> Value {
+pub fn position_opened(
+    now: i64,
+    tick: i64,
+    h: &Holding,
+    est_margin: i64,
+    why: &str,
+    bound: &str,
+) -> Value {
     serde_json::json!({
         "at": now, "tick": tick, "event": "position-opened",
         "good": h.good, "units": h.units, "ask": h.avg_cost, "sell_target": h.sell_target,
         "est_margin": est_margin, "sellable_at": h.sellable_at, "why": bounded_why(why),
+        "bound": bound,
     })
 }
 
@@ -952,6 +963,13 @@ pub fn decide_trade(
             let by_cash = bps(l.working_capital(), MAX_CASH_BPS) / q.ask.max(1);
             let by_hold = bps(l.spare_hold, MAX_HOLD_BPS).max(0);
             let units = by_cash.min(by_hold).min(q.max_buy);
+            let bound = if units == by_hold && by_hold <= by_cash {
+                "hold"
+            } else if units == by_cash {
+                "cash"
+            } else {
+                "shelf"
+            };
             if units <= 0 {
                 continue;
             }
@@ -987,6 +1005,7 @@ pub fn decide_trade(
                         sell_target: row.station.clone(),
                         est_margin: net,
                         why: bounded_why(&why),
+                        bound: bound.to_string(),
                     },
                 ));
             }
@@ -1149,6 +1168,7 @@ mod tests {
                 why,
                 est_margin,
                 units,
+                bound,
                 ..
             } => {
                 assert_eq!(sell_target, "works-b");
@@ -1159,6 +1179,10 @@ mod tests {
                 assert!(why.contains("absent events"), "{why}");
                 // 57 less the haircut; 60 units (half the hold) at 24; 50 fuel at 2.
                 assert_eq!(units, 60);
+                assert_eq!(
+                    bound, "hold",
+                    "60 is half the hold; cash would have bought 104"
+                );
                 let unit = 57 - bps(57, SELL_HAIRCUT_BPS);
                 assert_eq!(est_margin, unit * 60 - 24 * 60 - 50 * 2);
             }
@@ -1276,7 +1300,8 @@ mod tests {
         let long = "x".repeat(1_000);
         assert_eq!(bounded_why(&long).chars().count(), WHY_MAX_CHARS);
         let h = held("brine", 60, 23, 100, 388);
-        let ev = position_opened(1, 100, &h, 1_280, "forecast: works-b eats brine");
+        let ev = position_opened(1, 100, &h, 1_280, "forecast: works-b eats brine", "hold");
+        assert_eq!(ev["bound"], "hold");
         assert_eq!(ev["event"], "position-opened");
         assert_eq!(ev["why"], "forecast: works-b eats brine");
         assert_eq!(ev["units"], 60);
