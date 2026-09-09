@@ -6,6 +6,30 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-09 — T-237 B4 round 2: the captain's board is a required read, and a record that disagrees with itself is not judged
+
+Codex round 2 (`docs/reviews/2026-09-08-t237-b4-codex-reverification-r2.md`, REJECT): findings
+1–5 and the artifact all held — the checked-in xcframework itself answers call-paws / seam 2
+on the boundary probe — but one blocker stood: `/v1/loadboard?mine=true` was read with `try?`
+and an empty board on any failure, so a 500, a timeout or an unreadable shape on that one
+endpoint read as "no active contract", and a hull under contract could be shown — and after
+the same failure on the fresh re-read, filed — a freight-idle act.
+
+- The mine board is a REQUIRED, throwing read: a failure ends the gather with the endpoint
+  named ("The pilot's mind could not be asked: HTTP 500 on /v1/loadboard?mine=true"; a decode
+  failure names the route too), no proposal, and `confirm` throws.
+- Fail CLOSED on an inconsistent record: `DirectFeed.openLoads(me:)` applies the doctrine's
+  own `ledger_word` per load over `/v1/me.freight` (payment taken / collected = settled;
+  reverted / expired / lapsed / cancel = lost; a first-word rejection = lost; else delivered >
+  picked up > booked); a load the ledger holds open with no row on the mine board means the
+  mind is NOT asked — the document says which load and at which word, no proposal is offered,
+  and a confirm on an earlier proposal is refused in those words.
+
+Checks: `swift test` **88 passed, 0 failed, 2 live skipped** — a 500 and a non-JSON mine board
+through render, proposal and confirm with zero POSTs; the ledger-open / mine-empty case the
+same way; `openLoads` pinned on the fixture (L3249 picked up) and on settled / lost / rejected /
+cancelled loads. Codex round 3 queued.
+
 ## 2026-09-09 — T-237 B2 finding 1: the truth boundary binds a statement's verb to its source, not only its numbers
 
 Codex (B2 re-verification, finding 1): `Grounding.check` compared token provenance — numbers,

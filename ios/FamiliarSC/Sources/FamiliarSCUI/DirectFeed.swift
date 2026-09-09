@@ -238,7 +238,14 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         let me = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/me"))
         let board = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/loadboard"))
         let stations = try JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/stations"))
-        let mine = (try? JSONDecoder().decode(JSONValue.self, from: try await client.get("/v1/loadboard?mine=true"))) ?? .array([])
+        // The captain's own board is a REQUIRED read: a 500, a timeout or an unreadable shape
+        // here used to read as "no active contract", and a hull under contract could be
+        // shown — and after the same failure on the fresh re-read, FILED — a freight-idle act
+        // (codex T-237 B4 re-verification r2, finding 1). Now the gather fails, named.
+        let mineData = try await client.get("/v1/loadboard?mine=true")
+        let mine: JSONValue
+        do { mine = try JSONDecoder().decode(JSONValue.self, from: mineData) }
+        catch { throw ExchangeError.decode("/v1/loadboard?mine=true", "\(error)") }
         let repair = (try? await client.reference())?.params?["repairCostPerHundredBps"]?.double.map { Int64($0) } ?? 40
         let here = m.docked ?? m.enRouteTo ?? ""
         let pumps = Set((stations.array ?? []).filter { $0["sellsFuel"]?.bool == true }.compactMap { $0["id"]?.string })
@@ -299,6 +306,18 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
                                           "repair_per_hundred_bps": .number(Double(repair))]
         if let active { input["active"] = .object(["row": active]) }
         let inputValue = JSONValue.object(input)
+        // Fail CLOSED on an inconsistent record: the ledger (/v1/me.freight) says a contract is
+        // open — the same reading the doctrine makes — but the mine board carries no row for
+        // it. The doctrine would be told the hull is idle; it is not asked at all.
+        let openOnLedger = DirectFeed.openLoads(me: me)
+        let liveIDs = Set(live.compactMap { $0["loadId"]?.string })
+        let missing = openOnLedger.keys.filter { !liveIDs.contains($0) }.sorted()
+        if !missing.isEmpty {
+            var advice = Advice(text: "", verdict: .null, proposal: nil, input: inputValue, tick: m.tick, unpriced: legs.count - routes.count, unquotedRungs: unquotedRungs)
+            advice.text = "The pilot's mind was not asked: the ledger says " + missing.map { "\($0) is \(openOnLedger[$0] ?? "open")" }.joined(separator: ", ")
+                + " but the captain's board carries no such row. A contract that is open on one read and absent on the other is an inconsistent record, and nothing is judged or filed on it. Pull to read again."
+            memo.keep(advice); return advice
+        }
         let out = adviser(inputValue.description)
         var advice = Advice(text: "", verdict: .null, proposal: nil, input: inputValue, tick: m.tick, unpriced: legs.count - routes.count, unquotedRungs: unquotedRungs)
         guard let data = out.data(using: .utf8), let verdict = try? JSONDecoder().decode(JSONValue.self, from: data) else {
@@ -370,6 +389,36 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         return Briefs.fuel(picture) + "\n(Fuel priced at the pack's \(fuelPricePerUnit) ℳ per unit until the exchange publishes its own.)"
     }
 
+    /// The loads the ledger still holds open, and the word it holds them at — `doctrine::ledger_word`
+    /// applied per load over `/v1/me.freight`: "payment taken"/"collected" is settled, reverted /
+    /// expired / lapsed / cancel is lost, a rejection with no prior word is lost, else delivered >
+    /// picked up > booked (booked when the ledger only says departed/arrived).
+    static func openLoads(me: JSONValue) -> [String: String] {
+        var events: [String: [String]] = [:]
+        var order: [String] = []
+        for f in me["freight"]?.array ?? [] {
+            guard let id = f["loadId"]?.string, let e = f["event"]?.string else { continue }
+            if events[id] == nil { order.append(id) }
+            events[id, default: []].append(e)
+        }
+        var out: [String: String] = [:]
+        for id in order {
+            var word: String?
+            var closed = false
+            for e in events[id] ?? [] {
+                let l = e.lowercased()
+                if l.contains("payment taken") || l.contains("collected") { closed = true; break }
+                if l.contains("reverted") || l.contains("expired") || l.contains("lapsed") || l.contains("cancel") { closed = true; break }
+                if l.contains("rejected") { if word == nil { closed = true; break }; continue }
+                if l.contains("delivered") { word = "delivered" }
+                else if l.contains("pickedup") || l.contains("picked up") { if word != "delivered" { word = "picked up" } }
+                else if l.contains("booked"), word == nil { word = "booked" }
+            }
+            if !closed { out[id] = word ?? "booked" }
+        }
+        return out
+    }
+
     // MARK: acts — no host, so only what the device itself holds, and the one act the captain confirms
 
     public func pilotProposal(world: String) async throws -> PilotProposal? {
@@ -384,6 +433,9 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
     public func confirm(_ p: PilotProposal, world: String) async throws -> String {
         guard adviser != nil else { throw FeedError.unavailable("this shell carries no pilot's mind, so there is nothing to confirm") }
         let now = try await advice(me: try await client.me(), fresh: true)
+        // A fresh read that could not ask the mind at all (an inconsistent record, a seam it
+        // cannot read) refuses in its own words; nothing is filed on it.
+        if let now, now.verdict == .null { memo.drop(); throw FeedError.refused(now.text) }
         guard let live = now?.proposal, live.act == p.act else {
             memo.drop()
             let would = now?.proposal?.act.sentence ?? ("hold" + (now?.verdict["decision"]?["why"]?.string.map { " — \($0)" } ?? ""))

@@ -20,6 +20,9 @@ final class MockExchange: URLProtocol {
     static func serve(_ pathAndQuery: String, _ fixture: String, status: Int = 200) {
         lock.lock(); gets[pathAndQuery] = (status, Fixtures.wire(fixture)); lock.unlock()
     }
+    static func serveRaw(_ pathAndQuery: String, _ body: String, status: Int = 200) {
+        lock.lock(); gets[pathAndQuery] = (status, Data(body.utf8)); lock.unlock()
+    }
     static var postCount: Int { lock.lock(); defer { lock.unlock() }; return posts.count }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -271,6 +274,54 @@ final class DirectPilotTests: XCTestCase {
         let kept = await MainActor.run { model.pilotProposal }
         XCTAssertEqual(kept?.actionId, p.actionId, "the proposal and its id survive a failure that was not a refusal by the mind")
         XCTAssertEqual(MockExchange.postCount, 1)
+    }
+
+    // MARK: round 2, finding 1 — the mine board is a required read, and the record must agree with itself
+
+    func testAMineBoardThatWillNotReadFailsClosedThroughRenderAndConfirm() async throws {
+        serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
+        let f = feed(ScriptedMind([Self.travelVerdict]))
+        let shown = try await f.pilotProposal(world: "w")
+        let p = try XCTUnwrap(shown, "a good read shows the act")
+        for (status, body) in [(500, "{\"error\":\"fold in progress\"}"), (200, "this is not json")] {
+            MockExchange.serveRaw("/v1/loadboard?mine=true", body, status: status)
+            f.memo.drop()   // the 30 s memo of the good gather would otherwise answer; a confirm always reads fresh
+            let (_, docs) = try await f.context(world: "w", worldInstance: "PROD")
+            let pilot = try XCTUnwrap(docs.first { $0.name == "pilot" })
+            XCTAssertTrue(pilot.text.hasPrefix("The pilot's mind could not be asked: "), pilot.text)
+            XCTAssertTrue(pilot.text.contains("/v1/loadboard?mine=true"), "the failed endpoint is NAMED: \(pilot.text)")
+            XCTAssertFalse(pilot.text.contains("The pilot would now"))
+            do { _ = try await f.pilotProposal(world: "w"); XCTFail("a proposal on a failed read") } catch {}
+            do { _ = try await f.confirm(p, world: "w"); XCTFail("filed on a failed read") } catch {}
+        }
+        XCTAssertEqual(MockExchange.postCount, 0, "zero POSTs through render and confirm while the mine board will not read")
+    }
+
+    func testALedgerOpenLoadWithNoMineRowFailsClosed() async throws {
+        serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
+        let f = feed(ScriptedMind([Self.travelVerdict]))
+        let shown = try await f.pilotProposal(world: "w")
+        let p = try XCTUnwrap(shown)
+        // The ledger (me.json) holds L3249 open — departed, arrived, departed again — but the
+        // captain's board now answers empty: the record disagrees with itself.
+        MockExchange.serveRaw("/v1/loadboard?mine=true", "[]")
+        f.memo.drop()
+        let (_, docs) = try await f.context(world: "w", worldInstance: "PROD")
+        let pilot = try XCTUnwrap(docs.first { $0.name == "pilot" })
+        XCTAssertTrue(pilot.text.hasPrefix("The pilot's mind was not asked: the ledger says L3249 is picked up but the captain's board carries no such row."), pilot.text)
+        let none = try await f.pilotProposal(world: "w")
+        XCTAssertNil(none, "no proposal on an inconsistent record")
+        do { _ = try await f.confirm(p, world: "w"); XCTFail("filed on an inconsistent record") }
+        catch let e as FeedError { guard case .refused(let why) = e else { return XCTFail("\(e)") }; XCTAssertTrue(why.contains("inconsistent record"), why) }
+        XCTAssertEqual(MockExchange.postCount, 0)
+        XCTAssertEqual(DirectFeed.openLoads(me: try JSONDecoder().decode(JSONValue.self, from: Fixtures.wire("me"))), ["L3249": "picked up"])
+        let settled: JSONValue = .object(["freight": .array([
+            .object(["loadId": .string("L1"), "event": .string("booked")]), .object(["loadId": .string("L1"), "event": .string("delivered: payment taken")]),
+            .object(["loadId": .string("L2"), "event": .string("booked")]), .object(["loadId": .string("L2"), "event": .string("picked up at a")]),
+            .object(["loadId": .string("L3"), "event": .string("rejected: hold full")]),
+            .object(["loadId": .string("L4"), "event": .string("booked")]), .object(["loadId": .string("L4"), "event": .string("booking cancelled")]),
+        ])])
+        XCTAssertEqual(DirectFeed.openLoads(me: settled), ["L2": "picked up"], "settled, lost and cancelled loads are closed; the doctrine's own rule")
     }
 
     // MARK: finding 1's skew guard, and the allowlist

@@ -113,9 +113,11 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   artifact all REPAIRED (the checked-in xcframework itself returns call-paws / seam 2 on the
   boundary probe). Remaining: the `/v1/loadboard?mine=true` read fails OPEN (`try?` → `[]`), so
   a 500/timeout/decode on that one endpoint reads as freight-idle and could file a book while
-  `/v1/me.freight` says the hull is under contract. Repair (MacOnStick, in flight): the mine
-  read is required and throwing; a ledger-open load with no mine row fails CLOSED (the fact is
-  shown, no proposal); pinned through render and confirm with zero POSTs.
+  `/v1/me.freight` says the hull is under contract. **REPAIRED 2026-09-09 ~01:50 (MacOnStick):** the mine
+  read is required and throwing (endpoint named); a ledger-open load with no mine row fails
+  CLOSED (`DirectFeed.openLoads` = the doctrine's ledger rule; the fact is shown, no proposal,
+  confirm refused); pinned through render and confirm with zero POSTs. FamiliarSC 88/0. Log:
+  DEVELOPMENT_LOG 2026-09-09 (B4 r2). **Codex round 3 queued.**
 - **SWIFT HALF LANDED 2026-09-08 (~17:40 CDT, MacOnStick):** all five findings answered on the
   shell side — rungs on pump legs + `Route.forHull`, `active: {row}`, seam-version guard, reasons
   in words, no dial claim, and the confirm-to-act path (`ExchangeAct` allowlist, `PilotProposal`
