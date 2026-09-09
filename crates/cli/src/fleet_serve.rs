@@ -954,6 +954,34 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 Err(e) => (500, json!({"error": e.to_string()})),
             }
         }
+        // Remove a ship from the fleet — the same act as `fleet unpair`: the pilot
+        // stops, the key file goes, the world is decommissioned; the journal, the
+        // deliveries and the computer's persona stay for the captain (we do not
+        // forget). Ian, 2026-09-09: "no way to delete a ship from your fleet… Familiar
+        // app should allow for that."
+        ("DELETE", ["ships", id]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let out = std::process::Command::new(
+                std::env::current_exe().unwrap_or_else(|_| "familiar".into()),
+            )
+            .args(["fleet", "unpair", id, "--data-dir", &dir.to_string_lossy()])
+            .output();
+            match out {
+                Ok(o) if o.status.success() => (
+                    200,
+                    json!({"tick": tick, "tick_seconds": tick_seconds, "unpaired": s.world.id,
+                           "label": s.world.label, "captain": s.captain.captain,
+                           "output": String::from_utf8_lossy(&o.stdout).trim().to_string()}),
+                ),
+                Ok(o) => (
+                    400,
+                    json!({"error": String::from_utf8_lossy(&o.stderr).trim().to_string()}),
+                ),
+                Err(e) => (500, json!({"error": e.to_string()})),
+            }
+        }
         ("PUT", ["ships", id, "captain"]) => {
             let Some(s) = find(id) else {
                 return (404, json!({"error": "no such ship"}));

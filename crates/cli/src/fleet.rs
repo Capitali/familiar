@@ -1164,6 +1164,21 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 eprintln!("fleet pair: {e}");
                 return ExitCode::FAILURE;
             }
+            // And one key is one hull: a key already paired is not paired again — two
+            // worlds on one key are two pilots contradicting each other on the
+            // exchange (Kibble Klipper NG, 2026-09-09: paired from the iPad and from
+            // wildhorse 48 seconds apart). Rename or unpair the one that exists.
+            if let Some(already) = paired_ships(&dir, &root)
+                .into_iter()
+                .find(|s| s.captain.key_id == key_id)
+            {
+                eprintln!(
+                    "fleet pair: key {key_id} already flies {} as \"{}\" for {} — one key is one hull; \
+                     `fleet rename`/`fleet unpair {}` rather than pairing it twice",
+                    already.world.id, already.world.label, already.captain.captain, already.world.id
+                );
+                return ExitCode::FAILURE;
+            }
             // THE COMPUTER IS SETTLED BEFORE THE SHIP IS COMMISSIONED (codex T-236
             // re-verification, finding 6). Every failure below used to happen after
             // the world, the key and captain.json were already on disk, so a pair
@@ -1329,7 +1344,11 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     kind: "computer".into(),
                     name: persona.name.clone(),
                     holder: captain_id.clone(),
-                    act: "named".into(),
+                    act: if computer_name.is_some() {
+                        "named".into()
+                    } else {
+                        "joined".into()
+                    },
                     from: String::new(),
                     by,
                     pronouns: chosen
@@ -2939,7 +2958,7 @@ mod captain_store_tests {
             vec![
                 ("named".into(), "Felix".into(), String::new()),
                 ("renamed".into(), "Mittens".into(), "Felix".into()),
-                ("named".into(), "Purr".into(), String::new()),
+                ("joined".into(), "Purr".into(), String::new()),
                 ("renamed".into(), "Felix".into(), "Mittens".into()),
             ],
             "{ledger:?}"
@@ -3069,6 +3088,37 @@ mod captain_store_tests {
         assert!(names(&root)
             .iter()
             .any(|e| e.act == "chose" && e.by == "familiar"));
+    }
+
+    /// One key is one hull: pairing a key that already flies a world is refused with
+    /// the world named, whatever captain name is typed.
+    #[test]
+    fn a_key_already_paired_is_not_paired_twice() {
+        let base = tmp("one_key_one_hull");
+        let server = stub_exchange(2);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke SkyWhisker",
+                "ng",
+                "ucfk_dddddddddddddddddddd",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke Sky-Whisker",
+                "ng again",
+                "ucfk_dddddddddddddddddddd",
+                None
+            )),
+            ExitCode::FAILURE
+        );
+        assert_eq!(paired_ships(&base, &base.join("worlds")).len(), 1);
     }
 
     /// Joining a captain's own computer is not a naming: a second hull for Luke pairs
