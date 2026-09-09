@@ -293,7 +293,20 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         "open_proposals": open_proposals,
         // The CAPTAIN's computer (T-236 as Ian ruled it, 2026-09-04): one persona
         // across their whole fleet, with a ship-local record as the fallback.
-        "persona": persona_for(root, &s.dir, &s.captain).unwrap_or(Value::Null),
+        // The iPad's persona reader is STRICT by design (an unknown field is a broken
+        // record — codex T-236 finding 8), and build 7 predates `pronouns`. So the
+        // row's `persona` keeps the shape that reader knows, and the pronouns ride
+        // `computer_state` — until the Swift reader carries the field, then this
+        // strip goes. (Ian's iPad, 2026-09-09: "FamiliarSC.StoreError error 2",
+        // every automation reading locked.)
+        "persona": persona_for(root, &s.dir, &s.captain)
+            .map(|mut p| {
+                if let Some(o) = p.as_object_mut() {
+                    o.remove("pronouns");
+                }
+                p
+            })
+            .unwrap_or(Value::Null),
         // The same computer as a TYPED state — named / broken / absent — so a client
         // never has to read "no name" as "unnamed" (round 2, finding 7).
         "computer_state": computer_state(root, &s.dir, &s.captain),
@@ -1521,6 +1534,40 @@ mod surface_tests {
             cap["economy"].get("points").is_none(),
             "the brief carries the summary only"
         );
+    }
+
+    /// Until the iPad's strict persona reader knows `pronouns`, the row's persona
+    /// keeps the shape it knows and the pronouns ride computer_state only.
+    #[test]
+    fn the_rows_persona_stays_in_the_shape_the_strict_reader_knows() {
+        let b = base("strict_persona");
+        let root = b.join("worlds");
+        let s = hull(&b, "One", "Luke", "cpt-p");
+        let store = captain_store_by_id(&root, "cpt-p");
+        let (pron, _) =
+            familiar_kernel::persona::choose_gender(&familiar_kernel::persona::NamingContext {
+                captain: "Luke".into(),
+                name: "Felix".into(),
+                ..Default::default()
+            });
+        familiar_kernel::persona::write(
+            &store,
+            &familiar_kernel::persona::Persona {
+                persona_version: 2,
+                name: "Felix".into(),
+                pronouns: Some(pron.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let row = ship_row(&s, &root, 0);
+        assert!(
+            row["persona"].get("pronouns").is_none(),
+            "{}",
+            row["persona"]
+        );
+        assert_eq!(row["persona"]["name"], "Felix");
+        assert_eq!(row["computer_state"]["pronouns"]["label"], pron.label);
     }
 
     /// A named computer reads as named, and a hull with none reads as absent — the
