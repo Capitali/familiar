@@ -1904,8 +1904,18 @@ mod journal_vocabulary_pin {
     );
 
     fn events_in_source() -> std::collections::BTreeSet<String> {
-        let src = include_str!("main.rs");
+        // The runner's own literals, and the library's: an event the runner
+        // writes through a shared builder (trade::position_opened, so the soak
+        // and the runner write one record — codex T-238 finding 4) is still
+        // the runner's word.
         let mut out = std::collections::BTreeSet::new();
+        for src in [include_str!("main.rs"), include_str!("trade.rs")] {
+            scan_events(src, &mut out);
+        }
+        out
+    }
+
+    fn scan_events(src: &str, out: &mut std::collections::BTreeSet<String>) {
         let mut rest = src;
         while let Some(i) = rest.find("\"event\":") {
             let after = &rest[i + "\"event\":".len()..];
@@ -1921,7 +1931,6 @@ mod journal_vocabulary_pin {
             }
             rest = after;
         }
-        out
     }
 
     #[test]
