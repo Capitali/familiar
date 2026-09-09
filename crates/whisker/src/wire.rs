@@ -119,6 +119,30 @@ pub fn load_row(v: &Value) -> Option<LoadRow> {
     })
 }
 
+/// Contracts on `/v1/me.contracts[]` that are DELIVERED with pay owed and are not the
+/// one the doctrine is tracking — money parked on the desk that a single-active
+/// doctrine never collected. KK II's L4200 sat delivered with ℳ684 payable for two
+/// days (t9396 → t10256) while newer bookings took the active slot (T-243 slice 0).
+/// Engine 1.11.1's bay limit lets a hull hold up to three at once.
+pub fn stray_payables(me: &Value, active_load: Option<&str>) -> Vec<(String, i64)> {
+    me.get("contracts")
+        .and_then(Value::as_array)
+        .map(|cs| {
+            cs.iter()
+                .filter(|c| c.get("status").and_then(Value::as_str) == Some("delivered"))
+                .filter_map(|c| {
+                    let id = c.get("loadId")?.as_str()?;
+                    let owed = c
+                        .get("payableToBooker")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0);
+                    (owed > 0 && Some(id) != active_load).then(|| (id.to_string(), owed))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The stations that sell fuel, from `/v1/stations`. Anything unreadable is no pump.
 pub fn pumps_from(stations: &Value) -> BTreeSet<String> {
     match stations {
@@ -591,6 +615,27 @@ mod seam_parity_tests {
         assert_eq!(out["decision"]["station"], "b");
         assert_eq!(out["reasons"]["code"], "freight.laden-leg");
         assert_eq!(out["reasons"]["load_id"], "L3249");
+    }
+
+    /// T-243 slice 0: a delivered contract with pay owed that is not the active one is
+    /// a stray payable; the active one and the unpaid ones are not.
+    #[test]
+    fn delivered_contracts_with_pay_owed_are_strays_unless_active() {
+        let me = json!({"contracts": [
+            {"loadId": "L4525", "status": "booked", "payableToBooker": 0},
+            {"loadId": "L4200", "status": "delivered", "payableToBooker": 684},
+            {"loadId": "L4100", "status": "delivered", "payableToBooker": 0},
+            {"loadId": "L4300", "status": "delivered", "payableToBooker": 120},
+        ]});
+        assert_eq!(
+            stray_payables(&me, Some("L4525")),
+            vec![("L4200".to_string(), 684), ("L4300".to_string(), 120)]
+        );
+        assert_eq!(
+            stray_payables(&me, Some("L4200")),
+            vec![("L4300".to_string(), 120)]
+        );
+        assert!(stray_payables(&json!({}), None).is_empty());
     }
 
     /// Every actionable decision explains itself with a code and the numbers that

@@ -1752,6 +1752,57 @@ fn main() -> ExitCode {
             }
         }
 
+        // MONEY ON THE DESK FIRST (T-243 slice 0). The doctrine tracks one active
+        // contract; the engine lets a hull hold three. A delivered contract that is
+        // not the active one had its pay sit uncollected — KK II's L4200, ℳ684, for two
+        // days. Collect every such stray, one per fold, on the captain's collect dial,
+        // before the doctrine spends the fold on anything else.
+        if tick >= pending_until {
+            let active_load = active.as_ref().map(|a| a.row.load_id.as_str());
+            if let Some((lid, owed)) = familiar_whisker::wire::stray_payables(&me, active_load)
+                .into_iter()
+                .next()
+            {
+                let body = json!({"type": "collect", "loadId": lid});
+                if dial_gate.allow(
+                    &ship_dir,
+                    Surface::FreightCollect,
+                    tick,
+                    now,
+                    &body,
+                    &format!("collect ℳ{owed} owed on {lid}"),
+                    "a delivered contract's pay sits on the desk while another is active",
+                ) {
+                    seq += 1;
+                    let id = format!("whisker-{}-{}", now_secs(), seq);
+                    match wire.act(body, &id) {
+                        Ok(ack) => {
+                            pending_until = ack
+                                .get("resolvesAtTick")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(tick)
+                                + 1;
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "acted",
+                                "decision": format!("Collect {{ load_id: {lid:?} }}"), "stray": true,
+                                "owed": owed, "credits": ship.credits, "fuel": ship.fuel,
+                                "resolves": pending_until - 1}),
+                            );
+                            std::thread::sleep(Duration::from_secs(
+                                (tick_secs * 3 / 5).max(floor_secs),
+                            ));
+                            continue;
+                        }
+                        Err(e) => journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "carry-refused",
+                            "load": lid, "why": format!("collect refused: {e}")}),
+                        ),
+                    }
+                }
+            }
+        }
         // The chain's word on every load, from this fold's forecast — a tie-break the
         // doctrine applies between near-equal rates, and a fact the seam carries so
         // the iPad's core can weigh the same board the same way.
