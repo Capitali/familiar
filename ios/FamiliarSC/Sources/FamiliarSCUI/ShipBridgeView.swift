@@ -219,7 +219,7 @@ struct HistoryView: View {
                             ForEach(ms) { m in
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(m.text).font(.body).foregroundStyle(SC.ink)
-                                    Text(m.ticks.map { "t\($0)" }.joined(separator: " · ")).font(.caption2.monospacedDigit()).foregroundStyle(SC.dim)
+                                    if !m.ticks.isEmpty { Text(m.ticks.map { "t\($0)" }.joined(separator: " · ")).font(.caption2.monospacedDigit()).foregroundStyle(SC.dim) }
                                 }
                                 .listRowBackground(SC.panel)
                             }
@@ -227,7 +227,7 @@ struct HistoryView: View {
                     }
                 }
                 if let f = h.firstTick, let l = h.lastTick {
-                    Section { Text("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what she did.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
+                    Section { Text("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what she did, and the names are not forgotten.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
                 }
             } else {
                 Section { Text("No history yet. The record begins with her first leg.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }

@@ -29,11 +29,52 @@ final class HistoryTests: XCTestCase {
         XCTAssertTrue(distress[0].text.hasSuffix("not yet survived"))
         XCTAssertTrue(h.marks(of: .repair).isEmpty && h.marks(of: .rescue).isEmpty && h.marks(of: .escort).isEmpty)
         XCTAssertEqual(h.firstTick, 100); XCTAssertEqual(h.lastTick, 251)
-        // Every mark cites at least one tick, and the story carries every citation.
-        for m in h.marks { XCTAssertFalse(m.ticks.isEmpty, m.id) }
+        // Every mark of the journal cites at least one tick, and the story carries every citation.
+        for m in h.marks where m.kind != .name { XCTAssertFalse(m.ticks.isEmpty, m.id) }
         XCTAssertTrue(h.story.contains("Routes flown: whisker-hollow → foxys-diner, flown 1 time [t105]"), h.story)
         XCTAssertTrue(h.story.contains("Deliveries: 2 loads delivered, ℳ444 freight paid (bluefin-reserve, tinplate) [t120]"))
-        XCTAssertTrue(h.story.hasSuffix("Nothing here can be bought or edited; it is what she did."))
+        XCTAssertTrue(h.story.hasSuffix("it is what she did, and the names are not forgotten."))
+    }
+
+    /// Names are lineage (Ian, 2026-09-08): the store's naming trail and the host's ledger both
+    /// become marks, dated, never forgotten — and a rename's refusal is the host's sentence.
+    func testNamesAreLineageAndARefusedRenameIsSaidNotRetried() async throws {
+        let names = Fixtures.store.namings().map(NameLine.init(naming:))
+        XCTAssertEqual(names, [NameLine(kind: "computer", name: "Purr", act: "paired", by: "pairing", at: 1700000000)])
+        func ledger(_ json: String) throws -> NameLine { try XCTUnwrap(NameLine(ledger: try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)))) }
+        let rows = [
+            try ledger(#"{"at":1700003000,"kind":"computer","name":"Felix","holder":"cpt-1","act":"renamed","from":"Purr","by":"ian"}"#),
+            try ledger(#"{"at":1700001000,"kind":"hull","name":"Kibble Klipper II","holder":"world-1","act":"paired","by":"ian"}"#),
+        ]
+        XCTAssertNil(NameLine(ledger: .object(["act": .string("named")])), "a row without a name is no line")
+        let h = ShipHistory.from(journal: Fixtures.journal().entries, book: ShipBook(holdings: [], deliveries: []), names: names + rows)
+        XCTAssertEqual(h.marks(of: .name).map(\.text), [
+            "the computer was Purr from the pairing on 2023-11-14",
+            "the hull was Kibble Klipper II from the pairing (by ian) on 2023-11-14",
+            "the computer became Felix, was Purr (by ian) on 2023-11-14",
+        ])
+        XCTAssertTrue(h.story.hasPrefix("Names: the computer was Purr from the pairing on 2023-11-14; "), h.story)
+        // The store feed remembers its trail.
+        let remembered = try await StoreFeed(worlds: Fixtures.root).names(world: "ship")
+        XCTAssertEqual(remembered.map(\.name), ["Purr"])
+        // A refused rename is the host's sentence on the sheet, never a retry.
+        let model = BridgeModel(feed: FixtureFeed(), acts: RefusingActs())
+        await model.refreshShips(); await model.open(world: "world-fixture-purr")
+        let out = await model.rename(computer: "Felix")
+        XCTAssertFalse(out.ok)
+        XCTAssertEqual(out.text, "\"Felix\" is Luke SkyWhisker's computer's name; two ships' computers cannot have the same name (HTTP 400)")
+    }
+
+    struct RefusingActs: CaptainActs {
+        func approve(world: String, proposalID: String, approved: Bool) async throws {}
+        func setDial(world: String, dial: AutonomyDial) async throws {}
+        func pair(_ request: PairingRequest, key: PairingKey) async throws {}
+        func unpair(world: String) async throws {}
+        func rename(world: String, computer: String) async throws -> String? {
+            throw FeedError.refused("\"Felix\" is Luke SkyWhisker's computer's name; two ships' computers cannot have the same name (HTTP 400)")
+        }
+        func setAutomations(world: String, automations: [Automation]) async throws -> String? { nil }
+        func setCaptain(world: String, captain: String) async throws -> String? { nil }
     }
 
     func testDistressSurvivedRepairsRescuesAndCountsAreEarnedFromTheJournal() {

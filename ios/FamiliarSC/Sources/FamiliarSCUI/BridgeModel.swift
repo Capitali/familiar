@@ -121,7 +121,8 @@ public final class BridgeModel {
             let d = try await feed.dial(world: world)
             let b = try await feed.book(world: world)
             persona = p; journal = j; window = w; dial = d; book = b
-            history = ShipHistory.from(journal: j, book: b)
+            let names = (try? await feed.names(world: world)) ?? []
+            history = ShipHistory.from(journal: j, book: b, names: names)
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
             var (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
             // Her story rides the context frame so the voice can tell it — grounded on the marks.

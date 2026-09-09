@@ -27,7 +27,17 @@ nobody projected. `ios/FamiliarSC/Sources/FamiliarSCUI/History.swift` — pure: 
   ticks under each mark, no act on the screen. There is no initializer that takes marks and no
   mutating API: a purchase has nothing to call. Nothing served, nothing written, no wire POST.
 
-Checks: `swift test` **77 passed, 0 failed, 2 live skipped** — the fixture store's story pinned
+- **Names are lineage (Ian, 2026-09-08, verbatim: "Names are unique. We remember names. Names are
+  important to the familiar. Lineage is important. We do not forget names.")** `NameLine` (kind /
+  name / holder / act / from / by / at) reads the host's fleet-wide `captains/names.jsonl` rows
+  and a store's own `persona-names.jsonl`; `ShipsFeed.names(world:)` (default empty; the store
+  feed serves its trail; the wire feed will read the ledger when the host serves it) feeds the
+  history's first section, "Names", dated — "the computer became Felix, was Purr (by ian) on
+  2023-11-14". A refused rename (the host's 400 sentence: "…two ships' computers cannot have the
+  same name") is shown on the settings sheet as the host said it, never retried; the sheet says
+  names are unique and remembered.
+
+Checks: `swift test` **79 passed, 0 failed, 2 live skipped** — the fixture store's story pinned
 mark by mark (three routes, two deliveries ℳ444 at t120, the drive-tune refit, the open distress
 at t250), a synthesized journal for survived distress / rescue / repair / escort counts, the empty
 record, and the document on the bridge context; `xcodebuild … UCFFamiliar -configuration Release`:

@@ -10,10 +10,39 @@ import FamiliarSC
 // book in, marks out; no store write, no wire POST, no engine change. Fixtures pin a
 // synthesized store, never a real hull's journal.
 
+/// One line of name lineage — the host's fleet-wide `captains/names.jsonl` (Ian, 2026-09-08,
+/// verbatim: "Names are unique. We remember names. Names are important to the familiar. Lineage
+/// is important. We do not forget names."), or a ship store's own `persona-names.jsonl`.
+public struct NameLine: Equatable, Sendable {
+    /// `captain` | `hull` | `computer`
+    public var kind: String
+    public var name: String
+    public var holder: String
+    /// `paired` | `named` | `renamed` | `reassigned` | `unpaired`
+    public var act: String
+    public var from: String
+    public var by: String
+    /// Wall-clock seconds — the ledger keeps time, not ticks.
+    public var at: Int64
+    public init(kind: String, name: String, holder: String = "", act: String, from: String = "", by: String = "", at: Int64) {
+        self.kind = kind; self.name = name; self.holder = holder; self.act = act; self.from = from; self.by = by; self.at = at
+    }
+    /// A store's own naming trail, as lineage: the computer's names on this hull.
+    public init(naming e: NameEvent) {
+        self.init(kind: "computer", name: e.name, act: e.actor == "pairing" ? "paired" : "named", by: e.actor, at: e.at)
+    }
+    /// One ledger row off the wire; nil for a row without a kind or a name.
+    public init?(ledger v: JSONValue) {
+        guard let kind = v["kind"]?.string, let name = v["name"]?.string else { return nil }
+        self.init(kind: kind, name: name, holder: v["holder"]?.string ?? "", act: v["act"]?.string ?? "named",
+                  from: v["from"]?.string ?? "", by: v["by"]?.string ?? "", at: v["at"]?.int ?? 0)
+    }
+}
+
 public struct ShipHistory: Equatable, Sendable {
     public struct Mark: Equatable, Sendable, Identifiable {
         public enum Kind: String, Equatable, Sendable, CaseIterable {
-            case route, delivery, repair, refit, distress, rescue, escort
+            case name, route, delivery, repair, refit, distress, rescue, escort
         }
         public var id: String { kind.rawValue + ":" + key }
         public var kind: Kind
@@ -33,12 +62,34 @@ public struct ShipHistory: Equatable, Sendable {
 
     public func marks(of kind: Mark.Kind) -> [Mark] { marks.filter { $0.kind == kind } }
 
-    /// The record, from a hull's journal and book alone.
-    public static func from(journal: [JournalEntry], book: ShipBook) -> ShipHistory {
+    /// The record, from a hull's journal and book alone — and the names she and her people
+    /// have worn, when the store or the host remembers them.
+    public static func from(journal: [JournalEntry], book: ShipBook, names: [NameLine] = []) -> ShipHistory {
         var builder = Builder()
         for e in journal.sorted(by: { ($0.tick ?? 0, $0.at) < ($1.tick ?? 0, $1.at) }) { builder.take(e) }
         builder.take(book: book)
-        return builder.finish()
+        var h = builder.finish()
+        let lineage = names.sorted { $0.at < $1.at }.map { n -> Mark in
+            let who = n.kind == "computer" ? "the computer" : n.kind == "hull" ? "the hull" : "the captain"
+            var text: String
+            switch n.act {
+            case "paired": text = "\(who) was \(n.name) from the pairing"
+            case "renamed": text = "\(who) became \(n.name)" + (n.from.isEmpty ? "" : ", was \(n.from)")
+            case "reassigned": text = "\(who) \(n.name) passed to another captain" + (n.from.isEmpty ? "" : " from \(n.from)")
+            case "unpaired": text = "\(who) \(n.name) was unpaired"
+            default: text = "\(who) was named \(n.name)" + (n.from.isEmpty ? "" : ", was \(n.from)")
+            }
+            if !n.by.isEmpty && n.by != "pairing" { text += " (by \(n.by))" }
+            text += " on " + ShipHistory.day(n.at)
+            return Mark(kind: .name, key: "\(n.kind):\(n.name):\(n.at)", text: text, count: 1, firstTick: 0, lastTick: 0, ticks: [])
+        }
+        h.marks = lineage + h.marks
+        return h
+    }
+
+    static func day(_ at: Int64) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(at)))
     }
 
     /// The story as the bridge tells it and the voice is grounded on — plain sentences,
@@ -49,8 +100,9 @@ public struct ShipHistory: Equatable, Sendable {
         func section(_ kind: Mark.Kind, _ head: String) {
             let ms = marks(of: kind)
             guard !ms.isEmpty else { return }
-            lines.append(head + ": " + ms.map { $0.text + " [" + $0.ticks.map { "t\($0)" }.joined(separator: ", ") + "]" }.joined(separator: "; ") + ".")
+            lines.append(head + ": " + ms.map { $0.text + ($0.ticks.isEmpty ? "" : " [" + $0.ticks.map { "t\($0)" }.joined(separator: ", ") + "]") }.joined(separator: "; ") + ".")
         }
+        section(.name, "Names")
         section(.route, "Routes flown")
         section(.delivery, "Deliveries")
         section(.repair, "Repairs")
@@ -58,7 +110,7 @@ public struct ShipHistory: Equatable, Sendable {
         section(.rescue, "Rescues")
         section(.distress, "Distress survived")
         section(.escort, "Escort work")
-        if let f = firstTick, let l = lastTick { lines.append("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what she did.") }
+        if let f = firstTick, let l = lastTick { lines.append("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what she did, and the names are not forgotten.") }
         return lines.joined(separator: "\n")
     }
 

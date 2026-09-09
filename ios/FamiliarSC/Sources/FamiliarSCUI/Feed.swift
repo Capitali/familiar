@@ -186,6 +186,14 @@ public protocol ShipsFeed: Sendable {
     func window(world: String) async throws -> [MessageItem]
     func dial(world: String) async throws -> DialSheet
     func book(world: String) async throws -> ShipBook
+    /// The names this ship and her people have worn — the store's naming trail, or the host's
+    /// fleet-wide ledger when it serves it. Empty where nothing is remembered (Ian, 2026-09-08:
+    /// "We do not forget names").
+    func names(world: String) async throws -> [NameLine]
+}
+
+public extension ShipsFeed {
+    func names(world: String) async throws -> [NameLine] { [] }
 }
 
 public protocol CaptainActs: Sendable {
@@ -365,6 +373,7 @@ public struct StoreFeed: ShipsFeed {
 
     public func ships() async throws -> [ShipSummary] { stores().map { StoreFeed.summary(of: $0, moodWindowTicks: moodWindowTicks) } }
     public func persona(world: String) async throws -> Persona? { try store(world).persona() }
+    public func names(world: String) async throws -> [NameLine] { try store(world).namings().map(NameLine.init(naming:)) }
     public func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry] {
         let j = try store(world).journal()
         return sinceTick.map { j.since(tick: $0) } ?? j.entries
