@@ -266,12 +266,14 @@ fn locked(dir: &Path) -> io::Result<std::fs::File> {
 /// directory sync's error was discarded.
 ///
 /// The protocol, under the persona's lock:
-///   1. remember the prior pair — the persona bytes (or their absence) and the trail's
-///      length (or its absence);
-///   2. write the new persona to a UNIQUE temp and sync it;
-///   3. append the naming and sync the trail;
-///   4. rename the temp into place;
-///   5. sync the containing directory, which is what makes 4 durable.
+///
+/// 1. remember the prior pair — the persona bytes (or their absence) and the
+///    trail's length (or its absence);
+/// 2. write the new persona to a UNIQUE temp and sync it;
+/// 3. append the naming and sync the trail;
+/// 4. rename the temp into place;
+/// 5. sync the containing directory, which is what makes 4 durable.
+///
 /// Any failure at 3, 4 or 5 restores the prior pair before it is reported: the trail
 /// is truncated to its prior length (or removed if it did not exist), the prior
 /// persona is put back (or removed if it did not exist), and the temp is unlinked.
@@ -517,8 +519,10 @@ mod naming_tests {
         let dir = std::env::temp_dir().join(format!("persona_land_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut p = Persona::default();
-        p.name = "Felix".into();
+        let mut p = Persona {
+            name: "Felix".into(),
+            ..Persona::default()
+        };
         name(&dir, &p, Some(&ev("Felix"))).unwrap();
         let trail_before = std::fs::read(dir.join(NAME_EVENTS_FILE)).unwrap();
         let persona_before = std::fs::read(dir.join(PERSONA_FILE)).unwrap();
@@ -559,8 +563,10 @@ mod naming_tests {
         let dir = std::env::temp_dir().join(format!("persona_first_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(PERSONA_FILE)).unwrap(); // the landing spot is a dir
-        let mut p = Persona::default();
-        p.name = "Felix".into();
+        let p = Persona {
+            name: "Felix".into(),
+            ..Persona::default()
+        };
         assert!(name(&dir, &p, Some(&ev("Felix"))).is_err());
         assert!(!dir.join(NAME_EVENTS_FILE).exists(), "no orphan trail");
         assert!(namings(&dir).is_empty());
@@ -626,14 +632,6 @@ mod naming_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn ev(name: &str) -> NameEvent {
-        NameEvent {
-            at: 1,
-            actor: "test".into(),
-            name: name.into(),
-        }
-    }
 
     fn tmp(name: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir().join(format!("persona_{name}_{}", std::process::id()));
