@@ -135,6 +135,42 @@ class ASCClient:
         r = self.get(f"/v1/betaFeedbackCrashSubmissions/{submission_id}/crashLog")
         return (r.get("data") or {}).get("attributes", {}).get("logText", "")
 
+    def dsym_urls(self, build_id):
+        """[(bundleId, dSYMUrl)] for a build — Apple keeps the symbols we uploaded with it."""
+        r = self.get(f"/v1/builds/{build_id}", {"include": "buildBundles"})
+        out = []
+        for inc in r.get("included", []):
+            if inc.get("type") == "buildBundles" and inc.get("attributes", {}).get("dSYMUrl"):
+                out.append((inc["attributes"].get("bundleId", "bundle"), inc["attributes"]["dSYMUrl"]))
+        return out
+
+
+def fetch_dsyms(asc, build_id, build_version, state_dir):
+    """Download and unzip a build's dSYMs from App Store Connect once; return the directory
+    (or None). Lets xcsym symbolicate crashes from builds whose archive never lived on this Mac."""
+    if not build_id:
+        return None
+    d = os.path.join(state_dir, "dsyms", f"{build_version or build_id}")
+    if os.path.isdir(d) and any(n.endswith(".dSYM") for n in os.listdir(d)):
+        return d
+    try:
+        urls = asc.dsym_urls(build_id)
+    except RuntimeError as e:
+        print(f"  dSYM lookup failed: {e}", file=sys.stderr); return None
+    if not urls:
+        return None
+    os.makedirs(d, exist_ok=True)
+    for bundle, url in urls:
+        z = os.path.join(d, f"{bundle}.zip")
+        try:
+            download(url, z)
+            subprocess.run(["ditto", "-x", "-k", z, d] if sys.platform == "darwin" else ["unzip", "-o", "-q", z, "-d", d],
+                           capture_output=True, timeout=300)
+            os.remove(z)
+        except Exception as e:
+            print(f"  dSYM download failed for {bundle}: {e}", file=sys.stderr)
+    return d if any(n.endswith(".dSYM") for n in os.listdir(d)) else None
+
 
 # ----------------------------------------------------------------------------- state
 
@@ -170,22 +206,23 @@ def build_commit(app, build_version):
         return None
     pat = app["build_commit_grep"].format(build=build_version)
     try:
-        out = subprocess.run(["git", "-C", app["repo_path"], "log", "--all", "-1", "--fixed-strings",
+        out = subprocess.run(["git", "-C", app["repo_path"], "log", "--all", "-1", "--fixed-strings", "-i",
                               f"--grep={pat}", "--format=%h %ci"], capture_output=True, text=True, timeout=30).stdout.strip()
         return out or None
     except Exception:
         return None
 
 
-def symbolicate(crash_path, out_dir):
+def symbolicate(crash_path, out_dir, dsym_dir=None):
     """Run xcsym if available. Returns (human_summary, json_path) — either may be None."""
     if not shutil.which("xcsym"):
         return None, None
     json_path = os.path.join(out_dir, "xcsym.json")
+    extra = ["--dsym-paths", dsym_dir] if dsym_dir else []
     try:
-        subprocess.run(["xcsym", "crash", crash_path, "--format", "standard", "--output", json_path],
+        subprocess.run(["xcsym", "crash", crash_path, "--format", "standard", "--output", json_path] + extra,
                        capture_output=True, text=True, timeout=300)
-        human = subprocess.run(["xcsym", "crash", crash_path, "--format", "summary", "--human"],
+        human = subprocess.run(["xcsym", "crash", crash_path, "--format", "summary", "--human"] + extra,
                                capture_output=True, text=True, timeout=300).stdout
         return (human.strip() or None), (json_path if os.path.exists(json_path) else None)
     except Exception as e:
@@ -355,7 +392,8 @@ def process(cfg, asc, state, dry_run):
                 p = os.path.join(rd, "crash.ips")
                 if text and not dry_run:
                     open(p, "w").write(text)
-                    symsum, _ = symbolicate(p, rd)
+                    dsyms = fetch_dsyms(asc, sub.get("build_id"), sub["build"].get("version"), state.dir)
+                    symsum, _ = symbolicate(p, rd, dsyms)
                 crash_head = crash_headline(text)
                 files.append({"type": "crash", "path": p})
             json.dump(sub, open(os.path.join(rd, "submission.json"), "w"), indent=2)
@@ -382,6 +420,8 @@ def main():
     ap.add_argument("--interval", type=int, default=900, help="seconds between passes when looping")
     ap.add_argument("--dry-run", action="store_true", help="download nothing, file nothing, print what would be filed")
     ap.add_argument("--list", action="store_true", help="print the seen-submission ledger and exit")
+    ap.add_argument("--resym", metavar="SUBMISSION_ID",
+                    help="re-symbolicate a saved crash (fetching the build's dSYMs from App Store Connect), print the summary, exit")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -389,6 +429,18 @@ def main():
     if args.list:
         for sid, v in sorted(state.seen.items(), key=lambda kv: kv[1].get("created", "")):
             print(f"{v.get('created','?')}  {v.get('kind','?'):10} {v.get('app','?'):28} {v.get('issue','')}  {sid}")
+        return
+    if args.resym:
+        rd = state.report_dir(args.resym)
+        sub_path, crash_path = os.path.join(rd, "submission.json"), os.path.join(rd, "crash.ips")
+        if not os.path.exists(crash_path):
+            sys.exit(f"no saved crash at {crash_path}")
+        sub = json.load(open(sub_path)) if os.path.exists(sub_path) else {"build": {}}
+        asc = ASCClient(cfg["key_id"], cfg["issuer_id"], cfg["key_path"])
+        dsyms = fetch_dsyms(asc, sub.get("build_id"), sub.get("build", {}).get("version"), state.dir)
+        print(f"dSYMs: {dsyms or 'none available'}")
+        human, _ = symbolicate(crash_path, rd, dsyms)
+        print(human or "xcsym not available")
         return
     if not shutil.which("gh") and not args.dry_run:
         sys.exit("gh (GitHub CLI) is required to file issues; install it or use --dry-run")

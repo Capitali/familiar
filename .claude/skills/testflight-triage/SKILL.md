@@ -43,7 +43,10 @@ and `reports/<submission-id>/` (screenshots, `crash.ips`, `xcsym.json`, `submiss
    `tail ~/Library/Logs/tf-watch.log`. Remove with `launchctl bootout gui/$UID/io.river.tf-watch`.
 5. **Keep dSYMs**: the ship scripts copy each archive into
    `~/Library/Developer/Xcode/Archives/<date>/`. Without that, a crash from an old build cannot
-   be symbolicated locally. If you add a new ship script, keep that block.
+   be symbolicated locally. If you add a new ship script, keep that block. The watcher also
+   asks App Store Connect for the build's `dSYMUrl`, but Apple only fills that for bitcode
+   builds; for ours it is `null` even with `includesSymbols: true`, so the local archive is the
+   only copy. `tf_watch.py --resym <submission-id>` retries symbolication once an archive is found.
 
 Share the skill by copying this directory into another repo's `.claude/skills/` (or into
 `~/.claude/skills/` for every repo on one Mac). Nothing in it is specific to the familiar
