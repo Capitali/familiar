@@ -251,6 +251,12 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
             .filter(|p| !approvals.iter().any(|a| a.id == p.id))
             .count()
     };
+    // The captain's standing orders, counted (T-246); the list is at /ships/{id}/orders.
+    let orders_count = {
+        let all = familiar_whisker::store::load_orders(&s.dir);
+        json!({"pending": all.iter().filter(|o| o.pending() && o.waits.is_none()).count(),
+               "waiting": all.iter().filter(|o| o.pending() && o.waits.is_some()).count()})
+    };
     json!({
         "world": s.world.id, "label": s.world.label, "captain": s.captain.captain,
         // Identity, and the route built HERE. A client that assembles a brief path
@@ -291,6 +297,8 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
                    "realized_on_closed": est_realized},
         "dial": dial.settings,
         "open_proposals": open_proposals,
+        // The captain's standing orders, counted (T-246); the list is at /ships/{id}/orders.
+        "orders": orders_count,
         // The CAPTAIN's computer (T-236 as Ian ruled it, 2026-09-04): one persona
         // across their whole fleet, with a ship-local record as the fallback.
         // The iPad's persona reader is STRICT by design (an unknown field is a broken
@@ -879,6 +887,87 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                     "if_stranded": "sell what this berth will take for credits, wait for a load whose                                 origin is reachable, ask another captain (metal#75 proposes fuel                                 between hulls), or call the tanker knowingly",
                 }),
             )
+        }
+        // The captain's standing orders on a hull (T-246): list, place, withdraw.
+        ("GET", ["ships", id, "orders"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            (
+                200,
+                json!({"tick": tick, "tick_seconds": tick_seconds,
+                         "orders": familiar_whisker::store::load_orders(&s.dir)}),
+            )
+        }
+        ("POST", ["ships", id, "orders"]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let Ok(b) = serde_json::from_slice::<Value>(&req.body) else {
+                return (400, json!({"error": "json"}));
+            };
+            let verb = b
+                .get("verb")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !["repair", "refuel", "payLease"].contains(&verb.as_str()) {
+                return (400, json!({"error": "verb is repair, refuel or payLease"}));
+            }
+            let when = b
+                .get("when")
+                .and_then(Value::as_str)
+                .unwrap_or("next-docking")
+                .to_string();
+            if !["next-docking", "now"].contains(&when.as_str()) {
+                return (400, json!({"error": "when is next-docking or now"}));
+            }
+            let amount = b.get("amount").and_then(Value::as_i64);
+            if verb == "payLease" && amount.unwrap_or(0) <= 0 {
+                return (400, json!({"error": "payLease needs amount"}));
+            }
+            let mut orders = familiar_whisker::store::load_orders(&s.dir);
+            let order = familiar_whisker::store::Order {
+                id: format!("ord-{}-{}", now, orders.len() + 1),
+                verb,
+                when,
+                amount,
+                by: b
+                    .get("by")
+                    .and_then(Value::as_str)
+                    .map(String::from)
+                    .unwrap_or_else(|| s.captain.captain.clone()),
+                at: now,
+                done_at: None,
+                waits: None,
+            };
+            orders.push(order.clone());
+            match familiar_whisker::store::save_orders(&s.dir, &orders) {
+                Ok(()) => (
+                    201,
+                    json!({"tick": tick, "tick_seconds": tick_seconds, "order": order}),
+                ),
+                Err(e) => (500, json!({"error": e.to_string()})),
+            }
+        }
+        ("DELETE", ["ships", id, "orders", oid]) => {
+            let Some(s) = find(id) else {
+                return (404, json!({"error": "no such ship"}));
+            };
+            let mut orders = familiar_whisker::store::load_orders(&s.dir);
+            let before = orders.len();
+            orders.retain(|o| !(o.id == *oid && o.pending()));
+            if orders.len() == before {
+                return (404, json!({"error": "no pending order by that id"}));
+            }
+            match familiar_whisker::store::save_orders(&s.dir, &orders) {
+                Ok(()) => (
+                    200,
+                    json!({"tick": tick, "tick_seconds": tick_seconds, "withdrawn": oid}),
+                ),
+                Err(e) => (500, json!({"error": e.to_string()})),
+            }
         }
         ("GET", ["ships", id, "dial"]) => {
             let Some(s) = find(id) else {
@@ -1568,6 +1657,44 @@ mod surface_tests {
         );
         assert_eq!(row["persona"]["name"], "Felix");
         assert_eq!(row["computer_state"]["pronouns"]["label"], pron.label);
+    }
+
+    /// T-246: orders are placed, listed and withdrawn on the feed, and counted on the row.
+    #[test]
+    fn a_captain_places_lists_and_withdraws_an_order_on_the_feed() {
+        let b = base("orders");
+        let s = hull(&b, "One", "Luke", "cpt-o");
+        let post = |body: &str| {
+            let req = Req {
+                method: "POST".into(),
+                path: format!("/ships/{}/orders", s.world.id),
+                query: BTreeMap::new(),
+                bearer: Some("tok".into()),
+                body: body.as_bytes().to_vec(),
+            };
+            handle(req, &b, &b.join("worlds"), "tok", &mut Clocks::new())
+        };
+        let (code, v) = post(r#"{"verb":"repair"}"#);
+        assert_eq!(code, 201, "{v}");
+        let oid = v["order"]["id"].as_str().unwrap().to_string();
+        assert_eq!(v["order"]["when"], "next-docking");
+        assert_eq!(v["order"]["by"], "Luke");
+        let (code, v) = post(r#"{"verb":"payLease"}"#);
+        assert_eq!(code, 400, "{v}");
+        let (code, v) = get(&format!("/ships/{}/orders", s.world.id), &b);
+        assert_eq!(code, 200);
+        assert_eq!(v["orders"].as_array().map(Vec::len), Some(1));
+        assert_eq!(ship_row(&s, &b.join("worlds"), 0)["orders"]["pending"], 1);
+        let req = Req {
+            method: "DELETE".into(),
+            path: format!("/ships/{}/orders/{oid}", s.world.id),
+            query: BTreeMap::new(),
+            bearer: Some("tok".into()),
+            body: Vec::new(),
+        };
+        let (code, v) = handle(req, &b, &b.join("worlds"), "tok", &mut Clocks::new());
+        assert_eq!(code, 200, "{v}");
+        assert!(familiar_whisker::store::load_orders(&s.dir).is_empty());
     }
 
     /// A named computer reads as named, and a hull with none reads as absent — the

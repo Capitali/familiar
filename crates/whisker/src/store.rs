@@ -158,3 +158,122 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+/// A captain's standing order on this hull (T-246, Ian 2026-09-10: "an interactive
+/// method for the captain to do manual actions… 'repair at next docking'"). The
+/// pilot files it under the captain's authority at the first fold that satisfies
+/// it, ahead of its own doctrine; a verb the key cannot file leaves the order
+/// waiting for the captain's own papers, and says so.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Order {
+    pub id: String,
+    /// `repair` | `refuel` | `payLease`
+    pub verb: String,
+    /// `next-docking` | `now`
+    #[serde(default = "next_docking")]
+    pub when: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<i64>,
+    pub by: String,
+    pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<i64>,
+    /// Why the order has not been filed: the key cannot, or the exchange refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits: Option<String>,
+}
+
+fn next_docking() -> String {
+    "next-docking".into()
+}
+
+impl Order {
+    pub fn pending(&self) -> bool {
+        self.done_at.is_none()
+    }
+
+    /// Ready to file: `now` always; `next-docking` when docked.
+    pub fn ready(&self, docked: bool) -> bool {
+        self.pending() && (self.when == "now" || docked)
+    }
+
+    /// The action body the exchange takes for this verb; None for a verb the
+    /// pilot does not know how to file.
+    pub fn action(&self) -> Option<serde_json::Value> {
+        match self.verb.as_str() {
+            "repair" => Some(serde_json::json!({"type": "repair"})),
+            "refuel" => Some(match self.amount {
+                Some(u) => serde_json::json!({"type": "refuel", "units": u}),
+                None => serde_json::json!({"type": "refuel"}),
+            }),
+            "payLease" => {
+                Some(serde_json::json!({"type": "payLease", "amount": self.amount.unwrap_or(0)}))
+            }
+            _ => None,
+        }
+    }
+}
+
+pub fn load_orders(ship_dir: &Path) -> Vec<Order> {
+    std::fs::read_to_string(ship_dir.join("orders.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_orders(ship_dir: &Path, orders: &[Order]) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec_pretty(orders)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let tmp = ship_dir.join(format!("orders.json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, ship_dir.join("orders.json"))
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    #[test]
+    fn an_order_is_ready_when_its_moment_comes_and_files_the_right_verb() {
+        let o = Order {
+            id: "ord-1".into(),
+            verb: "repair".into(),
+            when: "next-docking".into(),
+            amount: None,
+            by: "Luke".into(),
+            at: 1,
+            done_at: None,
+            waits: None,
+        };
+        assert!(!o.ready(false));
+        assert!(o.ready(true));
+        assert_eq!(o.action(), Some(serde_json::json!({"type": "repair"})));
+        let pay = Order {
+            verb: "payLease".into(),
+            when: "now".into(),
+            amount: Some(500),
+            ..o.clone()
+        };
+        assert!(pay.ready(false));
+        assert_eq!(
+            pay.action(),
+            Some(serde_json::json!({"type": "payLease", "amount": 500}))
+        );
+        assert!(Order {
+            verb: "dance".into(),
+            ..o.clone()
+        }
+        .action()
+        .is_none());
+        let done = Order {
+            done_at: Some(2),
+            ..o
+        };
+        assert!(!done.ready(true));
+        let d = std::env::temp_dir().join(format!("orders_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        save_orders(&d, std::slice::from_ref(&done)).unwrap();
+        assert_eq!(load_orders(&d), vec![done]);
+    }
+}

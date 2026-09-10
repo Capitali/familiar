@@ -1901,6 +1901,83 @@ fn main() -> ExitCode {
             }
         }
 
+        // THE CAPTAIN'S STANDING ORDERS COME FIRST (T-246). An order the fold can
+        // satisfy is filed under the captain's own authority, ahead of the doctrine
+        // and the dial: it IS the captain acting. A verb this key cannot file leaves
+        // the order waiting for the captain's papers, and says so once.
+        if tick >= pending_until {
+            let mut orders = familiar_whisker::store::load_orders(&ship_dir);
+            let docked_now = ship.docked.is_some();
+            if let Some(o) = orders
+                .iter_mut()
+                .find(|o| o.ready(docked_now) && o.waits.is_none())
+            {
+                let verb = o.verb.clone();
+                match o.action() {
+                    None => {
+                        o.waits = Some(format!("the pilot does not know how to file \"{verb}\""));
+                        let _ = familiar_whisker::store::save_orders(&ship_dir, &orders);
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "order-waits", "order": orders.iter().find(|x| x.verb == verb).map(|x| x.id.clone()),
+                                   "verb": verb, "why": "unknown verb"}),
+                        );
+                    }
+                    Some(_) if denied.contains(&verb) => {
+                        o.waits = Some(format!(
+                            "this key cannot file \"{verb}\" — the captain's own papers must (UCF-Haul, or UCF Familiar direct with the captain's key)"
+                        ));
+                        let oid = o.id.clone();
+                        let _ = familiar_whisker::store::save_orders(&ship_dir, &orders);
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "order-waits", "order": oid,
+                                   "verb": verb, "why": "this key cannot file it; the captain's own papers must"}),
+                        );
+                    }
+                    Some(body) => {
+                        let oid = o.id.clone();
+                        let by = o.by.clone();
+                        seq += 1;
+                        let id = format!("whisker-{}-{}", now_secs(), seq);
+                        match wire.act(body.clone(), &id) {
+                            Ok(ack) => {
+                                pending_until = ack
+                                    .get("resolvesAtTick")
+                                    .and_then(Value::as_i64)
+                                    .unwrap_or(tick)
+                                    + 1;
+                                if let Some(o) = orders.iter_mut().find(|x| x.id == oid) {
+                                    o.done_at = Some(now);
+                                }
+                                let _ = familiar_whisker::store::save_orders(&ship_dir, &orders);
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "order-done", "order": oid,
+                                           "verb": verb, "by": by, "action": body, "credits": ship.credits,
+                                           "fuel": ship.fuel, "docked": ship.docked, "resolves": pending_until - 1}),
+                                );
+                                std::thread::sleep(Duration::from_secs(
+                                    (tick_secs * 3 / 5).max(floor_secs),
+                                ));
+                                continue;
+                            }
+                            Err(e) => {
+                                if let Some(o) = orders.iter_mut().find(|x| x.id == oid) {
+                                    o.waits = Some(format!("refused: {e}"));
+                                }
+                                let _ = familiar_whisker::store::save_orders(&ship_dir, &orders);
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "order-refused", "order": oid,
+                                           "verb": verb, "why": e}),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // MONEY ON THE DESK FIRST (T-243 slice 0). The doctrine tracks one active
         // contract; the engine lets a hull hold three. A delivered contract that is
         // not the active one had its pay sit uncollected — KK II's L4200, ℳ684, for two

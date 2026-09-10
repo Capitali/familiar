@@ -669,6 +669,19 @@ pub(crate) fn choose_for(
     })
 }
 
+fn rec_default() -> Captain {
+    Captain {
+        captain_id: String::new(),
+        captain: "captain".into(),
+        key_id: String::new(),
+        server: String::new(),
+        automations: vec![],
+        paired_at: 0,
+        hull_name: String::new(),
+        pilot_args: vec![],
+    }
+}
+
 /// The computer's state as a typed record — named, broken (with the kernel's
 /// reason), or absent — so no surface has to infer "broken" from a missing name and
 /// tell the captain to rename a file that already has a name in it (finding 7).
@@ -1867,6 +1880,95 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
+        // ── order: the captain's own hand on a hull — "repair at next docking" ──
+        // The pilot files it under the captain's authority at the first fold that
+        // satisfies it; a verb the key cannot file waits for the captain's papers
+        // (T-246, Ian 2026-09-10).
+        "order" => {
+            let (Some(id), Some(verb)) = (positional.first(), positional.get(1)) else {
+                eprintln!("fleet order <world> repair|refuel|payLease [--when next-docking|now] [--amount N] [--by <who>]");
+                return ExitCode::FAILURE;
+            };
+            if !["repair", "refuel", "payLease"].contains(&verb.as_str()) {
+                eprintln!(
+                    "fleet order: the verbs a captain can order are repair, refuel, payLease"
+                );
+                return ExitCode::FAILURE;
+            }
+            let ship_dir = root.join(id.as_str());
+            let Ok(text) = std::fs::read_to_string(ship_dir.join("captain.json")) else {
+                eprintln!("fleet order: no paired ship {id}");
+                return ExitCode::FAILURE;
+            };
+            let captain: Captain = serde_json::from_str(&text).unwrap_or_else(|_| rec_default());
+            let when = f
+                .get("when")
+                .cloned()
+                .unwrap_or_else(|| "next-docking".into());
+            if !["next-docking", "now"].contains(&when.as_str()) {
+                eprintln!("fleet order: --when is next-docking or now");
+                return ExitCode::FAILURE;
+            }
+            let amount = f.get("amount").and_then(|a| a.parse::<i64>().ok());
+            if verb.as_str() == "payLease" && amount.unwrap_or(0) <= 0 {
+                eprintln!("fleet order: payLease needs --amount N");
+                return ExitCode::FAILURE;
+            }
+            let mut orders = familiar_whisker::store::load_orders(&ship_dir);
+            let order = familiar_whisker::store::Order {
+                id: format!("ord-{}-{}", super::now_secs(), orders.len() + 1),
+                verb: verb.to_string(),
+                when: when.clone(),
+                amount,
+                by: f
+                    .get("by")
+                    .cloned()
+                    .unwrap_or_else(|| captain.captain.clone()),
+                at: super::now_secs(),
+                done_at: None,
+                waits: None,
+            };
+            orders.push(order.clone());
+            if let Err(e) = familiar_whisker::store::save_orders(&ship_dir, &orders) {
+                eprintln!("fleet order: {e}");
+                return ExitCode::FAILURE;
+            }
+            println!("order {}: {verb} {} — by {}", order.id, when, order.by);
+            ExitCode::SUCCESS
+        }
+        "orders" => {
+            let Some(id) = positional.first() else {
+                eprintln!("fleet orders <world>");
+                return ExitCode::FAILURE;
+            };
+            let orders = familiar_whisker::store::load_orders(&root.join(id.as_str()));
+            if f.contains_key("json") {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&orders).unwrap_or_default()
+                );
+                return ExitCode::SUCCESS;
+            }
+            if orders.is_empty() {
+                println!("no orders on {id}");
+            }
+            for o in &orders {
+                let state = match (&o.done_at, &o.waits) {
+                    (Some(t), _) => format!("done at {t}"),
+                    (None, Some(w)) => format!("waits: {w}"),
+                    (None, None) => "pending".into(),
+                };
+                println!(
+                    "  {} {} {}{} — by {} — {state}",
+                    o.id,
+                    o.verb,
+                    o.when,
+                    o.amount.map(|a| format!(" ℳ{a}")).unwrap_or_default(),
+                    o.by
+                );
+            }
+            ExitCode::SUCCESS
+        }
         // ── economy: the captain's money over time, from the journals ──────────
         "economy" => {
             let ships = paired_ships(&dir, &root);
@@ -2325,7 +2427,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | names | adopt-ids | rename | hull | choose | run | serve");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | order | orders | names | adopt-ids | rename | hull | choose | run | serve");
             ExitCode::FAILURE
         }
     }
@@ -3412,6 +3514,83 @@ mod captain_store_tests {
             .find(|s| s.world.label == "eye")
             .unwrap();
         assert!(eye.captain.automations.is_empty());
+    }
+
+    /// T-246: a captain's order lands in the hull's store, listed with its state.
+    #[test]
+    fn a_captains_order_is_kept_on_the_hull() {
+        let base = tmp("orders");
+        let server = stub_exchange(1);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "kk",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let ship = paired_ships(&base, &root).remove(0);
+        let args = |extra: &[&str]| -> Vec<String> {
+            let mut v: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
+            v.extend([
+                "--data-dir".to_string(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ]);
+            v
+        };
+        assert_eq!(
+            cmd_fleet(&args(&["order", &ship.world.id, "repair"])),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&args(&["order", &ship.world.id, "payLease"])),
+            ExitCode::FAILURE,
+            "payLease needs an amount"
+        );
+        assert_eq!(
+            cmd_fleet(&args(&[
+                "order",
+                &ship.world.id,
+                "payLease",
+                "--amount",
+                "500",
+                "--when",
+                "now"
+            ])),
+            ExitCode::SUCCESS
+        );
+        assert_eq!(
+            cmd_fleet(&args(&["order", &ship.world.id, "dance"])),
+            ExitCode::FAILURE
+        );
+        let orders = familiar_whisker::store::load_orders(&ship.dir);
+        assert_eq!(orders.len(), 2);
+        assert_eq!(
+            (
+                orders[0].verb.as_str(),
+                orders[0].when.as_str(),
+                orders[0].by.as_str()
+            ),
+            ("repair", "next-docking", "A. Captain")
+        );
+        assert_eq!(
+            (
+                orders[1].verb.as_str(),
+                orders[1].when.as_str(),
+                orders[1].amount
+            ),
+            ("payLease", "now", Some(500))
+        );
+        assert!(orders.iter().all(|o| o.pending()));
+        assert_eq!(
+            cmd_fleet(&args(&["orders", &ship.world.id])),
+            ExitCode::SUCCESS
+        );
     }
 
     /// One key is one hull: pairing a key that already flies a world is refused with
