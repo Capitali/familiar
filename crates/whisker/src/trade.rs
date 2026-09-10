@@ -993,7 +993,13 @@ pub fn decide_trade(
             // for the miles — the litter-clay lesson. Spoilage is charged here, on
             // the new position, not only on lots already held.
             let landing = surviving_units(&q.good, units, sell_ticks, l);
-            let net = unit_value * landing - q.ask * units - cost * l.fuel_price.max(0);
+            // The berth charges to dock: a run's cost beside the fuel (the reference
+            // prices it; the pilot never charged it until 2026-09-09).
+            let dock = l
+                .forecast
+                .and_then(|f| f.pricing.dock.get(row.station.as_str()).copied())
+                .unwrap_or(0);
+            let net = unit_value * landing - q.ask * units - cost * l.fuel_price.max(0) - dock;
             if net < MIN_TOTAL_MARGIN {
                 too_small += 1;
                 continue;
@@ -1217,6 +1223,30 @@ mod tests {
         l.forecast = Some(&fc);
         let d = decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true));
         assert!(!matches!(d, TradeDecision::Buy { .. }), "{d:?}");
+    }
+
+    /// The berth's dock fee is part of the run's cost: a run that clears the floor by
+    /// less than the fee does not clear it.
+    #[test]
+    fn a_dock_fee_is_charged_against_the_run() {
+        let board = vec![q("brine", 24, 20, 500)];
+        let galaxy = vec![row("brine", "works-b", 34)];
+        let mut l = at("here", 150);
+        let mut fc = eating("works-b", "brine", 500, 600, 13_333, 30, 9_000);
+        l.forecast = Some(&fc);
+        let before = match decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true)) {
+            TradeDecision::Buy { est_margin, .. } => est_margin,
+            other => panic!("{other:?}"),
+        };
+        fc.pricing.dock.insert("works-b".into(), 12);
+        let l2 = Ledger {
+            forecast: Some(&fc),
+            ..at("here", 150)
+        };
+        match decide_trade(&l2, &board, &galaxy, &[], &pumps(), &Reach(true)) {
+            TradeDecision::Buy { est_margin, .. } => assert_eq!(est_margin, before - 12),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// The fleet works together: works-b is starving and the run pays — unless a

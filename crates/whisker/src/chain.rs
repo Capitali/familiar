@@ -359,6 +359,8 @@ pub struct Pricing {
     pub goods: BTreeMap<String, (i64, i64)>,
     /// station → spreadBps (absent for a berth the caller has not earned)
     pub spread: BTreeMap<String, i64>,
+    /// station → dockFee ℳ, paid on every docking: a run's cost beside the fuel.
+    pub dock: BTreeMap<String, i64>,
 }
 
 pub fn parse_pricing(reference: &Value) -> Pricing {
@@ -379,9 +381,8 @@ pub fn parse_pricing(reference: &Value) -> Pricing {
                 .collect()
         })
         .unwrap_or_default();
-    let spread = reference
-        .get("stations")
-        .and_then(Value::as_array)
+    let stations = reference.get("stations").and_then(Value::as_array);
+    let spread = stations
         .map(|rows| {
             rows.iter()
                 .filter_map(|st| {
@@ -393,7 +394,23 @@ pub fn parse_pricing(reference: &Value) -> Pricing {
                 .collect()
         })
         .unwrap_or_default();
-    Pricing { goods, spread }
+    let dock = stations
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|st| {
+                    Some((
+                        st.get("id")?.as_str()?.to_string(),
+                        st.get("dockFee").and_then(Value::as_i64)?,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Pricing {
+        goods,
+        spread,
+        dock,
+    }
 }
 
 /// The exchange's clamp rails on the price multiplier (`Pricing.swift`).

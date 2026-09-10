@@ -496,6 +496,7 @@ fn main() -> ExitCode {
     let mut pending_trade: Option<PendingTrade> = None;
     // The chain's last word, so the forecast is journaled on change rather than every fold.
     let mut last_forecast: Vec<String> = Vec::new();
+    let mut last_fleet_inbound: Vec<String> = Vec::new();
     // The world's day, in ticks: the exchange's minimum hold on bought goods is a
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
@@ -1422,6 +1423,21 @@ fn main() -> ExitCode {
                 // What the captain's other hulls already have bound for each shelf.
                 let mut forecast = forecast;
                 forecast.inbound = fleet_inbound(&ship_dir);
+                // Say what the fleet has on its way, once per change: the soak's
+                // evidence that the hulls read each other (T-244).
+                let fleet_now: Vec<String> = forecast
+                    .inbound
+                    .iter()
+                    .map(|((st, g), u)| format!("{u} {g} → {st}"))
+                    .collect();
+                if fleet_now != last_fleet_inbound {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "fleet-inbound",
+                               "sisters": fleet_now}),
+                    );
+                    last_fleet_inbound = fleet_now;
+                }
                 fold_forecast = Some(forecast.clone());
                 // Say what the chain sees, once per change — the soak's evidence that
                 // the merchant is reading the map and not only the counter.
