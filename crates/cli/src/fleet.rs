@@ -531,6 +531,24 @@ pub(crate) fn adopt_siblings(
     Ok(n)
 }
 
+/// Captain records on worlds that are no longer flown (decommissioned, or with no key
+/// held): the identities live on. A captain who unpairs every hull and pairs a new
+/// one is the same captain with the same computer, not a stranger with a fresh Purr
+/// (Ian, 2026-09-08: we do not forget names; the LOCAL soak twin lost Felix to a
+/// re-pairing on 2026-09-09).
+pub(crate) fn retired_captains(dir: &Path, root: &Path) -> Vec<Captain> {
+    let Ok(all) = instance::load(dir) else {
+        return Vec::new();
+    };
+    all.into_iter()
+        .filter_map(|w| {
+            let text = std::fs::read_to_string(root.join(&w.id).join("captain.json")).ok()?;
+            let c: Captain = serde_json::from_str(&text).ok()?;
+            (!c.captain_id.trim().is_empty()).then_some(c)
+        })
+        .collect()
+}
+
 /// Give this captain an identity, once, and bring their computer with them.
 ///
 /// `siblings` is every paired ship's record — ALL of them, not the ones visited so
@@ -1188,10 +1206,13 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             // Identity first: siblings decide it, because two hulls can share a
             // captain and a second pairing must join the computer that already flies
             // for them rather than mint a rival.
-            let siblings: Vec<Captain> = paired_ships(&dir, &root)
+            let mut siblings: Vec<Captain> = paired_ships(&dir, &root)
                 .into_iter()
                 .map(|s| s.captain)
                 .collect();
+            // ...and the captains of hulls no longer flown: an identity outlives its
+            // last hull, and a re-pairing joins it rather than minting a stranger.
+            siblings.extend(retired_captains(&dir, &root));
             let computer_name = f.get("computer-name").cloned();
             let mut pending = Captain {
                 captain_id: String::new(),
@@ -2474,20 +2495,33 @@ mod captain_store_tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
-            for n in 0..requests {
+            // Serve at least a generous budget: a test that grows a request is not a
+            // test of the stub's arithmetic.
+            for n in 0..requests.max(64) {
                 let Ok((mut conn, _)) = listener.accept() else {
                     return;
                 };
                 let mut buf = [0u8; 4096];
                 let mut got = Vec::new();
+                // Read the whole request — headers, then a Content-Length body if
+                // one is declared — before answering, or a POST's body meets a
+                // closed socket and the client reads a reset.
                 loop {
                     let n = conn.read(&mut buf).unwrap_or(0);
                     if n == 0 {
                         break;
                     }
                     got.extend_from_slice(&buf[..n]);
-                    if got.windows(4).any(|w| w == b"\r\n\r\n") {
-                        break;
+                    if let Some(end) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&got[..end]).to_lowercase();
+                        let want: usize = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse().ok())
+                            .unwrap_or(0);
+                        if got.len() >= end + 4 + want {
+                            break;
+                        }
                     }
                 }
                 // A distinct hull name per pairing: two ships cannot have the same name.
@@ -3247,6 +3281,61 @@ mod captain_store_tests {
         assert_eq!(
             (row.name.as_str(), row.from.as_str(), row.by.as_str()),
             ("SkyWhisker Tuna", "Probe 0", "Luke")
+        );
+    }
+
+    /// A captain's identity outlives their last hull: pair, unpair, pair again — the
+    /// same captain id, the same computer with the same name (we do not forget).
+    #[test]
+    fn a_captain_identity_survives_unpairing_every_hull() {
+        let base = tmp("identity_survives");
+        let server = stub_exchange(2);
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "one",
+                "ucfk_aaaaaaaaaaaaaaaaaaaa",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let first = paired_ships(&base, &root).remove(0);
+        let args = |sub: &str, world: &str| -> Vec<String> {
+            vec![
+                sub.into(),
+                world.into(),
+                "--data-dir".into(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".into(),
+                root.to_string_lossy().into_owned(),
+            ]
+        };
+        assert_eq!(
+            cmd_fleet(&args("unpair", &first.world.id)),
+            ExitCode::SUCCESS
+        );
+        assert!(paired_ships(&base, &root).is_empty());
+        assert_eq!(
+            cmd_fleet(&pair_args(
+                &base,
+                &server,
+                "two",
+                "ucfk_bbbbbbbbbbbbbbbbbbbb",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let again = paired_ships(&base, &root).remove(0);
+        assert_eq!(
+            again.captain.captain_id, first.captain.captain_id,
+            "the same captain"
+        );
+        assert_eq!(
+            persona_for(&root, &again.dir, &again.captain).unwrap()["name"],
+            "Felix",
+            "the same computer"
         );
     }
 
