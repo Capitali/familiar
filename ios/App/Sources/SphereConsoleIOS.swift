@@ -103,9 +103,6 @@ struct SphereConsoleIOS: View {
             bridge.onInviteRedeem = { [weak model] payload in
                 Task { await model?.redeemInvite(payload) }
             }
-            bridge.onGame = { [weak model] act, kind, text, to, solo in
-                Task { await model?.gameAct(act, kind: kind, text: text, to: to, solo: solo) }
-            }
             bridge.onDeviceRole = { [weak model] roleRaw, owner in
                 guard let role = DeviceRole(rawValue: roleRaw) else { return }
                 model?.setDeviceBinding(role: role, owner: owner)
@@ -285,7 +282,6 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
     var onFederate: ((String, String) -> Void)?
     var onSponsor: ((String, String) -> Void)?
     var onInviteRedeem: ((String) -> Void)?
-    var onGame: ((String, String?, String, String, Bool) -> Void)?
     var onDeviceRole: ((String, String) -> Void)?
     var onRuleDisable: ((String) -> Void)?
     var onDeviceName: ((String) -> Void)?
@@ -435,15 +431,23 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             let coord = CLLocationCoordinate2D(latitude: n["lat"] as? Double ?? 0,
                                                longitude: n["lon"] as? Double ?? 0)
             let p = map.convert(coord, toPointTo: map)
+            // Mid-zoom (and for a coordinate the current projection cannot place) MapKit
+            // hands back NaN or ±inf. JSONSerialization refuses those with an Objective-C
+            // exception that Swift's `try?` cannot catch, and the app aborts — TestFlight
+            // builds 82, 93 and 100 all died here (Capitali/familiar#11). A node with no
+            // place on screen this frame is simply left off the arc this frame.
+            guard p.x.isFinite, p.y.isFinite else { continue }
             pts.append(["x": p.x, "y": p.y,
                         "label": n["label"] as? String ?? "",
                         "frontier": n["frontier"] as? Bool ?? false,
                         "self": n["self"] as? Bool ?? false])
         }
-        if let data = try? JSONSerialization.data(withJSONObject: pts),
-           let json = String(data: data, encoding: .utf8) {
-            web.evaluateJavaScript("window.streetArcPoints(\(json))", completionHandler: nil)
-        }
+        // Belt and braces: isValidJSONObject is the only pre-flight that sees what the
+        // writer will reject, and it never throws.
+        guard JSONSerialization.isValidJSONObject(pts),
+              let data = try? JSONSerialization.data(withJSONObject: pts),
+              let json = String(data: data, encoding: .utf8) else { return }
+        web.evaluateJavaScript("window.streetArcPoints(\(json))", completionHandler: nil)
     }
 
     // Same choreography as the Mac console: surface at matched altitude, descend with the
@@ -518,13 +522,6 @@ final class SphereBridgeIOS: NSObject, ObservableObject, WKScriptMessageHandler,
             case "deviceRole":
                 if let roleRaw = body["role"] as? String {
                     self.onDeviceRole?(roleRaw, body["owner"] as? String ?? "")
-                }
-            case "game":
-                // game_kind, not "kind" — the routing key would be overwritten (see Mac bridge).
-                if let act = body["act"] as? String {
-                    self.onGame?(act, body["game_kind"] as? String,
-                                 body["text"] as? String ?? "", body["to"] as? String ?? "",
-                                 body["solo"] as? Bool ?? false)
                 }
             case "setHuman":
                 if let name = body["name"] as? String, !name.isEmpty { self.onSetHuman?(name) }
