@@ -489,7 +489,7 @@ fn main() -> ExitCode {
         })
         .unwrap_or(-1);
     // The merchant's speculative book (ADR-0045: lives in the ship's own store).
-    let trades = granted.contains(&Automation::Trade);
+    let mut trades = granted.contains(&Automation::Trade);
     let mut last_carry_block = String::new();
     let mut last_merchant_idle = String::new();
     // A filed trade whose fold has not been read back from the receipt trail yet.
@@ -620,7 +620,7 @@ fn main() -> ExitCode {
         .as_ref()
         .and_then(|v| v.get("params")?.get("mortgagePaymentPerDay")?.as_i64())
         .unwrap_or(600);
-    let outfits = granted.contains(&Automation::Outfit);
+    let mut outfits = granted.contains(&Automation::Outfit);
     let mut deliveries: Vec<DeliveryStat> =
         std::fs::read_to_string(ship_dir.join("deliveries.jsonl"))
             .map(|j| {
@@ -1165,11 +1165,24 @@ fn main() -> ExitCode {
                                 ));
                                 continue;
                             }
-                            Err(e) => journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
+                            Err(e) => {
+                                // A verb the key cannot file at all is not a refusal to retry: drop the
+                                // automation for this run and say so once (KBC-04 on a co-pilot key,
+                                // 2026-09-09: a buy filed and refused every fold).
+                                if e.contains("verb_not_permitted") && outfits {
+                                    outfits = false;
+                                    journal(
+                                        &ship_dir,
+                                        json!({"at": now, "tick": tick, "event": "automation-refused",
+                                        "automation": "outfit", "why": e}),
+                                    );
+                                }
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick,
                                 "event": "refit-refused", "fitting": fitting.wire(), "why": e}),
-                            ),
+                                );
+                            }
                         }
                     }
                     OutfitDecision::Refit { .. } => {} // advised or proposed
@@ -1208,11 +1221,24 @@ fn main() -> ExitCode {
                                 ));
                                 continue;
                             }
-                            Err(e) => journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
+                            Err(e) => {
+                                // A verb the key cannot file at all is not a refusal to retry: drop the
+                                // automation for this run and say so once (KBC-04 on a co-pilot key,
+                                // 2026-09-09: a buy filed and refused every fold).
+                                if e.contains("verb_not_permitted") && outfits {
+                                    outfits = false;
+                                    journal(
+                                        &ship_dir,
+                                        json!({"at": now, "tick": tick, "event": "automation-refused",
+                                        "automation": "outfit", "why": e}),
+                                    );
+                                }
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick,
                                 "event": "frame-refused", "frame": frame, "cost": cost, "why": e}),
-                            ),
+                                );
+                            }
                         }
                     }
                     OutfitDecision::ExpandFrame { .. } => {} // advised or proposed
@@ -1251,11 +1277,24 @@ fn main() -> ExitCode {
                                 ));
                                 continue;
                             }
-                            Err(e) => journal(
-                                &ship_dir,
-                                json!({"at": now, "tick": tick,
+                            Err(e) => {
+                                // A verb the key cannot file at all is not a refusal to retry: drop the
+                                // automation for this run and say so once (KBC-04 on a co-pilot key,
+                                // 2026-09-09: a buy filed and refused every fold).
+                                if e.contains("verb_not_permitted") && outfits {
+                                    outfits = false;
+                                    journal(
+                                        &ship_dir,
+                                        json!({"at": now, "tick": tick, "event": "automation-refused",
+                                        "automation": "outfit", "why": e}),
+                                    );
+                                }
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick,
                                 "event": "pay-down-refused", "amount": amount, "why": e}),
-                            ),
+                                );
+                            }
                         }
                     }
                     OutfitDecision::PayLease { .. } => {} // advised or proposed
@@ -1720,11 +1759,24 @@ fn main() -> ExitCode {
                                 "credits": ship.credits, "why": why, "resolves": resolves}),
                             );
                         }
-                        Err(e) => journal(
-                            &ship_dir,
-                            json!({"at": now, "tick": tick,
+                        Err(e) => {
+                            // A verb the key cannot file at all is not a refusal to retry: drop the
+                            // automation for this run and say so once (KBC-04 on a co-pilot key,
+                            // 2026-09-09: a buy filed and refused every fold).
+                            if e.contains("verb_not_permitted") && trades {
+                                trades = false;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "automation-refused",
+                                    "automation": "trade", "why": e}),
+                                );
+                            }
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick,
                             "event": "trade-refused", "side": if is_sell {"sell"} else {"buy"}, "good": good, "why": e}),
-                        ),
+                            );
+                        }
                     }
                     std::thread::sleep(Duration::from_secs((tick_secs * 3 / 5).max(floor_secs)));
                     continue;

@@ -1172,6 +1172,37 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
+            // Grant only what the KEY can file. A co-pilot key (read + auto:freight)
+            // hauls and nothing else; a read-only key watches. Pairing KBC-04 with
+            // trade and outfit on a co-pilot key had its merchant filing a buy every
+            // fold and the exchange refusing every one (2026-09-09).
+            let scopes: Vec<String> = wire_get(server, &key, "/v1/profile")
+                .ok()
+                .and_then(|p| {
+                    p.get("scopes").and_then(Value::as_array).map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                })
+                .unwrap_or_default();
+            let allowed: &[&str] = if scopes.iter().any(|s| s == "act") {
+                &["freight", "trade", "outfit"]
+            } else if scopes.iter().any(|s| s == "auto:freight") {
+                &["freight"]
+            } else {
+                &[]
+            };
+            let asked = automations.clone();
+            let automations: Vec<String> = automations
+                .into_iter()
+                .filter(|a| allowed.contains(&a.as_str()))
+                .collect();
+            if automations.len() < asked.len() {
+                println!(
+                    "  the key's scopes {scopes:?} allow {allowed:?}: automations trimmed to {automations:?}"
+                );
+            }
             let key_id = key
                 .trim_start_matches("ucfk_")
                 .chars()
@@ -2491,7 +2522,15 @@ mod captain_store_tests {
     /// as many pairings as the test makes, so `fleet pair` can be driven end to end
     /// with no network and no key that means anything.
     fn stub_exchange(requests: usize) -> String {
+        stub_exchange_scoped(requests, r#"["read","act"]"#)
+    }
+
+    /// The same stub, answering `/v1/profile` with these scopes.
+    fn stub_exchange_scoped(requests: usize, scopes: &'static str) -> String {
         use std::io::{Read, Write};
+        // Hull names must be unique across every stub a test process opens: two
+        // ships cannot have the same name, and the fleet enforces it.
+        static NAMES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
@@ -2525,7 +2564,10 @@ mod captain_store_tests {
                     }
                 }
                 // A distinct hull name per pairing: two ships cannot have the same name.
-                let body = format!(r#"{{"shipName":"Probe {n}","actor":"key:test"}}"#);
+                let _ = n;
+                let n = NAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let body =
+                    format!(r#"{{"shipName":"Probe {n}","actor":"key:test","scopes":{scopes}}}"#);
                 let body = body.as_bytes();
                 let _ = write!(
                     conn,
@@ -3087,7 +3129,7 @@ mod captain_store_tests {
         );
         assert!(ledger
             .iter()
-            .any(|e| e.kind == "hull" && e.name == "Probe 0"));
+            .any(|e| e.kind == "hull" && !e.name.is_empty()));
         assert!(ledger
             .iter()
             .any(|e| e.kind == "captain" && e.name == "Luke"));
@@ -3253,10 +3295,11 @@ mod captain_store_tests {
                 root.to_string_lossy().into_owned(),
             ]
         };
+        let sisters_name = ships[1].captain.hull_name.clone();
         assert_eq!(
-            cmd_fleet(&args(&ships[0].world.id, "Probe 1")),
+            cmd_fleet(&args(&ships[0].world.id, &sisters_name)),
             ExitCode::FAILURE,
-            "the sister already wears Probe 1"
+            "the sister already wears {sisters_name}"
         );
         assert_eq!(
             cmd_fleet(&args(&ships[0].world.id, "SkyWhisker Tuna")),
@@ -3280,7 +3323,11 @@ mod captain_store_tests {
             .unwrap();
         assert_eq!(
             (row.name.as_str(), row.from.as_str(), row.by.as_str()),
-            ("SkyWhisker Tuna", "Probe 0", "Luke")
+            (
+                "SkyWhisker Tuna",
+                ships[0].captain.hull_name.as_str(),
+                "Luke"
+            )
         );
     }
 
@@ -3337,6 +3384,34 @@ mod captain_store_tests {
             "Felix",
             "the same computer"
         );
+    }
+
+    /// A key is granted only what it can file: a co-pilot key pairs with freight
+    /// alone whatever was asked; a read-only key pairs with nothing.
+    #[test]
+    fn automations_are_capped_by_the_keys_scopes() {
+        let base = tmp("scopes");
+        let copilot = stub_exchange_scoped(2, r#"["read","auto:freight"]"#);
+        let mut v = pair_args(&base, &copilot, "kbc", "ucfk_aaaaaaaaaaaaaaaaaaaa", None);
+        v.extend([
+            "--automations".to_string(),
+            "freight,trade,outfit".to_string(),
+        ]);
+        assert_eq!(cmd_fleet(&v), ExitCode::SUCCESS);
+        let root = base.join("worlds");
+        assert_eq!(
+            paired_ships(&base, &root)[0].captain.automations,
+            vec!["freight".to_string()]
+        );
+        let watcher = stub_exchange_scoped(2, r#"["read"]"#);
+        let mut v = pair_args(&base, &watcher, "eye", "ucfk_bbbbbbbbbbbbbbbbbbbb", None);
+        v.extend(["--automations".to_string(), "freight,trade".to_string()]);
+        assert_eq!(cmd_fleet(&v), ExitCode::SUCCESS);
+        let eye = paired_ships(&base, &root)
+            .into_iter()
+            .find(|s| s.world.label == "eye")
+            .unwrap();
+        assert!(eye.captain.automations.is_empty());
     }
 
     /// One key is one hull: pairing a key that already flies a world is refused with
@@ -3554,9 +3629,9 @@ mod captain_store_tests {
         assert!(got.iter().any(|e| e.kind == "captain"
             && e.name == "A. Captain"
             && e.holder == ship.captain.captain_id));
-        assert!(got
-            .iter()
-            .any(|e| e.kind == "hull" && e.name == "Probe 0" && e.holder == ship.world.id));
+        assert!(got.iter().any(|e| e.kind == "hull"
+            && e.name == ship.captain.hull_name
+            && e.holder == ship.world.id));
         assert!(
             got.iter()
                 .any(|e| e.kind == "computer" && e.name == "Mrs. Norris" && e.at == 1_900_000_000),
