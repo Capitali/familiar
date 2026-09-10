@@ -64,6 +64,10 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist /tmp/UCFFa
   -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 IPA=$(ls "$EXPORT"/*.ipa | head -1)
 xcrun altool --upload-app --type ios --file "$IPA" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+# Keep the archive (and its dSYMs) where Xcode Organizer and xcsym look, so a TestFlight
+# crash from this build can be symbolicated months later. /tmp is wiped on reboot.
+KEEP="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/UCFFamiliar $BUILD $(date +%H.%M).xcarchive"
+mkdir -p "$(dirname "$KEEP")" && cp -R "$ARCHIVE" "$KEEP" && echo "✓ archive kept at $KEEP"
 echo "✓ UCF Familiar $BUILD uploaded — TestFlight after processing"
 
 # Direct install to the household's own devices, exactly as ship.sh does for the

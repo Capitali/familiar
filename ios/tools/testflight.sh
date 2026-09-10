@@ -56,5 +56,10 @@ IPA=$(ls "$EXPORT"/*.ipa | head -1)
 echo "== upload $IPA =="
 xcrun altool --upload-app --type ios --file "$IPA" \
   --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+# Keep the archive (and its dSYMs) where Xcode Organizer and xcsym look, so a TestFlight
+# crash from this build can be symbolicated months later. /tmp is wiped on reboot.
+BUILD_NO="$(grep -m1 CURRENT_PROJECT_VERSION project.yml | grep -oE '[0-9]+' || echo unknown)"
+KEEP="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/FamiliarAgent $BUILD_NO $(date +%H.%M).xcarchive"
+mkdir -p "$(dirname "$KEEP")" && cp -R "$ARCHIVE" "$KEEP" && echo "✓ archive kept at $KEEP"
 
 echo "✓ uploaded — appears under App Store Connect → your app → TestFlight after processing (~5-15 min)."

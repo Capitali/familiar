@@ -1,0 +1,37 @@
+{
+  "key_id": "XXXXXXXXXX",
+  "issuer_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "key_path": "~/.appstoreconnect/private_keys/AuthKey_XXXXXXXXXX.p8",
+  "state_dir": "~/Library/Application Support/tf-watch",
+  "notify": {
+    "macos": true
+  },
+  "apps": [
+    {
+      "name": "UCF Familiar",
+      "bundle_id": "io.river.familiar.ucf",
+      "repo": "Capitali/familiar",
+      "repo_path": "~/Development/familiar",
+      "build_commit_grep": "UCF Familiar build {build}",
+      "labels": [
+        "testflight"
+      ],
+      "crash_labels": [
+        "bug"
+      ]
+    },
+    {
+      "name": "Familiar Agent",
+      "bundle_id": "io.river.familiar.ios",
+      "repo": "Capitali/familiar",
+      "repo_path": "~/Development/familiar",
+      "build_commit_grep": "build {build}",
+      "labels": [
+        "testflight"
+      ],
+      "crash_labels": [
+        "bug"
+      ]
+    }
+  ]
+}
