@@ -544,6 +544,38 @@ fn main() -> ExitCode {
     // are on /v1/reference; capacity and equilibrium per (station, good) are on each
     // station's quotes and are static, so they are swept ONCE here and merged with
     // live stock from the galaxy every fold. /v1/galaxy/prices carries neither.
+    // What this key may NOT file, from its papers: a co-pilot key (no `act`) files
+    // travel, book, cancelBooking, collect, refuel and engage and nothing else —
+    // never repair, never a tanker call. Told to the doctrine so it decides what
+    // the key can do; and learned at the door, in case the papers change.
+    let mut denied: Vec<String> = {
+        let scopes: Vec<String> = wire
+            .get("/v1/profile")
+            .ok()
+            .and_then(|p| {
+                p.get("scopes").and_then(Value::as_array).map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        if scopes.is_empty() || scopes.iter().any(|s| s == "act") {
+            Vec::new()
+        } else {
+            ["repair", "paws", "refit", "payLease", "expandFrame"]
+                .into_iter()
+                .map(String::from)
+                .collect()
+        }
+    };
+    if !denied.is_empty() {
+        journal(
+            &ship_dir,
+            json!({"at": now_secs(), "event": "automation-refused",
+                   "automation": "verbs", "why": format!("this key's papers cannot file {denied:?}")}),
+        );
+    }
     let recipes = reference
         .as_ref()
         .map(chain::parse_recipes)
@@ -700,7 +732,8 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let ship = familiar_whisker::wire::ship_from(&me, repair_rate);
+        let mut ship = familiar_whisker::wire::ship_from(&me, repair_rate);
+        ship.denied = denied.clone();
         let route_now: Vec<String> = me
             .get("route")
             .and_then(Value::as_array)
@@ -2101,6 +2134,27 @@ fn main() -> ExitCode {
                         // Keep the id: the exchange may have taken the order before the
                         // wire broke, and the retry next fold must carry the same id.
                         recent.insert(sig, (tick, action_id));
+                        // A verb the key cannot file at all: learn it, so the doctrine
+                        // stops deciding it (the papers said nothing, or changed).
+                        if e.contains("verb_not_permitted") {
+                            let verb = match &decision {
+                                Decision::Repair => "repair",
+                                Decision::CallPaws => "paws",
+                                Decision::Refuel | Decision::DivertToPump { .. } => "refuel",
+                                Decision::Book { .. } => "book",
+                                Decision::Collect { .. } => "collect",
+                                Decision::Travel { .. } => "travel",
+                                _ => "",
+                            };
+                            if !verb.is_empty() && !denied.iter().any(|v| v == verb) {
+                                denied.push(verb.to_string());
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "automation-refused",
+                                    "automation": format!("verb:{verb}"), "why": e}),
+                                );
+                            }
+                        }
                         journal(
                             &ship_dir,
                             json!({"at": now, "tick": tick,

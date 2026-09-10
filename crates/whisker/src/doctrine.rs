@@ -52,6 +52,11 @@ pub struct Ship {
     pub fuel: i64,
     pub fuel_capacity: i64,
     pub credits: i64,
+    /// Verbs this hull's KEY may not file (a co-pilot key files travel, book,
+    /// cancelBooking, collect, refuel and engage — never repair, never a tanker
+    /// call). A decision the key cannot file is not a decision; the doctrine
+    /// passes it by and says so. Empty = everything permitted.
+    pub denied: Vec<String>,
 }
 
 /// One row of the open load board (a subset of `/v1/loadboard`).
@@ -573,6 +578,13 @@ pub fn decide(
             .and_then(|here| reachable_pump(here, ship, pumps, router))
             .is_some();
         if !at_pump && !can_reach {
+            if ship.denied.iter().any(|v| v == "paws") {
+                return Decision::Hold {
+                    why: "dry with no pump in reach, and this key cannot call a tanker — \
+                          the captain's own papers must"
+                        .into(),
+                };
+            }
             return Decision::CallPaws;
         }
     }
@@ -657,7 +669,7 @@ pub fn decide(
             };
             ship.wear_bps * rate / 100
         };
-        if invoice <= ship.credits / 4 {
+        if invoice <= ship.credits / 4 && !ship.denied.iter().any(|v| v == "repair") {
             return Decision::Repair;
         }
     }
@@ -901,6 +913,7 @@ mod tests {
             fuel,
             fuel_capacity: 600,
             credits: 10_000,
+            denied: Vec::new(),
         }
     }
 
@@ -1069,6 +1082,44 @@ mod tests {
             Decision::Book {
                 load_id: "L0".into()
             }
+        );
+    }
+
+    /// A co-pilot key cannot repair or call a tanker: the doctrine passes those
+    /// decisions by instead of deciding them and being refused every fold
+    /// (KBC-04, 2026-09-10).
+    #[test]
+    fn a_key_that_cannot_file_a_verb_is_not_told_to() {
+        let mut ship = ship_at("a", 600);
+        ship.wear_bps = 6_000;
+        ship.leased = false;
+        ship.credits = 100_000;
+        let at_pumps = pumps(&["a", "b"]);
+        let router = FlatRouter(10);
+        let board = vec![load("L1", "a", "b", 900, (0, 10))];
+        assert_eq!(
+            decide(&ship, None, &board, &at_pumps, &router),
+            Decision::Repair
+        );
+        ship.denied = vec!["repair".into()];
+        assert_eq!(
+            decide(&ship, None, &board, &at_pumps, &router),
+            Decision::Book {
+                load_id: "L1".into()
+            },
+            "worn, cannot repair: fly the work"
+        );
+        // Dry, no pump in reach: a tanker call — unless the key cannot make one.
+        let mut dry = ship_at("nowhere", 10);
+        dry.denied = vec!["paws".into()];
+        match decide(&dry, None, &[], &pumps(&["far"]), &NoRouter) {
+            Decision::Hold { why } => assert!(why.contains("cannot call a tanker"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        dry.denied.clear();
+        assert_eq!(
+            decide(&dry, None, &[], &pumps(&["far"]), &NoRouter),
+            Decision::CallPaws
         );
     }
 

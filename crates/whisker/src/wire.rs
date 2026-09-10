@@ -74,6 +74,7 @@ pub fn ship_from(me: &Value, repair_rate: i64) -> Ship {
         fuel: me.get("fuel").and_then(Value::as_i64).unwrap_or(0),
         fuel_capacity: me.get("fuelCapacity").and_then(Value::as_i64).unwrap_or(1),
         credits: me.get("credits").and_then(Value::as_i64).unwrap_or(0),
+        denied: Vec::new(),
     }
 }
 
@@ -411,7 +412,18 @@ pub fn advise(input: &Value) -> Value {
         .get("repair_per_hundred_bps")
         .and_then(Value::as_i64)
         .unwrap_or(40);
-    let ship = ship_from(&me, repair_rate);
+    let mut ship = ship_from(&me, repair_rate);
+    // What this key may not file (optional; absent = everything). A co-pilot key
+    // cannot repair or call a tanker; the caller who knows the key's papers says so.
+    ship.denied = input
+        .get("denied")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
     let board: Vec<LoadRow> = input
         .get("board")
         .and_then(Value::as_array)
@@ -674,6 +686,22 @@ mod seam_parity_tests {
         assert_eq!(book["reasons"]["code"], "freight.best-net-per-tick");
         assert_eq!(book["reasons"]["estimated_net"], 900);
         assert_eq!(book["reasons"]["deliver_deadline_tick"], 1100);
+    }
+
+    /// `denied` rides the seam: a key that cannot repair is not told to repair.
+    #[test]
+    fn a_denied_verb_on_the_seam_is_not_advised() {
+        let me = json!({"docked": "a", "fuel": 590, "fuelCapacity": 600, "credits": 100000,
+                        "effectiveAccelMilliG": 189, "wearBps": 6000, "titled": true,
+                        "leasePrincipal": 0, "holdCapacity": 160, "holdUsed": 0,
+                        "route": [], "tick": 1});
+        let base = json!({"me": me, "board": [], "stations": [{"id": "a", "sellsFuel": true}], "routes": []});
+        let out = advise(&base);
+        assert_eq!(out["decision"]["type"], "repair", "{out}");
+        let mut denied = base.clone();
+        denied["denied"] = json!(["repair"]);
+        let out = advise(&denied);
+        assert_ne!(out["decision"]["type"], "repair", "{out}");
     }
 
     /// The chain's word rides the seam as `chain_pressure` on a board row (T-238
