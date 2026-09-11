@@ -17,6 +17,11 @@ struct UCFFamiliarApp: App {
         WindowGroup {
             UCFFamiliarRoot(connections: connections)
                 .preferredColorScheme(.dark)
+                // The bridge is a flight deck, not a form: no clock, battery or Wi-Fi glyphs over
+                // it, and the home indicator fades until touched (Ian, TestFlight feedback on
+                // build 7, Capitali/familiar#6). Both are preferences the system may override.
+                .statusBarHidden()
+                .persistentSystemOverlays(.hidden)
         }
     }
 }
@@ -32,8 +37,9 @@ struct UCFFamiliarRoot: View {
     var body: some View {
         Group {
             if let active = connections.active, let model = model(for: active) {
-                SCRootView(model: model, scanner: PairingScanner.camera, onClose: nil, fixtureNote: nil)
-                    .overlay(alignment: .topTrailing) { header(active) }
+                // The picker is a toolbar item, not an overlay: build 7 floated it top-right and it
+                // sat on the stack's own "Pair a ship" button (Capitali/familiar#6).
+                SCRootView(model: model, scanner: PairingScanner.camera, onClose: nil, fixtureNote: nil) { header(active) }
             } else {
                 ConnectionsView(connections: connections)
             }
@@ -53,11 +59,10 @@ struct UCFFamiliarRoot: View {
             Divider()
             Button { showConnections = true } label: { Label("Connections…", systemImage: "gearshape") }
         } label: {
+            // The bar draws the glass; a second capsule here is the double pill build 7 showed.
             Label(active.name, systemImage: active.isDirect ? "antenna.radiowaves.left.and.right" : "server.rack")
-                .font(.footnote.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 7)
-                .background(.ultraThinMaterial, in: Capsule())
         }
-        .padding(.trailing, 14).padding(.top, 6)
+        .accessibilityLabel("Fleet: \(active.name). Switch fleets")
     }
 
     func model(for c: Connection) -> BridgeModel? {

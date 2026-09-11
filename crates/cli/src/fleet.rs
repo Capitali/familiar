@@ -2044,7 +2044,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         "adopt-ids" => {
             let mut ships = paired_ships(&dir, &root);
             if ships.is_empty() {
-                println!("fleet: no paired ships");
+                println!("fleet: no paired ships in {} — the household store is ~/Library/Application Support/Familiar/data; pass --data-dir if that is not it", dir.display());
                 return ExitCode::SUCCESS;
             }
             // Every record is inspected before any is assigned (round 2, finding 4):
@@ -2093,7 +2093,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
         "status" => {
             let ships = paired_ships(&dir, &root);
             if ships.is_empty() {
-                println!("fleet: no paired ships. `familiar fleet pair --label … --captain … --server … --key …`");
+                println!("fleet: no paired ships in {} (the household store is ~/Library/Application Support/Familiar/data; pass --data-dir if that is not it). `familiar fleet pair --label … --captain … --server … --key …`", dir.display());
                 return ExitCode::SUCCESS;
             }
             let json_out = f.contains_key("json");
