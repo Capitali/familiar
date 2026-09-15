@@ -109,6 +109,20 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the customization dialogue's ladder rung "lived-in ship" and its ethics rail (docs/reviews/2026-08-31-ship-customization-dialogue.md, Round 3) name earned history as the one currency that cannot be bought — the familiar already holds the evidence and nobody projects it. This is the familiar-side brick that needs nothing from Jeff and gives his customization rungs their data source. Racing's "thermal/structural rating earned by surviving flybys" is the same record's second lineage, later
 
 ### T-238 · The supply chain is the map — production-aware P&L planning
+- **BRICK 3 CLAIMED — wildhorse, 2026-09-15: the dispatch feed is read.** Ian (2026-09-15):
+  "be sure those changes are made and that familiar is optimized as the ships computer to
+  maximize long term profits and ship operations." Survey of Jeff's last week: the pilot
+  reads `/v1/news` NOWHERE, and the deck behind it is public (`Content/market/events.json`,
+  72 cards: 44 production, 14 consumption, 7 spread, 7 laneCost, each a station/good
+  multiplier with lead + duration + fire odds). Jeff's own words on the route: "the lead
+  time is the entire information game". Scope: `crates/whisker/src/chain.rs` (deck +
+  dispatch parsing, per-flow rate windows, horizon walks the schedule), `trade.rs`
+  (`Forecast` carries the dispatches), `main.rs` (one `/v1/news` read per fold, a
+  `dispatch` journal line on change), vendored deck `crates/whisker/content/ucf-events.json`
+  + `tools/sync-ucf-deck.sh`, fixture word. NOT read: `/v1/events` — PROD answers a player
+  key with `willFire` + exact magnitude (the scope trap api.md warns of); the familiar plays
+  the game as designed, from the honest prior, and this is flagged to Jeff via Ian.
+  Production ledger (`/v1/stations/{id}/production`, live on PROD) is brick 4, not this.
 - **ROUND-2 CODEX RE-VERIFICATION QUEUED 2026-09-08 ~23:40 CDT — companion:codex, launched from the
   MacOnStick queue behind T-236 r3, on wildhorse's brief
   `docs/reviews/2026-09-08-t238-bricks1-2-reverification-r2-BRIEF.md`; report to
