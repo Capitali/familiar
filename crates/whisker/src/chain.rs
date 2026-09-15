@@ -40,6 +40,10 @@ pub struct Recipe {
     /// Good → units produced per cycle.
     pub outputs: BTreeMap<String, i64>,
     pub ticks_per_cycle: i64,
+    /// The line's MEASURED share of full running, bps — `FULL_BPS` until the
+    /// production ledger says otherwise (T-238 brick 4). This is where the
+    /// header's "if Jeff exposes utilization" lands.
+    pub utilization_bps: i64,
 }
 
 /// Parse the reference's `recipes` array. Rows missing their load-bearing
@@ -66,6 +70,7 @@ pub fn parse_recipes(reference: &Value) -> Vec<Recipe> {
                 inputs: goods("inputs"),
                 outputs: goods("outputs"),
                 ticks_per_cycle: r.get("ticksPerCycle")?.as_i64()?,
+                utilization_bps: FULL_BPS,
             };
             (recipe.ticks_per_cycle > 0 && !(recipe.inputs.is_empty() && recipe.outputs.is_empty()))
                 .then_some(recipe)
@@ -147,15 +152,17 @@ pub struct Window {
 pub fn flows(recipes: &[Recipe], shelves: &[Shelf]) -> Vec<Flow> {
     let mut rates: BTreeMap<(String, String, bool), i64> = BTreeMap::new();
     for r in recipes {
+        // The line's rate at its measured share: full lines when unmeasured.
+        let share = r.utilization_bps.clamp(0, FULL_BPS);
         for (good, units) in &r.inputs {
             *rates
                 .entry((r.station.clone(), good.clone(), true))
-                .or_insert(0) += units * 1000 / r.ticks_per_cycle;
+                .or_insert(0) += units * 1000 / r.ticks_per_cycle * share / FULL_BPS;
         }
         for (good, units) in &r.outputs {
             *rates
                 .entry((r.station.clone(), good.clone(), false))
-                .or_insert(0) += units * 1000 / r.ticks_per_cycle;
+                .or_insert(0) += units * 1000 / r.ticks_per_cycle * share / FULL_BPS;
         }
     }
     rates
@@ -837,6 +844,116 @@ mod tests {
         assert_eq!(loaf.stock_at(10), None);
     }
 
+    // ── the production ledger (T-238 brick 4) ──────────────────────────────
+
+    /// PROD's own shape, 2026-09-15: io-slagworks' extractor, one cycle a bucket
+    /// on a 6-tick line (half its rate), blocked with 6 idle ticks of 12.
+    fn production_reply(recipe: &str, cycles: &[i64], idle: &[i64], blocked: bool) -> Value {
+        let buckets: Vec<Value> = cycles
+            .iter()
+            .zip(idle)
+            .enumerate()
+            .map(|(n, (c, i))| {
+                let mut b = json!({"tick": 13008 + 12 * n as i64, "cyclesCompleted": c,
+                                   "unitsProduced": c * 38, "unitsConsumed": 0, "idleTicks": i});
+                if blocked {
+                    b["blockedReason"] = json!("blocked");
+                }
+                b
+            })
+            .collect();
+        json!({"station": "io-slagworks", "recipe": recipe, "displayName": "Io Extractor",
+               "intervalTicks": 12, "buckets": buckets})
+    }
+
+    #[test]
+    fn the_ledger_measures_a_lines_share_and_a_stall_is_reported_not_applied() {
+        let half = parse_production(
+            &production_reply("io-extractor", &[1, 1, 1, 1, 1, 1, 1, 1], &[6; 8], true),
+            MEASURED_BUCKETS,
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                half.buckets,
+                half.cycles,
+                half.idle_ticks,
+                half.blocked.as_deref()
+            ),
+            (4, 4, 24, Some("blocked"))
+        );
+        // Four buckets of 12 ticks hold eight 6-tick cycles; four ran → 5,000 bps.
+        assert_eq!(half.utilization_bps(6), Some(5_000));
+        // A 4-tick line in the same window could have run twelve: 4 of 12 → 3,333.
+        assert_eq!(half.utilization_bps(4), Some(3_333));
+        // Running flat out is full, never more (a bucket can straddle a cycle).
+        let full =
+            parse_production(&production_reply("r", &[2, 2, 2, 2], &[0; 4], false), 4).unwrap();
+        assert_eq!(full.utilization_bps(6), Some(FULL_BPS));
+        // Nothing completed: a stall, reported and not a rate.
+        let dead = parse_production(
+            &production_reply("titan-terraces", &[0, 0, 0], &[12; 3], true),
+            4,
+        )
+        .unwrap();
+        assert_eq!(dead.utilization_bps(6), None);
+        assert!(dead.stalled() && dead.blocked.is_some());
+        assert_eq!(full.blocked, None);
+        // A young ledger reads what it has; an uncharted station reads nothing.
+        assert_eq!(dead.buckets, 3);
+        assert!(
+            parse_production(&json!({"station": "x", "recipe": "", "buckets": []}), 4).is_none()
+        );
+        assert!(parse_production(&json!({"error": "no such route"}), 4).is_none());
+    }
+
+    #[test]
+    fn a_measured_line_slows_its_flows_and_a_stalled_line_keeps_its_appetite() {
+        let recipes = parse_recipes(&reference());
+        assert!(recipes.iter().all(|r| r.utilization_bps == FULL_BPS));
+        let readings = vec![
+            LineReading {
+                recipe: "cannery-line".into(),
+                interval_ticks: 12,
+                buckets: 4,
+                cycles: 2,
+                idle_ticks: 20,
+                blocked: Some("blocked".into()),
+            },
+            LineReading {
+                recipe: "gravy-reduction".into(),
+                interval_ticks: 12,
+                buckets: 4,
+                cycles: 0,
+                idle_ticks: 48,
+                blocked: Some("starved".into()),
+            },
+        ];
+        let measured = with_utilization(&recipes, &readings);
+        let line = measured.iter().find(|r| r.id == "cannery-line").unwrap();
+        // Four buckets hold 4.8 ten-tick cycles; two ran → 4,166 bps.
+        assert_eq!(line.utilization_bps, 4_166);
+        let gravy = measured.iter().find(|r| r.id == "gravy-reduction").unwrap();
+        assert_eq!(gravy.utilization_bps, FULL_BPS, "a stall is not a rate");
+        let press = measured.iter().find(|r| r.id == "biscuit-press").unwrap();
+        assert_eq!(press.utilization_bps, FULL_BPS, "unmeasured runs full");
+        // Cannery Row's fishmeal appetite: the line at 41.66% (2200 → 916) plus
+        // the stalled gravy line at full (2000) = 2,916 a kilotick, was 4,200.
+        let flows = flows(&measured, &[]);
+        let meal = flows
+            .iter()
+            .find(|f| f.station == "cannery-row" && f.good == "fishmeal")
+            .unwrap();
+        assert_eq!(meal.rate_per_kilotick, 2_916);
+        assert_eq!(
+            measured_lines(&measured, &readings),
+            vec![
+                "cannery-line@cannery-row 41% blocked".to_string(),
+                "gravy-reduction@cannery-row stalled starved".to_string()
+            ]
+        );
+    }
+
     #[test]
     fn two_windows_on_one_line_compound_and_the_same_card_twice_is_two_windows() {
         // The same hold announced again while one is in effect: both lay a window.
@@ -881,6 +998,147 @@ mod tests {
         // rate: 93,750 / 1000 = 93 more → dry at t108.
         assert_eq!(flow.walk_horizon(), Some(108));
     }
+}
+
+// ---------------------------------------------------------------------------
+// The production ledger — T-238 brick 4. `/v1/stations/{id}/production?recipe=R`
+// (ucf-exchange #5, live on PROD 2026-09-09) is what a station's lines actually
+// MADE: per recipe, a short series of equal buckets (`intervalTicks`, 12) of
+// `cyclesCompleted`, `unitsProduced`, `unitsConsumed`, `idleTicks` and a
+// `blockedReason`. Not the candles — those count what crossed the counter — this
+// counts cycles, so a line that has stopped shows as stopped while its shelf
+// still lasts. It is the utilization the header above waited for: the share of
+// full running a line achieved, measured, and it lands on `Recipe::utilization_bps`.
+//
+// A line that completed NOTHING over the window keeps its full appetite: a works
+// blocked on an empty input shelf is not a works with no appetite, it is the
+// most urgent feed on the map, and the shelf's own state (room zero) already says
+// so. Scaling it to zero would make it vanish from the starving list at the
+// moment it matters most. So the ledger stretches horizons where a line runs
+// slow; it never erases a line.
+// ---------------------------------------------------------------------------
+
+/// The ledger's bucket, ticks: `MarketState.seriesIntervalTicks` on the engine.
+pub const PRODUCTION_INTERVAL_TICKS: i64 = 12;
+/// How many of the newest buckets a reading spans (four market hours).
+pub const MEASURED_BUCKETS: usize = 4;
+
+/// One line's measured throughput over the newest buckets of its ledger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineReading {
+    pub recipe: String,
+    pub interval_ticks: i64,
+    /// Buckets actually read (a young ledger has fewer than asked).
+    pub buckets: i64,
+    pub cycles: i64,
+    pub idle_ticks: i64,
+    /// The newest `blockedReason` in the window ("blocked" on PROD's engine;
+    /// "starved" and kin on newer ones) — None when every bucket ran free.
+    pub blocked: Option<String>,
+}
+
+impl LineReading {
+    /// The share of full running, bps, given the line's cycle time: cycles
+    /// completed against the cycles the window could hold, capped at full. None
+    /// when the line completed nothing — a stall is reported, never applied as a
+    /// rate (see the banner above).
+    pub fn utilization_bps(&self, ticks_per_cycle: i64) -> Option<i64> {
+        if self.cycles <= 0 || self.buckets <= 0 || ticks_per_cycle <= 0 || self.interval_ticks <= 0
+        {
+            return None;
+        }
+        let window = self.buckets * self.interval_ticks;
+        Some((self.cycles * ticks_per_cycle * FULL_BPS / window).min(FULL_BPS))
+    }
+
+    pub fn stalled(&self) -> bool {
+        self.buckets > 0 && self.cycles <= 0
+    }
+}
+
+/// Parse one `/production` reply, keeping the newest `last` buckets. None for a
+/// reply with no recipe (a station the ledger has never charted) or no buckets.
+pub fn parse_production(v: &Value, last: usize) -> Option<LineReading> {
+    let recipe = v
+        .get("recipe")?
+        .as_str()
+        .filter(|r| !r.is_empty())?
+        .to_string();
+    let rows = v.get("buckets")?.as_array()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let tail = &rows[rows.len().saturating_sub(last.max(1))..];
+    let i = |b: &Value, k: &str| b.get(k).and_then(Value::as_i64).unwrap_or(0);
+    Some(LineReading {
+        recipe,
+        interval_ticks: v
+            .get("intervalTicks")
+            .and_then(Value::as_i64)
+            .filter(|t| *t > 0)
+            .unwrap_or(PRODUCTION_INTERVAL_TICKS),
+        buckets: tail.len() as i64,
+        cycles: tail.iter().map(|b| i(b, "cyclesCompleted")).sum(),
+        idle_ticks: tail.iter().map(|b| i(b, "idleTicks")).sum(),
+        blocked: tail
+            .iter()
+            .rev()
+            .find_map(|b| b.get("blockedReason").and_then(Value::as_str))
+            .filter(|r| !r.is_empty())
+            .map(String::from),
+    })
+}
+
+/// The recipes with each measured line's share applied; a line the ledger does
+/// not know, or one that stalled, runs at full (the honesty bound, unchanged).
+pub fn with_utilization(recipes: &[Recipe], readings: &[LineReading]) -> Vec<Recipe> {
+    recipes
+        .iter()
+        .map(|r| {
+            let share = readings
+                .iter()
+                .find(|m| m.recipe == r.id)
+                .and_then(|m| m.utilization_bps(r.ticks_per_cycle))
+                .unwrap_or(FULL_BPS);
+            Recipe {
+                utilization_bps: share,
+                ..r.clone()
+            }
+        })
+        .collect()
+}
+
+/// One line per measured line for the journal: the share, or the stall.
+pub fn measured_lines(recipes: &[Recipe], readings: &[LineReading]) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in recipes {
+        let Some(m) = readings.iter().find(|m| m.recipe == r.id) else {
+            continue;
+        };
+        match m.utilization_bps(r.ticks_per_cycle) {
+            Some(bps) if bps < FULL_BPS => out.push(format!(
+                "{}@{} {}%{}",
+                r.id,
+                r.station,
+                bps / 100,
+                m.blocked
+                    .as_deref()
+                    .map(|b| format!(" {b}"))
+                    .unwrap_or_default()
+            )),
+            None if m.stalled() => out.push(format!(
+                "{}@{} stalled{}",
+                r.id,
+                r.station,
+                m.blocked
+                    .as_deref()
+                    .map(|b| format!(" {b}"))
+                    .unwrap_or_default()
+            )),
+            _ => {}
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

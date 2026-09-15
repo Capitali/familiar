@@ -6,6 +6,73 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-15 — T-238 brick 4: the production ledger replaces the full-lines bound
+
+The chain model opened (2026-09-02) with its honesty bound: "the wire does not serve line
+UTILIZATION, so every rate here assumes the lines run FULL … if Jeff exposes utilization,
+`Flow::rate_per_kilotick` is where it lands." Jeff exposed it on 2026-09-09 (ucf-exchange #5,
+"What the lines actually MADE, kept outside the fold"): `/v1/stations/{id}/production?recipe=R`
+— per recipe, eight 12-tick buckets of `cyclesCompleted`, `unitsProduced`, `unitsConsumed`,
+`idleTicks` and a `blockedReason`. Live on PROD: today io-slagworks' extractor completes one
+6-tick cycle a bucket (half its rate, 6 idle of 12, "blocked") and titan-larder's terraces
+complete none (12 idle of 12) — while the forecast priced both at full lines.
+
+### What changed
+
+- **`chain::Recipe::utilization_bps`** (full until measured) scales the line's rates in
+  `flows()`. **`LineReading`** is one line's window off the ledger (`parse_production`, the
+  newest `MEASURED_BUCKETS` = 4 buckets, four market hours); `utilization_bps(ticks_per_cycle)`
+  is cycles completed against the cycles the window could hold, capped at full;
+  `with_utilization` applies it to the recipes; `measured_lines` says it for the journal
+  (`io-extractor@io-slagworks 50% blocked`, `titan-terraces@titan-larder stalled starved`).
+- **A stalled line keeps its full appetite.** A works that completed nothing over the window
+  is not a works with no appetite — blocked on an empty input shelf it is the most urgent feed
+  on the map, and the shelf's own room (zero) already ranks it first. Scaling it to zero would
+  drop it from the starving list at the moment it matters. So the ledger stretches horizons
+  where a line runs slow; it never erases a line. The stall is reported, not applied.
+- **`main.rs`** reads the 24 lines once per 12-tick bucket (`tick / PRODUCTION_INTERVAL_TICKS`
+  changes), never per fold — the read budget refills at 2/s and LOCAL folds every 10 s. A
+  daemon without the route (LOCAL's was Aug 31) answers 404 → nothing measured → full lines,
+  exactly as before. The `forecast` journal line gains `measured: [...]` and fires when it
+  changes. No new vocabulary word.
+- **Ops, LOCAL only:** the LOCAL daemon rebuilt from Jeff's main (914be11) and restarted under
+  launchd (snapshot at t131040, 49 ticks replayed, hashes verified); it serves the route with the
+  newer engine's reason words (`starved`). The soak hull had sat at tuna-prime on fuel 0 for
+  hours journaling `merchant-idle` — its pilot ran without `--allow-paws` and without a dial
+  file, so the rescue was *advised* and never made. `pilot_args: ["--allow-paws"]` and
+  `autonomy.json {"*": "auto"}` (PROD's KK has the same) restored it: tanker called, tank
+  full, ℳ2,929 left, flying. The three PROD pilots stay on the 09-10 build; a roll is Ian's word.
+
+### Why
+
+Runway and headroom were lower bounds by construction. With the measured share they are the
+lines' own numbers: a half-running extractor drains its ore shelf half as fast, so the
+forecast stops calling for a feed that would arrive to a full shelf; a stalled cannery keeps
+its full appetite, so the pilot still flies the fishmeal that restarts it. Both directions
+are what "maximize long term profits" asks of the ship's computer.
+
+### Checks run
+
+- `cargo fmt --all`; `cargo clippy -p familiar-whisker --all-targets -- -D warnings` clean;
+  `cargo test -p familiar-whisker` 108 + 2 + 1 passed (two new chain tests: PROD's own reply
+  shape → share, cap, stall, young ledger, uncharted station, 404; a measured line slows its
+  flows — Cannery Row's fishmeal appetite 4,200 → 2,916 a kilotick with the cannery line at
+  41.66% and the stalled gravy line at full — and the journal's words).
+- Live: LOCAL soak rolled by PID onto the release binary; the first `forecast` line with
+  `measured` is recorded in STATE.
+
+### Next
+
+- Spread cards into the merchant's haircut at that berth; lane cards into the router's price
+  (both ride the journal only today).
+- The frame ladder (Ian, 2026-09-15: "sardine stretch … are we prepared?"): the outfit doctrine
+  already proposes `ExpandFrame` from `nextFrame`/`nextFrameCost` on the captain's `ship.frame`
+  dial, gated on title, five hold-bound buys in the window and the reserve — the yard's own
+  four gates are berth, the frame's required standing tier (hauler for Sardine stretch), the
+  invoice, and title. The one gate the doctrine does not read is the standing tier; a proposal
+  on a hull below it would be refused at the door and journaled `frame-refused`. Small follow-up:
+  read the tier off `/v1/careers` and say "waits for hauler standing" instead of asking.
+
 ## 2026-09-15 — T-238 brick 3: the pilot reads the dispatch feed, and moves before the effect
 
 Ian (2026-09-15): "I believe Jeff is making updates that impact economy, routing, and profits.

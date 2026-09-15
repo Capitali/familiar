@@ -13,6 +13,12 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The forecast runs the lines at their measured share** (T-238 brick 4). Jeff's production
+  ledger (`/v1/stations/{id}/production`, live on PROD) is read once per market hour: a line
+  that completed half the cycles its window could hold drains and fills its shelves half as
+  fast in the forecast; a line that completed none keeps its full appetite, so an empty shelf
+  stays the most urgent feed. The `forecast` line says which lines run slow or stalled and why
+  the engine says so. Status: **shipped (LOCAL soak)**.
 - **The pilot reads the dispatch feed and moves before the effect** (T-238 brick 3; Ian,
   2026-09-15: "optimized as the ships computer to maximize long term profits"). Every
   `/v1/news` item is read against the exchange's own event deck (72 cards, vendored from the

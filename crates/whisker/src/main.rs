@@ -499,6 +499,10 @@ fn main() -> ExitCode {
     let mut last_fleet_inbound: Vec<String> = Vec::new();
     // The dispatch feed's last word, likewise journaled on change (T-238 brick 3).
     let mut last_dispatch: Vec<String> = Vec::new();
+    // The production ledger, read once per 12-tick bucket rather than per fold
+    // (24 lines on the pack; the read budget refills at 2/s) — T-238 brick 4.
+    let mut measured: Vec<chain::LineReading> = Vec::new();
+    let mut measured_bucket: i64 = -1;
     // The world's day, in ticks: the exchange's minimum hold on bought goods is a
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
@@ -1478,6 +1482,27 @@ fn main() -> ExitCode {
                 } else {
                     ship.fuel
                 };
+                // What the lines actually made, at each bucket boundary: the
+                // recipes run at their measured share below, the stalled ones at
+                // full appetite (chain.rs, the production ledger banner).
+                let bucket = tick / chain::PRODUCTION_INTERVAL_TICKS;
+                if bucket != measured_bucket && !recipes.is_empty() {
+                    measured = recipes
+                        .iter()
+                        .filter_map(|r| {
+                            let v = wire
+                                .get(&format!(
+                                    "/v1/stations/{}/production?recipe={}",
+                                    r.station, r.id
+                                ))
+                                .ok()?;
+                            chain::parse_production(&v, chain::MEASURED_BUCKETS)
+                        })
+                        .collect();
+                    measured_bucket = bucket;
+                }
+                let recipes_now = chain::with_utilization(&recipes, &measured);
+                let measured_now = chain::measured_lines(&recipes_now, &measured);
                 // The forecast for this fold: live stock onto the swept shelf shape,
                 // through the recipes, keeping only what starves inside the horizon.
                 let forecast = {
@@ -1496,7 +1521,7 @@ fn main() -> ExitCode {
                         })
                         .collect();
                     let horizon = min_hold.max(1) + 96;
-                    trade::Forecast::build(&recipes, &shelves, &pricing, horizon)
+                    trade::Forecast::build(&recipes_now, &shelves, &pricing, horizon)
                 };
                 // The board's announcements, read against the deck and laid over the
                 // flows before anything prices them: the lead time is the whole
@@ -1564,14 +1589,20 @@ fn main() -> ExitCode {
                         }
                     })
                     .unzip();
-                if hungry_key != last_forecast {
+                let forecast_key: Vec<String> = hungry_key
+                    .iter()
+                    .chain(measured_now.iter())
+                    .cloned()
+                    .collect();
+                if forecast_key != last_forecast {
                     journal(
                         &ship_dir,
                         json!({"at": now, "tick": tick, "event": "forecast",
                                "horizon_ticks": min_hold.max(1) + 96,
-                               "starving": hungry_now}),
+                               "starving": hungry_now,
+                               "measured": measured_now}),
                     );
-                    last_forecast = hungry_key;
+                    last_forecast = forecast_key;
                 }
                 let ledger = Ledger {
                     forecast: if recipes.is_empty() {

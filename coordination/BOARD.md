@@ -109,7 +109,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the customization dialogue's ladder rung "lived-in ship" and its ethics rail (docs/reviews/2026-08-31-ship-customization-dialogue.md, Round 3) name earned history as the one currency that cannot be bought — the familiar already holds the evidence and nobody projects it. This is the familiar-side brick that needs nothing from Jeff and gives his customization rungs their data source. Racing's "thermal/structural rating earned by surviving flybys" is the same record's second lineage, later
 
 ### T-238 · The supply chain is the map — production-aware P&L planning
-- **BRICK 4 CLAIMED — wildhorse, 2026-09-15: the production ledger replaces the full-lines bound.**
+- **BRICK 4 LANDED — wildhorse, 2026-09-15 (see DEVELOPMENT_LOG; LOCAL soak rolled). Was: CLAIMED the same day: the production ledger replaces the full-lines bound.**
   `/v1/stations/{id}/production?recipe=R` is LIVE on PROD (#5, 2026-09-09): per recipe, eight
   12-tick buckets of `cyclesCompleted`, `unitsProduced`, `unitsConsumed`, `idleTicks`,
   `blockedReason` ("blocked"). Today io-slagworks runs at half its rate (blocked, 6 idle of 12)
