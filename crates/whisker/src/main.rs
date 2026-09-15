@@ -457,6 +457,9 @@ fn main() -> ExitCode {
     };
 
     let mut active: Option<Active> = None;
+    // The rest of the bay (T-243 slices 1+2): contracts held beside the active,
+    // booked where they ride for free; their words refreshed like the active's.
+    let mut companions: Vec<Active> = Vec::new();
     let mut pending_until: i64 = -1;
     let mut recent: HashMap<String, (i64, String)> = HashMap::new();
     // Ids the exchange has acknowledged: a re-send of one is a no-op it can skip.
@@ -844,7 +847,11 @@ fn main() -> ExitCode {
                     .map(|(lid, (t, _))| (t, lid))
                     .collect();
             }
-            if let Some((_, lid)) = open.into_iter().max() {
+            // Every open contract the ledger shows: the newest is the active, the
+            // rest ride as companions (the engine lets a hull hold three).
+            open.sort_by(|a, b| b.cmp(a));
+            companions.clear();
+            for (n, (_, lid)) in open.into_iter().enumerate() {
                 for status in ["booked", "inTransit", "delivered"] {
                     if let Ok(Value::Array(rows)) =
                         wire.get(&format!("/v1/loadboard?status={status}"))
@@ -872,7 +879,11 @@ fn main() -> ExitCode {
                                 .ok()
                                 .flatten()
                                 .unwrap_or(ActiveWord::Booked);
-                            active = Some(Active { row, word });
+                            if n == 0 {
+                                active = Some(Active { row, word });
+                            } else {
+                                companions.push(Active { row, word });
+                            }
                             break;
                         }
                     }
@@ -1008,6 +1019,43 @@ fn main() -> ExitCode {
                                "load": a.row.load_id, "why": reason, "credits": ship.credits}),
                     );
                     active = None;
+                }
+            }
+        }
+        // The companions' words, from the same ledger; a closed one leaves the bay.
+        if tick >= pending_until {
+            let mut kept = Vec::with_capacity(companions.len());
+            for mut c in companions.drain(..) {
+                match familiar_whisker::wire::active_word(&me, &c.row.load_id) {
+                    Ok(Some(word)) => {
+                        c.word = word;
+                        kept.push(c);
+                    }
+                    Ok(None) => kept.push(c),
+                    Err(reason) => {
+                        lost_at.insert(c.row.load_id.clone(), tick);
+                        let lid = c.row.load_id.clone();
+                        recent.retain(|sig, _| !sig.contains(&lid));
+                        journal(
+                            &ship_dir,
+                            json!({"at": now, "tick": tick, "event": "load-closed",
+                                   "load": c.row.load_id, "why": reason,
+                                   "companion": true, "credits": ship.credits}),
+                        );
+                    }
+                }
+            }
+            companions = kept;
+            // The active closed with contracts still in the bay: the newest of
+            // them is the next act's contract.
+            if active.is_none() {
+                if let Some(next) = companions.pop() {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "adopted-held-contract",
+                               "load": next.row.load_id, "status": "companion"}),
+                    );
+                    active = Some(next);
                 }
             }
         }
@@ -2046,7 +2094,7 @@ fn main() -> ExitCode {
             let active_load = active.as_ref().map(|a| a.row.load_id.as_str());
             if let Some((lid, owed)) = familiar_whisker::wire::stray_payables(&me, active_load)
                 .into_iter()
-                .next()
+                .find(|(lid, _)| !companions.iter().any(|c| &c.row.load_id == lid))
             {
                 let body = json!({"type": "collect", "loadId": lid});
                 if dial_gate.allow(
@@ -2101,7 +2149,8 @@ fn main() -> ExitCode {
                 l
             })
             .collect();
-        let decision = doctrine::decide(&ship, active.as_ref(), &board, &pumps, &wire);
+        let decision =
+            doctrine::decide_with(&ship, active.as_ref(), &companions, &board, &pumps, &wire);
 
         // Gate 2: the automation this decision spends must be granted (pay-per-feature).
         if let Some(auto) = decision.automation() {
@@ -2259,10 +2308,17 @@ fn main() -> ExitCode {
                         );
                         if let Decision::Book { load_id } = &decision {
                             if let Some(row) = board.iter().find(|l| &l.load_id == load_id) {
-                                active = Some(Active {
+                                let booked = Active {
                                     row: row.clone(),
                                     word: ActiveWord::Booked,
-                                });
+                                };
+                                // Booked beside a contract in hand: a companion, never
+                                // a replacement for the act the tour is about.
+                                if active.is_some() {
+                                    companions.push(booked);
+                                } else {
+                                    active = Some(booked);
+                                }
                             }
                         }
                     }

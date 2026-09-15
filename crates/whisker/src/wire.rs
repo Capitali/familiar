@@ -438,33 +438,50 @@ pub fn advise(input: &Value) -> Value {
     // the host said travel or collect (codex T-237 B4 re-verification, finding
     // 2). `active_load_id` still works for a caller that also put the row on the
     // board, and `word` falls back to /v1/me.freight when the object omits it.
-    let active = input
-        .get("active")
-        .and_then(|a| {
-            let row = load_row(a.get("row")?)?;
-            let word = match a.get("word").and_then(Value::as_str) {
-                Some("delivered") => ActiveWord::Delivered,
-                Some("pickedUp") | Some("picked-up") | Some("in-transit") => ActiveWord::PickedUp,
-                Some("booked") => ActiveWord::Booked,
-                _ => active_word(&me, &row.load_id).ok().flatten()?,
-            };
-            Some(Active { row, word })
-        })
-        .or_else(|| {
-            input
-                .get("active_load_id")
-                .and_then(Value::as_str)
-                .and_then(|lid| {
-                    let row = board.iter().find(|l| l.load_id == lid)?.clone();
-                    let word = active_word(&me, lid).ok().flatten()?;
-                    Some(Active { row, word })
+    let contract = |a: &Value| -> Option<Active> {
+        let row = load_row(a.get("row")?)?;
+        let word = match a.get("word").and_then(Value::as_str) {
+            Some("delivered") => ActiveWord::Delivered,
+            Some("pickedUp") | Some("picked-up") | Some("in-transit") => ActiveWord::PickedUp,
+            Some("booked") => ActiveWord::Booked,
+            _ => active_word(&me, &row.load_id).ok().flatten()?,
+        };
+        Some(Active { row, word })
+    };
+    let active = input.get("active").and_then(contract).or_else(|| {
+        input
+            .get("active_load_id")
+            .and_then(Value::as_str)
+            .and_then(|lid| {
+                let row = board.iter().find(|l| l.load_id == lid)?.clone();
+                let word = active_word(&me, lid).ok().flatten()?;
+                Some(Active { row, word })
+            })
+    });
+    // The rest of the bay (T-243 slices 1+2): `contracts: [{row, word}]`, the
+    // contracts held BESIDE the active — optional and additive (absent = one
+    // contract in hand, as before; SEAM_VERSION 2 unchanged). The active is
+    // never listed twice.
+    let companions: Vec<Active> = input
+        .get("contracts")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(contract)
+                .filter(|c| {
+                    active
+                        .as_ref()
+                        .is_none_or(|a| a.row.load_id != c.row.load_id)
                 })
-        });
+                .collect()
+        })
+        .unwrap_or_default();
     let dial = input
         .get("dial")
         .map(|d| Dial::parse(&d.to_string()))
         .unwrap_or_default();
-    let decision = doctrine::decide(&ship, active.as_ref(), &board, &pumps, &router);
+    let decision =
+        doctrine::decide_with(&ship, active.as_ref(), &companions, &board, &pumps, &router);
     let surface = surface_of(&decision);
     let reasons = explain(&decision, &ship, active.as_ref(), &board, &pumps, &router);
     json!({
@@ -627,6 +644,44 @@ mod seam_parity_tests {
         assert_eq!(out["decision"]["station"], "b");
         assert_eq!(out["reasons"]["code"], "freight.laden-leg");
         assert_eq!(out["reasons"]["load_id"], "L3249");
+    }
+
+    /// T-243 slices 1+2 on the seam: the rest of the bay rides as `contracts[]`
+    /// beside `active`, and a load from this berth to a stop ahead is booked.
+    #[test]
+    fn the_bay_rides_as_contracts_beside_the_active() {
+        let row = |id: &str, o: &str, d: &str, net: i64| {
+            json!({"loadId": id, "origin": o, "dest": d, "good": "catnip", "units": 25,
+                   "estimatedNet": net, "deadheadTicks": 5, "haulTicks": 10,
+                   "loadingTicks": 8, "serviceClass": "standard"})
+        };
+        let me = json!({"docked": "a", "fuel": 500, "fuelCapacity": 600, "credits": 5000,
+                        "effectiveAccelMilliG": 189, "wearBps": 0, "titled": false,
+                        "leasePrincipal": 25000, "holdCapacity": 160, "holdUsed": 0,
+                        "route": [], "tick": 100, "freight": []});
+        let base = json!({
+            "me": me, "board": [row("L9", "a", "c", 400)],
+            "stations": [{"id": "a", "sellsFuel": true}],
+            "routes": [{"from": "a", "to": "b", "fuel": 10, "legs_km": [1_000_000]},
+                       {"from": "b", "to": "c", "fuel": 10, "legs_km": [1_000_000]},
+                       {"from": "a", "to": "c", "fuel": 10, "legs_km": [1_000_000]}],
+            "active": {"row": row("L1", "b", "c", 500), "word": "booked"},
+        });
+        // One contract in hand: L9 (a→c, on the way) is booked beside it.
+        let out = advise(&base);
+        assert_eq!(out["decision"]["type"], "book", "{out}");
+        assert_eq!(out["decision"]["load_id"], "L9");
+        // The bay full: the deadhead to b is filed instead.
+        let mut full = base.clone();
+        full["contracts"] = json!([
+            {"row": row("L2", "a", "c", 300), "word": "booked"},
+            {"row": row("L1", "b", "c", 500), "word": "booked"},   // the active, listed again: ignored
+            {"row": row("L3", "a", "b", 200), "word": "pickedUp"}
+        ]);
+        let out = advise(&full);
+        assert_eq!(out["decision"]["type"], "travel", "{out}");
+        assert_eq!(out["decision"]["station"], "b");
+        assert_eq!(out["seam_version"], SEAM_VERSION);
     }
 
     /// T-243 slice 0: a delivered contract with pay owed that is not the active one is

@@ -13,6 +13,11 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **A second load on the way** (T-243 slices 1+2). Berthed with a contract booked or laden,
+  the pilot books the best-paying load from this berth to a stop already on its tour — under
+  the engine's bay limit of three, inside the spare hold, landing before both deadlines — and
+  flies it beside the first; a delivered companion is collected like the active. The seam takes
+  the rest of the bay as `contracts[]`. Status: **shipped (LOCAL soak)**.
 - **The forecast runs the lines at their measured share** (T-238 brick 4). Jeff's production
   ledger (`/v1/stations/{id}/production`, live on PROD) is read once per market hour: a line
   that completed half the cycles its window could hold drains and fills its shelves half as

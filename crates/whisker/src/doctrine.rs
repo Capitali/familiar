@@ -527,10 +527,30 @@ pub struct Active {
     pub word: ActiveWord,
 }
 
-/// The judgment. Facts in, one decision out.
+/// How many contracts a hull may hold at once (engine `actorBayLimit`, live on
+/// PROD since t4051 — UCF-Haul#43). Not on `/v1/reference`; the pack's number.
+pub const BAY_LIMIT: i64 = 3;
+
+/// The judgment with one contract in hand. Facts in, one decision out.
 pub fn decide(
     ship: &Ship,
     active: Option<&Active>,
+    board: &[LoadRow],
+    pumps: &BTreeSet<String>,
+    router: &dyn Router,
+) -> Decision {
+    decide_with(ship, active, &[], board, pumps, router)
+}
+
+/// The judgment with the whole bay in hand (T-243 slices 1+2). `active` is the
+/// contract the next act is about; `companions` are the others the hull holds —
+/// booked beside it because their pickup was this berth and their delivery a
+/// stop already on the way. A companion adds no leg to the tour: it is booked
+/// only where it rides for free, and its money is collected like the active's.
+pub fn decide_with(
+    ship: &Ship,
+    active: Option<&Active>,
+    companions: &[Active],
     board: &[LoadRow],
     pumps: &BTreeSet<String>,
     router: &dyn Router,
@@ -598,6 +618,12 @@ pub fn decide(
             }
             ActiveWord::PickedUp | ActiveWord::Booked => {}
         }
+        // A companion's money never pays itself either.
+        if let Some(c) = companions.iter().find(|c| c.word == ActiveWord::Delivered) {
+            return Decision::Collect {
+                load_id: c.row.load_id.clone(),
+            };
+        }
         if ship.in_flight {
             return Decision::Hold {
                 why: "under way".into(),
@@ -608,7 +634,22 @@ pub fn decide(
                 why: "adrift between folds".into(),
             };
         };
-        if here == active.row.origin && ship.hold_used > 0 {
+        // A second load on the way (T-243 slice 2): berthed with a contract in
+        // hand, book what this berth offers for a stop we are flying to anyway,
+        // before the crane and before the drive.
+        if let Some(book) = companion(ship, active, companions, board, router, here) {
+            return book;
+        }
+        // Our cargo is aboard when the hold carries MORE than the companions
+        // account for — `hold_used > 0` alone would launch the laden leg the
+        // moment a companion loaded here, with the active's own cargo still on
+        // the dock.
+        let aboard_others: i64 = companions
+            .iter()
+            .filter(|c| c.word == ActiveWord::PickedUp)
+            .map(|c| c.row.units)
+            .sum();
+        if here == active.row.origin && ship.hold_used > aboard_others {
             return Decision::Travel {
                 station: active.row.dest.clone(),
             };
@@ -823,6 +864,130 @@ pub fn decide(
     }
 }
 
+/// The stops the tour still visits after `here`, in order: the active's origin
+/// while it is only booked, then its destination.
+fn stops_ahead(active: &Active, here: &str) -> Vec<String> {
+    let mut stops = Vec::new();
+    if active.word == ActiveWord::Booked && active.row.origin != here {
+        stops.push(active.row.origin.clone());
+    }
+    if active.row.dest != here {
+        stops.push(active.row.dest.clone());
+    }
+    stops
+}
+
+/// Ticks from `here` to `stop` along the tour the active already dictates: a
+/// stop reached through the active's origin (booked, not yet there) adds the
+/// origin leg and the active's loading; the router's legs at the contract's
+/// drive, the board's figure when the router cannot price a leg.
+fn ticks_to_stop(active: &Active, here: &str, stop: &str, accel: i64, router: &dyn Router) -> i64 {
+    let fly = |from: &str, to: &str, fallback: i64| -> i64 {
+        router
+            .leg_distances_km(from, to)
+            .map(|d| flight_ticks(&d, accel))
+            .unwrap_or(fallback)
+            + ENGAGE_OVERHEAD_TICKS
+    };
+    let via_origin = active.word == ActiveWord::Booked && active.row.origin != here;
+    if via_origin && stop == active.row.dest {
+        fly(here, &active.row.origin, active.row.deadhead_ticks)
+            + active.row.loading_ticks.max(8)
+            + fly(&active.row.origin, stop, active.row.haul_ticks)
+    } else {
+        fly(here, stop, active.row.haul_ticks)
+    }
+}
+
+/// Book a load this berth offers for a stop already ahead on the tour, if one
+/// fits: under the bay limit, inside the SPARE hold (booked-unfetched units
+/// count, the merchant's goods count), landing before its own deadline, and
+/// without pushing the active past its deadline by the time its loading takes.
+/// Best net first — it adds no leg, so every credit of it is the tour's gain —
+/// with the chain's word breaking near-ties as it does on the open board.
+fn companion(
+    ship: &Ship,
+    active: &Active,
+    companions: &[Active],
+    board: &[LoadRow],
+    router: &dyn Router,
+    here: &str,
+) -> Option<Decision> {
+    if 1 + companions.len() as i64 >= BAY_LIMIT || ship.denied.iter().any(|v| v == "book") {
+        return None;
+    }
+    let ahead = stops_ahead(active, here);
+    if ahead.is_empty() {
+        return None;
+    }
+    let unfetched: i64 = std::iter::once(active)
+        .chain(companions)
+        .filter(|c| c.word == ActiveWord::Booked)
+        .map(|c| c.row.units)
+        .sum();
+    let spare = ship.hold_capacity - ship.hold_used - unfetched;
+    let held =
+        |lid: &str| active.row.load_id == lid || companions.iter().any(|c| c.row.load_id == lid);
+    let hull = if ship.accel_milli_g > 0 {
+        ship.accel_milli_g
+    } else {
+        REFERENCE_ACCEL_MILLI_G
+    };
+    let mut fits: Vec<&LoadRow> = board
+        .iter()
+        .filter(|l| !l.held_for_other && !held(&l.load_id))
+        .filter(|l| l.origin == here && ahead.iter().any(|s| s == &l.dest))
+        .filter(|l| l.units > 0 && l.units <= spare && l.estimated_net > 0)
+        .filter(|l| {
+            let class = if l.class_bps > 0 { l.class_bps } else { 10_000 };
+            let accel = contract_accel(hull, class);
+            // Its own deadline, along the tour.
+            if l.deliver_deadline_tick > 0 {
+                let lands = ship.tick
+                    + l.loading_ticks.max(8)
+                    + ticks_to_stop(active, here, &l.dest, accel, router);
+                if lands > l.deliver_deadline_tick {
+                    return false;
+                }
+            }
+            // The active's deadline, delayed by this load's crane time.
+            if active.row.deliver_deadline_tick > 0 {
+                let a_class = if active.row.class_bps > 0 {
+                    active.row.class_bps
+                } else {
+                    10_000
+                };
+                let a_accel = contract_accel(hull, a_class);
+                let lands = ship.tick
+                    + l.loading_ticks.max(8)
+                    + ticks_to_stop(active, here, &active.row.dest, a_accel, router);
+                if lands > active.row.deliver_deadline_tick {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+    fits.sort_by(|a, b| {
+        b.estimated_net
+            .cmp(&a.estimated_net)
+            .then_with(|| a.load_id.cmp(&b.load_id))
+    });
+    if let Some(best) = fits.first().map(|l| l.estimated_net) {
+        let floor = best * (10_000 - CHAIN_TIE_BPS) / 10_000;
+        fits.sort_by_key(|l| {
+            if l.chain_pressure > 0 && l.estimated_net >= floor {
+                0
+            } else {
+                1
+            }
+        });
+    }
+    fits.first().map(|l| Decision::Book {
+        load_id: l.load_id.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -937,6 +1102,230 @@ mod tests {
 
     fn pumps(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── a second load on the way (T-243 slices 1+2) ─────────────────────────
+
+    fn booked(id: &str, origin: &str, dest: &str, net: i64) -> Active {
+        Active {
+            row: load(id, origin, dest, net, (5, 10)),
+            word: ActiveWord::Booked,
+        }
+    }
+
+    #[test]
+    fn a_load_from_this_berth_to_a_stop_ahead_rides_beside_the_active() {
+        // Berthed at A with L1 booked B→C: the tour is A→B→C. On the board here:
+        // L2 A→B (the next stop), L3 A→C (the final stop), L4 A→D (a detour),
+        // L5 B→C (not from here). L3 pays best of the two that ride free.
+        let ship = ship_at("a", 500);
+        let active = booked("L1", "b", "c", 500);
+        let board = vec![
+            load("L2", "a", "b", 300, (0, 10)),
+            load("L3", "a", "c", 450, (0, 20)),
+            load("L4", "a", "d", 900, (0, 5)),
+            load("L5", "b", "c", 900, (5, 10)),
+        ];
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            &[],
+            &board,
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L3".into()
+            }
+        );
+        // With L3 already a companion, L2 is next; with both, the bay is full and
+        // the deadhead to B is filed.
+        let c3 = booked("L3", "a", "c", 450);
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            std::slice::from_ref(&c3),
+            &board,
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L2".into()
+            }
+        );
+        let c2 = booked("L2", "a", "b", 300);
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            &[c3, c2],
+            &board,
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "b".into()
+            }
+        );
+        // No companion when the doctrine holds one contract (the old entry point).
+        assert_eq!(
+            decide(&ship, Some(&active), &board, &pumps(&[]), &FlatRouter(10)),
+            Decision::Book {
+                load_id: "L3".into()
+            },
+            "decide() is decide_with() and an empty bay"
+        );
+    }
+
+    #[test]
+    fn a_companion_must_fit_the_spare_hold_with_the_unfetched_counted() {
+        // Hold 120: L1 (25, booked, not fetched) + merchant goods 60 leave 35.
+        let mut ship = ship_at("a", 500);
+        ship.hold_used = 60;
+        let active = booked("L1", "b", "c", 500);
+        let mut big = load("L2", "a", "c", 800, (0, 20));
+        big.units = 40;
+        let mut small = load("L3", "a", "c", 200, (0, 20));
+        small.units = 35;
+        let board = vec![big.clone(), small];
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            &[],
+            &board,
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L3".into()
+            },
+            "40 does not fit 35 of spare"
+        );
+    }
+
+    #[test]
+    fn a_companion_lands_before_its_deadline_and_keeps_the_actives() {
+        struct Legs;
+        impl Router for Legs {
+            fn fuel_between(&self, _: &str, _: &str) -> Option<i64> {
+                Some(10)
+            }
+            fn leg_distances_km(&self, _: &str, _: &str) -> Option<Vec<i64>> {
+                // 10,000,000 km at the reference drive: ~ (isqrt(10^7/864900)·256)/256
+                Some(vec![10_000_000])
+            }
+        }
+        let ship = ship_at("a", 500); // tick 1000
+        let one_leg = flight_ticks(&[10_000_000], REFERENCE_ACCEL_MILLI_G);
+        let active = booked("L1", "b", "c", 500);
+        // A→C rides A→B (leg + engage) + L1's loading 8 + B→C (leg + engage),
+        // after its own loading of 8.
+        let tour = 8 + (one_leg + ENGAGE_OVERHEAD_TICKS) + 8 + (one_leg + ENGAGE_OVERHEAD_TICKS);
+        let mut late = load("L2", "a", "c", 900, (0, 20));
+        late.deliver_deadline_tick = 1000 + tour - 1;
+        let mut ok = load("L3", "a", "c", 300, (0, 20));
+        ok.deliver_deadline_tick = 1000 + tour;
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            &[],
+            &[late.clone(), ok.clone()],
+            &pumps(&[]),
+            &Legs,
+        );
+        assert_eq!(
+            d,
+            Decision::Book {
+                load_id: "L3".into()
+            },
+            "the better-paying L2 cannot land in time along the tour"
+        );
+        // ...and a companion whose crane time would push the ACTIVE past its own
+        // deadline is refused, however well it pays.
+        let mut tight = booked("L1", "b", "c", 500);
+        tight.row.deliver_deadline_tick = 1000 + (tour - 8) + 4; // 4 ticks of slack
+        let mut slow = ok.clone();
+        slow.loading_ticks = 12;
+        let d = decide_with(&ship, Some(&tight), &[], &[slow], &pumps(&[]), &Legs);
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "b".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_companion_loaded_first_does_not_launch_the_actives_leg_early() {
+        // At B, the active's origin, with the companion's 25 aboard and the
+        // active's own 25 still on the dock: hold_used 25 is the companion's.
+        let mut ship = ship_at("b", 500);
+        ship.hold_used = 25;
+        let active = booked("L1", "b", "c", 500);
+        let companion = Active {
+            row: load("L2", "a", "c", 300, (0, 20)),
+            word: ActiveWord::PickedUp,
+        };
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            std::slice::from_ref(&companion),
+            &[],
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Hold {
+                why: "waiting on the crane".into()
+            }
+        );
+        ship.hold_used = 50;
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            &[companion],
+            &[],
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "c".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_delivered_companion_is_collected_like_the_active() {
+        let ship = ship_at("c", 500);
+        let active = booked("L1", "c", "d", 500);
+        let companion = Active {
+            row: load("L2", "a", "c", 300, (0, 20)),
+            word: ActiveWord::Delivered,
+        };
+        let d = decide_with(
+            &ship,
+            Some(&active),
+            &[companion],
+            &[],
+            &pumps(&[]),
+            &FlatRouter(10),
+        );
+        assert_eq!(
+            d,
+            Decision::Collect {
+                load_id: "L2".into()
+            }
+        );
     }
 
     #[test]

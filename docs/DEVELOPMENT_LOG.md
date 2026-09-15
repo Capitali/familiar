@@ -6,6 +6,68 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-15 — T-243 slices 1+2: a second load on the way
+
+Ian (2026-09-15): "Continue, bay limits and other items." The engine has let a hull hold three
+contracts since t4051 (`actorBayLimit`, UCF-Haul#43); the doctrine flew one. Slice 0 (2026-09-09)
+only collected the strays. This lands the bay in the doctrine.
+
+### What changed
+
+- **`doctrine::decide_with(ship, active, companions, board, pumps, router)`** — the judgment
+  with the whole bay in hand; `decide()` is the same call with an empty bay, so every caller
+  and test of the old entry point is unchanged. `BAY_LIMIT` = 3 (the pack's number; it is not
+  on `/v1/reference`).
+- **A companion is booked only where it rides for free.** Berthed with a contract booked or
+  laden, before the crane and before the drive, the doctrine books the best-paying open load
+  whose ORIGIN is this berth and whose DESTINATION is a stop already ahead on the tour (the
+  active's origin while it is only booked, its destination either way) — under the bay
+  limit, inside the SPARE hold (the merchant's goods and every booked-unfetched contract
+  count), landing before its own deadline along the tour (`ticks_to_stop`: a stop reached
+  through the active's origin adds that leg and the active's loading), and without its crane
+  time pushing the active past the active's deadline. Net first — a companion adds no leg, so
+  every credit is the tour's gain — the chain's word breaking near-ties as on the open board.
+  A key that cannot file `book` books nothing.
+- **Cargo aboard is hold beyond what the companions account for.** The laden-leg rule read
+  `hold_used > 0` as "our cargo is aboard"; with a companion loaded first at the active's
+  origin that launched the leg with the active's own cargo still on the dock. Now it is
+  `hold_used > Σ units of companions marked picked up`.
+- **A delivered companion is collected like the active** (money never pays itself).
+- **Seam (`wire::advise`)**: optional, additive `contracts: [{row, word}]` beside `active`
+  (the active listed again is ignored); SEAM_VERSION 2 unchanged. MacOnStick: DirectFeed can
+  send `/v1/me.contracts[]` rows it holds beside the active; absent = one contract, as before.
+- **Runner**: adoption at start takes EVERY open `mine` contract (newest = active, the rest
+  companions) instead of only the newest; companions' words refresh from the same ledger each
+  fold and a closed one leaves the bay (`load-closed` with `companion: true`); when the active
+  closes with contracts still held, the newest companion is promoted (`adopted-held-contract`,
+  status `companion`); a booking made beside an active becomes a companion, never a
+  replacement; strays exclude the companions. No new vocabulary word.
+
+### Why
+
+The tour was already A→B→C; a load from A to B or C was money left on the board. The old
+rule could not take it without dropping the contract it was flying. Slice 3 (the tour
+planner: ordered stops over ≤3 contracts, exhaustive, scored Σnet − Σfuel − decay) stays
+open on the board; this slice is the half that never needs a plan — the load rides the
+plan we have.
+
+### Checks run
+
+- `cargo fmt --all`; `cargo clippy -p familiar-whisker --all-targets -- -D warnings` clean;
+  `cargo test -p familiar-whisker` 114 + 2 + 1 passed (five new doctrine tests: the stop-ahead
+  rule and the bay limit, the spare-hold rule with unfetched units, both deadlines along the
+  tour with real leg arithmetic, the companion-loaded-first case, the delivered companion; one
+  seam test: `contracts[]` beside `active`, the active listed twice ignored).
+- Live: the LOCAL soak flies it first (ship-learning: an incident becomes a rule before PROD).
+  The PROD roll of this slice waits for LOCAL evidence and Ian's word.
+
+### Next
+
+- T-243 slice 3, the tour planner; per-leg accounting for T-241; the bridge's "Your contracts · N".
+- The word lag: a companion's cargo loaded before the ledger says `picked up` reads as the
+  active's for one fold. The pickup word comes from `/v1/me.freight`; if it lags a fold on
+  PROD, `hold_used` needs the contract's own `unitsInHold` (on `/v1/me.contracts[]`) instead.
+
 ## 2026-09-15 — T-238 brick 4: the production ledger replaces the full-lines bound
 
 The chain model opened (2026-09-02) with its honesty bound: "the wire does not serve line
