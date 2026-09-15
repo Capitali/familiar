@@ -13,6 +13,15 @@ this file is the human-readable summary.
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
 ### Added
+- **The pilot reads the dispatch feed and moves before the effect** (T-238 brick 3; Ian,
+  2026-09-15: "optimized as the ships computer to maximize long term profits"). Every
+  `/v1/news` item is read against the exchange's own event deck (72 cards, vendored from the
+  public pack), becomes a rate window on the flow it names, and re-walks the forecast's
+  horizons — so a production hold is a starving buyer before the counter shows it, and a
+  counter rush a dry shelf before it clears. Odds are the honest prior (the card's while
+  announced, certain once in effect); a headline the deck does not know is journaled as a
+  question. The overwatch's resolved coin (`/v1/events`) is deliberately not read. `dispatch`
+  journal line on change. Status: **shipped (LOCAL soak)**.
 - **The familiar has its first partner AI.** Other AIs meet the familiar at its door over
   MCP, and the first one is registered: the **Envoy**, the Apple Intelligence model on the
   household's own Mac, minted as a principal on 2026-08-23 by Ian's own two-tap ceremony at

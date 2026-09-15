@@ -6,6 +6,83 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-15 — T-238 brick 3: the pilot reads the dispatch feed, and moves before the effect
+
+Ian (2026-09-15): "I believe Jeff is making updates that impact economy, routing, and profits.
+We need to be sure those changes are made and that familiar is optimized as the ships computer
+to maximize long term profits and ship operations." The survey of Jeff's last week on
+ucf-exchange (engine pinned 1.25.0 → 1.26.0; the co-pilot licence through the fold; the
+career carried across a crossing; the tanker destination check the doctrine already holds
+for; the daily market brief on MeowNet; the production ledger `/v1/stations/{id}/production`,
+live on PROD; the captain record) found one lever the pilot has never touched and Jeff
+designed as THE game: `/v1/news`. His words on the route: "Reading the board and moving
+before `effectiveAtTick` is the entire information game; the lead time is the point."
+
+### What changed
+
+- **`chain.rs` — the deck and the feed.** The exchange's content pack ships the dispatch
+  deck in the open (`Content/market/events.json`: 72 cards — 44 production, 14 consumption,
+  7 spread, 7 laneCost; each a headline with the effect behind it as a bps multiplier on one
+  station×good, plus lead, duration and fire odds). whisker carries a verbatim copy
+  (`crates/whisker/content/ucf-events.json`, `tools/sync-ucf-deck.sh` refreshes it from the
+  ucf-exchange checkout and writes the provenance README). `parse_deck` reads it, `deck()`
+  embeds it; `parse_news` reads the feed against it: announced and in-effect items become
+  `Dispatch`es, withdrawn and expired are dropped, and the odds are honest — the card's own
+  `fireProbabilityBps` while announced, certain once in effect, the tier's band floor for a
+  headline the deck does not know (no meaning is ever invented; the line reads `? "…"`).
+- **`Flow` carries a schedule.** `windows: Vec<Window>` (from/to ticks relative to now,
+  expected `rate_bps` = full plus the card's departure weighted by its odds). `schedule()`
+  lays production cards on the Makes flow and consumption cards on the Eats flow of their
+  station×good, then RE-WALKS EVERY HORIZON (`walk_horizon`: the first segment whose
+  cumulative movement reaches the room, floored like the unscheduled formula so the two agree
+  with no windows laid). `stock_at` integrates the same schedule. Overlapping windows on one
+  line compound multiplicatively. Spread and lane cards move no shelf and ride the journal only
+  (the merchant's spread haircut and the router's lane price are the next places they land).
+- **`trade::Forecast::with_dispatches`** lays the feed over the fold's forecast before anything
+  prices a shelf, and keeps the dispatches for the record; `main.rs` reads `/v1/news` once per
+  fold and journals **`dispatch`** on change (`announced: [...]`, one line per item:
+  `card @ station/good ×bps tA–tB (tier, status, odds)`). Fixture word added; Swift
+  `TemplatedVoice` ranks it beside `forecast` (3) and renders it as a fact.
+- **NOT read: `/v1/events`.** PROD answers a player key on the overwatch route with `willFire`
+  and the exact magnitude (checked 2026-09-15 with Luke's key). api.md calls that route "the
+  sharpest edge of the scope trap: a player reading this has no information game left to play".
+  The familiar plays from the prior, as designed; the leak is recorded in STATE for Ian to
+  raise with Jeff.
+
+### Why
+
+The forecast (bricks 1–2) projected every shelf at FULL lines — the honesty bound in
+`chain.rs`'s header — and said "absent events" because the modifier was not visible. It is
+visible: the feed names the card, the pack names the card's effect. A "third press at
+Tranquility" is a kibble-loaf shelf filling at 150% for fifty ticks; a "production hold at
+Cannery Row" is a starving buyer downstream twenty-four ticks before the counter shows it.
+Every one of the 15 headlines on PROD's and LOCAL's feeds today matched a card.
+
+### Checks run
+
+- `cargo fmt --all`, `cargo clippy -p familiar-whisker --all-targets -- -D warnings` clean;
+  `cargo test -p familiar-whisker` 106 + 2 + 1 passed (five new chain tests: the vendored deck
+  parses with every kind of card; the feed against the deck with honest odds; a hold in effect
+  pushes the full shelf from 13 to 60 ticks and an announced rush pulls the dry shelf from 205
+  to 203, with the unscheduled horizons restored on an empty feed; closed windows and shelfless
+  flows lay nothing and walk nothing; compounding windows). The journal-vocabulary contract
+  test in `main.rs` passes with the new word.
+- `swift test` on FamiliarSC does not build on macOS today (`topBarLeading` unavailable in
+  macOS, `SCRootView.swift:34`, landed 2026-09-10) — pre-existing, not this change; the Swift
+  edit mirrors the `forecast` case line for line. MacOnStick: please run the iOS bar.
+- Live: the LOCAL soak pilot rolled onto the release binary (by PID, never by name) — see the
+  STATE log for the first `dispatch` line.
+
+### Next
+
+- Brick 4: the production ledger (`/v1/stations/{id}/production`, live on PROD: cycles,
+  units, idle ticks, `blockedReason` per 12-tick bucket) replaces the FULL-lines bound with
+  the measured rate — the "if Jeff exposes utilization" the chain header waited for.
+- Spread cards into the merchant's haircut at that berth; lane cards into the router's price.
+- Found on the way, LOCAL only: the soak hull sits at tuna-prime with fuel 0 and ℳ9,696,
+  journaling `merchant-idle` ("none flyable on fuel 0") rather than calling the tanker — a
+  rescue-path question for the doctrine, not this brick.
+
 ## 2026-09-09 — FamiliarCore rebuilt on the freight tie-break seam (788d94b), and the device says what it does not model
 
 Wildhorse landed T-238 finding 3's freight half (b4c51ee doctrine/seam/reasons, 788d94b host

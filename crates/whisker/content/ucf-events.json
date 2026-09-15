@@ -1,0 +1,1076 @@
+[
+  {
+    "id": "sieve-downgrade",
+    "headline": "Grade-2 biscuit substrate held for re-sieve at Ganymede Plate Yards",
+    "effect": {
+      "production": {
+        "station": "ganymede-yards",
+        "good": "biscuit-substrate",
+        "magnitudeBps": 7800
+      }
+    },
+    "weight": 8,
+    "leadTicks": 3,
+    "durationTicks": 18,
+    "fireProbabilityBps": 9600
+  },
+  {
+    "id": "loaf-radius-revision",
+    "headline": "Loaf-form radius tolerance revised; Cannery Row lines re-tooling to the new figure",
+    "effect": {
+      "production": {
+        "station": "cannery-row",
+        "good": "kibble-loaf",
+        "magnitudeBps": 8200
+      }
+    },
+    "weight": 7,
+    "leadTicks": 4,
+    "durationTicks": 20,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "warm-spot-dispute",
+    "headline": "Warm-spot occupancy dispute closes the Io Slagworks reactor gallery to foot traffic",
+    "effect": {
+      "production": {
+        "station": "io-slagworks",
+        "good": "ore",
+        "magnitudeBps": 8000
+      }
+    },
+    "weight": 7,
+    "leadTicks": 3,
+    "durationTicks": 16,
+    "fireProbabilityBps": 9400
+  },
+  {
+    "id": "decant-blep-window",
+    "headline": "Mandatory blep window enforced during Titania Cold Store decant",
+    "effect": {
+      "production": {
+        "station": "titania-cold-store",
+        "good": "salmon-mousse",
+        "magnitudeBps": 8400
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 14,
+    "fireProbabilityBps": 9700
+  },
+  {
+    "id": "tin-gauge-recall",
+    "headline": "Tinplate gauge stock recalled to bond at Tranquility Press Works",
+    "effect": {
+      "production": {
+        "station": "tranquility",
+        "good": "tinplate",
+        "magnitudeBps": 7600
+      }
+    },
+    "weight": 7,
+    "leadTicks": 4,
+    "durationTicks": 22,
+    "fireProbabilityBps": 9300
+  },
+  {
+    "id": "litter-grade-audit",
+    "headline": "Litter clay grading suspended at Clawson's Drift pending scale certification",
+    "effect": {
+      "production": {
+        "station": "clawson-drift",
+        "good": "litter-clay",
+        "magnitudeBps": 8100
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 15,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "nap-cycle-overrun",
+    "headline": "Second shift nap cycle overruns at Deimos Arbor Lot; cutting schedule slips",
+    "effect": {
+      "production": {
+        "station": "deimos-arbor",
+        "good": "catnip",
+        "magnitudeBps": 7900
+      }
+    },
+    "weight": 7,
+    "leadTicks": 2,
+    "durationTicks": 12,
+    "fireProbabilityBps": 9800
+  },
+  {
+    "id": "water-draw-throttle",
+    "headline": "Enceladus Draw throttles the water ice line for bore inspection",
+    "effect": {
+      "production": {
+        "station": "enceladus-draw",
+        "good": "water-ice",
+        "magnitudeBps": 8300
+      }
+    },
+    "weight": 6,
+    "leadTicks": 4,
+    "durationTicks": 20,
+    "fireProbabilityBps": 9400
+  },
+  {
+    "id": "pate-texture-hold",
+    "headline": "Pate texture panel withholds sign off at Whisker Hollow; batch on hold",
+    "effect": {
+      "production": {
+        "station": "whisker-hollow",
+        "good": "pate",
+        "magnitudeBps": 8000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 18,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "gravy-viscosity-check",
+    "headline": "Gravy base viscosity check extended at Tuna Prime Exchange",
+    "effect": {
+      "production": {
+        "station": "tuna-prime",
+        "good": "gravy-base",
+        "magnitudeBps": 8200
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 16,
+    "fireProbabilityBps": 9600
+  },
+  {
+    "id": "holdfast-ore-tally",
+    "headline": "Triton Holdfast recounts the ore tally after a stencilling error",
+    "effect": {
+      "production": {
+        "station": "triton-outpost",
+        "good": "ore",
+        "magnitudeBps": 8100
+      }
+    },
+    "weight": 5,
+    "leadTicks": 3,
+    "durationTicks": 14,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "shelf-restack",
+    "headline": "Titan Larder Station restacks the grain shelf to the revised aisle plan",
+    "effect": {
+      "production": {
+        "station": "titan-larder",
+        "good": "grain",
+        "magnitudeBps": 8300
+      }
+    },
+    "weight": 6,
+    "leadTicks": 2,
+    "durationTicks": 12,
+    "fireProbabilityBps": 9700
+  },
+  {
+    "id": "mlem-line-calibration",
+    "headline": "Palatability line recalibrated at Velvet Array; fishmeal intake reduced",
+    "effect": {
+      "production": {
+        "station": "velvet-array",
+        "good": "fishmeal",
+        "magnitudeBps": 8000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 4,
+    "durationTicks": 20,
+    "fireProbabilityBps": 9400
+  },
+  {
+    "id": "biscuit-run-surge",
+    "headline": "Biscuit substrate drawn down early at Tranquility to cover a press run",
+    "effect": {
+      "consumption": {
+        "station": "tranquility",
+        "good": "biscuit-substrate",
+        "magnitudeBps": 12500
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 16,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "kibble-ration-review",
+    "headline": "Ration review raises the kibble loaf allowance at Ganymede Plate Yards",
+    "effect": {
+      "consumption": {
+        "station": "ganymede-yards",
+        "good": "kibble-loaf",
+        "magnitudeBps": 12800
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 18,
+    "fireProbabilityBps": 9400
+  },
+  {
+    "id": "clay-bulk-order",
+    "headline": "Bulk litter clay order filed against the Io Slagworks standing account",
+    "effect": {
+      "consumption": {
+        "station": "io-slagworks",
+        "good": "litter-clay",
+        "magnitudeBps": 13000
+      }
+    },
+    "weight": 5,
+    "leadTicks": 4,
+    "durationTicks": 20,
+    "fireProbabilityBps": 9300
+  },
+  {
+    "id": "catnip-issue-uplift",
+    "headline": "Catnip issue uplifted at Triton Holdfast for the cold season rota",
+    "effect": {
+      "consumption": {
+        "station": "triton-outpost",
+        "good": "catnip",
+        "magnitudeBps": 12600
+      }
+    },
+    "weight": 5,
+    "leadTicks": 3,
+    "durationTicks": 15,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "desk-cover-premium",
+    "headline": "Relief clerks cover the Clawson's Drift desk; quoted spread widens",
+    "effect": {
+      "spread": {
+        "station": "clawson-drift",
+        "magnitudeBps": 13000
+      }
+    },
+    "weight": 5,
+    "leadTicks": 2,
+    "durationTicks": 12,
+    "fireProbabilityBps": 9700
+  },
+  {
+    "id": "shift-handover",
+    "headline": "Shift handover runs long at Cannery Row Fulfilment; the line idles through the change",
+    "effect": {
+      "production": {
+        "station": "cannery-row",
+        "good": "pate",
+        "magnitudeBps": 8600
+      }
+    },
+    "weight": 8,
+    "leadTicks": 1,
+    "durationTicks": 2,
+    "fireProbabilityBps": 9800
+  },
+  {
+    "id": "scale-tare",
+    "headline": "Weighbridge tared at Ganymede Plate Yards; ore intake pauses for the check",
+    "effect": {
+      "production": {
+        "station": "ganymede-yards",
+        "good": "ore",
+        "magnitudeBps": 8800
+      }
+    },
+    "weight": 8,
+    "leadTicks": 1,
+    "durationTicks": 3,
+    "fireProbabilityBps": 9800
+  },
+  {
+    "id": "counter-rush",
+    "headline": "Counter rush at Velvet Array as the shift changes; kibble loaf clears fast",
+    "effect": {
+      "consumption": {
+        "station": "velvet-array",
+        "good": "kibble-loaf",
+        "magnitudeBps": 11800
+      }
+    },
+    "weight": 7,
+    "leadTicks": 1,
+    "durationTicks": 4,
+    "fireProbabilityBps": 9700
+  },
+  {
+    "id": "dust-in-the-hopper",
+    "headline": "Dust in the hopper stops the Whisker Hollow biscuit line for a clearing run",
+    "effect": {
+      "production": {
+        "station": "whisker-hollow",
+        "good": "biscuit-substrate",
+        "magnitudeBps": 8500
+      }
+    },
+    "weight": 7,
+    "leadTicks": 2,
+    "durationTicks": 6,
+    "fireProbabilityBps": 9600
+  },
+  {
+    "id": "bay-door-cycle",
+    "headline": "Bay door cycled for inspection at Enceladus Draw; loading pauses",
+    "effect": {
+      "production": {
+        "station": "enceladus-draw",
+        "good": "bluefin-reserve",
+        "magnitudeBps": 8700
+      }
+    },
+    "weight": 6,
+    "leadTicks": 2,
+    "durationTicks": 8,
+    "fireProbabilityBps": 9700
+  },
+  {
+    "id": "quote-refresh",
+    "headline": "Quote refresh underway at Titan Larder Station; the desk quotes wide meanwhile",
+    "effect": {
+      "spread": {
+        "station": "titan-larder",
+        "magnitudeBps": 12000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 1,
+    "durationTicks": 5,
+    "fireProbabilityBps": 9800
+  },
+  {
+    "id": "void-watch",
+    "headline": "Void watch called at Triton Holdfast; outside work stands down until it clears",
+    "effect": {
+      "production": {
+        "station": "triton-outpost",
+        "good": "biscuit-substrate",
+        "magnitudeBps": 8400
+      }
+    },
+    "weight": 6,
+    "leadTicks": 2,
+    "durationTicks": 10,
+    "fireProbabilityBps": 9500
+  },
+  {
+    "id": "press-two-jam",
+    "headline": "Press two jams at Tranquility Press Works; loaf output halved pending strip down",
+    "effect": {
+      "production": {
+        "station": "tranquility",
+        "good": "kibble-loaf",
+        "magnitudeBps": 5200
+      }
+    },
+    "weight": 4,
+    "leadTicks": 8,
+    "durationTicks": 44,
+    "fireProbabilityBps": 8600
+  },
+  {
+    "id": "silo-damp",
+    "headline": "Damp found in the Whisker Hollow grain silo; affected bays sealed",
+    "effect": {
+      "production": {
+        "station": "whisker-hollow",
+        "good": "grain",
+        "magnitudeBps": 5500
+      }
+    },
+    "weight": 4,
+    "leadTicks": 10,
+    "durationTicks": 52,
+    "fireProbabilityBps": 8200
+  },
+  {
+    "id": "bore-collapse",
+    "headline": "Partial bore collapse at Enceladus Draw; water ice extraction reduced",
+    "effect": {
+      "production": {
+        "station": "enceladus-draw",
+        "good": "water-ice",
+        "magnitudeBps": 4800
+      }
+    },
+    "weight": 4,
+    "leadTicks": 9,
+    "durationTicks": 48,
+    "fireProbabilityBps": 8000
+  },
+  {
+    "id": "slag-tap-runout",
+    "headline": "Uncontrolled tap runout at Io Slagworks; ore handling suspended in bay three",
+    "effect": {
+      "production": {
+        "station": "io-slagworks",
+        "good": "ore",
+        "magnitudeBps": 5000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 8,
+    "durationTicks": 40,
+    "fireProbabilityBps": 8400
+  },
+  {
+    "id": "chill-chain-break",
+    "headline": "Chill chain broken in Titania Cold Store hold four; bluefin reserve quarantined",
+    "effect": {
+      "production": {
+        "station": "titania-cold-store",
+        "good": "bluefin-reserve",
+        "magnitudeBps": 4600
+      }
+    },
+    "weight": 4,
+    "leadTicks": 12,
+    "durationTicks": 56,
+    "fireProbabilityBps": 7800
+  },
+  {
+    "id": "mousse-separation",
+    "headline": "Salmon mousse separation reported at Velvet Array; the affected run is withdrawn",
+    "effect": {
+      "production": {
+        "station": "velvet-array",
+        "good": "salmon-mousse",
+        "magnitudeBps": 5400
+      }
+    },
+    "weight": 4,
+    "leadTicks": 9,
+    "durationTicks": 46,
+    "fireProbabilityBps": 8300
+  },
+  {
+    "id": "arbor-frost",
+    "headline": "Unseasonal frost across Deimos Arbor Lot; catnip cutting suspended",
+    "effect": {
+      "production": {
+        "station": "deimos-arbor",
+        "good": "catnip",
+        "magnitudeBps": 4900
+      }
+    },
+    "weight": 4,
+    "leadTicks": 11,
+    "durationTicks": 54,
+    "fireProbabilityBps": 7900
+  },
+  {
+    "id": "plate-mill-strip",
+    "headline": "Plate mill stripped for bearing replacement at Ganymede Plate Yards",
+    "effect": {
+      "production": {
+        "station": "ganymede-yards",
+        "good": "tinplate",
+        "magnitudeBps": 5100
+      }
+    },
+    "weight": 4,
+    "leadTicks": 10,
+    "durationTicks": 50,
+    "fireProbabilityBps": 8500
+  },
+  {
+    "id": "substrate-contamination",
+    "headline": "Foreign body traced to the Cannery Row substrate line; batch withheld",
+    "effect": {
+      "production": {
+        "station": "cannery-row",
+        "good": "biscuit-substrate",
+        "magnitudeBps": 5300
+      }
+    },
+    "weight": 4,
+    "leadTicks": 9,
+    "durationTicks": 44,
+    "fireProbabilityBps": 8200
+  },
+  {
+    "id": "larder-roof-breach",
+    "headline": "Micrometeorite breach over the Titan Larder grain hall; bays under pressure watch",
+    "effect": {
+      "production": {
+        "station": "titan-larder",
+        "good": "grain",
+        "magnitudeBps": 4700
+      }
+    },
+    "weight": 3,
+    "leadTicks": 12,
+    "durationTicks": 58,
+    "fireProbabilityBps": 7600
+  },
+  {
+    "id": "gravy-line-scald",
+    "headline": "Scald incident halts the Tuna Prime gravy base line pending investigation",
+    "effect": {
+      "production": {
+        "station": "tuna-prime",
+        "good": "gravy-base",
+        "magnitudeBps": 5000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 8,
+    "durationTicks": 42,
+    "fireProbabilityBps": 8400
+  },
+  {
+    "id": "holdfast-thaw",
+    "headline": "Thaw damage in the Triton Holdfast clay pits; extraction curtailed",
+    "effect": {
+      "production": {
+        "station": "triton-outpost",
+        "good": "litter-clay",
+        "magnitudeBps": 5200
+      }
+    },
+    "weight": 3,
+    "leadTicks": 10,
+    "durationTicks": 48,
+    "fireProbabilityBps": 8000
+  },
+  {
+    "id": "zoomies-outbreak",
+    "headline": "Uncontained zoomies event at Cannery Row Fulfilment; ration draw spikes",
+    "effect": {
+      "consumption": {
+        "station": "cannery-row",
+        "good": "kibble-loaf",
+        "magnitudeBps": 16000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 8,
+    "durationTicks": 40,
+    "fireProbabilityBps": 8500
+  },
+  {
+    "id": "hoarding-notice",
+    "headline": "Hoarding notice issued at Tuna Prime Exchange; counters clear within the hour",
+    "effect": {
+      "consumption": {
+        "station": "tuna-prime",
+        "good": "kibble-loaf",
+        "magnitudeBps": 17000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 6,
+    "durationTicks": 36,
+    "fireProbabilityBps": 8700
+  },
+  {
+    "id": "approach-lane-closure",
+    "headline": "Approach lane closed for survey between Cannery Row and Ganymede Plate Yards",
+    "effect": {
+      "laneCost": {
+        "lane": "cannery-row--ganymede-yards",
+        "magnitudeBps": 22000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 8,
+    "durationTicks": 44,
+    "fireProbabilityBps": 8300
+  },
+  {
+    "id": "outer-lane-rider",
+    "headline": "Cold weather rider filed on the Titan Larder to Titania Cold Store run",
+    "effect": {
+      "laneCost": {
+        "lane": "titan-larder--titania-cold-store",
+        "magnitudeBps": 24000
+      }
+    },
+    "weight": 3,
+    "leadTicks": 10,
+    "durationTicks": 50,
+    "fireProbabilityBps": 8000
+  },
+  {
+    "id": "drift-lane-tariff",
+    "headline": "Transit tariff applied to the Clawson's Drift arboretum lane",
+    "effect": {
+      "laneCost": {
+        "lane": "clawson-drift--deimos-arbor",
+        "magnitudeBps": 20000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 7,
+    "durationTicks": 38,
+    "fireProbabilityBps": 8600
+  },
+  {
+    "id": "clerk-shortage",
+    "headline": "Clerk shortage at Velvet Array Provisioning Authority; quoted spread widens",
+    "effect": {
+      "spread": {
+        "station": "velvet-array",
+        "magnitudeBps": 16000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 6,
+    "durationTicks": 34,
+    "fireProbabilityBps": 8800
+  },
+  {
+    "id": "cannery-shutdown",
+    "headline": "Cannery Row Fulfilment enters full production hold pending board inquiry",
+    "effect": {
+      "production": {
+        "station": "cannery-row",
+        "good": "kibble-loaf",
+        "magnitudeBps": 2200
+      }
+    },
+    "weight": 2,
+    "leadTicks": 24,
+    "durationTicks": 92,
+    "fireProbabilityBps": 5200
+  },
+  {
+    "id": "europa-bloom",
+    "headline": "Sub-ice bloom closes the Velvet Array fishmeal intake for the season",
+    "effect": {
+      "production": {
+        "station": "velvet-array",
+        "good": "fishmeal",
+        "magnitudeBps": 1800
+      }
+    },
+    "weight": 2,
+    "leadTicks": 28,
+    "durationTicks": 100,
+    "fireProbabilityBps": 4800
+  },
+  {
+    "id": "slagworks-fire",
+    "headline": "Fire in the Io Slagworks casting hall; ore output suspended indefinitely",
+    "effect": {
+      "production": {
+        "station": "io-slagworks",
+        "good": "ore",
+        "magnitudeBps": 2000
+      }
+    },
+    "weight": 2,
+    "leadTicks": 20,
+    "durationTicks": 88,
+    "fireProbabilityBps": 5000
+  },
+  {
+    "id": "larder-quarantine",
+    "headline": "Titan Larder Station placed under full quarantine; all grain movement halted",
+    "effect": {
+      "production": {
+        "station": "titan-larder",
+        "good": "grain",
+        "magnitudeBps": 1500
+      }
+    },
+    "weight": 1,
+    "leadTicks": 26,
+    "durationTicks": 96,
+    "fireProbabilityBps": 4500
+  },
+  {
+    "id": "outer-run-embargo",
+    "headline": "Outer run embargoed pending certification review; Triton traffic reroutes",
+    "effect": {
+      "laneCost": {
+        "lane": "titan-larder--triton-outpost",
+        "magnitudeBps": 45000
+      }
+    },
+    "weight": 2,
+    "leadTicks": 22,
+    "durationTicks": 84,
+    "fireProbabilityBps": 5400
+  },
+  {
+    "id": "panic-buying",
+    "headline": "Supply notice misread across the Earth orbit counters; sustained panic buying",
+    "effect": {
+      "consumption": {
+        "station": "tuna-prime",
+        "good": "pate",
+        "magnitudeBps": 26000
+      }
+    },
+    "weight": 2,
+    "leadTicks": 18,
+    "durationTicks": 76,
+    "fireProbabilityBps": 5800
+  },
+  {
+    "id": "exchange-suspension",
+    "headline": "Tuna Prime Exchange suspends normal quoting; all trades at wide discretion",
+    "effect": {
+      "spread": {
+        "station": "tuna-prime",
+        "magnitudeBps": 32000
+      }
+    },
+    "weight": 1,
+    "leadTicks": 20,
+    "durationTicks": 80,
+    "fireProbabilityBps": 5000
+  },
+  {
+    "id": "cold-store-failure",
+    "headline": "Plant failure across Titania Cold Store; the entire hold is written down",
+    "effect": {
+      "production": {
+        "station": "titania-cold-store",
+        "good": "fishmeal",
+        "magnitudeBps": 1600
+      }
+    },
+    "weight": 2,
+    "leadTicks": 24,
+    "durationTicks": 90,
+    "fireProbabilityBps": 4700
+  },
+  {
+    "id": "record-cutting",
+    "headline": "Deimos Arbor Lot reports record cutting; the catnip yard runs over",
+    "effect": {
+      "production": {
+        "station": "deimos-arbor",
+        "good": "catnip",
+        "magnitudeBps": 17000
+      }
+    },
+    "weight": 3,
+    "leadTicks": 12,
+    "durationTicks": 60,
+    "fireProbabilityBps": 8000
+  },
+  {
+    "id": "bumper-silo",
+    "headline": "Bumper season declared at Whisker Hollow; every grain bay reports full",
+    "effect": {
+      "production": {
+        "station": "whisker-hollow",
+        "good": "grain",
+        "magnitudeBps": 16500
+      }
+    },
+    "weight": 3,
+    "leadTicks": 12,
+    "durationTicks": 64,
+    "fireProbabilityBps": 7800
+  },
+  {
+    "id": "mill-uprating",
+    "headline": "Ganymede Plate Yards uprates the mill after commissioning; tinplate output lifts",
+    "effect": {
+      "production": {
+        "station": "ganymede-yards",
+        "good": "tinplate",
+        "magnitudeBps": 15500
+      }
+    },
+    "weight": 3,
+    "leadTicks": 10,
+    "durationTicks": 56,
+    "fireProbabilityBps": 8400
+  },
+  {
+    "id": "shoal-report",
+    "headline": "Exceptional shoal reported under Enceladus; the fishmeal line runs a double shift",
+    "effect": {
+      "production": {
+        "station": "enceladus-draw",
+        "good": "fishmeal",
+        "magnitudeBps": 16000
+      }
+    },
+    "weight": 3,
+    "leadTicks": 10,
+    "durationTicks": 52,
+    "fireProbabilityBps": 8200
+  },
+  {
+    "id": "anniversary-broadcast",
+    "headline": "Anniversary broadcast confirmed: Meow Password live from the Tuna Prime floor",
+    "effect": {
+      "consumption": {
+        "station": "tuna-prime",
+        "good": "salmon-mousse",
+        "magnitudeBps": 18000
+      }
+    },
+    "weight": 2,
+    "leadTicks": 24,
+    "durationTicks": 48,
+    "fireProbabilityBps": 9800
+  },
+  {
+    "id": "subsidised-run",
+    "headline": "Company subsidy applied to the Tuna Prime to Titan Larder run for the quarter",
+    "effect": {
+      "laneCost": {
+        "lane": "tuna-prime--titan-larder",
+        "magnitudeBps": 5500
+      }
+    },
+    "weight": 3,
+    "leadTicks": 14,
+    "durationTicks": 72,
+    "fireProbabilityBps": 8600
+  },
+  {
+    "id": "market-making-grant",
+    "headline": "Market making grant awarded to Cannery Row Fulfilment; quoted spread narrows",
+    "effect": {
+      "spread": {
+        "station": "cannery-row",
+        "magnitudeBps": 6000
+      }
+    },
+    "weight": 3,
+    "leadTicks": 12,
+    "durationTicks": 64,
+    "fireProbabilityBps": 8800
+  },
+  {
+    "id": "surplus-release",
+    "headline": "Strategic litter clay reserve released to the Clawson's Drift counters",
+    "effect": {
+      "production": {
+        "station": "clawson-drift",
+        "good": "litter-clay",
+        "magnitudeBps": 16000
+      }
+    },
+    "weight": 3,
+    "leadTicks": 8,
+    "durationTicks": 44,
+    "fireProbabilityBps": 8500
+  },
+  {
+    "id": "press-recommissioning",
+    "headline": "Third press recommissioned at Tranquility Press Works ahead of schedule",
+    "effect": {
+      "production": {
+        "station": "tranquility",
+        "good": "kibble-loaf",
+        "magnitudeBps": 15000
+      }
+    },
+    "weight": 3,
+    "leadTicks": 10,
+    "durationTicks": 50,
+    "fireProbabilityBps": 8600
+  },
+  {
+    "id": "paws-rush",
+    "headline": "Convoy season at Paws Interstellar; the grill orders double off Tuna Prime",
+    "effect": {
+      "consumption": {
+        "station": "tuna-prime",
+        "good": "kibble-loaf",
+        "magnitudeBps": 16000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 4,
+    "durationTicks": 24,
+    "fireProbabilityBps": 9000
+  },
+  {
+    "id": "paws-repave",
+    "headline": "Apron resurfacing at Paws Interstellar; approach lane tolled",
+    "effect": {
+      "laneCost": {
+        "lane": "earth-paws",
+        "magnitudeBps": 20000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 6,
+    "durationTicks": 30,
+    "fireProbabilityBps": 8500
+  },
+  {
+    "id": "foxys-convoy-night",
+    "headline": "Convoy night at Foxy's Diner: every stool taken and the bluefin line out the airlock",
+    "effect": {
+      "consumption": {
+        "station": "foxys-diner",
+        "good": "bluefin-reserve",
+        "magnitudeBps": 12000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 16,
+    "fireProbabilityBps": 9000
+  },
+  {
+    "id": "foxys-gravy-shortfall",
+    "headline": "Gravy-base tureen runs dry at Foxy's; the sign still says COME ON IN, HONEY",
+    "effect": {
+      "consumption": {
+        "station": "foxys-diner",
+        "good": "gravy-base",
+        "magnitudeBps": 11000
+      }
+    },
+    "weight": 4,
+    "leadTicks": 4,
+    "durationTicks": 14,
+    "fireProbabilityBps": 8800
+  },
+  {
+    "id": "pamphlets-tuna",
+    "headline": "Unattributed pamphlets recovered on the Tuna Prime cargo apron; provenance review ordered",
+    "effect": {
+      "consumption": {
+        "station": "tuna-prime",
+        "good": "pate",
+        "magnitudeBps": 8200
+      }
+    },
+    "weight": 8,
+    "leadTicks": 4,
+    "durationTicks": 20,
+    "fireProbabilityBps": 9000,
+    "minResistanceBps": 4500
+  },
+  {
+    "id": "picket-tranquility",
+    "headline": "Picket line outside the Tranquility fulfilment doors; throughput reduced pending review",
+    "effect": {
+      "production": {
+        "station": "tranquility",
+        "good": "kibble-loaf",
+        "magnitudeBps": 7600
+      }
+    },
+    "weight": 8,
+    "leadTicks": 5,
+    "durationTicks": 24,
+    "fireProbabilityBps": 9400,
+    "minResistanceBps": 5000
+  },
+  {
+    "id": "quote-wire-cannery",
+    "headline": "Quote-wire irregularities under investigation at Cannery Row; spreads widened as a precaution",
+    "effect": {
+      "spread": {
+        "station": "cannery-row",
+        "magnitudeBps": 13000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 3,
+    "durationTicks": 16,
+    "fireProbabilityBps": 9600,
+    "minResistanceBps": 5500
+  },
+  {
+    "id": "lane-vandalism-earth-mars",
+    "headline": "Aids to navigation vandalised on the Earth-Mars lane; sweep and re-certification underway",
+    "effect": {
+      "laneCost": {
+        "lane": "earth-mars",
+        "magnitudeBps": 12500
+      }
+    },
+    "weight": 7,
+    "leadTicks": 6,
+    "durationTicks": 24,
+    "fireProbabilityBps": 8800,
+    "minResistanceBps": 5000
+  },
+  {
+    "id": "buyer-hesitancy-titan",
+    "headline": "Coordinated buyer hesitancy noted in grain forward bookings at Titan Larder",
+    "effect": {
+      "consumption": {
+        "station": "titan-larder",
+        "good": "grain",
+        "magnitudeBps": 8500
+      }
+    },
+    "weight": 7,
+    "leadTicks": 4,
+    "durationTicks": 20,
+    "fireProbabilityBps": 8600,
+    "minResistanceBps": 4500
+  },
+  {
+    "id": "provenance-dispute-velvet",
+    "headline": "Third-party claims dispute kibble provenance; Velvet Array holds stock for re-inspection",
+    "effect": {
+      "production": {
+        "station": "velvet-array",
+        "good": "kibble-loaf",
+        "magnitudeBps": 8000
+      }
+    },
+    "weight": 6,
+    "leadTicks": 5,
+    "durationTicks": 18,
+    "fireProbabilityBps": 9200,
+    "minResistanceBps": 6000
+  },
+  {
+    "id": "slogans-io",
+    "headline": "Anti-feline slogans found on hull plating at Io Slagworks; security posture raised, handling slowed",
+    "effect": {
+      "production": {
+        "station": "io-slagworks",
+        "good": "ore",
+        "magnitudeBps": 8200
+      }
+    },
+    "weight": 6,
+    "leadTicks": 4,
+    "durationTicks": 16,
+    "fireProbabilityBps": 9000,
+    "minResistanceBps": 5500
+  },
+  {
+    "id": "complaint-flood-clawson",
+    "headline": "Automated complaint volume floods the service desks at Clawson Drift; spreads widened while the queues clear",
+    "effect": {
+      "spread": {
+        "station": "clawson-drift",
+        "magnitudeBps": 12500
+      }
+    },
+    "weight": 5,
+    "leadTicks": 3,
+    "durationTicks": 14,
+    "fireProbabilityBps": 9700,
+    "minResistanceBps": 6500
+  }
+]

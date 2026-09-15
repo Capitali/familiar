@@ -497,6 +497,8 @@ fn main() -> ExitCode {
     // The chain's last word, so the forecast is journaled on change rather than every fold.
     let mut last_forecast: Vec<String> = Vec::new();
     let mut last_fleet_inbound: Vec<String> = Vec::new();
+    // The dispatch feed's last word, likewise journaled on change (T-238 brick 3).
+    let mut last_dispatch: Vec<String> = Vec::new();
     // The world's day, in ticks: the exchange's minimum hold on bought goods is a
     // day (`minHoldTicks` in the pack, not exposed on the wire — LOCAL and PROD both
     // 288). The refusal text corrects us if a world says otherwise.
@@ -586,6 +588,10 @@ fn main() -> ExitCode {
         .as_ref()
         .map(chain::parse_pricing)
         .unwrap_or_default();
+    // The deck behind the dispatch feed's headlines: what each announcement means
+    // (T-238 brick 3). Vendored from the pack; a headline the deck does not know
+    // is journaled as a question, never guessed at.
+    let deck = chain::deck();
     let shelf_shape: BTreeMap<(String, String), (i64, i64)> = if recipes.is_empty() {
         BTreeMap::new()
     } else {
@@ -1492,9 +1498,31 @@ fn main() -> ExitCode {
                     let horizon = min_hold.max(1) + 96;
                     trade::Forecast::build(&recipes, &shelves, &pricing, horizon)
                 };
+                // The board's announcements, read against the deck and laid over the
+                // flows before anything prices them: the lead time is the whole
+                // information game, and it is played from the honest prior on
+                // `/v1/news` — never from the overwatch's resolved coin.
+                let dispatches = wire
+                    .get("/v1/news")
+                    .map(|n| chain::parse_news(&n, &deck))
+                    .unwrap_or_default();
+                let mut forecast = forecast.with_dispatches(dispatches, tick);
                 // What the captain's other hulls already have bound for each shelf.
-                let mut forecast = forecast;
                 forecast.inbound = fleet_inbound(&ship_dir);
+                // Say what the board has announced, once per change.
+                let dispatch_now: Vec<String> = forecast
+                    .dispatches
+                    .iter()
+                    .map(chain::Dispatch::line)
+                    .collect();
+                if dispatch_now != last_dispatch {
+                    journal(
+                        &ship_dir,
+                        json!({"at": now, "tick": tick, "event": "dispatch",
+                               "announced": dispatch_now}),
+                    );
+                    last_dispatch = dispatch_now;
+                }
                 // Say what the fleet has on its way, once per change: the soak's
                 // evidence that the hulls read each other (T-244).
                 let fleet_now: Vec<String> = forecast

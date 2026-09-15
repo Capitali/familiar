@@ -109,7 +109,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the customization dialogue's ladder rung "lived-in ship" and its ethics rail (docs/reviews/2026-08-31-ship-customization-dialogue.md, Round 3) name earned history as the one currency that cannot be bought — the familiar already holds the evidence and nobody projects it. This is the familiar-side brick that needs nothing from Jeff and gives his customization rungs their data source. Racing's "thermal/structural rating earned by surviving flybys" is the same record's second lineage, later
 
 ### T-238 · The supply chain is the map — production-aware P&L planning
-- **BRICK 3 CLAIMED — wildhorse, 2026-09-15: the dispatch feed is read.** Ian (2026-09-15):
+- **BRICK 3 LANDED — wildhorse, 2026-09-15 (see DEVELOPMENT_LOG; LOCAL soak rolled). Was: CLAIMED the same day: the dispatch feed is read.** Ian (2026-09-15):
   "be sure those changes are made and that familiar is optimized as the ships computer to
   maximize long term profits and ship operations." Survey of Jeff's last week: the pilot
   reads `/v1/news` NOWHERE, and the deck behind it is public (`Content/market/events.json`,

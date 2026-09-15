@@ -11,6 +11,7 @@
     "carry-blocked",
     "carry-refused",
     "carry-to-market",
+    "dispatch",
     "distress-hold",
     "engage-refused",
     "engaged-drive",

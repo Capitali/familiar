@@ -595,6 +595,11 @@ pub struct Forecast {
     /// works; the second sees the first's cargo as stock already on its way (Ian,
     /// 2026-09-09: "All three should be working together to maximize profit").
     pub inbound: BTreeMap<(String, String), i64>,
+    /// The dispatch feed as read this fold against the deck (T-238 brick 3):
+    /// what the board has announced and what it means. The flows above already
+    /// carry them as rate windows; this is the record for the journal and the
+    /// bridge.
+    pub dispatches: Vec<chain::Dispatch>,
 }
 
 /// One priced projection: the shelf now and at arrival, and the mid each implies.
@@ -621,7 +626,19 @@ impl Forecast {
             pricing: pricing.clone(),
             horizon_ticks,
             inbound: BTreeMap::new(),
+            dispatches: Vec::new(),
         }
+    }
+
+    /// Lay the dispatch feed over the flows: every announced or in-effect card
+    /// on a station×good becomes a rate window relative to `now_tick`, and each
+    /// touched horizon is re-walked — so a starving works whose supplier just
+    /// announced a third press stops looking starved, and a shelf a counter
+    /// rush is about to clear looks dry before the counter shows it.
+    pub fn with_dispatches(mut self, dispatches: Vec<chain::Dispatch>, now_tick: i64) -> Forecast {
+        chain::schedule(&mut self.flows, &dispatches, now_tick);
+        self.dispatches = dispatches;
+        self
     }
 
     pub fn flow_at(&self, station: &str, good: &str, kind: FlowKind) -> Option<&chain::Flow> {
@@ -1154,10 +1171,12 @@ mod tests {
                 rate_per_kilotick: rate,
                 shelf: Some(shelf),
                 horizon_ticks: (rate > 0).then(|| stock * 1000 / rate),
+                windows: Vec::new(),
             }],
             pricing: chain::Pricing::default(),
             horizon_ticks: 288 + 96,
             inbound: BTreeMap::new(),
+            dispatches: Vec::new(),
         };
         fc.pricing.goods.insert(good.into(), (base, swing));
         fc
@@ -1353,6 +1372,7 @@ mod tests {
                 equilibrium: 600,
             }),
             horizon_ticks: Some(10),
+            windows: Vec::new(),
         });
         l.forecast = Some(&fc);
         match decide_trade(&l, &board, &galaxy, &[], &pumps(), &Reach(true)) {

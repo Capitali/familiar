@@ -121,9 +121,25 @@ pub struct Flow {
     pub rate_per_kilotick: i64,
     /// The live shelf, when the caller had quotes for this berth.
     pub shelf: Option<Shelf>,
-    /// Ticks until the shelf is empty (Eats) or full (Makes), at full lines.
-    /// None without a shelf, or when the rate is zero.
+    /// Ticks until the shelf is empty (Eats) or full (Makes), at full lines —
+    /// along the dispatch schedule below when one is set. None without a shelf,
+    /// or when the rate is zero.
     pub horizon_ticks: Option<i64>,
+    /// What the dispatch feed says this flow will do and when: the board's
+    /// announced events on this station×good, as rate windows relative to now.
+    /// Empty = the lines run at their full rate throughout (the bound above).
+    pub windows: Vec<Window>,
+}
+
+/// One stretch of ticks over which a flow runs at a multiple of its full rate —
+/// a dispatch card in force, weighted by the odds it fires. `from` and `to` are
+/// ticks FROM NOW (`to` exclusive); `rate_bps` is the expected multiplier,
+/// 10,000 = the full rate, 2,200 = a hold at 22%, 15,000 = a third press.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    pub from: i64,
+    pub to: i64,
+    pub rate_bps: i64,
 }
 
 /// Fold recipes and live shelves into the full flow table, one row per
@@ -171,9 +187,296 @@ pub fn flows(recipes: &[Recipe], shelves: &[Shelf]) -> Vec<Flow> {
                 rate_per_kilotick: rate,
                 shelf,
                 horizon_ticks,
+                windows: Vec::new(),
             }
         })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// The dispatch feed — T-238 brick 3 (Ian, 2026-09-15: "be sure those changes are
+// made and that familiar is optimized as the ships computer to maximize long term
+// profits"). `/v1/news` announces an event BEFORE it bites: a headline, an honest
+// prior (`tier`), the tick it takes effect and the tick it expires. Jeff's own
+// words on the route: "Reading the board and moving before `effectiveAtTick` is
+// the entire information game; the lead time is the point."
+//
+// What a headline MEANS is public knowledge: the exchange's content pack ships
+// the deck (`Content/market/events.json`, ucf-exchange), every card a headline
+// with its effect — a production or consumption multiplier on one station×good,
+// a spread at one berth, a lane's cost — plus lead, duration and the odds it
+// fires. The pilot carries a copy of the deck (`content/ucf-events.json`,
+// `tools/sync-ucf-deck.sh` refreshes it) and reads the feed against it, so a
+// "third press recommissioned at Tranquility" is a kibble-loaf shelf filling at
+// 150% for the next fifty ticks, and a "production hold at Cannery Row" is a
+// starving buyer downstream two ticks before the counter shows it.
+//
+// NOT read, on purpose: `/v1/events`, the overwatch route that publishes the
+// resolved coin (`willFire`) and the exact magnitude. PROD answers a player key
+// on it (2026-09-15) — api.md calls that route "the sharpest edge of the scope
+// trap: a player reading this has no information game left to play". The
+// familiar plays the game as designed, from the prior; the leak is Jeff's to
+// close and is flagged to him through Ian.
+// ---------------------------------------------------------------------------
+
+/// What one card does to the world while it is in effect. Magnitudes are
+/// multipliers in bps: 4,000 means 40% of normal, 15,000 means 150%.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Effect {
+    /// The station's lines MAKE this good at `bps` of their rate.
+    Production {
+        station: String,
+        good: String,
+        bps: i64,
+    },
+    /// The station EATS this good at `bps` of its rate.
+    Consumption {
+        station: String,
+        good: String,
+        bps: i64,
+    },
+    /// The berth's quoted spread, at `bps` of normal.
+    Spread { station: String, bps: i64 },
+    /// A lane's cost, at `bps` of normal (`lane` = `origin--dest`).
+    LaneCost { lane: String, bps: i64 },
+}
+
+impl Effect {
+    /// The target the exchange would name: `station/good`, a station, or a lane.
+    pub fn target(&self) -> String {
+        match self {
+            Effect::Production { station, good, .. }
+            | Effect::Consumption { station, good, .. } => {
+                format!("{station}/{good}")
+            }
+            Effect::Spread { station, .. } => station.clone(),
+            Effect::LaneCost { lane, .. } => lane.clone(),
+        }
+    }
+
+    pub fn bps(&self) -> i64 {
+        match self {
+            Effect::Production { bps, .. }
+            | Effect::Consumption { bps, .. }
+            | Effect::Spread { bps, .. }
+            | Effect::LaneCost { bps, .. } => *bps,
+        }
+    }
+}
+
+/// One card of the exchange's dispatch deck: a headline and what it means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Card {
+    pub id: String,
+    pub headline: String,
+    pub effect: Effect,
+    /// Ticks between the announcement and the effect — the lead the pilot has.
+    pub lead_ticks: i64,
+    pub duration_ticks: i64,
+    /// The odds the card fires once announced, bps. The feed's `tier` is this
+    /// number's display band (≥9,500 confirmed, ≥6,000 likely, else rumour).
+    pub fire_bps: i64,
+}
+
+/// The deck as vendored from Jeff's pack — `content/ucf-events.json`, refreshed
+/// by `tools/sync-ucf-deck.sh`. A pack with no deck is an eventless galaxy.
+pub fn deck() -> Vec<Card> {
+    serde_json::from_str::<Value>(include_str!("../content/ucf-events.json"))
+        .map(|v| parse_deck(&v))
+        .unwrap_or_default()
+}
+
+/// Parse the pack's `events.json` array. A card missing its load-bearing fields
+/// or naming an effect this model does not know is skipped — the pilot must
+/// never invent a meaning for a headline.
+pub fn parse_deck(v: &Value) -> Vec<Card> {
+    let Some(rows) = v.as_array() else {
+        return Vec::new();
+    };
+    rows.iter()
+        .filter_map(|c| {
+            let effect = c.get("effect")?.as_object()?;
+            let (kind, body) = effect.iter().next()?;
+            let station = || body.get("station")?.as_str().map(String::from);
+            let good = || body.get("good")?.as_str().map(String::from);
+            let bps = body.get("magnitudeBps")?.as_i64()?;
+            let effect = match kind.as_str() {
+                "production" => Effect::Production {
+                    station: station()?,
+                    good: good()?,
+                    bps,
+                },
+                "consumption" => Effect::Consumption {
+                    station: station()?,
+                    good: good()?,
+                    bps,
+                },
+                "spread" => Effect::Spread {
+                    station: station()?,
+                    bps,
+                },
+                "laneCost" => Effect::LaneCost {
+                    lane: body.get("lane")?.as_str()?.to_string(),
+                    bps,
+                },
+                _ => return None,
+            };
+            Some(Card {
+                id: c.get("id")?.as_str()?.to_string(),
+                headline: c.get("headline")?.as_str()?.to_string(),
+                effect,
+                lead_ticks: c.get("leadTicks").and_then(Value::as_i64).unwrap_or(0),
+                duration_ticks: c.get("durationTicks").and_then(Value::as_i64).unwrap_or(0),
+                fire_bps: c
+                    .get("fireProbabilityBps")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(FULL_BPS),
+            })
+        })
+        .collect()
+}
+
+/// A neutral multiplier, and the odds of a certainty.
+pub const FULL_BPS: i64 = 10_000;
+
+/// The honest prior behind each display band, used when a headline matches no
+/// card (the band's floor in the pack's own thresholds; a rumour below it).
+pub fn tier_odds_bps(tier: &str) -> i64 {
+    match tier {
+        "confirmed" => 9_500,
+        "likely" => 6_000,
+        _ => 4_000,
+    }
+}
+
+/// One item off `/v1/news`, read against the deck: what was announced, what it
+/// means if the feed's headline is a card we know, and the odds it bites.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dispatch {
+    pub headline: String,
+    /// The card's id when the headline is one of the deck's; None for a headline
+    /// the pack we carry does not know (a newer deck, or prose).
+    pub card: Option<String>,
+    pub effect: Option<Effect>,
+    pub tier: String,
+    /// `announced` or `in-effect` — withdrawn and expired items are not dispatches.
+    pub status: String,
+    pub announced_at: i64,
+    pub effective_at: i64,
+    pub expires_at: i64,
+    /// The odds the effect applies, bps: certain once in effect; the card's own
+    /// fire odds while announced; the tier's prior for an unknown headline.
+    pub odds_bps: i64,
+}
+
+impl Dispatch {
+    /// One line for the journal and the bridge: what, where, how much, when.
+    pub fn line(&self) -> String {
+        match (&self.card, &self.effect) {
+            (Some(card), Some(effect)) => format!(
+                "{card} @ {} ×{}bps t{}–t{} ({}, {}, odds {})",
+                effect.target(),
+                effect.bps(),
+                self.effective_at,
+                self.expires_at,
+                self.tier,
+                self.status,
+                self.odds_bps
+            ),
+            _ => format!(
+                "? \"{}\" t{}–t{} ({}, {})",
+                self.headline, self.effective_at, self.expires_at, self.tier, self.status
+            ),
+        }
+    }
+}
+
+/// Read the feed against the deck. Withdrawn and expired items are dropped;
+/// the rest keep the feed's order.
+pub fn parse_news(news: &Value, deck: &[Card]) -> Vec<Dispatch> {
+    let Some(rows) = news.as_array() else {
+        return Vec::new();
+    };
+    rows.iter()
+        .filter_map(|n| {
+            let status = n.get("status")?.as_str()?.to_string();
+            if status != "announced" && status != "in-effect" {
+                return None;
+            }
+            let headline = n.get("headline")?.as_str()?.to_string();
+            let tier = n
+                .get("tier")
+                .and_then(Value::as_str)
+                .unwrap_or("rumour")
+                .to_string();
+            let card = deck.iter().find(|c| c.headline == headline);
+            let odds_bps = if status == "in-effect" {
+                FULL_BPS
+            } else {
+                card.map_or_else(|| tier_odds_bps(&tier), |c| c.fire_bps)
+            };
+            Some(Dispatch {
+                headline,
+                card: card.map(|c| c.id.clone()),
+                effect: card.map(|c| c.effect.clone()),
+                tier,
+                status,
+                announced_at: n
+                    .get("announcedAtTick")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                effective_at: n
+                    .get("effectiveAtTick")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                expires_at: n.get("expiresAtTick").and_then(Value::as_i64).unwrap_or(0),
+                odds_bps,
+            })
+        })
+        .collect()
+}
+
+/// Lay the dispatches over the flows as rate windows and re-walk every touched
+/// horizon. A production card moves the Makes flow at its station×good, a
+/// consumption card the Eats flow; spread and lane cards move no shelf and are
+/// left to the journal. A window that has already closed is not laid; one in
+/// effect starts now. The expected multiplier weights the card's magnitude by
+/// its odds, so a rumour of a hold slows the line a little and a hold in effect
+/// slows it fully.
+pub fn schedule(flows: &mut [Flow], dispatches: &[Dispatch], now_tick: i64) {
+    for f in flows.iter_mut() {
+        f.windows.clear();
+    }
+    for d in dispatches {
+        let (station, good, bps, kind) = match &d.effect {
+            Some(Effect::Production { station, good, bps }) => {
+                (station, good, *bps, FlowKind::Makes)
+            }
+            Some(Effect::Consumption { station, good, bps }) => {
+                (station, good, *bps, FlowKind::Eats)
+            }
+            _ => continue,
+        };
+        let from = (d.effective_at - now_tick).max(0);
+        let to = d.expires_at - now_tick;
+        if to <= from {
+            continue;
+        }
+        // Expected rate: full, plus the card's departure from full at its odds.
+        let rate_bps = FULL_BPS + (bps - FULL_BPS) * d.odds_bps.clamp(0, FULL_BPS) / FULL_BPS;
+        for f in flows.iter_mut() {
+            if f.kind == kind && &f.station == station && &f.good == good {
+                f.windows.push(Window { from, to, rate_bps });
+            }
+        }
+    }
+    // Every horizon is re-walked, not only the touched ones: a flow whose window
+    // just closed goes back to the counter's own arithmetic (the walk with no
+    // windows IS that arithmetic).
+    for f in flows.iter_mut() {
+        f.windows.sort_by_key(|w| (w.from, w.to));
+        f.horizon_ticks = f.walk_horizon();
+    }
 }
 
 /// The feeds worth flying: inputs whose shelf runs dry inside the horizon, most
@@ -331,6 +634,253 @@ mod tests {
         assert_eq!(lifts[0].good, "gravy-base");
         assert_eq!(lifts[0].horizon_ticks, Some(5));
     }
+
+    // ── the dispatch feed (T-238 brick 3) ──────────────────────────────────
+
+    #[test]
+    fn the_vendored_deck_parses_and_every_kind_of_card_names_its_effect() {
+        let deck = deck();
+        assert_eq!(
+            deck.len(),
+            72,
+            "the pack's deck as synced 2026-09-15 (72 cards)"
+        );
+        let press = deck
+            .iter()
+            .find(|c| c.id == "press-recommissioning")
+            .unwrap();
+        assert_eq!(
+            press.effect,
+            Effect::Production {
+                station: "tranquility".into(),
+                good: "kibble-loaf".into(),
+                bps: 15_000
+            }
+        );
+        assert_eq!(press.effect.target(), "tranquility/kibble-loaf");
+        assert!(press.lead_ticks > 0 && press.duration_ticks > 0 && press.fire_bps > 0);
+        let desk = deck.iter().find(|c| c.id == "desk-cover-premium").unwrap();
+        assert_eq!(
+            desk.effect,
+            Effect::Spread {
+                station: "clawson-drift".into(),
+                bps: 13_000
+            }
+        );
+        let lane = deck
+            .iter()
+            .find(|c| c.id == "approach-lane-closure")
+            .unwrap();
+        assert!(
+            matches!(&lane.effect, Effect::LaneCost { lane, bps: 22_000 } if lane == "cannery-row--ganymede-yards")
+        );
+        assert!(deck
+            .iter()
+            .any(|c| matches!(c.effect, Effect::Consumption { .. })));
+        // A card the model cannot read is skipped, never guessed at.
+        let odd = json!([{"id": "x", "headline": "h", "effect": {"weather": {"magnitudeBps": 5}}}]);
+        assert!(parse_deck(&odd).is_empty());
+    }
+
+    fn deck_fixture() -> Vec<Card> {
+        parse_deck(&json!([
+            {"id": "cannery-hold", "headline": "Cannery Row Fulfilment enters full production hold pending board inquiry",
+             "effect": {"production": {"station": "cannery-row", "good": "kibble-loaf", "magnitudeBps": 2200}},
+             "weight": 3, "leadTicks": 24, "durationTicks": 92, "fireProbabilityBps": 4400},
+            {"id": "counter-rush", "headline": "Counter rush at Cannery Row as the shift changes; fishmeal clears fast",
+             "effect": {"consumption": {"station": "cannery-row", "good": "fishmeal", "magnitudeBps": 11800}},
+             "weight": 8, "leadTicks": 3, "durationTicks": 10, "fireProbabilityBps": 9600}
+        ]))
+    }
+
+    fn feed() -> Value {
+        json!([
+            {"headline": "Cannery Row Fulfilment enters full production hold pending board inquiry",
+             "tier": "rumour", "announcedAtTick": 100, "effectiveAtTick": 124, "expiresAtTick": 216, "status": "announced"},
+            {"headline": "Counter rush at Cannery Row as the shift changes; fishmeal clears fast",
+             "tier": "confirmed", "announcedAtTick": 100, "effectiveAtTick": 103, "expiresAtTick": 113, "status": "announced"},
+            {"headline": "Weighbridge tared at Ganymede Plate Yards; ore intake pauses for the check",
+             "tier": "likely", "announcedAtTick": 90, "effectiveAtTick": 91, "expiresAtTick": 95, "status": "expired"},
+            {"headline": "Something the deck we carry has never heard of",
+             "tier": "likely", "announcedAtTick": 100, "effectiveAtTick": 110, "expiresAtTick": 120, "status": "announced"},
+            {"headline": "Cannery Row Fulfilment enters full production hold pending board inquiry",
+             "tier": "rumour", "announcedAtTick": 50, "effectiveAtTick": 74, "expiresAtTick": 166, "status": "in-effect"}
+        ])
+    }
+
+    /// The two items that lay windows, one per flow: the hold in effect and the
+    /// rush announced. `feed()` above carries the same hold twice for the parser.
+    fn feed_live() -> Value {
+        json!([
+            {"headline": "Counter rush at Cannery Row as the shift changes; fishmeal clears fast",
+             "tier": "confirmed", "announcedAtTick": 100, "effectiveAtTick": 103, "expiresAtTick": 113, "status": "announced"},
+            {"headline": "Cannery Row Fulfilment enters full production hold pending board inquiry",
+             "tier": "rumour", "announcedAtTick": 50, "effectiveAtTick": 74, "expiresAtTick": 166, "status": "in-effect"}
+        ])
+    }
+
+    #[test]
+    fn the_feed_is_read_against_the_deck_and_the_odds_are_honest() {
+        let ds = parse_news(&feed(), &deck_fixture());
+        assert_eq!(ds.len(), 4, "the expired item is not a dispatch");
+        // Announced and known: the card's own fire odds, not the tier's band.
+        assert_eq!(ds[0].card.as_deref(), Some("cannery-hold"));
+        assert_eq!(ds[0].odds_bps, 4_400);
+        assert_eq!(ds[1].odds_bps, 9_600);
+        // Unknown headline: no meaning invented; the tier's prior stands.
+        assert_eq!(ds[2].card, None);
+        assert_eq!(ds[2].effect, None);
+        assert_eq!(ds[2].odds_bps, 6_000);
+        assert!(ds[2].line().starts_with("? \"Something"));
+        // In effect: the coin has landed.
+        assert_eq!(ds[3].status, "in-effect");
+        assert_eq!(ds[3].odds_bps, FULL_BPS);
+        assert_eq!(
+            ds[3].line(),
+            "cannery-hold @ cannery-row/kibble-loaf ×2200bps t74–t166 (rumour, in-effect, odds 10000)"
+        );
+    }
+
+    #[test]
+    fn a_hold_pushes_the_full_shelf_out_and_a_rush_pulls_the_dry_shelf_in() {
+        let shelves = vec![
+            Shelf {
+                station: "cannery-row".into(),
+                good: "fishmeal".into(),
+                stock: 862,
+                capacity: 1200,
+                equilibrium: 600,
+            },
+            Shelf {
+                station: "cannery-row".into(),
+                good: "kibble-loaf".into(),
+                stock: 356,
+                capacity: 400,
+                equilibrium: 200,
+            },
+        ];
+        let mut all = flows(&parse_recipes(&reference()), &shelves);
+        let before: Vec<Option<i64>> = all.iter().map(|f| f.horizon_ticks).collect();
+        // The in-effect hold and the announced rush: now = t100.
+        let ds = parse_news(&feed_live(), &deck_fixture());
+        schedule(&mut all, &ds, 100);
+        let loaf = all
+            .iter()
+            .find(|f| f.good == "kibble-loaf" && f.kind == FlowKind::Makes)
+            .unwrap();
+        // The hold is IN EFFECT (odds certain) until t166 → 66 ticks from now at
+        // 22%: 3300 × 0.22 = 726 milli-units a tick against 44 units of room →
+        // 44,000 / 726 = 60 ticks, inside the window. Unscheduled it was 13.
+        assert_eq!(
+            before[all.iter().position(|f| std::ptr::eq(f, loaf)).unwrap()],
+            Some(13)
+        );
+        assert_eq!(
+            loaf.windows,
+            vec![Window {
+                from: 0,
+                to: 66,
+                rate_bps: 2_200
+            }]
+        );
+        assert_eq!(loaf.horizon_ticks, Some(60));
+        assert_eq!(loaf.stock_at(10), Some(Units(363)), "356 + 7,260 milli");
+        // The rush is ANNOUNCED at 96% odds for t103–t113: expected 11,728 bps.
+        // Eating 862 fishmeal at 4200/kilotick: 3 ticks full (12,600), 10 ticks
+        // at 4925 (49,250), then full again — 800,150 left at 4200 = 190 more:
+        // dry at 203, two ticks sooner than the 205 the counter alone showed.
+        let meal = all
+            .iter()
+            .find(|f| f.good == "fishmeal" && f.kind == FlowKind::Eats)
+            .unwrap();
+        assert_eq!(
+            meal.windows,
+            vec![Window {
+                from: 3,
+                to: 13,
+                rate_bps: 11_728
+            }]
+        );
+        assert_eq!(meal.horizon_ticks, Some(203));
+        assert_eq!(meal.stock_at(13), Some(Units(801)), "862 − 61,850 milli");
+        // A shelf the feed never named keeps its unscheduled horizon.
+        let ice = all
+            .iter()
+            .find(|f| f.good == "water-ice" && f.kind == FlowKind::Eats)
+            .unwrap();
+        assert!(ice.windows.is_empty());
+        // Re-laying with an empty feed restores every horizon: the schedule is
+        // the feed's, not the flow's.
+        schedule(&mut all, &[], 100);
+        assert_eq!(
+            all.iter().map(|f| f.horizon_ticks).collect::<Vec<_>>(),
+            before
+        );
+    }
+
+    #[test]
+    fn a_window_already_closed_or_pointed_at_no_shelf_lays_nothing() {
+        let mut all = flows(&parse_recipes(&reference()), &[]);
+        let ds = parse_news(&feed_live(), &deck_fixture());
+        // At t500 every window in the feed has passed.
+        schedule(&mut all, &ds, 500);
+        assert!(all.iter().all(|f| f.windows.is_empty()));
+        // At t100 the loaf flow takes its window, but with no shelf there is no
+        // horizon to walk — and no panic.
+        schedule(&mut all, &ds, 100);
+        let loaf = all
+            .iter()
+            .find(|f| f.good == "kibble-loaf" && f.kind == FlowKind::Makes)
+            .unwrap();
+        assert_eq!(loaf.windows.len(), 1);
+        assert_eq!(loaf.horizon_ticks, None);
+        assert_eq!(loaf.stock_at(10), None);
+    }
+
+    #[test]
+    fn two_windows_on_one_line_compound_and_the_same_card_twice_is_two_windows() {
+        // The same hold announced again while one is in effect: both lay a window.
+        let mut all = flows(&parse_recipes(&reference()), &[]);
+        schedule(&mut all, &parse_news(&feed(), &deck_fixture()), 100);
+        let loaf = all
+            .iter()
+            .find(|f| f.good == "kibble-loaf" && f.kind == FlowKind::Makes)
+            .unwrap();
+        assert_eq!(loaf.windows.len(), 2);
+        // Half rate over [0,10) and half again over [5,15): a quarter where they
+        // overlap. 1000/kilotick: 500×5 + 250×5 = 3,750 milli → 3 units in 10.
+        let flow = Flow {
+            station: "w".into(),
+            good: "g".into(),
+            kind: FlowKind::Eats,
+            rate_per_kilotick: 1_000,
+            shelf: Some(Shelf {
+                station: "w".into(),
+                good: "g".into(),
+                stock: 100,
+                capacity: 200,
+                equilibrium: 50,
+            }),
+            horizon_ticks: Some(100),
+            windows: vec![
+                Window {
+                    from: 0,
+                    to: 10,
+                    rate_bps: 5_000,
+                },
+                Window {
+                    from: 5,
+                    to: 15,
+                    rate_bps: 5_000,
+                },
+            ],
+        };
+        assert_eq!(flow.rate_bps_at(7), 2_500);
+        assert_eq!(flow.stock_at(10), Some(Units(97)));
+        // 100 units: 3,750 by t10, 500×5 = 2,500 more by t15 (6,250), then full
+        // rate: 93,750 / 1000 = 93 more → dry at t108.
+        assert_eq!(flow.walk_horizon(), Some(108));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -460,16 +1010,87 @@ pub fn buy_unit_price(mid: Credits, spread_bps: i64) -> Credits {
 }
 
 impl Flow {
-    /// The shelf `ticks` from now, at full lines: an eaten shelf drains to
+    /// The shelf `ticks` from now, along the schedule: an eaten shelf drains to
     /// empty, a made shelf fills to capacity, and neither goes past. None
     /// without a live shelf.
     pub fn stock_at(&self, ticks: i64) -> Option<Units> {
         let s = self.shelf.as_ref()?;
-        let moved = self.rate_per_kilotick.max(0) * ticks.max(0) / 1000;
+        let moved = self.moved_milli(ticks.max(0)) / 1000;
         Some(Units(match self.kind {
             FlowKind::Eats => (s.stock - moved).max(0),
             FlowKind::Makes => (s.stock + moved).min(s.capacity.max(s.stock)),
         }))
+    }
+
+    /// The expected multiplier on the full rate at `t` ticks from now, bps:
+    /// every window covering `t` scales it in turn (two holds on one line
+    /// compound; a hold under a rush is a hold at a rush's fraction).
+    fn rate_bps_at(&self, t: i64) -> i64 {
+        self.windows
+            .iter()
+            .filter(|w| w.from <= t && t < w.to)
+            .fold(FULL_BPS, |bps, w| bps * w.rate_bps.max(0) / FULL_BPS)
+    }
+
+    /// The segment edges of the schedule inside `[0, until)`, in order, so the
+    /// rate is constant between neighbours.
+    fn edges(&self, until: i64) -> Vec<i64> {
+        let mut edges = vec![0];
+        for w in &self.windows {
+            for e in [w.from, w.to] {
+                if e > 0 && e < until {
+                    edges.push(e);
+                }
+            }
+        }
+        edges.push(until);
+        edges.sort_unstable();
+        edges.dedup();
+        edges
+    }
+
+    /// Units moved in the next `ticks`, in thousandths: the rate per kilotick
+    /// IS milli-units per tick, so this is Σ rate × length over the schedule's
+    /// segments — and exactly `rate × ticks` when nothing is scheduled.
+    fn moved_milli(&self, ticks: i64) -> i64 {
+        let rate = self.rate_per_kilotick.max(0);
+        if ticks <= 0 || rate == 0 {
+            return 0;
+        }
+        let edges = self.edges(ticks);
+        edges
+            .windows(2)
+            .map(|seg| rate * self.rate_bps_at(seg[0]) / FULL_BPS * (seg[1] - seg[0]))
+            .sum()
+    }
+
+    /// Ticks until the shelf is empty (Eats) or full (Makes) along the schedule:
+    /// the first segment whose cumulative movement reaches the room, and the
+    /// tick inside it. Floors like the unscheduled formula, so the two agree
+    /// whenever no window is laid.
+    fn walk_horizon(&self) -> Option<i64> {
+        let s = self.shelf.as_ref()?;
+        let rate = self.rate_per_kilotick.max(0);
+        if rate == 0 {
+            return None;
+        }
+        let room = match self.kind {
+            FlowKind::Eats => s.stock,
+            FlowKind::Makes => (s.capacity - s.stock).max(0),
+        } * 1000;
+        let far = self.windows.iter().map(|w| w.to).max().unwrap_or(0).max(1);
+        let mut edges = self.edges(far);
+        edges.push(i64::MAX);
+        let mut moved = 0i64;
+        for seg in edges.windows(2) {
+            let seg_rate = rate * self.rate_bps_at(seg[0]) / FULL_BPS;
+            let len = seg[1].saturating_sub(seg[0]);
+            if seg_rate > 0 && (seg[1] == i64::MAX || moved + seg_rate * len >= room) {
+                return Some(seg[0] + (room - moved).max(0) / seg_rate);
+            }
+            moved += seg_rate * len;
+        }
+        None
     }
 }
 
@@ -519,6 +1140,7 @@ mod pricing_tests {
             rate_per_kilotick: 13_333,
             shelf: Some(shelf.clone()),
             horizon_ticks: Some(37),
+            windows: Vec::new(),
         };
         assert_eq!(eats.stock_at(0), Some(Units(500)));
         assert_eq!(

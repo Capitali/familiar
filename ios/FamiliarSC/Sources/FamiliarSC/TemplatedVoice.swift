@@ -65,7 +65,7 @@ public struct TemplatedVoice {
         case "traded", "position-opened", "load-closed", "outfitted", "trade-outcome", "fill", "paid-down": return 6
         case "advice", "carry-blocked", "carry-refused", "engage-refused", "refit-refused", "book-corrected", "retargeted": return 5
         case "acted", "engaged-drive", "carry-to-market", "unwedged-course", "adopted-held-contract", "freight": return 4
-        case "held-at-the-gate", "watch-begins", "forecast": return 3
+        case "held-at-the-gate", "watch-begins", "forecast", "dispatch": return 3
         case "holding", "merchant-idle", "outfit-idle", "awaiting-pending-actions", "awaiting-our-own-fold": return 0
         // Unknown: shown, neutrally — except that a word the runner ends in "-refused" is a
         // refusal at the door whatever else it is, and outranks routine (the safe rule for a
@@ -260,6 +260,9 @@ public struct TemplatedVoice {
             return "\(t(e)): lease payment of ℳ\(i("amount")) refused — \(s("why"))"
         case "trade-refused":
             return "\(t(e)): \(s("side")) \(s("good")) refused at the door — \(s("why"))"
+        case "dispatch":
+            let announced = e["announced"]?.array?.compactMap { $0.string ?? $0.description } ?? []
+            return "\(t(e)): the board has " + (announced.isEmpty ? "nothing announced" : "announced: " + announced.joined(separator: "; "))
         case "forecast":
             let starving = e["starving"]?.array?.compactMap { $0.string ?? $0.description } ?? []
             return "\(t(e)): forecast over \(i("horizon_ticks")) ticks — " + (starving.isEmpty ? "no shelf runs dry" : "running dry: " + starving.joined(separator: ", "))
