@@ -109,6 +109,18 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: the customization dialogue's ladder rung "lived-in ship" and its ethics rail (docs/reviews/2026-08-31-ship-customization-dialogue.md, Round 3) name earned history as the one currency that cannot be bought — the familiar already holds the evidence and nobody projects it. This is the familiar-side brick that needs nothing from Jeff and gives his customization rungs their data source. Racing's "thermal/structural rating earned by surviving flybys" is the same record's second lineage, later
 
 ### T-238 · The supply chain is the map — production-aware P&L planning
+- **BRICK 4 CLAIMED — wildhorse, 2026-09-15: the production ledger replaces the full-lines bound.**
+  `/v1/stations/{id}/production?recipe=R` is LIVE on PROD (#5, 2026-09-09): per recipe, eight
+  12-tick buckets of `cyclesCompleted`, `unitsProduced`, `unitsConsumed`, `idleTicks`,
+  `blockedReason` ("blocked"). Today io-slagworks runs at half its rate (blocked, 6 idle of 12)
+  and titan-larder at zero (blocked, 12 idle) while the forecast prices both at FULL lines —
+  the honesty bound `chain.rs` opened with ("if Jeff exposes utilization, `rate_per_kilotick`
+  is where it lands"). Scope: `chain.rs` (utilization per recipe from the buckets; a flow's
+  rate scaled by its line's measured share; a stalled line keeps its full appetite so an empty
+  shelf stays the most urgent feed), `main.rs` (24 reads once per 12-tick bucket, never per
+  fold — the read budget is 2/s), the `forecast` line carries `measured`. No new vocabulary.
+  LOCAL's daemon predates the route (Aug 31 binary) — rebuilt from Jeff's main and restarted
+  under launchd so the soak can fly it first.
 - **BRICK 3 LANDED — wildhorse, 2026-09-15 (see DEVELOPMENT_LOG; LOCAL soak rolled). Was: CLAIMED the same day: the dispatch feed is read.** Ian (2026-09-15):
   "be sure those changes are made and that familiar is optimized as the ships computer to
   maximize long term profits and ship operations." Survey of Jeff's last week: the pilot
