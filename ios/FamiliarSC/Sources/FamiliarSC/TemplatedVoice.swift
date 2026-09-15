@@ -62,10 +62,10 @@ public struct TemplatedVoice {
         case "distress-hold": return 9
         case "refused-at-the-door", "exchange-unreachable", "trade-refused", "pay-down-refused": return 8
         case "proposed", "proposal-lapsed": return 7
-        case "traded", "position-opened", "load-closed", "outfitted", "trade-outcome", "fill", "paid-down": return 6
+        case "traded", "position-opened", "load-closed", "outfitted", "trade-outcome", "fill", "paid-down", "frame-expanded", "order-done": return 6
         case "advice", "carry-blocked", "carry-refused", "engage-refused", "refit-refused", "book-corrected", "retargeted": return 5
         case "acted", "engaged-drive", "carry-to-market", "unwedged-course", "adopted-held-contract", "freight": return 4
-        case "held-at-the-gate", "watch-begins", "forecast", "dispatch": return 3
+        case "held-at-the-gate", "watch-begins", "forecast", "dispatch", "fleet-inbound", "order-waits": return 3
         case "holding", "merchant-idle", "outfit-idle", "awaiting-pending-actions", "awaiting-our-own-fold": return 0
         // Unknown: shown, neutrally — except that a word the runner ends in "-refused" is a
         // refusal at the door whatever else it is, and outranks routine (the safe rule for a
@@ -260,6 +260,21 @@ public struct TemplatedVoice {
             return "\(t(e)): lease payment of ℳ\(i("amount")) refused — \(s("why"))"
         case "trade-refused":
             return "\(t(e)): \(s("side")) \(s("good")) refused at the door — \(s("why"))"
+        case "automation-refused":
+            return "\(t(e)): automation \(s("automation")) refused — \(s("why"))"
+        case "fleet-inbound":
+            let sisters = e["sisters"]?.array?.compactMap { $0.string ?? $0.description } ?? []
+            return "\(t(e)): the fleet has " + (sisters.isEmpty ? "nothing on its way" : "on its way: " + sisters.joined(separator: ", "))
+        case "frame-expanded":
+            return "\(t(e)): frame expanded to \(s("frame")) for ℳ\(i("cost")) at \(s("at_station")) — ℳ\(i("credits")) left, reserve ℳ\(i("reserve"))"
+        case "frame-refused":
+            return "\(t(e)): the \(s("frame")) frame (ℳ\(i("cost"))) refused — \(s("why"))"
+        case "order-done":
+            return "\(t(e)): standing order \(s("order")) done — \(s("verb")) filed under \(s("by")); ℳ\(i("credits")), fuel \(i("fuel")), resolves t\(i("resolves"))"
+        case "order-refused":
+            return "\(t(e)): standing order \(s("order")) (\(s("verb"))) refused — \(s("why"))"
+        case "order-waits":
+            return "\(t(e)): standing order \(s("order")) (\(s("verb"))) waits — \(s("why"))"
         case "dispatch":
             let announced = e["announced"]?.array?.compactMap { $0.string ?? $0.description } ?? []
             return "\(t(e)): the board has " + (announced.isEmpty ? "nothing announced" : "announced: " + announced.joined(separator: "; "))
