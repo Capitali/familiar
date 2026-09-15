@@ -31,7 +31,13 @@ public struct SCRootView: View {
                         ToolbarItem(placement: .cancellationAction) { Button("Close") { onClose() } }
                     }
                     if let hostItem {
+                        // `.topBarLeading` is iOS-only; the macOS stand-in (`swift test`,
+                        // CI's swift-bar) needs the cross-platform placement.
+                        #if os(macOS)
+                        ToolbarItem(placement: .navigation) { hostItem }
+                        #else
                         ToolbarItem(placement: .topBarLeading) { hostItem }
+                        #endif
                     }
                 }
         }
