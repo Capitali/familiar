@@ -1,6 +1,6 @@
 # Draft ask to Jeff — the captain's purse: one fleet's income pays down one fleet's leases
 
-Status: **DRAFT, not filed** (Ian, 2026-09-16: "Now that the fleet has one owned hull we should be
+Status: **FILED 2026-09-16 as ucf-exchange#53** (https://github.com/SpaceTrucker2196/ucf-exchange/issues/53), in Ian's name, on Ian's direction (2026-09-16: "Now that the fleet has one owned hull we should be
 using that additional income to pay down the lease on other ships. The captain needs access to all
 the income of the fleet so that it can benefit.")
 
