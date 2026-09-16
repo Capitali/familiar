@@ -82,6 +82,74 @@ final class T236SwiftTests: XCTestCase {
         func book(world: String) async throws -> ShipBook { try await inner.book(world: world) }
     }
 
+    /// A feed whose persona read for one world is SLOW and succeeds — the overlapping-open race.
+    struct SlowGoodFeed: ShipsFeed {
+        let inner = FixtureFeed()
+        let slow: String
+        func ships() async throws -> [ShipSummary] { try await inner.ships() }
+        func context(world: String, worldInstance: String?) async throws -> (frame: String?, documents: [ContextDocument]) { try await inner.context(world: world, worldInstance: worldInstance) }
+        func persona(world: String) async throws -> Persona? {
+            if world == slow { try await Task.sleep(nanoseconds: 400_000_000) }
+            return try await inner.persona(world: world)
+        }
+        func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry] { try await inner.journal(world: world, sinceTick: sinceTick) }
+        func window(world: String) async throws -> [MessageItem] { try await inner.window(world: world) }
+        func dial(world: String) async throws -> DialSheet { try await inner.dial(world: world) }
+        func book(world: String) async throws -> ShipBook { try await inner.book(world: world) }
+    }
+
+    /// codex T-236 r3, finding 8 (the reentrancy half): an answer that was in flight when the
+    /// captain switched ships is neither appended nor spoken under the new ship; an answer
+    /// that lands with no switch still is.
+    func testAnAnswerInFlightAcrossAShipSwitchIsDropped() async throws {
+        // The next ship reads FAST and well, so a stale answer would have a live conversation
+        // to land in (a broken next ship clears the voice again afterwards and would hide it).
+        let model = BridgeModel(feed: FixtureFeed(), acts: FixtureFeed())
+        model.speakAnswers = false
+        await model.refreshShips()
+        await model.open(world: "world-fixture-purr")
+        XCTAssertEqual(model.persona?.name, "Purr")
+        // Hold every answer for 300 ms before the conversation gives it.
+        model.asker = { c, q in try? await Task.sleep(nanoseconds: 300_000_000); return await c.ask(q) }
+        let asking = Task { await model.ask("status", spoken: false) }
+        try await Task.sleep(nanoseconds: 50_000_000)   // the old world's answer is in flight
+        XCTAssertTrue(model.asking)
+        await model.open(world: "world-fixture-old")    // the switch clears the voice
+        await asking.value
+        XCTAssertEqual(model.world, "world-fixture-old")
+        XCTAssertEqual(model.conversationWorld, "world-fixture-old")
+        XCTAssertTrue(model.turns.isEmpty, "Alice's answer must not land under Bob's ship")
+        // Back on her own ship, a held answer that meets no switch is appended as before.
+        await model.open(world: "world-fixture-purr")
+        await model.ask("status", spoken: false)
+        XCTAssertEqual(model.turns.count, 1)
+        XCTAssertEqual(model.turns.first?.question, "status")
+    }
+
+    /// codex T-236 r3, finding 8 (the overlapping-open half): two opens race; the one that
+    /// resumes last must not publish its persona under the later selection. Only the newest
+    /// open publishes, and `loading` reflects it.
+    func testAnOlderOpenThatResumesLastPublishesNothing() async throws {
+        let model = BridgeModel(feed: SlowGoodFeed(slow: "world-fixture-purr"), acts: FixtureFeed())
+        await model.refreshShips()
+        let first = Task { await model.open(world: "world-fixture-purr") }   // suspends 400 ms in its persona read
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await model.open(world: "world-fixture-old")                            // the newer selection, fast
+        XCTAssertEqual(model.world, "world-fixture-old")
+        XCTAssertNil(model.persona, "the old hull has no persona")
+        XCTAssertFalse(model.loading)
+        await first.value                                                        // Purr's read resumes now
+        XCTAssertEqual(model.world, "world-fixture-old")
+        XCTAssertNil(model.persona, "Purr must not be published under the old hull")
+        XCTAssertEqual(model.conversationWorld, "world-fixture-old")
+        XCTAssertNotEqual(model.computerName, "Purr")
+        XCTAssertFalse(model.loading)
+        // The reverse order — the slow one is the NEWEST — still publishes the slow one.
+        let again = Task { await model.open(world: "world-fixture-purr") }
+        await again.value
+        XCTAssertEqual(model.persona?.name, "Purr"); XCTAssertEqual(model.conversationWorld, "world-fixture-purr")
+    }
+
     func testWhileTheNextShipIsBeingReadThePreviousCaptainCannotSpeak() async throws {
         let model = BridgeModel(feed: SlowBrokenFeed(broken: "world-fixture-old"), acts: FixtureFeed())
         await model.refreshShips()

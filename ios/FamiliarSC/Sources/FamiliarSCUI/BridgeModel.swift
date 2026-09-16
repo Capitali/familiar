@@ -103,6 +103,14 @@ public final class BridgeModel {
         refreshInFlight = nil
     }
 
+    /// Every `open` takes a generation; a read that resumes under a later generation
+    /// publishes nothing (codex T-236 r3, finding 8: two overlapping opens had no token, so
+    /// either could resume after the other and publish its persona under the later world).
+    private var openGeneration = 0
+    /// The lane that answers a question — the conversation's own `ask`. A seam so a test can
+    /// hold an answer in flight across a ship switch; production never reassigns it.
+    var asker: @MainActor (Conversation, String) async -> Conversation.Turn = { await $0.ask($1) }
+
     @MainActor
     public func open(world: String, foldWindowTicks: Int64 = 96, windows: Int = 6) async {
         // Switching ships: nothing of the previous captain may be readable or speakable under
@@ -112,7 +120,10 @@ public final class BridgeModel {
         // A refresh of the SAME ship keeps its voice while the reads run.
         if self.world != world { await MainActor.run { clearVoice() } }
         self.world = world
-        loading = true; defer { loading = false }
+        openGeneration += 1
+        let gen = openGeneration
+        loading = true
+        defer { if gen == openGeneration { loading = false } }
         // Read the whole bridge into locals and publish only once every required read
         // has succeeded. A broken captain persona on the newly selected ship (the host
         // refuses to fall through, T-236) must not leave the PREVIOUS captain's name,
@@ -120,15 +131,24 @@ public final class BridgeModel {
         // re-verification finding 8).
         do {
             let p = try await feed.persona(world: world)
+            guard gen == openGeneration else { return }
             let j = try await feed.journal(world: world, sinceTick: nil)
+            guard gen == openGeneration else { return }
             let w = try await feed.window(world: world)
+            guard gen == openGeneration else { return }
             let d = try await feed.dial(world: world)
+            guard gen == openGeneration else { return }
             let b = try await feed.book(world: world)
+            // A later open has taken the bridge while these reads ran: this one is stale and
+            // publishes nothing — not the persona, not the journal, not a conversation.
+            guard gen == openGeneration else { return }
             persona = p; journal = j; window = w; dial = d; book = b
             let names = (try? await feed.names(world: world)) ?? []
+            guard gen == openGeneration else { return }
             history = ShipHistory.from(journal: j, book: b, names: names)
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
             var (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
+            guard gen == openGeneration else { return }
             // Her story rides the context frame so the voice can tell it — grounded on the marks.
             if let h = history { docs.append(ContextDocument(name: "history", title: "the ship's story — \(spokenOf.possessive) earned history: routes flown, deliveries, repairs and refits, distress survived, each with the journal ticks it came from; nothing here can be bought or edited", text: h.story)) }
             let frameLine = frame ?? summary.map { "ship, hull \($0.shipName) (\($0.worldInstance)), captain \($0.captain), computer \(computerName)" }
@@ -137,6 +157,7 @@ public final class BridgeModel {
             // its actionId across a refresh: a transport failure after the exchange accepted it,
             // then a pull-to-refresh and a second tap, must retry the id and not file twice.
             let fresh = try? await acts.pilotProposal(world: world)
+            guard gen == openGeneration else { return }
             if let old = pilotProposal, let new = fresh, old.act == new.act { pilotProposal = old } else { pilotProposal = fresh }
             if let c = conversation, c.voice.persona.name == (persona?.name ?? computerName), conversationWorld == world {
                 c.context = ctx; c.consent = voiceConsent
@@ -147,6 +168,8 @@ public final class BridgeModel {
             }
             error = nil
         } catch {
+            // A stale open's failure is not this bridge's failure to report.
+            guard gen == openGeneration else { return }
             if !BridgeModel.isCancellation(error) || conversationWorld != world { clearVoice() }
             report(error)
         }
@@ -189,9 +212,13 @@ public final class BridgeModel {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         // The final invariant: only a conversation that belongs to the open world may answer,
         // and not while that world is still being read.
-        guard !q.isEmpty, let c = conversation, conversationWorld == world, !loading else { return }
+        guard !q.isEmpty, let c = conversation, let askedWorld = world, conversationWorld == askedWorld, !loading else { return }
         asking = true; defer { asking = false }
-        let turn = await c.ask(q)
+        let turn = await asker(c, q)
+        // The gate again, AFTER the answer: this actor is re-entrant at the await, and a ship
+        // switch in the meantime cleared the voice. The previous captain's answer must not be
+        // appended or spoken under the new ship (codex T-236 r3, finding 8).
+        guard world == askedWorld, conversationWorld == askedWorld, conversation === c else { return }
         turns.append(turn)
         if speakAnswers, spoken || turns.count > 0 { speaker.speak(turn.answer) }
     }
