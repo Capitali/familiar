@@ -1,8 +1,9 @@
 # Draft ask to Jeff — fleet key management: a captain's keys as a record he can read, name and revoke
 
-Status: **DRAFT, not filed** (Ian, 2026-09-16: "Fleet key management will need to be a thing in
-the UCF world as well." — said while sorting the keys on his own devices; the roster from
-`/v1/clients` shows him 17 keys in his name, 10 of them revoked, minted from four apps.)
+Status: **FILED 2026-09-16 as ucf-exchange#55** (https://github.com/SpaceTrucker2196/ucf-exchange/issues/55) (Ian, 2026-09-16: "Fleet key management will need to be a thing in
+the UCF world as well" and, after #54, "the captain should see all naming of fleet keys and meta tags
+and have option update them across the fleet." The roster from `/v1/clients` shows him 17 keys in
+his name, 10 of them revoked, minted from four apps.)
 
 ---
 
@@ -31,14 +32,18 @@ Now that the captain is a record (metal#86), keys have somewhere to belong.
 
 ## Proposals (in the order I'd try them)
 
-**A. Keys hang off the captain.** `GET /v1/captain/keys` (the captain's own key only): every
-key ever minted for this `captainId` — captain keys and co-pilot keys — with the `clients`
-row's fields plus `label` (free text, up to 32: "iPad", "wildhorse pilot KK", "read-only
-for the familiar"), `hull` (the hull it is bound to, if any), `mintedBy` (which key minted
-it), and `lastSeenApp`. `PATCH /v1/captain/keys/{keyId} {label}` names one.
+**A. Keys hang off the captain, and the captain sees and sets every name on them.**
+`GET /v1/captain/keys` (the captain's own key only): every key ever minted for this
+`captainId` — captain keys and co-pilot keys — with the `clients` row's fields plus every
+name and tag the wire keeps on a key: `traderName` (the handle a wall note signs with, #54),
+`label` (free text, up to 32: "iPad", "wildhorse pilot KK", "read-only for the familiar"),
+`hull` (the hull it is bound to), `app`, `mintedBy` (which key minted it), `lastSeenApp`.
+`PATCH /v1/captain/keys/{keyId} {traderName?, label?, hull?}` sets any of them on one key;
+`PATCH /v1/captain/keys {traderName}` sets the handle on EVERY key of the captain at once, so
+"I am Luke SkyWhisker on all of my keys" is one request rather than one per device.
 `DELETE /v1/captain/keys/{keyId}` revokes any of them (today only co-pilot keys can be
-revoked by the captain; a lost captain key has to be reported to you). Revoking the key
-you are calling with is refused.
+revoked by the captain; a lost captain key has to be reported to you). Revoking the key you
+are calling with is refused.
 
 **B. Mint from the record.** `POST /v1/captain/keys {kind: "captain" | "copilot", hull,
 label, scopes}` — one door for both kinds, so a new device is enrolled BY the captain rather
