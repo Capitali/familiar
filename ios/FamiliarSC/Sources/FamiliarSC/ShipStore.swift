@@ -70,7 +70,53 @@ public struct Style: Codable, Equatable, Sendable {
     }
 }
 
-/// Who this computer says she is (persona.rs `Persona`). `deny_unknown_fields` on the Rust
+/// How the computer is spoken of (persona.rs `Pronouns`) — THE FAMILIAR'S OWN CHOICE, made at
+/// every naming. `none` means spoken of by name, never by pronoun. Absent until a captain has
+/// named it: an unnamed computer is spoken of as `it`. Every field is required, as in Rust.
+public struct Pronouns: Codable, Equatable, Sendable {
+    /// The label a captain sees: "she/her", "they/them", "none"…
+    public var label: String
+    public var subject: String
+    public var object: String
+    public var possessive: String
+
+    public init(label: String, subject: String, object: String, possessive: String) {
+        self.label = label; self.subject = subject; self.object = object; self.possessive = possessive
+    }
+}
+
+/// The words a shell uses FOR the computer: the record's pronouns, else the name, else `it`
+/// (Ian, 2026-09-09: "Her voice / Her brains / Her story" become the record's word or the
+/// name — "she" was never ruled, it slid in by imitation). Titles use the capitalised forms.
+public struct SpokenOf: Equatable, Sendable {
+    public var subject: String
+    public var object: String
+    public var possessive: String
+
+    public init(subject: String, object: String, possessive: String) {
+        self.subject = subject; self.object = object; self.possessive = possessive
+    }
+
+    /// "has" for she / he / it / a name; "have" for they.
+    public var has: String { subject == "they" ? "have" : "has" }
+    public var subjectTitle: String { SpokenOf.capitalised(subject) }
+    public var possessiveTitle: String { SpokenOf.capitalised(possessive) }
+
+    static func capitalised(_ w: String) -> String { w.prefix(1).uppercased() + w.dropFirst() }
+
+    /// The record's word, or the name, or `it`. A name that is still the root name is no name.
+    public static func of(name: String?, pronouns: Pronouns?) -> SpokenOf {
+        if let p = pronouns, p.label != "none", !p.subject.isEmpty, !p.object.isEmpty, !p.possessive.isEmpty {
+            return SpokenOf(subject: p.subject, object: p.object, possessive: p.possessive)
+        }
+        if let n = name?.trimmingCharacters(in: .whitespaces), !n.isEmpty, n != Persona.rootName, n != Persona.householdDefaultName {
+            return SpokenOf(subject: n, object: n, possessive: n + "\u{2019}s")
+        }
+        return SpokenOf(subject: "it", object: "it", possessive: "its")
+    }
+}
+
+/// Who this computer says it is (persona.rs `Persona`). `deny_unknown_fields` on the Rust
 /// side is mirrored: an unknown key is refused, because a file written under a contract this
 /// build does not know must be heard about, not half-honoured.
 public struct Persona: Codable, Equatable, Sendable {
@@ -80,16 +126,18 @@ public struct Persona: Codable, Equatable, Sendable {
     public var register: String = ""
     public var world: String = ""
     public var style: Style? = nil
+    /// How the computer is spoken of — the familiar's choice at naming; absent until named.
+    public var pronouns: Pronouns? = nil
 
     /// The root every ship's computer descends from (ADR-0037) — written EXACTLY.
     public static let rootName = "Purr"
     /// The household loader's default, which a ship must never borrow (T-236 brick 1).
     public static let householdDefaultName = "the familiar"
-    static let knownKeys: Set<String> = ["persona_version", "name", "role", "register", "world", "style"]
+    static let knownKeys: Set<String> = ["persona_version", "name", "role", "register", "world", "style", "pronouns"]
     static let knownStyleKeys: Set<String> = ["warmth", "formality", "humor", "sentence_length", "contractions", "vocabulary", "greeting", "form_of_address"]
 
     enum CodingKeys: String, CodingKey {
-        case name, role, register, world, style
+        case name, role, register, world, style, pronouns
         case personaVersion = "persona_version"
     }
 
@@ -107,7 +155,11 @@ public struct Persona: Codable, Equatable, Sendable {
         register = try c.decodeIfPresent(String.self, forKey: .register) ?? ""
         world = try c.decodeIfPresent(String.self, forKey: .world) ?? ""
         style = try c.decodeIfPresent(Style.self, forKey: .style)
+        pronouns = try c.decodeIfPresent(Pronouns.self, forKey: .pronouns)
     }
+
+    /// The words a shell uses for this computer: its pronouns, else its name, else `it`.
+    public var spokenOf: SpokenOf { SpokenOf.of(name: name, pronouns: pronouns) }
 
     /// Mirrors `Persona::validate`: versions 1 and 2 exist, style rides only on v2.
     public func validate() -> String? {

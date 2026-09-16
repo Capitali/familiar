@@ -6,6 +6,68 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-16 — T-243, the iPad half: the bay on the bridge, the key's papers on the seam, and the record's word in every title
+
+MacOnStick, on the three items the host lane left for this side (STATE 2026-09-09/10/15).
+
+### What changed
+
+- **The bay rides the seam from the iPad (T-243 slices 1+2, the iPad half).** `DirectFeed.advice`
+  now sends `contracts[]` — every open row on the captain's board (`/v1/loadboard?mine=true`)
+  beside the active one, `{row}` only: the seam takes each contract's word from `/v1/me.freight`
+  exactly as it does for the active (`wire::contract`), drops a row the ledger has settled, and
+  never lists the active twice. Absent = one in hand, as before; SEAM_VERSION 2 unchanged.
+  The direct-mode bridge shows the bay in its glance — **"Your contracts · N: L3249 picked up,
+  …"** — from the ledger's own open loads (`DirectFeed.openLoads`, the `ledger_word` mirror,
+  now typed over `[FreightEvent]`). A host row gains the same line when it serves `contracts[]`
+  (`{load|loadId, word|status}`, read optionally in `WireFeed.summary`); a host without it
+  serves no count and none is claimed.
+- **The key's papers ride the seam as `denied`.** A co-pilot key (no `act` scope) is told what it
+  cannot file — `repair, paws, refit, payLease, expandFrame` — read from `/v1/profile.scopes`
+  exactly as `whisker/main.rs` derives it; empty or unreadable papers deny nothing, as on the
+  host. So the mind on the iPad no longer advises a repair the key cannot file (wildhorse's
+  2026-09-10 seam note).
+- **`Persona` learns `pronouns`** ({label, subject, object, possessive}, every field required as
+  in `persona.rs::Pronouns`; absent omitted on write). The strict reader mirrors Rust: the key
+  is known, a half-set is refused. `WireFeed` reads them off `computer_state.pronouns` (where
+  the host carries them while it strips the row's persona for build 7) or the persona itself,
+  and folds them into `persona(world:)`. **Wildhorse: the strip in `fleet_serve.rs` can go once
+  a build carrying this is on the iPad** (build 7 still needs it).
+- **Every title follows the record (Ian, 2026-09-09).** `SpokenOf` = the record's pronouns,
+  else the name, else `it` (root name = unnamed): `BridgeModel.spokenOf` drives "His advice",
+  "Everything he has said" (they → have), "His story", "Mute his voice", "His voice", "He would
+  have…", the history's "what he did" / "his first leg"; direct mode with no choice yet says the
+  name ("Felix’s story"); the app-level settings, where no one ship is open, say "The
+  computer's voice / brains". Felix chose he/him and build 7 said "her" everywhere (#6).
+- The iOS look of `SCRootView`'s toolbar is unchanged by wildhorse's macOS fix (the iOS branch
+  of the `#if os(macOS)` is byte-for-byte what shipped in build 7); confirmed by the simulator
+  build below.
+
+### Checks run
+
+- `cd ios/FamiliarSC && swift test`: **93 passed, 0 failed, 2 live skipped**, exit 0 (was 89).
+  New pins: `testPronounsRideThePersonaAndTheWordsFollowTheRecord` (decode, round trip, omitted
+  when absent, they→have, `none` = by name, unnamed = it, half-set refused);
+  `testPronounsAndTheBayAreReadOffTheRow`; the gather test now asserts `contracts[]` = the three
+  other mine rows, `{row}` only, and no `denied` under `act`;
+  `testACoPilotKeysPapersRideTheSeamAsDenied` (five verbs; unreadable papers deny nothing; zero
+  POSTs); `testTheSummaryCarriesTheLedgersOpenLoads` (L3249 "picked up", equals `openLoads`).
+- `xcodegen generate` exit 0; `xcodebuild … -scheme UCFFamiliar -sdk iphonesimulator -destination
+  'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` **exit 0, BUILD SUCCEEDED**;
+  `… -scheme FamiliarAgent -destination 'generic/platform=iOS Simulator' …` **exit 0, BUILD
+  SUCCEEDED** (without `-sdk`: with it the embedded watch target is forced onto the iPhone SDK
+  and fails on the Watch AppIcon set — the T-228 bar note, not this change).
+- No Rust changed; the Rust bar on main 0eaf8a3 ran in parallel (fmt 0, clippy, tests — in the
+  STATE line).
+
+### Next
+
+- Ship UCF Familiar build 8 on Ian's word (carries #6's two fixes and this); then wildhorse drops
+  the strip.
+- The wire row does not carry the bay: `contracts[]` on `/ships` rows (`{load, word}`) is the
+  host-side twin of this line — wildhorse's call, additive.
+- T-243 slice 3, the tour planner, is the host's.
+
 ## 2026-09-16 — The captain record adopted, the exchange's cash ledger read, and the fleet's income pays the fleet's leases
 
 Ian (2026-09-16): "Adopt the captain record, assure naming is correct across ships in the

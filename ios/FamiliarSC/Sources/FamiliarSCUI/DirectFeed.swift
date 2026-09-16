@@ -134,6 +134,10 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
             leasePrincipal: m.leasePrincipal, leaseServicePaid: m.leaseServicePaid
         )
         out.worldName = s.worldName
+        out.pronouns = persona?.pronouns
+        // The bay from the ledger itself (T-243): every load `/v1/me.freight` still holds open,
+        // at the word it holds it — the same reading the seam makes.
+        out.heldContracts = DirectFeed.openLoads(freight: m.freight ?? []).map { ShipSummary.HeldContract(loadId: $0.loadId, word: $0.word) }
         return [out]
     }
 
@@ -305,6 +309,19 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         var input: [String: JSONValue] = ["me": me, "board": board, "stations": stations, "routes": .array(routes),
                                           "repair_per_hundred_bps": .number(Double(repair))]
         if let active { input["active"] = .object(["row": active]) }
+        // The rest of the bay (T-243 slices 1+2): every other open contract on the captain's
+        // board rides as `contracts[]`, `{row}` only — the seam takes each word from the ledger
+        // as it does for the active, and drops a row the ledger has settled. Absent = one in
+        // hand, as before; the seam version is unchanged.
+        let companions = live.filter { $0["loadId"]?.string != active?["loadId"]?.string }.sorted { activeKey($0) < activeKey($1) }
+        if !companions.isEmpty { input["contracts"] = .array(companions.map { .object(["row": $0]) }) }
+        // What this key may NOT file, from its papers — read exactly as the host reads them
+        // (whisker main.rs): no `act` scope means no repair, no tanker call, no refit, no lease
+        // payment, no frame. Empty or unreadable papers deny nothing, as on the host.
+        let scopes = (try? await client.profile())?.scopes ?? []
+        if !(scopes.isEmpty || scopes.contains("act")) {
+            input["denied"] = .array(DirectFeed.deniedWithoutAct.map { .string($0) })
+        }
         let inputValue = JSONValue.object(input)
         // Fail CLOSED on an inconsistent record: the ledger (/v1/me.freight) says a contract is
         // open — the same reading the doctrine makes — but the mine board carries no row for
@@ -398,18 +415,34 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
     /// expired / lapsed / cancel is lost, a rejection with no prior word is lost, else delivered >
     /// picked up > booked (booked when the ledger only says departed/arrived).
     static func openLoads(me: JSONValue) -> [String: String] {
-        var events: [String: [String]] = [:]
-        var order: [String] = []
-        for f in me["freight"]?.array ?? [] {
-            guard let id = f["loadId"]?.string, let e = f["event"]?.string else { continue }
-            if events[id] == nil { order.append(id) }
-            events[id, default: []].append(e)
+        let pairs = (me["freight"]?.array ?? []).compactMap { f -> (String, String)? in
+            guard let id = f["loadId"]?.string, let e = f["event"]?.string else { return nil }
+            return (id, e)
         }
-        var out: [String: String] = [:]
+        return Dictionary(openLoads(events: pairs).map { ($0.loadId, $0.word) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The same reading over the typed ledger, in the ledger's order.
+    static func openLoads(freight: [FreightEvent]) -> [(loadId: String, word: String)] {
+        openLoads(events: freight.compactMap { f in f.loadId.map { ($0, f.event) } })
+    }
+
+    /// The verbs a key without `act` cannot file — the host's list, verbatim (whisker main.rs).
+    static let deniedWithoutAct = ["repair", "paws", "refit", "payLease", "expandFrame"]
+
+    static func openLoads(events: [(String, String)]) -> [(loadId: String, word: String)] {
+        var byLoad: [String: [String]] = [:]
+        var order: [String] = []
+        for (id, e) in events {
+            if byLoad[id] == nil { order.append(id) }
+            byLoad[id, default: []].append(e)
+        }
+        var out: [(loadId: String, word: String)] = []
         for id in order {
+            let events = byLoad[id] ?? []
             var word: String?
             var closed = false
-            for e in events[id] ?? [] {
+            for e in events {
                 let l = e.lowercased()
                 if l.contains("payment taken") || l.contains("collected") { closed = true; break }
                 if l.contains("reverted") || l.contains("expired") || l.contains("lapsed") || l.contains("cancel") { closed = true; break }
@@ -418,7 +451,7 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
                 else if l.contains("pickedup") || l.contains("picked up") { if word != "delivered" { word = "picked up" } }
                 else if l.contains("booked"), word == nil { word = "booked" }
             }
-            if !closed { out[id] = word ?? "booked" }
+            if !closed { out.append((loadId: id, word: word ?? "booked")) }
         }
         return out
     }

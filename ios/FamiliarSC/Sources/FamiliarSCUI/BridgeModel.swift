@@ -58,6 +58,10 @@ public final class BridgeModel {
 
     public var summary: ShipSummary? { ships.first { $0.world == world } }
     public var computerName: String { persona?.name ?? summary?.computer ?? "the ship's computer" }
+    /// The record's word for the computer — its pronouns, else its name, else `it` — so every
+    /// title on the bridge follows the record, never a default (Ian, 2026-09-09; #6: Felix
+    /// chose he/him and build 7 said "her").
+    public var spokenOf: SpokenOf { persona?.spokenOf ?? summary?.spokenOf ?? SpokenOf.of(name: nil, pronouns: nil) }
 
     /// A cancelled read is not an error: a view's `.task` is cancelled whenever SwiftUI
     /// tears the view down or a pull-to-refresh supersedes it, and the request it was
@@ -126,7 +130,7 @@ public final class BridgeModel {
             reports = BridgeModel.fold(journal: journal, persona: persona, windowTicks: foldWindowTicks, count: windows, openProposals: openProposals)
             var (frame, docs) = (try? await feed.context(world: world, worldInstance: summary?.worldInstance)) ?? (nil, [])
             // Her story rides the context frame so the voice can tell it — grounded on the marks.
-            if let h = history { docs.append(ContextDocument(name: "history", title: "the ship's story — her earned history: routes flown, deliveries, repairs and refits, distress survived, each with the journal ticks it came from; nothing here can be bought or edited", text: h.story)) }
+            if let h = history { docs.append(ContextDocument(name: "history", title: "the ship's story — \(spokenOf.possessive) earned history: routes flown, deliveries, repairs and refits, distress survived, each with the journal ticks it came from; nothing here can be bought or edited", text: h.story)) }
             let frameLine = frame ?? summary.map { "ship, hull \($0.shipName) (\($0.worldInstance)), captain \($0.captain), computer \(computerName)" }
             let ctx = BridgeContext(entries: latestWindow(), hull: summary?.hullGlance, openProposals: openProposals, frame: frameLine, documents: docs)
             // The act the mind would file, if any. A proposal already shown for the SAME act keeps

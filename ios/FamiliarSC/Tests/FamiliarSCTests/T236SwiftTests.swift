@@ -41,6 +41,27 @@ final class T236SwiftTests: XCTestCase {
         XCTAssertEqual(legacy.personaState, .named("Felix"), "a host without the field is read as before")
     }
 
+    /// The row's `computer_state.pronouns` (where the host carries them while it strips the
+    /// persona for older readers) and `contracts[]` (T-243) are read; a host without them
+    /// serves nothing and nothing is claimed.
+    func testPronounsAndTheBayAreReadOffTheRow() throws {
+        func row(_ extra: String) throws -> ShipSummary {
+            let text = #"{"world":"w","label":"KK II","hull":"","captain":"Luke","server":"","automations":[],"persona":{"name":"Felix"},"# + extra + "}"
+            return try XCTUnwrap(WireFeed.summary(from: try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)), tick: nil))
+        }
+        let he = try row(#""computer_state":{"state":"named","name":"Felix","pronouns":{"label":"he/him","subject":"he","object":"him","possessive":"his"}},"contracts":[{"load":"L1","word":"pickedUp"},{"loadId":"L2","status":"delivered"},{"word":"orphan"}]"#)
+        XCTAssertEqual(he.pronouns?.label, "he/him"); XCTAssertEqual(he.spokenOf.possessiveTitle, "His")
+        XCTAssertEqual(he.heldContracts, [.init(loadId: "L1", word: "pickedUp"), .init(loadId: "L2", word: "delivered")])
+        let onPersonaText = #"{"world":"w","label":"KK II","hull":"","captain":"Luke","server":"","automations":[],"persona":{"name":"Felix","pronouns":{"label":"she/her","subject":"she","object":"her","possessive":"her"}}}"#
+        let onPersona = try XCTUnwrap(WireFeed.summary(from: try JSONDecoder().decode(JSONValue.self, from: Data(onPersonaText.utf8)), tick: nil))
+        XCTAssertEqual(onPersona.pronouns?.subject, "she", "a host that no longer strips them: read off the persona")
+        let older = try row(#""world_name":"LOCAL""#)
+        XCTAssertNil(older.pronouns); XCTAssertTrue(older.heldContracts.isEmpty)
+        XCTAssertEqual(older.spokenOf.possessive, "Felix\u{2019}s", "named, no choice served: the name")
+        let unnamed = try row(#""computer_state":{"state":"absent"},"persona":null"#)
+        XCTAssertEqual(unnamed.spokenOf.subject, "it")
+    }
+
     /// Alice (Purr) is open. Bob's persona read SUSPENDS, then fails. While it is suspended
     /// and after it fails, nothing of Alice is readable or speakable under Bob's world.
     struct SlowBrokenFeed: ShipsFeed {

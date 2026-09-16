@@ -30,9 +30,9 @@ public struct ShipBridgeView: View {
             }
             let advice = model.advice.suffix(3).reversed()
             if !advice.isEmpty {
-                Section("Her advice") {
+                Section("\(model.spokenOf.possessiveTitle) advice") {
                     ForEach(Array(advice), id: \.at) { item in AdviceLine(item: item) }
-                    NavigationLink { MessageWindowView(model: model) } label: { Text("Everything she has said").font(.footnote).foregroundStyle(SC.dim) }
+                    NavigationLink { MessageWindowView(model: model) } label: { Text("Everything \(model.spokenOf.subject) \(model.spokenOf.has) said").font(.footnote).foregroundStyle(SC.dim) }
                         .listRowBackground(SC.panel)
                 }
             }
@@ -40,7 +40,7 @@ public struct ShipBridgeView: View {
             Section {
                 NavigationLink { AutonomyDialView(model: model) } label: { Label("Autonomy", systemImage: "dial.medium") }
                 NavigationLink { LogView(model: model) } label: { Label("Log", systemImage: "book") }
-                NavigationLink { HistoryView(model: model) } label: { Label("Her story", systemImage: "seal") }
+                NavigationLink { HistoryView(model: model) } label: { Label("\(model.spokenOf.possessiveTitle) story", systemImage: "seal") }
             }
             .listRowBackground(SC.panel)
         }
@@ -99,7 +99,7 @@ public struct ShipBridgeView: View {
                 Button { model.speakAnswers.toggle(); if !model.speakAnswers { model.speaker.stop() } } label: {
                     Image(systemName: model.speakAnswers ? "speaker.wave.2.fill" : "speaker.slash.fill").font(.title3).foregroundStyle(SC.dim)
                 }
-                .buttonStyle(.plain).accessibilityLabel(model.speakAnswers ? "Mute her voice" : "Unmute her voice")
+                .buttonStyle(.plain).accessibilityLabel(model.speakAnswers ? "Mute \(model.spokenOf.possessive) voice" : "Unmute \(model.spokenOf.possessive) voice")
             }
             if model.asking { ProgressView().controlSize(.small) }
             if !model.dictation.status.isEmpty, model.dictation.status != "listening" { Text(model.dictation.status).font(.caption2).foregroundStyle(SC.amber) }
@@ -124,6 +124,11 @@ public struct ShipBridgeView: View {
                 Chip(text: s.pilotAlive ? "pilot" : "NO PILOT", tint: s.pilotAlive ? SC.green : SC.red)
                 if let h = s.leaseHoursLeft { Chip(text: h < 0 ? "LEASE EXPIRED" : "lease \(h)h", tint: h <= 4 ? SC.amber : SC.dim) }
                 if let d = s.docked { Chip(text: "at \(d)") } else if let to = s.enRouteTo { Chip(text: "→ \(to)") } else { Chip(text: "under way") }
+            }
+            // The bay (T-243): what the ledger holds open, at its word — the hull may hold three.
+            if !s.heldContracts.isEmpty {
+                Text("Your contracts · \(s.heldContracts.count): " + s.heldContracts.map { "\($0.loadId) \($0.word)" }.joined(separator: ", "))
+                    .font(.caption.monospacedDigit()).foregroundStyle(SC.ice)
             }
             if let t = s.trades {
                 Text("Trades: \((t.realized >= 0 ? "+" : ""))ℳ\(t.realized) realized over \(t.filled) fill\(t.filled == 1 ? "" : "s")" + (t.estimatesLine.map { " · " + $0 } ?? ""))
@@ -227,15 +232,15 @@ struct HistoryView: View {
                     }
                 }
                 if let f = h.firstTick, let l = h.lastTick {
-                    Section { Text("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what she did, and the names are not forgotten.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
+                    Section { Text("The record runs t\(f)–t\(l). Nothing here can be bought or edited; it is what \(model.spokenOf.subject) did, and the names are not forgotten.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
                 }
             } else {
-                Section { Text("No history yet. The record begins with her first leg.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
+                Section { Text("No history yet. The record begins with \(model.spokenOf.possessive) first leg.").font(.footnote).foregroundStyle(.secondary).listRowBackground(Color.clear) }
             }
         }
         .scrollContentBackground(.hidden)
         .background(SC.bg)
-        .navigationTitle("Her story")
+        .navigationTitle("\(model.spokenOf.possessiveTitle) story")
     }
 }
 
