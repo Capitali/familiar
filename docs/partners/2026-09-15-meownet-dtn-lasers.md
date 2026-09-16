@@ -1,6 +1,6 @@
 # Ask to Jeff — MeowNet on the Interplanetary Internet: bundles, lasers, and the rungs above 19.2
 
-Status: **READY TO FILE on ucf-exchange, in Ian's name, on Ian's go** (Ian, 2026-09-15:
+Status: **FILED 2026-09-15 as ucf-exchange#50** (https://github.com/SpaceTrucker2196/ucf-exchange/issues/50), in Ian's name, on Ian's word ("Yeah. Place this for Jeff to review.") (Ian, 2026-09-15:
 "Meownet at 14.4k seems way behind where space cats should be. Lasers." Choices made
 2026-09-15: rungs above 19.2 are asked for; bundles carry lifetimes and hop-delayed house
 posts; the real standards are named on the wire; filed on ucf-exchange with the fitting's
