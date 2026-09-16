@@ -1,7 +1,13 @@
 # ADR-0028 — The mesh games, and the law of the fire
 
-- Status: **accepted** (Ian, 2026-08-04; human-turn law 2026-08-06). Shipped: Riddle of the
-  Mesh and The Campfire, both live across the household.
+- Status: **retired** (Ian, 2026-09-10: "I think we can remove the game screen and tests").
+  The games screen, the judge (`mesh/game.rs`, `mesh/changeling.rs`), the `/mesh/game/act`
+  route, the game payload on record-sync, the turn/win pushes, the Swift `GameClient`, the
+  wrist ember and every game test were removed from `main` on 2026-09-10. The record below
+  is kept as history: what the games taught (signed member acts, the law of the fire,
+  ADR-0029's hardening) still holds; only the fires are out.
+  Previously: accepted (Ian, 2026-08-04; human-turn law 2026-08-06); Riddle of the Mesh and
+  The Campfire were live across the household.
 
 ## Why games
 

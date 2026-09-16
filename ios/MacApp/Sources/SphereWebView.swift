@@ -484,20 +484,6 @@ final class SphereBridge: NSObject, ObservableObject, WKScriptMessageHandler, CL
                 // The SEVER button (armed + confirm in the web layer) — also previously dead.
                 self.model.unenroll()
                 self.pushDevice()
-            case "game":
-                // A move in the mesh game — signed by this console's own key; the door judges.
-                // The game's kind travels as "game_kind": the message-routing key is "kind",
-                // and a same-named payload field would overwrite it in toApp's spread.
-                if let act = body["act"] as? String {
-                    let kind = body["game_kind"] as? String
-                    let text = body["text"] as? String ?? ""
-                    let to = body["to"] as? String ?? ""
-                    let solo = body["solo"] as? Bool ?? false
-                    Task {
-                        await self.model.gameAct(act, kind: kind, text: text, to: to, solo: solo)
-                        await self.poll()
-                    }
-                }
             case "deviceRole":
                 // Whose hands hold this machine — decides whether identity survives relaunch.
                 if let roleRaw = body["role"] as? String,

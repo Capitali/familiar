@@ -71,4 +71,4 @@ The build appears under your app → **TestFlight** after processing (~5–15 mi
   contact + notes are filled in App Store Connect (the notes describe the two-device test:
   second device joins as a visitor and follows the on-screen path to membership).
 - The reviewer-facing story is real: install on two devices, one joins as a visitor, the
-  guided path (name / vouch / sponsor / invite) admits it, then light a riddle at the fire.
+  guided path (name / vouch / sponsor / invite) admits it.

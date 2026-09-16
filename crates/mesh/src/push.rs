@@ -6,7 +6,7 @@
 //! of the human whose turn it became — the OS shows it whether or not the app is running.
 //!
 //! Three pieces, all best-effort (a door without the config, a device without a token, or an
-//! unreachable APNs simply mean no push — the game itself never depends on this):
+//! unreachable APNs simply mean no push — nothing in the mesh depends on this):
 //!
 //! - **Registration** (`POST /mesh/push-token`, transport.rs): a member device posts its APNs
 //!   device token + environment, signed like any other member write. Stored per node in
@@ -175,67 +175,6 @@ async fn send_one(cfg: &ApnsConfig, jwt: &str, t: &PushToken, payload: &str) -> 
     }
 }
 
-/// The turn changed hands: push "the ember is yours" to every registered device of the
-/// holder. Spawned off the reply path — best-effort, never blocks a judge's answer.
-/// No-op unless this door carries `mesh/apns.json`.
-pub fn spawn_notify_turn(dir: &Path, holder: &str, kind: &str) {
-    let Some(cfg) = load_config(dir) else { return };
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        return;
-    };
-    // The holder is a HUMAN handle (ADR-0028); their devices are the member records whose
-    // established handle matches. Tokens exist only for devices that registered.
-    let holder_lc = holder.to_lowercase();
-    let device_ids: Vec<String> = crate::record::load_all(dir)
-        .into_iter()
-        .filter(|r| {
-            crate::record::derive_state(r) == crate::record::RecordState::Member
-                && r.identity
-                    .established
-                    .as_ref()
-                    .is_some_and(|e| e.handle.to_lowercase() == holder_lc)
-        })
-        .map(|r| r.device_id)
-        .collect();
-    let tokens: Vec<PushToken> = load_tokens(dir)
-        .into_iter()
-        .filter(|t| device_ids.iter().any(|d| d == &t.node_id))
-        .collect();
-    if tokens.is_empty() {
-        return;
-    }
-    let body = match kind {
-        "campfire" => "the campfire — your turn at the fire",
-        "changeling" => "the changeling — three lines, one human truth. Come look",
-        "pact" => "the pact — the constitution has dealt; come rule",
-        _ => "riddle of the mesh — your turn at the fire",
-    };
-    let payload = format!(
-        r#"{{"aps":{{"alert":{{"title":"🔥 the ember is yours","body":"{body}"}},"sound":"default","interruption-level":"time-sensitive"}},"ember":"{kind}"}}"#
-    );
-    let now = crate::transport::now_secs();
-    handle.spawn(async move {
-        let jwt = match provider_jwt(&cfg, now) {
-            Ok(j) => j,
-            Err(e) => {
-                eprintln!("apns: no provider token: {e}");
-                return;
-            }
-        };
-        for t in tokens {
-            let r = send_one(&cfg, &jwt, &t, &payload).await;
-            if !r.ends_with("200") {
-                eprintln!(
-                    "apns: push to {}({}) -> {}",
-                    &t.node_id[..8.min(t.node_id.len())],
-                    t.env,
-                    r
-                );
-            }
-        }
-    });
-}
-
 /// WARN a human that a device is claiming their name (T-202).
 ///
 /// This is the only push the familiar sends that is not an invitation — it is an alarm. A
@@ -296,61 +235,6 @@ pub fn spawn_notify_claim(dir: &Path, claimed_handle: &str, claimer_label: &str)
             if !r.ends_with("200") {
                 eprintln!(
                     "apns: claim warning to {}({}) -> {}",
-                    &t.node_id[..8.min(t.node_id.len())],
-                    t.env,
-                    r
-                );
-            }
-        }
-    });
-}
-
-/// Announce a riddle WIN to every member device — the fanfare reaches the phones in pockets
-/// too (B13), not only the winner's. Best-effort; needs registered tokens and an APNs config.
-pub fn spawn_notify_win(dir: &Path, winner: &str, kind: &str) {
-    let Some(cfg) = load_config(dir) else { return };
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        return;
-    };
-    let member_ids: Vec<String> = crate::record::load_all(dir)
-        .into_iter()
-        .filter(|r| crate::record::derive_state(r) == crate::record::RecordState::Member)
-        .map(|r| r.device_id)
-        .collect();
-    let tokens: Vec<PushToken> = load_tokens(dir)
-        .into_iter()
-        .filter(|t| member_ids.iter().any(|d| d == &t.node_id))
-        .collect();
-    if tokens.is_empty() {
-        return;
-    }
-    let title = match kind {
-        "changeling" => "✦ the changeling is done",
-        "pact" => "✦ the pact is settled",
-        _ => "✦ the riddle is solved",
-    };
-    let body = if winner.is_empty() {
-        "someone took it".to_string()
-    } else {
-        format!("{winner} took it")
-    };
-    let payload = format!(
-        r#"{{"aps":{{"alert":{{"title":"{title}","body":"{body}"}},"sound":"default"}},"win":"{kind}"}}"#
-    );
-    let now = crate::transport::now_secs();
-    handle.spawn(async move {
-        let jwt = match provider_jwt(&cfg, now) {
-            Ok(j) => j,
-            Err(e) => {
-                eprintln!("apns: no provider token: {e}");
-                return;
-            }
-        };
-        for t in tokens {
-            let r = send_one(&cfg, &jwt, &t, &payload).await;
-            if !r.ends_with("200") {
-                eprintln!(
-                    "apns: win push to {}({}) -> {}",
                     &t.node_id[..8.min(t.node_id.len())],
                     t.env,
                     r

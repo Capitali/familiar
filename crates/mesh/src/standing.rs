@@ -495,8 +495,6 @@ pub fn to_guest_view(dir: &std::path::Path, view: &mut Worldview, reader_node_id
         arrivals,
         // Whose device is claiming whom is entirely the household's business.
         claims_waiting: Vec::new(),
-        // The fire is inside the house: a guest sees no game, no players, no story.
-        game: None,
         presence: view.presence,
         withdrawn: view.withdrawn,
         service: view.service,

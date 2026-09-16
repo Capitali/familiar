@@ -1387,21 +1387,6 @@ async fn handle(
             };
             recv_introduce(&dir, &bytes, &sig, &peer_ip, relayed)
         }
-        // The mesh games: a member's signed move. The door runs the rules; the console only
-        // renders. One game at a time, judged deterministically — the familiar is the referee.
-        (Method::POST, "/mesh/game/act") => {
-            let sig = req
-                .headers()
-                .get("x-familiar-sig")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let bytes = match collect(req).await {
-                Ok(b) => b,
-                Err(_) => return Ok(text(StatusCode::BAD_REQUEST, "bad body")),
-            };
-            recv_game_act(&dir, &bytes, &sig)
-        }
         // APNs registration: a member device hands its door a push token so the ember can
         // reach a locked phone. Signed like every member write; stored per node.
         (Method::POST, "/mesh/push-token") => {
@@ -2906,73 +2891,8 @@ fn recv_vouch(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     }
 }
 
-/// Who can hold a turn: standing-full, human-facing devices — phones, iPads, consoles. The
-/// daemons and the lighthouse keep score and judge; they don't take turns at the fire.
-/// The seats at the fire are HUMANS (Ian's law: games are played between humans). Every
-/// standing, online, human-facing device whose ESTABLISHED human is known folds into that
-/// human's one seat — the ember shows on all their devices; any one may answer. Devices
-/// serving nobody, daemons, and watches hold no seat.
-fn game_players(dir: &Path, now: i64) -> Vec<crate::game::Player> {
-    let members = crate::members::classify(dir, now);
-    // The established handle is the seat key — the record's word, not the device's claim.
-    let established_handle = |node_id: &str| -> String {
-        crate::record::find_by_key(dir, node_id)
-            .and_then(|r| crate::record::effective_establishment(&r).map(|e| e.handle.clone()))
-            .unwrap_or_default()
-    };
-    let mut seats: Vec<crate::game::Player> = Vec::new();
-    for m in &members {
-        // The established handle IS the eligibility: daemons and the lighthouse are
-        // established with an empty handle, watches are guests — all excluded by the one
-        // honest test. (An actor-namespace filter looked right and silently unseated any
-        // fresh device that had never posted an observation — Betty lit a game she had no
-        // seat in.)
-        // Record-truth standing, never the legacy roll — the roll drifts (Betty's admission
-        // reached this door as a record while its roll slept, and she lit a game she had no
-        // seat in for the second time; same class as the standing_full drift).
-        if crate::standing::standing_of(dir, &m.node_id) != crate::standing::Standing::Full
-            || m.status == "offline"
-        {
-            continue;
-        }
-        let handle = established_handle(&m.node_id);
-        if handle.is_empty() {
-            continue; // an unnamed device seats nobody
-        }
-        match seats.iter_mut().find(|p| p.handle == handle) {
-            Some(seat) => {
-                if !seat.devices.contains(&m.node_id) {
-                    seat.devices.push(m.node_id.clone());
-                }
-            }
-            None => seats.push(crate::game::Player {
-                node_id: m.node_id.clone(),
-                label: handle.clone(),
-                handle,
-                devices: vec![m.node_id.clone()],
-                score: 0,
-                strikes: 0,
-                eliminated: false,
-            }),
-        }
-    }
-    seats
-}
-
-/// The signed wrapper every game act arrives in — same proof shape as an introduce.
-#[derive(serde::Deserialize)]
-struct GameActEnvelope {
-    node: crate::node::NodeIdentity,
-    #[serde(flatten)]
-    act: crate::game::GameAct,
-    #[allow(dead_code)]
-    ts: i64,
-    #[allow(dead_code)]
-    nonce: String,
-}
-
 /// `POST /mesh/push-token` — a member device registers its APNs token with this door so the
-/// ember can reach it while the app sleeps. Same verification ladder as a game act: the body
+/// ember can reach it while the app sleeps. Same verification ladder as an introduce: the body
 /// signature, the key-fingerprint identity, and full standing.
 fn recv_push_token(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
     #[derive(serde::Deserialize)]
@@ -3014,206 +2934,6 @@ fn recv_push_token(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>>
     match crate::push::upsert_token(dir, &env.node.node_id, &token, &env.env, now_secs()) {
         Ok(()) => text(StatusCode::OK, "the door will call for you"),
         Err(e) => text(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    }
-}
-
-/// Claim the right to announce this game's win ONCE per door. Returns true the first time a
-/// given game id settles here, false on every re-sync of the same done game — a done game
-/// replicates every gossip round, and without this it re-announced the win each time.
-fn claim_win_announcement(dir: &Path, game_id: &str) -> bool {
-    let marker = dir.join("mesh/win_announced.txt");
-    let already = std::fs::read_to_string(&marker)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    if already == game_id {
-        return false;
-    }
-    if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&marker, game_id);
-    true
-}
-
-/// The ember changed hands (or a fresh fire lit): tell the new holder's pocket. Compares the
-/// game before and after a mutation; a different holder or a different generation, still
-/// open, gets a push. Quiet on everything else — closes, guesses that didn't move the turn.
-fn notify_if_turn_changed(dir: &Path, before: Option<(String, String)>) {
-    let Some(after) = crate::game::load(dir) else {
-        return;
-    };
-    // A game just SETTLED with a winner (B13, extended for every kind that names one — the
-    // ember stopped, so the turn-changed path bails below): announce the win to everyone at
-    // the fire, ONCE. The prior guard only checked that the id matched, which every
-    // record-sync of an already-done game satisfies — so a done game re-pushed the win on
-    // every gossip round (seen live during the 0035 deploy). Now a door-local marker records
-    // the last game id whose win it announced; a re-sync of the same done game says nothing.
-    if after.status == "done" && !after.winner.is_empty() {
-        if claim_win_announcement(dir, &after.id) {
-            let kind = format!("{:?}", after.kind).to_lowercase();
-            crate::push::spawn_notify_win(dir, &after.winner, &kind);
-        }
-        return;
-    }
-    if after.status != "open" || after.holder.is_empty() {
-        return;
-    }
-    let moved = match &before {
-        Some((id, holder)) => *id != after.id || *holder != after.holder,
-        None => true,
-    };
-    if moved {
-        let kind = format!("{:?}", after.kind).to_lowercase();
-        crate::push::spawn_notify_turn(dir, &after.holder, &kind);
-    }
-}
-
-/// Absorb a synced game and push if the turn crossed to someone here — the ember arriving
-/// from the OTHER door is exactly the moment the holder's phone is most likely locked.
-fn absorb_game_notifying(dir: &Path, g: &crate::game::GameState) {
-    let before = crate::game::load(dir).map(|s| (s.id.clone(), s.holder.clone()));
-    let _ = crate::game::absorb(dir, g);
-    notify_if_turn_changed(dir, before);
-    // Votes completing on ANOTHER door reach the keeper as this sync — its next duty
-    // (reveal), or a solo forge re-claim, runs off-path now rather than on the next poll.
-    spawn_changeling_touch(dir, None);
-}
-
-/// Run the changeling keeper's next duty off the request path (ADR-0034). Forging may
-/// consult the LLM for up to two minutes; no hyper worker ever waits on it. The runtime
-/// handle is captured first so the result can call for the new holder (APNs) and cross
-/// to the sibling doors immediately — the same no-seesaw law as the act path.
-pub(crate) fn spawn_changeling_touch(dir: &Path, truth: Option<String>) {
-    let Some(g) = crate::game::load(dir) else {
-        return;
-    };
-    if g.status != "open" || g.kind != crate::game::GameKind::Changeling {
-        return;
-    }
-    let duty = (g.phase == "forging" && g.keeper.is_empty() && (truth.is_some() || g.solo))
-        || g.phase == "reveal-wait";
-    if !duty {
-        return;
-    }
-    let rt = tokio::runtime::Handle::try_current().ok();
-    let dir = dir.to_path_buf();
-    std::thread::spawn(move || {
-        let Ok(key) = crate::node::NodeKey::load_or_mint(&dir, "familiar") else {
-            return;
-        };
-        let my = key.identity().node_id;
-        let before = crate::game::load(&dir).map(|s| (s.id.clone(), s.holder.clone()));
-        if !matches!(
-            crate::changeling::touch(&dir, &my, truth, now_secs()),
-            Ok(true)
-        ) {
-            return;
-        }
-        if let Some(rt) = rt {
-            let dir2 = dir.clone();
-            rt.spawn(async move {
-                notify_if_turn_changed(&dir2, before);
-                let doors: Vec<String> = load_peers(&dir2)
-                    .into_iter()
-                    .filter(|p| !p.interactive && !p.addr.is_empty() && p.status != "abandoned")
-                    .map(|p| p.addr)
-                    .collect();
-                for addr in doors {
-                    sync_records_with(&dir2, &addr).await;
-                }
-            });
-        }
-    });
-}
-
-/// `POST /mesh/game/act` → verify the member and apply the move. The reply body is the
-/// judge's words ("✓ solved!", "not it — the ember moves on"), shown to the player verbatim.
-fn recv_game_act(dir: &Path, bytes: &[u8], sig: &str) -> Response<Full<Bytes>> {
-    let env: GameActEnvelope = match serde_json::from_slice(bytes) {
-        Ok(v) => v,
-        Err(_) => return text(StatusCode::BAD_REQUEST, "bad game act"),
-    };
-    let now = now_secs();
-    if env.node.verify(bytes, sig).is_err() {
-        return text(StatusCode::FORBIDDEN, "signature did not verify");
-    }
-    let Ok(pk) = crate::hex_decode(&env.node.pubkey) else {
-        return text(StatusCode::BAD_REQUEST, "bad pubkey");
-    };
-    match crate::exactly_32(&pk, "node pubkey") {
-        Ok(arr) if crate::node::fingerprint(&arr) == env.node.node_id => {}
-        _ => return text(StatusCode::FORBIDDEN, "node_id ≠ pubkey fingerprint"),
-    }
-    if crate::standing::standing_of(dir, &env.node.node_id) != crate::standing::Standing::Full {
-        return text(
-            StatusCode::FORBIDDEN,
-            "members only — the fire is inside the house",
-        );
-    }
-    // The turn belongs to the HUMAN: resolve the acting device to its established handle.
-    // Any of a human's devices may act on their turn; a device serving nobody plays nothing.
-    // Through the liveness gate: a device whose identity was released holds no seat and
-    // takes no turn — its old handle must not act (same rule the voucher anchor uses).
-    let actor_handle = crate::record::find_by_key(dir, &env.node.node_id)
-        .and_then(|r| crate::record::effective_establishment(&r).map(|e| e.handle.clone()))
-        .unwrap_or_default();
-    if actor_handle.is_empty() {
-        return text(
-            StatusCode::FORBIDDEN,
-            "the fire knows humans — establish who you are before playing",
-        );
-    }
-    let mut state = crate::game::load(dir);
-    let before = state.as_ref().map(|s| (s.id.clone(), s.holder.clone()));
-    let players = if env.act.act == "begin" {
-        game_players(dir, now)
-    } else {
-        Vec::new()
-    };
-    let label = if env.node.label.trim().is_empty() {
-        env.node.node_id.chars().take(8).collect()
-    } else {
-        env.node.label.trim().to_string()
-    };
-    match crate::game::apply_act(&mut state, &env.act, &actor_handle, &label, &players, now) {
-        Ok(reply) => {
-            // A move that judged but didn't persist is a lie to the player — say so instead
-            // of returning the judge's words over state the next read won't show.
-            if let Some(s) = &state {
-                if let Err(e) = crate::game::save(dir, s) {
-                    return text(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("the move judged but did not save: {e}"),
-                    );
-                }
-            }
-            // The turn may have crossed to a human whose phone is locked — call for them.
-            notify_if_turn_changed(dir, before);
-            // A witness's truth (or a solo begin) lights the forge — the keeper's work
-            // runs off this request path; the truth text exists only in this act.
-            spawn_changeling_touch(dir, (env.act.act == "line").then(|| env.act.text.clone()));
-            // The ember must not wait for the next gossip round to cross doors: two humans
-            // acting through two doors saw a ~30s holder seesaw as each door's periodic sync
-            // swung the other's view. Push records to the sibling doors NOW, best-effort —
-            // doors are the non-interactive peers with an address (devices don't listen).
-            if let Ok(h) = tokio::runtime::Handle::try_current() {
-                let dir2 = dir.to_path_buf();
-                let doors: Vec<String> = load_peers(dir)
-                    .into_iter()
-                    .filter(|p| !p.interactive && !p.addr.is_empty() && p.status != "abandoned")
-                    .map(|p| p.addr)
-                    .collect();
-                h.spawn(async move {
-                    for addr in doors {
-                        sync_records_with(&dir2, &addr).await;
-                    }
-                });
-            }
-            text(StatusCode::OK, reply)
-        }
-        Err(crate::Error::Untrusted(m)) => text(StatusCode::FORBIDDEN, m),
-        Err(e) => text(StatusCode::BAD_REQUEST, e.to_string()),
     }
 }
 
@@ -3443,9 +3163,6 @@ fn recv_record_sync(dir: &Path, bytes: &[u8]) -> Response<Full<Bytes>> {
             absorbed += 1;
         }
     }
-    if let Some(g) = &sync.body.game {
-        absorb_game_notifying(dir, g);
-    }
     text(StatusCode::OK, format!("absorbed {absorbed}"))
 }
 
@@ -3486,9 +3203,6 @@ async fn sync_records_with(dir: &Path, addr: &str) {
                         {
                             for r in &theirs.body.records {
                                 let _ = crate::record::absorb(dir, r, now);
-                            }
-                            if let Some(g) = &theirs.body.game {
-                                absorb_game_notifying(dir, g);
                             }
                         }
                     }
@@ -5041,32 +4755,6 @@ mod tests {
 
     fn body_status(resp: &Response<Full<Bytes>>) -> StatusCode {
         resp.status()
-    }
-
-    #[test]
-    fn a_win_is_announced_once_per_game_not_every_resync() {
-        // The 0035-deploy bug: a done game replicates every gossip round, and the win push
-        // re-fired each time. The door-local marker makes it once.
-        let dir = fresh_dir("win_dedup");
-        assert!(
-            claim_win_announcement(&dir, "changeling-100"),
-            "first settle announces"
-        );
-        assert!(
-            !claim_win_announcement(&dir, "changeling-100"),
-            "a re-sync says nothing"
-        );
-        assert!(
-            !claim_win_announcement(&dir, "changeling-100"),
-            "and stays quiet"
-        );
-        // A genuinely new game announces again.
-        assert!(
-            claim_win_announcement(&dir, "pact-200"),
-            "a new fire's win is heard"
-        );
-        assert!(!claim_win_announcement(&dir, "pact-200"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

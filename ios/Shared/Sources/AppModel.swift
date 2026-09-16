@@ -39,8 +39,6 @@ final class AppModel: ObservableObject {
     /// The introduction the human made before the door was reachable. Replayed once it is —
     /// an act of identification is not discarded because the handshake was still in flight.
     var pendingIntroduction: (IdentityClaim?, Evidence)?
-    /// The door's last verdict on a game act, shown on the games screen (B15). "" when clear.
-    @Published var gameNote = ""
 
     /// The default path-to-admission copy, before the door has said anything more specific.
     static let admissionPath = "Covenant accepted — you're reading as a guest. To be admitted: " +
@@ -545,9 +543,6 @@ final class AppModel: ObservableObject {
             // nudging for a name the human already gave (T-185).
             "introduceHeld": introduceHeldReason,
             "introduceElapsed": introducing ? Int(Date().timeIntervalSince1970 - introduceStartedAt) : 0,
-            // The door's last verdict on a game act (B15) — surfaced on the games screen so a
-            // refused BEGIN shows its reason instead of silently bouncing to the finished game.
-            "gameNote": gameNote,
             // Claims waiting on this device's human (B7) — the welcome glyph flashes on it.
             "pendingClaims": pendingClaimCount,
             // What the ladder currently believes, so the console can SHOW the belief instead of
@@ -998,9 +993,7 @@ final class AppModel: ObservableObject {
 
     /// Present evidence at `POST /mesh/introduce`. On yes the device is a member and both sides
     /// hear it; on not-yet the door's words become the guest screen's path-to-admission copy.
-    /// One move in the mesh game (begin / guess / line / pass / close), signed and sent to
-    /// the door. The judge's reply lands in the activity feed verbatim.
-    // ---- APNs (the ember reaches a locked phone) ------------------------------------------
+    // ---- APNs (a push reaches a locked phone) ------------------------------------------
     /// The OS-issued device token, hex — held until the device is enrolled with a door.
     private var apnsToken: String?
 
@@ -1021,40 +1014,6 @@ final class AppModel: ObservableObject {
         } catch {
             note("push registration failed at door \(host): \(error.localizedDescription)")
         }
-    }
-
-    func gameAct(_ act: String, kind: String? = nil, text: String = "", to: String = "",
-                 solo: Bool = false) async {
-        markInteraction()
-        // Never bail silently: a dead-looking button is worse than an error. The note surfaces
-        // on the games screen (deviceStateJSON.notes), door named, so a refusal is legible.
-        guard !host.isEmpty else {
-            note("\(act): no door to act through — this device has no enrolled host")
-            return
-        }
-        do {
-            switch try await GameClient(node: node).act(act, kind: kind, text: text, to: to,
-                                                        solo: solo,
-                                                        host: host, port: enrollPort) {
-            case .said(let words):
-                gameNote = ""
-                note(words.isEmpty ? "the move landed" : words)
-            case .refused(let why):
-                // Surface the refusal ON THE GAMES SCREEN (B15): a begin that the door refuses
-                // (no players present, members only, an already-burning game) used to vanish
-                // into a device-screen note while the games view silently bounced to the last
-                // finished game after its 12-second grace — reading as "the game won't start".
-                gameNote = why
-                note("door \(host) refused \(act): \(why)")
-            case .error(let e):
-                gameNote = e
-                note("\(act) failed at door \(host): \(e)")
-            }
-        } catch {
-            gameNote = Self.brief(error)
-            note("\(act) failed at door \(host): \(error.localizedDescription)")
-        }
-        await refreshWorldview()
     }
 
     /// An enrolled visitor redeeming a pasted invite (the visitor path card's REDEEM box).
@@ -1451,10 +1410,6 @@ final class AppModel: ObservableObject {
     /// Live count of claims waiting on THIS device's human — the welcome glyph flashes on it,
     /// so a waiting acceptance is visible even on the first read (B7).
     @Published var pendingClaimCount = 0
-    private var wasMyTurn = false
-    /// Whether the current finished game's win was already celebrated — reset when a game is
-    /// open or absent, so the fanfare rings once per win (B13).
-    private var wonGameShown = false
     private var preferredReadFails = 0
     /// Consecutive reads that served this device the guest projection. Demotion waits for
     /// three — a single projected read (a fallback door's stale roll, a mid-merge worldview)
@@ -1995,53 +1950,6 @@ final class AppModel: ObservableObject {
                     }
                 }
                 knownClaimKeys = keys
-            }
-
-            // The ember reached this device (the mesh games): edge-triggered chime, so a
-            // player who wandered off hears their turn arrive.
-            // The turn belongs to the HUMAN: chime when the holder handle is this
-            // device's human — whichever of their devices they're nearest.
-            let myHandle = attributedHuman.lowercased()
-            let myTurn = view.game.map {
-                $0.status == "open" && myHandle != "observer" && !myHandle.isEmpty
-                    && $0.holder.lowercased() == myHandle
-            } ?? false
-            if myTurn && !wasMyTurn {
-                Chime.guestWaiting()
-                switch view.game?.kind {
-                case "campfire":
-                    note("🔥 the ember has reached you — add your line")
-                case "changeling":
-                    note(view.game?.phase == "voting"
-                         ? "🎭 three lines, one human truth — come vote"
-                         : "🎭 your round to witness — one true line")
-                case "pact":
-                    note(view.game?.phase == "gambit"
-                         ? "⚖️ your temptation — write the request"
-                         : "⚖️ the constitution has dealt — come rule")
-                default:
-                    note("🧩 your turn — the riddle waits on you")
-                }
-            }
-            #if os(iOS)
-            // The wrist is a device of the holder too (the law of the fire): flame on the
-            // rising edge, cleared on the falling one.
-            if myTurn != wasMyTurn {
-                PhoneWatchLink.shared.sendEmber(myTurn, kind: view.game?.kind ?? "riddle")
-            }
-            #endif
-            wasMyTurn = myTurn
-
-            // A riddle just SOLVED (B13): ring the fanfare once, on the win edge. Reset when
-            // a game is open or absent so a finished game doesn't re-ring every poll.
-            let riddleWon = view.game.map {
-                $0.status == "done" && !($0.winner ?? "").isEmpty && $0.kind == "riddle"
-            } ?? false
-            if riddleWon && !wonGameShown {
-                wonGameShown = true
-                Chime.fanfare()
-            } else if !(view.game.map { $0.status == "done" } ?? false) {
-                wonGameShown = false
             }
 
             // Were WE just admitted? The moment this device's own id appears on the roll it

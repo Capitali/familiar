@@ -12,6 +12,15 @@ this file is the human-readable summary.
 > each "Added" entry traces to its tests / live evidence in the
 > [claim→evidence table](docs/05-validation-and-results.md#claim--evidence).
 
+### Removed
+- **The mesh party games are retired** (Ian, 2026-09-10: "I think we can remove the game
+  screen and tests"). Riddle of the Mesh, The Campfire, The Changeling and The Pact — the
+  games screen on every console, the door-side judge and keeper, `POST /mesh/game/act`, the
+  game payload on record-sync, the turn and win pushes, the wrist ember, the Swift
+  `GameClient`, and their tests — are gone from `main`. ADR-0028/0034/0035 are marked retired
+  and kept as history; the push registration, signed member acts and record-sync they
+  exercised are untouched. Mesh doors keep running the previous binary until deployed.
+
 ### Added
 - **A second load on the way** (T-243 slices 1+2). Berthed with a contract booked or laden,
   the pilot books the best-paying load from this berth to a stop already on its tour — under

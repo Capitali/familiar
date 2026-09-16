@@ -29,14 +29,12 @@
 #![forbid(unsafe_code)]
 
 pub mod brief;
-pub mod changeling;
 pub mod config;
 pub mod console_act;
 pub mod consult;
 pub mod device;
 pub mod enroll;
 pub mod federation;
-pub mod game;
 pub mod grants;
 pub mod group;
 pub mod members;

@@ -12,9 +12,7 @@ struct WatchRootView: View {
     @EnvironmentObject var model: WatchModel
     @State private var showTalk = false
     var body: some View {
-        if let kind = model.emberKind {
-            EmberView(kind: kind) { model.emberKind = nil }
-        } else if model.needsConsentPrompt {
+        if model.needsConsentPrompt {
             WatchConsentView(model: model)
         } else {
             mainBody
@@ -22,8 +20,8 @@ struct WatchRootView: View {
     }
 
     // The wrist's resting face (B18): the blue globe orb, orbiting slowly. No health data — the
-    // watch is a presence and a signal, not a dashboard. It shows the ember when a notification
-    // arrives (handled above). A named wrist can TAP THE ORB to talk: dictate a turn, hear the
+    // watch is a presence and a signal, not a dashboard. A named wrist can TAP THE ORB to talk:
+    // dictate a turn, hear the
     // reply. Enrolled → the orb; not yet → a quiet line to link it.
     var mainBody: some View {
         ZStack {
@@ -125,43 +123,6 @@ struct WatchOrbView: View {
                 ctx.fill(dp, with: .color(ink))
             }
         }
-    }
-}
-
-/// The ember has reached this wrist (the law of the fire: every device of the holder shows
-/// it). A big living flame, a glow that breathes, and one line of what to do. Tap to dismiss —
-/// the answer itself happens on whichever device has a keyboard.
-struct EmberView: View {
-    let kind: String
-    let dismiss: () -> Void
-    @State private var flare = false
-
-    var body: some View {
-        ZStack {
-            RadialGradient(colors: [.orange.opacity(flare ? 0.45 : 0.2), .black],
-                           center: .center, startRadius: 6, endRadius: flare ? 130 : 90)
-                .ignoresSafeArea()
-            VStack(spacing: 6) {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.yellow, .orange, .red],
-                                       startPoint: .top, endPoint: .bottom))
-                    .shadow(color: .orange.opacity(flare ? 0.9 : 0.4), radius: flare ? 22 : 10)
-                    .scaleEffect(flare ? 1.12 : 0.92)
-                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: flare)
-                Text(kind == "campfire" ? "The ember is yours"
-                     : kind == "changeling" ? "Find the human"
-                     : kind == "pact" ? "Allow, consent, or refuse?" : "Your turn")
-                    .font(.headline)
-                Text("answer from any of your devices")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .onAppear { flare = true }
-        .onTapGesture { dismiss() }
     }
 }
 

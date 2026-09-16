@@ -1,6 +1,8 @@
 # ADR-0034 — The Changeling, the keeper, and the promise it can prove
 
-- **Status:** accepted — implemented 2026-08-09
+- **Status:** retired 2026-09-10 (Ian: "I think we can remove the game screen and tests") —
+  the keeper and its game were removed with ADR-0028's games; kept as history. Was:
+  accepted — implemented 2026-08-09
 - **Relates to:** [ADR-0028](0028-the-mesh-games.md) (the law of the fire — all of it still
   holds), [ADR-0029](0029-the-door-under-load.md) (§1 never park a worker, §2 temp+rename,
   §4 no seesaw), [ADR-0030](0030-the-ember-reaches-a-locked-phone.md) (the push),

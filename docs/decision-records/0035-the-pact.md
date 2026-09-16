@@ -1,6 +1,9 @@
 # ADR-0035 — The Pact: the constitution as the game's judge
 
-- **Status:** accepted — implemented 2026-08-10
+- **Status:** retired 2026-09-10 (Ian: "I think we can remove the game screen and tests") —
+  the Pact left with the games screen it lived on; the guard and intent classifiers it
+  exercised (`kernel/guard.rs`, `kernel/intent.rs`) stay, they were never game code. Was:
+  accepted — implemented 2026-08-10
 - **Relates to:** [ADR-0028](0028-the-mesh-games.md) (the law of the fire — all of it
   holds), [ADR-0034](0034-the-changeling.md) (the fourth kind, and `Unknown`),
   `docs/SOUL.md`, `docs/HUMANITY.md`, `docs/law-iii-responses.md`,

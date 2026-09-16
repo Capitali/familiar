@@ -145,8 +145,8 @@ On first launch the console greets you, finds a reachable mesh through the light
 and joins as a guest; the guided path on its own screen (say a name, be vouched for or
 sponsored, or redeem a one-scan invite) carries it to membership. After that it renders
 the worldview — the satellite globe centered over home, the roster (live members, with
-everything last seen over 24h ago behind a history button), theories, signals, the games,
-and the device screen.
+everything last seen over 24h ago behind a history button), theories, signals, and the
+device screen.
 
 A member console can also hold the door open itself: any **warranted** member mints
 one-scan invites, and admission is judged by the two filters wherever the knock lands
@@ -196,15 +196,6 @@ lighthouse, and a pasted or scanned address as the offline fallback.
 It now also **watches**: with the `allow_camera` gate open, the daemon captures still
 frames through its eye (a bundled AVFoundation helper) and records that it saw. See
 [Install & run](#install--run).
-
-And it **plays**: two mesh games — Riddle of the Mesh and The Campfire — where every
-move is a signed member act, seats belong to humans (any of your devices may answer;
-none of them takes a turn for you), and the familiar referees
-([ADR-0028](docs/decision-records/0028-the-mesh-games.md)). The first full two-human
-game was played across two doors and four devices on 2026-08-07; the six defects it
-surfaced, and the hardening they taught, are
-[ADR-0029](docs/decision-records/0029-the-door-under-load.md) — testers playing IS the
-test.
 
 And it has **partners**: other AIs meet the familiar at its door over MCP, on the
 household's terms — what the familiar learns to control becomes an anonymized offering,
