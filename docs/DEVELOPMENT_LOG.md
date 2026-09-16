@@ -104,6 +104,48 @@ MacOnStick, on the three items the host lane left for this side (STATE 2026-09-0
   host-side twin of this line — wildhorse's call, additive.
 - T-243 slice 3, the tour planner, is the host's.
 
+## 2026-09-16 — T-243 slice 3: the tour planner, and the feed answers in parallel
+
+Ian (2026-09-16): "We should roll changes into prod, finish up the tour planner and get that
+rolled out as well." Slices 1+2 put the bay in the doctrine; the next leg was still the
+ACTIVE's next stop. With three contracts held, the order of stops is the difference between a
+tour that pays and one that criss-crosses.
+
+### What changed
+
+- **`doctrine::plan_tour`** — the stops the bay still needs (`required_stops`: a booked
+  contract's pickup then its delivery, a laden one's delivery, a delivered one's nothing; the
+  active's pickup dropped when its cargo is aboard by the laden-leg rule's own test), every
+  order of them with each pickup before its own delivery (≤ 6 stops, so every order is
+  tried), each priced from `here` on the router's legs at the contract's drive with the crane
+  at every pickup — and the best order is the one with the **fewest deliveries past their
+  deadline**, then the fewest ticks, then the least fuel. A load no order can save is not a
+  reason to hold the ones that can. `None` only when the router cannot price a leg, and then
+  the one-contract rule flies exactly as it always did.
+- **The tour drives the next leg.** In `decide_with`, berthed with contracts in hand: the
+  tour's first stop is the next `Travel`; a first stop that is this berth is the crane
+  (`Hold "waiting on the crane"`). A companion may now aim at ANY stop on the planned tour,
+  not only the active's own origin and destination.
+- **Seam:** unchanged in shape (SEAM_VERSION 2); the answer differs where the tour finds a
+  better order.
+- **The feed's `/ships` builds every hull's row in parallel** (std::thread::scope): four
+  hulls over Starlink took 9–12 s in series and the iPad read it as "cannot connect".
+
+### Checks run
+
+- `cargo fmt --all`; `cargo clippy -p familiar-whisker -p familiar-cli --all-targets -- -D warnings`
+  clean; `cargo test`: whisker (three new doctrine tests — the cheapest order that lands every
+  delivery, a tight deadline reordering it, the hopeless load not holding the savable one, the
+  unpriceable router falling back; pickups before their own deliveries and the crane here; a
+  companion aiming at a tour stop — and the seam's bay test re-pinned on the planner: a
+  booked-unfetched companion HERE is the crane), cli.
+- Live: LOCAL soak rolled; PROD rolled on Ian's word.
+
+### Next
+
+- Detours: a companion whose destination is NOT on the tour, priced as net per added tick
+  against the board's best rate (slice 4); per-leg accounting for T-241.
+
 ## 2026-09-16 — The captain record adopted, the exchange's cash ledger read, and the fleet's income pays the fleet's leases
 
 Ian (2026-09-16): "Adopt the captain record, assure naming is correct across ships in the

@@ -674,14 +674,24 @@ mod seam_parity_tests {
         // The bay full: the deadhead to b is filed instead.
         let mut full = base.clone();
         full["contracts"] = json!([
-            {"row": row("L2", "a", "c", 300), "word": "booked"},
+            {"row": row("L2", "a", "c", 300), "word": "pickedUp"},
             {"row": row("L1", "b", "c", 500), "word": "booked"},   // the active, listed again: ignored
             {"row": row("L3", "a", "b", 200), "word": "pickedUp"}
         ]);
+        // The tour: deliver L3 at b, pick up L1 at b, then both deliveries at c.
         let out = advise(&full);
         assert_eq!(out["decision"]["type"], "travel", "{out}");
         assert_eq!(out["decision"]["station"], "b");
         assert_eq!(out["seam_version"], SEAM_VERSION);
+        // ...and a companion booked HERE and not yet fetched holds for the crane.
+        let mut crane = base.clone();
+        crane["contracts"] = json!([
+            {"row": row("L2", "a", "c", 300), "word": "booked"},
+            {"row": row("L3", "a", "b", 200), "word": "pickedUp"}
+        ]);
+        let out = advise(&crane);
+        assert_eq!(out["decision"]["type"], "hold", "{out}");
+        assert_eq!(out["reasons"]["why"], "waiting on the crane");
     }
 
     /// T-243 slice 0: a delivered contract with pay owed that is not the active one is

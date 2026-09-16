@@ -22,6 +22,11 @@ this file is the human-readable summary.
   exercised are untouched. Mesh doors keep running the previous binary until deployed.
 
 ### Added
+- **The tour planner** (T-243 slice 3). With up to three contracts in the bay, the pilot
+  flies the order of stops that lands the most deliveries in time, then the fewest ticks, then
+  the least fuel — every order tried, pickups before their own deliveries — and books a
+  companion for any stop on that tour. The fleet feed's ship rows are built in parallel.
+  Status: **shipped**.
 - **The fleet's records follow the world's captain record** (metal#86). `fleet captains
   --adopt` remembers the exchange's captain id, a hull renamed from another client, and the
   computer's name as the world holds it — or files the familiar's own where the world has none;

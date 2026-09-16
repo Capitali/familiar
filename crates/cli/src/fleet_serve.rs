@@ -591,19 +591,35 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
                 }),
             )
         }
-        ("GET", ["ships"]) => (
-            200,
-            json!({"ships": ships
-                .iter()
-                .map(|s| {
-                    let (t, ts) = clock(s, clk);
-                    let mut row = ship_row(s, root, now);
-                    row["tick"] = json!(t);
-                    row["tick_seconds"] = json!(ts);
-                    row
-                })
-                .collect::<Vec<_>>()}),
-        ),
+        ("GET", ["ships"]) => {
+            // Every hull's row reads its exchange (me, receipts, status) — in
+            // PARALLEL, so the bridge waits for the slowest hull rather than the
+            // sum: four hulls over Starlink took 9–12 s in series (2026-09-16), which
+            // the iPad read as "cannot connect".
+            let rows: Vec<Value> = std::thread::scope(|sc| {
+                let handles: Vec<_> = ships
+                    .iter()
+                    .map(|s| sc.spawn(move || ship_row(s, root, now)))
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or(Value::Null))
+                    .collect()
+            });
+            (
+                200,
+                json!({"ships": ships
+                    .iter()
+                    .zip(rows)
+                    .map(|(s, mut row)| {
+                        let (t, ts) = clock(s, clk);
+                        row["tick"] = json!(t);
+                        row["tick_seconds"] = json!(ts);
+                        row
+                    })
+                    .collect::<Vec<_>>()}),
+            )
+        }
         ("GET", ["ships", id, "journal"]) => {
             let Some(s) = find(id) else {
                 return (404, json!({"error": "no such ship"}));

@@ -634,12 +634,6 @@ pub fn decide_with(
                 why: "adrift between folds".into(),
             };
         };
-        // A second load on the way (T-243 slice 2): berthed with a contract in
-        // hand, book what this berth offers for a stop we are flying to anyway,
-        // before the crane and before the drive.
-        if let Some(book) = companion(ship, active, companions, board, router, here) {
-            return book;
-        }
         // Our cargo is aboard when the hold carries MORE than the companions
         // account for — `hold_used > 0` alone would launch the laden leg the
         // moment a companion loaded here, with the active's own cargo still on
@@ -649,7 +643,42 @@ pub fn decide_with(
             .filter(|c| c.word == ActiveWord::PickedUp)
             .map(|c| c.row.units)
             .sum();
-        if here == active.row.origin && ship.hold_used > aboard_others {
+        let aboard = here == active.row.origin && ship.hold_used > aboard_others;
+        // The tour (T-243 slice 3): the cheapest feasible order of every stop the
+        // bay still needs. Its stations are what "on the way" means below, and its
+        // first stop is the next leg.
+        let held: Vec<&Active> = std::iter::once(active).chain(companions).collect();
+        let stops = required_stops(active, companions, aboard);
+        let tour = plan_tour(here, &stops, &held, ship, router);
+        // A second load on the way (T-243 slice 2): berthed with a contract in
+        // hand, book what this berth offers for a stop we are flying to anyway,
+        // before the crane and before the drive.
+        let ahead: Vec<String> = match &tour {
+            Some(t) => {
+                let mut v: Vec<String> = Vec::new();
+                for st in t.stops.iter().map(|s| s.station().to_string()) {
+                    if st != here && !v.contains(&st) {
+                        v.push(st);
+                    }
+                }
+                v
+            }
+            None => stops_ahead(active, here),
+        };
+        if let Some(book) = companion(ship, active, companions, board, router, here, &ahead) {
+            return book;
+        }
+        if let Some(t) = &tour {
+            return match t.stops.first() {
+                Some(first) if first.station() != here => Decision::Travel {
+                    station: first.station().to_string(),
+                },
+                _ => Decision::Hold {
+                    why: "waiting on the crane".into(),
+                },
+            };
+        }
+        if aboard {
             return Decision::Travel {
                 station: active.row.dest.clone(),
             };
@@ -864,6 +893,188 @@ pub fn decide_with(
     }
 }
 
+// ---------------------------------------------------------------------------
+// The tour planner — T-243 slice 3 (Ian, 2026-09-09: "flying and planning a route
+// for profit where we can haul more than one load to more than one destination";
+// 2026-09-16: "finish up the tour planner"). With up to three contracts in the bay
+// the tour is an ORDER of stops — each booked contract's pickup, then every
+// contract's delivery — and the order is the whole difference between a fleet
+// that pays and one that criss-crosses. At most six stops, so every order is
+// tried: pickups before their own deliveries, every delivery inside its
+// deadline, priced on the router's own legs at the hull's drive; the cheapest
+// feasible order in ticks wins, fuel breaking the tie. A tour the router cannot
+// price falls back to the one-contract rule below, as before.
+// ---------------------------------------------------------------------------
+
+/// One stop on a tour: a booked contract's pickup, or a delivery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stop {
+    Pickup { load_id: String, station: String },
+    Deliver { load_id: String, station: String },
+}
+
+impl Stop {
+    pub fn station(&self) -> &str {
+        match self {
+            Stop::Pickup { station, .. } | Stop::Deliver { station, .. } => station,
+        }
+    }
+    fn load_id(&self) -> &str {
+        match self {
+            Stop::Pickup { load_id, .. } | Stop::Deliver { load_id, .. } => load_id,
+        }
+    }
+}
+
+/// The best order the planner found, priced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tour {
+    pub stops: Vec<Stop>,
+    pub ticks: i64,
+    pub fuel: i64,
+    /// Deliveries this order still lands past their deadline (0 = every one in time).
+    pub late: i64,
+}
+
+/// The stops the held contracts still need, active first: a booked contract's
+/// pickup (unless its cargo is already aboard) then its delivery; a laden one's
+/// delivery; a delivered one's nothing. `aboard` is the caller's word on whether
+/// the ACTIVE's cargo is in the hold when the hull stands at its origin — the
+/// `hold_used > aboard_others` heuristic the laden-leg rule has always used.
+pub fn required_stops(active: &Active, companions: &[Active], aboard: bool) -> Vec<Stop> {
+    let mut stops = Vec::new();
+    for (n, c) in std::iter::once(active).chain(companions).enumerate() {
+        match c.word {
+            ActiveWord::Delivered => {}
+            ActiveWord::Booked if n == 0 && aboard => stops.push(Stop::Deliver {
+                load_id: c.row.load_id.clone(),
+                station: c.row.dest.clone(),
+            }),
+            ActiveWord::Booked => {
+                stops.push(Stop::Pickup {
+                    load_id: c.row.load_id.clone(),
+                    station: c.row.origin.clone(),
+                });
+                stops.push(Stop::Deliver {
+                    load_id: c.row.load_id.clone(),
+                    station: c.row.dest.clone(),
+                });
+            }
+            ActiveWord::PickedUp => stops.push(Stop::Deliver {
+                load_id: c.row.load_id.clone(),
+                station: c.row.dest.clone(),
+            }),
+        }
+    }
+    stops
+}
+
+/// Every order of `stops` with each pickup before its own delivery.
+fn orders(stops: &[Stop]) -> Vec<Vec<usize>> {
+    fn go(stops: &[Stop], chosen: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        if chosen.len() == stops.len() {
+            out.push(chosen.clone());
+            return;
+        }
+        for i in 0..stops.len() {
+            if chosen.contains(&i) {
+                continue;
+            }
+            if let Stop::Deliver { load_id, .. } = &stops[i] {
+                // Its pickup, if it has one in this set, must already be chosen.
+                let pickup = stops
+                    .iter()
+                    .position(|s| matches!(s, Stop::Pickup { load_id: l, .. } if l == load_id));
+                if pickup.is_some_and(|p| !chosen.contains(&p)) {
+                    continue;
+                }
+            }
+            chosen.push(i);
+            go(stops, chosen, out);
+            chosen.pop();
+        }
+    }
+    let mut out = Vec::new();
+    go(stops, &mut Vec::new(), &mut out);
+    out
+}
+
+/// Price one order from `here`: ticks and fuel along the router's legs at the
+/// hull's drive, the crane at every pickup, and how many deliveries land PAST
+/// their deadline. None when a leg cannot be priced.
+fn price_order(
+    here: &str,
+    stops: &[Stop],
+    order: &[usize],
+    held: &[&Active],
+    ship: &Ship,
+    router: &dyn Router,
+) -> Option<(i64, i64, i64)> {
+    let hull = if ship.accel_milli_g > 0 {
+        ship.accel_milli_g
+    } else {
+        REFERENCE_ACCEL_MILLI_G
+    };
+    let row = |lid: &str| held.iter().find(|c| c.row.load_id == lid).map(|c| &c.row);
+    let mut at = here.to_string();
+    let mut t = ship.tick;
+    let mut fuel = 0i64;
+    let mut late = 0i64;
+    for &i in order {
+        let stop = &stops[i];
+        let r = row(stop.load_id())?;
+        let class = if r.class_bps > 0 { r.class_bps } else { 10_000 };
+        let accel = contract_accel(hull, class);
+        if stop.station() != at {
+            let legs = router.leg_distances_km(&at, stop.station())?;
+            t += flight_ticks(&legs, accel) + ENGAGE_OVERHEAD_TICKS;
+            fuel += fuel_at_drive(router.fuel_between(&at, stop.station())?, accel);
+            at = stop.station().to_string();
+        }
+        match stop {
+            Stop::Pickup { .. } => t += r.loading_ticks.max(8),
+            Stop::Deliver { .. } => {
+                if r.deliver_deadline_tick > 0 && t > r.deliver_deadline_tick {
+                    late += 1;
+                }
+            }
+        }
+    }
+    Some((late, t - ship.tick, fuel))
+}
+
+/// The best order of the required stops from `here`: the fewest deliveries past
+/// their deadline first (a load that cannot be saved is not a reason to hold the
+/// ones that can), then the fewest ticks, then the least fuel. None only when no
+/// order can be priced at all (the router lacks a leg) — the caller then flies
+/// the one-contract rule it always flew.
+pub fn plan_tour(
+    here: &str,
+    stops: &[Stop],
+    held: &[&Active],
+    ship: &Ship,
+    router: &dyn Router,
+) -> Option<Tour> {
+    let mut best: Option<Tour> = None;
+    for order in orders(stops) {
+        let Some((late, ticks, fuel)) = price_order(here, stops, &order, held, ship, router) else {
+            continue;
+        };
+        let better = best
+            .as_ref()
+            .is_none_or(|b| (late, ticks, fuel) < (b.late, b.ticks, b.fuel));
+        if better {
+            best = Some(Tour {
+                stops: order.iter().map(|&i| stops[i].clone()).collect(),
+                ticks,
+                fuel,
+                late,
+            });
+        }
+    }
+    best
+}
+
 /// The stops the tour still visits after `here`, in order: the active's origin
 /// while it is only booked, then its destination.
 fn stops_ahead(active: &Active, here: &str) -> Vec<String> {
@@ -912,11 +1123,11 @@ fn companion(
     board: &[LoadRow],
     router: &dyn Router,
     here: &str,
+    ahead: &[String],
 ) -> Option<Decision> {
     if 1 + companions.len() as i64 >= BAY_LIMIT || ship.denied.iter().any(|v| v == "book") {
         return None;
     }
-    let ahead = stops_ahead(active, here);
     if ahead.is_empty() {
         return None;
     }
@@ -1102,6 +1313,198 @@ mod tests {
 
     fn pumps(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── the tour planner (T-243 slice 3) ────────────────────────────────────
+
+    /// A router with a map: legs in km per (from, to), the same both ways; fuel
+    /// is the legs' sum in thousands of km.
+    struct MapRouter(Vec<(&'static str, &'static str, i64)>);
+    impl MapRouter {
+        fn km(&self, a: &str, b: &str) -> Option<i64> {
+            self.0
+                .iter()
+                .find(|(x, y, _)| (*x == a && *y == b) || (*x == b && *y == a))
+                .map(|(_, _, km)| *km)
+        }
+    }
+    impl Router for MapRouter {
+        fn fuel_between(&self, a: &str, b: &str) -> Option<i64> {
+            self.km(a, b).map(|km| km / 1_000_000)
+        }
+        fn leg_distances_km(&self, a: &str, b: &str) -> Option<Vec<i64>> {
+            self.km(a, b).map(|km| vec![km])
+        }
+    }
+
+    fn laden(id: &str, origin: &str, dest: &str) -> Active {
+        Active {
+            row: load(id, origin, dest, 500, (5, 10)),
+            word: ActiveWord::PickedUp,
+        }
+    }
+
+    #[test]
+    fn the_tour_takes_the_cheapest_order_that_lands_every_delivery_in_time() {
+        // At H with L1 laden for X and L2 booked Y→X. Y is a short hop from H and
+        // from X; X is far from H. The tour is H→Y (pick up L2)→X (deliver both),
+        // not H→X→Y→X.
+        let map = MapRouter(vec![
+            ("h", "x", 40_000_000),
+            ("h", "y", 4_000_000),
+            ("y", "x", 4_000_000),
+        ]);
+        let ship = ship_at("h", 500);
+        let a = laden("L1", "w", "x");
+        let b = booked("L2", "y", "x", 400);
+        let stops = required_stops(&a, std::slice::from_ref(&b), false);
+        assert_eq!(stops.len(), 3);
+        let tour = plan_tour("h", &stops, &[&a, &b], &ship, &map).unwrap();
+        assert_eq!(
+            tour.stops
+                .iter()
+                .map(|s| s.station().to_string())
+                .collect::<Vec<_>>(),
+            vec!["y", "x", "x"]
+        );
+        let d = decide_with(
+            &ship,
+            Some(&a),
+            std::slice::from_ref(&b),
+            &[],
+            &pumps(&[]),
+            &map,
+        );
+        assert_eq!(
+            d,
+            Decision::Travel {
+                station: "y".into()
+            }
+        );
+        // L1's deadline cannot wait for the detour: X first, then Y, then X again.
+        let mut tight = a.clone();
+        tight.row.deliver_deadline_tick = ship.tick
+            + flight_ticks(&[40_000_000], REFERENCE_ACCEL_MILLI_G)
+            + ENGAGE_OVERHEAD_TICKS;
+        let tour = plan_tour(
+            "h",
+            &required_stops(&tight, std::slice::from_ref(&b), false),
+            &[&tight, &b],
+            &ship,
+            &map,
+        )
+        .unwrap();
+        assert_eq!(
+            tour.stops
+                .iter()
+                .map(|s| s.station().to_string())
+                .collect::<Vec<_>>(),
+            vec!["x", "y", "x"]
+        );
+        assert_eq!(
+            decide_with(
+                &ship,
+                Some(&tight),
+                std::slice::from_ref(&b),
+                &[],
+                &pumps(&[]),
+                &map
+            ),
+            Decision::Travel {
+                station: "x".into()
+            }
+        );
+        // L2 cannot be saved by any order: the planner still saves L1 (one late,
+        // not two) and flies X first rather than holding for a lost cause.
+        let mut hopeless = b.clone();
+        hopeless.row.deliver_deadline_tick = ship.tick + 1;
+        let tour = plan_tour(
+            "h",
+            &required_stops(&tight, std::slice::from_ref(&hopeless), false),
+            &[&tight, &hopeless],
+            &ship,
+            &map,
+        )
+        .unwrap();
+        assert_eq!(tour.late, 1);
+        assert_eq!(tour.stops[0].station(), "x");
+        assert_eq!(
+            decide_with(
+                &ship,
+                Some(&tight),
+                std::slice::from_ref(&hopeless),
+                &[],
+                &pumps(&[]),
+                &map
+            ),
+            Decision::Travel {
+                station: "x".into()
+            }
+        );
+        // A router that cannot price a leg: no tour, and the one-contract rule
+        // flies as it always did (booked, not at the origin → the origin).
+        assert_eq!(
+            decide_with(&ship, Some(&b), &[], &[], &pumps(&[]), &NoRouter),
+            Decision::Travel {
+                station: "y".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_pickup_comes_before_its_own_delivery_and_the_crane_here_is_waited_on() {
+        let map = MapRouter(vec![("h", "x", 4_000_000)]);
+        let ship = ship_at("h", 500);
+        // Booked here: the first stop is the pickup at H → wait on the crane.
+        let a = booked("L1", "h", "x", 400);
+        assert_eq!(
+            decide_with(&ship, Some(&a), &[], &[], &pumps(&[]), &map),
+            Decision::Hold {
+                why: "waiting on the crane".into()
+            }
+        );
+        // Cargo aboard at H: the pickup is done, the delivery is next.
+        let mut aboard = ship_at("h", 500);
+        aboard.hold_used = 25;
+        assert_eq!(
+            decide_with(&aboard, Some(&a), &[], &[], &pumps(&[]), &map),
+            Decision::Travel {
+                station: "x".into()
+            }
+        );
+        // Every order keeps a pickup ahead of its delivery.
+        let stops = vec![
+            Stop::Deliver {
+                load_id: "L1".into(),
+                station: "x".into(),
+            },
+            Stop::Pickup {
+                load_id: "L1".into(),
+                station: "h".into(),
+            },
+        ];
+        for o in orders(&stops) {
+            assert_eq!(o, vec![1, 0]);
+        }
+    }
+
+    #[test]
+    fn a_companion_may_aim_at_any_stop_on_the_planned_tour() {
+        // At H, L1 booked Y→X. The tour visits Y then X; a load H→Y rides free.
+        let map = MapRouter(vec![
+            ("h", "x", 40_000_000),
+            ("h", "y", 4_000_000),
+            ("y", "x", 4_000_000),
+        ]);
+        let ship = ship_at("h", 500);
+        let a = booked("L1", "y", "x", 400);
+        let board = vec![load("L9", "h", "y", 300, (0, 5))];
+        assert_eq!(
+            decide_with(&ship, Some(&a), &[], &board, &pumps(&[]), &map),
+            Decision::Book {
+                load_id: "L9".into()
+            }
+        );
     }
 
     // ── a second load on the way (T-243 slices 1+2) ─────────────────────────
