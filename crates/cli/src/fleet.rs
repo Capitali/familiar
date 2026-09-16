@@ -2914,7 +2914,10 @@ mod captain_store_tests {
 
     #[test]
     fn a_broken_persona_is_an_error_on_the_feed_not_a_raw_value() {
-        let base = tmp("broken");
+        // Its own directory: `tmp` wipes the path it names, and the sibling test above
+        // named "broken" too — whichever ran second emptied the other's store mid-test
+        // (CI red on 3a3f62b and 6ce7f4f, 2026-09-16).
+        let base = tmp("broken_feed");
         let root = base.join("worlds");
         let cap = captain_store(&root, "Cap");
         std::fs::create_dir_all(&cap).unwrap();
