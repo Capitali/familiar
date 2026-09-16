@@ -290,7 +290,13 @@ requests fleet ops through the board, never runs them directly unless assigned).
 
 ## Held-operations ledger
 
-**HELD 2026-09-16 (MacOnStick) — two TestFlight ships, trigger = Ian's word "ship" / "build and ship":**
+**SHIPS ATTEMPTED 2026-09-16 on Ian's word ("shipo builds") — BOTH BLOCKED ON THIS MAC, both build numbers already claimed in git; the remaining step is one command on wildhorse (Ian runs it — the classifier refuses a remote ship from the model):**
+- **UCF Familiar build 8** (bump `1080e63`): archive OK here; export FAILED — the App Store profile `UCF Familiar AppStore io.river.familiar.ucf` (ASC id 5MJ9P4A3YX) carries only wildhorse's distribution cert 8PV78GZUUJ, not this Mac's 27FF5K2QAM. Durable fix written, NOT run (classifier: cert change): `python3 ios/tools/ucf-profile-both-certs.py` recreates it with both certs — the 2026-08-13 pattern.
+- **Familiar Agent build 113** (bump `6bcc130`): Mac console built + installed here (/Applications, AirDrop zip); iOS archive + export OK; **TestFlight upload REFUSED by App Store Connect, error 90534 "Unsupported SDK or Xcode version"** — Xcode 27.0 beta 27A5237l is no longer accepted; an RC is required. Until Xcode 27 RC/GA is on MacOnStick, EVERY TestFlight ship goes from wildhorse (Xcode 26.5).
+- **The command (wildhorse, Ian's terminal):** `ssh ian@wildhorse.local 'cd ~/Development/familiar && git pull --ff-only && bash ios/tools/ship-ucf.sh 8 && bash ios/tools/ship.sh 113'` — the bumps are no-ops there (numbers already in project.yml), so it archives, uploads, and backgrounds the external release. Then #6 and #11 close with their build numbers.
+- **Codex, second launch 22:32Z:** ran 11 min on T-236 r3, then the usage limit again ("try again at 10:32 PM"); no partial report; the queue sleeps and relaunches at 22:33 CDT on its own.
+
+(Was:) **HELD 2026-09-16 (MacOnStick) — two TestFlight ships, trigger = Ian's word "ship" / "build and ship":**
 - **UCF Familiar build 8** (`bash ios/tools/ship-ucf.sh 8` from a clean clone of main ≥ a4bba29): carries #6's two fixes
   (183f612) and the T-243 iPad half + record pronouns (a4bba29). Closes #6's fixed points; Game Mode stays open.
 - **Familiar Agent build 113** (`bash ios/tools/ship.sh 113`, same clone): carries the #11 launch-crash fix (6f47e61)
