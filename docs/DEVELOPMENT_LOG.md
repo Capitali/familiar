@@ -6,6 +6,76 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-16 — The captain record adopted, the exchange's cash ledger read, and the fleet's income pays the fleet's leases
+
+Ian (2026-09-16): "Adopt the captain record, assure naming is correct across ships in the
+fleet. KBC-03 and KBC-04 all in prod — make sure records map and fleet is acting under current
+world configurations expectations. Read cash ledger …" and then: "Now that the fleet has one
+owned hull we should be using that additional income to pay down the lease on other ships. The
+captain needs access to all the income of the fleet so that it can benefit."
+
+### What changed
+
+- **The captain record (metal#86, live on PROD since 2026-09-15).** `Captain` gains
+  `exchange_captain_id` (the world's `captain.captainId`; the familiar's own `captain_id` still
+  keys its stores). **`fleet captains [--adopt]`** prints every hull's familiar record beside the
+  world's — captain, computer, hull name, ids — and with `--adopt` makes the records FOLLOW THE
+  WORLD (Ian's 2026-09-07 ruling: the name is the world's fact, the host store a cache): the
+  exchange's id is remembered; a hull renamed elsewhere is remembered here with `the exchange`
+  as the ledger's actor; a computer the world names differently is renamed here with a trail
+  event by `the exchange`; a computer the world holds no name for is filed from here
+  (`POST /v1/captain {computerName}`). `fleet rename` and `fleet pair --computer-name` now file
+  on the world FIRST: a 409 (`computer-name-held`) refuses the naming here too; a 404 (papers
+  not filed) or 403 (co-pilot key) leaves the familiar's record standing and says so. The
+  `/ships` row carries `captain_record` (the wire's block) and `exchange_captain_id`.
+- **Live, PROD:** the hull the familiar's world-039001 flies had been renamed **KBC-03** from
+  UCF-Haul on 2026-09-1x and the record still said `""` — `--adopt` remembered it; all three
+  PROD hulls now carry `captain:fb4439e33a54`; captain, computer (Felix) and hull names agree
+  with the world on every row. **LOCAL:** the captain had never been filed there; filed on the
+  box (`UCFMarketd captains adopt`, then `captains rename … "Luke SkyWhisker (LOCAL soak)"`),
+  and `--adopt` filed Felix on it, so the soak exercises the same shape as PROD.
+- **The cash ledger (`GET /v1/cash`, ucf-exchange#42, landed 2026-09-15).** `economy::flows_from_cash`
+  maps the engine's own kinds (`trade` by sign, `freight`, `fuel`+`paws`, `repair`,
+  `refit`+`crew`+`galley` → outfit, `lease` → debt paid, `opening` skipped, the rest other)
+  onto the flows; `for_ship_with_cash` uses it where the ledger answers and the journal's
+  attribution where it does not; `History.source` / `flows_source` says which
+  (`exchange` / `journal` / `mixed` on a pool). The feed's `/captains/{id}/economy` and
+  `fleet economy` read the ledger per hull. Readings and the trend stay the journal's.
+- **The fleet's income pays the fleet's leases (T-244 slice 2, the half that needs no bill of
+  lading).** `outfit::Purse` gains `sisters` (the captain's other hulls on this exchange: actor,
+  hull, debt — read off each sister's own key in its store, for an OWNED hull only) and
+  `fleet_lease_pay` (whether the exchange can take the payment from here). `decide_outfit`:
+  after its own balance (still first) and before any fitting, an owned hull with cash over the
+  reserve pays the sister with the SMALLEST balance — title soonest, service charge gone
+  soonest — never past the reserve, never more than is owed; `PayLease` carries
+  `sister: Option<Sister>`. **The exchange has no verb for it yet**: `payLease` pays the
+  caller's own balance and nothing moves a credit between a captain's actors, so the runner
+  journals the doctrine's word as `advice` on `ship.lease` and files nothing until
+  `/v1/reference` publishes `fleetLeasePay: 1` — the ask to Jeff is
+  `docs/partners/2026-09-16-the-captains-purse.md` (A: `payLease {amount, hull}` under the
+  captain's key; B: `remit`; C: the captain's purse as a record). On PROD tonight that
+  advice reads: KBC-03 (titled, ℳ7,804) would put ℳ4,804 against KBC-04's ℳ18,400.
+- Also: the mesh party games retirement the other lane left uncommitted in the shared tree
+  since 2026-09-10 is landed (d9294ef + 3a3f62b), workspace clippy clean, mesh + cli green;
+  the one mesh federation test that failed once passed on the rerun and on a clean tree (a
+  network-bound test under load, not the change).
+
+### Checks run
+
+- `cargo fmt --all`; `cargo clippy -p familiar-whisker -p familiar-cli --all-targets -- -D warnings`
+  clean; `cargo test`: cli 39 (new: `the_records_follow_the_world_on_adopt` against the loopback
+  stub — a hull the world renamed is remembered with the exchange as the actor; the cash
+  ledger's kinds and the opening line), whisker 115 (new: an owned hull pays the smallest sister
+  balance before any fitting, capped at the debt and the reserve; its own balance outranks).
+- Live: `fleet captains --adopt` on the real fleet (above); LOCAL box adoption; the LOCAL soak
+  rolled onto the clean build. PROD stays on fcdf27b until Ian says roll.
+
+### Next
+
+- File the purse ask; when Jeff publishes `fleetLeasePay`, the runner files the payment with
+  no code change. Fleet key management (Ian, 2026-09-16) is drafted beside it.
+- T-243 slice 3, the tour planner.
+
 ## 2026-09-15 — T-243 slices 1+2: a second load on the way
 
 Ian (2026-09-15): "Continue, bay limits and other items." The engine has let a hull hold three

@@ -226,6 +226,70 @@ fn hold_bound_buys(ship_dir: &Path, since: i64) -> i64 {
 /// ship (same captain, same exchange, beside this store) and every lot in her
 /// holdings with a sell target. A fleet that works together does not send two
 /// ships to fill one starving works (Ian, 2026-09-09).
+/// The captain's other hulls on this exchange and what each still owes, read off
+/// each sister's own key in its store (T-244 slice 2). Two GETs on a fleet of
+/// three; called only for a hull with no balance of its own, since only an owned
+/// hull's surplus is the fleet's to spend.
+fn fleet_leases(ship_dir: &Path) -> Vec<outfit::Sister> {
+    let mut out = Vec::new();
+    let mine: Value = std::fs::read_to_string(ship_dir.join("captain.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Null);
+    let (Some(captain), Some(server)) = (
+        mine.get("captain").and_then(Value::as_str),
+        mine.get("server").and_then(Value::as_str),
+    ) else {
+        return out;
+    };
+    let Some(root) = ship_dir.parent() else {
+        return out;
+    };
+    let Ok(dirs) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for d in dirs.flatten().map(|e| e.path()) {
+        if d == ship_dir || !d.join("ucf.env").exists() {
+            continue;
+        }
+        let theirs: Value = std::fs::read_to_string(d.join("captain.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(Value::Null);
+        if theirs.get("captain").and_then(Value::as_str) != Some(captain)
+            || theirs.get("server").and_then(Value::as_str) != Some(server)
+        {
+            continue;
+        }
+        let Some(key) = store::env_value(&d.join("ucf.env"), "UCF_KEY") else {
+            continue;
+        };
+        let sister = Wire {
+            base: server.trim_end_matches('/').to_string(),
+            key,
+            routes: RefCell::new(HashMap::new()),
+            rung_quotes: RefCell::new(HashMap::new()),
+        };
+        let Ok(me) = sister.get("/v1/me") else {
+            continue;
+        };
+        let Some(actor) = me.get("actor").and_then(Value::as_str) else {
+            continue;
+        };
+        out.push(outfit::Sister {
+            actor: actor.to_string(),
+            hull: me
+                .get("shipName")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            debt: me.get("debt").and_then(Value::as_i64).unwrap_or(0).max(0),
+        });
+    }
+    out.sort_by(|a, b| a.actor.cmp(&b.actor));
+    out
+}
+
 fn fleet_inbound(ship_dir: &Path) -> BTreeMap<(String, String), i64> {
     let mut out = BTreeMap::new();
     let mine: Value = std::fs::read_to_string(ship_dir.join("captain.json"))
@@ -1223,6 +1287,17 @@ fn main() -> ExitCode {
                         .unwrap_or(0),
                     crew_priced: param("crewWagePerDay").is_some_and(|w| w > 0)
                         && param("crewEngineWearReliefBps").is_some_and(|r| r > 0),
+                    // The fleet's balances, for an owned hull only (a leased hull's
+                    // surplus is its own balance's first).
+                    sisters: if ship.leased {
+                        Vec::new()
+                    } else {
+                        fleet_leases(&ship_dir)
+                    },
+                    // The exchange says on `/v1/reference` when a sister's lease can
+                    // be paid from here (the ask: `fleetLeasePay` 1); until then the
+                    // doctrine's sister pay-down is advice.
+                    fleet_lease_pay: param("fleetLeasePay").is_some_and(|v| v > 0),
                 };
                 match outfit::decide_outfit(&purse, &deliveries) {
                     OutfitDecision::Refit { fitting, price }
@@ -1336,20 +1411,62 @@ fn main() -> ExitCode {
                     // Paying the balance down rides the SAME dial as a refit: it is
                     // the ship spending the captain's money on the ship's standing,
                     // which is what `ship.lease` is for.
-                    OutfitDecision::PayLease { amount }
+                    // A sister's balance, on an exchange that cannot yet take the
+                    // payment from here: the doctrine's word is recorded as advice
+                    // on the lease dial and nothing is filed (a filed `payLease` today
+                    // would pay THIS hull's balance, which is zero, and be refused
+                    // every fold).
+                    OutfitDecision::PayLease {
+                        amount,
+                        sister: Some(sister),
+                    } if !purse.fleet_lease_pay => {
+                        let why = format!(
+                            "{} owes ℳ{}; ℳ{amount} is spare here over the reserve — the exchange \
+                             has no way to pay a sister's lease yet (the captain's purse ask)",
+                            sister.hull, sister.debt
+                        );
+                        if why != last_outfit_idle {
+                            journal(
+                                &ship_dir,
+                                json!({"at": now, "tick": tick, "event": "advice",
+                                "surface": "ship.lease",
+                                "would": format!("PayLease {{ amount: {amount}, sister: {:?} }}", sister.hull),
+                                "why": why}),
+                            );
+                            last_outfit_idle = why;
+                        }
+                    }
+                    OutfitDecision::PayLease { amount, sister }
                         if dial_gate.allow(
                             &ship_dir,
                             Surface::ShipLease,
                             tick,
                             now,
-                            &json!({"type": "payLease", "amount": amount}),
-                            &format!("put ℳ{amount} against the balance at {here}"),
+                            &match &sister {
+                                Some(s) => {
+                                    json!({"type": "payLease", "amount": amount, "hull": s.actor})
+                                }
+                                None => json!({"type": "payLease", "amount": amount}),
+                            },
+                            &match &sister {
+                                Some(s) => format!(
+                                    "put ℳ{amount} against {}'s balance from {here}",
+                                    s.hull
+                                ),
+                                None => format!("put ℳ{amount} against the balance at {here}"),
+                            },
                             "debt before fittings; the title lands the morning it clears",
                         ) =>
                     {
                         seq += 1;
                         let id = format!("whisker-{}-{}", now_secs(), seq);
-                        match wire.act(json!({"type": "payLease", "amount": amount}), &id) {
+                        let body = match &sister {
+                            Some(s) => {
+                                json!({"type": "payLease", "amount": amount, "hull": s.actor})
+                            }
+                            None => json!({"type": "payLease", "amount": amount}),
+                        };
+                        match wire.act(body, &id) {
                             Ok(ack) => {
                                 pending_until = ack
                                     .get("resolvesAtTick")
@@ -1359,7 +1476,9 @@ fn main() -> ExitCode {
                                 journal(
                                     &ship_dir,
                                     json!({"at": now, "tick": tick, "event": "paid-down",
-                                    "amount": amount, "owed_before": purse.debt,
+                                    "amount": amount,
+                                    "owed_before": sister.as_ref().map_or(purse.debt, |s| s.debt),
+                                    "sister": sister.as_ref().map(|s| s.hull.clone()),
                                     "credits": ship.credits, "at_station": here,
                                     "resolves": pending_until - 1}),
                                 );

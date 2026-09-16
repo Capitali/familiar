@@ -3,6 +3,10 @@
 //! Argument parsing is hand-rolled and dependency-free on purpose: a small,
 //! legible trust surface is part of the Law III commitment.
 
+// The feed's ship row is one `json!` literal with many fields; the macro's
+// expansion outgrows the default limit.
+#![recursion_limit = "256"]
+
 mod autonomy_cmd;
 mod daemon;
 mod economy;

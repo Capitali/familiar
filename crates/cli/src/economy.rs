@@ -84,6 +84,71 @@ pub(crate) struct History {
     pub points: Vec<Point>,
     pub flows: Flows,
     pub summary: Summary,
+    /// Where the flows came from: `exchange` when the exchange's own cash ledger
+    /// (`GET /v1/cash`, ucf-exchange#42) named every credit that moved inside the
+    /// window; `journal` when they were attributed from the ship's journal (the
+    /// heuristic above); `mixed` for a pool of both. The readings and the trend are
+    /// the journal's either way.
+    #[serde(default)]
+    pub source: String,
+}
+
+/// The exchange's cash ledger for one hull (`GET /v1/cash`): every credit in and
+/// out as a signed line with the engine's own `kind` — `trade`, `freight`, `fuel`,
+/// `repair`, `refit`, `crew`, `galley`, `lease`, `paws`, `survey`, `equity`,
+/// `insurance`, `opening`, `other` — newest first, up to 400 lines. Where it
+/// answers, it replaces the journal's guess about CAUSE with the fold's own word;
+/// the sum of its lines is exactly the credits that moved.
+///
+/// The window is the journal's (unix seconds); the ledger speaks in ticks, so the
+/// caller hands in the first tick inside the window, read off the journal.
+pub(crate) fn flows_from_cash(cash: &Value, since_tick: i64) -> Option<Flows> {
+    let lines = cash.get("lines")?.as_array()?;
+    let mut flows = Flows::default();
+    let mut any = false;
+    for l in lines {
+        let tick = l.get("tick").and_then(Value::as_i64).unwrap_or(0);
+        if tick < since_tick {
+            continue;
+        }
+        let amount = l.get("amount").and_then(Value::as_i64).unwrap_or(0);
+        let kind = l.get("kind").and_then(Value::as_str).unwrap_or("other");
+        match kind {
+            // The ledger does not split a trade's side; the sign does.
+            "trade" if amount >= 0 => flows.trade_sold += amount,
+            "trade" => flows.trade_bought += amount,
+            "freight" => flows.freight += amount,
+            "fuel" | "paws" => flows.fuel += amount,
+            "repair" => flows.repair += amount,
+            "refit" | "crew" | "galley" => flows.outfit += amount,
+            "lease" => flows.debt_paid += amount,
+            // The balance carried forward is not a movement inside the window.
+            "opening" => continue,
+            _ => flows.other += amount,
+        }
+        any = true;
+    }
+    any.then_some(flows)
+}
+
+/// One hull's history with the exchange's cash ledger as the flows' source where
+/// it answers, the journal where it does not. `fills` and `settles` stay the
+/// journal's counts either way (the ledger counts credits, not acts).
+pub(crate) fn for_ship_with_cash(ship_dir: &Path, since: i64, cash: Option<&Value>) -> History {
+    let mut h = for_ship(ship_dir, since);
+    let Some(cash) = cash else {
+        return h;
+    };
+    let Some(first_tick) = h.points.first().map(|p| p.tick) else {
+        return h;
+    };
+    if let Some(mut flows) = flows_from_cash(cash, first_tick) {
+        flows.fills = h.flows.fills;
+        flows.settles = h.flows.settles;
+        h.flows = flows;
+        h.source = "exchange".into();
+    }
+    h
 }
 
 fn cause_of(v: &Value) -> Option<&'static str> {
@@ -191,6 +256,7 @@ pub(crate) fn from_journal(text: &str, since: i64) -> History {
         points: thin(&points),
         flows,
         summary,
+        source: "journal".into(),
     }
 }
 
@@ -255,6 +321,14 @@ pub(crate) fn pool(hulls: &[History], since: i64) -> History {
     for h in hulls {
         flows.add(&h.flows);
     }
+    let source = if !hulls.is_empty() && hulls.iter().all(|h| h.source == "exchange") {
+        "exchange"
+    } else if hulls.iter().any(|h| h.source == "exchange") {
+        "mixed"
+    } else {
+        "journal"
+    }
+    .to_string();
     let mut buckets: std::collections::BTreeSet<i64> = std::collections::BTreeSet::new();
     for h in hulls {
         for p in &h.points {
@@ -301,6 +375,7 @@ pub(crate) fn pool(hulls: &[History], since: i64) -> History {
         points,
         flows,
         summary,
+        source,
     }
 }
 
@@ -405,6 +480,7 @@ pub(crate) fn window_seconds(s: Option<&str>) -> i64 {
 pub(crate) fn to_json(h: &History, with_points: bool) -> Value {
     let mut v = json!({
         "flows": h.flows,
+        "flows_source": h.source,
         "summary": h.summary,
         "analysis": analysis(h),
     });
@@ -419,6 +495,28 @@ fn _keep(_: BTreeMap<String, i64>) {}
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_exchanges_cash_ledger_names_every_flow_and_the_opening_line_is_not_one() {
+        let cash = json!({"credits": 6193, "lines": [
+            {"tick": 13263, "amount": -5, "kind": "other", "note": "departed"},
+            {"tick": 13256, "amount": 476, "kind": "freight", "note": "L5391 settled"},
+            {"tick": 13250, "amount": -105, "kind": "trade", "note": "bought 10 kibble"},
+            {"tick": 13249, "amount": 300, "kind": "trade", "note": "sold 12 pate"},
+            {"tick": 13248, "amount": -600, "kind": "lease", "note": "the desk is holding"},
+            {"tick": 13240, "amount": -38, "kind": "fuel", "note": "fuelled 47"},
+            {"tick": 13230, "amount": -9000, "kind": "refit", "note": "before the window"},
+            {"tick": 13000, "amount": 10000, "kind": "opening", "note": "carried forward"}
+        ]});
+        let f = flows_from_cash(&cash, 13240).unwrap();
+        assert_eq!((f.trade_sold, f.trade_bought), (300, -105));
+        assert_eq!(
+            (f.freight, f.fuel, f.debt_paid, f.other, f.outfit),
+            (476, -38, -600, -5, 0)
+        );
+        assert!(flows_from_cash(&json!({"lines": []}), 0).is_none());
+        assert!(flows_from_cash(&json!({"error": "no such route"}), 0).is_none());
+    }
+
     use super::*;
 
     fn line(at: i64, tick: i64, event: &str, credits: Option<i64>, extra: &str) -> String {

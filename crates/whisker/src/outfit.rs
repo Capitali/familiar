@@ -128,6 +128,25 @@ pub struct Purse {
     /// a relief bps). Without those numbers a hire is a guess dressed as a
     /// decision, and this doctrine does not guess.
     pub crew_priced: bool,
+    /// The captain's OTHER hulls on this exchange and what each still owes
+    /// (T-244 slice 2; Ian, 2026-09-16: "Now that the fleet has one owned hull we
+    /// should be using that additional income to pay down the lease on other
+    /// ships"). Empty for a hull flying alone.
+    pub sisters: Vec<Sister>,
+    /// Whether the exchange lets one hull pay a sister's lease (`payLease {amount,
+    /// hull}` under the captain's key — the ask in
+    /// `docs/partners/2026-09-16-the-captains-purse.md`). Until it does, a sister
+    /// pay-down is ADVICE: the doctrine says what it would do and files nothing.
+    pub fleet_lease_pay: bool,
+}
+
+/// A sister hull as the fleet doctrine sees it: who to pay and how much is owed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sister {
+    /// The exchange's actor id (`/v1/me.actor` on the sister's own key).
+    pub actor: String,
+    pub hull: String,
+    pub debt: i64,
 }
 
 impl Purse {
@@ -151,9 +170,12 @@ pub enum OutfitDecision {
         price: i64,
     },
     /// Put credits against the balance. Clearing it transfers the title, so this is
-    /// the act that turns a leased hull into the captain's own.
+    /// the act that turns a leased hull into the captain's own. `sister` names
+    /// ANOTHER of the captain's hulls whose balance this hull pays down out of its
+    /// own surplus (None = this hull's own balance).
     PayLease {
         amount: i64,
+        sister: Option<Sister>,
     },
     /// §4.4's frame ladder: the next rung, bought outright, when the ship holds
     /// title, the hold has been the binding constraint, and the purse can bear
@@ -237,6 +259,7 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
         if spare > 0 {
             return OutfitDecision::PayLease {
                 amount: spare.min(p.debt),
+                sister: None,
             };
         }
         return OutfitDecision::Idle {
@@ -244,6 +267,33 @@ pub fn decide_outfit(p: &Purse, stats: &[DeliveryStat]) -> OutfitDecision {
                 "ℳ{} still owed and nothing spare over the reserve — the balance comes \
                  first, and the title lands the morning it clears",
                 p.debt
+            ),
+        };
+    }
+    // THE FLEET'S BALANCES NEXT. An owned hull's surplus is the fleet's, not its own
+    // (Ian, 2026-09-16): before this hull buys anything for itself it pays down a
+    // sister's lease — the SMALLEST balance first, so a title lands soonest and a
+    // service charge stops soonest. The reserve still stands, for the same reason
+    // as above. Whether the exchange lets the payment be FILED is the runner's
+    // question (`fleet_lease_pay`); the doctrine's answer is the same either way.
+    if let Some(sister) = p
+        .sisters
+        .iter()
+        .filter(|s| s.debt > 0)
+        .min_by_key(|s| (s.debt, s.actor.clone()))
+    {
+        let spare = p.credits - reserve(p);
+        if spare > 0 {
+            return OutfitDecision::PayLease {
+                amount: spare.min(sister.debt),
+                sister: Some(sister.clone()),
+            };
+        }
+        return OutfitDecision::Idle {
+            why: format!(
+                "{} still owes ℳ{} and nothing is spare over the reserve — the fleet's \
+                 balances come before this hull's fittings",
+                sister.hull, sister.debt
             ),
         };
     }
@@ -379,7 +429,7 @@ mod tests {
         let mut p = purse(20_000, &[]);
         p.debt = 121_317;
         match decide_outfit(&p, &[]) {
-            OutfitDecision::PayLease { amount } => {
+            OutfitDecision::PayLease { amount, .. } => {
                 assert_eq!(amount, 20_000 - reserve(&p), "everything over the reserve");
             }
             other => panic!("the balance comes first, got {other:?}"),
@@ -410,7 +460,10 @@ mod tests {
         let mut p = purse(80_000, &[]);
         p.debt = 300;
         match decide_outfit(&p, &[]) {
-            OutfitDecision::PayLease { amount } => assert_eq!(amount, 300),
+            OutfitDecision::PayLease { amount, sister } => {
+                assert_eq!(amount, 300);
+                assert_eq!(sister, None);
+            }
             other => panic!("expected a 300 payment, got {other:?}"),
         }
     }
@@ -432,7 +485,85 @@ mod tests {
             crew_hire_cost: 0,
             crew_aboard: 0,
             crew_priced: false,
+            sisters: Vec::new(),
+            fleet_lease_pay: false,
         }
+    }
+
+    /// An owned hull pays down the fleet's leases before it buys itself a fitting
+    /// (Ian, 2026-09-16): the smallest sister balance first, never past the
+    /// reserve, never more than is owed; its own balance still outranks theirs.
+    #[test]
+    fn an_owned_hull_pays_the_smallest_sister_balance_before_any_fitting() {
+        // KBC-03 on 2026-09-16: titled, ℳ7,804; KK owes 87,297, KBC-04 owes 18,400.
+        let mut p = purse(7_804, &[]);
+        p.titled = true;
+        p.daily_fixed_cost = 600;
+        p.tank_price = 1_200;
+        p.sisters = vec![
+            Sister {
+                actor: "player:84c0".into(),
+                hull: "Kibble Klipper".into(),
+                debt: 87_297,
+            },
+            Sister {
+                actor: "player:02e1".into(),
+                hull: "KBC-04".into(),
+                debt: 18_400,
+            },
+            Sister {
+                actor: "key:b52c".into(),
+                hull: "KBC-05".into(),
+                debt: 0,
+            },
+        ];
+        // reserve = 3 × 600 + 1,200 = 3,000 → 4,804 spare, all of it to KBC-04.
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::PayLease {
+                amount,
+                sister: Some(s),
+            } => {
+                assert_eq!(amount, 4_804);
+                assert_eq!(s.hull, "KBC-04");
+            }
+            other => panic!("expected the sister pay-down, got {other:?}"),
+        }
+        // Flush: never more than the sister owes.
+        p.credits = 40_000;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::PayLease {
+                amount,
+                sister: Some(s),
+            } => {
+                assert_eq!((amount, s.hull.as_str()), (18_400, "KBC-04"));
+            }
+            other => panic!("{other:?}"),
+        }
+        // Nothing over the reserve: idle, and it says whose balance waits.
+        p.credits = 3_000;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::Idle { why } => {
+                assert!(why.contains("KBC-04") && why.contains("18400"), "{why}")
+            }
+            other => panic!("{other:?}"),
+        }
+        // Its own balance outranks the sisters'.
+        p.credits = 7_804;
+        p.debt = 500;
+        match decide_outfit(&p, &[]) {
+            OutfitDecision::PayLease {
+                amount,
+                sister: None,
+            } => assert_eq!(amount, 500),
+            other => panic!("{other:?}"),
+        }
+        // No sister owes anything: back to the fittings.
+        p.debt = 0;
+        p.sisters.iter_mut().for_each(|s| s.debt = 0);
+        assert!(!matches!(
+            decide_outfit(&p, &[]),
+            OutfitDecision::PayLease { .. }
+        ));
     }
 
     /// The frame ladder (T-242): the next rung is proposed only with title, with

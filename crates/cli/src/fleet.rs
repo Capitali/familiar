@@ -60,6 +60,55 @@ pub struct Captain {
     /// and a short `--interval-floor`; a PROD hull passes nothing).
     #[serde(default)]
     pub pilot_args: Vec<String>,
+    /// The WORLD's id for this captain (`captain.captainId` on `/v1/me`, metal#86),
+    /// learned by `fleet captains --adopt`. Empty until the exchange has filed the
+    /// captain. `captain_id` above stays the familiar's own key for its stores; this
+    /// is the join to the exchange's record.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exchange_captain_id: String,
+}
+
+/// What the exchange said when asked to file the computer's name on the captain
+/// record (`POST /v1/captain {computerName}`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Filing {
+    /// Filed: the world now carries the name.
+    Filed,
+    /// Not filed, and not a refusal of the NAME: the captain's papers are not on
+    /// the box yet (404), this key is a co-pilot's (403), or the exchange did not
+    /// answer. The familiar's own record stands; the sentence says why.
+    NotFiled(String),
+    /// The world refused the name itself (409 `computer-name-held` and kin): a name
+    /// another captain has ever worn. The familiar refuses it too.
+    Refused(String),
+}
+
+pub(crate) fn file_computer_name(server: &str, key: &str, captain: &str, name: &str) -> Filing {
+    let url = match Url::parse(&format!("{}/v1/captain", server.trim_end_matches('/'))) {
+        Ok(u) => u,
+        Err(e) => return Filing::NotFiled(format!("{e:?}")),
+    };
+    let headers = vec![
+        ("Authorization".to_string(), format!("Bearer {key}")),
+        ("X-UCF-App".to_string(), "familiar-fleet".to_string()),
+        ("X-UCF-Trader".to_string(), captain.to_string()),
+    ];
+    let body = serde_json::to_vec(&json!({"computerName": name})).unwrap_or_default();
+    match http::post_json(&url, &headers, &body) {
+        Ok(resp) if (200..300).contains(&resp.status) => Filing::Filed,
+        Ok(resp) => {
+            let said = serde_json::from_slice::<Value>(&resp.body)
+                .ok()
+                .and_then(|v| v.get("error").and_then(Value::as_str).map(String::from))
+                .unwrap_or_else(|| format!("HTTP {}", resp.status));
+            if resp.status == 409 {
+                Filing::Refused(said)
+            } else {
+                Filing::NotFiled(format!("HTTP {}: {said}", resp.status))
+            }
+        }
+        Err(e) => Filing::NotFiled(format!("the exchange did not answer: {e:?}")),
+    }
 }
 
 pub(crate) fn read_env_value(path: &Path, key: &str) -> Option<String> {
@@ -679,6 +728,7 @@ fn rec_default() -> Captain {
         paired_at: 0,
         hull_name: String::new(),
         pilot_args: vec![],
+        exchange_captain_id: String::new(),
     }
 }
 
@@ -1270,6 +1320,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                     .get("pilot-args")
                     .map(|s| s.split_whitespace().map(String::from).collect())
                     .unwrap_or_default(),
+                exchange_captain_id: String::new(),
             };
             let captain_id = match ensure_captain_id(&root, &mut pending, &siblings) {
                 Ok(id) => id,
@@ -1362,6 +1413,16 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 if let Err(e) = computer_name_free(&dir, &root, given, captain, &captain_id) {
                     eprintln!("fleet pair: {e}");
                     return ExitCode::FAILURE;
+                }
+                match file_computer_name(&server[..], &key, &captain.to_string(), given) {
+                    Filing::Filed => println!("  filed on the exchange's captain record"),
+                    Filing::NotFiled(why) => println!(
+                        "  not filed on the exchange ({why}) — the familiar's record stands"
+                    ),
+                    Filing::Refused(why) => {
+                        eprintln!("fleet pair: the exchange refused the name: {why}");
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
 
@@ -1613,6 +1674,25 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             if let Err(e) = computer_name_free(&dir, &root, new_name, &captain, &captain_id) {
                 eprintln!("fleet rename: {e}");
                 return ExitCode::FAILURE;
+            }
+            // The world's record first (metal#86): the exchange carries the captain's
+            // computer name and its lineage, and refuses a name any captain has ever
+            // worn. A refusal there is a refusal here; papers not yet filed, or a
+            // co-pilot key, leave the familiar's own record standing, and say so.
+            {
+                let key = read_env_value(&ship_dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+                let server = read_env_value(&ship_dir.join("ucf.env"), "UCF_SERVER")
+                    .unwrap_or_else(|| rec.server.clone());
+                match file_computer_name(&server, &key, &captain, new_name) {
+                    Filing::Filed => println!("  filed on the exchange's captain record"),
+                    Filing::NotFiled(why) => println!(
+                        "  not filed on the exchange ({why}) — the familiar's record stands"
+                    ),
+                    Filing::Refused(why) => {
+                        eprintln!("fleet rename: the exchange refused the name: {why}");
+                        return ExitCode::FAILURE;
+                    }
+                }
             }
             persona.name = new_name.to_string();
             persona.persona_version = 2;
@@ -1984,7 +2064,15 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 };
                 let e = by_captain.entry(key).or_default();
                 e.0 = s.captain.captain.clone();
-                e.1.push(super::economy::for_ship(&s.dir, since));
+                let secret = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+                let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
+                    .unwrap_or_else(|| s.captain.server.clone());
+                let cash = wire_get(&server, &secret, "/v1/cash").ok();
+                e.1.push(super::economy::for_ship_with_cash(
+                    &s.dir,
+                    since,
+                    cash.as_ref(),
+                ));
             }
             if f.contains_key("json") {
                 let out: Vec<Value> = by_captain
@@ -2005,6 +2093,221 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 }
             }
             ExitCode::SUCCESS
+        }
+        // ── captains: the fleet's records against the world's (metal#86) ────────
+        // Every hull: the familiar's captain / computer / hull name beside the
+        // exchange's captain record and ship name. `--adopt` makes them agree, with
+        // the WORLD as the source: the exchange's captain id is remembered on the
+        // record, a hull renamed elsewhere (UCF-Haul) is remembered here with the
+        // exchange as the actor, and the computer's name follows the world's record
+        // — or, where the world holds no name yet, the familiar files its own.
+        "captains" => {
+            let adopt = f.contains_key("adopt");
+            let ships = paired_ships(&dir, &root);
+            if ships.is_empty() {
+                println!("fleet: no paired ships");
+                return ExitCode::SUCCESS;
+            }
+            let mut disagreements = 0usize;
+            let mut failures = 0usize;
+            for s in &ships {
+                let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+                let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
+                    .unwrap_or_else(|| s.captain.server.clone());
+                let me = wire_get(&server, &key, "/v1/me").ok();
+                let wire_ship = me
+                    .as_ref()
+                    .and_then(|m| m.get("shipName").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                let cap = me
+                    .as_ref()
+                    .and_then(|m| m.get("captain").filter(|c| c.is_object()).cloned());
+                let wire_id = cap
+                    .as_ref()
+                    .and_then(|c| c.get("captainId").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                let wire_name = cap
+                    .as_ref()
+                    .and_then(|c| c.get("name").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                let wire_computer = cap
+                    .as_ref()
+                    .and_then(|c| c.get("computerName").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                let local_computer = persona_for(&root, &s.dir, &s.captain)
+                    .and_then(|p| p.get("name").and_then(Value::as_str).map(String::from))
+                    .unwrap_or_default();
+                println!(
+                    "{} ({})\n  familiar: captain {:?} [{}] computer {:?} hull {:?}\n  exchange: {}",
+                    s.world.label,
+                    server,
+                    s.captain.captain,
+                    s.captain.captain_id,
+                    local_computer,
+                    s.captain.hull_name,
+                    match (&me, &cap) {
+                        (None, _) => "unreachable".to_string(),
+                        (Some(_), None) => format!("ship {wire_ship:?}; captain NOT FILED on this world (the operator's `captains adopt` on the box)"),
+                        (Some(_), Some(c)) => format!(
+                            "ship {wire_ship:?}; captain {wire_name:?} [{wire_id}] computer {wire_computer:?} hulls {}",
+                            c.get("hulls").and_then(Value::as_i64).unwrap_or(0)
+                        ),
+                    }
+                );
+                if me.is_none() {
+                    continue;
+                }
+                let mut rec = s.captain.clone();
+                let mut changed = false;
+                // The hull's name, as the world calls it.
+                if !wire_ship.is_empty() && wire_ship != rec.hull_name {
+                    disagreements += 1;
+                    println!(
+                        "  ≠ hull: the exchange says {wire_ship:?}, the record says {:?}",
+                        rec.hull_name
+                    );
+                    if adopt {
+                        let was = rec.hull_name.clone();
+                        rec.hull_name = wire_ship.clone();
+                        changed = true;
+                        if let Err(e) = record_name(
+                            &root,
+                            &NameEntry {
+                                at: super::now_secs(),
+                                kind: "hull".into(),
+                                name: wire_ship.clone(),
+                                holder: s.world.id.clone(),
+                                act: "renamed".into(),
+                                from: was,
+                                by: "the exchange".into(),
+                                pronouns: String::new(),
+                            },
+                        ) {
+                            eprintln!("  ! names ledger: {e}");
+                            failures += 1;
+                        } else {
+                            println!("  → hull remembered as {wire_ship:?}");
+                        }
+                    }
+                }
+                // The world's captain id, remembered on the record.
+                if !wire_id.is_empty() && wire_id != rec.exchange_captain_id {
+                    if !rec.exchange_captain_id.is_empty() {
+                        disagreements += 1;
+                        println!(
+                            "  ≠ captain id: the exchange says {wire_id}, the record says {}",
+                            rec.exchange_captain_id
+                        );
+                    }
+                    if adopt {
+                        rec.exchange_captain_id = wire_id.clone();
+                        changed = true;
+                        println!("  → exchange captain id {wire_id} remembered");
+                    }
+                }
+                // The computer's name: the world's record is the source (Ian, 2026-09-07).
+                let root_name = familiar_kernel::persona::ROOT_NAME;
+                if cap.is_some() {
+                    if !wire_computer.is_empty()
+                        && fold_name(&wire_computer) != fold_name(&local_computer)
+                    {
+                        disagreements += 1;
+                        println!("  ≠ computer: the exchange says {wire_computer:?}, the familiar says {local_computer:?}");
+                        if adopt {
+                            let persona_dir = captain_store_for(&root, &rec);
+                            match familiar_kernel::persona::load(&persona_dir) {
+                                Ok(mut persona) => {
+                                    let was = persona.name.clone();
+                                    persona.name = wire_computer.clone();
+                                    persona.persona_version = 2;
+                                    let (pron, why) =
+                                        choose_for(&dir, &root, &s.dir, &rec, &wire_computer);
+                                    persona.pronouns = Some(pron.clone());
+                                    let event = familiar_kernel::persona::NameEvent {
+                                        at: super::now_secs(),
+                                        actor: "the exchange".into(),
+                                        name: wire_computer.clone(),
+                                        pronouns: Some(pron.clone()),
+                                        why: format!(
+                                            "the world's captain record (metal#86); {why}"
+                                        ),
+                                    };
+                                    if let Err(e) = familiar_kernel::persona::name(
+                                        &persona_dir,
+                                        &persona,
+                                        Some(&event),
+                                    ) {
+                                        eprintln!("  ! computer: {e}");
+                                        failures += 1;
+                                    } else if let Err(e) = record_name(
+                                        &root,
+                                        &NameEntry {
+                                            at: super::now_secs(),
+                                            kind: "computer".into(),
+                                            name: wire_computer.clone(),
+                                            holder: rec.captain_id.clone(),
+                                            act: "renamed".into(),
+                                            from: was,
+                                            by: "the exchange".into(),
+                                            pronouns: pron.label.clone(),
+                                        },
+                                    ) {
+                                        eprintln!("  ! names ledger: {e}");
+                                        failures += 1;
+                                    } else {
+                                        println!("  → computer now answers to {wire_computer:?} (the world's record)");
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("  ! computer: {e}");
+                                    failures += 1;
+                                }
+                            }
+                        }
+                    } else if wire_computer.is_empty()
+                        && !local_computer.is_empty()
+                        && fold_name(&local_computer) != fold_name(root_name)
+                    {
+                        disagreements += 1;
+                        println!("  ≠ computer: the exchange holds no name; the familiar says {local_computer:?}");
+                        if adopt {
+                            match file_computer_name(&server, &key, &rec.captain, &local_computer) {
+                                Filing::Filed => println!(
+                                    "  → filed {local_computer:?} on the exchange's captain record"
+                                ),
+                                Filing::NotFiled(why) => println!("  · not filed ({why})"),
+                                Filing::Refused(why) => {
+                                    eprintln!("  ! the exchange refused {local_computer:?}: {why}");
+                                    failures += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if changed {
+                    if let Err(e) = std::fs::write(
+                        s.dir.join("captain.json"),
+                        serde_json::to_vec_pretty(&rec).unwrap_or_default(),
+                    ) {
+                        eprintln!("  ! captain.json: {e}");
+                        failures += 1;
+                    }
+                }
+            }
+            if disagreements == 0 {
+                println!("every record agrees with the world");
+            } else if !adopt {
+                println!("{disagreements} disagreement(s) — `fleet captains --adopt` makes the records follow the world");
+            }
+            if failures > 0 {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
         }
         // ── names: everything the fleet has ever called anyone ─────────────────
         "names" => {
@@ -2427,7 +2730,7 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         other => {
-            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | economy | order | orders | names | adopt-ids | rename | hull | choose | run | serve");
+            eprintln!("fleet: unknown subcommand `{other}` — pair | unpair | status | captains | economy | order | orders | names | adopt-ids | rename | hull | choose | run | serve");
             ExitCode::FAILURE
         }
     }
@@ -2454,6 +2757,7 @@ mod captain_store_tests {
             paired_at: 0,
             hull_name: String::new(),
             pilot_args: vec![],
+            exchange_captain_id: String::new(),
         }
     }
 
@@ -3431,6 +3735,68 @@ mod captain_store_tests {
                 "Luke"
             )
         );
+    }
+
+    /// `fleet captains --adopt`: a hull renamed elsewhere (UCF-Haul) is remembered
+    /// here with the exchange as the actor; a world that has not filed the captain
+    /// says so and changes no name.
+    #[test]
+    fn the_records_follow_the_world_on_adopt() {
+        let base = tmp("captains_adopt");
+        // Three answers: the pairing's two reads, then the adopt's read — each with
+        // a fresh "Probe N" ship name, so the world has "renamed" the hull by then.
+        let server = stub_exchange(3);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "one",
+                "ucfk_cccccccccccccccccccc",
+                None
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let before = paired_ships(&base, &root).remove(0);
+        let args = |adopt: bool| -> Vec<String> {
+            let mut v = vec![
+                "captains".to_string(),
+                "--data-dir".into(),
+                base.to_string_lossy().into_owned(),
+                "--store-root".into(),
+                root.to_string_lossy().into_owned(),
+            ];
+            if adopt {
+                v.push("--adopt".into());
+            }
+            v
+        };
+        // A read changes nothing.
+        assert_eq!(cmd_fleet(&args(false)), ExitCode::SUCCESS);
+        assert_eq!(
+            paired_ships(&base, &root)[0].captain.hull_name,
+            before.captain.hull_name
+        );
+        assert_eq!(cmd_fleet(&args(true)), ExitCode::SUCCESS);
+        let after = paired_ships(&base, &root).remove(0);
+        assert_ne!(
+            after.captain.hull_name, before.captain.hull_name,
+            "the world renamed it"
+        );
+        assert!(after.captain.hull_name.starts_with("Probe "));
+        assert!(
+            after.captain.exchange_captain_id.is_empty(),
+            "no captain filed on the stub"
+        );
+        let row = names(&root)
+            .into_iter()
+            .rev()
+            .find(|e| e.kind == "hull" && e.act == "renamed")
+            .unwrap();
+        assert_eq!(row.by, "the exchange");
+        assert_eq!(row.from, before.captain.hull_name);
+        assert_eq!(row.name, after.captain.hull_name);
     }
 
     /// A captain's identity outlives their last hull: pair, unpair, pair again — the

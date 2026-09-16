@@ -264,6 +264,12 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         // which is how the LOCAL bridge came to 404 on a captain that exists
         // (codex T-236 re-verification, finding 9). `captain` stays a label.
         "captain_id": s.captain.captain_id,
+        // The WORLD's captain record (metal#86), as `/v1/me` carries it: the id the
+        // exchange keys on, the captain's name, the computer's name and lineage. Null
+        // until the exchange has filed this captain. `exchange_captain_id` is the
+        // same id as the record remembers it.
+        "captain_record": g("captain"),
+        "exchange_captain_id": s.captain.exchange_captain_id,
         "captain_brief": format!("/captains/{}/brief", if s.captain.captain_id.trim().is_empty() {
             super::fleet::captain_store(root, &s.captain.captain)
                 .file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()
@@ -435,9 +441,17 @@ fn handle(req: Req, dir: &Path, root: &Path, tok: &str, clk: &mut Clocks) -> (u1
             };
             let since =
                 now - super::economy::window_seconds(req.query.get("window").map(String::as_str));
+            // The exchange's own cash ledger where it answers (ucf-exchange#42): the
+            // fold's word on every credit that moved, in place of the journal's guess.
             let per_hull: Vec<super::economy::History> = mine
                 .iter()
-                .map(|s| super::economy::for_ship(&s.dir, since))
+                .map(|s| {
+                    let key = read_env_value(&s.dir.join("ucf.env"), "UCF_KEY").unwrap_or_default();
+                    let server = read_env_value(&s.dir.join("ucf.env"), "UCF_SERVER")
+                        .unwrap_or_else(|| s.captain.server.clone());
+                    let cash = wire_get(&server, &key, "/v1/cash").ok();
+                    super::economy::for_ship_with_cash(&s.dir, since, cash.as_ref())
+                })
                 .collect();
             let pooled = super::economy::pool(&per_hull, since);
             (
@@ -1415,6 +1429,7 @@ mod surface_tests {
             paired_at: 0,
             hull_name: String::new(),
             pilot_args: vec![],
+            exchange_captain_id: String::new(),
         };
         std::fs::write(
             dir.join("captain.json"),

@@ -22,6 +22,17 @@ this file is the human-readable summary.
   exercised are untouched. Mesh doors keep running the previous binary until deployed.
 
 ### Added
+- **The fleet's records follow the world's captain record** (metal#86). `fleet captains
+  --adopt` remembers the exchange's captain id, a hull renamed from another client, and the
+  computer's name as the world holds it — or files the familiar's own where the world has none;
+  `fleet rename` files on the world first and honours its refusal. Status: **shipped (PROD fleet
+  adopted 2026-09-16)**.
+- **The economy view reads the exchange's cash ledger** (`/v1/cash`): every credit that moved,
+  named by the fold, in place of the journal's attribution; `flows_source` says which spoke.
+  Status: **shipped**.
+- **An owned hull's surplus pays the fleet's leases** (T-244 slice 2): the smallest sister
+  balance first, never past the reserve. Advice only until the exchange can take the payment
+  (`fleetLeasePay` on `/v1/reference`, asked). Status: **shipped as advice (LOCAL soak)**.
 - **A second load on the way** (T-243 slices 1+2). Berthed with a contract booked or laden,
   the pilot books the best-paying load from this berth to a stop already on its tour — under
   the engine's bay limit of three, inside the spare hold, landing before both deadlines — and
