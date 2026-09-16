@@ -107,6 +107,15 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         summary.captainID = row["captain_id"]?.string ?? ""
         summary.personaState = state
         summary.worldName = row["world_name"]?.string
+        // The record's pronouns ride `computer_state` (the host strips them off the row's
+        // `persona` for readers older than this one) or the persona itself.
+        summary.pronouns = WireFeed.pronouns(row["computer_state"]?["pronouns"]) ?? WireFeed.pronouns(row["persona"]?["pronouns"])
+        // The bay (T-243): `contracts[]` on the row when the host serves it — `{load, word}`
+        // (`loadId`/`status` read too). A host without it serves no count, and none is claimed.
+        summary.heldContracts = (row["contracts"]?.array ?? []).compactMap { c in
+            guard let id = c["load"]?.string ?? c["loadId"]?.string, !id.isEmpty else { return nil }
+            return ShipSummary.HeldContract(loadId: id, word: c["word"]?.string ?? c["status"]?.string ?? "held")
+        }
         return summary
     }
 
@@ -120,7 +129,16 @@ public struct WireFeed: ShipsFeed, CaptainActs {
     public func persona(world: String) async throws -> Persona? {
         let e = try await envelope("ships")
         guard let row = (e.ships ?? []).first(where: { $0["world"]?.string == world }), let p = row["persona"], p != .null else { return nil }
-        return try Persona.decode(Data(p.description.utf8))
+        var persona = try Persona.decode(Data(p.description.utf8))
+        // A host that still strips `pronouns` off the row's persona carries them on `computer_state`.
+        if persona.pronouns == nil { persona.pronouns = WireFeed.pronouns(row["computer_state"]?["pronouns"]) }
+        return persona
+    }
+
+    /// A `{label, subject, object, possessive}` object, or nil for anything else.
+    static func pronouns(_ v: JSONValue?) -> Pronouns? {
+        guard let v, v != .null, v.object != nil else { return nil }
+        return try? JSONDecoder().decode(Pronouns.self, from: Data(v.description.utf8))
     }
 
     public func journal(world: String, sinceTick: Int64?) async throws -> [JournalEntry] {

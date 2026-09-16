@@ -15,6 +15,32 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(Fixtures.store.namings().map(\.name), ["Purr"])
     }
 
+    /// The record's pronouns (persona.rs `Pronouns`, 2026-09-09) decode in the strict reader —
+    /// the host may stop stripping them off the row — and every title follows the record's
+    /// word, the name, or `it`: never a default "she".
+    func testPronounsRideThePersonaAndTheWordsFollowTheRecord() throws {
+        let felix = try Persona.decode(Data(#"{"persona_version":2,"name":"Felix","pronouns":{"label":"he/him","subject":"he","object":"him","possessive":"his"}}"#.utf8))
+        XCTAssertEqual(felix.pronouns, Pronouns(label: "he/him", subject: "he", object: "him", possessive: "his"))
+        XCTAssertEqual(felix.spokenOf, SpokenOf(subject: "he", object: "him", possessive: "his"))
+        XCTAssertEqual(felix.spokenOf.possessiveTitle, "His"); XCTAssertEqual(felix.spokenOf.has, "has")
+        // Round trip: the pronouns are written back, and an absent set is omitted, as in Rust.
+        let again = try Persona.decode(try JSONEncoder().encode(felix))
+        XCTAssertEqual(again.pronouns, felix.pronouns)
+        let plain = try Persona.decode(try JSONEncoder().encode(Persona(name: "Sprocket", style: nil)))
+        XCTAssertNil(plain.pronouns)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(Persona(name: "Sprocket", style: nil)), as: UTF8.self).contains("pronouns"))
+        // they/them agrees its verb; `none` is spoken of by name; unnamed is `it`.
+        let they = try Persona.decode(Data(#"{"persona_version":1,"name":"Mittens","pronouns":{"label":"they/them","subject":"they","object":"them","possessive":"their"}}"#.utf8))
+        XCTAssertEqual(they.spokenOf.has, "have"); XCTAssertEqual(they.spokenOf.subjectTitle, "They")
+        let byName = try Persona.decode(Data(#"{"persona_version":1,"name":"Mittens","pronouns":{"label":"none","subject":"","object":"","possessive":""}}"#.utf8))
+        XCTAssertEqual(byName.spokenOf, SpokenOf(subject: "Mittens", object: "Mittens", possessive: "Mittens\u{2019}s"))
+        XCTAssertEqual(plain.spokenOf.possessive, "Sprocket\u{2019}s", "named without a choice yet: the name")
+        XCTAssertEqual(Persona(name: Persona.rootName, style: nil).spokenOf, SpokenOf(subject: "it", object: "it", possessive: "its"))
+        XCTAssertEqual(SpokenOf.of(name: nil, pronouns: nil).possessiveTitle, "Its")
+        // Half a set is refused, as Rust refuses a `Pronouns` missing a field.
+        XCTAssertThrowsError(try Persona.decode(Data(#"{"persona_version":1,"name":"Felix","pronouns":{"label":"he/him","subject":"he"}}"#.utf8)))
+    }
+
     func testAShipPairedBeforeT236HasNoPersonaAndSaysSo() throws {
         let s = try Fixtures.scratchStore { try FileManager.default.removeItem(at: $0.appendingPathComponent("persona.json")) }
         XCTAssertNil(try s.persona())

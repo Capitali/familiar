@@ -52,6 +52,19 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var leaseServicePaid: Int64?
     /// The merchant's book as `fleet status` computes it from receipts ∪ journal (wire only).
     public var trades: TradeBook?
+    /// A contract the hull holds and the ledger's word for it (T-243, the bay): the host's row
+    /// `contracts[]` when it serves one; in direct mode the ledger's own open loads.
+    public struct HeldContract: Equatable, Sendable {
+        public var loadId: String
+        public var word: String
+        public init(loadId: String, word: String) { self.loadId = loadId; self.word = word }
+    }
+    public var heldContracts: [HeldContract] = []
+    /// How the computer is spoken of — `computer_state.pronouns` on the row, or the persona's own;
+    /// nil until a captain has named it.
+    public var pronouns: Pronouns? = nil
+    /// The words a shell uses for this ship's computer: the record's, the name's, or `it`.
+    public var spokenOf: SpokenOf { SpokenOf.of(name: named ? computer : nil, pronouns: pronouns) }
     /// The WORLD INSTANCE the ship flies in (PROD, LOCAL, TEST…) — the exchange's name for
     /// itself, never part of the ship's name (Ian, 2026-09-04: "those are instance names of
     /// the world not ship names"). Served as `world_name` when the host has it; else derived.

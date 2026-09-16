@@ -135,10 +135,11 @@ struct ConnectionsView: View {
                         Text("A familiar host runs the pilot (whisker) and serves the fleet feed. Today that is a Mac of yours; in production, a server farm.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Section("Her voice") { VoicePicker(speaker: speaker) }
-                Section("Her brains") {
+                // No one ship is open here, so no record's word applies: the computer, plainly.
+                Section("The computer's voice") { VoicePicker(speaker: speaker) }
+                Section("The computer's brains") {
                     Toggle("Private Cloud Compute", isOn: $consentPCC)
-                    Text("On the device by default: Apple Intelligence answers from the journal and the wire. Private Cloud Compute (OS 27) lets her reason over a whole day; nothing is stored off the device.").font(.caption).foregroundStyle(.secondary)
+                    Text("On the device by default: Apple Intelligence answers from the journal and the wire. Private Cloud Compute (OS 27) lets the computer reason over a whole day; nothing is stored off the device.").font(.caption).foregroundStyle(.secondary)
                 }
                 if let o = outcome { Section { Text(o).font(.footnote).foregroundStyle(SC.amber) } }
             }

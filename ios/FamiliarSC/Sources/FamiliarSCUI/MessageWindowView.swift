@@ -22,7 +22,7 @@ public struct MessageWindowView: View {
                 Section("Waiting on you") { ForEach(open, id: \.at) { item in ProposalRow(item: item, model: model) } }
             }
             if !advice.isEmpty {
-                Section("She would have…") { ForEach(advice, id: \.at) { item in AdviceLine(item: item) } }
+                Section("\(model.spokenOf.subjectTitle) would have…") { ForEach(advice, id: \.at) { item in AdviceLine(item: item) } }
             }
             if !record.isEmpty {
                 Section("The record") { ForEach(record, id: \.at) { item in ProposalRow(item: item, model: model) } }

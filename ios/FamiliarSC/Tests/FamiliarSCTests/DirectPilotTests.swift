@@ -158,6 +158,13 @@ final class DirectPilotTests: XCTestCase {
         XCTAssertEqual(input["active"]?["row"]?["loadId"]?.string, "L3249")
         XCTAssertEqual(input["active"]?["row"]?["status"]?.string, "inTransit")
         XCTAssertNil(input["active"]?["word"], "the seam reads the ledger word from /v1/me.freight, as the host does")
+        // T-243, the bay: every OTHER open row on the captain's board rides as `contracts[]`,
+        // `{row}` only — the seam takes each word from the ledger and drops a settled one; the
+        // active is never listed twice. This key holds `act`, so nothing is denied.
+        let bay = try XCTUnwrap(input["contracts"]?.array)
+        XCTAssertEqual(bay.map { $0["row"]?["loadId"]?.string ?? "?" }.sorted(), ["L3083", "L3151", "L3159"])
+        XCTAssertTrue(bay.allSatisfy { $0["word"] == nil && $0["row"]?["status"]?.string == "delivered" })
+        XCTAssertNil(input["denied"], "papers with `act` deny nothing")
         XCTAssertFalse((input["board"]?.array ?? []).contains { $0["loadId"]?.string == "L3249" }, "the open board never carried it")
         // Finding 1: every leg to a pump carries the exchange's price for THIS hull at both
         // rungs; a load leg carries none (the doctrine asks the world's rung price only on
@@ -181,6 +188,33 @@ final class DirectPilotTests: XCTestCase {
         // The same input, byte for byte, is what the adviser was handed.
         XCTAssertEqual(mind.inputs.count, 1)
         XCTAssertEqual(mind.inputs[0], input.description)
+    }
+
+    /// A co-pilot key (no `act`) is told what it cannot file, exactly as the host tells the
+    /// doctrine; papers that will not read deny nothing, as on the host.
+    func testACoPilotKeysPapersRideTheSeamAsDenied() async throws {
+        let me = try ExchangeWire.me(Fixtures.wire("me"))
+        serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
+        MockExchange.serveRaw("/v1/profile", #"{"traderName":"Luke SkyWhisker","scopes":["read","auto:freight"]}"#)
+        let coPilotRead = try await feed(ScriptedMind([Self.travelVerdict])).advice(me: me)
+        let coPilot = try XCTUnwrap(coPilotRead)
+        XCTAssertEqual(coPilot.input["denied"]?.array?.compactMap(\.string), ["repair", "paws", "refit", "payLease", "expandFrame"])
+        MockExchange.serveRaw("/v1/profile", "not json", status: 500)
+        let unreadRead = try await feed(ScriptedMind([Self.travelVerdict])).advice(me: me, fresh: true)
+        let unread = try XCTUnwrap(unreadRead)
+        XCTAssertNil(unread.input["denied"], "unreadable papers deny nothing — the host's reading")
+        XCTAssertEqual(MockExchange.postCount, 0)
+    }
+
+    /// The summary carries the bay from the ledger itself: the loads /v1/me.freight holds open.
+    func testTheSummaryCarriesTheLedgersOpenLoads() async throws {
+        let ships = try await feed(nil).ships()
+        let s = try XCTUnwrap(ships.first)
+        let ledger = DirectFeed.openLoads(me: try JSONDecoder().decode(JSONValue.self, from: Fixtures.wire("me")))
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: s.heldContracts.map { ($0.loadId, $0.word) }), ledger)
+        XCTAssertEqual(s.heldContracts.first { $0.loadId == "L3249" }?.word, "picked up")
+        XCTAssertNil(s.pronouns, "no naming on this device has chosen any")
+        XCTAssertEqual(s.spokenOf.possessive, "its", "unnamed: spoken of as it")
     }
 
     func testAWorldThatWillNotPriceTheHullIsCountedNotHidden() async throws {

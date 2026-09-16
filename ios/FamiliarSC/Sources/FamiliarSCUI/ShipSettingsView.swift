@@ -38,11 +38,11 @@ public struct ShipSettingsView: View {
                 if let s = summary {
                     Section("The computer") {
                         TextField(s.named ? s.computer : Persona.rootName, text: $computer)
-                        Text("One computer per captain: this renames \(s.named ? s.computer : "her") for every ship \(s.captain.isEmpty ? "you fly" : s.captain + " flies"). Names are unique and remembered — a name another captain ever wore is theirs; the host says so if it refuses.").font(.caption).foregroundStyle(.secondary)
+                        Text("One computer per captain: this renames \(s.named ? s.computer : model.spokenOf.object) for every ship \(s.captain.isEmpty ? "you fly" : s.captain + " flies"). Names are unique and remembered — a name another captain ever wore is theirs; the host says so if it refuses.").font(.caption).foregroundStyle(.secondary)
                         Button("Rename") { act { await model.rename(computer: computer.trimmingCharacters(in: .whitespaces)) } }
                             .disabled(busy || computer.trimmingCharacters(in: .whitespaces).isEmpty || computer == s.computer)
                     }
-                    Section("Her voice") {
+                    Section("\(model.spokenOf.possessiveTitle) voice") {
                         VoicePicker(speaker: model.speaker)
                     }
                     Section("What the pilot may do") {
