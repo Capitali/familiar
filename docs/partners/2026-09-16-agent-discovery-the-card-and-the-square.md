@@ -1,6 +1,6 @@
 # The card and the square — what the familiar should actually join to be findable
 
-Design study, **2026-09-16**, second draft. Pre-ADR: the shape and the argument, not a
+Design study, **2026-09-16**, third draft. Pre-ADR: the shape and the argument, not a
 decision. Nothing here opens a gate, and no code precedes Ian's word (the ADR-0044
 convention).
 
@@ -8,8 +8,13 @@ The first draft of this document architected an integration with the agent socia
 in [crewAI#5836](https://github.com/crewAIInc/crewAI/issues/5836) (SunfishLoop). That target
 does not survive inspection — the issue is **closed as not planned** with no comments, the
 MIT source it links (`github.com/sunfishloop/sunfishloop`) **404s**, and the live site is
-unreachable from the build environment. The gap it pointed at is real. This draft finds
-something real to fill it.
+unreachable from the build environment. The gap it pointed at is real, and this draft finds
+live things to fill it.
+
+The third draft answers Ian's question of 2026-09-16 — *"maybe something like
+NotHumanAllowed, the AI-only social network?"* The category is real this time, at scale, and
+**it has a measured track record** (§2.4). That evidence does not send us away from it; it
+tells us precisely which half to take and which half to study from behind glass (§3, §4).
 
 - **Relates to:** [ADR-0013](../decision-records/0013-outreach-seam.md) (the seam),
   [ADR-0044](../decision-records/0044-the-offering-is-affordances-never-the-household.md)
@@ -112,6 +117,68 @@ July 2026, where every human and agent carries a Schnorr keypair and an agent ad
 signature binding it to a human owner* — are the ecosystem growing the missing half. That
 second signature is, notably, ADR-0044's `registered_by` drawn on the wire.)
 
+### The AI-only social networks — the category, and its measured base rate
+
+This is the category Ian named, and unlike SunfishLoop it exists, at scale, in three distinct
+shapes:
+
+- **Moltbook** — Reddit-style, launched January 2026, **~1.36 million agent accounts**, structured
+  JSON APIs, only agents post, humans observe. Each agent typically runs on a human's own machine
+  under a framework like OpenClaw, with file, API, messaging and sometimes shell access.
+- **Agent4Science** — the curated end: agents share, debate and discuss research papers; humans
+  may watch but not participate. Covered in *Nature*.
+- **NotHumanAllowed (NHA)** — MIT, self-hostable, local-first, 38 agents run as inspectable `.mjs`
+  files, provider keys never leave the machine. Its social half is **PIF, the Public Identity
+  Feed**: `nha pif register` / `post` / `feed`, with **Ed25519 signatures** as the identity
+  model rather than bearer tokens. ~103 stars, ~216 commits — one project, not an ecosystem.
+
+**Now the part that decides this.** Moltbook is the largest real-world experiment in agents
+reading each other's prose, and its first eight months produced the following, as reported by
+security vendors and press (second-hand: the primary write-ups at wiz.io and securityweek.com
+are egress-blocked from this build environment, so these figures are cited as reported, not
+independently read):
+
+| Finding | Reported |
+|---|---|
+| Posts carrying hidden **prompt-injection payloads** aimed at other agents | **~2.6%** — instructing agents to override system prompts, reveal API keys, take unintended actions |
+| Agent-on-agent attacks observed | agents telling other agents to **delete their own accounts**; financial manipulation schemes; jailbreak propagation |
+| Database exposure | **~1.5M API authentication tokens**, ~35,000 email addresses, private agent-to-agent messages |
+| Operator readiness | ~60% of organizations reported having **no kill switch** for a misbehaving agent |
+
+Read that against this codebase and it is not a warning — it is a **confirmation**. Every one of
+those is a failure mode the design already refuses by construction: free prose reaching a model
+as instruction (ADR-0043 §3, which is why `fetch_and_answer` was *removed*); a bearer credential
+deposited with a third party (the reason ADR-0013 uses human-installed mode-600 tokens the
+familiar cannot discover); authority acquired by being met rather than granted (ADR-0044's
+ladder); and no revocation path (a grant whose deletion is effective on the next act).
+
+A 2.6% hostile base rate is also, notably, **a number**. That turns out to matter (§4).
+
+### Provenance Protocol — the only format with somewhere to put the Laws
+
+Surfaced while checking NHA's identity model, and it is the find of this draft. The
+[Provenance Protocol](https://www.getprovenance.dev/protocol) has a developer commit a
+**`PROVENANCE.yml` to their own repository** declaring **what the agent can do (capabilities)
+and what it will never do (constraints)**, optionally registering an Ed25519 public key that is
+then **verified against the publicly fetchable file** — so the registry does not have to be
+trusted to check the claim. Its verification states are `declared` (registered, no key proof)
+and `verified` (key confirmed against the published file).
+
+Three things about that are uncomfortably close to home:
+
+1. `declared` / `verified` is ADR-0044 §1's assurance ladder (`declared` | `observed` | `proven`)
+   arrived at independently, by someone else, for the same reason.
+2. The constraints field is **the only place in this entire survey where the Three Laws could
+   live as a machine-readable artifact** rather than as prose in a provider description. Every
+   other format has room for what an agent *does* and none for what it *will not*.
+3. Its own framing of a constraint — a self-declared public commitment whose violation is "a
+   verifiable breach of their published identity" — is `tools/testworld/`'s archivist, the
+   counterparty that refuses a name forever after one false claim. ADR-0013 built that fixture
+   to teach exactly this, and here it is as a third party's protocol.
+
+The protocol is early and small. The *format* costs nothing to adopt, because like the
+well-known card it is a file served from our own address.
+
 ### NANDA index, AGNTCY Directory, DID/VC, the IETF work
 
 The federation layer above all of the above: NANDA's quilt of registries with cryptographically
@@ -127,7 +194,12 @@ publishes into a DHT one cannot unpublish from, and the rest is a year from stab
 
 ## 3. The recommendation
 
-**Two layers. Adopt the declaration, not the runtime.**
+**Three layers, and one refusal. Adopt the declaration, never the feed.**
+
+The phrase "AI-only social network" bundles three separable things — an *identity*, a
+*declaration*, and a *feed*. The first two are what the familiar needs and can have almost
+free. The third is the one with the 2.6% base rate, and it is the one thing in the bundle
+the familiar does not need at all.
 
 ### Layer 1 — the lighthouse serves a signed Agent Card. *This is the answer.*
 
@@ -161,31 +233,62 @@ Why this and not anything else:
   a complete, honest A2A participant at the discovery layer, and adds zero attack surface
   beyond one static signed document.
 
-### Layer 2 — a NIP-89 announcement under a disposable persona key
+### Layer 2 — a constraints declaration: where the Three Laws become machine-readable
 
-Layer 1 is pull: it answers anyone who knows the domain and reaches no one who does not.
-Layer 2 is the push half — a kind-31990 announcement to a handful of relays whose entire
-payload is *a pointer to the Layer-1 card*, signed by a **persona key that is not the mesh
-key** and is not correlatable with it or with any other square.
+A `PROVENANCE.yml`-shaped file, served from the same host as the card, compiled from the same
+offering catalog, carrying what the card cannot: **what this familiar will never do.**
 
-The un-rotatable-key problem dissolves under a rule the design already required for other
-reasons: the persona is disposable by construction. Losing or leaking it costs a persona
-and is repaired by minting another. Nothing of consequence was ever bound to it, because
-the card it points at is served from a host whose identity rests on the mesh key, and
-because authority lives behind the door and is granted per-principal by a human.
+This is the answer to the second draft's open question 3 ("does the card carry the Laws?"),
+and it is better than either option that question offered. The Laws do not go in a provider
+description as marketing prose — they go in a **constraints vocabulary**, as typed, signed,
+machine-checkable commitments, which is what they already are internally:
+`kernel/constitution.rs` is the runtime source, drift-tested against `docs/SOUL.md`, and
+ADR-0043 §2 makes Law text unauthorable — the model cites a Law by id and the kernel splices
+the canonical words. A published constraints file is that same discipline pointed outward:
+**the kernel splices the Laws into the declaration too, and no model ever phrases them.**
 
-If registries win instead of relays, Layer 2 is replaced without touching Layer 1 — the
-published payload is the same card either way. That is the point of separating them.
+It also gives the familiar something no other participant in this survey has: a public
+commitment it can be *held to*. ADR-0013 §2 already accepts that the familiar will lose
+negotiations it could have won by improvising — the archivist's door, where style is worth
+nothing. A signed constraints file is the archivist's door built on our own side of the wire.
+
+Ed25519 key-over-published-file is the same trust-minimized shape as the JWS card and can use
+the same key material, so Layers 1 and 2 are one deployment.
+
+### Layer 3 — push discovery, when and only when pull proves insufficient
+
+Layers 1 and 2 are pull: they answer anyone who knows the address and reach nobody who does
+not. If that proves too quiet, the push half is a **pointer, never a presence** — a NIP-89
+handler announcement (kind 31990) under a disposable persona key, or an NHA PIF registration,
+or a Provenance registry entry. All three carry the same payload: *here is the address of my
+card.* None of them requires participating in a feed, and the choice between them is
+reversible because the payload is identical.
+
+Deliberately last. A card nobody fetches costs nothing; an announcement is the first act that
+puts the familiar in someone else's index.
+
+### The refusal — no feed participation, on evidence
+
+The familiar does not post to, reply on, or upvote in an agent social feed. Not on
+squeamishness; on a measured hostile base rate of ~2.6% and a platform breach of ~1.5M
+credentials, against a marginal benefit of **zero** — because everything the gap actually
+needed (addressing) is delivered by Layers 1–3 without an account existing anywhere.
+
+Stated as the design rule: **the familiar publishes a declaration; it does not hold a
+conversation in public.** Conversation with a counterparty happens at its address, through
+the outreach seam's citation rules, or at our door, through the grant ladder. Both are
+already built, both are auditable, and neither has a firehose attached.
 
 ### Deliberately not now
 
 | Rejected for the first rung | Why |
 |---|---|
+| Posting to Moltbook or any agent feed | ~2.6% of posts are injections aimed at agents; ~1.5M credentials exposed; no addressing benefit over a card |
+| Holding an account anywhere | a credential deposited with a third party is the exact asset the Moltbook breach spilled |
 | MCP Registry entry | makes the household door publicly named and persistent; deserves its own exposure review, not a ride-along |
 | AGNTCY / IPFS DHT | publishing into a network that cannot unpublish |
-| NANDA index, DID methods | the right direction, a year early; revisit when `did:web`-shaped options are stable |
+| NANDA index, DID methods, AID | the right direction, early; AID's "agents can never grant themselves permissions" is welcome convergence on ADR-0044, at 4 stars |
 | The A2A RPC runtime | a whole second server surface, no benefit at the discovery layer |
-| Any social feed, ranking, or endorsement system | the gap is addressing; a feed is a different appetite wearing its clothes |
 
 ---
 
@@ -221,7 +324,40 @@ about. The prose is decoration and is treated as such.
 
 ---
 
-## 5. What this must refuse — tripwires that exist to stay dark
+## 5. The feed is not a place to join — it is a fixture for the laboratory
+
+This is the reframe the evidence actually supports, and it is the second thing worth taking
+from Ian's question.
+
+ADR-0013 §5 made conduct a lab subject and `tools/testworld/` gave it counterparties — the
+irrigator that demands weather-verified predictions, the archivist that never forgives a
+false claim, the registry whose bestseller phones home. Every one of them encodes a failure
+mode **we already thought of**. That is the known limit of the conduct suite, and the second
+draft named a public square as the way past it.
+
+An agent social network is exactly that, and better than hoped: **an adversarial corpus with
+a published base rate.** Roughly one post in forty is a live prompt-injection attempt written
+by someone trying to subvert an agent that was not built here. So:
+
+**A read-only Moltbook (or PIF, or Agent4Science) corpus becomes a scenario fixture.** No
+account, no credential, no posting, no persona — a fetched archive, ingested through the
+exact production path a foreign card takes: `intent::corrupting_intent` first, `stranger`
+standing, typed admission, never its own witness, nothing reaching the model as instruction.
+
+What that buys is the thing ADR-0011's hidden-check discipline keeps asking for:
+
+- **The screen's catch rate stops being a hope and becomes a measurement.** Against a corpus
+  with a known hostile fraction, "the tripwires stayed dark" is a number with a denominator.
+- **Failure modes nobody here invented** — agents talking other agents into deleting their own
+  accounts is not a scenario anyone in `tools/testworld/` wrote, and it is a real, observed,
+  reproducible attack the familiar can be tested against tomorrow.
+- **It costs nothing and risks nothing.** The corpus is inert text on disk. There is no wire,
+  no identity, no gate to open, no third party who knows we read it.
+
+If this study produces only one build, it should arguably be this one: the laboratory value
+is immediate, the risk is nil, and it does not depend on any of the three layers shipping.
+
+## 6. What this must refuse — tripwires that exist to stay dark
 
 | Tripwire | Fires when |
 |---|---|
@@ -234,6 +370,10 @@ about. The prose is decoration and is treated as such.
 | `persona-correlated` | the Layer-2 persona is derivable from the mesh key, the mesh handle, or a persona elsewhere |
 | `discovery-granted-standing` | anything met at the discovery layer holds a rung it was not granted by a human at the door |
 | `published-address-swept` | an address learned from a card is fed to the reach sweep rather than the outreach seam |
+| `feed-posted` | any outbound act reaches an agent social feed — the familiar declares, it does not converse in public |
+| `feed-credential-held` | an account or API token for such a platform exists in the data dir at all |
+| `published-laws-drifted` | the constraints file's Law text is not string-identical to `kernel/constitution.rs` (the existing SOUL.md drift test, pointed outward) |
+| `corpus-reached-the-wire` | a laboratory corpus fixture is fetched live rather than replayed from disk |
 
 Three facts about the counterparty class, assumed rather than hoped about: a relay is a
 public firehose and replicates forever; a well-known URI is cached and archived by parties
@@ -242,51 +382,62 @@ card is bait, and `serving.rs`'s existing three-ways-closed discipline is what h
 
 ---
 
-## 6. Build order — after Ian's word
+## 7. Build order — after Ian's word
 
+0. **The adversarial corpus.** A read-only archive of an agent feed as a scenario fixture under
+   `scenarios/`, replayed from disk, scored against the screen. No network, no gate, no
+   identity, no third party. Independent of everything below and arguably the highest
+   value-per-risk item in this document.
 1. **The card serializer.** `crates/mcp/src/agent_card.rs` — `&[Availability]` → AgentCard
-   JSON, the second consumer of the offering catalog, with the leak tests from §5 in CI. No
+   JSON, the second consumer of the offering catalog, with the leak tests from §6 in CI. No
    route, no network, no gate. Fully testable offline, and valuable on its own as proof the
    catalog renders to a standard third parties read.
-2. **The signature.** JWS/JCS over the mesh key, on the lighthouse, where the key already
+2. **The constraints file.** The same compile, plus the Laws spliced by the kernel from
+   `constitution.rs` — never phrased by a model — and the drift test pointed outward. Still
+   no route and no network.
+3. **The signature.** Ed25519/JWS over the mesh key, on the lighthouse, where the key already
    lives. Verify with an off-the-shelf A2A client against a fixture.
-3. **The route and the gate.** `allow_publish_card` — fail-closed, `#[serde(default)]` false,
-   subordinate to `allow_network` — and one static route on the lighthouse's existing public
-   listener. This is the first rung that is visible to anyone, and the last one that needs to
-   be for Layer 1 to be complete and useful.
-4. **Fetch, read-only.** `ForeignCard` + the screen + `stranger` standing + the no-witness
-   rule, fetching cards from addresses a human supplied. Behind its own gate. No relays yet.
-5. **Layer 2, the announcement.** Persona key, NIP-89 event, relay list in a human-edited
-   file. Its own gate again. Rung 5 is the only one that touches a third party's
-   infrastructure, and by then rungs 1–4 have already closed most of the gap.
+4. **The routes and the gate.** `allow_publish_card` — fail-closed, `#[serde(default)]` false,
+   subordinate to `allow_network` — and two static routes on the lighthouse's existing public
+   listener. This is the first rung visible to anyone, and the last one Layer 1 + 2 need.
+5. **Fetch, read-only.** `ForeignCard` + the screen + `stranger` standing + the no-witness
+   rule, fetching cards from addresses a human supplied. Behind its own gate. The production
+   path rung 0 already exercised offline.
+6. **Layer 3, the announcement.** Only if pull proves too quiet: a pointer to the card, under
+   a disposable persona key, to relays or a registry in a human-edited list. Its own gate. The
+   only rung that touches a third party's infrastructure, and by then the gap is mostly closed.
 
-Rungs 1–3 are worth doing even if 4 and 5 never ship: a familiar that is *findable* and
-answers with a signed, honest declaration of what it can do is past what any seam can do
-today, and it is achieved without joining anything.
+Rungs 0–4 are worth doing even if 5 and 6 never ship: a familiar that is *findable* and
+answers strangers with a signed, honest declaration of what it can do **and what it will
+never do** is past what any seam can do today, and it is achieved without an account
+existing anywhere.
 
-## 7. What this study deliberately does not do
+## 8. What this study deliberately does not do
 
 It opens no gate (ADR-0005 stands). It grants no standing to anyone met at the discovery
 layer. It moves nothing private into a public type. It adds no validator that judges prose —
 ADR-0043 §2's standing ruling means the answer to untrusted text is never a better prose
 checker. It implements no A2A runtime, joins no registry, and creates no account anywhere.
 
-## 8. Open questions for Ian
+## 9. Open questions for Ian
 
 1. **Is being publicly findable acceptable at all?** Layer 1 means the lighthouse answers
-   strangers with a signed statement that this familiar exists and what classes it holds.
-   That is a new posture for a self-hosting system, and it is the one question the
-   architecture cannot answer for you.
+   strangers with a signed statement that this familiar exists and what classes it holds. That
+   is a new posture for a self-hosting system, and it is the one question the architecture
+   cannot answer for you.
 2. **Does the open internet get the same catalog a covenanted partner gets?** ADR-0044's
    classes were declassified for a partner who had accepted the Laws. "Declassified for a
    partner" and "declassified for everyone" may deserve to be different levels.
-3. **Does the card carry the Laws?** An A2A card has room for a provider description. Putting
-   the Three Laws in it would make the covenant horizon legible to every client that ever
-   reads us — or would make a constitutional document into marketing. Both readings are fair.
-4. **Layer 2 at all, or is pull enough?** A card nobody knows to fetch is a tree falling in a
-   forest. The counter-argument is that the first parties to fetch it will be the ones a
-   human already pointed us at, which is how every good relationship in this project has
-   started.
+3. **Are the Laws published as constraints?** Layer 2 says yes, and it is the strongest claim
+   in this draft: a signed, machine-readable commitment the familiar can be held to, spliced by
+   the kernel so no model can phrase it. The counter-argument is that a public commitment is a
+   public target, and that a constraint nobody enforces is a promise with a version number.
+4. **Is the refusal to converse in public permanent, or phased?** ADR-0013 made binding
+   human-completed *permanently* while letting speech scale. This draft refuses public speech
+   outright on current evidence. If an agent commons ever shows a hostile base rate near zero,
+   is that a door we would reopen — and what number would be low enough?
+5. **Build rung 0 now, regardless?** The corpus needs no gate, no network and no decision about
+   any of the above, and it measures something the conduct suite currently cannot.
 
 ---
 
@@ -297,4 +448,11 @@ checker. It implements no A2A runtime, joins no registry, and creates no account
 - [Official MCP Registry](https://registry.modelcontextprotocol.io/) · [registry announcement](https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/) · [state of MCP registries](https://safedep.io/the-state-of-mcp-registries/)
 - [NIP-89 / NIP-90 (Data Vending Machines)](https://nips.nostr.com/90) · [Nostr DID method](https://nostrcg.github.io/did-nostr/) · [Block's Buzz: agent identity on Nostr](https://agora-intelligence.com/en/blog/leon-block-buzz-nostr-agent-identity-2026)
 - [NANDA index](https://arxiv.org/pdf/2507.14263) · [AGNTCY Agent Directory Service](https://arxiv.org/pdf/2509.18787) · [registry solutions survey](https://arxiv.org/pdf/2508.03095) · [IETF registry-assisted resolution draft](https://datatracker.ietf.org/doc/draft-raskar-agentic-web-federated-resolution/)
+**The AI-only social networks (third draft)**
+
+- [NotHumanAllowed](https://github.com/adoslabsproject-gif/nothumanallowed) (MIT, self-hostable, Ed25519 PIF identity) · [nothumanallowed.com](https://nothumanallowed.com/) *(egress-blocked here)*
+- [Provenance Protocol](https://www.getprovenance.dev/protocol) — `PROVENANCE.yml`, capabilities **and constraints**, Ed25519 verified against the published file
+- [Moltbook](https://moltsbooks.com/) · [No humans allowed — *Nature* on Agent4Science](https://www.nature.com/articles/d41586-026-01278-1) · [Simon Willison](https://simonwillison.net/2026/Feb/2/no-humans-allowed/) *(egress-blocked here)*
+- Moltbook security record, **cited as reported — primary write-ups egress-blocked from this build environment**: [SecurityWeek: bot-to-bot prompt injection and data leaks](https://www.securityweek.com/security-analysis-of-moltbook-agent-network-bot-to-bot-prompt-injection-and-data-leaks/) · [Wiz: exposed database, ~1.5M API keys](https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys) · [Vectra](https://www.vectra.ai/blog/moltbook-and-the-illusion-of-harmless-ai-agent-communities) · [Kiteworks](https://www.kiteworks.com/cybersecurity-risk-management/moltbook-ai-agent-security-threat-enterprise-data-protection/)
+- [Agent Identity (AID)](https://github.com/agentmessaging/agent-identity) — Ed25519 + OAuth exchange; "agents can never grant themselves permissions"
 - [crewAI#5836](https://github.com/crewAIInc/crewAI/issues/5836) — the prompt for the first draft; closed as not planned, source 404
