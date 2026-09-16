@@ -6,6 +6,42 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-16 — T-236 codex round 3, the Swift finding: a bridge that switched ships stays switched
+
+codex T-236 brick 1 re-verification, round 3 (`docs/reviews/2026-09-16-t236-brick1-codex-reverification-r3.md`,
+REJECT): findings 1, 3, 5, 6, 7, 9 held; 2 and 4 (host, `fleet.rs`) and 8 (Swift) still partial. This is
+finding 8, both halves. Findings 2 and 4 are the host lane's.
+
+### What changed
+
+- **An answer in flight across a ship switch is dropped.** `BridgeModel.ask` gated the conversation
+  only BEFORE `await c.ask(q)`; the actor is re-entrant at that await, so an `open` of another ship
+  could clear the voice and the old captain's answer still landed in `turns` and was spoken under the
+  new ship. The gate now runs again after the answer — same world, same `conversationWorld`, the same
+  `Conversation` object — or the turn is discarded. The lane that answers is a seam (`asker`,
+  internal, defaulting to the conversation's own `ask`) so a test can hold an answer in flight.
+- **Only the newest `open` publishes.** Two overlapping opens had no token: the one that resumed last
+  published its persona, journal and conversation under the later selection. Every `open` now takes a
+  generation; after every await it checks it is still the newest and otherwise returns without
+  publishing, reporting, or clearing `loading`.
+
+### Checks run
+
+- Both pins fail on the old model and pass on this one (run against `origin/main`'s `BridgeModel.swift`
+  with only the seam added): `testAnAnswerInFlightAcrossAShipSwitchIsDropped` (Alice's held answer must not
+  land under Bob's fast, good ship — a broken next ship clears the voice again afterwards and would hide
+  the bug, which is why the first draft of the pin was green before the fix and was retargeted) and
+  `testAnOlderOpenThatResumesLastPublishesNothing` (the slow older open resumes last and publishes
+  nothing; the reverse order still publishes the slow newest one).
+- `cd ios/FamiliarSC && swift test`: **95 passed, 0 failed, 2 live skipped**, exit 0.
+- `xcodebuild … -scheme UCFFamiliar -sdk iphonesimulator … CODE_SIGNING_ALLOWED=NO build`: exit 0.
+
+### Next
+
+- Host findings 2 + 4 (wildhorse): a present-but-broken existing computer is not "absent"; ship-local
+  migration under the persona lock; `ensure_captain_id` inspects siblings before an early return.
+- Codex round 4 after both halves land.
+
 ## 2026-09-16 — T-243, the iPad half: the bay on the bridge, the key's papers on the seam, and the record's word in every title
 
 MacOnStick, on the three items the host lane left for this side (STATE 2026-09-09/10/15).
