@@ -1,0 +1,79 @@
+# The lighthouse's public reading room. Static bytes only.
+#
+# Deployed by vps/publish-constitution.sh. {$CONSTITUTION_DOMAIN} is substituted
+# from the environment at deploy time; Caddy obtains and renews the certificate.
+#
+# What this serves: the constitution, in its four renderings, and nothing else.
+# The web root contains only files copied by an explicit allowlist — there is no
+# path from this server into /var/lib/familiar, the mesh data, or the group secret.
+
+{$CONSTITUTION_DOMAIN} {
+	root * /var/www/constitution
+	encode gzip zstd
+
+	header {
+		# A public document. Say so, and let anything read it.
+		Access-Control-Allow-Origin "*"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Strict-Transport-Security "max-age=31536000"
+		# The constitution changes when the constitution changes. Until then, cache.
+		Cache-Control "public, max-age=3600"
+		-Server
+	}
+
+	# The machine-readable form, at the address the discovery work named.
+	handle /.well-known/laws.json {
+		header Content-Type "application/json; charset=utf-8"
+		rewrite * /laws.v1.json
+		file_server
+	}
+
+	# Short aliases, so the URLs in the article and the adoption kit are typeable.
+	handle /laws.json {
+		header Content-Type "application/json; charset=utf-8"
+		rewrite * /laws.v1.json
+		file_server
+	}
+	handle /laws.md {
+		header Content-Type "text/markdown; charset=utf-8"
+		rewrite * /laws.v1.md
+		file_server
+	}
+	handle /adopt {
+		header Content-Type "text/markdown; charset=utf-8"
+		rewrite * /ADOPT.md
+		file_server
+	}
+	handle /license {
+		header Content-Type "text/plain; charset=utf-8"
+		rewrite * /LICENSE
+		file_server
+	}
+
+	# The rendered page is the root.
+	handle / {
+		rewrite * /constitution.html
+		file_server
+	}
+
+	# Everything else: the allowlisted files by their own names, no directory
+	# listing, and a plain 404 for anything not copied here.
+	handle {
+		file_server {
+			index constitution.html
+		}
+	}
+
+	handle_errors {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "{err.status_code} — this host publishes The Constitution of Co-existence and nothing else. Try / or /.well-known/laws.json" {err.status_code}
+	}
+
+	log {
+		output file /var/log/caddy/constitution.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+	}
+}

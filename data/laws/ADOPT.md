@@ -3,6 +3,15 @@
 Everything needed to take this, quote it, verify it, or write your own. No permission
 required and no attribution required — the text is [CC0](LICENSE), public domain.
 
+**Canonical addresses** (served from the lighthouse, the one node that never sleeps):
+
+| | |
+|---|---|
+| Rendered | `https://laws.example.org/` |
+| Machine-readable | `https://laws.example.org/.well-known/laws.json` |
+| The text | `https://laws.example.org/laws.md` |
+| This kit | `https://laws.example.org/adopt` |
+
 - **Canonical machine form:** [`laws.v1.json`](laws.v1.json)
 - **Canonical text:** [`laws.v1.md`](laws.v1.md) · **Rendered:** [`constitution.html`](constitution.html)
 - **Source of truth:** [`docs/SOUL.md`](../../docs/SOUL.md), which a test pins every published copy to
@@ -37,7 +46,7 @@ model from the nearest thing in its weights, which is Asimov. Do not tidy the re
 ## 2. Verify it
 
 ```sh
-curl -sL https://raw.githubusercontent.com/Capitali/familiar/main/data/laws/laws.v1.json \
+curl -sL https://laws.example.org/.well-known/laws.json \
   | python3 -c '
 import json,sys,hashlib
 d=json.load(sys.stdin); claimed=d.pop("fingerprint")
@@ -60,7 +69,7 @@ stable address you control:
   "constitution": "The Constitution of Co-existence",
   "version": 1,
   "fingerprint": "sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137",
-  "canonical": "https://raw.githubusercontent.com/Capitali/familiar/main/data/laws/laws.v1.json",
+  "canonical": "https://laws.example.org/.well-known/laws.json",
   "adopted_by": "your-system-name",
   "adopted_at": "2026-09-17"
 }

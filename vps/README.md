@@ -59,6 +59,36 @@ lighthouse without re-enrollment and fail over to it when they leave the LAN.
   deletion: what an internet stranger can get from this box is a guest's
   projected read, ever.
 
+## The reading room (publishing the constitution)
+
+The lighthouse also serves one public document over HTTPS: **The Constitution of
+Co-existence**, as static files and nothing else.
+
+```sh
+# DNS A/AAAA for the name must already point at this box.
+ssh root@<vps> 'CONSTITUTION_DOMAIN=laws.example.org bash -s' < vps/publish-constitution.sh
+```
+
+Re-run it to republish after the constitution changes. It refuses to publish bytes
+whose fingerprint does not match the manifest — a wrong hash on a public document is
+worse than no hash, because the hash is the whole reason to trust a copy.
+
+**This is not a familiar capability and opens no boundary gate.** The daemon is
+untouched: no new route, no kernel change, nothing for the guard to weigh. A human is
+copying seven files onto a web server. `allow_publish_card` was scoped for the daemon
+serving its own agent card — a different act, by a different actor, still unbuilt.
+
+**What it costs.** A public HTTP surface on the box that holds the group secret and is
+the mesh's only non-transient entity. Taken deliberately, with the surface kept as
+small as a surface gets: static bytes, an explicit file allowlist (never `cp -r` of the
+repo), a web root outside `/var/lib/familiar`, caddy as its own user under systemd
+hardening with `InaccessiblePaths=/var/lib/familiar`, no directory listing, no dynamic
+handler, no upload path. ufw gains 80 and 443; 47100 and SSH are untouched.
+
+Nothing here requires the lighthouse specifically — the published bytes are identical
+from any static host, and the fingerprint is what proves it. This box is simply the
+public address the mesh already owns.
+
 ## Known seams (deliberate, tracked)
 
 - **Device TLS pinning vs. failover**: enrollment payloads carry one node's

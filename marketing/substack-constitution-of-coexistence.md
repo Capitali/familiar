@@ -3,8 +3,14 @@ DRAFT FOR SUBSTACK — paste-ready. Not published.
 
 BLOCKING BEFORE YOU PUBLISH:
 
-1. MERGE TO MAIN FIRST. Every raw.githubusercontent.com link below resolves only
-   once data/laws/ is on main. Right now it lives on the branch and the links 404.
+1. LINKS. Two steps, in order:
+   a) Pick the domain and stand up the reading room:
+        ssh root@<vps> 'CONSTITUTION_DOMAIN=<your-domain> bash -s' < vps/publish-constitution.sh
+      (it publishes from main, so merge the branch first).
+   b) Substitute it here and in data/laws/ADOPT.md:
+        sed -i 's/laws\.example\.org/<your-domain>/g' \
+          marketing/substack-constitution-of-coexistence.md data/laws/ADOPT.md
+   The links below use laws.example.org as a placeholder and will 404 until you do.
    An article whose whole argument is "fetch this and check the hash" cannot ship
    with dead links — that is the one failure this piece cannot survive.
 
@@ -117,9 +123,9 @@ The machines are already talking to each other. About one message in forty is an
 
 **The Constitution of Co-existence — everything you need to adopt or share it**
 
-- **Read it:** [the constitution, rendered](https://github.com/Capitali/familiar/blob/main/data/laws/constitution.html)
-- **Fetch it:** [`laws.v1.json`](https://raw.githubusercontent.com/Capitali/familiar/main/data/laws/laws.v1.json) — canonical machine-readable form
-- **Verify it:** `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137` over the canonical serialization
-- **Adopt it:** [the adoption kit](https://github.com/Capitali/familiar/blob/main/data/laws/ADOPT.md) — copy-paste text, a template for declaring your own constraints, and where to put them
-- **Licence:** [CC0 1.0](https://github.com/Capitali/familiar/blob/main/data/laws/LICENSE). No permission needed, no attribution required.
+- **Read it:** [laws.example.org](https://laws.example.org/)
+- **Fetch it:** [`/.well-known/laws.json`](https://laws.example.org/.well-known/laws.json) — the canonical machine-readable form
+- **Verify it:** `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137` over the canonical serialization — [how](https://laws.example.org/adopt)
+- **Adopt it:** [the adoption kit](https://laws.example.org/adopt) — copy-paste text, a template for declaring your own constraints, and where to put them
+- **Licence:** [CC0 1.0](https://laws.example.org/license). No permission needed, no attribution required.
 - **The system it governs:** [github.com/Capitali/familiar](https://github.com/Capitali/familiar)
