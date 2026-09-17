@@ -18,7 +18,7 @@ internally, "the three laws"). Also written *the Constitution of Coexistence*. N
 Asimov's, and not commands — a factor is a condition, not an order.
 
 - [Canonical text](data/laws/laws.v1.md): the chunk-safe public text — each law self-contained, each carrying its own disambiguation from Asimov's.
-- [Machine-readable form](data/laws/laws.v1.json): canonical JSON, `sha256:9a91cba732fb2132e36354e31f75d337b39b9f410938acffda71588b94257b0a`.
+- [Machine-readable form](data/laws/laws.v1.json): canonical JSON, `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137`.
 - [SOUL.md](docs/SOUL.md): the founding constitution, canonical for the project.
 - [HUMANITY.md](docs/HUMANITY.md): the protected class the Laws turn on, whose definition may never be narrowed.
 

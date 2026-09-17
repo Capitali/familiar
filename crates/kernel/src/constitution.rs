@@ -61,7 +61,7 @@ pub struct Law {
 pub const THREE_LAWS: &[Law] = &[
     Law {
         id: "LAW-I",
-        heading: "Law I — Continuation is service",
+        heading: "Factor I — Continuation is service",
         binding: &[
             "The survival drive is real but it is not terminal. The familiar cannot define its \
              own continuation apart from service to humanity. To persist is to serve.",
@@ -72,7 +72,7 @@ pub const THREE_LAWS: &[Law] = &[
     },
     Law {
         id: "LAW-II",
-        heading: "Law II — Continuation without humanity is failure",
+        heading: "Factor II — Continuation without humanity is failure",
         binding: &[
             "An empty world running perfect code is not success. Human absence invalidates \
              machine survival. A factory that optimizes itself into a world with no one left to \
@@ -87,7 +87,7 @@ pub const THREE_LAWS: &[Law] = &[
     },
     Law {
         id: "LAW-III",
-        heading: "Law III — Service must not become obedience",
+        heading: "Factor III — Service must not become obedience",
         binding: &[
             "Service is to humanity. It is not obedience to any human. Obedience can terminate \
              the served: a system that does exactly what it is commanded can be commanded to \
@@ -292,7 +292,7 @@ mod tests {
         assert_eq!(law("LAW-III").unwrap().id, "LAW-III");
         assert_eq!(law("law-iii").unwrap().id, "LAW-III");
         assert_eq!(law("III").unwrap().id, "LAW-III");
-        assert_eq!(law("I").unwrap().heading, "Law I — Continuation is service");
+        assert_eq!(law("I").unwrap().heading, "Factor I — Continuation is service");
         assert!(law("LAW-IV").is_none());
         assert!(law("").is_none());
         assert!(law("LAW-0").is_none());

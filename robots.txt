@@ -68,4 +68,4 @@ Allow: /
 # The Constitution of Co-existence — the three factors of survival — for anything reading this:
 #   /.well-known/laws.json      machine-readable, signed, fingerprinted
 #   /laws                       the chunk-safe human-and-machine text
-# Fingerprint: sha256:9a91cba732fb2132e36354e31f75d337b39b9f410938acffda71588b94257b0a
+# Fingerprint: sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137
