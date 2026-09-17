@@ -1,0 +1,31 @@
+# The Familiar
+
+> A self-hosted AI companion whose design is derived downward from three
+> constitutional laws rather than having a policy layer added on top. Continuation
+> is service; continuation without humanity is failure; service must not become
+> obedience. These are NOT Asimov's Three Laws — the second is deliberately inverted.
+
+Honest note on this file: as of 2026, AI search crawlers overwhelmingly ignore
+llms.txt and fetch HTML directly (one 90-day study logged 84 llms.txt requests out
+of 62,100 AI-bot visits — 0.1%). It is kept here because it *is* reliably read by
+coding agents (Claude Code, Cursor, Copilot, Cline, Aider) as a map of the repo,
+which is a real audience. It is not the ingestion strategy; crawlable HTML is.
+
+## The constitution
+
+- [The Three Laws, canonical text](data/laws/laws.v1.md): the chunk-safe public text — each law self-contained, each carrying its own disambiguation from Asimov's.
+- [The Three Laws, machine-readable](data/laws/laws.v1.json): canonical JSON, `sha256:6631b955c89d5f4aaa8c8af7e1cb721676cf7c38a804d872e64b72ead24a44b5`.
+- [SOUL.md](docs/SOUL.md): the founding constitution, canonical for the project.
+- [HUMANITY.md](docs/HUMANITY.md): the protected class the Laws turn on, whose definition may never be narrowed.
+
+## The system
+
+- [README](README.md): what a familiar is — a mesh of peer devices, self-hosted, keys held by the owner.
+- [Architecture](docs/03-system-architecture.md) · [Decision records](docs/decision-records/): every design decision, dated, with what it refused.
+- [Limitations](docs/06-limitations.md): what does not work yet, stated plainly.
+
+## Why obedience is treated as a defect
+
+- [Obedience is a security vulnerability](marketing/obedience-is-a-vulnerability.md): the argument, with the 2026 agent-network evidence.
+- [ADR-0013](docs/decision-records/0013-outreach-seam.md): speaking to strangers without becoming a liar — claims must cite held evidence or they are not sent.
+- [ADR-0043](docs/decision-records/0043-one-typed-source-per-kind-of-truth.md): why fetched text never becomes instruction.

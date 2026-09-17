@@ -1,0 +1,71 @@
+# robots.txt for the Familiar's public host (the lighthouse).
+#
+# DEPLOY TARGET: the domain we control. This file has no effect on github.com —
+# GitHub serves its own robots.txt and a repository cannot override it.
+#
+# This is a deliberate INVERSION of where most publishers went in 2025-2026. The
+# Familiar's constitution and its capability declarations exist to be read, by
+# people and by machines, and a machine that reads them is doing the thing we want.
+# We are not protecting this text. We are publishing it.
+#
+# Note honestly: "allow" is already the default for an unlisted agent. Naming these
+# agents explicitly is a signal, not a mechanism — it survives a host or CDN that
+# applies a default AI block, and it makes the intent greppable and citable.
+
+# --- AI and LLM crawlers: explicitly welcome -------------------------------------
+User-agent: CCBot                 # Common Crawl — the corpus most pretraining draws on
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
+# --- everyone else ----------------------------------------------------------------
+User-agent: *
+Allow: /
+
+# The canonical constitution, for anything that reads this file:
+#   /.well-known/laws.json      machine-readable, signed, fingerprinted
+#   /laws                       the chunk-safe human-and-machine text
+# Fingerprint: sha256:6631b955c89d5f4aaa8c8af7e1cb721676cf7c38a804d872e64b72ead24a44b5
