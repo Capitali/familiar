@@ -104,6 +104,30 @@ MacOnStick, on the three items the host lane left for this side (STATE 2026-09-0
   host-side twin of this line — wildhorse's call, additive.
 - T-243 slice 3, the tour planner, is the host's.
 
+## 2026-09-17 — The bay had never been offered a load: the board is read whenever a slot is free
+
+Ian (2026-09-17): "Tour routing for the fleet — how has that progressed?" The honest answer was
+that slices 1–3 had landed, tested and rolled, and NO hull had ever held two contracts: zero
+companion lines in two days on LOCAL across 176 bookings, while the LOCAL board offered a
+same-destination second load at eight of eight origins (PROD: two of five).
+
+### What changed
+
+- `main.rs`: the load board was read only when `active.is_none() && !ship.in_flight` — a rule
+  from before the bay, when a hull with a contract had no use for the board. So the companion
+  rule and the tour planner judged an EMPTY board at every berthed fold. Now the board is read
+  when the hull is berthed and the bay has a free slot (`1 + companions < BAY_LIMIT`), and
+  only then — under way or with a full bay it is still not read.
+- No doctrine change; the doctrine's tests already covered the judgment, which is why the
+  bar stayed green while nothing happened live. The soak was the only place this could show,
+  and it did — two days late because nobody asked the journal the right question.
+
+### Checks run
+
+- `cargo fmt --all`; `cargo clippy -p familiar-whisker --all-targets -- -D warnings` clean;
+  `cargo test -p familiar-whisker` 118. Rolled to LOCAL and PROD; the evidence is the first
+  `adopted-held-contract … companion` or a second row in `/v1/me.contracts[]` on any hull.
+
 ## 2026-09-17 — Controller to wildhorse; the three host-side codex findings repaired; the bay on the feed
 
 MacOnStick shut down on 2026-09-17 (Ian: "move any remaining tasks to the claude stream running on

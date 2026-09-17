@@ -1214,8 +1214,14 @@ fn main() -> ExitCode {
         // The fold's forecast, kept for the freight doctrine below: the chain's
         // word on each load rides the board as `chain_pressure` (T-238 finding 3).
         let mut fold_forecast: Option<trade::Forecast> = None;
-        // The board, only when the judgment could use it.
-        let board: Vec<LoadRow> = if active.is_none() && !ship.in_flight {
+        // The board, only when the judgment could use it: berthed, and with a slot
+        // in the bay. It used to be read only with NO contract in hand, so the
+        // companion rule and the tour planner (T-243 slices 2–3) judged an empty
+        // board at every berthed fold and no hull ever held two contracts — found
+        // 2026-09-17 after two days of zero companions on LOCAL (176 bookings) with
+        // eight of eight origins offering a same-destination second load.
+        let slot_free = active.is_none() || (1 + companions.len() as i64) < doctrine::BAY_LIMIT;
+        let board: Vec<LoadRow> = if !ship.in_flight && ship.docked.is_some() && slot_free {
             match wire.get("/v1/loadboard?status=open") {
                 Ok(Value::Array(rows)) => rows
                     .iter()
