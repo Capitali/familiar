@@ -156,6 +156,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   to Jeff as ENGINE STATE (proposal to draft — wildhorse lane — for Ian to file), not a
   familiar-side overlay. The T-236 `captain_id` record is shaped to mirror the engine's
   captain when it exists (generated id, display label, `traderName` beside it).
+- **CODEX ROUND 2 RETURNED 2026-09-17 (`docs/reviews/2026-09-16-t238-bricks1-2-codex-reverification-r2.md`, pushed by codex itself as d874fb7): REJECT — findings 1, 2, 4 REPAIRED; 3 PARTIAL.** The one blocker left: a FREIGHT-ONLY runner (a co-pilot key: Freight granted, Trade not) never builds `fold_forecast` — it lives inside the gated Trade phase — so every row's `chain_pressure` is zero and the freight doctrine chooses by rate alone. Pure doctrine + seam hold. **Host (whisker main.rs): wildhorse's.**
 - status: **CLAIMED companion:claude 2026-09-02 evening for brick 1 ONLY** — the pure
   chain model: NEW FILE `crates/whisker/src/chain.rs` (+ lib.rs module line, + tests),
   deliberately touching nothing else — no main.rs, no trade.rs, no doctrine.rs — so the
