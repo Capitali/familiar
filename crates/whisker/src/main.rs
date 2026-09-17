@@ -524,6 +524,12 @@ fn main() -> ExitCode {
     // The rest of the bay (T-243 slices 1+2): contracts held beside the active,
     // booked where they ride for free; their words refreshed like the active's.
     let mut companions: Vec<Active> = Vec::new();
+    // How many contracts THIS world lets a hull hold. The pack's number is three
+    // (PROD since t4051); a world that files a smaller dial says so only at the
+    // fold — "rejected: already holding a contract" (LOCAL, 2026-09-17, the first
+    // companion the bay ever booked) — so the cap is learned from that refusal and
+    // the board is not read for a bay this world will not fill.
+    let mut bay_cap: i64 = doctrine::BAY_LIMIT;
     let mut pending_until: i64 = -1;
     let mut recent: HashMap<String, (i64, String)> = HashMap::new();
     // Ids the exchange has acknowledged: a re-send of one is a no-op it can skip.
@@ -1106,6 +1112,21 @@ fn main() -> ExitCode {
                                    "load": c.row.load_id, "why": reason,
                                    "companion": true, "credits": ship.credits}),
                         );
+                        // The world's bay is smaller than the pack's: what we hold
+                        // with this one gone is the cap, and the board stays unread
+                        // for a slot this world does not have.
+                        if reason.contains("already holding") {
+                            let held = 1 + kept.len() as i64;
+                            if held < bay_cap {
+                                bay_cap = held;
+                                journal(
+                                    &ship_dir,
+                                    json!({"at": now, "tick": tick, "event": "automation-refused",
+                                           "automation": "bay",
+                                           "why": format!("this world holds {held} contract(s) per hull, not {}: {reason}", doctrine::BAY_LIMIT)}),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1220,7 +1241,7 @@ fn main() -> ExitCode {
         // board at every berthed fold and no hull ever held two contracts — found
         // 2026-09-17 after two days of zero companions on LOCAL (176 bookings) with
         // eight of eight origins offering a same-destination second load.
-        let slot_free = active.is_none() || (1 + companions.len() as i64) < doctrine::BAY_LIMIT;
+        let slot_free = active.is_none() || (1 + companions.len() as i64) < bay_cap;
         let board: Vec<LoadRow> = if !ship.in_flight && ship.docked.is_some() && slot_free {
             match wire.get("/v1/loadboard?status=open") {
                 Ok(Value::Array(rows)) => rows
