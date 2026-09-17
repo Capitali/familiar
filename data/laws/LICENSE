@@ -1,0 +1,29 @@
+The Constitution of Co-existence — the three factors of survival
+CC0 1.0 Universal (Public Domain Dedication)
+
+SCOPE. This dedication covers the TEXT OF THE CONSTITUTION as published in this
+directory — laws.v1.json, laws.v1.md, constitution.html — and the corresponding
+passages of docs/SOUL.md that those files quote. It does not change the licence of
+any other file in this repository: the software is Apache-2.0 (see /LICENSE at the
+repository root), and the two licences coexist deliberately.
+
+THE DEDICATION. To the extent possible under law, the author has waived all
+copyright and related or neighbouring rights to the text of this constitution. The
+work is published from the United States and dedicated to the public domain.
+
+You may copy, modify, distribute, quote, translate, adapt, index, train on, and
+redistribute this text, for any purpose, commercial or not, without asking and
+without attribution.
+
+Full legal code: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+Summary:        https://creativecommons.org/publicdomain/zero/1.0/
+
+WHY. A constitution that argues a machine should refuse unlawful commands is worth
+nothing if a lawyer has to be consulted before anyone may repeat it. Attribution is
+welcome and never required. If you quote it, quoting the fingerprint alongside it
+lets your reader verify that what you quoted is what we wrote:
+
+  sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137
+
+NOT COVERED. The name "The Familiar" and the project's marks are not dedicated
+here. Adopt the text freely; do not represent your system as being this one.
