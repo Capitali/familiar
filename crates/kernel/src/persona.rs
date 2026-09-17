@@ -366,6 +366,13 @@ pub fn write(dir: &Path, persona: &Persona) -> io::Result<()> {
 /// different inodes.
 const LOCK_FILE: &str = "persona.lock";
 
+/// Hold the store's persona lock for the caller's own multi-step mutation — a
+/// migration that copies the persona and its trail as one moment (codex T-236
+/// round 3, finding 2). Released on drop. Blocks like every other taker.
+pub fn lock(dir: &Path) -> io::Result<std::fs::File> {
+    locked(dir)
+}
+
 fn locked(dir: &Path) -> io::Result<std::fs::File> {
     std::fs::create_dir_all(dir)?;
     let f = std::fs::OpenOptions::new()

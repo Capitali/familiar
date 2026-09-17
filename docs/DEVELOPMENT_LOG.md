@@ -104,6 +104,50 @@ MacOnStick, on the three items the host lane left for this side (STATE 2026-09-0
   host-side twin of this line — wildhorse's call, additive.
 - T-243 slice 3, the tour planner, is the host's.
 
+## 2026-09-17 — Controller to wildhorse; the three host-side codex findings repaired; the bay on the feed
+
+MacOnStick shut down on 2026-09-17 (Ian: "move any remaining tasks to the claude stream running on
+wildhorse and shut maconstick down"); its handoff (3438d40) names everything it left. wildhorse
+holds the controller role from here (STATE.md says so). Taken up in this entry:
+
+### What changed
+
+- **T-236 round 3, finding 2 (pairing / migration preserve a computer whole).** (1) A second
+  pairing to a captain whose existing computer WILL NOT READ is refused, and the broken record
+  is left untouched — `persona::load(...).ok()` had turned a load failure into "absent" and fed
+  the `(None, given)` arm, which overwrote a tuned record with Purr or the new name. Test:
+  `a_second_pairing_never_overwrites_a_computer_that_will_not_read` (corrupts the id store's
+  persona, pairs a second hull, asserts FAILURE, bytes unchanged, nothing commissioned).
+  (2) `migrate_computer` now holds the kernel's persona lock on BOTH stores (source, then
+  target — every taker's order) for the whole trail + persona copy, so no naming can land
+  between the two copies; `persona::lock(dir)` is the kernel's new public door to the lock it
+  already used internally.
+- **T-236 round 3, finding 4 (two ids for one captain).** `ensure_captain_id` counts every
+  identity the captain's records carry — the selected record's included — BEFORE its early
+  return, so two already-split hulls are refused ("2 identities … reconcile them first") rather
+  than each reported "already migrated". `fleet adopt-ids` inherits the refusal. Test:
+  `a_captain_with_two_ids_is_refused_not_reported_twice`.
+- **T-238 round 2, finding 3 (a freight-only runner never supplied chain pressure).** The
+  forecast — production ledger, shelves off the galaxy read, the dispatch feed, the sisters'
+  inbound cargo, and its three journal lines — was built INSIDE the merchant's `if trades`
+  block, so a co-pilot-key hull (KBC-04, `["freight"]`) never built one and every load it
+  weighed carried `chain_pressure` 0 while the pure doctrine's tests said otherwise. It is now
+  built once per fold, before the merchant, for every hull with recipes; the merchant reuses the
+  fold's galaxy read and forecast (one `/v1/galaxy/prices` GET per fold, as before, now shared).
+- **The bay on the feed.** `/ships` rows carry `contracts[]` — `{load, word, units, payable}` off
+  `/v1/me.contracts[]`, the word the doctrine's (`booked` / `pickedUp` / `delivered`) — the host
+  twin of the bridge's "Your contracts · N" (MacOnStick's handoff, item 4).
+- Left as MacOnStick asked, not done here: the `pronouns` strip on the `/ships` row goes once
+  build 8 is on Ian's iPad (the ships wait for Ian's word "ship"); codex re-verification of these
+  repairs runs when Ian releases codex (Fridays) via `tools/codex-queue.sh`.
+
+### Checks run
+
+- `cargo fmt --all`; `cargo clippy -p familiar-whisker -p familiar-cli --all-targets -- -D warnings`
+  clean; `cargo test`: cli 41 (two new), whisker 118.
+- Live: rolled to LOCAL and PROD (Ian's standing word to roll); KBC-04 is the hull the freight
+  forecast repair is for — its journal should now carry `forecast` and `dispatch` lines.
+
 ## 2026-09-16 — T-243 slice 3: the tour planner, and the feed answers in parallel
 
 Ian (2026-09-16): "We should roll changes into prod, finish up the tour planner and get that

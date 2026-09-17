@@ -1528,6 +1528,143 @@ fn main() -> ExitCode {
         // goods are realized at whatever berth pays once the exchange's clock allows;
         // BUY (opening a position) only when freight is idle and nothing is held.
         // The whole phase is gated: no Trade grant, no merchant behavior.
+        // THE CHAIN, FOR EVERY HULL (codex T-238 round 2, finding 3). The forecast used
+        // to be built inside the merchant, so a freight-only hull — a co-pilot key,
+        // KBC-04 — never ran it, and every load it weighed carried a chain word of
+        // zero while the pure doctrine's tests said otherwise. It is built here, once
+        // per fold, for the merchant and the freight doctrine alike; the galaxy read
+        // it needs is shared with the merchant's own.
+        let fold_galaxy: Vec<trade::MarketRow> = if recipes.is_empty() {
+            Vec::new()
+        } else {
+            wire.get("/v1/galaxy/prices")
+                .map(|v| trade::parse_galaxy(&v))
+                .unwrap_or_default()
+        };
+        if !recipes.is_empty() && tick >= pending_until {
+            // What the lines actually made, at each bucket boundary: the
+            // recipes run at their measured share below, the stalled ones at
+            // full appetite (chain.rs, the production ledger banner).
+            let bucket = tick / chain::PRODUCTION_INTERVAL_TICKS;
+            if bucket != measured_bucket && !recipes.is_empty() {
+                measured = recipes
+                    .iter()
+                    .filter_map(|r| {
+                        let v = wire
+                            .get(&format!(
+                                "/v1/stations/{}/production?recipe={}",
+                                r.station, r.id
+                            ))
+                            .ok()?;
+                        chain::parse_production(&v, chain::MEASURED_BUCKETS)
+                    })
+                    .collect();
+                measured_bucket = bucket;
+            }
+            let recipes_now = chain::with_utilization(&recipes, &measured);
+            let measured_now = chain::measured_lines(&recipes_now, &measured);
+            // The forecast for this fold: live stock onto the swept shelf shape,
+            // through the recipes, keeping only what starves inside the horizon.
+            let forecast = {
+                let shelves: Vec<chain::Shelf> = fold_galaxy
+                    .iter()
+                    .filter_map(|r| {
+                        let (capacity, equilibrium) =
+                            *shelf_shape.get(&(r.station.clone(), r.good.clone()))?;
+                        Some(chain::Shelf {
+                            station: r.station.clone(),
+                            good: r.good.clone(),
+                            stock: r.stock,
+                            capacity,
+                            equilibrium,
+                        })
+                    })
+                    .collect();
+                let horizon = min_hold.max(1) + 96;
+                trade::Forecast::build(&recipes_now, &shelves, &pricing, horizon)
+            };
+            // The board's announcements, read against the deck and laid over the
+            // flows before anything prices them: the lead time is the whole
+            // information game, and it is played from the honest prior on
+            // `/v1/news` — never from the overwatch's resolved coin.
+            let dispatches = wire
+                .get("/v1/news")
+                .map(|n| chain::parse_news(&n, &deck))
+                .unwrap_or_default();
+            let mut forecast = forecast.with_dispatches(dispatches, tick);
+            // What the captain's other hulls already have bound for each shelf.
+            forecast.inbound = fleet_inbound(&ship_dir);
+            // Say what the board has announced, once per change.
+            let dispatch_now: Vec<String> = forecast
+                .dispatches
+                .iter()
+                .map(chain::Dispatch::line)
+                .collect();
+            if dispatch_now != last_dispatch {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "dispatch",
+                       "announced": dispatch_now}),
+                );
+                last_dispatch = dispatch_now;
+            }
+            // Say what the fleet has on its way, once per change: the soak's
+            // evidence that the hulls read each other (T-244).
+            let fleet_now: Vec<String> = forecast
+                .inbound
+                .iter()
+                .map(|((st, g), u)| format!("{u} {g} → {st}"))
+                .collect();
+            if fleet_now != last_fleet_inbound {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "fleet-inbound",
+                       "sisters": fleet_now}),
+                );
+                last_fleet_inbound = fleet_now;
+            }
+            fold_forecast = Some(forecast.clone());
+            // Say what the chain sees, once per change — the soak's evidence that
+            // the merchant is reading the map and not only the counter.
+            // Journal on CHANGE — of which shelves are starving and what the
+            // mid heads to, not of the countdown, which moves every fold and
+            // wrote a line per fold on the LOCAL soak (10 s ticks, 2026-09-08).
+            let (hungry_now, hungry_key): (Vec<String>, Vec<String>) = forecast
+                .starving()
+                .iter()
+                .map(|f| {
+                    let h = f.horizon_ticks.unwrap_or(0);
+                    match forecast.project(&f.station, &f.good, h) {
+                        Some(p) => (
+                            format!(
+                                "{}:{} dry in {h}t, mid {}→{}",
+                                f.station, f.good, p.mid_now.0, p.mid_then.0
+                            ),
+                            format!("{}:{} → {}", f.station, f.good, p.mid_then.0),
+                        ),
+                        None => (
+                            format!("{}:{} dry in {h}t", f.station, f.good),
+                            format!("{}:{}", f.station, f.good),
+                        ),
+                    }
+                })
+                .unzip();
+            let forecast_key: Vec<String> = hungry_key
+                .iter()
+                .chain(measured_now.iter())
+                .cloned()
+                .collect();
+            if forecast_key != last_forecast {
+                journal(
+                    &ship_dir,
+                    json!({"at": now, "tick": tick, "event": "forecast",
+                       "horizon_ticks": min_hold.max(1) + 96,
+                       "starving": hungry_now,
+                       "measured": measured_now}),
+                );
+                last_forecast = forecast_key;
+            }
+        }
         if trades && tick >= pending_until {
             // 1. Read back the last trade's fold from the receipt trail: the outcome is
             //    a market fact recorded in the world (filled, or a named refusal), never
@@ -1626,9 +1763,7 @@ fn main() -> ExitCode {
                     .map(|v| trade::parse_board(&v))
                     .unwrap_or_default();
                 let galaxy = if galaxy_for_hint.is_empty() {
-                    wire.get("/v1/galaxy/prices")
-                        .map(|v| trade::parse_galaxy(&v))
-                        .unwrap_or_default()
+                    fold_galaxy.clone()
                 } else {
                     galaxy_for_hint
                 };
@@ -1649,128 +1784,8 @@ fn main() -> ExitCode {
                 } else {
                     ship.fuel
                 };
-                // What the lines actually made, at each bucket boundary: the
-                // recipes run at their measured share below, the stalled ones at
-                // full appetite (chain.rs, the production ledger banner).
-                let bucket = tick / chain::PRODUCTION_INTERVAL_TICKS;
-                if bucket != measured_bucket && !recipes.is_empty() {
-                    measured = recipes
-                        .iter()
-                        .filter_map(|r| {
-                            let v = wire
-                                .get(&format!(
-                                    "/v1/stations/{}/production?recipe={}",
-                                    r.station, r.id
-                                ))
-                                .ok()?;
-                            chain::parse_production(&v, chain::MEASURED_BUCKETS)
-                        })
-                        .collect();
-                    measured_bucket = bucket;
-                }
-                let recipes_now = chain::with_utilization(&recipes, &measured);
-                let measured_now = chain::measured_lines(&recipes_now, &measured);
-                // The forecast for this fold: live stock onto the swept shelf shape,
-                // through the recipes, keeping only what starves inside the horizon.
-                let forecast = {
-                    let shelves: Vec<chain::Shelf> = galaxy
-                        .iter()
-                        .filter_map(|r| {
-                            let (capacity, equilibrium) =
-                                *shelf_shape.get(&(r.station.clone(), r.good.clone()))?;
-                            Some(chain::Shelf {
-                                station: r.station.clone(),
-                                good: r.good.clone(),
-                                stock: r.stock,
-                                capacity,
-                                equilibrium,
-                            })
-                        })
-                        .collect();
-                    let horizon = min_hold.max(1) + 96;
-                    trade::Forecast::build(&recipes_now, &shelves, &pricing, horizon)
-                };
-                // The board's announcements, read against the deck and laid over the
-                // flows before anything prices them: the lead time is the whole
-                // information game, and it is played from the honest prior on
-                // `/v1/news` — never from the overwatch's resolved coin.
-                let dispatches = wire
-                    .get("/v1/news")
-                    .map(|n| chain::parse_news(&n, &deck))
-                    .unwrap_or_default();
-                let mut forecast = forecast.with_dispatches(dispatches, tick);
-                // What the captain's other hulls already have bound for each shelf.
-                forecast.inbound = fleet_inbound(&ship_dir);
-                // Say what the board has announced, once per change.
-                let dispatch_now: Vec<String> = forecast
-                    .dispatches
-                    .iter()
-                    .map(chain::Dispatch::line)
-                    .collect();
-                if dispatch_now != last_dispatch {
-                    journal(
-                        &ship_dir,
-                        json!({"at": now, "tick": tick, "event": "dispatch",
-                               "announced": dispatch_now}),
-                    );
-                    last_dispatch = dispatch_now;
-                }
-                // Say what the fleet has on its way, once per change: the soak's
-                // evidence that the hulls read each other (T-244).
-                let fleet_now: Vec<String> = forecast
-                    .inbound
-                    .iter()
-                    .map(|((st, g), u)| format!("{u} {g} → {st}"))
-                    .collect();
-                if fleet_now != last_fleet_inbound {
-                    journal(
-                        &ship_dir,
-                        json!({"at": now, "tick": tick, "event": "fleet-inbound",
-                               "sisters": fleet_now}),
-                    );
-                    last_fleet_inbound = fleet_now;
-                }
-                fold_forecast = Some(forecast.clone());
-                // Say what the chain sees, once per change — the soak's evidence that
-                // the merchant is reading the map and not only the counter.
-                // Journal on CHANGE — of which shelves are starving and what the
-                // mid heads to, not of the countdown, which moves every fold and
-                // wrote a line per fold on the LOCAL soak (10 s ticks, 2026-09-08).
-                let (hungry_now, hungry_key): (Vec<String>, Vec<String>) = forecast
-                    .starving()
-                    .iter()
-                    .map(|f| {
-                        let h = f.horizon_ticks.unwrap_or(0);
-                        match forecast.project(&f.station, &f.good, h) {
-                            Some(p) => (
-                                format!(
-                                    "{}:{} dry in {h}t, mid {}→{}",
-                                    f.station, f.good, p.mid_now.0, p.mid_then.0
-                                ),
-                                format!("{}:{} → {}", f.station, f.good, p.mid_then.0),
-                            ),
-                            None => (
-                                format!("{}:{} dry in {h}t", f.station, f.good),
-                                format!("{}:{}", f.station, f.good),
-                            ),
-                        }
-                    })
-                    .unzip();
-                let forecast_key: Vec<String> = hungry_key
-                    .iter()
-                    .chain(measured_now.iter())
-                    .cloned()
-                    .collect();
-                if forecast_key != last_forecast {
-                    journal(
-                        &ship_dir,
-                        json!({"at": now, "tick": tick, "event": "forecast",
-                               "horizon_ticks": min_hold.max(1) + 96,
-                               "starving": hungry_now,
-                               "measured": measured_now}),
-                    );
-                    last_forecast = forecast_key;
-                }
+                // The forecast for this fold was built above, for every hull.
+                let forecast = fold_forecast.clone().unwrap_or_default();
                 let ledger = Ledger {
                     forecast: if recipes.is_empty() {
                         None

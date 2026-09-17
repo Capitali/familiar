@@ -530,6 +530,15 @@ pub(crate) fn migrate_computer(
     let file = familiar_kernel::persona::PERSONA_FILE;
     let trail = familiar_kernel::persona::NAME_EVENTS_FILE;
     std::fs::create_dir_all(&to).map_err(|e| format!("{}: {e}", to.display()))?;
+    // Both stores' persona locks for the whole move, so no naming can land between
+    // the trail's copy and the persona's and leave an id store whose two files came
+    // from different moments (codex T-236 round 3, finding 2). The source first,
+    // then the target — the same order every taker uses, so two migrations cannot
+    // deadlock each other.
+    let _from_lock = familiar_kernel::persona::lock(from)
+        .map_err(|e| format!("{}: persona lock: {e}", from.display()))?;
+    let _to_lock = familiar_kernel::persona::lock(&to)
+        .map_err(|e| format!("{}: persona lock: {e}", to.display()))?;
     if to.join(file).exists() {
         return Ok(());
     }
@@ -619,11 +628,13 @@ pub(crate) fn ensure_captain_id(
     siblings: &[Captain],
 ) -> Result<String, String> {
     let _lock = migration_lock(root)?;
-    if !rec.captain_id.trim().is_empty() {
-        return Ok(rec.captain_id.trim().to_string());
-    }
+    // Every identity this captain's records carry — this one's included — BEFORE the
+    // early return: a record that already has an id used to skip the count, so two
+    // already-split hulls were each "already migrated" and nothing was refused
+    // (codex T-236 round 3, finding 4).
     let mut ids: Vec<String> = siblings
         .iter()
+        .chain(std::iter::once(&*rec))
         .filter(|s| s.captain == rec.captain && !s.captain_id.trim().is_empty())
         .map(|s| s.captain_id.trim().to_string())
         .collect();
@@ -636,6 +647,9 @@ pub(crate) fn ensure_captain_id(
             ids.len(),
             ids.join(", ")
         ));
+    }
+    if !rec.captain_id.trim().is_empty() {
+        return Ok(rec.captain_id.trim().to_string());
     }
     let from = captain_store(root, &rec.captain);
     if let Some(other) = siblings.iter().find(|s| {
@@ -1357,9 +1371,22 @@ pub fn cmd_fleet(args: &[String]) -> ExitCode {
                 eprintln!("fleet pair: {e}");
                 return ExitCode::FAILURE;
             }
+            // A computer that EXISTS and will not read is a refusal, never an absence:
+            // reading it as absent fed the `(None, given)` arm below and overwrote a
+            // tuned record with Purr or the new name (codex T-236 round 3, finding 2).
             let existing = match origin {
                 Origin::None => None,
-                _ => familiar_kernel::persona::load(&persona_dir).ok(),
+                _ => match familiar_kernel::persona::load(&persona_dir) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        eprintln!(
+                            "fleet pair: {captain}'s computer at {} will not read — {e}; \
+                             repair it before pairing another hull to it",
+                            persona_dir.display()
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                },
             };
 
             let mut persona = match (existing, computer_name.as_deref()) {
@@ -3738,6 +3765,64 @@ mod captain_store_tests {
                 "Luke"
             )
         );
+    }
+
+    /// Two records of one captain with two ids are a refusal, not two "already
+    /// migrated" lines (codex T-236 round 3, finding 4).
+    #[test]
+    fn a_captain_with_two_ids_is_refused_not_reported_twice() {
+        let base = tmp("two_ids");
+        let root = base.join("worlds");
+        std::fs::create_dir_all(&root).unwrap();
+        let one = rec("A. Captain", "cpt-one");
+        let mut two = rec("A. Captain", "cpt-two");
+        let err = ensure_captain_id(&root, &mut two, std::slice::from_ref(&one)).unwrap_err();
+        assert!(err.contains("2 identities"), "{err}");
+        // The same captain with the same id everywhere is fine, and keeps it.
+        let mut same = rec("A. Captain", "cpt-one");
+        assert_eq!(
+            ensure_captain_id(&root, &mut same, &[one]).unwrap(),
+            "cpt-one"
+        );
+    }
+
+    /// A second pairing to a captain whose computer will not read is refused, and the
+    /// broken record is left exactly as it was (codex T-236 round 3, finding 2).
+    #[test]
+    fn a_second_pairing_never_overwrites_a_computer_that_will_not_read() {
+        let base = tmp("broken_second_pairing");
+        let server = stub_exchange(4);
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "one",
+                "ucfk_dddddddddddddddddddd",
+                Some("Felix")
+            )),
+            ExitCode::SUCCESS
+        );
+        let root = base.join("worlds");
+        let first = paired_ships(&base, &root).remove(0);
+        let store = captain_store_for(&root, &first.captain);
+        let persona = store.join(familiar_kernel::persona::PERSONA_FILE);
+        std::fs::write(&persona, b"{ this is not a persona").unwrap();
+        let before = std::fs::read(&persona).unwrap();
+        assert_eq!(
+            cmd_fleet(&pair_args_for(
+                &base,
+                &server,
+                "Luke",
+                "two",
+                "ucfk_eeeeeeeeeeeeeeeeeeee",
+                None
+            )),
+            ExitCode::FAILURE,
+            "a computer that will not read is not absent"
+        );
+        assert_eq!(std::fs::read(&persona).unwrap(), before, "left as it was");
+        assert_eq!(paired_ships(&base, &root).len(), 1, "nothing commissioned");
     }
 
     /// `fleet captains --adopt`: a hull renamed elsewhere (UCF-Haul) is remembered
