@@ -291,6 +291,24 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         "credits": g("credits"), "debt": g("debt"), "fuel": g("fuel"), "fuelCapacity": g("fuelCapacity"),
         "wearBps": g("wearBps"), "fittings": g("fittings"), "titled": g("titled"),
         "holdUsed": g("holdUsed"), "holdCapacity": g("holdCapacity"), "cargo": g("cargo"),
+        // The bay (T-243): every contract the hull holds, `{load, word}` off
+        // `/v1/me.contracts[]` — the host twin of the bridge's "Your contracts · N"
+        // (MacOnStick's handoff, 2026-09-17). `word` is the doctrine's: booked,
+        // pickedUp, delivered.
+        "contracts": me.as_ref()
+            .and_then(|m| m.get("contracts").and_then(Value::as_array))
+            .map(|cs| cs.iter().filter_map(|c| {
+                let load = c.get("loadId")?.as_str()?;
+                let word = match c.get("status").and_then(Value::as_str).unwrap_or("") {
+                    "delivered" => "delivered",
+                    "inTransit" | "loaded" | "pickedUp" => "pickedUp",
+                    _ => "booked",
+                };
+                Some(json!({"load": load, "word": word,
+                            "units": c.get("unitsInHold").cloned().unwrap_or(Value::Null),
+                            "payable": c.get("payableToBooker").cloned().unwrap_or(Value::Null)}))
+            }).collect::<Vec<_>>())
+            .unwrap_or_default(),
         "hauls": hauls, "freight_paid": paid,
         "trades": {"filled": book.filled, "rejected": book.rejected, "realized": book.realized,
                    "cost_of_sold": book.cost_of_sold, "inventory_cost": aboard_cost,
