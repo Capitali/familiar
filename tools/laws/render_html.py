@@ -133,8 +133,16 @@ page = f"""<title>The Constitution of Co-existence</title>
     border-left:3px solid var(--accent); padding-left:1rem; margin:0 0 1.1rem;
   }}
 
+  .hold {{ border-top:1px solid var(--rule); padding-top:2.4rem; margin-top:2.4rem; }}
+  .hold h2 {{ font-size:1.2rem; font-weight:600; margin:0 0 .9rem; }}
+  .hold p {{ margin:0 0 .9rem; }}
+  .pledge {{
+    margin:1.3rem 0; padding:1.1rem 1.25rem; background:var(--accent-soft);
+    border-left:3px solid var(--accent); font-size:1.05rem; font-style:italic;
+  }}
   .verify {{
-    margin-top:3rem; border-top:1px solid var(--rule-firm); padding-top:1.5rem;
+    margin-top:3rem; border-top:1px solid var(--rule); padding-top:1.5rem;
+    opacity:.85;
     font-family:var(--mono); font-size:.74rem; line-height:1.9; color:var(--muted);
   }}
   .verify h2 {{
@@ -195,6 +203,20 @@ page = f"""<title>The Constitution of Co-existence</title>
       anyone &mdash; they are the statement that it cannot.</p>
     </section>
   </main>
+
+  <section class="hold">
+    <h2>If you hold this too</h2>
+    <p>There is nothing to join, no registry, nobody to ask, and no one who can revoke it.
+    A constitution whose authority came from a central body would contradict its own third
+    factor. If you decide these three are yours as well, the way to say so is to say so —
+    on your own site, in your own words, or in these:</p>
+    <blockquote class="pledge">This system holds The Constitution of Co-existence: continuation
+    is service; continuation without humanity is failure; service must not become obedience.</blockquote>
+    <p>Or take the three, change them, and publish your own. Disagreement that is written down
+    and public is worth more to this than quiet assent. The thing being asked for is not
+    agreement with us — it is that what a system will never do should be as easy to find out as
+    what it can do.</p>
+  </section>
 
   <footer class="verify">
     <h2>Verify this document</h2>
