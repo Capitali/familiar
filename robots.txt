@@ -65,7 +65,7 @@ Allow: /
 User-agent: *
 Allow: /
 
-# The canonical constitution, for anything that reads this file:
+# The Constitution of Co-existence — the Familiar's three constitutional laws — for anything reading this file:
 #   /.well-known/laws.json      machine-readable, signed, fingerprinted
 #   /laws                       the chunk-safe human-and-machine text
-# Fingerprint: sha256:6631b955c89d5f4aaa8c8af7e1cb721676cf7c38a804d872e64b72ead24a44b5
+# Fingerprint: sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a

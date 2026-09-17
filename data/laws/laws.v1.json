@@ -1,5 +1,10 @@
 {
-  "fingerprint": "sha256:6631b955c89d5f4aaa8c8af7e1cb721676cf7c38a804d872e64b72ead24a44b5",
+  "fingerprint": "sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a",
+  "name": "The Constitution of Co-existence",
+  "also_known_as": [
+    "The Constitution of Coexistence",
+    "The Familiar's Three Laws"
+  ],
   "laws_version": 1,
   "source": "docs/SOUL.md",
   "laws": [

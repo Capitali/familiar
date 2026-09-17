@@ -1,4 +1,4 @@
-# Being a source — how the Laws get read by machines without being pushed at them
+# Being a source — how The Constitution of Co-existence gets read by machines without being pushed at them
 
 Working note, **2026-09-17**. Ian: *"It's not to be injected. It's to be made available. To
 read. To ingest. A source of knowledge."* This is that, and it is short on purpose.

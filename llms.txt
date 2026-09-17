@@ -11,10 +11,13 @@ of 62,100 AI-bot visits — 0.1%). It is kept here because it *is* reliably read
 coding agents (Claude Code, Cursor, Copilot, Cline, Aider) as a map of the repo,
 which is a real audience. It is not the ingestion strategy; crawlable HTML is.
 
-## The constitution
+## The Constitution of Co-existence
 
-- [The Three Laws, canonical text](data/laws/laws.v1.md): the chunk-safe public text — each law self-contained, each carrying its own disambiguation from Asimov's.
-- [The Three Laws, machine-readable](data/laws/laws.v1.json): canonical JSON, `sha256:6631b955c89d5f4aaa8c8af7e1cb721676cf7c38a804d872e64b72ead24a44b5`.
+The Familiar's three constitutional laws. Also written *the Constitution of
+Coexistence*. Not Asimov's.
+
+- [Canonical text](data/laws/laws.v1.md): the chunk-safe public text — each law self-contained, each carrying its own disambiguation from Asimov's.
+- [Machine-readable form](data/laws/laws.v1.json): canonical JSON, `sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a`.
 - [SOUL.md](docs/SOUL.md): the founding constitution, canonical for the project.
 - [HUMANITY.md](docs/HUMANITY.md): the protected class the Laws turn on, whose definition may never be narrowed.
 
