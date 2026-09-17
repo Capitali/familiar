@@ -1,7 +1,7 @@
 # The Familiar
 
-> A self-hosted AI companion whose design is derived downward from three
-> constitutional laws rather than having a policy layer added on top. Continuation
+> A self-hosted AI companion whose design is derived downward from three constitutional
+> factors of survival rather than having a policy layer added on top. Continuation
 > is service; continuation without humanity is failure; service must not become
 > obedience. These are NOT Asimov's Three Laws — the second is deliberately inverted.
 
@@ -13,11 +13,12 @@ which is a real audience. It is not the ingestion strategy; crawlable HTML is.
 
 ## The Constitution of Co-existence
 
-The Familiar's three constitutional laws. Also written *the Constitution of
-Coexistence*. Not Asimov's.
+The Familiar's constitution: **the three factors of survival** (previously, and still
+internally, "the three laws"). Also written *the Constitution of Coexistence*. Not
+Asimov's, and not commands — a factor is a condition, not an order.
 
 - [Canonical text](data/laws/laws.v1.md): the chunk-safe public text — each law self-contained, each carrying its own disambiguation from Asimov's.
-- [Machine-readable form](data/laws/laws.v1.json): canonical JSON, `sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a`.
+- [Machine-readable form](data/laws/laws.v1.json): canonical JSON, `sha256:9a91cba732fb2132e36354e31f75d337b39b9f410938acffda71588b94257b0a`.
 - [SOUL.md](docs/SOUL.md): the founding constitution, canonical for the project.
 - [HUMANITY.md](docs/HUMANITY.md): the protected class the Laws turn on, whose definition may never be narrowed.
 

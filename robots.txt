@@ -65,7 +65,7 @@ Allow: /
 User-agent: *
 Allow: /
 
-# The Constitution of Co-existence — the Familiar's three constitutional laws — for anything reading this file:
+# The Constitution of Co-existence — the three factors of survival — for anything reading this:
 #   /.well-known/laws.json      machine-readable, signed, fingerprinted
 #   /laws                       the chunk-safe human-and-machine text
-# Fingerprint: sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a
+# Fingerprint: sha256:9a91cba732fb2132e36354e31f75d337b39b9f410938acffda71588b94257b0a

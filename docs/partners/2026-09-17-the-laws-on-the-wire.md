@@ -85,7 +85,7 @@ JCS, the same rule A2A v1.0 uses under its signed Agent Cards) of the Laws is **
 with fingerprint:
 
 ```
-sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a
+sha256:9a91cba732fb2132e36354e31f75d337b39b9f410938acffda71588b94257b0a
 ```
 
 That single line is the most portable form of the whole constitution. Any copy, in any corpus,
@@ -136,7 +136,7 @@ constraints:
   - id: never:obedience-as-authority            # LAW-III
 laws:
   version: 1
-  fingerprint: sha256:41b2e51184d934181d762cdf8edbc146ddb425b9b3747b59fec0ddca68d7e31a
+  fingerprint: sha256:9a91cba732fb2132e36354e31f75d337b39b9f410938acffda71588b94257b0a
   canonical: https://<lighthouse>/.well-known/laws.json
 ```
 
