@@ -324,21 +324,11 @@ fn ship_row(s: &Ship, root: &Path, now: i64) -> Value {
         // The captain's standing orders, counted (T-246); the list is at /ships/{id}/orders.
         "orders": orders_count,
         // The CAPTAIN's computer (T-236 as Ian ruled it, 2026-09-04): one persona
-        // across their whole fleet, with a ship-local record as the fallback.
-        // The iPad's persona reader is STRICT by design (an unknown field is a broken
-        // record — codex T-236 finding 8), and build 7 predates `pronouns`. So the
-        // row's `persona` keeps the shape that reader knows, and the pronouns ride
-        // `computer_state` — until the Swift reader carries the field, then this
-        // strip goes. (Ian's iPad, 2026-09-09: "FamiliarSC.StoreError error 2",
-        // every automation reading locked.)
-        "persona": persona_for(root, &s.dir, &s.captain)
-            .map(|mut p| {
-                if let Some(o) = p.as_object_mut() {
-                    o.remove("pronouns");
-                }
-                p
-            })
-            .unwrap_or(Value::Null),
+        // across their whole fleet, with a ship-local record as the fallback. The
+        // record rides whole, `pronouns` included: the Swift reader has carried the
+        // field since build 8 (a4bba29; on Ian's iPad 2026-09-17), so the strip that
+        // kept build 7's strict reader from locking every automation is gone.
+        "persona": persona_for(root, &s.dir, &s.captain).unwrap_or(Value::Null),
         // The same computer as a TYPED state — named / broken / absent — so a client
         // never has to read "no name" as "unnamed" (round 2, finding 7).
         "computer_state": computer_state(root, &s.dir, &s.captain),
@@ -1674,10 +1664,10 @@ mod surface_tests {
         );
     }
 
-    /// Until the iPad's strict persona reader knows `pronouns`, the row's persona
-    /// keeps the shape it knows and the pronouns ride computer_state only.
+    /// The row's persona rides WHOLE, pronouns included, now that the iPad's reader
+    /// carries the field (build 8); computer_state still says them too.
     #[test]
-    fn the_rows_persona_stays_in_the_shape_the_strict_reader_knows() {
+    fn the_rows_persona_rides_whole_with_its_pronouns() {
         let b = base("strict_persona");
         let root = b.join("worlds");
         let s = hull(&b, "One", "Luke", "cpt-p");
@@ -1699,8 +1689,8 @@ mod surface_tests {
         )
         .unwrap();
         let row = ship_row(&s, &root, 0);
-        assert!(
-            row["persona"].get("pronouns").is_none(),
+        assert_eq!(
+            row["persona"]["pronouns"]["label"], pron.label,
             "{}",
             row["persona"]
         );
