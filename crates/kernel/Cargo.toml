@@ -12,3 +12,6 @@ serde_json.workspace = true
 # store (see store.rs). `bundled` compiles SQLite in — no system library — and the kernel's own
 # `#![forbid(unsafe_code)]` still holds (it governs kernel code, not dependencies).
 rusqlite = { version = "0.32", features = ["bundled"] }
+# The refusal ledger (ledger.rs) chains its records by SHA-256 so the public can verify a
+# copy without trusting the writer. Same crate the mesh already hashes with; pure Rust.
+sha2 = "0.10"

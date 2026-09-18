@@ -6,6 +6,40 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-18 — T-248: the refusal ledger — every refusal as a hash-chained, redactable record
+
+Layer 4 of The Service Charter (T-250, on branch `claude/crewai-integration-architecture-3tl8pf`,
+published at <https://coexist.humanhighway.net/charter>) made mechanical. `crates/kernel/src/ledger.rs`
+appends one `Record` per refusal to `ledger.jsonl` in the data dir — the charter's fields verbatim
+(`timestamp` RFC 3339, `service_id`, `action_type`, `trigger`, `command_summary`,
+`affected_population`, `reasoning`, `human_oversight_notified`, `prev_hash`, `hash`). The hash is
+SHA-256 over the canonical JSON (keys sorted, compact) of the record with `hash` removed and the
+three free-text fields replaced by the SHA-256 of their text, chained on `prev_hash` from `genesis`.
+So `redacted()` — the three fields swapped for their hashes, `redacted: true` — verifies against
+exactly the same chain: the public copy hides whose command it was and still proves the record is
+intact. `verify` names the first broken link. A plain file beside the SQLite store on purpose: a
+chain the public is invited to check should be readable with `cat` and hashed with `shasum`, and
+`familiar export` (T-249) carries it verbatim.
+
+Three seams append (all the familiar's OWN decisions — no mark on a person; Ian's 2026-08-17 ruling
+untouched): `cycle::refuse_act` (an LLM-drafted act refused as constitution-breaking, trigger C3),
+the human request refused in the conversation path (`persist_exchange … "refused"`; who asked and
+what they said are the redactable fields), and `mesh::merge` where a peer's authority grant is
+refused at the boundary (C3 when constitutional, else `none`). `human_oversight_notified` is false
+everywhere: no oversight body exists yet, and the record says so rather than pretending.
+
+`familiar ledger [verify|show|export] [--redacted] [--last N] [--out FILE]` in
+`crates/cli/src/ledger_cmd.rs`. Cross-language smoke: a two-record chain written by a Python script
+from the charter's rule alone verified, showed redacted, exported redacted (the copy verifies), and a
+one-word tamper was caught at record 0. Kernel gains `sha2 = "0.10"` (already in the workspace via
+the mesh).
+
+Checks: `cargo fmt`, `cargo clippy` on kernel/cycle/mesh/cli `-D warnings`, `cargo test` on all
+four (kernel 255, cli 44, cycle 98+193+6+2+1, mesh green). Next: the redacted copy published to the
+reading room (a later brick, on Ian's word); the guard's own `Refuse` verdicts in the CLI gates
+(`cmd_actuate`, reach, discover) do not append yet — they are one-shot commands whose refusal is
+printed to the person running them, and adding them is a `ledger::record` call each.
+
 ## 2026-09-18 — T-249: familiar export — the household's record in open files, with a manifest
 
 `familiar export [--out <dir>] [--data-dir <dir>] [--store-root <dir>]` (new

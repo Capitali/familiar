@@ -28,6 +28,7 @@ pub mod guard;
 pub mod humanity;
 pub mod identity;
 pub mod intent;
+pub mod ledger;
 pub mod lineage;
 pub mod loops;
 pub mod machinery;

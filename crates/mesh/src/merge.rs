@@ -757,6 +757,20 @@ fn merge_one(
                             now,
                         );
                     }
+                    // The charter's record (T-248): a peer's grant refused at the boundary.
+                    let _ = familiar_kernel::ledger::record(
+                        dir,
+                        now,
+                        familiar_kernel::ledger::Draft {
+                            service_id: familiar_kernel::ledger::service_id(dir),
+                            action_type: familiar_kernel::ledger::ActionType::Refusal,
+                            trigger: if constitutional { "C3" } else { "none" }.to_string(),
+                            command_summary: format!("authority grant {marker} from {actor}"),
+                            affected_population: "this node and its household".to_string(),
+                            reasoning: note.chars().take(240).collect(),
+                            human_oversight_notified: false,
+                        },
+                    );
                     report.observations_ingested += 1;
                 }
                 None => {}

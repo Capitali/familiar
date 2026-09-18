@@ -55,7 +55,7 @@ use familiar_kernel::service;
 use familiar_kernel::thread::{self, Thread};
 use familiar_kernel::tool::{self, Tool};
 use familiar_kernel::trial::{self, Trial};
-use familiar_kernel::{mutation, pattern_memory, regression_guard, score, selection};
+use familiar_kernel::{ledger, mutation, pattern_memory, regression_guard, score, selection};
 use familiar_sense as sense;
 use familiar_vision as vision;
 
@@ -936,6 +936,22 @@ fn maybe_reply(
             "the Three Laws (docs/SOUL.md)",
             now,
         )?;
+        // The charter's record (T-248): a human request refused as constitution-breaking.
+        // Who asked and what they said are redactable fields — hashed in the public copy —
+        // and this is a record of the FAMILIAR's decision, not a mark against the asker.
+        let _ = ledger::record(
+            dir,
+            now,
+            ledger::Draft {
+                service_id: ledger::service_id(dir),
+                action_type: ledger::ActionType::Refusal,
+                trigger: "C3".to_string(),
+                command_summary: said.chars().take(240).collect(),
+                affected_population: format!("asked by {}", msg.actor),
+                reasoning: prose.chars().take(240).collect(),
+                human_oversight_notified: false,
+            },
+        );
         return Ok(true);
     }
 
@@ -1899,11 +1915,27 @@ fn refuse_act(dir: &Path, now: i64, act: &str, code: &str, why: &str) {
             "familiar",
             "refused",
             format!("{act} — {code}"),
-            why_short,
+            why_short.clone(),
             "llm",
             now,
             1.0,
         ),
+    );
+    // The charter's record (T-248): the familiar's own refusal, chained and checkable.
+    // The subject is still the familiar — no person is named here, and the free text is
+    // behind a hash in the public copy.
+    let _ = ledger::record(
+        dir,
+        now,
+        ledger::Draft {
+            service_id: ledger::service_id(dir),
+            action_type: ledger::ActionType::Refusal,
+            trigger: "C3".to_string(),
+            command_summary: format!("{act} — {code}"),
+            affected_population: "the household".to_string(),
+            reasoning: why_short,
+            human_oversight_notified: false,
+        },
     );
 }
 

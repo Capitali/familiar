@@ -13,6 +13,7 @@ mod economy;
 mod export;
 mod fleet;
 mod fleet_serve;
+mod ledger_cmd;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -81,6 +82,8 @@ commands:
                  (auditability); `db import` folds any legacy .jsonl into the DB
   export         the household's whole record as open files: `export [--out DIR]` copies
                  data/, worlds/, captains/ + MANIFEST.json (sha256) + README; secrets withheld
+  ledger         the refusal ledger (charter Layer 4): `ledger [verify|show|export]`
+                 `--redacted` hashes the free text; `export --out FILE`; the copy verifies
   agent          delegate a task to the boundary-mediated agentic loop:
                  `agent run <task…> [--steps N]` (refused unless the Pact opens it)
   mesh           federate with peer familiars (headless mirror of the Glass wizard):
@@ -143,6 +146,15 @@ fn main() -> ExitCode {
         Some("consult") => cmd_consult(rest),
         Some("db") => cmd_db(rest),
         Some("export") => export::cmd_export(rest),
+        Some("ledger") => {
+            let f = flags(rest);
+            let positional: Vec<String> = rest
+                .iter()
+                .filter(|a| !a.starts_with("--"))
+                .cloned()
+                .collect();
+            ledger_cmd::cmd_ledger(&positional, &f)
+        }
         Some("agent") => cmd_agent(rest),
         Some("mesh") => cmd_mesh(rest),
         Some("mcp") => cmd_mcp(rest),
