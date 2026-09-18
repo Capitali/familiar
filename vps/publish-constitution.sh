@@ -150,8 +150,20 @@ fi
 
 systemctl daemon-reload
 CONSTITUTION_DOMAIN="$DOMAIN" caddy validate --config /etc/caddy/Caddyfile
+# `caddy validate` runs here as root and provisions the site's log writer, which
+# creates /var/log/caddy/constitution.log owned by root, mode 0600. The service runs
+# as the caddy user and cannot open that file, so the reload fails and the restart
+# that follows it fails too (2026-09-18: both names were down for two minutes).
+chown -R caddy:caddy /var/log/caddy
 systemctl enable --now caddy
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
+# Say "published" only over a server that is actually up.
+sleep 2
+if ! systemctl is-active --quiet caddy; then
+  echo "caddy is not running after the reload — nothing is published:" >&2
+  journalctl -u caddy -n 20 --no-pager >&2
+  exit 1
+fi
 
 cat <<EOF
 
