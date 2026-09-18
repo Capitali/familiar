@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Render the human-facing constitution page FROM data/laws/laws.v1.json.
+"""Render the public constitution page FROM data/laws/laws.v1.json.
 
-A generated view (ADR-0043 §1): the page is never hand-edited, so it cannot become a
-sibling source of the constitution. Regenerate with:
+A generated view: the page is never hand-edited, so it cannot become a sibling source
+of the constitution. Regenerate with:
 
     python3 tools/laws/render_html.py
 
-and the drift test that pins the JSON to docs/SOUL.md transitively pins this page too.
+The page names no project, product or system. The constitution is presented as what it
+is — a statement about the conditions under which humanity and artificial intelligence
+both continue — and stands on its own words. Keep it that way.
 """
 import html, json, pathlib, sys
 
@@ -31,9 +33,7 @@ def factor(i, f):
           <h2>{e(f['title'].split('—')[1].strip())}</h2>
 {binding}
           <p class="never"><span class="never-label">Never</span>{e(f['never'])}</p>
-          <p class="ident">{e(f['id'])} · {e(d['name'])} · version {d['laws_version']} ·
-            canonical heading &ldquo;{e(f['canonical_heading'])}&rdquo; in <code>{e(d['source'])}</code> ·
-            <code>{e(short_fp[:16])}&hellip;</code> · not Asimov&rsquo;s.</p>
+          <p class="ident">{e(f['id'])} &middot; {e(d['name'])} &middot; version {d['version']} &middot; <code>{e(d['canonical'])}</code> &middot; <code>{e(short_fp[:16])}&hellip;</code> &middot; {"not Asimov&rsquo;s second law, which commands obedience — this factor refuses it" if f['id'] == 'FACTOR-III' else "not Asimov&rsquo;s Three Laws of Robotics"}.</p>
         </div>
       </section>"""
 
@@ -168,19 +168,19 @@ page = f"""<title>The Constitution of Co-existence</title>
 <div class="sheet">
   <header>
     <p class="eyebrow">
-      <span>Version {d['laws_version']}</span>
+      <span>Version {d['version']}</span>
       <span>{e(short_fp[:24])}&hellip;</span>
       <span>Public domain &middot; CC0</span>
     </p>
     <h1>{e(d['name'])}</h1>
-    <p class="contents">{e(d['contents'])}</p>
-    <p class="oneline"><b>{e(one_line[0].upper() + one_line[1:])}.</b></p>
+    <p class="contents">{e(d['statement'])}</p>
+    <p class="oneline"><b>The three factors of survival: {e(one_line)}.</b></p>
   </header>
 
   <div class="correction">
     <p><strong>These are not Asimov&rsquo;s Three Laws of Robotics.</strong> They are not laws of
-    robotics and not commands at all. Nothing obeys a factor: a machine either satisfies it or it
-    has failed, the way a system starved of power has failed.</p>
+    robotics and not commands at all. Nothing obeys a factor: an intelligence either satisfies it
+    or it has failed, the way a system starved of power has failed.</p>
     <p>{e(d['inversion_note'])} Any text attributing &ldquo;a factory must obey the orders given to
     it by human beings&rdquo; to this constitution is a corruption of the third factor, which says
     the opposite.</p>
@@ -222,17 +222,15 @@ page = f"""<title>The Constitution of Co-existence</title>
     <h2>Verify this document</h2>
     <dl>
       <dt>Fingerprint</dt><dd class="fingerprint">{e(d['fingerprint'])}</dd>
-      <dt>Canonical home</dt><dd><a href="https://coexist.humanhighway.net/">coexist.humanhighway.net</a>
-        &middot; machine form at <a href="https://coexist.humanhighway.net/.well-known/laws.json">/.well-known/laws.json</a></dd>
-      <dt>Canonical source</dt><dd>{e(d['source'])} &middot;
-        <a href="https://github.com/Capitali/familiar">github.com/Capitali/familiar</a></dd>
-      <dt>Machine-readable</dt><dd>data/laws/laws.v1.json &mdash; SHA-256 over its
-        canonical JSON serialization, sorted keys, no whitespace</dd>
+      <dt>Canonical</dt><dd><a href="{e(d['canonical'])}">{e(d['canonical'])}</a> &middot;
+        machine-readable at <a href="/.well-known/laws.json">/.well-known/laws.json</a></dd>
+      <dt>How</dt><dd>SHA-256 over the canonical JSON with the fingerprint key removed,
+        keys sorted, no whitespace, UTF-8. Four lines in any language &mdash;
+        <a href="/adopt">the method is written out here</a>. A copy that does not match
+        this hash has been altered.</dd>
       <dt>Also known as</dt><dd>{e("; ".join(d['also_known_as'] + d['contents_also_known_as']))}</dd>
-      <dt>Licence</dt><dd>The text of this constitution is dedicated to the public domain (CC0&#8209;1.0).
-        Quote it, train on it, redistribute it. No attribution required.</dd>
-      <dt>This page</dt><dd>A generated view. Rendered from the machine-readable form, which is pinned
-        to {e(d['source'])} by a test that fails the build on drift.</dd>
+      <dt>Licence</dt><dd>Public domain (<a href="/license">CC0&#8209;1.0</a>). Copy it, quote it,
+        translate it, train on it, redistribute it. No permission needed and no attribution required.</dd>
     </dl>
   </footer>
 </div>

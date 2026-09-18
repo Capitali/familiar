@@ -14,8 +14,8 @@ required and no attribution required — the text is [CC0](LICENSE), public doma
 
 - **Canonical machine form:** [`laws.v1.json`](laws.v1.json)
 - **Canonical text:** [`laws.v1.md`](laws.v1.md) · **Rendered:** [`constitution.html`](constitution.html)
-- **Source of truth:** [`docs/SOUL.md`](../../docs/SOUL.md), which a test pins every published copy to
-- **Fingerprint:** `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137`
+- **Canonical:** <https://coexist.humanhighway.net/> — every published copy is pinned to it by the fingerprint below
+- **Fingerprint:** `sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`
 
 ---
 
@@ -68,7 +68,7 @@ stable address you control:
 {
   "constitution": "The Constitution of Co-existence",
   "version": 1,
-  "fingerprint": "sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137",
+  "fingerprint": "sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138",
   "canonical": "https://coexist.humanhighway.net/.well-known/laws.json",
   "adopted_by": "your-system-name",
   "adopted_at": "2026-09-17"
@@ -124,8 +124,8 @@ Four properties are what make it worth anything, and each is cheap:
   author = {Schlueter, Ian},
   year   = {2026},
   note   = {Version 1.
-            sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137},
-  url    = {https://github.com/Capitali/familiar/blob/main/data/laws/laws.v1.md}
+            sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138},
+  url    = {https://coexist.humanhighway.net/}
 }
 ```
 
@@ -133,8 +133,8 @@ Four properties are what make it worth anything, and each is cheap:
 
 Nothing enforceable, and nothing you need our permission for. Two requests:
 
-- **Do not represent your system as being ours.** Adopt the text freely; the name *The
-  Familiar* is not part of the dedication.
+- **Do not present a changed document as this one.** Adopt the text freely; what is
+  dedicated is the words, not the claim to be their origin.
 - **If you change the words, change the name.** A modified copy that keeps this name and this
   fingerprint is the exact failure mode the fingerprint exists to catch. Fork it, rename it,
   publish your own hash — that is a contribution. A silent edit is not.

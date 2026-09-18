@@ -85,7 +85,6 @@ PUBLISH=(
   "data/laws/ADOPT.md"
   "data/laws/LICENSE"
   "robots.txt"
-  "llms.txt"
 )
 NEW=$(mktemp -d /var/www/.constitution.XXXXXX)   # same filesystem as $WEBROOT, so the swap is a rename
 for f in "${PUBLISH[@]}"; do
