@@ -10,6 +10,7 @@
 mod autonomy_cmd;
 mod daemon;
 mod economy;
+mod export;
 mod fleet;
 mod fleet_serve;
 
@@ -78,6 +79,8 @@ commands:
   consult        consult the LLM (refused unless a human has opened the Pact)
   db             storage: `db export [--out DIR]` dumps every table to JSONL
                  (auditability); `db import` folds any legacy .jsonl into the DB
+  export         the household's whole record as open files: `export [--out DIR]` copies
+                 data/, worlds/, captains/ + MANIFEST.json (sha256) + README; secrets withheld
   agent          delegate a task to the boundary-mediated agentic loop:
                  `agent run <task…> [--steps N]` (refused unless the Pact opens it)
   mesh           federate with peer familiars (headless mirror of the Glass wizard):
@@ -139,6 +142,7 @@ fn main() -> ExitCode {
         Some("guard") => cmd_guard(rest),
         Some("consult") => cmd_consult(rest),
         Some("db") => cmd_db(rest),
+        Some("export") => export::cmd_export(rest),
         Some("agent") => cmd_agent(rest),
         Some("mesh") => cmd_mesh(rest),
         Some("mcp") => cmd_mcp(rest),
@@ -3785,7 +3789,7 @@ fn cmd_consult(args: &[String]) -> ExitCode {
 
 /// Parse `--key value` and `--key=value` flags into a map. Bare trailing `--key`
 /// maps to an empty string.
-fn flags(args: &[String]) -> HashMap<String, String> {
+pub(crate) fn flags(args: &[String]) -> HashMap<String, String> {
     let mut m = HashMap::new();
     let mut i = 0;
     while i < args.len() {
@@ -3813,7 +3817,7 @@ fn flags(args: &[String]) -> HashMap<String, String> {
 /// Where ship stores live by default: a `worlds/` directory BESIDE the household data
 /// dir, never inside it — a household scan must traverse a store that simply contains
 /// no ship data (ADR-0045 §1), and nesting would put ship files on that walk.
-fn world_store_root(dir: &std::path::Path, flag: Option<&str>) -> std::path::PathBuf {
+pub(crate) fn world_store_root(dir: &std::path::Path, flag: Option<&str>) -> std::path::PathBuf {
     match flag {
         Some(p) => std::path::PathBuf::from(p),
         None => dir

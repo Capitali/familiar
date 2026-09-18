@@ -6,6 +6,46 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-18 — T-249: familiar export — the household's record in open files, with a manifest
+
+`familiar export [--out <dir>] [--data-dir <dir>] [--store-root <dir>]` (new
+`crates/cli/src/export.rs`, wired in `main.rs` like every other subcommand) writes
+`<out>/familiar-export-<YYYY-MM-DD>/` holding `data/` (boundary.json, familiar.db with its
+-wal/-shm, every top-level .json/.jsonl including ledger.jsonl, `mesh/node.json` and
+`mesh/records/` only), `worlds/` and `captains/` copied whole, plus `MANIFEST.json`
+`{exported_at, service_id, files: [{path, bytes, sha256}], withheld: [{path, reason}]}` and a
+README.md (what each directory is, `shasum -a 256` verification, what was withheld and why,
+how to start another familiar on the copy with `--data-dir`). Files are copied as the plain
+JSON/JSONL/SQLite they already are — no archive, no encoding.
+
+Why: the charter's C4 (exit is a right) made mechanical at household scale. The files were
+already open and local; this makes leaving one command, and the manifest makes the copy
+checkable by anyone with `shasum`.
+
+Withholding is by name and by place (`withhold_reason`, one function, blunt on purpose):
+`ucf.env`, `fleet-serve.token`, `daemon.log`, any `mesh/` file other than `node.json` and
+`records/**` (node_key, group.json, tls_key.der, push_tokens.json, peers, inboxes…), and any
+name containing `secret`, `token` or `.key`. The mesh rule keys on a `mesh` path component,
+so a ship world's own `mesh/node_key` is withheld the same way the household's is. Withheld
+files are listed, never silently skipped. `service_id` is `node_id` from `mesh/node.json`,
+null without one. The date is formatted from `SystemTime` by civil-from-days — no chrono, no
+new dependency. `flags` and `world_store_root` in main.rs became `pub(crate)` for the new
+module.
+
+Checks: `cargo fmt --all`, `cargo clippy -p familiar-cli --all-targets -- -D warnings`,
+`cargo test -p familiar-cli export` (3 pass: `export_copies_the_record_and_withholds_secrets`,
+`withholding_rules_are_by_name_and_by_place`, `ymd_formats_utc_dates`). Smoke on Ian's live
+data dir into a scratch dir: `exported 131 files (78133681 bytes), 68 withheld, service
+1c991bc6c1c4aa4f → …/familiar-export-2026-09-18`; `jq … | shasum -a 256 -c` reported zero
+mismatches; the copy was deleted.
+
+Next developer: the data dir is deliberately NOT copied whole — top-level non-JSON files
+(pidfile, .txt cursors, .imported leftovers, logs) and helper dirs (`actuators/`, `agent/`,
+`artifacts/`, `eye/`, `llm/`, `export/`) stay home and are not listed either; if one of them
+becomes part of the record, add it to `Walk::data_dir`. The export is a file copy of a live
+SQLite database — for a consistent snapshot stop the daemon first (`familiar daemon stop`) or
+accept that the -wal may be mid-checkpoint; SQLite recovers, but the hash is of that instant.
+
 ## 2026-09-18 — Exchange sync: the cash ledger's `dock` and `unnamed` lines (ucf-exchange #61)
 
 Jeff's #61 (0be370b, 2026-09-17) stops the exchange's `/v1/cash` calling a berth's arrival fee

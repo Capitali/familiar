@@ -1275,15 +1275,6 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - accept: an append-only `ledger.jsonl` in the data dir, one record per consequential refusal/escalation `{timestamp, service_id, action_type, trigger, command_summary, affected_population, reasoning, human_oversight_notified, prev_hash, hash}` with `hash = sha256(canonical record without hash)` chained on `prev_hash`; `familiar ledger verify` walks the chain and names the first broken link; `--redacted` drops the free-text fields under a stated policy and keeps the chain verifiable; the guard's refuse verdict appends a record at the seam where it is already counted; tests pin the chain, the redaction, and that a redacted export still verifies
 - notes: the charter's answer to red-team Q5 (self-certification): a refusal the public can check rather than one the system asserts. Public copy to the reading room is a later brick, on Ian's word.
 
-### T-249 · `familiar export` — a household's whole record in open files, with a manifest
-- status: claimed
-- owner: controller (wildhorse)
-- scope: crates/cli/src/export.rs (new), main.rs wiring, docs/DEVELOPMENT_LOG.md
-- depends: —
-- accept: `familiar export [--out <dir>]` copies the data dir's worlds/, captains/, journals, persona, orders, ledger.jsonl and boundary into `<out>/familiar-export-<date>/` as the plain files they already are, plus `MANIFEST.json` `{exported_at, service_id, files: [{path, bytes, sha256}]}`; never includes secrets (`ucf.env` keys, fleet-serve.token, mesh group secret) — those are listed in the manifest as `withheld` with the reason; a test builds a fixture dir and pins the manifest and the withholding
-- notes: the charter's C4 (exit is a right) made mechanical at household scale: the files are already open and local; this makes leaving one command. Migration notes ride in the export as README.md.
-
-
 ### T-211 · The conversation and the mind are two different organisms
 - status: **done 2026-08-20** — closed against ADR-0043 (accepted). Built on Ian's "Build q1-q4 and the rest. Go!": brick 3 (stakes — AskDraft, no `none`, anti-vacuity; ADR-0040 D2 closed), brick 5′ (the dereference replaced the carve-out — own speech zero-weight, laundering invariant pinned), Q2 retirement (answer_requests + fetch_and_answer gone; persist_exchange makes the dialogue path the producer of the durable Request/Answer nouns), brick 6 (ADR-0043 + law-quotation gap pinned as labelled regression, no detector — Ian's word). Q5/Q6 of the dialogue continue as T-216/T-217
 - owner: companion:claude-opus (claude chair) + companion:codex (dialogue partner)
@@ -1395,6 +1386,15 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 - notes: repository brick merged as 6e02b0a: two reversible surfaces, changed-only three-point feed, fail-safe human-owned provisioner, 5 Python tests + full green bar. Ian (2026-08-14): a virtual smart home for the familiar to explore, begin to control, and report on when human intervention would improve efficiency or awareness. Controller: live upgrade/deploy belongs to infra; proposed as T-117 (renumbered from T-112 after controller assigned that id to obs_class)
 
 ## Done (recent — pruned to ~10; history is git's)
+
+### T-249 · `familiar export` — a household's whole record in open files, with a manifest
+- status: done
+- owner: controller (wildhorse)
+- merged: see git (2026-09-18)
+- scope: crates/cli/src/export.rs (new), main.rs wiring, docs/DEVELOPMENT_LOG.md
+- depends: —
+- accept: `familiar export [--out <dir>]` copies the data dir's worlds/, captains/, journals, persona, orders, ledger.jsonl and boundary into `<out>/familiar-export-<date>/` as the plain files they already are, plus `MANIFEST.json` `{exported_at, service_id, files: [{path, bytes, sha256}]}`; never includes secrets (`ucf.env` keys, fleet-serve.token, mesh group secret) — those are listed in the manifest as `withheld` with the reason; a test builds a fixture dir and pins the manifest and the withholding
+- notes: RESULT 2026-09-18: `familiar export [--out DIR] [--data-dir] [--store-root]` writes `familiar-export-<date>/{data,worlds,captains}` + MANIFEST.json (sha256 per file, `withheld` with reasons) + README.md; smoke on Ian's live data: 131 files, 68 withheld (ucf.env, fleet-serve.token, every mesh/ file but node.json + records/, daemon.log), every hash verifies with `shasum -a 256 -c`; 3 tests. Originally: the charter's C4 (exit is a right) made mechanical at household scale: the files are already open and local; this makes leaving one command. Migration notes ride in the export as README.md.
 
 ### T-230 · Calibration feedback reads bounded recent results and reports class×polarity
 - status: done
