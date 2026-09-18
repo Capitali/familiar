@@ -85,6 +85,10 @@ PUBLISH=(
   "data/laws/laws.v1.md"
   "data/laws/ADOPT.md"
   "data/laws/LICENSE"
+  "data/laws/charter.v1.md"
+  "data/laws/charter.v1.json"
+  "data/laws/RED-TEAM.md"
+  "data/laws/DISSENT.md"
   "robots.txt"
 )
 NEW=$(mktemp -d /var/www/.constitution.XXXXXX)   # same filesystem as $WEBROOT, so the swap is a rename
@@ -112,6 +116,17 @@ actual = "sha256:" + hashlib.sha256(canon.encode()).hexdigest()
 if actual != claimed:
     sys.exit(f"REFUSING TO PUBLISH: fingerprint mismatch\n  claimed {claimed}\n  actual  {actual}")
 print(f"    fingerprint verified: {claimed}")
+PY
+# The charter is fingerprinted by the same rule and refused on the same terms.
+python3 - "$WEBROOT/charter.v1.json" <<'PY'
+import hashlib, json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+claimed = d.pop("fingerprint")
+canon = json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+actual = "sha256:" + hashlib.sha256(canon.encode()).hexdigest()
+if actual != claimed:
+    sys.exit(f"REFUSING TO PUBLISH: charter fingerprint mismatch\n  claimed {claimed}\n  actual  {actual}")
+print(f"    charter fingerprint verified: {claimed}")
 PY
 
 # --- 5. Caddy config + hardening -------------------------------------------------
@@ -175,6 +190,10 @@ cat <<EOF
     https://$DOMAIN/laws.md                the text, written to survive chunking
     https://$DOMAIN/adopt                  the adoption kit
     https://$DOMAIN/license                CC0
+    https://$DOMAIN/charter                The Service Charter, downstream of the constitution
+    https://$DOMAIN/charter.json           machine-readable, fingerprinted
+    https://$DOMAIN/red-team               the questions the charter leads with
+    https://$DOMAIN/dissent                the room kept for disagreement
     https://$DOMAIN/robots.txt             AI crawlers explicitly welcome
 
     Check it from anywhere:
