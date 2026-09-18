@@ -10,8 +10,8 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ## Proposed
 
 ### T-247 · The join badge says one sentence, and leaves the fifteen lines to the Device screen
-- status: proposed
-- owner: —
+- status: **claimed 2026-09-18 (companion:claude, MacOnStick)** — a pure sentence-builder in FamiliarMesh (`JoinFailure`), pinned for the all-timeout and the mixed case; AppModel's every-door-failed branch sets the badge to that sentence and keeps the lines in `attemptLog`
+- owner: companion:claude (MacOnStick)
 - scope: ios/Shared/Sources/AppModel.swift (the every-candidate-failed branch that sets `worldviewError`), the sphere badge that renders it, a FamiliarMesh/AppModel test
 - depends: —
 - accept: when every door fails, the badge carries one line — how many doors tried, the dominant cause ("every door timed out — off Wi-Fi?", "the lighthouse dropped the connection"), the pin counts — and the per-door lines stay in `attemptLog` (already rendered on the Device screen); a test pins the sentence for the all-timeout and the mixed case; nothing about candidate order or racing (T-231) changes
@@ -59,7 +59,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 ### T-241 · Economic history and profit analysis, by captain — trend lines on the UCF Familiar views
 - **proposed (Ian, 2026-09-09, verbatim): "Familiar UCF views should include economic history/trend lines and analysis of profit in summary form for overview by captain."**
 - status: **HOST HALF LANDED (wildhorse, 2026-09-09)** — `crates/cli/src/economy.rs`: from each hull's journal, every `credits` reading is a point and every delta between two readings is exact money, booked to the last act that could have moved it (fill → trade bought/sold, load-closed → freight, Refuel/DivertToPump → fuel, Repair → repair, outfitted → outfit, paid-down → debt, else "other"); readings thinned to one per hour; pooled per captain across hulls (purses summed per hour with carry-forward, flows summed); summary = start → now, delta, least-squares trend ℳ/day, best and worst single move with cause; `analysis` = the host's sentences. Wire: **`GET /captains/{id}/economy?window=24h|7d|30d`** (per-hull + pooled, with points) and **`economy`** (pooled summary + analysis, no points) on the captain brief. CLI: `familiar fleet economy [--window 7d] [--json]`. Pinned (attribution, window seeding, thinning, pooling, route + brief).
-- **iPad half — MacOnStick (FamiliarSC/UCFFamiliar):** a captain-overview screen drawing `pooled.points` as a trend line (Swift Charts), the flows as a stacked bar or waterfall (earned vs spent by cause), and the `analysis` sentences as the summary; per-hull lines toggleable; window picker 24h/7d/30d. Read `economy` off the brief for the summary card without a second call.
+- **iPad half — CLAIMED 2026-09-18 (companion:claude, MacOnStick):** `FamiliarSC/Economy.swift` (typed read of `/captains/{id}/economy` and the brief's `economy`), `ShipsFeed.economy(world:window:)` with a nil default, `EconomyView` off the bridge (Swift Charts trend line + earned/spent bars + the host's analysis, window picker), and the analysis sentences on the fleet document Felix reads. Scope: ios/FamiliarSC only. Was: a captain-overview screen drawing `pooled.points` as a trend line (Swift Charts), the flows as a stacked bar or waterfall (earned vs spent by cause), and the `analysis` sentences as the summary; per-hull lines toggleable; window picker 24h/7d/30d. Read `economy` off the brief for the summary card without a second call.
 - depends: T-236 (captain_id keys the route), T-238 (the journal's `why` on fills is what "analysis" will cite next).
 - notes: the trend is a straight line through what happened — say so on screen. Debt is not journaled per fold; it rides `/v1/me` on the row, so "net worth" is out of scope until the pilot journals debt (small follow-up).
 
