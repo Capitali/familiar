@@ -34,6 +34,8 @@ pub(crate) struct Flows {
     pub repair: i64,
     pub outfit: i64,
     pub debt_paid: i64,
+    /// Berth fees on arrival, named by the exchange since #61 (before it: `other`).
+    pub dock: i64,
     pub other: i64,
     pub fills: i64,
     pub settles: i64,
@@ -48,6 +50,7 @@ impl Flows {
         self.repair += o.repair;
         self.outfit += o.outfit;
         self.debt_paid += o.debt_paid;
+        self.dock += o.dock;
         self.other += o.other;
         self.fills += o.fills;
         self.settles += o.settles;
@@ -96,7 +99,8 @@ pub(crate) struct History {
 /// The exchange's cash ledger for one hull (`GET /v1/cash`): every credit in and
 /// out as a signed line with the engine's own `kind` — `trade`, `freight`, `fuel`,
 /// `repair`, `refit`, `crew`, `galley`, `lease`, `paws`, `survey`, `equity`,
-/// `insurance`, `opening`, `other` — newest first, up to 400 lines. Where it
+/// `insurance`, `dock`, `opening`, `unnamed` (and `other` on lines written before
+/// the exchange's #61) — newest first, up to 400 lines. Where it
 /// answers, it replaces the journal's guess about CAUSE with the fold's own word;
 /// the sum of its lines is exactly the credits that moved.
 ///
@@ -122,6 +126,8 @@ pub(crate) fn flows_from_cash(cash: &Value, since_tick: i64) -> Option<Flows> {
             "repair" => flows.repair += amount,
             "refit" | "crew" | "galley" => flows.outfit += amount,
             "lease" => flows.debt_paid += amount,
+            // A berth's fee on arrival (exchange #61); before it these were `other`.
+            "dock" => flows.dock += amount,
             // The balance carried forward is not a movement inside the window.
             "opening" => continue,
             _ => flows.other += amount,
@@ -427,6 +433,7 @@ pub(crate) fn analysis(h: &History) -> Vec<String> {
         ("repair", f.repair),
         ("outfit", f.outfit),
         ("debt paid", f.debt_paid),
+        ("dock", f.dock),
         ("other", f.other),
     ] {
         if n != 0 {
@@ -498,7 +505,9 @@ mod tests {
     #[test]
     fn the_exchanges_cash_ledger_names_every_flow_and_the_opening_line_is_not_one() {
         let cash = json!({"credits": 6193, "lines": [
+            {"tick": 13264, "amount": -12, "kind": "dock", "note": "dock fee at velvet-array"},
             {"tick": 13263, "amount": -5, "kind": "other", "note": "departed"},
+            {"tick": 13262, "amount": -3, "kind": "unnamed", "note": "credits moved with no receipt"},
             {"tick": 13256, "amount": 476, "kind": "freight", "note": "L5391 settled"},
             {"tick": 13250, "amount": -105, "kind": "trade", "note": "bought 10 kibble"},
             {"tick": 13249, "amount": 300, "kind": "trade", "note": "sold 12 pate"},
@@ -510,8 +519,8 @@ mod tests {
         let f = flows_from_cash(&cash, 13240).unwrap();
         assert_eq!((f.trade_sold, f.trade_bought), (300, -105));
         assert_eq!(
-            (f.freight, f.fuel, f.debt_paid, f.other, f.outfit),
-            (476, -38, -600, -5, 0)
+            (f.freight, f.fuel, f.debt_paid, f.other, f.outfit, f.dock),
+            (476, -38, -600, -8, 0, -12)
         );
         assert!(flows_from_cash(&json!({"lines": []}), 0).is_none());
         assert!(flows_from_cash(&json!({"error": "no such route"}), 0).is_none());

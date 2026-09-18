@@ -6,6 +6,27 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-18 — Exchange sync: the cash ledger's `dock` and `unnamed` lines (ucf-exchange #61)
+
+Jeff's #61 (0be370b, 2026-09-17) stops the exchange's `/v1/cash` calling a berth's arrival fee
+"credits moved with no receipt to name them": those are now `dock` lines ("dock fee at
+<station>", the berth's fee less the standing rebate), and the residue that still has no
+receipt is `unnamed` rather than `other` (`other` stays on lines written before #61).
+`flows_from_cash` in `crates/cli/src/economy.rs` folds `dock` into its own bucket
+(`Flows.dock`, pooled across a captain's hulls, "dock ℳ-N" in the brief's sentence) and
+lets `unnamed` fall to `other` as before. Test extended with a dock and an unnamed line.
+
+Also read in the same sweep and needing nothing from the pilot: #62 (THE DISPATCH is a
+MeowNet board — `/v1/news` keeps its `wire` spellings announced/in-effect/withdrawn/expired,
+now composed from one rule shared with the board); #164 (`brokerCharterTimeRate` 20 joins
+`Content/standard-dials.json`, 43 dials — **not filed on PROD yet**, "the operator's call";
+broker pay reaches the pilot through the board row's `payable`, so no doctrine change
+until it is). Deck (`Content/market/events.json`) unchanged since our copy.
+
+Checks: `cargo fmt`, `cargo clippy -p familiar-cli --all-targets -D warnings`, `cargo test -p
+familiar-cli economy` (6 pass). LOCAL: exchange rebuilt at 47731a9 and restarted by PID,
+43 dials refiled — see STATE.
+
 ## 2026-09-16 — T-236 codex round 3, the Swift finding: a bridge that switched ships stays switched
 
 codex T-236 brick 1 re-verification, round 3 (`docs/reviews/2026-09-16-t236-brick1-codex-reverification-r3.md`,
