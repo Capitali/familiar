@@ -128,3 +128,85 @@ casually rebuilt.
 Then merge the branch to `main` and re-run the same command without `FAMILIAR_REF`,
 so the published copy tracks main rather than a feature branch. Re-running it is how
 you republish after any constitution change; it is idempotent.
+
+---
+
+## Troubleshooting: the URL returns an HTTPS error
+
+Reported 2026-09-18. "An HTTPS error" covers several distinct faults; the browser's
+exact wording, or the certificate the server actually presents, separates them in one
+step. Work it in this order — each check rules out a whole class.
+
+| What you see | What it means |
+|---|---|
+| `ERR_CERT_AUTHORITY_INVALID`, "not private", self-signed | Caddy fell back to its internal CA because Let's Encrypt issuance failed |
+| `ERR_CERT_COMMON_NAME_INVALID`, or a cert naming some other domain | the name resolves somewhere that is not the lighthouse — DreamHost hosting, most likely |
+| `ERR_CONNECTION_REFUSED` / timeout | nothing is listening on 443, or a firewall is dropping it |
+
+**1. Where does the name actually point?**
+
+```sh
+dig coexist.humanhighway.net +short          # want exactly: 134.209.168.50
+dig coexist.humanhighway.net AAAA +short     # want: nothing
+```
+
+A DreamHost-hosted zone can already carry a wildcard or a parked entry for the
+subdomain, and a browser preferring a stray AAAA over the A record produces a
+certificate error that looks nothing like a DNS problem. If the answer is not
+`134.209.168.50` and nothing else, the fault is in the zone and no amount of work on
+the VPS will fix it.
+
+**2. Which certificate is being presented?**
+
+```sh
+openssl s_client -connect coexist.humanhighway.net:443 \
+  -servername coexist.humanhighway.net </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+Issuer `Let's Encrypt` → issuance worked and the fault is elsewhere. Issuer
+`Caddy Local Authority` → issuance failed; go to 3. A subject naming another domain
+entirely → go back to 1.
+
+**3. Is port 80 reachable from the internet?**
+
+This is the most likely single cause. Let's Encrypt validates over HTTP-01 on port
+80, and `ufw` is not the only firewall in front of this box:
+
+```sh
+nc -vz 134.209.168.50 80
+nc -vz 134.209.168.50 443
+```
+
+Both must be open **from off-network**. `vps/publish-constitution.sh` opens them in
+ufw, but a **DigitalOcean cloud firewall** attached to the droplet is a separate
+layer that ufw cannot see or change. If the droplet has one permitting only 22 and
+47100, the ACME challenge never arrives, Caddy falls back to its internal CA, and
+everything on the box looks healthy while the browser refuses the certificate. Fix it
+in the DigitalOcean control panel (Networking > Firewalls), then:
+
+```sh
+ssh root@134.209.168.50 'systemctl restart caddy'
+```
+
+**4. What does Caddy say?** It states the reason plainly:
+
+```sh
+ssh root@134.209.168.50 \
+  'systemctl status caddy --no-pager; echo ---; journalctl -u caddy -n 80 --no-pager; echo ---; ufw status'
+```
+
+Look for `obtain certificate`, `challenge failed`, `timeout`, or `rate limit`. Note
+that Let's Encrypt rate-limits repeated failures for the same name — if the log shows
+that, stop retrying and wait it out rather than restarting Caddy in a loop.
+
+**5. Only if 1-4 are all clean**, suspect the config:
+
+```sh
+ssh root@134.209.168.50 \
+  'CONSTITUTION_DOMAIN=coexist.humanhighway.net caddy validate --config /etc/caddy/Caddyfile'
+```
+
+A bad Caddyfile should never reach this point — the publish script validates before
+starting Caddy and aborts on failure — so a fault here means the file on the box is
+not the one the script installed.
