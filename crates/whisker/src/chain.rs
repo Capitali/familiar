@@ -1089,6 +1089,49 @@ pub fn parse_production(v: &Value, last: usize) -> Option<LineReading> {
     })
 }
 
+/// Parse one `/v1/industry/series?station=` reply (exchange #68) into a reading
+/// per line, keeping the newest `last` hourly points of each — the same
+/// `LineReading` the per-recipe `/production` route yields, so everything
+/// downstream (`with_utilization`, `measured_lines`) is unchanged. One call per
+/// berth instead of one per recipe, and the exchange's own `blockedReason` is
+/// already the LAST reason in the hour. Lines with no points yet are skipped:
+/// "not charted" is not "stalled". None when the route is absent (PROD before
+/// Jeff deploys it) or the berth has no plant, so the caller falls back.
+pub fn parse_series(v: &Value, last: usize) -> Option<Vec<LineReading>> {
+    let lines = v.get("lines")?.as_array()?;
+    let interval_ticks = v
+        .get("intervalTicks")
+        .and_then(Value::as_i64)
+        .filter(|t| *t > 0)
+        .unwrap_or(PRODUCTION_INTERVAL_TICKS);
+    let i = |b: &Value, k: &str| b.get(k).and_then(Value::as_i64).unwrap_or(0);
+    let out: Vec<LineReading> = lines
+        .iter()
+        .filter_map(|line| {
+            let recipe = line.get("recipe")?.as_str().filter(|r| !r.is_empty())?;
+            let points = line.get("points")?.as_array()?;
+            if points.is_empty() {
+                return None;
+            }
+            let tail = &points[points.len().saturating_sub(last.max(1))..];
+            Some(LineReading {
+                recipe: recipe.to_string(),
+                interval_ticks,
+                buckets: tail.len() as i64,
+                cycles: tail.iter().map(|b| i(b, "cyclesCompleted")).sum(),
+                idle_ticks: tail.iter().map(|b| i(b, "idleTicks")).sum(),
+                blocked: tail
+                    .iter()
+                    .rev()
+                    .find_map(|b| b.get("blockedReason").and_then(Value::as_str))
+                    .filter(|r| !r.is_empty())
+                    .map(String::from),
+            })
+        })
+        .collect();
+    Some(out)
+}
+
 /// The recipes with each measured line's share applied; a line the ledger does
 /// not know, or one that stalled, runs at full (the honesty bound, unchanged).
 pub fn with_utilization(recipes: &[Recipe], readings: &[LineReading]) -> Vec<Recipe> {
@@ -1429,5 +1472,43 @@ mod pricing_tests {
             .stock_at(24),
             None
         );
+    }
+
+    #[test]
+    fn the_station_series_reads_as_one_reading_per_charted_line() {
+        // The exchange's own example (#68), plus an uncharted line and a
+        // second hour with a stall.
+        let v = serde_json::json!({
+            "station": "tuna-prime", "intervalTicks": 12, "bucketsKept": 1440,
+            "lines": [
+                {"recipe": "cannery-line", "cycleTicks": 12, "ratedCycleTicks": 12,
+                 "ratedPerCycle": 33,
+                 "points": [
+                    {"tick": 624, "cyclesCompleted": 1, "unitsProduced": 33, "idleTicks": 0,
+                     "blockedReason": null, "ran": true},
+                    {"tick": 636, "cyclesCompleted": 0, "unitsProduced": 0, "idleTicks": 12,
+                     "blockedReason": "starved", "ran": false}
+                 ]},
+                {"recipe": "gravy-press", "points": []}
+            ],
+            "known": null, "survey": null
+        });
+        let readings = parse_series(&v, MEASURED_BUCKETS).unwrap();
+        assert_eq!(readings.len(), 1, "an uncharted line is not a reading");
+        let line = &readings[0];
+        assert_eq!(line.recipe, "cannery-line");
+        assert_eq!((line.buckets, line.cycles, line.idle_ticks), (2, 1, 12));
+        assert_eq!(line.blocked.as_deref(), Some("starved"));
+        // One cycle of 12 ticks over a 24-tick window: half.
+        assert_eq!(line.utilization_bps(12), Some(5_000));
+        // A plantless berth is an empty answer, not an absent one; a missing
+        // route is absent.
+        assert_eq!(
+            parse_series(&serde_json::json!({"lines": []}), 4)
+                .unwrap()
+                .len(),
+            0
+        );
+        assert!(parse_series(&serde_json::json!({"error": "no such route"}), 4).is_none());
     }
 }

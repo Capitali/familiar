@@ -1574,18 +1574,39 @@ fn main() -> ExitCode {
             // full appetite (chain.rs, the production ledger banner).
             let bucket = tick / chain::PRODUCTION_INTERVAL_TICKS;
             if bucket != measured_bucket && !recipes.is_empty() {
-                measured = recipes
-                    .iter()
-                    .filter_map(|r| {
-                        let v = wire
-                            .get(&format!(
-                                "/v1/stations/{}/production?recipe={}",
-                                r.station, r.id
-                            ))
-                            .ok()?;
-                        chain::parse_production(&v, chain::MEASURED_BUCKETS)
-                    })
-                    .collect();
+                // One read per berth where the exchange publishes the series
+                // (#68); the per-recipe route where it does not yet (PROD
+                // until Jeff deploys), so the pilot is right on both.
+                let mut stations: Vec<&str> = recipes.iter().map(|r| r.station.as_str()).collect();
+                stations.sort_unstable();
+                stations.dedup();
+                measured = Vec::new();
+                for station in stations {
+                    let series = wire
+                        .get(&format!(
+                            "/v1/industry/series?station={station}&limit={}",
+                            chain::MEASURED_BUCKETS
+                        ))
+                        .ok()
+                        .and_then(|v| chain::parse_series(&v, chain::MEASURED_BUCKETS));
+                    match series {
+                        Some(lines) => measured.extend(lines),
+                        None => measured.extend(
+                            recipes
+                                .iter()
+                                .filter(|r| r.station == station)
+                                .filter_map(|r| {
+                                    let v = wire
+                                        .get(&format!(
+                                            "/v1/stations/{}/production?recipe={}",
+                                            r.station, r.id
+                                        ))
+                                        .ok()?;
+                                    chain::parse_production(&v, chain::MEASURED_BUCKETS)
+                                }),
+                        ),
+                    }
+                }
                 measured_bucket = bucket;
             }
             let recipes_now = chain::with_utilization(&recipes, &measured);

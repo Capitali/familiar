@@ -6,6 +6,29 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-18 — Exchange sync: the station production series (ucf-exchange #68)
+
+Jeff's #68 (7ef4d0c) adds `GET /v1/industry/series?station=S[&limit=N]`: what a berth's lines have
+MADE per market hour, every line at once, with the individuals/moving-range chart worked out
+server-side (`meanMilli`, `capabilityBps`, control limits) and `blockedReason` already the LAST
+reason in the hour. The per-recipe `/v1/stations/{id}/production?recipe=` route survives.
+`chain::parse_series` folds the series into the same `LineReading` per charted line the per-recipe
+route yields (an uncharted line is not a reading — "not charted" is not "stalled"), so
+`with_utilization` and `measured_lines` are unchanged; the pilot now reads one series per berth and
+falls back to the per-recipe route where the exchange does not answer it. PROD does not yet (no
+such route at 21:30 UTC); LOCAL does after tonight's rebuild. Test pins the exchange's own example
+plus a stall and an uncharted line. Not adopted (yet): the server's `capabilityBps` as the share —
+the pilot keeps computing its own share from cycles over the window, which is the same number on a
+4-bucket tail and stays honest on PROD's route; switching to the server's chart is a one-line change
+once PROD serves it.
+
+Also in the sweep, nothing for the pilot: #67 (Developer Notes board), #69 (Gopher epic), Haul
+#208 (the FILE control — Ian's UI issue, closed), #209/#210 (station contract, Production Workflow
+with SPC charts — Haul's reading of the same series), metal #98.
+
+Checks: `cargo fmt`, `cargo clippy -p familiar-whisker --all-targets -D warnings`, `cargo test -p
+familiar-whisker` (119 + 2).
+
 ## 2026-09-18 — T-248: the refusal ledger — every refusal as a hash-chained, redactable record
 
 Layer 4 of The Service Charter (T-250, on branch `claude/crewai-integration-architecture-3tl8pf`,
