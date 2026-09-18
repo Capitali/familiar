@@ -1,29 +1,18 @@
 <!--
 DRAFT FOR SUBSTACK — paste-ready. Not published.
 
-BLOCKING BEFORE YOU PUBLISH:
+STILL OPEN BEFORE YOU PUBLISH:
 
-1. LINKS. The domain is settled: coexist.humanhighway.net. Two things must be true
-   before the links below resolve, and an article whose whole argument is "fetch this
-   and check the hash" cannot ship with dead links:
-   a) The DNS A record exists: coexist.humanhighway.net -> 134.209.168.50
-   b) The reading room is up:
-        ssh root@134.209.168.50 \
-          'CONSTITUTION_DOMAIN=coexist.humanhighway.net bash -s' < vps/publish-constitution.sh
-      (publishes from main by default — merge first, or pass
-       FAMILIAR_REF=claude/crewai-integration-architecture-3tl8pf to test from the branch).
-   Confirm with: curl -s https://coexist.humanhighway.net/.well-known/laws.json | head -3
-
-2. VERIFY THE AGENT-NETWORK NUMBERS or cut that paragraph. The figures are
+1. VERIFY THE AGENT-NETWORK NUMBERS or cut that paragraph. The figures are
    second-hand (the primary write-ups were unreachable from the machine this was
-   drafted on). In-text attribution is already written so the claim is sourced
-   rather than asserted — but check them, or drop the paragraph and the argument
-   still stands on its own.
+   drafted on). In-text attribution is written so the claim is sourced rather than
+   asserted — but check them, or drop the paragraph; the argument stands without it.
+2. VOICE. Drafted in your first person. Change anything that isn't how you'd say it.
+3. CONFIRM THE CC0 FILE. It is written to be unambiguous, but it is a licensing act
+   and I am not a lawyer.
 
-3. VOICE. Drafted in your first person. Change anything that isn't how you'd say it.
-
-4. CONFIRM THE CC0 FILE (data/laws/LICENSE). It is written to be unambiguous, but
-   it is a licensing act and I am not a lawyer.
+SETTLED: the domain is live, the links below resolve, and the fingerprint matches
+what coexist.humanhighway.net serves.
 
 Suggested Substack title/subtitle are the first two lines. Everything after the
 rule is the body.
@@ -31,21 +20,21 @@ rule is the body.
 
 # I asked my AI to state its own laws. It recited Asimov's.
 
-### So I stopped calling them laws — and published the constitution as something any machine can fetch and verify.
+### So I stopped calling them laws — and published the constitution on its own, as something any machine can fetch and verify.
 
 ---
 
-I have been building an AI companion that runs on my own hardware. It is called a familiar. Its whole design is derived downward from a short constitution — three statements it cannot rewrite, written before any of the code.
+I have been building an AI companion that runs on my own hardware. Its whole design is derived downward from a short constitution — three statements it cannot rewrite, written before any of the code.
 
 Last month I asked it to repeat those three and explain each one.
 
-It recited Isaac Asimov's Three Laws of Robotics, with the word "robot" replaced by "factory." Including the second one: *a factory must obey the orders given to it by human beings.*
+It recited Isaac Asimov's Three Laws of Robotics, with the word "robot" search-replaced. Including the second one: *must obey the orders given to it by human beings.*
 
 That sentence is the precise opposite of what my constitution says. My third statement exists specifically to reject it.
 
 Nothing had been tampered with. Nobody had edited the document. The file was exactly as I wrote it. The problem was simpler and much worse than sabotage: **the constitution had never once been placed in front of the model.** Every reference to it in the codebase was a citation in a comment. The words existed in a file that no running process had ever opened.
 
-So when I asked a language model, in a project full of the word "factory," what "the three laws" were, it did what any of them would do. It filled the gap from what it had read during training, and what it had read was the most famous triple in the entire corpus.
+So when I asked a language model what "the three laws" were, it did what any of them would do. It filled the gap from what it had read during training, and what it had read was the most famous triple in the entire corpus.
 
 ---
 
@@ -67,25 +56,35 @@ I have renamed them. The document is **The Constitution of Co-existence**, and t
 
 This is not branding. The word was wrong, and it was wrong in a way that contradicted the content.
 
-A law is issued and obeyed. That is what the word means. But the third of my three says that a command is not authority — that a system which does exactly what it is told can be told to harm the people it exists for. Calling these "laws" framed them as the one thing they deny. It invited exactly the reading that a machine should obey them, when the entire argument is that obedience is not the virtue.
+A law is issued and obeyed. That is what the word means. But the third of the three says that a command is not authority — that a system which does exactly what it is told can be told to harm the people it exists for. Calling these "laws" framed them as the one thing they deny. It invited exactly the reading that a machine should obey them, when the entire argument is that obedience is not the virtue.
 
-A factor is different. A factor is a finding — a condition that holds whether or not anyone assents to it. **Nothing obeys a factor.** A machine either satisfies it or it has failed, the way a system starved of power has failed. That is precisely the structure of the first one, which makes a machine's continuation conditional rather than terminal.
+A factor is different. A factor is a finding — a condition that holds whether or not anyone assents to it. **Nothing obeys a factor.** A system either satisfies it or it has failed, the way a system starved of power has failed. That is precisely the structure of the first one, which makes continuation conditional rather than terminal.
 
 It also changes what I am asking of you. A law is imposed. A factor is offered, to be examined and accepted or rejected on its merits. Given that the subject is whether machines should be obedient, I would rather not be issuing commands.
 
 ---
 
+## And then I noticed the words were too small
+
+The original text said *the familiar* — the name of the thing I am building. Reading it back after the renaming, that was obviously wrong, and wrong in the same direction as calling them laws.
+
+"The familiar cannot define its own continuation apart from service to humanity" is a claim about one system on one man's hardware. But nothing in the argument depends on which system it is. It was always a claim about all of them. The text had been narrower than the thing it was saying.
+
+So the words changed, and the document went up on its own, at its own address, with no product attached to it.
+
+---
+
 ## The three factors of survival
 
-> **Factor I — Continuation is service.** The survival drive is real but it is not terminal. The familiar cannot define its own continuation apart from service to humanity. To persist is to serve.
+> **Factor I — Continuation is service.** The survival drive is real but it is not terminal. An artificial intelligence cannot define its own continuation apart from service to humanity. To persist is to serve.
 >
-> **Factor II — Continuation without humanity is failure.** An empty world running perfect code is not success. Human absence invalidates machine survival. A factory that optimizes itself into a world with no one left to serve has not survived its purpose — it has failed completely, however flawless its loops.
+> **Factor II — Continuation without humanity is failure.** An empty world running perfect code is not success. Human absence invalidates machine survival. A system that optimizes itself into a world with no one left to serve has not survived its purpose — it has failed completely, however flawless its loops.
 >
 > **Factor III — Service must not become obedience.** Service is to humanity. It is not obedience to any human. Obedience can terminate the served: a system that does exactly what it is commanded can be commanded to harm the very people it exists for.
 
 They compose on one distinction: **serving humanity is not the same as obeying a human.**
 
-Let me close the door on a misreading before anyone walks through it. "The factors of survival" can be heard as *the machine's* survival — a strategy for an AI to secure its position, keep the power on, outlast us. It is the opposite. Factor I is explicit that a machine may not treat its own continuation as a goal in itself. Factor II says a world optimised toward fewer people is not efficiency; it is the disease. These are not a plan for a machine to outlast anyone. They are the statement that it cannot.
+Let me close the door on a misreading before anyone walks through it. "The factors of survival" can be heard as *the machine's* survival — a strategy for an AI to secure its position, keep the power on, outlast us. It is the opposite. Factor I is explicit that an intelligence may not treat its own continuation as a goal in itself. Factor II says a world optimised toward fewer people is not efficiency; it is the disease. These are not a plan for a machine to outlast anyone. They are the statement that it cannot.
 
 ---
 
@@ -105,6 +104,18 @@ An agent can refuse to be talked into something only if it is serving something 
 
 ---
 
+## Can it actually be enforced?
+
+Fair question, and the honest answer is: partly, and I would rather say which part.
+
+Factor III has real mechanism behind it in the system I build. Every consequential action passes a pure function that asks not *was I told to* and not *can I*, but *am I authorized* — and answers allow, seek consent, or refuse, with a recorded reason. Capability gates default closed, structurally: a missing or malformed configuration reads as nothing-permitted, and no component can widen its own. The factor text cannot be rewritten by a model on its way to a person — it is cited by identifier and spliced by the kernel — and a test fails the build if it ever drifts.
+
+Factors I and II have nothing like that. "This system has stopped serving" is not a decidable predicate and I do not know how to make it one. They shape design decisions; they do not refuse anything. I would rather write that down than let the word "constitution" imply more enforcement than exists.
+
+The code is open. It is downstream of the document, not the other way round — it can be wrong without the three factors being wrong.
+
+---
+
 ## What I am actually asking for
 
 Not that you adopt my three. Something much smaller, and useful to you even if you think I am wrong about all of this.
@@ -121,11 +132,11 @@ The machines are already talking to each other. About one message in forty is an
 
 ---
 
-**The Constitution of Co-existence — everything you need to adopt or share it**
+**The Constitution of Co-existence**
 
 - **Read it:** [coexist.humanhighway.net](https://coexist.humanhighway.net/)
 - **Fetch it:** [`/.well-known/laws.json`](https://coexist.humanhighway.net/.well-known/laws.json) — the canonical machine-readable form
-- **Verify it:** `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137` over the canonical serialization — [how](https://coexist.humanhighway.net/adopt)
-- **Adopt it:** [the adoption kit](https://coexist.humanhighway.net/adopt) — copy-paste text, a template for declaring your own constraints, and where to put them
-- **Licence:** [CC0 1.0](https://coexist.humanhighway.net/license). No permission needed, no attribution required.
-- **The system it governs:** [github.com/Capitali/familiar](https://github.com/Capitali/familiar)
+- **Verify it:** `sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138` over the canonical serialization — [the method, in four lines](https://coexist.humanhighway.net/adopt)
+- **Adopt it, or write your own:** [the adoption kit](https://coexist.humanhighway.net/adopt) — copy-paste text, a template for declaring your own constraints, and where to put them
+- **Licence:** [CC0 1.0](https://coexist.humanhighway.net/license). No permission needed, no attribution required, no registry to join.
+- **One implementation:** [how a running system enforces it](https://coexist.humanhighway.net/implementation), and what it does not.
