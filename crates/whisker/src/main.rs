@@ -1588,7 +1588,11 @@ fn main() -> ExitCode {
                             chain::MEASURED_BUCKETS
                         ))
                         .ok()
-                        .and_then(|v| chain::parse_series(&v, chain::MEASURED_BUCKETS));
+                        .and_then(|v| chain::parse_series(&v, chain::MEASURED_BUCKETS))
+                        // An empty series at a berth the pilot holds recipes for is
+                        // the tier or the observer's youth hiding the plant, not a
+                        // plantless berth: the per-recipe route still knows.
+                        .filter(|lines| !lines.is_empty());
                     match series {
                         Some(lines) => measured.extend(lines),
                         None => measured.extend(
