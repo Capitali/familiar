@@ -148,11 +148,21 @@ fn main() -> ExitCode {
         Some("export") => export::cmd_export(rest),
         Some("ledger") => {
             let f = flags(rest);
-            let positional: Vec<String> = rest
-                .iter()
-                .filter(|a| !a.starts_with("--"))
-                .cloned()
-                .collect();
+            // Positionals are what is left once `--k v` and `--k=v` are gone —
+            // the value of a flag is never a subcommand (the fleet command's rule).
+            let mut positional: Vec<String> = Vec::new();
+            let mut skip_next = false;
+            for a in rest {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if let Some(key) = a.strip_prefix("--") {
+                    skip_next = !key.contains('=') && !matches!(key, "redacted");
+                    continue;
+                }
+                positional.push(a.clone());
+            }
             ledger_cmd::cmd_ledger(&positional, &f)
         }
         Some("agent") => cmd_agent(rest),
