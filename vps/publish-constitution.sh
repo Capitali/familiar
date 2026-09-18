@@ -77,7 +77,7 @@ fi
 # Named one by one, on purpose. A `cp -r` of the repository would publish the whole
 # project — including anything a future commit puts in it that was never meant to
 # face the internet. Adding a file to the reading room is an edit to this list.
-install -d -m 0755 "$WEBROOT"
+install -d -m 0755 /var/www "$WEBROOT"
 PUBLISH=(
   "data/laws/constitution.html"
   "data/laws/laws.v1.json"
@@ -87,14 +87,17 @@ PUBLISH=(
   "robots.txt"
   "llms.txt"
 )
-NEW=$(mktemp -d)
+NEW=$(mktemp -d /var/www/.constitution.XXXXXX)   # same filesystem as $WEBROOT, so the swap is a rename
 for f in "${PUBLISH[@]}"; do
   [ -f "$SRC/$f" ] || { echo "missing from source: $f" >&2; exit 1; }
   install -m 0644 "$SRC/$f" "$NEW/$(basename "$f")"
 done
 # Atomic-ish swap: the reading room is never half-written.
-rm -rf "$WEBROOT.old" && [ -d "$WEBROOT" ] && mv "$WEBROOT" "$WEBROOT.old"
-mv "$NEW" "$WEBROOT" && chmod 0755 "$WEBROOT" && rm -rf "$WEBROOT.old"
+rm -rf "$WEBROOT.old"
+if [ -d "$WEBROOT" ]; then mv "$WEBROOT" "$WEBROOT.old"; fi
+mv "$NEW" "$WEBROOT"
+chmod 0755 "$WEBROOT"
+rm -rf "$WEBROOT.old"
 chown -R root:root "$WEBROOT"
 
 # --- 4. Verify what we are about to serve ----------------------------------------
@@ -146,7 +149,7 @@ if command -v ufw >/dev/null; then
 fi
 
 systemctl daemon-reload
-caddy validate --config /etc/caddy/Caddyfile --envfile /etc/default/caddy-constitution
+CONSTITUTION_DOMAIN="$DOMAIN" caddy validate --config /etc/caddy/Caddyfile
 systemctl enable --now caddy
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 
