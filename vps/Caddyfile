@@ -1,7 +1,41 @@
-# The lighthouse's public reading room. Static bytes only.
+# The lighthouse's Caddyfile: two names, two jobs, one file.
 #
-# Deployed by vps/publish-constitution.sh. {$CONSTITUTION_DOMAIN} is substituted
-# from the environment at deploy time; Caddy obtains and renews the certificate.
+# Deployed by vps/publish-constitution.sh, which installs this file whole. Anything
+# not in here is gone from the box the next time that script runs — which is why
+# the MCP seam lives here too rather than only in a hand-edit on the box.
+#
+# 1. lighthouse.river.io — the familiar's MCP seam, behind an ordinary certificate.
+#    Ian chose this (2026-08-18) over handing a partner an SPKI pin: the mesh port
+#    keeps its self-signed certificate because iOS devices pin its SPKI, so real TLS
+#    is terminated out here and only the MCP path is proxied inward. Nothing else on
+#    47100 is reachable through this host — none of the /mesh/* routes, none of the
+#    /local/* ones.
+lighthouse.river.io {
+	encode zstd gzip
+
+	handle /mcp {
+		reverse_proxy https://127.0.0.1:47100 {
+			transport http {
+				tls
+				# The upstream is the familiar's own mesh listener: self-signed, CN
+				# "familiar-mesh", pinned by SPKI on iOS rather than named by hostname.
+				# Verification is skipped for that reason alone, and the hop is loopback,
+				# so it never leaves the machine.
+				tls_insecure_skip_verify
+			}
+		}
+	}
+
+	# Everything else says nothing useful. This host exists to serve one path.
+	handle {
+		respond "familiar lighthouse" 404
+	}
+}
+
+# 2. {$CONSTITUTION_DOMAIN} — the public reading room. Static bytes only.
+#
+# {$CONSTITUTION_DOMAIN} is substituted from the environment at deploy time; Caddy
+# obtains and renews the certificate.
 #
 # What this serves: the constitution, in its four renderings, and nothing else.
 # The web root contains only files copied by an explicit allowlist — there is no
