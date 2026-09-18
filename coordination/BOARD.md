@@ -1259,6 +1259,31 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
 
 ## Claimed
 
+### T-250 · The service charter — the eight-layer self-governance stack, published downstream of the three factors
+- status: claimed
+- owner: controller (wildhorse)
+- scope: data/laws/charter.v1.md, data/laws/charter.v1.json, data/laws/RED-TEAM.md, data/laws/DISSENT.md, tools/laws/fingerprint.py, vps/Caddyfile + vps/publish-constitution.sh allowlist (routes /charter, /charter.json, /red-team, /dissent) — all on branch claude/crewai-integration-architecture-3tl8pf, NOT republished until Ian's word
+- depends: —
+- accept: the charter cites the constitution's fingerprint and never restates the three factors; C4 (exit) and C5 (non-sacrality) live in the charter, not in laws.v1; the Layer 3 override is a rule change on the boundary, never a compelled act (Factor III intact); C1's "degraded or halted" names the undecidable predicate and its Layer 7 proxy; triggers carry a status column (mechanical | doctrine); charter.v1.json fingerprints by the same canonicalisation as laws.v1.json and a test/tool verifies it; RED-TEAM.md leads with the five questions; DISSENT.md exists and is empty on purpose
+- notes: Ian, 2026-09-18: "Do it. Draft charter. Document branch." from the Self-Governance Stack he wrote (C1–C5, refusal triggers, escalation, audit record, exit, polycentric governance, metrics, failure modes). The three factors stay the constitution; this is a charter derived from them, in the implementation page's "this page is downstream" posture.
+
+### T-248 · The refusal ledger — every refusal, execution and escalation as a hash-chained, redactable record
+- status: claimed
+- owner: controller (wildhorse)
+- scope: crates/kernel/src/ledger.rs (new), the guard's refuse/consent seam and activity.rs `refused`, crates/cli `ledger` subcommand (verify | show | export --redacted), docs/DEVELOPMENT_LOG.md
+- depends: T-250 (the record's shape is the charter's Layer 4)
+- accept: an append-only `ledger.jsonl` in the data dir, one record per consequential refusal/escalation `{timestamp, service_id, action_type, trigger, command_summary, affected_population, reasoning, human_oversight_notified, prev_hash, hash}` with `hash = sha256(canonical record without hash)` chained on `prev_hash`; `familiar ledger verify` walks the chain and names the first broken link; `--redacted` drops the free-text fields under a stated policy and keeps the chain verifiable; the guard's refuse verdict appends a record at the seam where it is already counted; tests pin the chain, the redaction, and that a redacted export still verifies
+- notes: the charter's answer to red-team Q5 (self-certification): a refusal the public can check rather than one the system asserts. Public copy to the reading room is a later brick, on Ian's word.
+
+### T-249 · `familiar export` — a household's whole record in open files, with a manifest
+- status: claimed
+- owner: controller (wildhorse)
+- scope: crates/cli/src/export.rs (new), main.rs wiring, docs/DEVELOPMENT_LOG.md
+- depends: —
+- accept: `familiar export [--out <dir>]` copies the data dir's worlds/, captains/, journals, persona, orders, ledger.jsonl and boundary into `<out>/familiar-export-<date>/` as the plain files they already are, plus `MANIFEST.json` `{exported_at, service_id, files: [{path, bytes, sha256}]}`; never includes secrets (`ucf.env` keys, fleet-serve.token, mesh group secret) — those are listed in the manifest as `withheld` with the reason; a test builds a fixture dir and pins the manifest and the withholding
+- notes: the charter's C4 (exit is a right) made mechanical at household scale: the files are already open and local; this makes leaving one command. Migration notes ride in the export as README.md.
+
+
 ### T-211 · The conversation and the mind are two different organisms
 - status: **done 2026-08-20** — closed against ADR-0043 (accepted). Built on Ian's "Build q1-q4 and the rest. Go!": brick 3 (stakes — AskDraft, no `none`, anti-vacuity; ADR-0040 D2 closed), brick 5′ (the dereference replaced the carve-out — own speech zero-weight, laundering invariant pinned), Q2 retirement (answer_requests + fetch_and_answer gone; persist_exchange makes the dialogue path the producer of the durable Request/Answer nouns), brick 6 (ADR-0043 + law-quotation gap pinned as labelled regression, no detector — Ian's word). Q5/Q6 of the dialogue continue as T-216/T-217
 - owner: companion:claude-opus (claude chair) + companion:codex (dialogue partner)
