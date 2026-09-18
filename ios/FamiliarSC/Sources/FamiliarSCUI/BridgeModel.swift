@@ -26,6 +26,12 @@ public final class BridgeModel {
     /// The hull's earned history (T-239): routes flown, deliveries, repairs, refits, distress
     /// survived — computed here from the journal and the book, never served, never editable.
     public var history: ShipHistory?
+    /// The captain's money over a window (T-241) — read when the screen opens, not with the
+    /// bridge: the host reads the exchange's ledger for every hull to answer it.
+    public var economy: CaptainEconomy?
+    public var economyWindow = "7d"
+    public var economyError: String?
+    public var loadingEconomy = false
     public var reports: [FoldReport] = []
     public var spoken: SpokenReport?
     public var pendingDialChanges: [DialChange] = []
@@ -175,12 +181,33 @@ public final class BridgeModel {
         }
     }
 
+    /// Read the captain's economy for the open ship (T-241). A window given here becomes the
+    /// screen's; a stale open's answer is dropped like every other read's.
+    public func loadEconomy(window: String? = nil) async {
+        guard let world else { return }
+        if let window, CaptainEconomy.windows.contains(window) { economyWindow = window }
+        let gen = openGeneration
+        loadingEconomy = true
+        defer { if gen == openGeneration { loadingEconomy = false } }
+        do {
+            let e = try await feed.economy(world: world, window: economyWindow)
+            guard gen == openGeneration else { return }
+            economy = e
+            economyError = e == nil ? "this host does not serve the captain's ledger" : nil
+        } catch {
+            guard gen == openGeneration, !BridgeModel.isCancellation(error) else { return }
+            economy = nil
+            economyError = BridgeModel.describe(error)
+        }
+    }
+
     /// Nothing of a previously opened ship may speak for this one: no persona, no
     /// conversation, no turns, no journal or window or reports. The fleet summary (ship
     /// facts the host served) and the visible error remain.
     @MainActor
     func clearVoice() {
         persona = nil; journal = []; window = []; dial = nil; book = nil; reports = []; spoken = nil; history = nil
+        economy = nil; economyError = nil
         pilotProposal = nil; pilotOutcome = nil
         conversation = nil; conversationWorld = nil; turns = []
     }

@@ -214,6 +214,27 @@ public struct WireFeed: ShipsFeed, CaptainActs {
         return WireFeed.names(fromBrief: c)
     }
 
+    /// The captain's economy (T-241): the route sits beside the brief's, so it is derived from
+    /// the host's own `captain_brief` (the id is the host's word; only the last segment
+    /// changes). A host that predates the route answers 404 → the refusal is thrown and shown.
+    public func economy(world: String, window: String) async throws -> CaptainEconomy? {
+        let row = (try? await envelope("ships"))?.ships?.first { $0["world"]?.string == world }
+        guard let brief = WireFeed.captainBriefPath(row: row, captainName: row?["captain"]?.string),
+              let path = WireFeed.captainEconomyPath(briefPath: brief, window: window) else { return nil }
+        let d = try await call(path)
+        guard let v = try? JSONDecoder().decode(JSONValue.self, from: d) else {
+            throw FeedError.refused("the captain's ledger came back unreadable from \(path)")
+        }
+        return CaptainEconomy(json: v)
+    }
+
+    /// `captains/<id>/brief` → `captains/<id>/economy?window=<w>`; nil for a path that is not
+    /// a brief's. The window is one of the host's three words or it is not sent.
+    static func captainEconomyPath(briefPath: String, window: String) -> String? {
+        guard briefPath.hasPrefix("captains/"), briefPath.hasSuffix("/brief"), CaptainEconomy.windows.contains(window) else { return nil }
+        return String(briefPath.dropLast("brief".count)) + "economy?window=" + window
+    }
+
     /// The ledger rows off a captain brief, verbatim, in the host's order.
     static func names(fromBrief c: JSONValue) -> [NameLine] {
         (c["names"]?.array ?? []).compactMap { NameLine(ledger: $0) }

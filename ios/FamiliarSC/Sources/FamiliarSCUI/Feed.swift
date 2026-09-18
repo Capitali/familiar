@@ -214,10 +214,16 @@ public protocol ShipsFeed: Sendable {
     /// fleet-wide ledger when it serves it. Empty where nothing is remembered (Ian, 2026-09-08:
     /// "We do not forget names").
     func names(world: String) async throws -> [NameLine]
+    /// The captain's money over a window (`24h` | `7d` | `30d`): every hull he flies and the
+    /// pool, with points, from the host's `/captains/{id}/economy` (T-241). Nil where the feed
+    /// has no captain ledger (a fixture, a store without a host); a refusal throws, so the
+    /// screen says what the host said.
+    func economy(world: String, window: String) async throws -> CaptainEconomy?
 }
 
 public extension ShipsFeed {
     func names(world: String) async throws -> [NameLine] { [] }
+    func economy(world: String, window: String) async throws -> CaptainEconomy? { nil }
 }
 
 public protocol CaptainActs: Sendable {
