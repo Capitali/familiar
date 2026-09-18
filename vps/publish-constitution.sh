@@ -80,6 +80,7 @@ fi
 install -d -m 0755 /var/www "$WEBROOT"
 PUBLISH=(
   "data/laws/constitution.html"
+  "data/laws/implementation.html"
   "data/laws/laws.v1.json"
   "data/laws/laws.v1.md"
   "data/laws/ADOPT.md"
@@ -157,6 +158,7 @@ cat <<EOF
 ==> published.
 
     https://$DOMAIN/                       the constitution, rendered
+    https://$DOMAIN/implementation         how one system enforces it
     https://$DOMAIN/.well-known/laws.json  machine-readable, fingerprinted
     https://$DOMAIN/laws.md                the text, written to survive chunking
     https://$DOMAIN/adopt                  the adoption kit

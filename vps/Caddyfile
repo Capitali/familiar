@@ -51,6 +51,11 @@
 		file_server
 	}
 
+	handle /implementation {
+		rewrite * /implementation.html
+		file_server
+	}
+
 	# The rendered page is the root.
 	handle / {
 		rewrite * /constitution.html
