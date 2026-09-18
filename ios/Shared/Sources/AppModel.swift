@@ -2033,12 +2033,15 @@ final class AppModel: ObservableObject {
         // also land in attemptLog, which the Device screen already renders (T-120 — the field
         // existed with a render path but was never written).
         attemptLog = attempts
-        worldviewError = "pins \(MeshTLS.pins.count)+\(MeshTLS.alwaysTrust.count) · " + attempts.joined(separator: " ")
+        // The badge says ONE sentence (T-247, familiar#10): how many doors, what most of them
+        // said, what the lighthouse said. The fifteen lines are the Device screen's.
+        let sentence = JoinFailure.sentence(attempts: attempts, lighthouse: Self.rendezvousHost)
+        worldviewError = "pins \(MeshTLS.pins.count)+\(MeshTLS.alwaysTrust.count) · " + sentence
         // Every door refused or timed out — NOW it is a failure, and it says which and why
         // (T-132). A link that had been joined and dropped narrates the same way.
         if joinProgress.stage == .reaching || joinProgress.stage == .joined {
             joinStage(.unreachable,
-                      "no door answered — retrying every few seconds",
+                      sentence + "; retrying every few seconds",
                       causes: attempts)
         }
     }

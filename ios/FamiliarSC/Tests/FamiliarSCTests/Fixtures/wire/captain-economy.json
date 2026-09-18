@@ -1,0 +1,37 @@
+{
+  "captain": "Luke SkyWhisker",
+  "captain_id": "c_9f3",
+  "since": 1789000000,
+  "now": 1789604800,
+  "hulls": [
+    {
+      "world": "world-kk",
+      "label": "Kibble Klipper",
+      "flows": {"trade_bought": -105, "trade_sold": 300, "freight": 476, "fuel": -38, "repair": 0, "outfit": 0, "debt_paid": -600, "dock": -12, "other": -8, "fills": 2, "settles": 1},
+      "flows_source": "exchange",
+      "summary": {"window_days": 7.0, "readings": 3, "credits_start": 1000, "credits_now": 1013, "delta": 13, "trend_per_day": 1.9,
+                  "best": {"at": 1789300000, "tick": 13256, "delta": 476, "cause": "freight"},
+                  "worst": {"at": 1789200000, "tick": 13248, "delta": -600, "cause": "debt paid"}},
+      "analysis": ["+ℳ13 over 7.0 days: ℳ1000 → ℳ1013", "earned: freight +ℳ476 on 1 settle(s); trade +ℳ195 realized on 2 fill(s) (sold ℳ300, bought ℳ105)"],
+      "points": [{"at": 1789000000, "tick": 13200, "credits": 1000}, {"at": 1789200000, "tick": 13248, "credits": 400}, {"at": 1789300000, "tick": 13256, "credits": 1013}]
+    },
+    {
+      "world": "world-kk2",
+      "label": "Kibble Klipper II",
+      "flows": {"trade_bought": 0, "trade_sold": 0, "freight": 300, "fuel": -50, "repair": -20, "outfit": 0, "debt_paid": 0, "dock": 0, "other": 0, "fills": 0, "settles": 1},
+      "flows_source": "journal",
+      "summary": {"window_days": 7.0, "readings": 2, "credits_start": 500, "credits_now": 730, "delta": 230, "trend_per_day": 32.9, "best": {"at": 1789400000, "tick": 13300, "delta": 300, "cause": "freight"}, "worst": null},
+      "analysis": ["+ℳ230 over 7.0 days: ℳ500 → ℳ730"],
+      "points": [{"at": 1789000000, "tick": 13200, "credits": 500}, {"at": 1789400000, "tick": 13300, "credits": 730}]
+    }
+  ],
+  "pooled": {
+    "flows": {"trade_bought": -105, "trade_sold": 300, "freight": 776, "fuel": -88, "repair": -20, "outfit": 0, "debt_paid": -600, "dock": -12, "other": -8, "fills": 2, "settles": 2},
+    "flows_source": "mixed",
+    "summary": {"window_days": 7.0, "readings": 4, "credits_start": 1500, "credits_now": 1743, "delta": 243, "trend_per_day": 34.7,
+                "best": {"at": 1789300000, "tick": 13256, "delta": 476, "cause": "freight"},
+                "worst": {"at": 1789200000, "tick": 13248, "delta": -600, "cause": "debt paid"}},
+    "analysis": ["+ℳ243 over 7.0 days: ℳ1500 → ℳ1743", "earned: freight +ℳ776 on 2 settle(s); trade +ℳ195 realized on 2 fill(s) (sold ℳ300, bought ℳ105)", "spent: fuel −ℳ88; repair −ℳ20; debt paid −ℳ600; dock −ℳ12"],
+    "points": [{"at": 1789000000, "tick": 13200, "credits": 1500}, {"at": 1789200000, "tick": 13248, "credits": 900}, {"at": 1789300000, "tick": 13256, "credits": 1513}, {"at": 1789400000, "tick": 13300, "credits": 1743}]
+  }
+}

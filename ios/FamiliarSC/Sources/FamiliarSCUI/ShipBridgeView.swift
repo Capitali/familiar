@@ -41,6 +41,7 @@ public struct ShipBridgeView: View {
                 NavigationLink { AutonomyDialView(model: model) } label: { Label("Autonomy", systemImage: "dial.medium") }
                 NavigationLink { LogView(model: model) } label: { Label("Log", systemImage: "book") }
                 NavigationLink { HistoryView(model: model) } label: { Label("\(model.spokenOf.possessiveTitle) story", systemImage: "seal") }
+                NavigationLink { EconomyView(model: model) } label: { Label("Money over time", systemImage: "chart.line.uptrend.xyaxis") }
             }
             .listRowBackground(SC.panel)
         }

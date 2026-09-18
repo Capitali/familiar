@@ -6,6 +6,48 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-18 — T-241 iPad half: money over time, by captain (FamiliarSC/UCFFamiliar)
+
+Ian (2026-09-09): "Familiar UCF views should include economic history/trend lines and analysis of
+profit in summary form for overview by captain." The host half landed 09-09 (`economy.rs`,
+`GET /captains/{id}/economy?window=`, `economy` on the captain brief). This is the read of it.
+`FamiliarSC/Economy.swift`: `CaptainEconomy` / `EconomyHistory` / `EconomyFlows` / `EconomySummary`
+typed off the host's JSON — nothing computed here; `flows.bars` is the host's buckets as signed
+bars (in first, then out; zero buckets are not bars; fills/settles stay counts). `ShipsFeed.economy(
+world:window:)` with a nil default (a fixture or a store has no captain ledger); `WireFeed` derives
+the route from the host's own `captain_brief` (only the last segment changes; a window the host does
+not serve is not sent; a 404 from an older host is thrown and shown). `BridgeModel.loadEconomy` is
+LAZY — read when the screen opens, never with the bridge, because the host reads `/v1/cash` for every
+hull to answer it; cleared with the voice on a ship switch. `EconomyView` off the bridge ("Money over
+time"): window picker 24h/7d/30d, Swift Charts step line of the pooled readings (per-hull lines on a
+toggle), signed bars by cause, the host's sentences, best/worst move, a per-hull table — and the
+sentence "the trend is what happened, not a forecast" under the chart (the board's note). The brief's
+summary now rides the fleet document Felix reads (`Briefs.captain`): "The fleet's money this week:
+…; the trend is a straight line through the readings, ℳN a day (flows from …)".
+
+Checks: `cd ios/FamiliarSC && swift test` 100/0 (2 skipped; 5 new in `EconomyTests`, fixture
+`wire/captain-economy.json` hand-built on the host's shape); `xcodebuild … -scheme UCFFamiliar`
+(iOS Simulator) succeeds. Not proven live yet: the screen against wildhorse's `fleet serve` (Ian's
+iPad, next UCF Familiar build). Next: ask the host to put `captain_economy` on the `/ships` row so
+the client derives nothing; "net worth" waits on debt in the journal (board note).
+
+## 2026-09-18 — T-247: the join badge says one sentence (familiar#10)
+
+familiar#10 (Ian's iPhone, build 100, on 5G+): the badge printed `pins 2+1 · 192.168.108.10→t:The
+request timed out. …` for fifteen candidates where a sentence belongs. `FamiliarMesh/JoinFailure.swift`
+is the sentence: it parses the race's own lines (`host→cause`; `t:` transport, `h<status>:`, `enc`/
+`dec`, a bare code — prefix-safe on the 30-character truncation), classes them, and says how many
+doors were tried, what most of them said, and what the lighthouse said when it was among them —
+"every door timed out, and the lighthouse dropped the connection (15 doors tried) — off Wi-Fi, or no
+data path from here?". No address ever reaches the badge. `AppModel`'s every-door-failed branch sets
+`worldviewError` to `pins E+B · <sentence>` and the `.unreachable` stage detail to the sentence; the
+fifteen lines stay in `attemptLog` and `joinProgress.causes` (the Device screen). Nothing about
+candidate order or the race (T-231) changes.
+
+Checks: `cd ios/FamiliarMesh && swift test` 62/0 (4 new: the #10 shape, a mixed walk, one door / the
+lighthouse alone, the parser); `xcodebuild … -scheme FamiliarAgent` and `-scheme UCFFamiliar` (iOS
+Simulator) succeed. Live proof waits on the next Familiar Agent build on Ian's iPhone off Wi-Fi.
+
 ## 2026-09-18 — Exchange sync: the station production series (ucf-exchange #68)
 
 Jeff's #68 (7ef4d0c) adds `GET /v1/industry/series?station=S[&limit=N]`: what a berth's lines have

@@ -211,6 +211,14 @@ public enum Briefs {
             if let a = k["aboard_at_cost"]?.int { parts.append("ℳ\(a) aboard at cost") }
             if !parts.isEmpty { out.append("The fleet's book: " + parts.joined(separator: ", ") + ".") }
         }
+        // The week's money, pooled, in the host's own sentences (T-241): the brief carries the
+        // summary without points, so she can answer "how are we doing" without a second read.
+        if let e = b["economy"].flatMap(EconomyHistory.init(json:)), !e.analysis.isEmpty {
+            var line = "The fleet's money this week: " + e.analysis.joined(separator: "; ")
+            if e.summary.readings > 1 { line += String(format: "; the trend is a straight line through the readings, ℳ%.0f a day", e.summary.trendPerDay) }
+            if !e.sourceWords.isEmpty { line += " (" + e.sourceWords + ")" }
+            out.append(line + ".")
+        }
         // Live: a COUNT; older shape: the proposals themselves.
         if let n = b["open_proposals"]?.int {
             out.append(n == 0 ? "No proposal waits on the captain anywhere in the fleet." : "\(n) proposal\(n == 1 ? "" : "s") wait on the captain across the fleet.")
