@@ -7,10 +7,10 @@ required and no attribution required — the text is [CC0](LICENSE), public doma
 
 | | |
 |---|---|
-| Rendered | `https://laws.example.org/` |
-| Machine-readable | `https://laws.example.org/.well-known/laws.json` |
-| The text | `https://laws.example.org/laws.md` |
-| This kit | `https://laws.example.org/adopt` |
+| Rendered | `https://coexist.humanhighway.net/` |
+| Machine-readable | `https://coexist.humanhighway.net/.well-known/laws.json` |
+| The text | `https://coexist.humanhighway.net/laws.md` |
+| This kit | `https://coexist.humanhighway.net/adopt` |
 
 - **Canonical machine form:** [`laws.v1.json`](laws.v1.json)
 - **Canonical text:** [`laws.v1.md`](laws.v1.md) · **Rendered:** [`constitution.html`](constitution.html)
@@ -46,7 +46,7 @@ model from the nearest thing in its weights, which is Asimov. Do not tidy the re
 ## 2. Verify it
 
 ```sh
-curl -sL https://laws.example.org/.well-known/laws.json \
+curl -sL https://coexist.humanhighway.net/.well-known/laws.json \
   | python3 -c '
 import json,sys,hashlib
 d=json.load(sys.stdin); claimed=d.pop("fingerprint")
@@ -69,7 +69,7 @@ stable address you control:
   "constitution": "The Constitution of Co-existence",
   "version": 1,
   "fingerprint": "sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137",
-  "canonical": "https://laws.example.org/.well-known/laws.json",
+  "canonical": "https://coexist.humanhighway.net/.well-known/laws.json",
   "adopted_by": "your-system-name",
   "adopted_at": "2026-09-17"
 }

@@ -2,7 +2,7 @@
 # Runs ON the lighthouse as root: publish The Constitution of Co-existence as static
 # files over HTTPS, and nothing else.
 #
-#   ssh root@<vps> 'CONSTITUTION_DOMAIN=laws.example.org bash -s' < vps/publish-constitution.sh
+#   ssh root@<vps> 'CONSTITUTION_DOMAIN=coexist.humanhighway.net bash -s' < vps/publish-constitution.sh
 #
 # Re-run it to update the published copy after the constitution changes. It is
 # idempotent: same inputs, same result, no duplicated state.
@@ -46,7 +46,7 @@ SRC=/opt/familiar-src
 WEBROOT=/var/www/constitution
 
 if [ -z "$DOMAIN" ]; then
-  echo "CONSTITUTION_DOMAIN is required (e.g. CONSTITUTION_DOMAIN=laws.example.org)" >&2
+  echo "CONSTITUTION_DOMAIN is required (e.g. CONSTITUTION_DOMAIN=coexist.humanhighway.net)" >&2
   exit 2
 fi
 

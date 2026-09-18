@@ -222,6 +222,8 @@ page = f"""<title>The Constitution of Co-existence</title>
     <h2>Verify this document</h2>
     <dl>
       <dt>Fingerprint</dt><dd class="fingerprint">{e(d['fingerprint'])}</dd>
+      <dt>Canonical home</dt><dd><a href="https://coexist.humanhighway.net/">coexist.humanhighway.net</a>
+        &middot; machine form at <a href="https://coexist.humanhighway.net/.well-known/laws.json">/.well-known/laws.json</a></dd>
       <dt>Canonical source</dt><dd>{e(d['source'])} &middot;
         <a href="https://github.com/Capitali/familiar">github.com/Capitali/familiar</a></dd>
       <dt>Machine-readable</dt><dd>data/laws/laws.v1.json &mdash; SHA-256 over its

@@ -66,7 +66,7 @@ Co-existence**, as static files and nothing else.
 
 ```sh
 # DNS A/AAAA for the name must already point at this box.
-ssh root@<vps> 'CONSTITUTION_DOMAIN=laws.example.org bash -s' < vps/publish-constitution.sh
+ssh root@<vps> 'CONSTITUTION_DOMAIN=coexist.humanhighway.net bash -s' < vps/publish-constitution.sh
 ```
 
 Re-run it to republish after the constitution changes. It refuses to publish bytes

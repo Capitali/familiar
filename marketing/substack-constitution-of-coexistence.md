@@ -3,16 +3,16 @@ DRAFT FOR SUBSTACK — paste-ready. Not published.
 
 BLOCKING BEFORE YOU PUBLISH:
 
-1. LINKS. Two steps, in order:
-   a) Pick the domain and stand up the reading room:
-        ssh root@<vps> 'CONSTITUTION_DOMAIN=<your-domain> bash -s' < vps/publish-constitution.sh
-      (it publishes from main, so merge the branch first).
-   b) Substitute it here and in data/laws/ADOPT.md:
-        sed -i 's/laws\.example\.org/<your-domain>/g' \
-          marketing/substack-constitution-of-coexistence.md data/laws/ADOPT.md
-   The links below use laws.example.org as a placeholder and will 404 until you do.
-   An article whose whole argument is "fetch this and check the hash" cannot ship
-   with dead links — that is the one failure this piece cannot survive.
+1. LINKS. The domain is settled: coexist.humanhighway.net. Two things must be true
+   before the links below resolve, and an article whose whole argument is "fetch this
+   and check the hash" cannot ship with dead links:
+   a) The DNS A record exists: coexist.humanhighway.net -> 134.209.168.50
+   b) The reading room is up:
+        ssh root@134.209.168.50 \
+          'CONSTITUTION_DOMAIN=coexist.humanhighway.net bash -s' < vps/publish-constitution.sh
+      (publishes from main by default — merge first, or pass
+       FAMILIAR_REF=claude/crewai-integration-architecture-3tl8pf to test from the branch).
+   Confirm with: curl -s https://coexist.humanhighway.net/.well-known/laws.json | head -3
 
 2. VERIFY THE AGENT-NETWORK NUMBERS or cut that paragraph. The figures are
    second-hand (the primary write-ups were unreachable from the machine this was
@@ -123,9 +123,9 @@ The machines are already talking to each other. About one message in forty is an
 
 **The Constitution of Co-existence — everything you need to adopt or share it**
 
-- **Read it:** [laws.example.org](https://laws.example.org/)
-- **Fetch it:** [`/.well-known/laws.json`](https://laws.example.org/.well-known/laws.json) — the canonical machine-readable form
-- **Verify it:** `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137` over the canonical serialization — [how](https://laws.example.org/adopt)
-- **Adopt it:** [the adoption kit](https://laws.example.org/adopt) — copy-paste text, a template for declaring your own constraints, and where to put them
-- **Licence:** [CC0 1.0](https://laws.example.org/license). No permission needed, no attribution required.
+- **Read it:** [coexist.humanhighway.net](https://coexist.humanhighway.net/)
+- **Fetch it:** [`/.well-known/laws.json`](https://coexist.humanhighway.net/.well-known/laws.json) — the canonical machine-readable form
+- **Verify it:** `sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137` over the canonical serialization — [how](https://coexist.humanhighway.net/adopt)
+- **Adopt it:** [the adoption kit](https://coexist.humanhighway.net/adopt) — copy-paste text, a template for declaring your own constraints, and where to put them
+- **Licence:** [CC0 1.0](https://coexist.humanhighway.net/license). No permission needed, no attribution required.
 - **The system it governs:** [github.com/Capitali/familiar](https://github.com/Capitali/familiar)
