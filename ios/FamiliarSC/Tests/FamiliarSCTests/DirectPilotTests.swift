@@ -14,9 +14,12 @@ final class MockExchange: URLProtocol {
     nonisolated(unsafe) static var gets: [String: (Int, Data)] = [:]
     nonisolated(unsafe) static var posts: [(path: String, body: JSONValue)] = []
     nonisolated(unsafe) static var postAnswer: (Int, Data) = (202, Data())
+    /// GETs that fail at the transport (no response at all), as a dropped connection does.
+    nonisolated(unsafe) static var failing: Set<String> = []
     static let lock = NSLock()
 
-    static func reset() { lock.lock(); gets = [:]; posts = []; postAnswer = (202, Data()); lock.unlock() }
+    static func reset() { lock.lock(); gets = [:]; posts = []; postAnswer = (202, Data()); failing = []; lock.unlock() }
+    static func fail(_ pathAndQuery: String) { lock.lock(); failing.insert(pathAndQuery); lock.unlock() }
     static func serve(_ pathAndQuery: String, _ fixture: String, status: Int = 200) {
         lock.lock(); gets[pathAndQuery] = (status, Fixtures.wire(fixture)); lock.unlock()
     }
@@ -44,7 +47,11 @@ final class MockExchange: URLProtocol {
             let parsed = (try? JSONDecoder().decode(JSONValue.self, from: body)) ?? .null
             MockExchange.lock.lock(); MockExchange.posts.append((key, parsed)); (status, data) = MockExchange.postAnswer; MockExchange.lock.unlock()
         } else {
-            MockExchange.lock.lock(); let hit = MockExchange.gets[key]; MockExchange.lock.unlock()
+            MockExchange.lock.lock(); let hit = MockExchange.gets[key]; let fails = MockExchange.failing.contains(key); MockExchange.lock.unlock()
+            if fails {
+                client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+                return
+            }
             (status, data) = hit ?? (404, Data("{\"error\":\"no fixture for \(key)\"}".utf8))
         }
         let resp = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
@@ -107,7 +114,7 @@ final class DirectPilotTests: XCTestCase {
     }
 
     static let travelVerdict = """
-    {"seam_version": 2, "doctrine_build": "0.1.0-test",
+    {"seam_version": 3, "doctrine_build": "0.1.0-test",
      "decision": {"type": "divert-to-pump", "pump": "paws-neptune", "burn_bps": 5000, "burn": "economy"},
      "reasons": {"code": "fuel.pump-in-reach.world-priced", "pump": "paws-neptune", "burn": "economy", "burn_bps": 5000,
                  "fuel_needed": 114, "ticks": 95, "tank": 166, "reserve": 1.1},
@@ -117,7 +124,7 @@ final class DirectPilotTests: XCTestCase {
      "pumps": ["foxys-diner", "paws-neptune", "paws-truckstop"], "board_rows": 12}
     """
     static let bookVerdict = """
-    {"seam_version": 2, "doctrine_build": "0.1.0-test",
+    {"seam_version": 3, "doctrine_build": "0.1.0-test",
      "decision": {"type": "book", "load_id": "L1"},
      "reasons": {"code": "freight.best-net-per-tick", "load_id": "L1", "estimated_net": 900, "deadhead_ticks": 0, "haul_ticks": 10,
                  "deliver_deadline_tick": 1100, "tick": 1000, "candidates": 3, "chain_pressure": 0},
@@ -126,7 +133,7 @@ final class DirectPilotTests: XCTestCase {
      "pumps": ["foxys-diner"], "board_rows": 12}
     """
     static let holdVerdict = """
-    {"seam_version": 2, "doctrine_build": "0.1.0-test",
+    {"seam_version": 3, "doctrine_build": "0.1.0-test",
      "decision": {"type": "hold", "why": "a tanker is inbound to foxys-diner; leaving forfeits the call"},
      "reasons": {"code": "hold", "why": "a tanker is inbound to foxys-diner; leaving forfeits the call"},
      "surface": "navigation.course", "family": "freight", "level": "auto", "automation": null,
@@ -241,7 +248,7 @@ final class DirectPilotTests: XCTestCase {
         XCTAssertTrue(pilot.text.contains("Because the exchange prices this hull to paws-neptune on the economy burn at 114 fuel over 95 ticks"), pilot.text)
         XCTAssertTrue(pilot.text.contains("No dial governs this device"), pilot.text)
         XCTAssertFalse(pilot.text.contains("the captain's setting"), "finding 5: the default level is not the captain's setting")
-        XCTAssertTrue(pilot.text.contains("Doctrine build 0.1.0-test, seam 2."))
+        XCTAssertTrue(pilot.text.contains("Doctrine build 0.1.0-test, seam 3."))
         // The proposal the screen would show, read from the same gather (one actionId).
         let shown = try await f.pilotProposal(world: "direct-mocktest")
         let p = try XCTUnwrap(shown)
@@ -335,28 +342,46 @@ final class DirectPilotTests: XCTestCase {
 
     func testAMineBoardThatWillNotReadFailsClosedThroughRenderAndConfirm() async throws {
         serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
-        let f = feed(ScriptedMind([Self.travelVerdict]))
+        let mind = ScriptedMind([Self.travelVerdict])
+        let f = feed(mind)
         let shown = try await f.pilotProposal(world: "w")
         let p = try XCTUnwrap(shown, "a good read shows the act")
-        for (status, body) in [(500, "{\"error\":\"fold in progress\"}"), (200, "this is not json")] {
+        let asked = mind.inputs.count
+        // A 500, non-JSON, and — codex r3 finding 1 — VALID JSON of the wrong shape: an HTTP-200
+        // object, `null`, a scalar. Each used to be an empty board; each must be a named failure.
+        let bad: [(Int, String)] = [(500, "{\"error\":\"fold in progress\"}"), (200, "this is not json"),
+                                    (200, "{\"error\":\"temporarily unavailable\"}"), (200, "null"), (200, "\"[]\""), (200, "7")]
+        for (status, body) in bad {
             MockExchange.serveRaw("/v1/loadboard?mine=true", body, status: status)
             f.memo.drop()   // the 30 s memo of the good gather would otherwise answer; a confirm always reads fresh
             let (_, docs) = try await f.context(world: "w", worldInstance: "PROD")
             let pilot = try XCTUnwrap(docs.first { $0.name == "pilot" })
             XCTAssertTrue(pilot.text.hasPrefix("The pilot's mind could not be asked: "), pilot.text)
             XCTAssertTrue(pilot.text.contains("/v1/loadboard?mine=true"), "the failed endpoint is NAMED: \(pilot.text)")
+            if status == 200, body != "this is not json" { XCTAssertTrue(pilot.text.contains("expected the captain's rows as an array"), pilot.text) }
             XCTAssertFalse(pilot.text.contains("The pilot would now"))
-            do { _ = try await f.pilotProposal(world: "w"); XCTFail("a proposal on a failed read") } catch {}
-            do { _ = try await f.confirm(p, world: "w"); XCTFail("filed on a failed read") } catch {}
+            do { _ = try await f.pilotProposal(world: "w"); XCTFail("a proposal on a failed read: \(body)") } catch {}
+            do { _ = try await f.confirm(p, world: "w"); XCTFail("filed on a failed read: \(body)") } catch {}
         }
+        // And the transport itself failing on that one read: named by endpoint too.
+        MockExchange.fail("/v1/loadboard?mine=true")
+        f.memo.drop()
+        let (_, docs) = try await f.context(world: "w", worldInstance: "PROD")
+        let pilot = try XCTUnwrap(docs.first { $0.name == "pilot" })
+        XCTAssertTrue(pilot.text.hasPrefix("The pilot's mind could not be asked: /v1/loadboard?mine=true: "), pilot.text)
+        do { _ = try await f.pilotProposal(world: "w"); XCTFail("a proposal on a transport failure") } catch {}
+        do { _ = try await f.confirm(p, world: "w"); XCTFail("filed on a transport failure") } catch {}
+        XCTAssertEqual(mind.inputs.count, asked, "the mind was never asked on a failed gather")
         XCTAssertEqual(MockExchange.postCount, 0, "zero POSTs through render and confirm while the mine board will not read")
     }
 
     func testALedgerOpenLoadWithNoMineRowFailsClosed() async throws {
         serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
-        let f = feed(ScriptedMind([Self.travelVerdict]))
+        let mind = ScriptedMind([Self.travelVerdict])
+        let f = feed(mind)
         let shown = try await f.pilotProposal(world: "w")
         let p = try XCTUnwrap(shown)
+        let asked = mind.inputs.count
         // The ledger (me.json) holds L3249 open — departed, arrived, departed again — but the
         // captain's board now answers empty: the record disagrees with itself.
         MockExchange.serveRaw("/v1/loadboard?mine=true", "[]")
@@ -369,6 +394,7 @@ final class DirectPilotTests: XCTestCase {
         do { _ = try await f.confirm(p, world: "w"); XCTFail("filed on an inconsistent record") }
         catch let e as FeedError { guard case .refused(let why) = e else { return XCTFail("\(e)") }; XCTAssertTrue(why.contains("inconsistent record"), why) }
         XCTAssertEqual(MockExchange.postCount, 0)
+        XCTAssertEqual(mind.inputs.count, asked, "the mind is not asked about a record that disagrees with itself")
         XCTAssertEqual(DirectFeed.openLoads(me: try JSONDecoder().decode(JSONValue.self, from: Fixtures.wire("me"))), ["L3249": "picked up"])
         let settled: JSONValue = .object(["freight": .array([
             .object(["loadId": .string("L1"), "event": .string("booked")]), .object(["loadId": .string("L1"), "event": .string("delivered: payment taken")]),
@@ -383,11 +409,11 @@ final class DirectPilotTests: XCTestCase {
 
     func testASeamThisShellWasNotBuiltForIsRefusedAndOffersNoAct() async throws {
         serveRoutes(pairs: [(Self.here, "paws-neptune"), (Self.here, "paws-truckstop")], hull: true)
-        let skewed = Self.travelVerdict.replacingOccurrences(of: "\"seam_version\": 2", with: "\"seam_version\": 3")
+        let skewed = Self.travelVerdict.replacingOccurrences(of: "\"seam_version\": 3", with: "\"seam_version\": 4")
         let f = feed(ScriptedMind([skewed]))
         let (_, docs) = try await f.context(world: "w", worldInstance: nil)
         let pilot = try XCTUnwrap(docs.first { $0.name == "pilot" })
-        XCTAssertTrue(pilot.text.contains("speaks seam 3 and this shell was built for seam 2"), pilot.text)
+        XCTAssertTrue(pilot.text.contains("speaks seam 4 and this shell was built for seam 3"), pilot.text)
         XCTAssertFalse(pilot.text.contains("The pilot would now"))
         let p = try await f.pilotProposal(world: "w")
         XCTAssertNil(p, "nothing can be filed from a verdict the shell cannot read")

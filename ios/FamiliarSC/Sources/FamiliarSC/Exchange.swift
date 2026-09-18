@@ -399,7 +399,9 @@ public struct ExchangeClient: Sendable {
         let data: Data
         let resp: URLResponse
         do { (data, resp) = try await session.data(for: request(path)) } catch {
-            throw ExchangeError.transport("\(error.localizedDescription)")
+            // Named by endpoint like every other failure: a transport error on the captain's
+            // board must say WHICH read did not happen (codex T-237 B4 r3, finding 1).
+            throw ExchangeError.transport("\(path): \(error.localizedDescription)")
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else { throw ExchangeError.http(code, path) }
@@ -450,7 +452,7 @@ public struct ExchangeClient: Sendable {
         let data: Data
         let resp: URLResponse
         do { (data, resp) = try await session.data(for: r) } catch {
-            throw ExchangeError.transport("\(error.localizedDescription)")
+            throw ExchangeError.transport("/v1/actions: \(error.localizedDescription)")
         }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
