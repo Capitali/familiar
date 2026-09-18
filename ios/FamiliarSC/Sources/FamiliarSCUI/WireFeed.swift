@@ -105,6 +105,7 @@ public struct WireFeed: ShipsFeed, CaptainActs {
             trades: row["trades"].map { TradeBook(row: $0) }
         )
         summary.captainID = row["captain_id"]?.string ?? ""
+        summary.titled = row["titled"]?.bool
         summary.personaState = state
         summary.worldName = row["world_name"]?.string
         // The record's pronouns ride `computer_state` (the host strips them off the row's

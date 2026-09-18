@@ -50,6 +50,17 @@ public struct ShipSummary: Identifiable, Equatable, Sendable {
     public var sentence: String = ""
     public var leasePrincipal: Int64?
     public var leaseServicePaid: Int64?
+    /// The world's word on the hull's title (`titled` on `/v1/me`): true once the lease
+    /// balance cleared. nil when the row did not say (an older host, an unreachable hull).
+    public var titled: Bool? = nil
+    /// The hull as the exchange holds it: owned outright, leased with a balance, or unknown.
+    public var titleWord: String? {
+        switch titled {
+        case .some(true): return "owned"
+        case .some(false): return "lease" + ((debt ?? 0) > 0 ? " ℳ\(debt!)" : "")
+        case .none: return nil
+        }
+    }
     /// The merchant's book as `fleet status` computes it from receipts ∪ journal (wire only).
     public var trades: TradeBook?
     /// A contract the hull holds and the ledger's word for it (T-243, the bay): the host's row

@@ -134,6 +134,7 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
             leasePrincipal: m.leasePrincipal, leaseServicePaid: m.leaseServicePaid
         )
         out.worldName = s.worldName
+        out.titled = m.titled
         out.pronouns = persona?.pronouns
         // The bay from the ledger itself (T-243): every load `/v1/me.freight` still holds open,
         // at the word it holds it — the same reading the seam makes.
