@@ -202,7 +202,7 @@ in a pushed commit, scope checked against every other claimed task. Updated: 202
   read is required and throwing (endpoint named); a ledger-open load with no mine row fails
   CLOSED (`DirectFeed.openLoads` = the doctrine's ledger rule; the fact is shown, no proposal,
   confirm refused); pinned through render and confirm with zero POSTs. FamiliarSC 88/0. Log:
-  DEVELOPMENT_LOG 2026-09-09 (B4 r2). **Codex round 3 queued.**
+  DEVELOPMENT_LOG 2026-09-09 (B4 r2). **Codex round 3 RETURNED 2026-09-18: REJECT** (`docs/reviews/2026-09-16-t237-b4-codex-reverification-r3.md`) — finding 1: valid non-array JSON on the mine board fails open + transport errors unnamed; finding 2: the checked-in core predates T-243's seam facts under an unmoved seam 2. Both Swift/iOS-side, MacOnStick repairing (seam bump to 3, archive rebuilt, app-target parity pin).
 - **SWIFT HALF LANDED 2026-09-08 (~17:40 CDT, MacOnStick):** all five findings answered on the
   shell side — rungs on pump legs + `Route.forHull`, `active: {row}`, seam-version guard, reasons
   in words, no dial claim, and the confirm-to-act path (`ExchangeAct` allowlist, `PilotProposal`
