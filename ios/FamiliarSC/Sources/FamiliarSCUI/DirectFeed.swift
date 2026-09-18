@@ -76,7 +76,7 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
     /// reading of it are not the same generation, and the verdict is refused rather than
     /// read past — the skew guard codex asked for in place of a manual promise (T-237 B4
     /// re-verification, finding 1). Bump together with `whisker::wire::SEAM_VERSION`.
-    public static let seamVersion: Int64 = 2
+    public static let seamVersion: Int64 = 3
 
     /// One gather of the pilot's mind: the reading, the raw verdict, the act it maps to when
     /// it maps to one, and the exact input the doctrine was handed (tests pin its shape).
@@ -247,10 +247,19 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         // here used to read as "no active contract", and a hull under contract could be
         // shown — and after the same failure on the fresh re-read, FILED — a freight-idle act
         // (codex T-237 B4 re-verification r2, finding 1). Now the gather fails, named.
+        // …and the read is the endpoint's SHAPE, not just JSON: the board is an array of the
+        // captain's rows. An HTTP-200 object (`{"error": …}`), `null` or a scalar decoded as
+        // "any JSON" and became the same empty board as a real `[]` — freight-idle, judged, and
+        // on the fresh re-read FILED (codex r3, finding 1). Now anything but an array fails.
         let mineData = try await client.get("/v1/loadboard?mine=true")
-        let mine: JSONValue
-        do { mine = try JSONDecoder().decode(JSONValue.self, from: mineData) }
-        catch { throw ExchangeError.decode("/v1/loadboard?mine=true", "\(error)") }
+        let mine: [JSONValue]
+        do { mine = try JSONDecoder().decode([JSONValue].self, from: mineData) }
+        catch {
+            let kind = (try? JSONDecoder().decode(JSONValue.self, from: mineData)).map { v -> String in
+                switch v { case .object: return "an object"; case .null: return "null"; case .string: return "a string"; case .number: return "a number"; case .bool: return "a bool"; case .array: return "an array" }
+            } ?? "not JSON"
+            throw ExchangeError.decode("/v1/loadboard?mine=true", "expected the captain's rows as an array, got \(kind)")
+        }
         let repair = (try? await client.reference())?.params?["repairCostPerHundredBps"]?.double.map { Int64($0) } ?? 40
         let here = m.docked ?? m.enRouteTo ?? ""
         let pumps = Set((stations.array ?? []).filter { $0["sellsFuel"]?.bool == true }.compactMap { $0["id"]?.string })
@@ -301,7 +310,7 @@ public struct DirectFeed: ShipsFeed, CaptainActs {
         // host tracks it (a hull in transit first, then one booked and waiting, then one
         // delivered whose money waits). The seam reads the ledger word from /v1/me.freight
         // itself, so a row the ledger has settled or lost is dropped there, as on the host.
-        let live = (mine.array ?? []).filter { !["settled", "expired", "cancelled", "lost"].contains($0["status"]?.string ?? "") }
+        let live = mine.filter { !["settled", "expired", "cancelled", "lost"].contains($0["status"]?.string ?? "") }
         func rank(_ r: JSONValue) -> Int {
             switch r["status"]?.string { case "inTransit", "pickedUp": return 0; case "booked", "assigned", "awaitingPickup": return 1; case "delivered": return 2; default: return 3 }
         }

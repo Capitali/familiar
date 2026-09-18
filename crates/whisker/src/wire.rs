@@ -218,10 +218,14 @@ pub struct TableRouter {
     rungs: BTreeMap<(String, String, i64), (i64, i64)>,
 }
 
-/// Bumped whenever the shape of `advise`'s input or output changes. A shell that
-/// was built against one seam and is handed another must be able to tell, rather
-/// than quietly reading a field that is no longer there (finding 1's skew guard).
-pub const SEAM_VERSION: i64 = 2;
+/// Bumped whenever the shape of `advise`'s input or output changes — OR whenever
+/// the shell comes to rely on a new input fact for safe judgment, even an additive
+/// one. A shell that was built against one seam and is handed another must be able
+/// to tell, rather than quietly reading a field that is no longer there (finding
+/// 1's skew guard) or handing a fact to a core that ignores it. Seam 3: `contracts[]`
+/// (the rest of the bay) and `denied` (the key's prohibited verbs) — a seam-2 core
+/// offered `repair` to a key that could not file it (codex T-237 B4 r3, finding 2).
+pub const SEAM_VERSION: i64 = 3;
 
 impl TableRouter {
     pub fn from_json(routes: &Value) -> Self {
@@ -571,6 +575,40 @@ mod tests {
 #[cfg(test)]
 mod seam_parity_tests {
     use super::*;
+
+    /// The shared artifact-parity fixtures (codex T-237 B4 r3, finding 2): the same
+    /// two files are run by `ios/UCFFamiliarTests` against the CHECKED-IN FamiliarCore
+    /// archive on the simulator. This side pins that current source says what the
+    /// fixture expects, so a drift is caught wherever it starts. Read at compile time:
+    /// the fixture cannot be edited without this test seeing it.
+    const CORE_FIXTURES: [(&str, &str); 2] = [
+        (
+            "seam-denied-repair",
+            include_str!(
+                "../../../ios/FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/seam-denied-repair.json"
+            ),
+        ),
+        (
+            "seam-bay-full",
+            include_str!(
+                "../../../ios/FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/seam-bay-full.json"
+            ),
+        ),
+    ];
+
+    #[test]
+    fn the_checked_in_core_fixtures_say_what_current_source_says() {
+        for (name, text) in CORE_FIXTURES {
+            let f: Value = serde_json::from_str(text).unwrap();
+            let out = advise(&f["input"]);
+            assert_eq!(
+                out["seam_version"], f["expect"]["seam_version"],
+                "{name}: {out}"
+            );
+            assert_eq!(out["seam_version"], SEAM_VERSION, "{name}");
+            assert_eq!(out["decision"], f["expect"]["decision"], "{name}: {out}");
+        }
+    }
 
     /// The exact facts codex probed (T-237 B4 re-verification, finding 1): a 188 mG
     /// hull at titania-cold-store on 123 of fuel, foxy's-diner the pump, the route

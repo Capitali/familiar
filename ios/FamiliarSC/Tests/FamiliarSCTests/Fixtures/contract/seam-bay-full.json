@@ -1,0 +1,19 @@
+{
+  "_why": "T-243 on the seam: an active contract plus two more in the bay (contracts[]) — the tour delivers L3 at b, fetches L1 at b, then both at c, so the verdict is travel to b, not a book of the open L9. A seam-2 core never read contracts[] and would book. Pinned on both sides like seam-denied-repair.json.",
+  "input": {
+    "me": {"docked": "a", "fuel": 500, "fuelCapacity": 600, "credits": 5000,
+           "effectiveAccelMilliG": 189, "wearBps": 0, "titled": false,
+           "leasePrincipal": 25000, "holdCapacity": 160, "holdUsed": 0, "route": [], "tick": 100, "freight": []},
+    "board": [{"loadId": "L9", "origin": "a", "dest": "c", "good": "catnip", "units": 25, "estimatedNet": 400, "deadheadTicks": 5, "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard"}],
+    "stations": [{"id": "a", "sellsFuel": true}],
+    "routes": [{"from": "a", "to": "b", "fuel": 10, "legs_km": [1000000]},
+               {"from": "b", "to": "c", "fuel": 10, "legs_km": [1000000]},
+               {"from": "a", "to": "c", "fuel": 10, "legs_km": [1000000]}],
+    "active": {"row": {"loadId": "L1", "origin": "b", "dest": "c", "good": "catnip", "units": 25, "estimatedNet": 500, "deadheadTicks": 5, "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard"}, "word": "booked"},
+    "contracts": [
+      {"row": {"loadId": "L2", "origin": "a", "dest": "c", "good": "catnip", "units": 25, "estimatedNet": 300, "deadheadTicks": 5, "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard"}, "word": "pickedUp"},
+      {"row": {"loadId": "L3", "origin": "a", "dest": "b", "good": "catnip", "units": 25, "estimatedNet": 200, "deadheadTicks": 5, "haulTicks": 10, "loadingTicks": 8, "serviceClass": "standard"}, "word": "pickedUp"}
+    ]
+  },
+  "expect": {"seam_version": 3, "decision": {"type": "travel", "station": "b"}}
+}

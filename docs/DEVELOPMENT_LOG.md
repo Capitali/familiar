@@ -6,6 +6,43 @@ the latest entries here.
 
 Each entry: what changed, why, checks run, what the next developer should know.
 
+## 2026-09-18 — T-237 B4 codex round 3 repaired: the board's shape, and the archive says what the source says
+
+Codex r3 (`docs/reviews/2026-09-16-t237-b4-codex-reverification-r3.md`, REJECT) found two blockers,
+both on the Apple side. **Finding 1 — valid JSON of the wrong shape failed open.** The required
+mine-board read (r2's repair) decoded as `JSONValue`, and `mine.array ?? []` turned an HTTP-200
+`{"error":…}`, `null` or a scalar into the same empty board as a real `[]`: freight-idle, judged,
+and on the fresh re-read FILED (codex's probe: one proposal, one POST). Now `DirectFeed` decodes
+`[JSONValue]` and anything else throws `decode("/v1/loadboard?mine=true", "expected the captain's
+rows as an array, got an object|null|a string|a number")`; `ExchangeClient` names the endpoint on
+transport failures too (`"/v1/loadboard?mine=true: The network connection was lost."`). Pins: the
+mine-read test now walks 500 / non-JSON / 200-object / `null` / `"[]"` / `7` and a transport
+failure (`MockExchange.fail`) through render AND confirm — endpoint named, no proposal, the mind's
+call count unchanged, zero POSTs; the inconsistent-record test pins the call count too. Proven
+red first: the old decode failed the four wrong-shape inputs exactly. **Finding 2 — the checked-in
+FamiliarCore archive predated the seam facts the shell relies on.** Built at 532099c, before T-243
+put `contracts[]` and `denied` on the seam, yet stamping the same seam 2 — codex ran it and got
+`repair` where current source says `hold` (repair denied). Three things: (a) **SEAM_VERSION 2 → 3**
+on both sides — the rule is now written on the constant: bump when the shell comes to rely on a
+new input fact for safe judgment, even an additive one; (b) `tools/build-core.sh` rebuilt both
+slices from this tree (floor check ✓); (c) **the artifact pin codex asked for in r2 and r3**: two
+shared fixtures `ios/FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/seam-{denied-repair,bay-
+full}.json` (input + expected decision), pinned by `wire::seam_parity_tests` at COMPILE TIME
+(`include_str!`) against current source, and by a new **`UCFFamiliarTests` app test target**
+(`ios/UCFFamiliarTests/CorePinTests.swift`) that runs the CHECKED-IN archive over the same files on
+the simulator — the only thing in the repo that executes the archive itself. Proven: on the old
+archive it failed (seam 2 ≠ 3; `repair` ≠ `hold`); on the rebuilt one it passes.
+
+Checks: FamiliarSC `swift test` 100/0 (2 skipped); `cargo fmt --check`, `cargo clippy --all-targets
+-- -D warnings`, `cargo test -p familiar-whisker -p familiar-core-ffi` (120 + 2 + 1); `tools/build-
+core.sh` exit 0; `xcodebuild … -scheme FamiliarAgent` (sim) builds on the new archive; `xcodebuild
+test-without-building -scheme UCFFamiliar -destination 'platform=iOS Simulator,id=…'` 1/0. Simulator
+lesson on this Mac (Xcode 27 beta): a combined `xcodebuild test` hangs at install ("Invalid device
+state") — build first, then `test-without-building`; if `simctl` itself hangs, kill
+`CoreSimulatorService`, `simctl boot`, `bootstatus -b`, then run. Next: UCF Familiar build 9 shipped
+tonight from wildhorse BEFORE this landed, so it carries the seam-2 archive — build 10 owed; the
+Rust side's `wire::advise` is unchanged apart from the constant, so hosts need no roll.
+
 ## 2026-09-18 — T-241 iPad half: money over time, by captain (FamiliarSC/UCFFamiliar)
 
 Ian (2026-09-09): "Familiar UCF views should include economic history/trend lines and analysis of

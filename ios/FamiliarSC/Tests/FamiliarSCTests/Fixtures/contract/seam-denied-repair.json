@@ -1,0 +1,13 @@
+{
+  "_why": "codex T-237 B4 r3 finding 2, the exact deciding facts: a titled hull docked at a, wear 6000 bps, credits 100000, fuel 590/600, an empty board, a pump at a, and repair DENIED by the key's papers. A seam-2 core ignored `denied` and said repair; current doctrine holds. Pinned on both sides: crates/whisker/src/wire.rs seam_parity_tests reads this file at compile time; ios/UCFFamiliarTests runs the CHECKED-IN FamiliarCore archive over it on the simulator.",
+  "input": {
+    "me": {"docked": "a", "fuel": 590, "fuelCapacity": 600, "credits": 100000,
+           "effectiveAccelMilliG": 189, "wearBps": 6000, "titled": true,
+           "leasePrincipal": 0, "holdCapacity": 160, "holdUsed": 0, "route": [], "tick": 1},
+    "board": [],
+    "stations": [{"id": "a", "sellsFuel": true}],
+    "routes": [],
+    "denied": ["repair"]
+  },
+  "expect": {"seam_version": 3, "decision": {"type": "hold", "why": "no fuelable work on the board"}}
+}

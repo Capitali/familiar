@@ -120,6 +120,33 @@ targets:
       # Static library — link only, never embed (see FamiliarAgent's note).
       - framework: FamiliarCore/FamiliarCore.xcframework
         embed: false
+    scheme:
+      testTargets: [UCFFamiliarTests]
+  # The pin on the CHECKED-IN core (codex T-237 B4 r3, finding 2): the archive linked into
+  # UCF Familiar is run on the simulator over the same fixtures `crates/whisker/src/wire.rs`
+  # (seam_parity_tests) pins against current source. Both suites green while the shipped
+  # runtime disagreed was the defect; this target is the only thing that executes the
+  # archive itself. `xcodebuild test -scheme UCFFamiliar -destination 'platform=iOS Simulator,…'`.
+  UCFFamiliarTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - UCFFamiliarTests
+      - path: FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/seam-denied-repair.json
+        buildPhase: resources
+      - path: FamiliarSC/Tests/FamiliarSCTests/Fixtures/contract/seam-bay-full.json
+        buildPhase: resources
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.river.familiar.ucf.tests
+        # The host is the app's PRODUCT (with its space), not the target's name.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/UCF Familiar.app/UCF Familiar"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        CODE_SIGN_STYLE: Automatic
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+    dependencies:
+      - target: UCFFamiliar
   # The macOS peer's console. It ENROLS and reads the worldview over the mesh like any other peer
   # (ADR-0018) — it no longer reads a daemon on the same machine over loopback /local/worldview.
   # A peer among equals: no "host", and holding no group secret it cannot mint, only offer its address.
