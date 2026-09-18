@@ -210,3 +210,54 @@ ssh root@134.209.168.50 \
 A bad Caddyfile should never reach this point — the publish script validates before
 starting Caddy and aborts on failure — so a fault here means the file on the box is
 not the one the script installed.
+
+
+---
+
+## Republishing after a change to the constitution
+
+The site currently serves an earlier text. Republishing is the same command as the
+first deploy — the script is idempotent, and the webroot is swapped whole, so files
+dropped from the allowlist (llms.txt) disappear and files added to it
+(implementation.html) appear.
+
+```
+Republish coexist.humanhighway.net with the updated constitution.
+
+The text changed: the three factors were generalised (they no longer name any
+particular system), a second page was added, and the fingerprint moved. Everything is
+pushed to branch claude/crewai-integration-architecture-3tl8pf.
+
+From wildhorse, with the repo checked out and up to date on that branch:
+
+    git fetch && git checkout claude/crewai-integration-architecture-3tl8pf && git pull
+    ssh root@134.209.168.50 \
+      'CONSTITUTION_DOMAIN=coexist.humanhighway.net FAMILIAR_REF=claude/crewai-integration-architecture-3tl8pf bash -s' \
+      < vps/publish-constitution.sh
+
+The script refuses to publish if the fingerprint does not match the bytes, so a
+successful run is itself the check. Then confirm from off-network:
+
+    curl -s https://coexist.humanhighway.net/.well-known/laws.json | python3 -c '
+    import json,sys,hashlib
+    d=json.load(sys.stdin); claimed=d.pop("fingerprint")
+    canon=json.dumps(d,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+    actual="sha256:"+hashlib.sha256(canon.encode()).hexdigest()
+    print("OK" if actual==claimed else "MISMATCH", actual)'
+
+    curl -sI https://coexist.humanhighway.net/implementation | head -2
+    curl -s  https://coexist.humanhighway.net/ | grep -ci familiar     # expect 0
+
+Expected fingerprint:
+    sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448
+
+Same constraints as before: do not touch the familiar daemon, /var/lib/familiar, the
+47100 or SSH firewall rules, or boundary.json. Report what changed and anything you
+did that this brief did not ask for.
+```
+
+**Note on the fingerprint.** It changed because the text changed, and the new document
+records the old hash in a `supersedes` list. Anyone holding the previous fingerprint can
+therefore tell an earlier version from an altered copy. Do this before the article
+drives traffic — after publication, a hash change without a recorded lineage is
+indistinguishable from tampering.

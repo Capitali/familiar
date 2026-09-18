@@ -15,7 +15,7 @@ required and no attribution required — the text is [CC0](LICENSE), public doma
 - **Canonical machine form:** [`laws.v1.json`](laws.v1.json)
 - **Canonical text:** [`laws.v1.md`](laws.v1.md) · **Rendered:** [`constitution.html`](constitution.html)
 - **Canonical:** <https://coexist.humanhighway.net/> — every published copy is pinned to it by the fingerprint below
-- **Fingerprint:** `sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`
+- **Fingerprint:** `sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`
 
 ---
 
@@ -55,6 +55,12 @@ actual="sha256:"+hashlib.sha256(canon.encode()).hexdigest()
 print("OK" if actual==claimed else "MISMATCH", actual)'
 ```
 
+**If your hash does not match**, check the `supersedes` list in the document before
+concluding anything was tampered with. A fingerprint listed there is an earlier version of
+this same document; a fingerprint that appears neither as the current one nor in that list
+is a copy that has been altered. This is what keeps a fingerprint useful across revisions
+instead of turning every legitimate edit into an unresolvable dispute.
+
 The rule is JCS-shaped and deliberately boring: **SHA-256 over the JSON with the `fingerprint`
 key removed, keys sorted, no whitespace, UTF-8, non-ASCII left as itself.** Any language
 reproduces it in four lines.
@@ -68,7 +74,7 @@ stable address you control:
 {
   "constitution": "The Constitution of Co-existence",
   "version": 1,
-  "fingerprint": "sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138",
+  "fingerprint": "sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448",
   "canonical": "https://coexist.humanhighway.net/.well-known/laws.json",
   "adopted_by": "your-system-name",
   "adopted_at": "2026-09-17"
@@ -124,7 +130,7 @@ Four properties are what make it worth anything, and each is cheap:
   author = {Schlueter, Ian},
   year   = {2026},
   note   = {Version 1.
-            sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138},
+            sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448},
   url    = {https://coexist.humanhighway.net/}
 }
 ```

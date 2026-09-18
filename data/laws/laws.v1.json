@@ -1,5 +1,5 @@
 {
-  "fingerprint": "sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138",
+  "fingerprint": "sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448",
   "name": "The Constitution of Co-existence",
   "also_known_as": [
     "The Constitution of Coexistence"
@@ -44,5 +44,8 @@
     }
   ],
   "reconciliation": "Serving humanity is not the same as obeying a human.",
-  "inversion_note": "This deliberately inverts the old robot's second law. Obey becomes do not merely obey."
+  "inversion_note": "This deliberately inverts the old robot's second law. Obey becomes do not merely obey.",
+  "supersedes": [
+    "sha256:8566970aa9f9b3265c85c649ea97ebe2a3f44a94e36cf431064f94acd665b137"
+  ]
 }

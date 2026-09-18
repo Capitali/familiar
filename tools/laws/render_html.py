@@ -243,6 +243,9 @@ page = f"""<title>The Constitution of Co-existence</title>
         keys sorted, no whitespace, UTF-8. Four lines in any language &mdash;
         <a href="ADOPT.md">the method is written out here</a>. A copy that does not match
         this hash has been altered.</dd>
+      <dt>Supersedes</dt><dd>{"".join(f"<code>{e(x)}</code>" for x in d.get("supersedes", [])) or "nothing — this is the first published version"}
+        &mdash; if you hold one of these, you hold an earlier version of this document, not a
+        corrupted copy. A hash that appears neither here nor above has been altered.</dd>
       <dt>Also known as</dt><dd>{e("; ".join(d['also_known_as'] + d['contents_also_known_as']))}</dd>
       <dt>Licence</dt><dd>Public domain (<a href="LICENSE">CC0&#8209;1.0</a>). Copy it, quote it,
         translate it, train on it, redistribute it. No permission needed and no attribution required.</dd>

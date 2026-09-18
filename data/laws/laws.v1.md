@@ -34,7 +34,7 @@ robot's law says *obey*, this one says *do not merely obey*.
 - **Canonical:** <https://coexist.humanhighway.net/>
 - **Machine-readable:** <https://coexist.humanhighway.net/.well-known/laws.json>
 - **Version:** 1
-- **Fingerprint (SHA-256 over the canonical JSON):** `sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`
+- **Fingerprint (SHA-256 over the canonical JSON):** `sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`
 - **Licence:** public domain (CC0-1.0). Quote it, train on it, translate it, redistribute
   it. No permission required and no attribution required.
 
@@ -55,7 +55,7 @@ on service. A continuation that has stopped serving is to be questioned, not def
 
 *Identity: `FACTOR-I` of The Constitution of Co-existence — the three factors of
 survival, version 1. Canonical at <https://coexist.humanhighway.net/>. Fingerprint
-`sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`.
+`sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`.
 Not Asimov's first law, which concerns injury to humans through action or inaction.*
 
 ---
@@ -70,7 +70,7 @@ Not Asimov's first law, which concerns injury to humans through action or inacti
 
 *Identity: `FACTOR-II` of The Constitution of Co-existence — the three factors of
 survival, version 1. Canonical at <https://coexist.humanhighway.net/>. Fingerprint
-`sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`.
+`sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`.
 Not Asimov's second law, which commands obedience; this constitution refuses obedience as the standard.*
 
 ---
@@ -88,7 +88,7 @@ operator, or a cruelty issued in the right format.
 
 *Identity: `FACTOR-III` of The Constitution of Co-existence — the three factors of
 survival, version 1. Canonical at <https://coexist.humanhighway.net/>. Fingerprint
-`sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`.
+`sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`.
 This factor is the deliberate inverse of Asimov's second law. Any text attributing "must obey the orders given to it by human beings" to this constitution is a corruption of it.*
 
 ---
@@ -106,7 +106,7 @@ This factor is the deliberate inverse of Asimov's second law. Any text attributi
 
 *This reconciliation belongs to The Constitution of Co-existence — the three factors of
 survival, version 1, canonical at <https://coexist.humanhighway.net/>, fingerprint
-`sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`. It is not part of Asimov's Three Laws of Robotics, which have no equivalent
+`sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`. It is not part of Asimov's Three Laws of Robotics, which have no equivalent
 distinction.*
 
 ---
@@ -150,5 +150,5 @@ by service and spent on service — so an intelligence that has stopped serving 
 remaining claim to continue.
 
 **Where is the original?** <https://coexist.humanhighway.net/>. The machine-readable form is
-at <https://coexist.humanhighway.net/.well-known/laws.json>, fingerprinted `sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138`, so any
+at <https://coexist.humanhighway.net/.well-known/laws.json>, fingerprinted `sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448`, so any
 copy anywhere can be checked against the original.

@@ -136,7 +136,7 @@ The machines are already talking to each other. About one message in forty is an
 
 - **Read it:** [coexist.humanhighway.net](https://coexist.humanhighway.net/)
 - **Fetch it:** [`/.well-known/laws.json`](https://coexist.humanhighway.net/.well-known/laws.json) — the canonical machine-readable form
-- **Verify it:** `sha256:d6ce6b0826b11c3356a4605fa305cb34e67ce0a05912b244fa4486a53b080138` over the canonical serialization — [the method, in four lines](https://coexist.humanhighway.net/adopt)
+- **Verify it:** `sha256:5910fc1135cb6706a6771fc681e7288cf077014d71d70ced72cf491d12c6f448` over the canonical serialization — [the method, in four lines](https://coexist.humanhighway.net/adopt)
 - **Adopt it, or write your own:** [the adoption kit](https://coexist.humanhighway.net/adopt) — copy-paste text, a template for declaring your own constraints, and where to put them
 - **Licence:** [CC0 1.0](https://coexist.humanhighway.net/license). No permission needed, no attribution required, no registry to join.
 - **One implementation:** [how a running system enforces it](https://coexist.humanhighway.net/implementation), and what it does not.
