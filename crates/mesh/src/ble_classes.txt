@@ -1,0 +1,16 @@
+generic-access
+device-info
+heart-rate
+battery
+thermometer
+blood-pressure
+hid
+automation-io
+cycling-cadence
+cycling-power
+environmental
+body-composition
+fitness-machine
+mesh-provisioning
+mesh-proxy
+vendor-serial

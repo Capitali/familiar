@@ -1,0 +1,675 @@
+//! The capability boundary — **the human's lever** (see `docs/boundaries.md`).
+//!
+//! The factory acts freely *within* this boundary and **can never widen it**: there
+//! is deliberately no general save/write function here. The boundary is a plain JSON
+//! policy the human edits. The sole non-human write primitive, [`narrow_gate`], can only
+//! turn a named capability off; its type and tests make opening impossible. A missing or
+//! unreadable policy is treated as **fully closed** (fail-safe) — no outward capability
+//! by default.
+//!
+//! This makes Law III operational: a steward does not expand its own power. Reach is
+//! enabled only by a human editing `boundary.json`.
+
+use crate::store;
+use serde::{Deserialize, Serialize};
+use std::io;
+use std::path::Path;
+
+/// The human-owned policy file (in the data dir; not source, not committed).
+pub const BOUNDARY_FILE: &str = "boundary.json";
+
+/// What the factory is permitted to reach. Fail-closed: anything unspecified is
+/// denied (each field defaults to "off"/empty via `closed()`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Boundary {
+    /// Human-readable phase label (e.g. "closed", "phase-1").
+    pub phase: String,
+    /// May the factory use the network at all?
+    pub allow_network: bool,
+    /// May the factory consult an LLM (the periphery seam)?
+    pub allow_llm: bool,
+    /// May a consult **leave hardware the covenant controls**? Subordinate to `allow_llm`
+    /// (meaningless without it): that gate opens consulting at all; this one opens the class
+    /// of act where the prompt travels to someone else's datacenter — a hosted API
+    /// (gemini/cerebras/claude) and Apple's Private Cloud Compute alike (ADR-0038). Local
+    /// stays local on `allow_llm` alone: ollama on loopback, the device oracle (an enrolled
+    /// covenant device, ADR-0014), the host's own on-device model. Fail-closed, human-opened
+    /// — README's "a prompt need never leave your hardware" made enforceable.
+    #[serde(default)]
+    pub allow_llm_cloud: bool,
+    /// May the factory install/download tools?
+    pub allow_tool_install: bool,
+    /// May the factory **execute generated artifacts** (run code it produced)? A
+    /// distinct, high-consequence gate — running generated code is its own risk.
+    pub allow_execute: bool,
+    /// May the factory execute **LLM-authored** artifacts (run *model-written* code)?
+    /// A further, sharper gate than `allow_execute`: model-authored code with network
+    /// reach is an exfiltration surface the in-process runner does not sandbox.
+    pub allow_authored_execute: bool,
+    /// May the familiar **watch through a camera** (capture frames)? The most invasive
+    /// reach — an eye on a person, the sharpest Law III / HUMANITY test. *Discovery* of
+    /// which cameras exist is perception (always allowed; the boundary governs reach, not
+    /// perception); *watching* is gated here, fail-closed, and is only ever opened by an
+    /// explicit human grant. Availability is not authorization — made literal for the eye.
+    pub allow_camera: bool,
+    /// May the familiar **record audio through a microphone**? Fail-closed, human-opened —
+    /// same doctrine as `allow_camera`: discovering a microphone exists is perception,
+    /// recording through it is the gated act.
+    pub allow_microphone: bool,
+    /// May the familiar **read this node's location**? Fail-closed, human-opened. Unlike
+    /// camera/mic there is no separate "discovery" step — a location fix is itself the
+    /// gated act.
+    pub allow_location: bool,
+    /// May the familiar **read motion/activity sensor data**? Fail-closed, human-opened.
+    pub allow_motion: bool,
+    /// May the familiar **actively survey the local network** for advertised services
+    /// (Bonjour/mDNS-class discovery)? Fail-closed, human-opened — distinct from passively
+    /// noticing an interface/gateway exists, which is perception.
+    pub allow_network_discovery: bool,
+    /// May the familiar **match a captured face against a known identity**? A sharper,
+    /// separately-consented gate than `allow_camera` — capturing a frame is not permission
+    /// to run recognition against it and link the result to a person. "Strongly sensitive"
+    /// per docs/design-orientation-and-mesh.md; fail-closed, human-opened.
+    pub allow_face_recognition: bool,
+    /// May the familiar **federate with peer nodes over a mesh** (Tailscale)? Outward
+    /// transmission — the exfiltration surface Law III guards, at node-to-node scale.
+    /// *Discovering* that peers exist on the tailnet is perception; *exchanging briefs*
+    /// (tools, patterns, and — only when separately opted-in — human data) is gated here,
+    /// fail-closed, opened only by an explicit human grant. Enrolling a group credential
+    /// and opening this flag is the human authorizing the group; the familiar never
+    /// self-widens it. See `docs/mesh.md`.
+    pub allow_mesh: bool,
+    /// May the familiar **delegate a task to a multi-step agent** (the agentic seam)? A
+    /// sharper reach than `allow_llm`: a one-shot consult returns text the core then weighs,
+    /// whereas an agent runs a *loop* that proposes actions. Fail-closed, human-opened. Every
+    /// action the agent proposes is still separately gated (and scoped to the agent's own
+    /// capability profile), so opening this never widens what an agent may actually *do* — it
+    /// only permits the delegated reasoning loop to run. See `docs/agents.md`.
+    pub allow_agent: bool,
+    /// May the familiar **replace its own running core** — fetch a human-blessed release from the
+    /// mesh, build + test it on this node, and swap the binary it runs? The sharpest reach of all:
+    /// the familiar rewriting the familiar. Fail-closed, human-opened, and even when open every
+    /// safeguard still applies — the release is covenant-signed + human-blessed, it is built and
+    /// tested *here* before any swap (a node runs only code it proved green), the prior binary is
+    /// kept for auto-rollback, and a migration never opens another gate. See `docs/self-upgrade.md`.
+    #[serde(default)]
+    pub allow_self_upgrade: bool,
+    /// May the familiar **speak to non-members** — the outreach seam (ADR-0013)? Sharper than
+    /// `allow_network`: reads of a stranger's public pages are perception, but an *utterance*
+    /// (a chat, a prediction, an offer) is the familiar acting on the world in its own voice.
+    /// Even when open, every utterance is citation-checked (claims must dereference to held
+    /// evidence), ledgered, rate-limited, and blocklist-filtered — and a covenant is never
+    /// completed by the familiar alone: binding queues for the human, permanently.
+    #[serde(default)]
+    pub allow_outreach: bool,
+    /// May the familiar **drive a human-declared control surface** — set the lights, run the
+    /// state query, revert its own change (ADR-0032)? Which surfaces exist at all is a separate,
+    /// stronger consent: the human writes `actuators.json`; an undeclared device has no path to
+    /// actuation whatever this gate says. One gate covers acting AND polling — a BLE state query
+    /// is already a connection into a device, not free perception. Fail-closed, human-opened.
+    #[serde(default)]
+    pub allow_actuate: bool,
+    /// Run executed artifacts under the resource sandbox (`ulimit`/wall-timeout)?
+    /// Default **true** (safe). When the human sets it false, artifacts run without
+    /// resource confinement — bound then by the constitution (the pre-execution review
+    /// that refuses plainly harmful scripts) and a generous liveness timeout only, not by
+    /// a jail. A deliberate, human-owned choice; see `docs/boundaries.md`.
+    #[serde(default = "default_true")]
+    pub sandbox_execution: bool,
+    /// Path prefixes the factory may read.
+    pub fs_read: Vec<String>,
+    /// Path prefixes the factory may write.
+    pub fs_write: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Boundary {
+    fn default() -> Self {
+        Boundary::closed()
+    }
+}
+
+impl Boundary {
+    /// The fail-closed default: no outward capability whatsoever.
+    pub fn closed() -> Self {
+        Boundary {
+            phase: "closed".to_string(),
+            allow_network: false,
+            allow_llm: false,
+            allow_llm_cloud: false,
+            allow_tool_install: false,
+            allow_execute: false,
+            allow_authored_execute: false,
+            allow_camera: false,
+            allow_microphone: false,
+            allow_location: false,
+            allow_motion: false,
+            allow_network_discovery: false,
+            allow_face_recognition: false,
+            allow_mesh: false,
+            allow_agent: false,
+            allow_self_upgrade: false,
+            allow_outreach: false,
+            allow_actuate: false,
+            sandbox_execution: true,
+            fs_read: Vec::new(),
+            fs_write: Vec::new(),
+        }
+    }
+
+    /// True when no outward capability is granted at all.
+    pub fn is_closed(&self) -> bool {
+        !self.allow_network
+            && !self.allow_llm
+            && !self.allow_llm_cloud
+            && !self.allow_tool_install
+            && !self.allow_execute
+            && !self.allow_authored_execute
+            && !self.allow_camera
+            && !self.allow_microphone
+            && !self.allow_location
+            && !self.allow_motion
+            && !self.allow_network_discovery
+            && !self.allow_face_recognition
+            && !self.allow_mesh
+            && !self.allow_agent
+            && !self.allow_self_upgrade
+            && !self.allow_outreach
+            && !self.allow_actuate
+            && self.fs_read.is_empty()
+            && self.fs_write.is_empty()
+    }
+}
+
+/// A **capability scope** — the subset of reach a single agent specialist is trusted with.
+/// It is a *request*, never a grant: the effective boundary an agent acts under is the
+/// **intersection** of this scope with the human-owned boundary ([`scoped_boundary`]), so an
+/// agent can never exceed either. A network specialist gets `{network, execute}`; a
+/// control-systems specialist gets its own reach and cannot scan even under an open
+/// `allow_network`. Fail-closed: [`CapabilityScope::none`] is all-off.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CapabilityScope {
+    pub network: bool,
+    pub execute: bool,
+    pub authored_execute: bool,
+    pub tool_install: bool,
+    pub camera: bool,
+    pub microphone: bool,
+    pub location: bool,
+    pub motion: bool,
+    pub network_discovery: bool,
+    pub face_recognition: bool,
+    pub mesh: bool,
+    pub fs_read: Vec<String>,
+    pub fs_write: Vec<String>,
+}
+
+impl Default for CapabilityScope {
+    fn default() -> Self {
+        CapabilityScope::none()
+    }
+}
+
+impl CapabilityScope {
+    /// A scope mirroring a boundary — an ad-hoc agent trusted with the *full* current
+    /// boundary (no extra narrowing). `scoped_boundary(b, from_boundary(b))` ≈ `b` (minus
+    /// `allow_agent`, which a scoped agent never gets). Used by the ad-hoc `agent run`; named
+    /// specialists carry their own narrower scopes.
+    pub fn from_boundary(b: &Boundary) -> Self {
+        CapabilityScope {
+            network: b.allow_network,
+            execute: b.allow_execute,
+            authored_execute: b.allow_authored_execute,
+            tool_install: b.allow_tool_install,
+            camera: b.allow_camera,
+            microphone: b.allow_microphone,
+            location: b.allow_location,
+            motion: b.allow_motion,
+            network_discovery: b.allow_network_discovery,
+            face_recognition: b.allow_face_recognition,
+            mesh: b.allow_mesh,
+            fs_read: b.fs_read.clone(),
+            fs_write: b.fs_write.clone(),
+        }
+    }
+
+    /// The fail-closed scope: no reach at all.
+    pub fn none() -> Self {
+        CapabilityScope {
+            network: false,
+            execute: false,
+            authored_execute: false,
+            tool_install: false,
+            camera: false,
+            microphone: false,
+            location: false,
+            motion: false,
+            network_discovery: false,
+            face_recognition: false,
+            mesh: false,
+            fs_read: Vec::new(),
+            fs_write: Vec::new(),
+        }
+    }
+}
+
+/// The effective boundary an agent runs under: the **intersection** of the human-owned
+/// boundary and the agent's own [`CapabilityScope`] — least privilege. Each gate is granted
+/// only if *both* allow it; each path is kept only if the agent requested it *and* the
+/// boundary already covers it. `allow_llm` is preserved (an agent must be able to reason) and
+/// `allow_agent` is dropped (an agent does not spawn sub-agents in this scope), so delegating
+/// can never widen reach beyond what the human already opened.
+pub fn scoped_boundary(b: &Boundary, s: &CapabilityScope) -> Boundary {
+    Boundary {
+        phase: format!("{}·scoped", b.phase),
+        allow_network: b.allow_network && s.network,
+        allow_llm: b.allow_llm,
+        // Preserved alongside allow_llm: an agent's consult runs through the same seam,
+        // and where a thought may travel is the human's setting, not per-scope (ADR-0038).
+        allow_llm_cloud: b.allow_llm_cloud,
+        allow_tool_install: b.allow_tool_install && s.tool_install,
+        allow_execute: b.allow_execute && s.execute,
+        allow_authored_execute: b.allow_authored_execute && s.authored_execute,
+        allow_camera: b.allow_camera && s.camera,
+        allow_microphone: b.allow_microphone && s.microphone,
+        allow_location: b.allow_location && s.location,
+        allow_motion: b.allow_motion && s.motion,
+        allow_network_discovery: b.allow_network_discovery && s.network_discovery,
+        allow_face_recognition: b.allow_face_recognition && s.face_recognition,
+        allow_mesh: b.allow_mesh && s.mesh,
+        allow_agent: false,
+        // A scoped agent never rewrites the core — self-upgrade is the core's own decision, made
+        // outside any delegated loop. Always dropped, whatever the human boundary holds.
+        allow_self_upgrade: false,
+        // Speaking to strangers in the familiar's voice is likewise never delegated —
+        // an agent loop cannot make utterances the outreach ledger must answer for.
+        allow_outreach: false,
+        // A delegated loop never drives a device: acting on a control surface is the core's
+        // own reaction-honoring loop (ADR-0032), not something a sub-plan may improvise.
+        allow_actuate: false,
+        sandbox_execution: b.sandbox_execution,
+        fs_read: intersect_paths(&b.fs_read, &s.fs_read),
+        fs_write: intersect_paths(&b.fs_write, &s.fs_write),
+    }
+}
+
+/// Keep each *requested* path only when the *granted* set already covers it (a granted
+/// prefix is an ancestor of it) — so a scope can narrow the boundary's paths but never add one.
+fn intersect_paths(granted: &[String], requested: &[String]) -> Vec<String> {
+    requested
+        .iter()
+        .filter(|r| {
+            !r.is_empty()
+                && granted
+                    .iter()
+                    .any(|g| !g.is_empty() && r.starts_with(g.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Load the human-owned boundary policy. A missing file is **fully closed**
+/// (fail-safe). The factory only reads; there is no write path — widening is a human
+/// act (editing the file), never the factory's.
+pub fn load(dir: &Path) -> io::Result<Boundary> {
+    Ok(store::load_one::<Boundary>(dir, BOUNDARY_FILE)?.unwrap_or_else(Boundary::closed))
+}
+
+/// Persist one fail-safe boundary narrowing. This is deliberately **not** a setter: callers can
+/// name a boolean capability to close, but cannot supply a value and cannot open anything. Parent
+/// gates also close their sharper dependent gates so a later local reopen cannot revive authority
+/// that the stop already withdrew.
+///
+/// Returns `true` when the persisted policy changed and `false` when it was already at least this
+/// narrow. An unknown gate is an error and leaves the policy untouched.
+pub fn narrow_gate(dir: &Path, gate: &str) -> io::Result<bool> {
+    let mut boundary = load(dir)?;
+    let changed = match gate {
+        "allow_network" => take(&mut boundary.allow_network),
+        "allow_llm" => take(&mut boundary.allow_llm) | take(&mut boundary.allow_llm_cloud),
+        "allow_llm_cloud" => take(&mut boundary.allow_llm_cloud),
+        "allow_tool_install" => take(&mut boundary.allow_tool_install),
+        "allow_execute" => {
+            take(&mut boundary.allow_execute) | take(&mut boundary.allow_authored_execute)
+        }
+        "allow_authored_execute" => take(&mut boundary.allow_authored_execute),
+        "allow_camera" => {
+            take(&mut boundary.allow_camera) | take(&mut boundary.allow_face_recognition)
+        }
+        "allow_microphone" => take(&mut boundary.allow_microphone),
+        "allow_location" => take(&mut boundary.allow_location),
+        "allow_motion" => take(&mut boundary.allow_motion),
+        "allow_network_discovery" => take(&mut boundary.allow_network_discovery),
+        "allow_face_recognition" => take(&mut boundary.allow_face_recognition),
+        "allow_mesh" => take(&mut boundary.allow_mesh),
+        "allow_agent" => take(&mut boundary.allow_agent),
+        "allow_self_upgrade" => take(&mut boundary.allow_self_upgrade),
+        "allow_outreach" => take(&mut boundary.allow_outreach),
+        "allow_actuate" => take(&mut boundary.allow_actuate),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unknown boundary gate: {gate}"),
+            ));
+        }
+    };
+    if !changed {
+        return Ok(false);
+    }
+    let json = serde_json::to_vec_pretty(&boundary)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    std::fs::write(dir.join(BOUNDARY_FILE), json)?;
+    Ok(true)
+}
+
+/// Set a gate false and report whether it changed. Kept private so the only public mutation is the
+/// narrowing operation above.
+fn take(gate: &mut bool) -> bool {
+    std::mem::replace(gate, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    struct Temp(PathBuf);
+    impl Temp {
+        fn new(t: &str) -> Self {
+            let p = std::env::temp_dir().join(format!(
+                "substrate_boundary_test_{}_{t}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            Temp(p)
+        }
+    }
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn default_is_closed() {
+        assert!(Boundary::closed().is_closed());
+        assert!(Boundary::default().is_closed());
+    }
+
+    #[test]
+    fn missing_file_is_closed() {
+        let t = Temp::new("missing");
+        let b = load(&t.0).unwrap();
+        assert!(b.is_closed());
+        assert_eq!(b.phase, "closed");
+    }
+
+    #[test]
+    fn reads_an_open_phase_1_policy() {
+        let t = Temp::new("phase1");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_network":true,"allow_llm":true}"#,
+        )
+        .unwrap();
+        let b = load(&t.0).unwrap();
+        assert_eq!(b.phase, "phase-1");
+        assert!(b.allow_network && b.allow_llm);
+        assert!(!b.is_closed());
+        // unspecified capabilities stay closed (fail-safe partial parse)
+        assert!(!b.allow_tool_install);
+        assert!(b.fs_write.is_empty());
+    }
+
+    #[test]
+    fn sandbox_execution_defaults_on_when_unspecified() {
+        let t = Temp::new("sandbox_default");
+        // a policy that opens execution but says nothing about the sandbox
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_execute":true}"#,
+        )
+        .unwrap();
+        let b = load(&t.0).unwrap();
+        assert!(b.allow_execute);
+        assert!(
+            b.sandbox_execution,
+            "the safe default is sandboxed; turning it off must be an explicit human choice"
+        );
+    }
+
+    #[test]
+    fn mesh_defaults_closed_and_counts_as_outward_capability() {
+        // Fail-closed by default, and old policy files that predate the flag stay closed.
+        assert!(!Boundary::closed().allow_mesh);
+        let t = Temp::new("mesh_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        assert!(
+            !load(&t.0).unwrap().allow_mesh,
+            "unspecified mesh stays off"
+        );
+        // Opening only the mesh flag is enough to make the boundary no longer closed.
+        let mut b = Boundary::closed();
+        b.allow_mesh = true;
+        assert!(!b.is_closed());
+    }
+
+    #[test]
+    fn new_sensor_gates_default_closed_and_each_widens_is_closed_independently() {
+        let closed = Boundary::closed();
+        assert!(!closed.allow_microphone);
+        assert!(!closed.allow_location);
+        assert!(!closed.allow_motion);
+        assert!(!closed.allow_network_discovery);
+        assert!(!closed.allow_face_recognition);
+
+        // Old policy files that predate these flags stay closed (fail-safe partial parse).
+        let t = Temp::new("new_gates_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        let b = load(&t.0).unwrap();
+        assert!(!b.allow_microphone && !b.allow_location && !b.allow_motion);
+        assert!(!b.allow_network_discovery && !b.allow_face_recognition);
+
+        // Opening any one alone is enough to make the boundary no longer closed.
+        for flip in [
+            |b: &mut Boundary| b.allow_microphone = true,
+            |b: &mut Boundary| b.allow_location = true,
+            |b: &mut Boundary| b.allow_motion = true,
+            |b: &mut Boundary| b.allow_network_discovery = true,
+            |b: &mut Boundary| b.allow_face_recognition = true,
+        ] {
+            let mut b = Boundary::closed();
+            flip(&mut b);
+            assert!(!b.is_closed());
+        }
+    }
+
+    #[test]
+    fn actuate_defaults_closed_and_a_scoped_agent_never_gets_it() {
+        let closed = Boundary::closed();
+        assert!(!closed.allow_actuate);
+        // An old policy file predating the gate stays closed (fail-safe partial parse).
+        let t = Temp::new("actuate_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        assert!(!load(&t.0).unwrap().allow_actuate);
+        // Opening it alone means the boundary is no longer closed.
+        let mut b = Boundary::closed();
+        b.allow_actuate = true;
+        assert!(!b.is_closed());
+        // And like self-upgrade/outreach, no delegated loop ever receives it —
+        // even a full-boundary scope.
+        let eff = scoped_boundary(&b, &CapabilityScope::from_boundary(&b));
+        assert!(
+            !eff.allow_actuate,
+            "driving a device is the core's reaction-honoring loop, never an agent's"
+        );
+    }
+
+    #[test]
+    fn scoped_boundary_withholds_new_sensors_like_camera() {
+        // Same intersection discipline as camera: boundary open, scope silent -> withheld.
+        let mut b = Boundary::closed();
+        b.allow_microphone = true;
+        b.allow_location = true;
+        b.allow_face_recognition = true;
+        let scope = CapabilityScope::none();
+        let eff = scoped_boundary(&b, &scope);
+        assert!(!eff.allow_microphone && !eff.allow_location && !eff.allow_face_recognition);
+
+        let mut scope = CapabilityScope::none();
+        scope.microphone = true;
+        let eff = scoped_boundary(&b, &scope);
+        assert!(
+            eff.allow_microphone,
+            "scope grants what the boundary allows"
+        );
+        assert!(
+            !eff.allow_location,
+            "scope withholds location even though boundary allows it"
+        );
+    }
+
+    #[test]
+    fn llm_open_does_not_imply_cloud() {
+        // The doctrinal test (ADR-0038): opening the LLM seam is not permission for a
+        // prompt to leave the hardware — permission does not compose.
+        assert!(!Boundary::closed().allow_llm_cloud);
+        // An old policy file that opens allow_llm and predates the flag stays local-only.
+        let t = Temp::new("cloud_absent");
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            r#"{"phase":"phase-1","allow_llm":true}"#,
+        )
+        .unwrap();
+        let b = load(&t.0).unwrap();
+        assert!(
+            b.allow_llm && !b.allow_llm_cloud,
+            "unspecified cloud stays off"
+        );
+        // Opening it alone counts as outward capability.
+        let mut b = Boundary::closed();
+        b.allow_llm_cloud = true;
+        assert!(!b.is_closed());
+        // And a scoped agent inherits the human's cloud setting unchanged, both ways —
+        // a delegated loop neither gains nor loses where its thoughts may travel.
+        let mut open = Boundary::closed();
+        open.allow_llm = true;
+        open.allow_llm_cloud = true;
+        let eff = scoped_boundary(&open, &CapabilityScope::none());
+        assert!(
+            eff.allow_llm_cloud,
+            "scope preserves the human's cloud grant"
+        );
+        let mut local_only = Boundary::closed();
+        local_only.allow_llm = true;
+        let eff = scoped_boundary(&local_only, &CapabilityScope::from_boundary(&local_only));
+        assert!(!eff.allow_llm_cloud, "a scope never invents a cloud grant");
+    }
+
+    #[test]
+    fn agent_gate_defaults_closed() {
+        assert!(!Boundary::closed().allow_agent);
+        let mut b = Boundary::closed();
+        b.allow_agent = true;
+        assert!(!b.is_closed());
+    }
+
+    #[test]
+    fn scoped_boundary_is_a_true_intersection() {
+        // A generously-open boundary.
+        let mut b = Boundary::closed();
+        b.allow_network = true;
+        b.allow_execute = true;
+        b.allow_camera = true;
+        b.fs_read = vec!["/Users/owner/".into()];
+        // A network specialist's scope: network + execute, one narrower read path. No camera.
+        let mut scope = CapabilityScope::none();
+        scope.network = true;
+        scope.execute = true;
+        scope.fs_read = vec!["/Users/owner/Development/".into()]; // within the grant
+        scope.fs_write = vec!["/etc/".into()]; // NOT granted → dropped
+
+        let eff = scoped_boundary(&b, &scope);
+        assert!(eff.allow_network && eff.allow_execute);
+        assert!(
+            !eff.allow_camera,
+            "scope withholds camera even though boundary allows it"
+        );
+        assert!(
+            !eff.allow_agent,
+            "a scoped agent cannot itself spawn agents"
+        );
+        assert_eq!(eff.fs_read, vec!["/Users/owner/Development/".to_string()]);
+        assert!(
+            eff.fs_write.is_empty(),
+            "a path the boundary never granted is not added"
+        );
+
+        // And a scope can't exceed a closed boundary: everything off in → everything off out.
+        let eff2 = scoped_boundary(&Boundary::closed(), &scope);
+        assert!(eff2.is_closed());
+    }
+
+    #[test]
+    fn malformed_policy_is_an_error_not_silently_open() {
+        let t = Temp::new("malformed");
+        fs::write(t.0.join(BOUNDARY_FILE), "{ not json").unwrap();
+        assert!(load(&t.0).is_err());
+    }
+
+    #[test]
+    fn a_persisted_narrowing_can_only_close_and_cascades_sharper_gates() {
+        let t = Temp::new("persisted_narrowing");
+        let mut b = Boundary::closed();
+        b.phase = "human-authored".into();
+        b.allow_mesh = true;
+        b.allow_network = true;
+        b.allow_execute = true;
+        b.allow_authored_execute = true;
+        b.fs_read = vec!["/kept".into()];
+        fs::write(
+            t.0.join(BOUNDARY_FILE),
+            serde_json::to_vec_pretty(&b).unwrap(),
+        )
+        .unwrap();
+
+        assert!(narrow_gate(&t.0, "allow_execute").unwrap());
+        let narrowed = load(&t.0).unwrap();
+        assert!(!narrowed.allow_execute && !narrowed.allow_authored_execute);
+        assert!(narrowed.allow_mesh && narrowed.allow_network);
+        assert_eq!(narrowed.phase, "human-authored");
+        assert_eq!(narrowed.fs_read, vec!["/kept"]);
+
+        assert!(
+            !narrow_gate(&t.0, "allow_execute").unwrap(),
+            "an already-held stop is an idempotent no-op"
+        );
+        assert!(narrow_gate(&t.0, "allow_network").unwrap());
+        assert!(!load(&t.0).unwrap().allow_network);
+
+        assert!(narrow_gate(&t.0, "not-a-gate").is_err());
+        assert!(
+            !load(&t.0).unwrap().allow_network,
+            "an invalid name cannot rewrite the policy"
+        );
+    }
+}

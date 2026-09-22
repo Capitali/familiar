@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Store / TestFlight distribution requires the App Sandbox. FamiliarMac is a pure
+	     client: it enrols as a peer and reads the worldview over the mesh (ADR-0018), the same
+	     way the iOS shells do — it no longer reads a local daemon over loopback. network.client
+	     covers the outgoing TLS connections that needs; no server, no file access, no other
+	     capability is required. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- The microphone: push-to-talk and the ship's computer's speech. A sandboxed
+	     app without this entitlement records silence, whatever TCC says. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

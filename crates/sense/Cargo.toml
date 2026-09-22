@@ -1,0 +1,11 @@
+[package]
+name = "familiar-sense"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Perception of the host — environment, interfaces, capabilities — as observations."
+
+[dependencies]
+familiar-kernel.workspace = true
+serde.workspace = true
+serde_json.workspace = true

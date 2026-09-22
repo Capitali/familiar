@@ -1,0 +1,6 @@
+[package]
+name = "familiar-exec"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "A small sandboxed script runner — resource-limited execution with measured cost."

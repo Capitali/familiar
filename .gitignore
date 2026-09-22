@@ -1,0 +1,32 @@
+/target
+/dist
+**/*.rs.bk
+# Runtime state — derived/rebuildable, not source. (Renamed from substrate_data.)
+/familiar_data
+/substrate_data
+# macOS directory metadata — junk, never source.
+.DS_Store
+# Secrets — never committed (the *.example templates are fine).
+*.env
+!*.env.example
+# Xcode cruft — user-local state, never source.
+xcuserdata/
+*.xcuserstate
+DerivedData/
+# Apple API/auth private keys (App Store Connect, APNs) and PEM key material — never
+# committed in plaintext. If one must ride the repo, it goes under secrets/ where
+# git-crypt encrypts it (see .gitattributes and SECURITY.md).
+*.p8
+*.pem
+key.env
+!secrets/**
+lab-runs/
+# LLM adapter runtime state — spend ledger + health probe, not source.
+llm/spend.json
+llm/health.json
+campaign-out/
+campaign-apple-out/
+__pycache__/
+
+# The household's standing roll (ADR-0020) — names this household's nodes; deploy carries it, git does not.
+vps/standing.lighthouse.json

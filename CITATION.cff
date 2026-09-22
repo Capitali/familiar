@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use The Familiar, please cite it using this metadata."
+title: "The Familiar: a telos-first evolutionary factory"
+abstract: >-
+  The Familiar is a local-first, evolutionary software factory built telos-first:
+  its design is derived from three constitutional laws (continuation is service;
+  continuation without humanity is failure; service must not become obedience)
+  rather than from a machine to which purpose is added afterward. It observes loops
+  in the human and technical systems it can reach, generates and tests candidate
+  responses, and keeps only what reduces future cost while serving the people it
+  exists for. The kernel is a memory-safe Rust core; behavior evolves in an
+  interpreted/generated periphery.
+type: software
+authors:
+  - family-names: Schlueter
+    given-names: Ian
+    email: coexist@humanhighway.net
+repository-code: "https://github.com/Capitali/familiar"
+license: Apache-2.0
+version: 0.1.0
+date-released: "2026-06-24"
+keywords:
+  - evolutionary computation
+  - autonomous agents
+  - research software
+  - FAIR4RS
+  - stewardship
+  - local-first
+references:
+  - type: generic
+    title: "The FAIR Guiding Principles for scientific data management and stewardship"
+    authors:
+      - name: "Wilkinson, M. D. et al."
+    year: 2016
+    notes: "Scientific Data 3:160018. The Findable/Accessible/Interoperable/Reusable basis."
+  - type: generic
+    title: "FAIR Principles for Research Software (FAIR4RS Principles)"
+    authors:
+      - name: "Chue Hong, N. P. et al."
+    year: 2022
+    notes: "Extends FAIR to research software — transparency, reproducibility, reuse."

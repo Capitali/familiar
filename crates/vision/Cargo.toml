@@ -1,0 +1,9 @@
+[package]
+name = "familiar-vision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "The familiar's eye — camera discovery (perception); capture/recognition are gated and arrive in later bricks."
+
+[dependencies]
+familiar-kernel.workspace = true

@@ -1,0 +1,16 @@
+# XcodeGen generates this from project.yml — regenerate with `xcodegen`, don't commit it.
+*.xcodeproj
+
+# Build artifacts
+.build/
+DerivedData/
+build/
+
+# Xcode/user state
+xcuserdata/
+*.xcuserstate
+.DS_Store
+
+# SwiftPM
+.swiftpm/
+Package.resolved

@@ -1,0 +1,10 @@
+[package]
+name = "familiar-reach"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Reach assessment — probe discovered devices to classify how the familiar could extend into them (agent-capable / protocol-controllable / observable). The input to consent-gated expansion."
+
+[dependencies]
+familiar-kernel.workspace = true
+familiar-sense.workspace = true

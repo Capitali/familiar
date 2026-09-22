@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Capitali/familiar/blob/main/data/schema/observation.schema.json",
+  "title": "Observation",
+  "description": "A single observed event: a subject-predicate-object triple plus provenance. The only authoritative record type in The Familiar; everything else is derived from these.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "source", "actor", "action", "object", "ts", "confidence"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Sequential id, assigned on append.",
+      "pattern": "^obs-.+$",
+      "examples": ["obs-0001"]
+    },
+    "source": {
+      "type": "string",
+      "description": "Where it came from: a signal ref, a sensor, or 'cli' for manual input.",
+      "examples": ["cli", "sensor", "signal-0007"]
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The subject of the triple."
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The predicate of the triple."
+    },
+    "object": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The object of the triple."
+    },
+    "context": {
+      "type": "string",
+      "default": "",
+      "description": "Optional free-form detail."
+    },
+    "ts": {
+      "type": "integer",
+      "description": "Unix time in seconds.",
+      "minimum": 0
+    },
+    "confidence": {
+      "type": "number",
+      "description": "Confidence in the observation, in [0, 1].",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

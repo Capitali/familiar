@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleName</key>
+	<string>Familiar Agent</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<!-- Mesh transport is TLS to self-signed peers, and authenticity comes from SPKI PINNING
+	     (MeshTLS), not from a CA chain. Default ATS lets the pinning delegate accept a self-signed
+	     cert on a LOCAL IP but blocks it on tailnet/public IPs before the delegate runs — so a
+	     device could reach the mesh over the LAN but never off-LAN (the lighthouse). Disable ATS's
+	     CA requirement; the pin is the stronger, node-specific check ATS's generic trust can't be.
+	     No plaintext is allowed by this — every mesh connection is still TLS + covenant-signed. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_familiar-mesh._tcp</string>
+		<string>_ssh._tcp</string>
+		<string>_sftp-ssh._tcp</string>
+		<string>_rfb._tcp</string>
+		<string>_http._tcp</string>
+		<string>_https._tcp</string>
+		<string>_airplay._tcp</string>
+		<string>_raop._tcp</string>
+		<string>_airport._tcp</string>
+		<string>_googlecast._tcp</string>
+		<string>_spotify-connect._tcp</string>
+		<string>_ipp._tcp</string>
+		<string>_ipps._tcp</string>
+		<string>_printer._tcp</string>
+		<string>_pdl-datastream._tcp</string>
+		<string>_homekit._tcp</string>
+		<string>_hap._tcp</string>
+		<string>_companion-link._tcp</string>
+		<string>_apple-mobdev2._tcp</string>
+		<string>_smb._tcp</string>
+		<string>_afpovertcp._tcp</string>
+		<string>_daap._tcp</string>
+		<string>_dacp._tcp</string>
+		<string>_mqtt._tcp</string>
+		<string>_workstation._tcp</string>
+		<string>_device-info._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to scan a familiar's join QR code, and (if you enable it) on-device facial presence analysis — never a stored image.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>The familiar listens for Bluetooth devices around you and reports only what KIND of thing it heard (a heart-rate sensor, a battery device) — never a name, identity, or contents.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>The familiar surveys the local network to notice devices and services around you (like printers, speakers, and other familiars) and reports what kind of thing it saw — never their addresses or contents.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>The familiar notes home/away in the background so it can serve you without the app open. Only "home" or "away" is ever sent — never your coordinates.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>The familiar notes when you are home or away — only "home" or "away", never your coordinates.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Push-to-talk: your spoken note is transcribed on-device and sent to the familiar. No audio leaves the device.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>The familiar notes coarse activity (walking, driving, still) — never raw motion data.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribes your push-to-talk speech on-device so the familiar can act on it.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>io.river.familiar.ios.refresh</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiresFullScreen</key>
+	<true/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>

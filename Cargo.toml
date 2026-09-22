@@ -1,0 +1,42 @@
+# Substrate v2 — telos-first factory. See docs/SOUL.md and docs/ARCHITECTURE.md.
+#
+# A small workspace expressing the hybrid architecture: a thin, deterministic
+# kernel library + a thin CLI shell. Behavior evolves in the periphery (generated
+# artifacts / data / the LLM seam), so the compiled core changes rarely.
+[workspace]
+resolver = "2"
+# The Rust workspace is the FAMILIAR CORE: the daemon (crates/cli → `familiar`) and the
+# embeddable library (crates/core-ffi → device shells, ADR-0009 Phase 0). The human
+# interface is the Metal Sphere (ADR-0008) hosted by the apps in `ios/` (FamiliarMac +
+# the iOS/iPad/watch apps) and — via core-ffi — a capable phone runs against its own
+# embedded core. Retired UIs (egui Glass, menu-bar Marble, wgpu hologram engine, SwiftUI
+# consoles) were removed 2026-07-24 — git history keeps them; see ADR-0007 (superseded)
+# and ADR-0008.
+members = ["crates/kernel", "crates/cli", "crates/sense", "crates/cycle", "crates/llm", "crates/exec", "crates/vision", "crates/mesh", "crates/probe",
+    "crates/probe", "crates/agent", "crates/reach", "crates/core-ffi", "crates/scenario", "crates/recipe", "crates/mcp", "crates/workshop", "crates/jail", "crates/factory", "crates/factory-run"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Ian Schlueter"]
+
+# Dependencies are kept deliberately minimal — a small, legible trust surface is
+# part of the Law III commitment (it cannot be turned against the served).
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: parse floats to the exact value their digits name. The default fast
+# parser can land 1 ULP off, and anything signed-then-reserialized (the brief) then fails
+# its own signature — one longitude took a node off the mesh for 8 hours (2026-08-13).
+serde_json = { version = "1", features = ["float_roundtrip"] }
+familiar-kernel = { path = "crates/kernel" }
+familiar-sense = { path = "crates/sense" }
+familiar-vision = { path = "crates/vision" }
+familiar-cycle = { path = "crates/cycle" }
+familiar-llm = { path = "crates/llm" }
+familiar-exec = { path = "crates/exec" }
+familiar-mesh = { path = "crates/mesh" }
+familiar-agent = { path = "crates/agent" }
+familiar-reach = { path = "crates/reach" }
+familiar-scenario = { path = "crates/scenario" }
+familiar-recipe = { path = "crates/recipe" }
+familiar-mcp = { path = "crates/mcp" }

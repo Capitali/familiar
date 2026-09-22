@@ -1,0 +1,13 @@
+[package]
+name = "familiar-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "The agentic seam — a boundary-mediated, multi-step reasoning loop. The agent proposes actions; the familiar's core decides and executes, one gated step at a time."
+
+[dependencies]
+familiar-kernel.workspace = true
+familiar-llm.workspace = true
+familiar-exec.workspace = true
+serde.workspace = true
+serde_json.workspace = true

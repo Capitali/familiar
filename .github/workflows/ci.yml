@@ -1,0 +1,52 @@
+name: CI
+
+# The green bar, enforced. Mirrors CONTRIBUTING.md: fmt + clippy(--all-targets -D warnings) +
+# test, plus a guard that no `unsafe` enters the kernel.
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  green-bar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable) with rustfmt + clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --all
+
+      - name: No unsafe in the kernel (Law III)
+        # The real guarantee is `#![forbid(unsafe_code)]` (compile-enforced). This is a
+        # belt-and-suspenders check for the `unsafe` *keyword* in code — matching
+        # `unsafe {`, `unsafe fn`, `unsafe impl/trait/extern` — so a string literal like
+        # the "unsafe" failure class does not trip it.
+        run: |
+          if grep -rnE '\bunsafe[[:space:]]*(\{|fn|impl|trait|extern)' crates/kernel/src; then
+            echo "::error::real unsafe usage in crates/kernel — Law III forbids it"
+            exit 1
+          fi
+          echo "no unsafe in kernel ✓"
+          echo "no unsafe in kernel ✓"

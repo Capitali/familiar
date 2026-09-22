@@ -1,0 +1,61 @@
+import Foundation
+
+/// Where to reach a familiar, for the covenant handshake — produced by `familiar mesh qr` (or, later,
+/// Bonjour discovery). It carries only the **address** and a cosmetic label; the group secret never
+/// leaves the familiar. (`secret`/`group` are accepted but ignored — kept optional so an older
+/// secret-bearing payload still parses, and so the field can be dropped entirely.)
+public struct EnrollmentPayload: Codable, Equatable {
+    public var v: Int
+    public var label: String
+    public var host: String
+    public var port: Int
+    /// Every address the familiar can be reached at, most-universal first (tailnet, then LAN).
+    /// Optional on the wire — older payloads carry only `host`.
+    public var hosts: [String]?
+    public var group: String?
+    public var secret: String?
+    /// SHA-256 of the familiar's TLS SubjectPublicKeyInfo — the device pins every mesh
+    /// connection to it (ADR-0009). Absent on older payloads (encryption-only then).
+    public var tlspin: String?
+    /// The group's trusted TLS pins (this node's + siblings' it vouches for). The device accepts
+    /// any, so failover to a reachable member (the lighthouse) passes the pin check (ADR-0012).
+    public var pins: [String]?
+    /// A member-signed invite token (ADR-0026, E3) riding along with the address. When present,
+    /// the scanning device knocks AND introduces in one motion — admitted end to end with no
+    /// third person and no waiting. Ten minutes, single-use, and never a secret: spending it
+    /// establishes one identity once, on the inviter's deliberate act. Absent on plain address
+    /// payloads and older invites, which still land the device as a guest.
+    public var invite: InviteToken?
+
+    public init(v: Int = 1, label: String, host: String, port: Int, hosts: [String]? = nil,
+                group: String? = nil, secret: String? = nil, tlspin: String? = nil,
+                pins: [String]? = nil, invite: InviteToken? = nil) {
+        self.v = v
+        self.label = label
+        self.host = host
+        self.port = port
+        self.hosts = hosts
+        self.group = group
+        self.secret = secret
+        self.tlspin = tlspin
+        self.pins = pins
+        self.invite = invite
+    }
+
+    /// The addresses to try, in order — `hosts` when present, else just `host`. The device should
+    /// walk this list on every failure: whichever interface it is on (wifi, cellular, VPN), some
+    /// candidate may be reachable when the others are not.
+    public var candidateHosts: [String] {
+        let list = (hosts ?? []).filter { !$0.isEmpty }
+        return list.isEmpty ? [host] : list
+    }
+
+    /// Parse the JSON string carried by the QR/paste. Requires only a reachable `host`/`port`.
+    public static func parse(_ json: String) -> EnrollmentPayload? {
+        guard let data = json.data(using: .utf8),
+              let p = try? JSONDecoder().decode(EnrollmentPayload.self, from: data),
+              !p.host.isEmpty, p.port > 0
+        else { return nil }
+        return p
+    }
+}

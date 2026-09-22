@@ -1,0 +1,17 @@
+[package]
+name = "familiar-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "The deterministic core of the Substrate factory: records, persistence, and the law-signals."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+# The one place the otherwise serde-only kernel takes on a C-backed dependency: the embedded
+# store (see store.rs). `bundled` compiles SQLite in — no system library — and the kernel's own
+# `#![forbid(unsafe_code)]` still holds (it governs kernel code, not dependencies).
+rusqlite = { version = "0.32", features = ["bundled"] }
+# The refusal ledger (ledger.rs) chains its records by SHA-256 so the public can verify a
+# copy without trusting the writer. Same crate the mesh already hashes with; pure Rust.
+sha2 = "0.10"

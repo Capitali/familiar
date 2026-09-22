@@ -1,0 +1,367 @@
+//! The tool library — the familiar remembers the code it writes, so it reuses tools
+//! instead of re-authoring them.
+//!
+//! When the familiar writes a script to answer a request, it keeps it: a named, described
+//! **Tool**, persisted with its purpose and the keywords it serves. The next time a similar
+//! request arrives it *recognizes* the tool and re-runs it — no LLM authoring, just fresh
+//! execution. This is Law I made concrete (Soul: "motion becomes service only when it makes
+//! the future cheaper than the past"): a growing library of skills, each authored once and
+//! reused many times. The scripts live in the familiar's workspace; this is the index over
+//! them. Append-only JSONL (a rewrite updates usage stats), derived/rebuildable.
+
+use serde::{Deserialize, Serialize};
+use std::io;
+use std::path::Path;
+
+use crate::store;
+
+pub const TOOLS_FILE: &str = "tools.jsonl";
+
+/// The window over which a sensor's null-result streak is judged — a run older than this
+/// no longer counts against it (the same reversible-window discipline as
+/// [`crate::corruption`]). A day: a sensor that produced nothing for a full day is stale.
+pub const NULL_WINDOW_SECS: i64 = 86_400;
+/// Consecutive null/failed runs within the window before the audit retires a deployed
+/// sensor autonomously (~1h at the 20-min cultivation cadence). Forgiving of a transient
+/// blip; a fabricating tool is gone within the hour. Reversible: it heals if it produces
+/// genuine signal again.
+pub const NULL_STREAK_RETIRE: u32 = 3;
+
+/// A reusable capability the familiar authored once and can run again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tool {
+    pub id: String,
+    /// A short slug, e.g. `cpu_load`.
+    pub name: String,
+    /// What it does — human-readable, and used (with `keywords`) to recognize a match.
+    pub purpose: String,
+    /// Space-joined content words this tool serves (from the request it was born for).
+    pub keywords: String,
+    /// Absolute path to the persisted script in the workspace.
+    pub script_path: String,
+    pub created_at: i64,
+    /// How many times it has been run — the efficiency dividend, visible.
+    pub uses: u32,
+    pub last_used: i64,
+    /// Did its most recent run exit cleanly? A tool that keeps failing should not be reused.
+    pub last_exit_ok: bool,
+    /// A short, human-readable verdict on the most recent run — e.g. "timed out after 10120ms",
+    /// "output looked wrong (permission denied)", "exit 0 in 180ms". Shown in the Glass so a
+    /// failure is diagnosable, not just an orange badge. Empty until the tool has run.
+    #[serde(default)]
+    pub last_status: String,
+    /// Provenance. Empty when this node authored the tool itself; otherwise the `node_id` of
+    /// the mesh peer it was federated from. A federated tool is trusted into the *library*
+    /// but — like any tool — still passes `review_script` + the sandbox on every run.
+    #[serde(default)]
+    pub origin: String,
+    /// When a federated tool's body was verified (sha-matched) on merge; 0 for local tools.
+    #[serde(default)]
+    pub origin_verified_at: i64,
+    /// Consecutive runs that produced nothing useful (empty, error-marked, or a null result
+    /// like "no devices found") — the self-correction signal (ADR-0036). A useful run resets
+    /// it to 0; the audit retires a tool that reaches [`NULL_STREAK_RETIRE`]. `#[serde(default)]`
+    /// so older `tools.jsonl` loads unchanged.
+    #[serde(default)]
+    pub null_streak: u32,
+    /// When this tool last produced a genuinely useful run — the healing timestamp. 0 until
+    /// its first useful run.
+    #[serde(default)]
+    pub last_useful_at: i64,
+}
+
+impl Tool {
+    /// How strongly this tool matches a request's content words — the count of request
+    /// keywords that appear in the tool's keywords, name, or purpose (all lowercased).
+    pub fn overlap(&self, request_keywords: &[String]) -> usize {
+        let hay = format!("{} {} {}", self.keywords, self.name, self.purpose).to_lowercase();
+        let tokens: std::collections::HashSet<&str> = hay
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| !t.is_empty())
+            .collect();
+        request_keywords
+            .iter()
+            .filter(|w| tokens.contains(w.as_str()))
+            .count()
+    }
+}
+
+pub fn append(dir: &Path, t: &Tool) -> io::Result<()> {
+    store::append(dir, TOOLS_FILE, t)
+}
+
+pub fn load(dir: &Path) -> io::Result<Vec<Tool>> {
+    store::load(dir, TOOLS_FILE)
+}
+
+/// The healthy tool that best matches the request, if the match is strong enough to trust.
+/// Conservative: requires at least two shared keywords (so a single common word never
+/// triggers the wrong tool), and skips tools whose last run failed. Correctness over reuse.
+pub fn best_match<'a>(tools: &'a [Tool], request_keywords: &[String]) -> Option<&'a Tool> {
+    tools
+        .iter()
+        .filter(|t| t.last_exit_ok)
+        .map(|t| (t, t.overlap(request_keywords)))
+        .filter(|(_, n)| *n >= 2)
+        .max_by_key(|(_, n)| *n)
+        .map(|(t, _)| t)
+}
+
+/// Record a run of a tool: bump `uses`, stamp `last_used`, note whether it exited cleanly and
+/// a short human-readable `status` (the verdict shown in the Glass). Returns the tool's new use
+/// count (or None if the id was not found).
+pub fn record_use(
+    dir: &Path,
+    id: &str,
+    now: i64,
+    exit_ok: bool,
+    status: &str,
+) -> io::Result<Option<u32>> {
+    let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
+        return Ok(None);
+    };
+    // The null-result streak, on the same reversible-window discipline as corruption: a run
+    // older than the window no longer counts, so a fresh failure starts from a clean slate.
+    if now - t.last_used > NULL_WINDOW_SECS {
+        t.null_streak = 0;
+    }
+    if exit_ok {
+        t.null_streak = 0; // a useful run heals the streak…
+        t.last_useful_at = now; // …and stamps when it was last genuinely useful.
+    } else {
+        t.null_streak = t.null_streak.saturating_add(1);
+    }
+    t.uses += 1;
+    t.last_used = now;
+    t.last_exit_ok = exit_ok;
+    t.last_status = status.to_string();
+    let uses = t.uses;
+    store::update_by_id(dir, TOOLS_FILE, id, &t)?;
+    Ok(Some(uses))
+}
+
+/// Retire a tool by marking it unhealthy, so [`best_match`] skips it and the familiar
+/// re-authors a fresh one instead of reusing it. Used when the human's feedback says an
+/// answer a tool produced was wrong. Returns true if the id was found.
+pub fn mark_unhealthy(dir: &Path, id: &str) -> io::Result<bool> {
+    mark_unhealthy_with(dir, id, "retired by your feedback")
+}
+
+/// [`mark_unhealthy`] with an explicit verdict — the self-correction audit (ADR-0036)
+/// retires a fabricating sensor with its own reason ("retired — produced nothing useful
+/// N times running"), distinct from human feedback.
+pub fn mark_unhealthy_with(dir: &Path, id: &str, status: &str) -> io::Result<bool> {
+    let Some(mut t) = store::load_by_id::<Tool>(dir, TOOLS_FILE, id)? else {
+        return Ok(false);
+    };
+    t.last_exit_ok = false;
+    t.last_status = status.to_string();
+    store::update_by_id(dir, TOOLS_FILE, id, &t)
+}
+
+/// Purge every tool whose script reaches outward onto the network — the LAN-local scans that
+/// should never have been core-authored or federated ([`crate::review::reaches_network`]). Deletes
+/// each removed tool's script file and rewrites the store with the survivors. Returns the removed
+/// `(id, name)` pairs, for reporting. A tool whose script can't be read is **kept** (never delete a
+/// tool we can't inspect). Idempotent: a second run finds nothing to remove.
+pub fn prune_network(dir: &Path) -> io::Result<Vec<(String, String)>> {
+    let all = load(dir)?;
+    let mut keep = Vec::new();
+    let mut removed = Vec::new();
+    for t in all {
+        let reaches = std::fs::read_to_string(&t.script_path)
+            .map(|s| crate::review::reaches_network(&s))
+            .unwrap_or(false);
+        if reaches {
+            let _ = std::fs::remove_file(&t.script_path);
+            removed.push((t.id.clone(), t.name.clone()));
+        } else {
+            keep.push(t);
+        }
+    }
+    if !removed.is_empty() {
+        store::rewrite(dir, TOOLS_FILE, &keep)?;
+    }
+    Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    struct Temp(PathBuf);
+    impl Temp {
+        fn new(t: &str) -> Self {
+            let p =
+                std::env::temp_dir().join(format!("familiar_tool_test_{}_{t}", std::process::id()));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            Temp(p)
+        }
+    }
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tool(id: &str, name: &str, purpose: &str, keywords: &str) -> Tool {
+        Tool {
+            id: id.into(),
+            name: name.into(),
+            purpose: purpose.into(),
+            keywords: keywords.into(),
+            script_path: format!("/ws/{id}.sh"),
+            created_at: 1,
+            uses: 0,
+            last_used: 0,
+            last_exit_ok: true,
+            last_status: String::new(),
+            origin: String::new(),
+            origin_verified_at: 0,
+            null_streak: 0,
+            last_useful_at: 0,
+        }
+    }
+
+    #[test]
+    fn best_match_reuses_a_strong_match_and_skips_weak_or_broken_ones() {
+        let cpu = tool(
+            "tool-0001",
+            "cpu_load",
+            "reports cpu load average and uptime",
+            "cpu load uptime",
+        );
+        let mut broken = tool("tool-0002", "disk", "reports disk usage", "disk usage free");
+        broken.last_exit_ok = false; // a failing tool is not reused
+        let tools = vec![cpu.clone(), broken];
+        // strong overlap -> reuse the cpu tool
+        let kw: Vec<String> = ["cpu", "load", "average"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            best_match(&tools, &kw).map(|t| t.id.as_str()),
+            Some("tool-0001")
+        );
+        // a request that only shares one common word -> no reuse (author fresh)
+        let kw2: Vec<String> = vec!["cpu".into()];
+        assert!(best_match(&tools, &kw2).is_none());
+        // a request matching only the broken tool -> not reused
+        let kw3: Vec<String> = ["disk", "usage"].iter().map(|s| s.to_string()).collect();
+        assert!(best_match(&tools, &kw3).is_none());
+    }
+
+    #[test]
+    fn record_use_increments_and_persists() {
+        let t = Temp::new("use");
+        append(&t.0, &tool("tool-0001", "cpu_load", "p", "cpu load")).unwrap();
+        assert_eq!(
+            record_use(&t.0, "tool-0001", 100, true, "exit 0 in 12ms").unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            record_use(&t.0, "tool-0001", 200, true, "exit 0 in 9ms").unwrap(),
+            Some(2)
+        );
+        let reloaded = &load(&t.0).unwrap()[0];
+        assert_eq!(reloaded.uses, 2);
+        assert_eq!(reloaded.last_used, 200);
+        assert_eq!(reloaded.last_status, "exit 0 in 9ms");
+        assert_eq!(record_use(&t.0, "nope", 1, true, "").unwrap(), None);
+    }
+
+    #[test]
+    fn prune_network_removes_scan_tools_and_keeps_local_ones() {
+        let t = Temp::new("prune");
+        let dir = &t.0;
+        // A local tool (kept) and a LAN-scan tool (purged). Write real script files so the
+        // classifier reads their bodies and the purge can delete them.
+        let local = dir.join("tool-0001.sh");
+        fs::write(&local, "#!/bin/sh\nsysctl -n hw.ncpu\n").unwrap();
+        let scan = dir.join("tool-0002.sh");
+        fs::write(&scan, "#!/bin/sh\nnmap -sn 192.168.1.0/24\n").unwrap();
+        let mut lt = tool("tool-0001", "cpu", "cpu load", "cpu");
+        lt.script_path = local.display().to_string();
+        let mut st = tool("tool-0002", "lan_scan", "sweep lan", "scan");
+        st.script_path = scan.display().to_string();
+        append(dir, &lt).unwrap();
+        append(dir, &st).unwrap();
+
+        let removed = prune_network(dir).unwrap();
+        assert_eq!(
+            removed,
+            vec![("tool-0002".to_string(), "lan_scan".to_string())]
+        );
+        // store now holds only the local tool; the scan's script file is gone.
+        let left = load(dir).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "tool-0001");
+        assert!(local.exists() && !scan.exists());
+        // idempotent: a second run removes nothing.
+        assert!(prune_network(dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mark_unhealthy_retires_a_tool_from_reuse() {
+        let t = Temp::new("retire");
+        append(
+            &t.0,
+            &tool("tool-0001", "scan", "p", "network scan run results"),
+        )
+        .unwrap();
+        let kw = vec!["network".to_string(), "scan".to_string()];
+        // healthy → best_match will reuse it
+        assert!(best_match(&load(&t.0).unwrap(), &kw).is_some());
+        // the human's "refine" retires it → no longer a reuse candidate
+        assert!(mark_unhealthy(&t.0, "tool-0001").unwrap());
+        assert!(best_match(&load(&t.0).unwrap(), &kw).is_none());
+        assert_eq!(
+            load(&t.0).unwrap()[0].last_status,
+            "retired by your feedback"
+        );
+        assert!(!mark_unhealthy(&t.0, "nope").unwrap());
+    }
+
+    #[test]
+    fn a_null_run_grows_the_streak_and_a_useful_one_heals_it() {
+        let t = Temp::new("streak");
+        append(&t.0, &tool("tool-0001", "s", "p", "k")).unwrap();
+        record_use(&t.0, "tool-0001", 100, false, "nothing found").unwrap();
+        record_use(&t.0, "tool-0001", 200, false, "nothing found").unwrap();
+        assert_eq!(
+            load(&t.0).unwrap()[0].null_streak,
+            2,
+            "consecutive nulls accrue"
+        );
+        // A genuinely useful run heals the streak and stamps the moment.
+        record_use(&t.0, "tool-0001", 300, true, "exit 0 in 12ms").unwrap();
+        let tl = &load(&t.0).unwrap()[0];
+        assert_eq!(tl.null_streak, 0, "a useful run wipes the streak");
+        assert_eq!(tl.last_useful_at, 300);
+    }
+
+    #[test]
+    fn the_streak_window_resets_a_stale_gap() {
+        let t = Temp::new("streak_window");
+        append(&t.0, &tool("tool-0001", "s", "p", "k")).unwrap();
+        record_use(&t.0, "tool-0001", 100, false, "nothing found").unwrap();
+        assert_eq!(load(&t.0).unwrap()[0].null_streak, 1);
+        // A failure a day-plus later starts from a clean slate (reversible window).
+        record_use(
+            &t.0,
+            "tool-0001",
+            100 + NULL_WINDOW_SECS + 1,
+            false,
+            "nothing found",
+        )
+        .unwrap();
+        assert_eq!(
+            load(&t.0).unwrap()[0].null_streak,
+            1,
+            "the stale run no longer counts"
+        );
+    }
+}

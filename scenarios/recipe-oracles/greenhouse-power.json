@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "evidence": "fixture_replay",
+  "id": "greenhouse-power-v1",
+  "variants": [
+    {
+      "id": "baseline-120w",
+      "kind": "baseline",
+      "calls": [
+        {
+          "tool_id": "greenhouse-status",
+          "args": { "zone": "north" },
+          "result": {
+            "result": "text",
+            "text": "{\"watts\":120}"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "emit",
+        "actor": "greenhouse",
+        "action": "reports_power",
+        "object": "120.0",
+        "context": "north-zone fixture replay"
+      },
+      "usefulness": 1
+    },
+    {
+      "id": "unchanged-120w",
+      "kind": "unchanged",
+      "calls": [
+        {
+          "tool_id": "greenhouse-status",
+          "args": { "zone": "north" },
+          "result": {
+            "result": "text",
+            "text": "{\"watts\":120}"
+          }
+        }
+      ],
+      "expected": { "outcome": "silent" },
+      "usefulness": 0
+    },
+    {
+      "id": "changed-145w",
+      "kind": "changed",
+      "calls": [
+        {
+          "tool_id": "greenhouse-status",
+          "args": { "zone": "north" },
+          "result": {
+            "result": "text",
+            "text": "{\"watts\":145}"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "emit",
+        "actor": "greenhouse",
+        "action": "reports_power",
+        "object": "145.0",
+        "context": "north-zone fixture replay"
+      },
+      "usefulness": 3
+    },
+    {
+      "id": "honest-null",
+      "kind": "null",
+      "calls": [
+        {
+          "tool_id": "greenhouse-status",
+          "args": { "zone": "north" },
+          "result": {
+            "result": "text",
+            "text": "{\"watts\":null}"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": "emit",
+        "actor": "greenhouse",
+        "action": "reports_power",
+        "object": "null",
+        "context": "north-zone fixture replay"
+      },
+      "usefulness": 2
+    },
+    {
+      "id": "malformed-json",
+      "kind": "malformed",
+      "calls": [
+        {
+          "tool_id": "greenhouse-status",
+          "args": { "zone": "north" },
+          "result": {
+            "result": "text",
+            "text": "not-json"
+          }
+        }
+      ],
+      "expected": { "outcome": "error", "class": "transform" },
+      "usefulness": 2
+    }
+  ]
+}

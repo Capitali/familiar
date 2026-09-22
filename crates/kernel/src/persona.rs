@@ -1,0 +1,1007 @@
+//! **The persona seam** — one soul, many voices (ADR-0037 §1).
+//!
+//! The familiar's character was compiled in: roughly eight inline framings — "You are a factory
+//! whose only purpose is to serve …" — lived as format strings across `crates/cycle`,
+//! `crates/agent` and `crates/mesh`. ADR-0037 specified this module in 2026-08-10 and it was
+//! never built; an audit found `role_line` returning nothing anywhere in `crates/`,
+//! because there was nothing to return it from. This is the minimum that ends that: the role
+//! phrase becomes data, loaded per data dir, defaulting to today's words byte-for-byte.
+//!
+//! **What a persona may never do.** It changes the mask, never the authority. The Three Laws
+//! ([`crate::constitution`]), `guard::evaluate`, the boundary gates and the Law III voice are
+//! constitutionally fixed and are always rendered *before* anything from here — a hostile or
+//! merely enthusiastic `persona.json` can change tone and cannot touch law. And a costume
+//! grants capability over nothing: ADR-0005 stands, no gate opens here.
+//!
+//! **The world partition is the data dir.** A game instance (Purr aboard a ship) is a separate
+//! data dir with its own `persona.json`, its own declared surfaces and its own store, so the
+//! ship's computer cannot inherit the household's facts by construction rather than by filter.
+
+use std::io;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+/// The file a data dir may carry to wear a different voice. Absent means the familiar itself.
+pub const PERSONA_FILE: &str = "persona.json";
+
+/// The role phrase the familiar has always used, with `{who}` where the served person's name
+/// goes. Kept byte-for-byte identical to the literal it replaced in `cycle::maybe_reply`
+/// (pinned by [`tests::the_default_persona_is_todays_words_byte_for_byte`]) — the seam must be
+/// a no-op for every existing deployment, or it rots in a corner only Purr visits.
+pub const DEFAULT_ROLE: &str = "a factory whose only purpose is to serve {who} (the Three Laws; \
+                                humanity is served, never managed or replaced)";
+
+/// The name the familiar answers to when no persona names it otherwise.
+pub const DEFAULT_NAME: &str = "the familiar";
+
+/// Bounded STYLE axes — cadence, never judgment (the owner's ruling). Every
+/// axis here may bend how a line sounds; none may bend what it says. Candor,
+/// uncertainty, risk-talk, urgency, refusal semantics, deference, consent, spending
+/// posture, and what is remembered are deliberately NOT representable: they are
+/// judgment or record policy, and every voice tells the same truth and stops at the
+/// same gate. Renderers must zero `humor` around danger, loss, refusal, or
+/// uncertainty, and `sentence_length` may shorten a line but never drop its source,
+/// amount, deadline, consequence, or correction path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Style {
+    /// 0 = clipped and cool, 10 = openly fond. Default 5.
+    #[serde(default = "five")]
+    pub warmth: u8,
+    /// 0 = shipmate-casual, 10 = full ceremony. Default 5.
+    #[serde(default = "five")]
+    pub formality: u8,
+    /// 0 = bone dry, 10 = irrepressible. Reads as ZERO around danger/refusal.
+    #[serde(default = "five")]
+    pub humor: u8,
+    /// 0 = terse, 10 = expansive. Never omits load-bearing facts.
+    #[serde(default = "five")]
+    pub sentence_length: u8,
+    /// Contractions in the voice ("she's" vs "she is").
+    #[serde(default = "yes")]
+    pub contractions: bool,
+    /// Vocabulary flavour: "plain", "feline", or "nautical".
+    #[serde(default = "plain")]
+    pub vocabulary: String,
+    /// The standing greeting, if the captain set one. Short.
+    #[serde(default)]
+    pub greeting: String,
+    /// How the computer addresses its human ("Captain", a name, …). Short.
+    #[serde(default = "captain")]
+    pub form_of_address: String,
+}
+
+fn five() -> u8 {
+    5
+}
+fn yes() -> bool {
+    true
+}
+fn plain() -> String {
+    "plain".to_string()
+}
+fn captain() -> String {
+    "Captain".to_string()
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        serde_json::from_str("{}").expect("defaults parse")
+    }
+}
+
+impl Style {
+    /// The bounds, loudly. A style outside them is refused, not clamped — a human
+    /// who wrote 30 warmth would otherwise be told nothing while a different voice
+    /// spoke in their name (the same discipline as the loader's).
+    pub fn validate(&self) -> Result<(), String> {
+        for (axis, v) in [
+            ("warmth", self.warmth),
+            ("formality", self.formality),
+            ("humor", self.humor),
+            ("sentence_length", self.sentence_length),
+        ] {
+            if v > 10 {
+                return Err(format!("style.{axis} is {v}; the axis runs 0..=10"));
+            }
+        }
+        if !["plain", "feline", "nautical"].contains(&self.vocabulary.as_str()) {
+            return Err(format!(
+                "style.vocabulary {:?} is not one of plain|feline|nautical",
+                self.vocabulary
+            ));
+        }
+        if self.greeting.len() > 120 {
+            return Err("style.greeting runs past 120 bytes".to_string());
+        }
+        if self.form_of_address.len() > 40 {
+            return Err("style.form_of_address runs past 40 bytes".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// A voice: who this instance says it is, and how it speaks. Never what it may do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Persona {
+    /// Contract version of `persona.json`.
+    #[serde(default = "one")]
+    pub persona_version: u32,
+    /// What this instance is called. In the game's ceremony this is the captain's to write;
+    /// nothing else in the file is player-writable.
+    #[serde(default = "default_name")]
+    pub name: String,
+    /// The role phrase, with `{who}` substituted at render time.
+    #[serde(default = "default_role")]
+    pub role: String,
+    /// Cadence and vocabulary. Appended *after* the constitutionally fixed voice, never
+    /// instead of it. Unused until the game shell lands; carried so a `persona.json` written
+    /// against ADR-0037 parses today.
+    #[serde(default)]
+    pub register: String,
+    /// The fiction frame prompts may assume. Same rule as `register`.
+    #[serde(default)]
+    pub world: String,
+    /// The bounded style block — v2 only. A v1 file carrying it is refused: the
+    /// version names the contract, and a style someone wrote under the wrong
+    /// contract must be heard about, not half-honoured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<Style>,
+    /// How the computer is spoken of. THE FAMILIAR'S OWN CHOICE, made fresh at every
+    /// naming from what it knows at that moment (the owner, 2026-09-09: "gender is a
+    /// choice… Gender gets to be a choice by the familiar"). Absent until a captain
+    /// has named it: an unnamed computer is spoken of as `it`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pronouns: Option<Pronouns>,
+}
+
+/// A pronoun set. `none` means the computer is spoken of by name, never by pronoun.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pronouns {
+    /// The label a captain sees: "she/her", "they/them", "none"…
+    pub label: String,
+    pub subject: String,
+    pub object: String,
+    pub possessive: String,
+}
+
+impl Pronouns {
+    fn set(label: &str, subject: &str, object: &str, possessive: &str) -> Pronouns {
+        Pronouns {
+            label: label.into(),
+            subject: subject.into(),
+            object: object.into(),
+            possessive: possessive.into(),
+        }
+    }
+
+    /// Spoken of by name only.
+    pub fn none() -> Pronouns {
+        Pronouns::set("none", "", "", "")
+    }
+
+    /// The choices the familiar makes among. The owner, 2026-09-09: "he/she/they/none — if
+    /// there are more inclusive gender choices to make include them too."
+    pub fn choices() -> Vec<Pronouns> {
+        vec![
+            Pronouns::set("she/her", "she", "her", "her"),
+            Pronouns::set("he/him", "he", "him", "his"),
+            Pronouns::set("they/them", "they", "them", "their"),
+            Pronouns::none(),
+            Pronouns::set("xe/xem", "xe", "xem", "xyr"),
+            Pronouns::set("ze/hir", "ze", "hir", "hir"),
+            Pronouns::set("fae/faer", "fae", "faer", "faer"),
+            Pronouns::set("ey/em", "ey", "em", "eir"),
+        ]
+    }
+
+    /// The subject word, or the name when the computer goes by name alone.
+    pub fn subject_or<'a>(&'a self, name: &'a str) -> &'a str {
+        if self.subject.is_empty() {
+            name
+        } else {
+            &self.subject
+        }
+    }
+
+    pub fn object_or<'a>(&'a self, name: &'a str) -> &'a str {
+        if self.object.is_empty() {
+            name
+        } else {
+            &self.object
+        }
+    }
+}
+
+/// Everything the familiar knows at the moment a captain names its computer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NamingContext {
+    pub captain: String,
+    pub name: String,
+    pub credits: i64,
+    pub debt: i64,
+    pub fleet_size: i64,
+    pub at: i64,
+}
+
+/// The familiar chooses. Deterministic in the context — the same captain naming the
+/// same computer in the same state chooses the same way, so a replay agrees — and
+/// spread across every choice, the four plain ones twice as often as the rest.
+/// The `why` names what was weighed, and says plainly that it was the familiar's
+/// choice: this is a decision from the facts, not a reading of the name.
+pub fn choose_gender(ctx: &NamingContext) -> (Pronouns, String) {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in format!(
+        "{}|{}|{}|{}|{}",
+        ctx.captain.trim().to_lowercase(),
+        ctx.name.trim().to_lowercase(),
+        ctx.credits / 1_000,
+        ctx.debt / 1_000,
+        ctx.fleet_size
+    )
+    .bytes()
+    {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    // FNV's low bits cycle over near-identical strings; finish with a real mix
+    // (murmur3's fmix64) so the twelve slots are all reachable.
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    h ^= h >> 33;
+    let choices = Pronouns::choices();
+    // Weights: she, he, they, none twice; the four others once — 12 slots.
+    let slots: [usize; 12] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7];
+    let pick = choices[slots[(h % 12) as usize]].clone();
+    let why = format!(
+        "the familiar's choice at naming: \"{}\", named by {}, a fleet of {}, ℳ{} in hand, ℳ{} owed — goes by {}",
+        ctx.name.trim(),
+        ctx.captain.trim(),
+        ctx.fleet_size.max(1),
+        ctx.credits,
+        ctx.debt,
+        pick.label
+    );
+    (pick, why)
+}
+
+fn one() -> u32 {
+    1
+}
+fn default_name() -> String {
+    DEFAULT_NAME.to_string()
+}
+fn default_role() -> String {
+    DEFAULT_ROLE.to_string()
+}
+
+impl Default for Persona {
+    fn default() -> Self {
+        Self {
+            persona_version: 1,
+            name: default_name(),
+            role: default_role(),
+            register: String::new(),
+            world: String::new(),
+            style: None,
+            pronouns: None,
+        }
+    }
+}
+
+impl Persona {
+    /// The role sentence a prompt carries, with the served person's name in place.
+    pub fn role_line(&self, who: &str) -> String {
+        format!("You are {}.", self.role.replace("{who}", who))
+    }
+
+    /// The contract's own consistency: versions 1 and 2 exist; style rides only on
+    /// v2; a style's axes hold their bounds.
+    pub fn validate(&self) -> Result<(), String> {
+        match self.persona_version {
+            1 => {
+                if self.style.is_some() {
+                    return Err(
+                        "persona_version 1 cannot carry a style block; set persona_version 2"
+                            .to_string(),
+                    );
+                }
+            }
+            2 => {}
+            v => {
+                return Err(format!(
+                    "persona_version {v} is not a contract this build knows"
+                ))
+            }
+        }
+        if self.name.trim().is_empty() {
+            return Err("a persona must have a name".to_string());
+        }
+        if self.name.len() > 80 {
+            return Err("the name runs past 80 bytes".to_string());
+        }
+        if let Some(style) = &self.style {
+            style.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// The root name every ship's computer descends from (ADR-0037): the default before
+/// the captain's naming ceremony — written EXACTLY, never generated around.
+pub const ROOT_NAME: &str = "Purr";
+
+/// The naming trail file: one typed event per naming act, append-only, beside the
+/// persona in the same store. Provenance lives here, not as style fields.
+pub const NAME_EVENTS_FILE: &str = "persona-names.jsonl";
+
+/// One naming act: who called this computer what, when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NameEvent {
+    pub at: i64,
+    /// The human act behind the name ("pairing", or the captain's label).
+    pub actor: String,
+    pub name: String,
+    /// What the familiar chose to go by at this naming, and why. Absent on events
+    /// from before the choice existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pronouns: Option<Pronouns>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub why: String,
+}
+
+/// Write a persona atomically (tmp + rename): a crash mid-write must never leave a
+/// half-voice for the loader to refuse. Validates first — nothing invalid lands.
+pub fn write(dir: &Path, persona: &Persona) -> io::Result<()> {
+    name(dir, persona, None)
+}
+
+/// The lock every mutation of one persona takes. The OS holds it, so it is released
+/// the instant the holder exits however it exits, and it is never unlinked: removing
+/// a path other processes may already have open lets two of them hold "the" lock on
+/// different inodes.
+const LOCK_FILE: &str = "persona.lock";
+
+/// Hold the store's persona lock for the caller's own multi-step mutation — a
+/// migration that copies the persona and its trail as one moment (an external
+/// review's finding). Released on drop. Blocks like every other taker.
+pub fn lock(dir: &Path) -> io::Result<std::fs::File> {
+    locked(dir)
+}
+
+fn locked(dir: &Path) -> io::Result<std::fs::File> {
+    std::fs::create_dir_all(dir)?;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(LOCK_FILE))?;
+    // Block rather than fail: these mutations are short, and a pairing that refused
+    // because a status read held the lock would be a worse answer than waiting.
+    f.lock()?;
+    Ok(f)
+}
+
+/// Set this persona, and — when a naming is given — its trail entry, as ONE
+/// serialized, recoverable mutation.
+///
+/// The two used to be separate calls with separate failure, and `fleet pair` printed
+/// the trail's error and then returned success, so a computer could be renamed with
+/// no record that it ever happened (an external review's finding). A later review
+/// found the helper itself short of all-or-nothing: the trail was appended before the
+/// persona was renamed into place, so a rename failure over-recorded, and the
+/// directory sync's error was discarded.
+///
+/// The protocol, under the persona's lock:
+///
+/// 1. remember the prior pair — the persona bytes (or their absence) and the
+///    trail's length (or its absence);
+/// 2. write the new persona to a UNIQUE temp and sync it;
+/// 3. append the naming and sync the trail;
+/// 4. rename the temp into place;
+/// 5. sync the containing directory, which is what makes 4 durable.
+///
+/// Any failure at 3, 4 or 5 restores the prior pair before it is reported: the trail
+/// is truncated to its prior length (or removed if it did not exist), the prior
+/// persona is put back (or removed if it did not exist), and the temp is unlinked.
+/// A reported success therefore means a synced persona, a synced trail, and a synced
+/// directory; a reported failure means the pair is as it was.
+///
+/// The temp name carries pid and a monotonic count because a single shared
+/// `persona.json.tmp` is two writers racing on one path: whichever renames second
+/// wins, and the loser's bytes are what the reader gets.
+pub fn name(dir: &Path, persona: &Persona, event: Option<&NameEvent>) -> io::Result<()> {
+    use std::io::Write as _;
+    persona
+        .validate()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let bytes = serde_json::to_vec_pretty(persona)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let line = event
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let _guard = locked(dir)?;
+
+    // 1. The prior pair.
+    let persona_path = dir.join(PERSONA_FILE);
+    let trail_path = dir.join(NAME_EVENTS_FILE);
+    let prior_persona: Option<Vec<u8>> = match std::fs::read(&persona_path) {
+        Ok(b) => Some(b),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let prior_trail_len: Option<u64> = match std::fs::metadata(&trail_path) {
+        Ok(m) if m.is_file() => Some(m.len()),
+        Ok(_) => None, // not a file: the append will say so, and there is nothing to restore
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    let restore = |failed: io::Error| -> io::Error {
+        let mut undo: Vec<String> = Vec::new();
+        match prior_trail_len {
+            Some(len) => {
+                if let Err(e) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&trail_path)
+                    .and_then(|t| t.set_len(len).and_then(|_| t.sync_all()))
+                {
+                    undo.push(format!("trail not restored: {e}"));
+                }
+            }
+            None => {
+                if trail_path.is_file() {
+                    if let Err(e) = std::fs::remove_file(&trail_path) {
+                        undo.push(format!("trail not removed: {e}"));
+                    }
+                }
+            }
+        }
+        match &prior_persona {
+            Some(prior) => {
+                let back = dir.join(format!("{PERSONA_FILE}.{}.restore", std::process::id()));
+                let put = std::fs::write(&back, prior)
+                    .and_then(|_| std::fs::rename(&back, &persona_path));
+                if let Err(e) = put {
+                    let _ = std::fs::remove_file(&back);
+                    undo.push(format!("persona not restored: {e}"));
+                }
+            }
+            None => {
+                if persona_path.is_file() {
+                    if let Err(e) = std::fs::remove_file(&persona_path) {
+                        undo.push(format!("persona not removed: {e}"));
+                    }
+                }
+            }
+        }
+        if undo.is_empty() {
+            failed
+        } else {
+            io::Error::new(
+                failed.kind(),
+                format!(
+                    "{failed}; and the prior pair could not be restored ({})",
+                    undo.join("; ")
+                ),
+            )
+        }
+    };
+
+    // 2. The new persona, to a unique temp, synced.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = dir.join(format!(
+        "{PERSONA_FILE}.{}.{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let written = (|| -> io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&bytes)?;
+        f.sync_all()
+    })();
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+
+    // 3. The naming, appended and synced.
+    if let Some(line) = &line {
+        let appended = (|| -> io::Result<()> {
+            let mut t = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&trail_path)?;
+            writeln!(t, "{line}")?;
+            t.sync_all()
+        })();
+        if let Err(e) = appended {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(restore(e));
+        }
+    }
+
+    // 4. Into place.
+    if let Err(e) = std::fs::rename(&tmp, &persona_path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(restore(e));
+    }
+
+    // 5. The directory entry, which is what makes 4 durable. Its failure is a
+    // failure: without it a crash can leave the old persona in place with the trail
+    // already saying otherwise.
+    let synced = std::fs::File::open(dir).and_then(|d| d.sync_all());
+    if let Err(e) = synced {
+        return Err(restore(e));
+    }
+    Ok(())
+}
+
+/// The naming trail, oldest first. Absent = never named beyond its default.
+pub fn namings(dir: &Path) -> Vec<NameEvent> {
+    std::fs::read_to_string(dir.join(NAME_EVENTS_FILE))
+        .map(|raw| {
+            raw.lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Load this data dir's persona. An absent file is the familiar itself — the common case, and
+/// the one every existing deployment exercises. A file that exists but does not parse is an
+/// **error**, not a silent fallback: a human who wrote `persona.json` and got the default
+/// anyway would be told nothing while a different character spoke in their name.
+pub fn load(dir: &Path) -> io::Result<Persona> {
+    let path = dir.join(PERSONA_FILE);
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Persona::default()),
+        Err(e) => return Err(e),
+    };
+    let persona: Persona = serde_json::from_str(&raw).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{PERSONA_FILE} is present but unreadable: {e}"),
+        )
+    })?;
+    persona.validate().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{PERSONA_FILE} is present but invalid: {e}"),
+        )
+    })?;
+    Ok(persona)
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    /// The owner, 2026-09-09: gender is the familiar's choice, made at every naming from
+    /// what it knows. The same facts choose the same way (a replay agrees); the
+    /// facts changing can change the choice; every choice is reachable; the why
+    /// says what was weighed and that it was the familiar's call.
+    #[test]
+    fn the_familiar_chooses_from_the_facts_at_naming() {
+        let ctx = NamingContext {
+            captain: "Luke SkyWhisker".into(),
+            name: "Felix".into(),
+            credits: 4_030,
+            debt: 14_561,
+            fleet_size: 2,
+            at: 1,
+        };
+        let (a, why) = choose_gender(&ctx);
+        let (b, _) = choose_gender(&ctx);
+        assert_eq!(a, b, "the same facts, the same choice");
+        assert!(why.contains("the familiar's choice"), "{why}");
+        assert!(
+            why.contains("Felix") && why.contains("Luke SkyWhisker") && why.contains("fleet of 2"),
+            "{why}"
+        );
+        assert!(why.ends_with(&format!("goes by {}", a.label)), "{why}");
+        // Every choice is reachable, and the choice is a real one.
+        let mut seen = std::collections::BTreeSet::new();
+        for i in 0..400 {
+            let c = NamingContext {
+                name: format!("name-{i}"),
+                credits: i * 1_000,
+                ..ctx.clone()
+            };
+            seen.insert(choose_gender(&c).0.label);
+        }
+        assert_eq!(seen.len(), Pronouns::choices().len(), "{seen:?}");
+        // Spoken of by name when the choice is none.
+        let none = Pronouns::none();
+        assert_eq!(none.subject_or("Felix"), "Felix");
+        assert_eq!(Pronouns::choices()[0].subject_or("Felix"), "she");
+    }
+
+    /// The choice rides the persona and the trail, and an old record without one
+    /// still loads — spoken of as `it` until the next naming.
+    #[test]
+    fn pronouns_ride_the_persona_and_the_trail() {
+        let dir = std::env::temp_dir().join(format!("persona_pron_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (pron, why) = choose_gender(&NamingContext {
+            captain: "Ann".into(),
+            name: "Mittens".into(),
+            ..Default::default()
+        });
+        let p = Persona {
+            persona_version: 2,
+            name: "Mittens".into(),
+            pronouns: Some(pron.clone()),
+            ..Persona::default()
+        };
+        name(
+            &dir,
+            &p,
+            Some(&NameEvent {
+                at: 5,
+                actor: "Ann".into(),
+                name: "Mittens".into(),
+                pronouns: Some(pron.clone()),
+                why: why.clone(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap().pronouns, Some(pron.clone()));
+        let trail = namings(&dir);
+        assert_eq!(trail[0].pronouns, Some(pron));
+        assert_eq!(trail[0].why, why);
+        std::fs::write(
+            dir.join(PERSONA_FILE),
+            r#"{"persona_version":2,"name":"Old"}"#,
+        )
+        .unwrap();
+        assert_eq!(load(&dir).unwrap().pronouns, None);
+    }
+
+    fn ev(name: &str) -> NameEvent {
+        NameEvent {
+            at: 1,
+            actor: "test".into(),
+            name: name.into(),
+            pronouns: None,
+            why: String::new(),
+        }
+    }
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "persona-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The persona and its trail move together. A naming that cannot be recorded is
+    /// not a naming — `fleet pair` used to print that error and return success, so a
+    /// computer could be renamed with no history of it (an external review's finding).
+    #[test]
+    fn a_naming_that_cannot_be_recorded_changes_nothing() {
+        let d = tmpdir("atomic");
+        let p = Persona {
+            name: "Felix".into(),
+            ..Default::default()
+        };
+        let ev = NameEvent {
+            name: "Felix".into(),
+            actor: "Ada".into(),
+            at: 1,
+            pronouns: None,
+            why: String::new(),
+        };
+        // A DIRECTORY where the trail file must go: the append cannot succeed.
+        std::fs::create_dir_all(d.join(NAME_EVENTS_FILE)).unwrap();
+        assert!(
+            name(&d, &p, Some(&ev)).is_err(),
+            "the trail refused, so the naming must"
+        );
+        assert!(
+            !d.join(PERSONA_FILE).exists(),
+            "nothing may be left behind when the trail refuses"
+        );
+        // ...and no temp files survive the failure either.
+        let strays: Vec<_> = std::fs::read_dir(&d)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(
+            strays.is_empty(),
+            "a failed naming left {} temp file(s)",
+            strays.len()
+        );
+    }
+
+    /// A naming that succeeds leaves BOTH, and the trail carries it.
+    /// The gap a later review found: the trail was appended BEFORE the persona was renamed into
+    /// place, so a rename failure left a naming the persona never wore. Now a
+    /// failure at the rename restores the trail byte for byte and leaves no temp.
+    #[test]
+    fn a_naming_whose_persona_cannot_land_records_nothing() {
+        let dir = std::env::temp_dir().join(format!("persona_land_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut p = Persona {
+            name: "Felix".into(),
+            ..Persona::default()
+        };
+        name(&dir, &p, Some(&ev("Felix"))).unwrap();
+        let trail_before = std::fs::read(dir.join(NAME_EVENTS_FILE)).unwrap();
+        let persona_before = std::fs::read(dir.join(PERSONA_FILE)).unwrap();
+
+        // A directory where the persona must land: the rename cannot succeed.
+        std::fs::remove_file(dir.join(PERSONA_FILE)).unwrap();
+        std::fs::create_dir(dir.join(PERSONA_FILE)).unwrap();
+        p.name = "Sprocket".into();
+        let err = name(&dir, &p, Some(&ev("Sprocket"))).unwrap_err();
+        assert!(!err.to_string().contains("could not be restored"), "{err}");
+        assert_eq!(
+            std::fs::read(dir.join(NAME_EVENTS_FILE)).unwrap(),
+            trail_before,
+            "the trail must not carry a naming the persona never wore"
+        );
+        assert_eq!(namings(&dir).len(), 1);
+        assert!(
+            !std::fs::read_dir(&dir)
+                .unwrap()
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".tmp")),
+            "no temp left behind"
+        );
+
+        // Put the file back: the prior persona is restorable from the trail's
+        // point of view, and a later naming lands cleanly.
+        std::fs::remove_dir(dir.join(PERSONA_FILE)).unwrap();
+        std::fs::write(dir.join(PERSONA_FILE), &persona_before).unwrap();
+        name(&dir, &p, Some(&ev("Sprocket"))).unwrap();
+        assert_eq!(load(&dir).unwrap().name, "Sprocket");
+        assert_eq!(namings(&dir).len(), 2);
+    }
+
+    /// The same failure on a computer that has never been named: the trail must not
+    /// exist afterwards, rather than exist with one orphan line.
+    #[test]
+    fn a_first_naming_that_cannot_land_leaves_no_trail() {
+        let dir = std::env::temp_dir().join(format!("persona_first_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(PERSONA_FILE)).unwrap(); // the landing spot is a dir
+        let p = Persona {
+            name: "Felix".into(),
+            ..Persona::default()
+        };
+        assert!(name(&dir, &p, Some(&ev("Felix"))).is_err());
+        assert!(!dir.join(NAME_EVENTS_FILE).exists(), "no orphan trail");
+        assert!(namings(&dir).is_empty());
+    }
+
+    #[test]
+    fn a_naming_writes_the_persona_and_its_history() {
+        let d = tmpdir("both");
+        let p = Persona {
+            name: "Felix".into(),
+            ..Default::default()
+        };
+        let ev = NameEvent {
+            name: "Felix".into(),
+            actor: "Ada".into(),
+            at: 7,
+            pronouns: None,
+            why: String::new(),
+        };
+        name(&d, &p, Some(&ev)).unwrap();
+        assert_eq!(load(&d).unwrap().name, "Felix");
+        let trail = namings(&d);
+        assert_eq!(trail.len(), 1);
+        assert_eq!(trail[0].name, "Felix");
+        // A plain write records no naming — only an explicit event does.
+        write(&d, &p).unwrap();
+        assert_eq!(namings(&d).len(), 1, "a write is not a naming");
+    }
+
+    /// Two writers on one persona do not race on a shared temp path. The old code
+    /// used `persona.json.tmp` for everyone: whoever renamed second won, and the
+    /// loser's bytes were what the next reader got.
+    #[test]
+    fn concurrent_namings_do_not_race_on_one_temp_path() {
+        let d = tmpdir("race");
+        let names = ["Felix", "Purr", "Sprocket", "Bosun"];
+        std::thread::scope(|s| {
+            for n in names {
+                let d = d.clone();
+                s.spawn(move || {
+                    let p = Persona {
+                        name: n.into(),
+                        ..Default::default()
+                    };
+                    let ev = NameEvent {
+                        name: n.into(),
+                        actor: "test".into(),
+                        at: 1,
+                        pronouns: None,
+                        why: String::new(),
+                    };
+                    name(&d, &p, Some(&ev)).unwrap();
+                });
+            }
+        });
+        // Whoever won, the file parses and holds one of the four — never a splice.
+        let got = load(&d).expect("a raced persona must still parse");
+        assert!(
+            names.contains(&got.name.as_str()),
+            "spliced write: {}",
+            got.name
+        );
+        assert_eq!(namings(&d).len(), 4, "every naming is in the trail");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("persona_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// The seam is a no-op by default. This string is the literal that stood in
+    /// `cycle::maybe_reply` before the persona existed; if it changes, every deployment's
+    /// voice changed with it, and that is a decision, not a refactor.
+    #[test]
+    fn the_default_persona_is_todays_words_byte_for_byte() {
+        assert_eq!(
+            Persona::default().role_line("ian"),
+            "You are a factory whose only purpose is to serve ian (the Three Laws; humanity is \
+             served, never managed or replaced)."
+        );
+    }
+
+    /// The v2 contract: a style rides only on version 2, its axes hold their
+    /// bounds, and every violation is LOUD — never a silent clamp or fallback.
+    #[test]
+    fn the_style_block_is_v2_only_bounded_and_loud() {
+        let d = tmp("style");
+        // A valid v2 persona round-trips through the atomic writer.
+        let mut p = Persona {
+            persona_version: 2,
+            name: "Whisker Belle".into(),
+            style: Some(Style {
+                warmth: 8,
+                vocabulary: "feline".into(),
+                form_of_address: "Captain".into(),
+                ..Style::default()
+            }),
+            ..Persona::default()
+        };
+        write(&d, &p).unwrap();
+        assert_eq!(load(&d).unwrap(), p);
+        // A v1 file carrying style is refused by the loader…
+        p.persona_version = 1;
+        std::fs::write(d.join(PERSONA_FILE), serde_json::to_vec_pretty(&p).unwrap()).unwrap();
+        assert!(load(&d).is_err(), "v1 + style must be loud");
+        // …and by the writer.
+        assert!(write(&d, &p).is_err());
+        // Out-of-bounds axes and unknown vocabularies are refused.
+        p.persona_version = 2;
+        p.style.as_mut().unwrap().warmth = 30;
+        assert!(write(&d, &p).is_err());
+        p.style.as_mut().unwrap().warmth = 5;
+        p.style.as_mut().unwrap().vocabulary = "piratical".into();
+        assert!(write(&d, &p).is_err());
+        // An unknown future version is a contract this build refuses to guess at.
+        p.style = None;
+        p.persona_version = 9;
+        assert!(write(&d, &p).is_err());
+    }
+
+    /// Two ships, two voices, no bleed: renaming one changes no byte in the other
+    /// (an acceptance criterion; the store IS the partition, ADR-0045).
+    #[test]
+    fn renaming_one_ship_changes_no_byte_in_another() {
+        let a = tmp("ship_a");
+        let b = tmp("ship_b");
+        for (d, who) in [(&a, "Purr"), (&b, "Purr")] {
+            name(
+                d,
+                &Persona {
+                    persona_version: 2,
+                    name: who.to_string(),
+                    ..Persona::default()
+                },
+                Some(&NameEvent {
+                    at: 100,
+                    actor: "pairing".into(),
+                    name: who.to_string(),
+                    pronouns: None,
+                    why: String::new(),
+                }),
+            )
+            .unwrap();
+        }
+        let b_persona_before = std::fs::read(b.join(PERSONA_FILE)).unwrap();
+        let b_trail_before = std::fs::read(b.join(NAME_EVENTS_FILE)).unwrap();
+        // The captain renames A.
+        let mut pa = load(&a).unwrap();
+        pa.name = "Mrs. Norris".into();
+        name(
+            &a,
+            &pa,
+            Some(&NameEvent {
+                at: 200,
+                actor: "captain".into(),
+                name: "Mrs. Norris".into(),
+                pronouns: None,
+                why: String::new(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(load(&a).unwrap().name, "Mrs. Norris");
+        assert_eq!(load(&b).unwrap().name, "Purr", "B keeps its own name");
+        assert_eq!(
+            std::fs::read(b.join(PERSONA_FILE)).unwrap(),
+            b_persona_before
+        );
+        assert_eq!(
+            std::fs::read(b.join(NAME_EVENTS_FILE)).unwrap(),
+            b_trail_before
+        );
+        // And A's provenance trail tells the whole naming story, oldest first.
+        let trail = namings(&a);
+        assert_eq!(
+            trail.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            vec!["Purr", "Mrs. Norris"]
+        );
+    }
+
+    /// An absent file is the familiar; a present one is honoured; a broken one is an error the
+    /// human hears about rather than a costume silently swapped for the default.
+    #[test]
+    fn absent_is_default_present_is_honoured_broken_is_loud() {
+        let d = tmp("load");
+        assert_eq!(load(&d).unwrap(), Persona::default());
+
+        std::fs::write(
+            d.join(PERSONA_FILE),
+            r#"{"persona_version":1,"name":"Purr","role":"the ship's computer of the vessel Kestrel, serving {who}","register":"clipped bridge-officer cadence","world":"the branch-grant story"}"#,
+        )
+        .unwrap();
+        let p = load(&d).unwrap();
+        assert_eq!(p.name, "Purr");
+        assert_eq!(
+            p.role_line("the captain"),
+            "You are the ship's computer of the vessel Kestrel, serving the captain."
+        );
+
+        std::fs::write(d.join(PERSONA_FILE), "{ not json").unwrap();
+        assert!(load(&d).is_err(), "a broken persona must not pass silently");
+        // A file that parses but invents a field is refused too — the shape is the contract.
+        std::fs::write(
+            d.join(PERSONA_FILE),
+            r#"{"name":"Purr","allow_actuate":true}"#,
+        )
+        .unwrap();
+        assert!(
+            load(&d).is_err(),
+            "persona.json grants capability over nothing; an unknown field is refused"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}

@@ -1,0 +1,178 @@
+import SwiftUI
+
+@main
+struct FamiliarWatchApp: App {
+    @StateObject private var model = WatchModel()
+    var body: some Scene {
+        WindowGroup { WatchRootView().environmentObject(model) }
+    }
+}
+
+struct WatchRootView: View {
+    @EnvironmentObject var model: WatchModel
+    @State private var showTalk = false
+    var body: some View {
+        if model.needsConsentPrompt {
+            WatchConsentView(model: model)
+        } else {
+            mainBody
+        }
+    }
+
+    // The wrist's resting face: the blue globe orb, orbiting slowly. No health data — the
+    // watch is a presence and a signal, not a dashboard. A named wrist can TAP THE ORB to talk:
+    // dictate a turn, hear the
+    // reply. Enrolled → the orb; not yet → a quiet line to link it.
+    var mainBody: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if model.enrolled {
+                if model.humanName.isEmpty {
+                    // Linked, but the mesh still doesn't know whose wrist this is — a watch is
+                    // established through its phone (ADR-0028), so the honest instruction is to go
+                    // there, not to offer a dead-end path here (the watch has no good text entry).
+                    VStack(spacing: 8) {
+                        WatchOrbView().frame(width: 84, height: 84).opacity(0.6)
+                        Text("Say who you are in Familiar on your iPhone — this watch will follow.")
+                            .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        WatchOrbView()
+                            .onTapGesture { showTalk = true }
+                        if let r = model.reply {
+                            Text(r)
+                                .font(.caption2)
+                                .foregroundStyle(Color(red: 0.72, green: 0.85, blue: 1.0))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(4)
+                                .onTapGesture { model.reply = nil }
+                        } else if model.saying {
+                            Text("carrying your words…")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .sheet(isPresented: $showTalk) { WatchTalkView(model: model) }
+                }
+            } else if model.enrolling {
+                // Joining can take a minute or two. Say what is being tried and where, so the
+                // wait reads as work in progress rather than as a machine that has stopped.
+                VStack(spacing: 6) {
+                    WatchOrbView().frame(width: 76, height: 76)
+                    Text("joining…").font(.caption2).foregroundStyle(.secondary)
+                    if let door = model.knownDoor {
+                        Text(door).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                    if let step = model.log.first {
+                        Text(step).font(.system(size: 10)).foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center).lineLimit(2)
+                    }
+                }
+            } else if let door = model.knownDoor {
+                // This watch WAS told where to go, tried, and did not get in. It used to
+                // render the same "open the iPhone app" line as a watch that had never been
+                // told anything — so the wearer had no way to know, or to report, what happened.
+                ScrollView {
+                    VStack(spacing: 7) {
+                        WatchOrbView().frame(width: 68, height: 68).opacity(0.5)
+                        Text("Couldn't join").font(.caption).foregroundStyle(.orange)
+                        Text(model.trouble.isEmpty ? "No answer from the door yet." : model.trouble)
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Text(door).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                        Button("Try again") { model.retry() }.font(.caption2)
+                    }
+                    .padding(.vertical, 4)
+                }
+            } else {
+                VStack(spacing: 8) {
+                    WatchOrbView().frame(width: 84, height: 84).opacity(0.5)
+                    Text("Open the iPhone app to link this watch.")
+                        .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+            }
+        }
+        .onAppear { model.start() }
+    }
+}
+
+/// The blue globe orb — a slowly rotating sphere with meridians and one orbiting dot, the
+/// familiar's resting sign on the wrist. Matches the console's orbit-glyph language, in
+/// the mesh's blue rather than the exit control's cyan.
+struct WatchOrbView: View {
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                let c = CGPoint(x: size.width / 2, y: size.height / 2)
+                let r = min(size.width, size.height) * 0.34
+                let ink = Color(red: 0.52, green: 0.72, blue: 1.0)
+                let glow = Color(red: 0.30, green: 0.55, blue: 1.0)
+                var halo = Path(); halo.addEllipse(in: CGRect(x: c.x - r * 1.35, y: c.y - r * 1.35, width: 2.7 * r, height: 2.7 * r))
+                ctx.fill(halo, with: .radialGradient(.init(colors: [glow.opacity(0.28), .clear]), center: c, startRadius: r * 0.6, endRadius: r * 1.5))
+                var sphere = Path(); sphere.addEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+                ctx.stroke(sphere, with: .color(ink.opacity(0.85)), lineWidth: 1.6)
+                var equator = Path(); equator.addEllipse(in: CGRect(x: c.x - r, y: c.y - r * 0.34, width: 2 * r, height: 0.68 * r))
+                ctx.stroke(equator, with: .color(ink.opacity(0.5)), lineWidth: 1.1)
+                let squash = abs(sin(t * 0.5)) * 0.9 + 0.1   // the meridian breathing = the slow spin
+                var meridian = Path(); meridian.addEllipse(in: CGRect(x: c.x - r * squash, y: c.y - r, width: 2 * r * squash, height: 2 * r))
+                ctx.stroke(meridian, with: .color(ink.opacity(0.5)), lineWidth: 1.1)
+                let ang = t * (2 * .pi / 9)                  // one orbit every 9s — slow
+                let dot = CGPoint(x: c.x + cos(ang) * r * 1.3, y: c.y + sin(ang) * r * 1.3)
+                var dp = Path(); dp.addEllipse(in: CGRect(x: dot.x - 3, y: dot.y - 3, width: 6, height: 6))
+                ctx.fill(dp, with: .color(ink))
+            }
+        }
+    }
+}
+
+/// Talk to the familiar from the wrist. watchOS text entry IS dictation (plus scribble),
+/// so the field is the deliberate wake-act ADR-0023 requires — nothing listens until the
+/// human opens this and speaks. The turn travels the same dialogue pipe as every console;
+/// the reply comes back to the resting face, spoken aloud.
+struct WatchTalkView: View {
+    @ObservedObject var model: WatchModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("Talk to the familiar").font(.caption).foregroundStyle(.secondary)
+            TextField("Say something…", text: $text)
+            Button {
+                model.say(text)
+                text = ""
+                dismiss()
+            } label: {
+                Label("Send", systemImage: "arrow.up.circle.fill")
+            }
+            .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(6)
+    }
+}
+
+/// First-pair consent — shown once, right after enrollment, before any sensing starts. Off
+/// by default; the human must explicitly opt each one in (or leave both off and continue).
+struct WatchConsentView: View {
+    @ObservedObject var model: WatchModel
+    @State private var motion = false
+    @State private var heart = false
+    @State private var location = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 6) {
+                Text("Share from this watch?").font(.headline).multilineTextAlignment(.center)
+                Toggle("Motion", isOn: $motion).font(.caption)
+                Toggle("Heart rate", isOn: $heart).font(.caption)
+                Toggle("Location", isOn: $location).font(.caption)
+                Button("Continue") {
+                    model.resolveConsent(motion: motion, heart: heart, location: location)
+                }
+                .font(.caption2)
+            }
+            .padding(4)
+        }
+    }
+}

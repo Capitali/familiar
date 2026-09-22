@@ -1,0 +1,5 @@
+{"id":"obs-0001","source":"cli","actor":"client","action":"requests","object":"status_report","context":"weekly cadence","ts":1782277955,"confidence":0.9}
+{"id":"obs-0002","source":"cli","actor":"support_team","action":"resolves","object":"customer_ticket","context":"escalation cleared","ts":1782277990,"confidence":0.9}
+{"id":"obs-0003","source":"sensor","actor":"host","action":"reports","object":"cpu_load","context":"pcpu=42","ts":1782278010,"confidence":0.95}
+{"id":"obs-0004","source":"sensor","actor":"host","action":"reports","object":"disk_free","context":"free=18%","ts":1782278040,"confidence":0.95}
+{"id":"obs-0005","source":"cli","actor":"user","action":"asks_for","object":"appointment_reschedule","context":"","ts":1782278075,"confidence":0.8}
